@@ -2060,6 +2060,27 @@ public final class ReturnBaseStuckService {
                 }
             }
         }
+        // Phase 3: direct pillar-up — no wall needed. Jump and place block underfoot.
+        // This handles wide depressions where no adjacent walls exist.
+        if (countPillarBlocks(bot) > 0) {
+            LOGGER.info("ReturnBaseStuck: scaffold-escape attempting direct pillar-up from {}", origin.toShortString());
+            BlockPos belowFeet = origin.down();
+            // Need solid ground below to stand on after placing
+            if (!world.getBlockState(belowFeet).getCollisionShape(world, belowFeet).isEmpty()) {
+                // Jump and place at feet level
+                server.execute(() -> {
+                    bot.jump();
+                });
+                sleepQuiet(200); // wait for jump apex
+                boolean placed = BotActions.placeBlockAt(bot, origin, Direction.UP,
+                        new java.util.ArrayList<>(PILLAR_BLOCKS));
+                if (placed) {
+                    LOGGER.info("ReturnBaseStuck: scaffold-escape pillar placed at {}", origin.toShortString());
+                    sleepQuiet(300);
+                    return;
+                }
+            }
+        }
         LOGGER.info("ReturnBaseStuck: scaffold-escape failed (no suitable placement found)");
     }
 

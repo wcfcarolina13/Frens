@@ -37,6 +37,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
 import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.Database.QTableStorage;
+import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -169,6 +170,11 @@ public class BotEventHandler {
             return t;
         }
     });
+
+    /** Interrupt all in-flight come-recovery tasks. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        COME_RECOVERY_EXECUTOR.shutdownNow();
+    }
 
     private static BlockPos currentAvoidDoor(UUID botId) {
         return FollowStateService.currentAvoidDoor(botId);
@@ -641,6 +647,7 @@ public class BotEventHandler {
                 srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 40, () -> {
                     if (candidate.isRemoved()) return;
                     if (!(candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) return;
+                    if (net.wcfcarolina13.GameAI.services.TaskService.isServerStopping()) return;
                     Long lastJoinCheck = LAST_JOIN_ENCLOSURE_CHECK_TICK.get(candidate.getUuid());
                     if (lastJoinCheck != null && (srv.getTicks() - lastJoinCheck) < 200L) return;
                     LAST_JOIN_ENCLOSURE_CHECK_TICK.put(candidate.getUuid(), (long) srv.getTicks());
@@ -648,6 +655,7 @@ public class BotEventHandler {
                     if (liveMode != Mode.IDLE) return;
                     if (getFollowTargetUuid(candidate) != null || getBaseTarget(candidate) != null) return;
                     if (net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(candidate.getUuid())) return;
+                    if (net.wcfcarolina13.GameAI.skills.SkillManager.shouldAbortSkill(candidate)) return;
                     String rideSuppression = net.wcfcarolina13.GameAI.services.RideSyncService
                             .getJoinEnclosureSuppressionReason(candidate, srv.getTicks());
                     if (rideSuppression != null) {
@@ -908,6 +916,23 @@ public class BotEventHandler {
                 AutoFaceEntity.setBotExecutingTask(false);
                 AutoFaceEntity.isBotMoving = false;
                 debugRL("Resetting handler trigger flag to: " + false);
+            }
+        }
+    }
+
+    public static void tickDrowningRescue(MinecraftServer server) {
+        if (server == null) return;
+        for (ServerPlayerEntity player : getRegisteredBots(server)) {
+            if (player.isAlive() && player.isTouchingWater() && player.getAir() < player.getMaxAir()) {
+                if (player.isSneaking() && !net.wcfcarolina13.GameAI.services.SneakLockService.isLocked(player.getUuid())) {
+                    player.setSneaking(false);
+                }
+                player.setPitch(-80f);
+                player.setYaw(player.getYaw());
+                player.setSprinting(true);
+                player.setSwimming(true);
+                net.wcfcarolina13.GameAI.BotActions.jump(player);
+                net.wcfcarolina13.GameAI.BotActions.moveForward(player);
             }
         }
     }
@@ -1910,6 +1935,18 @@ public class BotEventHandler {
             }
         }
 
+        // Try bot-to-bot artifact teleport when far from base — a same-owner bot
+        // at the destination with tier-2 artifacts can summon the traveler instantly.
+        BlockPos baseBP = BlockPos.ofFloored(base.x, base.y, base.z);
+        if (bot.getBlockPos().getSquaredDistance(baseBP) > 96.0D * 96.0D) {
+            MinecraftServer srvTp = bot.getCommandSource().getServer();
+            if (srvTp != null
+                    && net.wcfcarolina13.GameAI.services.NavigationArtifactService
+                            .tryBotToBotArtifactTeleport(srvTp, bot, baseBP)) {
+                return "A companion at base is summoning " + bot.getName().getString() + " home via artifact.";
+            }
+        }
+
         // Preserve baseTarget so sunset automation can track "home" for auto-sleep.
         setBaseTarget(bot, base);
 
@@ -2819,6 +2856,20 @@ public class BotEventHandler {
         if (bot == null || server == null) return false;
         UUID botId = bot.getUuid();
         long nowTick = server.getTicks();
+        if (TaskService.hasActiveTask(botId)) {
+            boolean hadIdleSweepState = Boolean.TRUE.equals(FollowStateService.IDLE_SWEEP_ACTIVE.get(botId))
+                    || FollowStateService.IDLE_SWEEP_TARGET.containsKey(botId)
+                    || FollowStateService.IDLE_SWEEP_START_TICK.containsKey(botId);
+            boolean hadInFlightSweep = DropSweepService.isInProgressFor(bot);
+            if (hadIdleSweepState || hadInFlightSweep) {
+                LOGGER.info("[IdleSweep] {} suppressed — active task {}",
+                        bot.getName().getString(),
+                        TaskService.getActiveTaskName(botId).orElse("unknown"));
+            }
+            BackgroundSweepPolicy.clearPendingIdleSweepState(botId);
+            DropSweepService.requestCancel(bot, "active-task");
+            return false;
+        }
 
         // Resolve the player for FOLLOW mode movement check.
         ServerPlayerEntity commander = null;
@@ -3534,9 +3585,13 @@ public class BotEventHandler {
             BotActions.resetRangedState(bot);
         }
 
-        if (distance > 3.0D) {
+        ItemStack activeMainHand = bot.getMainHandStack();
+        double preferredEngageDistance = BotActions.getPreferredMeleeEngageDistance(activeMainHand);
+        double preferredStopDistance = BotActions.getPreferredMeleeStopDistance(activeMainHand);
+
+        if (distance > preferredEngageDistance) {
             lowerShieldTracking(bot);
-            moveToward(bot, positionOf(closest), 2.5D, true);
+            moveToward(bot, positionOf(closest), preferredStopDistance, true);
         } else if (shouldBlock) {
             // In melee range with a sword: stop sprinting when 2+ mobs are close so
             // sweep attacks can trigger (vanilla sweep requires: on ground, not sprinting,
@@ -3608,11 +3663,20 @@ public class BotEventHandler {
                 if (!hasMelee) {
                     BotActions.selectBestWeapon(bot);
                 }
+                if (BotActions.shouldReopenSpearSpacing(bot, closest)) {
+                    BotActions.sprint(bot, false);
+                    BotActions.moveBackward(bot);
+                    return true;
+                }
+                if (BotActions.shouldPressSpearCharge(bot, closest)) {
+                    BotActions.sprint(bot, true);
+                    moveToward(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()), true);
+                }
                 // Hit-and-retreat kiting: after swinging, backpedal during cooldown reset
                 // to dodge the mob's return hit, then step forward to re-engage.
                 // Only kite against 1-2 mobs — backpedaling when surrounded exposes the back.
                 float cooldown = bot.getAttackCooldownProgress(0.5f);
-                if (nearbyMeleeCount2 <= 2 && hasMelee) {
+                if (nearbyMeleeCount2 <= 2 && hasMelee && !BotActions.isSpear(bot.getMainHandStack())) {
                     if (cooldown < 0.3f && distance <= 2.5D) {
                         // Just swung — backpedal out of mob's reach
                         BotActions.moveBackward(bot);

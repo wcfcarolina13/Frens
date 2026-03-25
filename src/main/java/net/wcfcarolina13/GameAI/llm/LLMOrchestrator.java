@@ -19,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Central hub for routing chat messages through the LLM pipeline.
@@ -28,7 +29,12 @@ import java.util.concurrent.Executors;
 public final class LLMOrchestrator {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("LLMOrchestrator");
-    private static final ExecutorService CHAT_EXECUTOR = Executors.newCachedThreadPool();
+    private static final AtomicInteger CHAT_THREAD_ID = new AtomicInteger(0);
+    private static final ExecutorService CHAT_EXECUTOR = Executors.newCachedThreadPool(runnable -> {
+        Thread t = new Thread(runnable, "llm-orchestrator-" + CHAT_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
     private static final MemoryStore MEMORY_STORE = new MemoryStore();
 
     private static final Map<String, Boolean> WORLD_TOGGLES = new ConcurrentHashMap<>();

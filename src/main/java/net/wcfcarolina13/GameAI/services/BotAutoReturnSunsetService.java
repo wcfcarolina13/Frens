@@ -107,6 +107,11 @@ public final class BotAutoReturnSunsetService {
         }
     });
 
+    /** Interrupt all in-flight sunset return tasks. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        AUTO_EXECUTOR.shutdownNow();
+    }
+
     private BotAutoReturnSunsetService() {}
 
     public static void beginAcceptedSunsetReturn(MinecraftServer server, ServerPlayerEntity bot) {
@@ -203,15 +208,15 @@ public final class BotAutoReturnSunsetService {
         }
         if (session.activeKind == AnchorKind.TACTICAL_SHELTER) {
             PENDING_SLEEP.remove(bot.getUuid());
-            if (server != null) {
-                BotFleeService.tryProactiveShelter(bot, server);
-            }
+            boolean sheltering = server != null
+                    && BotHomeService.isTacticalShelterEnabled(bot)
+                    && BotFleeService.tryProactiveShelter(bot, server);
             CompanionOverheadDialogueService.showOverheadLine(bot,
-                    "Settling into shelter.",
+                    sheltering ? "Settling into shelter." : "Holding position for the night.",
                     3_000,
                     32.0,
                     "sunset-arrival",
-                    "shelter");
+                    sheltering ? "shelter" : "hold");
             return true;
         }
         return false;
@@ -399,6 +404,15 @@ public final class BotAutoReturnSunsetService {
             return;
         }
 
+        // Try bot-to-bot artifact teleport if far from home — a receiver bot at base
+        // with tier-2 artifacts can summon this bot instantly instead of walking.
+        if (bot.getBlockPos().getSquaredDistance(anchor.pos()) > PRACTICAL_HOME_RANGE_SQ) {
+            if (NavigationArtifactService.tryBotToBotArtifactTeleport(server, bot, anchor.pos())) {
+                LOGGER.info("Sunset return for {} handled via bot-to-bot artifact teleport", bot.getName().getString());
+                return;
+            }
+        }
+
         SunsetSession session = new SunsetSession();
         session.primaryHome = anchor.pos().toImmutable();
         session.primaryKind = anchor.kind();
@@ -463,6 +477,11 @@ public final class BotAutoReturnSunsetService {
 
         if (session.activeKind == AnchorKind.TACTICAL_SHELTER) {
             PENDING_SLEEP.remove(bot.getUuid());
+            if (!BotHomeService.isTacticalShelterEnabled(bot)) {
+                BotFleeService.clearShelterAndBreakFree(bot);
+                clearSession(bot.getUuid());
+                return;
+            }
             if (BotFleeService.isInShelter(bot.getUuid())) {
                 return;
             }
@@ -737,7 +756,10 @@ public final class BotAutoReturnSunsetService {
             if (SurvivalRecruitmentService.isVillageSignalNearby(world, validatedShelter)) {
                 return new SunsetAnchor(validatedShelter.toImmutable(), AnchorKind.VILLAGE_HOUSE, "validated_village");
             }
-            return new SunsetAnchor(validatedShelter.toImmutable(), AnchorKind.TACTICAL_SHELTER, "validated_local");
+            if (BotHomeService.isTacticalShelterEnabled(bot)) {
+                return new SunsetAnchor(validatedShelter.toImmutable(), AnchorKind.TACTICAL_SHELTER, "validated_local");
+            }
+            return null;
         }
 
         boolean recentSurfaceFailure = BotFleeService.hadRecentSurfaceRecoveryFailure(
@@ -771,6 +793,9 @@ public final class BotAutoReturnSunsetService {
         }
 
         if (!recentSurfaceFailure) {
+            return null;
+        }
+        if (!BotHomeService.isTacticalShelterEnabled(bot)) {
             return null;
         }
         return new SunsetAnchor(bot.getBlockPos().toImmutable(), AnchorKind.TACTICAL_SHELTER, "local_reassess");
@@ -856,6 +881,9 @@ public final class BotAutoReturnSunsetService {
             return new SunsetAnchor(safe.toImmutable(), AnchorKind.CHEST, "chest");
         }
 
+        if (!BotHomeService.isTacticalShelterEnabled(bot)) {
+            return null;
+        }
         return new SunsetAnchor(bot.getBlockPos().toImmutable(), AnchorKind.TACTICAL_SHELTER, "tactical");
     }
 

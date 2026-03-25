@@ -48,6 +48,11 @@ public final class BotAutoHuntService {
         }
     });
 
+    /** Interrupt all in-flight auto-hunt tasks. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        EXECUTOR.shutdownNow();
+    }
+
     private BotAutoHuntService() {}
 
     public static void requestDecisionNow(ServerPlayerEntity bot) {

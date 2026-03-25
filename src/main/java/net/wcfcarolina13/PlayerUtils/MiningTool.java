@@ -1,7 +1,9 @@
 package net.wcfcarolina13.PlayerUtils;
 
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
@@ -16,6 +18,7 @@ import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.MappedVillageService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,8 +48,13 @@ public class MiningTool {
         return thread;
     });
 
+    /** Interrupt all in-flight mining operations. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        MINING_EXECUTOR.shutdownNow();
+    }
+
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos) {
-        return mineBlock(bot, targetBlockPos, false);
+        return mineBlock(bot, targetBlockPos, false, true);
     }
 
     /**
@@ -58,6 +66,13 @@ public class MiningTool {
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot,
                                                       BlockPos targetBlockPos,
                                                       boolean preserveSelectedHotbarItem) {
+        return mineBlock(bot, targetBlockPos, preserveSelectedHotbarItem, true);
+    }
+
+    public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot,
+                                                      BlockPos targetBlockPos,
+                                                      boolean preserveSelectedHotbarItem,
+                                                      boolean enforceVillageProtection) {
         CompletableFuture<String> miningResult = new CompletableFuture<>();
         if (bot == null || targetBlockPos == null) {
             miningResult.complete("⚠️ Cannot mine: invalid target.");
@@ -66,6 +81,13 @@ public class MiningTool {
         MinecraftServer server = bot.getEntityWorld().getServer();
         if (server == null) {
             miningResult.complete("⚠️ Cannot mine: server unavailable.");
+            return miningResult;
+        }
+
+        if (enforceVillageProtection
+                && bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw
+                && MappedVillageService.isInsideMappedVillage(sw, targetBlockPos)) {
+            miningResult.complete("⚠️ Cannot mine: protected mapped village block.");
             return miningResult;
         }
 
@@ -287,12 +309,27 @@ public class MiningTool {
             return false;
         }
 
+        PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (ItemStack.areItemsEqual(stack, tool)) {
-                bot.getInventory().setSelectedSlot(i);
+            ItemStack stack = inventory.getStack(i);
+            if (ItemStack.areItemsAndComponentsEqual(stack, tool)) {
+                BotActions.selectHotbarSlot(bot, i);
                 return true;
             }
+        }
+
+        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!ItemStack.areItemsAndComponentsEqual(stack, tool)) {
+                continue;
+            }
+            int target = findEmptyHotbarSlot(inventory);
+            if (target == -1) {
+                target = inventory.getSelectedSlot();
+            }
+            swapStacks(inventory, i, target);
+            BotActions.selectHotbarSlot(bot, target);
+            return true;
         }
         return false;
     }
@@ -301,14 +338,36 @@ public class MiningTool {
         if (bot == null) {
             return;
         }
+        PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
+            ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) {
-                bot.getInventory().setSelectedSlot(i);
+                BotActions.selectHotbarSlot(bot, i);
                 return;
             }
-            if (!isWeaponOnlyItem(stack) && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f) {
-                bot.getInventory().setSelectedSlot(i);
+        }
+        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
+            if (inventory.getStack(i).isEmpty()) {
+                int selectedSlot = inventory.getSelectedSlot();
+                swapStacks(inventory, i, selectedSlot);
+                BotActions.selectHotbarSlot(bot, selectedSlot);
+                return;
+            }
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (isHarmlessMiningFallback(stack)) {
+                BotActions.selectHotbarSlot(bot, i);
+                return;
+            }
+        }
+        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (isHarmlessMiningFallback(stack)) {
+                int selectedSlot = inventory.getSelectedSlot();
+                swapStacks(inventory, i, selectedSlot);
+                BotActions.selectHotbarSlot(bot, selectedSlot);
                 return;
             }
         }
@@ -316,6 +375,34 @@ public class MiningTool {
 
     private static boolean isWeaponOnlyItem(ItemStack stack) {
         return BotActions.isCombatClassItem(stack);
+    }
+
+    private static boolean isHarmlessMiningFallback(ItemStack stack) {
+        return stack != null
+                && !stack.isEmpty()
+                && !isWeaponOnlyItem(stack)
+                && stack.get(DataComponentTypes.FOOD) == null
+                && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f;
+    }
+
+    private static int findEmptyHotbarSlot(PlayerInventory inventory) {
+        for (int i = 0; i < 9; i++) {
+            if (inventory.getStack(i).isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void swapStacks(PlayerInventory inventory, int from, int to) {
+        if (inventory == null || from == to) {
+            return;
+        }
+        ItemStack fromStack = inventory.getStack(from);
+        ItemStack toStack = inventory.getStack(to);
+        inventory.setStack(from, toStack);
+        inventory.setStack(to, fromStack);
+        inventory.markDirty();
     }
 
 }

@@ -22,7 +22,7 @@ public final class BotAutoCookingService {
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-auto-cooking");
     private static final Random RNG = new Random();
 
-    private static final int STARVING_THRESHOLD = 5;
+    private static final int VERY_HUNGRY_THRESHOLD = 5;
     private static final long START_COOLDOWN_TICKS = 20L * 14L;
     private static final long COLLECT_COOLDOWN_TICKS = 20L * 8L;
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
@@ -47,8 +47,9 @@ public final class BotAutoCookingService {
                 continue;
             }
 
+            int hunger = bot.getHungerManager().getFoodLevel();
             ServerCommandSource source = bot.getCommandSource().withSilent();
-            if (SmeltingService.hasReadyFoodOutput(bot, world)) {
+            if (shouldCollectReadyFood(hunger, SmeltingService.hasReadyFoodOutput(bot, world))) {
                 if (SmeltingService.startCollectFinishedFood(bot, source)) {
                     NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + COLLECT_COOLDOWN_TICKS + RNG.nextInt(40));
                     LOGGER.info("Auto-cook: collecting finished output for {}", bot.getName().getString());
@@ -56,21 +57,43 @@ public final class BotAutoCookingService {
                 }
             }
 
-            if (bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD) {
+            if (hunger > VERY_HUNGRY_THRESHOLD) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 80L);
                 continue;
             }
-            if (!SmeltingService.hasCookableInventoryItems(bot, world) || !SmeltingService.hasFuelForAutoCook(bot, world)) {
+            boolean hasCookableFood = SmeltingService.hasCookableFoodInventoryItems(bot, world);
+            boolean hasFuel = SmeltingService.hasFuelForAutoCook(bot, world);
+            if (!shouldStartEmergencyAutoCook(hunger, hasCookableFood, hasFuel)) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 120L + RNG.nextInt(80));
                 continue;
             }
-            if (SmeltingService.startBatchCook(bot, source, "", "auto")) {
+            if (SmeltingService.startBatchCookFoodOnly(bot, source, "auto")) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + START_COOLDOWN_TICKS + RNG.nextInt(60));
                 LOGGER.info("Auto-cook: started batch cook for {}", bot.getName().getString());
             } else {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 120L);
             }
         }
+    }
+
+    public static void snoozeFor(ServerPlayerEntity bot, long delayTicks) {
+        if (bot == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        long nowTick = server.getTicks();
+        NEXT_DECISION_TICK.merge(bot.getUuid(), nowTick + Math.max(0L, delayTicks), Math::max);
+    }
+
+    static boolean shouldStartEmergencyAutoCook(int hungerLevel, boolean hasCookableFood, boolean hasFuel) {
+        return hungerLevel <= VERY_HUNGRY_THRESHOLD && hasCookableFood && hasFuel;
+    }
+
+    static boolean shouldCollectReadyFood(int hungerLevel, boolean hasReadyFoodOutput) {
+        return hungerLevel <= VERY_HUNGRY_THRESHOLD && hasReadyFoodOutput;
     }
 
     private static boolean isEligible(ServerPlayerEntity bot) {

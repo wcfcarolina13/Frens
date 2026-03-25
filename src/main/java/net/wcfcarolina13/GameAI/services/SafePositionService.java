@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BedBlock;
 import net.minecraft.block.BlockState;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -193,6 +194,16 @@ public final class SafePositionService {
             return true;
         }
         if (!assessment.standable()) {
+            // Before giving up, check if ±1 Y is standable — the bot may be in a
+            // 1-block depression or standing on an irregular block (slab, half-step).
+            if (assessment.openSky() && assessment.nearSurface()) {
+                for (int dy = -1; dy <= 1; dy += 2) {
+                    BlockPos adjusted = feet.up(dy);
+                    if (isSpawnable(world, adjusted)) {
+                        return true;
+                    }
+                }
+            }
             return false;
         }
         int columnGap = Math.max(0, columnSurfaceFeetY(world, feet.getX(), feet.getZ()) - feet.getY());
@@ -443,17 +454,49 @@ public final class SafePositionService {
         return findSafeColumn(world, new BlockPos(x, origin.getY(), z), -4, 4);
     }
 
+    /**
+     * Return the Y where feet would stand on actual walkable ground,
+     * scanning through tree trunks/leaves that fool the heightmap.
+     * Uses MOTION_BLOCKING_NO_LEAVES as a ceiling hint, then scans downward
+     * through log and leaf blocks to find the first solid non-vegetation block.
+     */
+    public static int getWalkableGroundY(ServerWorld world, int x, int z) {
+        int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        if (topY <= world.getBottomY()) return topY;
+        int y = topY;
+        int minY = Math.max(world.getBottomY(), y - 32);
+        while (y > minY) {
+            BlockPos checkPos = new BlockPos(x, y - 1, z);
+            BlockState state = world.getBlockState(checkPos);
+            if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES)) {
+                y--;
+                continue;
+            }
+            if (!state.getCollisionShape(world, checkPos).isEmpty()) {
+                return y; // feet stand on top of this block
+            }
+            y--;
+        }
+        return topY; // fallback to heightmap
+    }
+
     private static int columnSurfaceFeetY(ServerWorld world, int x, int z) {
-        return world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        return getWalkableGroundY(world, x, z);
     }
 
     private static int wideSurfaceFeetY(ServerWorld world, int x, int z) {
-        int max = columnSurfaceFeetY(world, x, z);
+        // Use the median of surrounding surface samples rather than the max.
+        // Max is biased upward by nearby tree trunks (MOTION_BLOCKING_NO_LEAVES
+        // still counts log blocks), causing nearSurface=false under canopies
+        // even when the bot is clearly at ground level.
         int[][] offsets = {{4, 0}, {-4, 0}, {0, 4}, {0, -4}, {3, 3}, {3, -3}, {-3, 3}, {-3, -3}};
-        for (int[] off : offsets) {
-            max = Math.max(max, columnSurfaceFeetY(world, x + off[0], z + off[1]));
+        int[] samples = new int[offsets.length + 1];
+        samples[0] = columnSurfaceFeetY(world, x, z);
+        for (int i = 0; i < offsets.length; i++) {
+            samples[i + 1] = columnSurfaceFeetY(world, x + offsets[i][0], z + offsets[i][1]);
         }
-        return max;
+        java.util.Arrays.sort(samples);
+        return samples[samples.length / 2]; // median
     }
 
     private static boolean hasLowRoofCover(ServerWorld world, BlockPos feet, int maxBlocksAboveHead) {

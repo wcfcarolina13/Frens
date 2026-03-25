@@ -70,6 +70,11 @@ public final class MovementService {
         t.setDaemon(true);
         return t;
     });
+    /** Interrupt door-close scheduler. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        DOOR_CLOSE_SCHEDULER.shutdownNow();
+    }
+
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_CLOSE_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_DEBUG_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_IRON_WARN_COOLDOWN = new ConcurrentHashMap<>();
@@ -756,8 +761,13 @@ public final class MovementService {
             return new MovementResult(false, mode, player.getBlockPos(), label + ": aborted");
         }
 
-        String rawResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
-        boolean success = isGoToSuccess(rawResult);
+        ServerWorld world = getWorld(player);
+        BlockPos safe = findNearbyStandable(world, destination, 2, 2);
+        if (safe == null) safe = destination;
+        player.teleport(world, safe.getX() + 0.5, safe.getY(), safe.getZ() + 0.5, java.util.Set.of(), player.getYaw(), player.getPitch(), true);
+        boolean success = true;
+        String rawResult = "Teleported successfully";
+
         if (success) {
             BlockPos post = player.getBlockPos();
             double postDistanceSq = post.getSquaredDistance(destination);
@@ -1758,7 +1768,7 @@ public final class MovementService {
                 bot.getName().getString(),
                 leafPos.toShortString());
 
-        CompletableFuture<String> future = MiningTool.mineBlock(bot, leafPos);
+        CompletableFuture<String> future = MiningTool.mineBlock(bot, leafPos, true);
         LEAF_MINE_INFLIGHT.put(id, future);
         future.whenComplete((result, error) -> {
             LEAF_MINE_INFLIGHT.remove(id, future);
@@ -2732,8 +2742,15 @@ public final class MovementService {
                 continue;
             }
 
+            boolean leafBlock = state.isIn(BlockTags.LEAVES);
+            if (leafBlock && !isBreakableLeaf(world, pos)) {
+                continue;
+            }
+
             // Pick a reasonable tool for this block type.
-            if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+            if (leafBlock) {
+                selectHarmlessForLeaves(bot);
+            } else if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
                 BotActions.selectHarvestToolOrHands(bot, "pickaxe");
             } else if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
                 BotActions.selectHarvestToolOrHands(bot, "shovel");
@@ -2748,7 +2765,7 @@ public final class MovementService {
                     state.getBlock().getTranslationKey());
 
             try {
-                MiningTool.mineBlock(bot, pos).get(6, TimeUnit.SECONDS);
+                MiningTool.mineBlock(bot, pos, leafBlock).get(6, TimeUnit.SECONDS);
                 // Small pause to let physics/collision settle.
                 sleep(120L);
                 boolean mined = world.getBlockState(pos).isAir();
@@ -3033,6 +3050,13 @@ public final class MovementService {
         if (player.isTouchingWater() && player.isSneaking()
                 && !SneakLockService.isLocked(player.getUuid())) {
             player.setSneaking(false);
+        }
+        
+        // Always surface when drowning or low on air
+        if (player.isTouchingWater() && player.getAir() < player.getMaxAir()) {
+            player.addVelocity(0, 0.04, 0);
+            player.velocityDirty = true;
+            player.jump();
         }
     }
 }

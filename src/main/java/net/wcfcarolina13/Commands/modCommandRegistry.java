@@ -110,6 +110,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import net.minecraft.registry.entry.RegistryEntry;
@@ -133,8 +134,24 @@ import net.wcfcarolina13.network.CompanionQuestStatePayload;
 
 public class modCommandRegistry {
 
-    private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-    private static final ExecutorService skillExecutor = Executors.newCachedThreadPool();
+    private static final AtomicInteger SCHEDULER_THREAD_ID = new AtomicInteger(0);
+    private static final AtomicInteger SKILL_THREAD_ID = new AtomicInteger(0);
+    private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, runnable -> {
+        Thread t = new Thread(runnable, "mod-command-scheduler-" + SCHEDULER_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
+    private static final ExecutorService skillExecutor = Executors.newCachedThreadPool(runnable -> {
+        Thread t = new Thread(runnable, "mod-command-skill-" + SKILL_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
+    /** Interrupt all in-flight command/skill tasks. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        scheduler.shutdownNow();
+        skillExecutor.shutdownNow();
+    }
+
     static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
     public static boolean enableReinforcementLearning = false;
@@ -406,6 +423,7 @@ public class modCommandRegistry {
 	                            .then(BotUtilityCommands.buildIdentityCheck())
 	                            .then(BotHomeCommands.buildAutoReturnSunset())
                                 .then(BotHomeCommands.buildAutoReturnSelfSufficient())
+                                .then(BotHomeCommands.buildTacticalShelter())
 	                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSkipPermission())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -5553,6 +5571,7 @@ public class modCommandRegistry {
         net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
         net.wcfcarolina13.GameAI.BotActions.sneak(bot, false);
         net.wcfcarolina13.GameAI.BotActions.stop(bot);
+        net.wcfcarolina13.GameAI.services.BotAutoCookingService.snoozeFor(bot, 20L * 120L);
         ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + alias + "...");
         SkillResumeService.clearAndNotify(bot.getUuid());
         return 1;
@@ -5958,6 +5977,66 @@ public class modCommandRegistry {
                 boolean on = BotHomeService.isAutoReturnSelfSufficientFallback(bots.getFirst());
                 ChatUtils.sendSystemMessage(source,
                         summary + " sunset self-sufficiency is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeTacticalShelterSetTargets(CommandContext<ServerCommandSource> context,
+                                                String targetArg,
+                                                boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setTacticalShelterEnabled(bot, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " tactical shelter is now " + (enabled ? "ON" : "OFF") + ".");
+        }
+        return successes;
+    }
+
+    static int executeTacticalShelterToggleTargets(CommandContext<ServerCommandSource> context,
+                                                   String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleTacticalShelterEnabled(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isTacticalShelterEnabled(bot)) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " tactical shelter enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isTacticalShelterEnabled(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " tactical shelter is now " + (on ? "ON" : "OFF") + ".");
             }
         }
         return successes;

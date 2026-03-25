@@ -256,7 +256,7 @@ public final class HealingService {
         }
         
         if (message != null) {
-            ChatUtils.sendChatMessages(bot.getCommandSource(), message);
+            CompanionOverheadDialogueService.showOverheadLine(bot, message, 3000, 32.0, "hunger", null);
             LAST_HUNGER_WARNING.put(uuid, now);
             LAST_WARNED_LEVEL.put(uuid, foodLevel);
         }

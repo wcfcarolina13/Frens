@@ -80,9 +80,29 @@ public final class CraftingHelper {
     private static final double MAX_REMEMBERED_TABLE_DIST_SQ = 140.0D * 140.0D;
     private static final Map<UUID, WorldPos> LAST_KNOWN_CRAFTING_TABLE = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Cooldown after failing to reach a crafting table — prevents cascade of 6-second blocking
+    // attempts when multiple tool provisions all try to reach the same unreachable table.
+    private static final Map<UUID, Long> CRAFT_TABLE_REACH_FAILURE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CRAFT_TABLE_FAILURE_COOLDOWN_MS = 30_000L;
+
+    // Message cooldown — prevents 15+ identical "I need a crafting table" messages per second
+    // when multiple tool provisions all fail in quick succession.
+    private static final Map<UUID, Long> CRAFT_TABLE_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CRAFT_TABLE_MSG_COOLDOWN_MS = 30_000L;
+
     private record WorldPos(net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey, BlockPos pos) {}
 
     private CraftingHelper() {
+    }
+
+    /** Send a crafting-table-needed message at most once per cooldown period per bot. */
+    private static void sendCraftTableNeededOnce(ServerPlayerEntity bot, ServerCommandSource source, String msg) {
+        if (bot == null || source == null) return;
+        Long last = CRAFT_TABLE_MSG_COOLDOWN.get(bot.getUuid());
+        long now = System.currentTimeMillis();
+        if (last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS) return;
+        CRAFT_TABLE_MSG_COOLDOWN.put(bot.getUuid(), now);
+        ChatUtils.sendSystemMessage(source, msg);
     }
 
     public static boolean craftCraftingTable(ServerCommandSource source, ServerPlayerEntity bot, ServerPlayerEntity commander, int amountRequested) {
@@ -201,7 +221,7 @@ public final class CraftingHelper {
         }
         // Ladder: 7 sticks => 3 ladders (3x3 recipe)
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
@@ -238,7 +258,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a bed.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a bed.");
             return 0;
         }
         // Choose a color based on available wool stacks (3 required per bed).
@@ -420,7 +440,7 @@ public final class CraftingHelper {
                                        int amountRequested) {
         if (!output.equals(Items.CRAFTING_TABLE)) {
             if (!ensureCraftingStation(bot, source)) {
-                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
         }
@@ -429,14 +449,14 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
-            ChatUtils.sendSystemMessage(source, "I need " + planksPerItem + " planks per craft.");
+            sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
             return 0;
         }
         int plankCount = countPlanks(bot);
         int maxByPlanks = plankCount / planksPerItem;
         int crafts = Math.min(amountRequested, maxByPlanks);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
+            sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
             return 0;
         }
         ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of());
@@ -453,7 +473,7 @@ public final class CraftingHelper {
         // 2 planks => 4 sticks
         int craftsNeeded = (int) Math.ceil(amount / 4.0);
         if (!ensurePlanksAvailable(bot, source, craftsNeeded * 2)) {
-            ChatUtils.sendSystemMessage(source, "Sticks need 2 planks per craft.");
+            sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
@@ -464,7 +484,7 @@ public final class CraftingHelper {
         int maxByPlanks = plankCount / 2;
         int crafts = Math.min(craftsNeeded, maxByPlanks);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Sticks need 2 planks per craft.");
+            sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
             return 0;
         }
         ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of());
@@ -534,7 +554,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a door.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a door.");
             return 0;
         }
         record DoorRecipe(Item plank, Item door, Identifier recipeId) {}
@@ -608,7 +628,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         record FenceRecipe(Item plank, Item fence, Identifier recipeId) {}
@@ -688,7 +708,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         Identifier recipeId = Identifier.of("minecraft", "lead");
@@ -722,7 +742,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         Identifier recipeId = Identifier.of("minecraft", "bundle");
@@ -782,7 +802,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a saddle.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a saddle.");
             return 0;
         }
         Identifier recipeId = Identifier.of("minecraft", "saddle");
@@ -816,7 +836,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         Identifier recipeId = Identifier.of("minecraft", "carrot_on_a_stick");
@@ -852,7 +872,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
         Identifier recipeId = Identifier.of("minecraft", "warped_fungus_on_a_stick");
@@ -924,7 +944,7 @@ public final class CraftingHelper {
                 return crafts;
             }
         }
-        ChatUtils.sendSystemMessage(source, "Missing materials for " + kind.name().toLowerCase(Locale.ROOT) + ".");
+        sendCraftTableNeededOnce(bot, source, "Missing materials for " + kind.name().toLowerCase(Locale.ROOT) + ".");
         return 0;
     }
 
@@ -936,7 +956,7 @@ public final class CraftingHelper {
                                              ToolMaterial mat) {
         // Ensure crafting table nearby for 3x3 recipes
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
 
@@ -956,7 +976,7 @@ public final class CraftingHelper {
         if (!ensureSticks(bot, source, neededSticks)) {
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
-            ChatUtils.sendSystemMessage(source, "Missing sticks; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + "). Add planks/logs and retry.");
+            sendCraftTableNeededOnce(bot, source, "Missing sticks; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + "). Add planks/logs and retry.");
             return 0;
         }
         int sticks = countItem(bot, Items.STICK);
@@ -972,7 +992,7 @@ public final class CraftingHelper {
         int maxByHead = heads / headCount;
         int crafts = Math.min(amount, Math.min(maxBySticks, maxByHead));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Missing materials for " + mat.name() + " " + kind.name().toLowerCase(Locale.ROOT) + ".");
+            sendCraftTableNeededOnce(bot, source, "Missing materials for " + mat.name() + " " + kind.name().toLowerCase(Locale.ROOT) + ".");
             return 0;
         }
 
@@ -1040,7 +1060,7 @@ public final class CraftingHelper {
                                    ServerPlayerEntity commander,
                                    int amount) {
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a shield.");
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a shield.");
             return 0;
         }
         ensurePlanksAvailable(bot, source, 6 * amount);
@@ -1064,6 +1084,13 @@ public final class CraftingHelper {
 
     public static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source) {
         if (bot == null) return false;
+        // If we recently failed to reach a distant table, skip expensive movement but still try
+        // placing from inventory or crafting a new table (those are fast/local operations).
+        boolean reachCooldownActive = false;
+        Long lastFail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
+        if (lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS) {
+            reachCooldownActive = true;
+        }
         // Check nearby crafting table
         BlockPos botPos = bot.getBlockPos();
         ServerWorld world = source.getWorld();
@@ -1116,6 +1143,15 @@ public final class CraftingHelper {
         }
         if (nearest != null) {
             double distSq = botPos.getSquaredDistance(nearest);
+            // If we recently failed to reach a distant table, skip expensive movement and
+            // fall through to the placement/crafting path instead.
+            if (reachCooldownActive && distSq > STATION_REACH_SQ) {
+                LOGGER.info("Skipping unreachable crafting table at {} (cooldown active)", nearest.toShortString());
+                nearest = null;
+            }
+        }
+        if (nearest != null) {
+            double distSq = botPos.getSquaredDistance(nearest);
             LOGGER.info("Found nearby crafting table at {}", nearest.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), nearest.toImmutable()));
             if (distSq > 36.0D) { // >6 blocks away
@@ -1145,6 +1181,8 @@ public final class CraftingHelper {
                     MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
                     if (res.success() || bot.getBlockPos().getSquaredDistance(nearest) <= STATION_REACH_SQ) {
                         if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
+                            CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                            CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                             return true;
                         }
                     }
@@ -1152,38 +1190,72 @@ public final class CraftingHelper {
                 }
                 // Fall through to the normal standable scan once the chunk is likely loaded.
             }
-            List<BlockPos> standables = findStandableOptions(world, nearest, 2);
+            List<BlockPos> standables = findStandableOptions(world, nearest, 3);
             LOGGER.info("Standable options near crafting table ({}): {}", nearest.toShortString(), standables.size());
             if (standables.isEmpty()) {
-                LOGGER.warn("No standable spot near crafting table at {}", nearest.toShortString());
+                LOGGER.warn("No standable spot near crafting table at {} — scanning for alternatives", nearest.toShortString());
+                BlockPos unreachable = nearest;
+                LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
+                // Re-scan for a different, accessible table
+                nearest = null;
+                double best2 = Double.MAX_VALUE;
+                for (BlockPos pos2 : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
+                    if (!world.isChunkLoaded(pos2)) continue;
+                    if (pos2.equals(unreachable)) continue;
+                    if (world.getBlockState(pos2).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                        List<BlockPos> altStandables = findStandableOptions(world, pos2.toImmutable(), 3);
+                        if (altStandables.isEmpty()) continue;
+                        double distSq2 = botPos.getSquaredDistance(pos2);
+                        if (distSq2 < best2) {
+                            best2 = distSq2;
+                            nearest = pos2.toImmutable();
+                            standables = altStandables;
+                        }
+                    }
+                }
+                if (nearest == null) {
+                    LOGGER.warn("No accessible crafting table found in range");
+                    // Fall through to placement/crafting path below
+                }
+            }
+            if (nearest != null && !standables.isEmpty()) {
+                BlockPos approach = standables.get(0);
+                LOGGER.info("Selected approach {} (dist={})", approach.toShortString(), Math.sqrt(approach.getSquaredDistance(nearest)));
+                if (bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
+                    CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
+                }
+                boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT,
+                        approach,
+                        approach,
+                        null,
+                        null,
+                        bot.getHorizontalFacing());
+                MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+                if (res.success() || bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
+                    LOGGER.info("Reached crafting table approach {}", approach.toShortString());
+                    CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
+                }
+                ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
+                MovementService.clearRecentWalkAttempt(bot.getUuid());
+                boolean close = MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 2200L, 0.14, "craft-table-nudge");
+                if (!close) {
+                    LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
+                    CRAFT_TABLE_REACH_FAILURE.put(bot.getUuid(), System.currentTimeMillis());
+                    ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
+                }
+                if (close && ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
+                    CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    return true;
+                }
                 return false;
             }
-            BlockPos approach = standables.get(0);
-            LOGGER.info("Selected approach {} (dist={})", approach.toShortString(), Math.sqrt(approach.getSquaredDistance(nearest)));
-            if (bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
-                return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
-            }
-            boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT,
-                    approach,
-                    approach,
-                    null,
-                    null,
-                    bot.getHorizontalFacing());
-            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
-            if (res.success() || bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
-                LOGGER.info("Reached crafting table approach {}", approach.toShortString());
-                return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
-            }
-            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
-            MovementService.clearRecentWalkAttempt(bot.getUuid());
-            boolean close = MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 2200L, 0.14, "craft-table-nudge");
-            if (!close) {
-                LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
-                ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
-            }
-            return close && ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
         }
 
         // Try placing from inventory
@@ -1223,6 +1295,7 @@ public final class CraftingHelper {
             MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
             if (res.success() || bot.getBlockPos().getSquaredDistance(placeAt) <= STATION_REACH_SQ) {
                 LOGGER.info("Reached newly placed crafting table at {}", placeAt.toShortString());
+                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                 return true;
             }
             LOGGER.warn("Failed to step to newly placed crafting table at {}: {}", placeAt.toShortString(), res.detail());
@@ -1269,16 +1342,18 @@ public final class CraftingHelper {
                     bot.getHorizontalFacing());
             MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
             if (res.success() || bot.getBlockPos().getSquaredDistance(placeAt) <= STATION_REACH_SQ) {
+                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                 return true;
             }
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(placeAt));
             MovementService.clearRecentWalkAttempt(bot.getUuid());
             boolean close = MovementService.nudgeTowardUntilClose(bot, placeAt, STATION_REACH_SQ, 1500L, 0.14, "craft-crafted-table-nudge");
+            if (close) CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
             return close;
         }
 
         LOGGER.info("No crafting table within {} blocks of {}", radius, botPos.toShortString());
-        ChatUtils.sendSystemMessage(source, "I need a crafting table nearby to craft that.");
+        sendCraftTableNeededOnce(bot, source, "I need a crafting table nearby to craft that.");
         return false;
     }
 
@@ -1381,7 +1456,7 @@ public final class CraftingHelper {
                                    int per) {
         if (output.equals(Items.BUCKET)) {
             if (!ensureCraftingStation(bot, source)) {
-                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
         }
@@ -1435,7 +1510,7 @@ public final class CraftingHelper {
                                         int per) {
         if (output.equals(Items.FURNACE)) {
             if (!ensureCraftingStation(bot, source)) {
-                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
         }
@@ -1462,7 +1537,7 @@ public final class CraftingHelper {
                                        ServerPlayerEntity commander,
                                        int amount) {
         if (!ensureCraftingStation(bot, source)) {
-            ChatUtils.sendSystemMessage(source, "Fishing rods require a nearby crafting table.");
+            sendCraftTableNeededOnce(bot, source, "Fishing rods require a nearby crafting table.");
             return 0;
         }
         ensureSticks(bot, source, amount * 3);

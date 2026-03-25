@@ -473,7 +473,10 @@ public final class HuntSkill implements Skill {
             }
 
             BlockPos killPos = candidate.entity.getBlockPos();
-            kills++;
+            // When depopulation is enabled, zombie kills don't count toward the hunt target
+            if (!(depopulationEnabled && candidate.target.zombie())) {
+                kills++;
+            }
             huntLoopStartMs = System.currentTimeMillis(); // reset no-progress timeout after each kill
             // Walk toward kill location before sweeping — mob may have fled far before dying
             if (bot.getBlockPos().getSquaredDistance(killPos) > 25) {

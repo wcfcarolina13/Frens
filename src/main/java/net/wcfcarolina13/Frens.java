@@ -458,6 +458,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetRadiusPayload.ID, net.wcfcarolina13.network.BaseSetRadiusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetHomePayload.ID, net.wcfcarolina13.network.BaseSetHomePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGoToPayload.ID, net.wcfcarolina13.network.BaseGoToPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseMapVillagePayload.ID, net.wcfcarolina13.network.BaseMapVillagePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseClaimWallPayload.ID, net.wcfcarolina13.network.BaseClaimWallPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseUnclaimWallPayload.ID, net.wcfcarolina13.network.BaseUnclaimWallPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGrantWallAccessPayload.ID, net.wcfcarolina13.network.BaseGrantWallAccessPayload.CODEC);
@@ -591,6 +592,16 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
+            // Shut down all mod executor services BEFORE saving — prevents worker threads
+            // from submitting new server.execute() tasks that keep the shutdown loop alive.
+            net.wcfcarolina13.PlayerUtils.MiningTool.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.BotEventHandler.shutdownExecutors();
+            net.wcfcarolina13.Commands.modCommandRegistry.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.BotAutoHuntService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.MovementService.shutdownExecutors();
+            AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
@@ -810,6 +821,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
+        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDrowningRescue);
         ServerTickEvents.END_SERVER_TICK.register(Frens::processSpawnEscapeChecks);
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);

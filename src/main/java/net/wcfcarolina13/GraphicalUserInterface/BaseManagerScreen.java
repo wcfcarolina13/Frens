@@ -13,11 +13,13 @@ import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.network.BaseClaimWallPayload;
 import net.wcfcarolina13.network.BaseGoToPayload;
 import net.wcfcarolina13.network.BaseGrantWallAccessPayload;
+import net.wcfcarolina13.network.BaseMapVillagePayload;
 import net.wcfcarolina13.network.BaseRemovePayload;
 import net.wcfcarolina13.network.BaseRenamePayload;
 import net.wcfcarolina13.network.BaseSetRadiusPayload;
@@ -49,9 +51,17 @@ public class BaseManagerScreen extends Screen {
             .resolve("frens")
             .resolve("base_manager_ui.json");
 
-    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName, int radius) {
+    public record BaseDto(String kind, String label, int x, int y, int z, boolean home, String detailText, String ownerName, int radius) {
+        boolean isBase() {
+            return "base".equalsIgnoreCase(kind);
+        }
+
         boolean isWall() {
-            return wallStatus != null && !wallStatus.isBlank();
+            return "wall".equalsIgnoreCase(kind);
+        }
+
+        boolean isVillage() {
+            return "village".equalsIgnoreCase(kind);
         }
     }
 
@@ -140,6 +150,10 @@ public class BaseManagerScreen extends Screen {
     private TextFieldWidget nameField;
     private ButtonWidget resetLayoutButton;
     private ButtonWidget constructionButton;
+    private TextFieldWidget villagePromptField;
+    private ButtonWidget villagePromptConfirmButton;
+    private ButtonWidget villagePromptCancelButton;
+    private boolean mapVillagePromptOpen;
 
     private static final int STATUS_WARN  = 0xFFFFCC44;
     private static final int STATUS_ERROR = 0xFFFF6666;
@@ -171,6 +185,9 @@ public class BaseManagerScreen extends Screen {
     private int dragPanelStartY;
     private int dragPanelStartW;
     private int dragPanelStartH;
+
+    private static final int MODAL_W = 220;
+    private static final int MODAL_H = 92;
 
     private static final int RESIZE_LEFT = 1;
     private static final int RESIZE_RIGHT = 2;
@@ -208,6 +225,7 @@ public class BaseManagerScreen extends Screen {
 
         applySavedOrDefaultPanel();
         buildControls();
+        buildVillagePromptControls();
         contentScroll = MathHelper.clamp(contentScroll, 0.0D, maxScroll());
         requestRefresh();
     }
@@ -305,6 +323,14 @@ public class BaseManagerScreen extends Screen {
                 this::sendRevokeWallAccess);
         y += BUTTON_H + SECTION_GAP;
 
+        // Section 4: Villages
+        addSectionHeader("⌘ Villages", y, 0xFFA3D7E6);
+        y += SECTION_LABEL_H;
+
+        addBtn("Map Village", "Scan the nearby settlement, name it in a popup, and save it as a shared no-go zone", y, 0,
+                this::openMapVillagePrompt);
+        y += BUTTON_H + SECTION_GAP;
+
         addBtn("Close", "Close this screen and return to the inventory", y, 2,
                 this::close);
         y += BUTTON_H + 4;
@@ -323,6 +349,29 @@ public class BaseManagerScreen extends Screen {
         btn.setTooltip(Tooltip.of(Text.literal(tooltip)));
         this.addDrawableChild(btn);
         controls.add(new ControlSlot(btn, col, 1, relY));
+    }
+
+    private void buildVillagePromptControls() {
+        villagePromptField = new TextFieldWidget(this.textRenderer, 0, 0, MODAL_W - 20, 18, Text.literal("Village name"));
+        villagePromptField.setMaxLength(64);
+        villagePromptField.setPlaceholder(Text.literal("Village name"));
+        villagePromptField.visible = false;
+        villagePromptField.active = false;
+        this.addDrawableChild(villagePromptField);
+
+        villagePromptConfirmButton = ButtonWidget.builder(Text.literal("Map"), b -> sendMapVillage())
+                .dimensions(0, 0, 72, 20)
+                .build();
+        villagePromptConfirmButton.visible = false;
+        villagePromptConfirmButton.active = false;
+        this.addDrawableChild(villagePromptConfirmButton);
+
+        villagePromptCancelButton = ButtonWidget.builder(Text.literal("Cancel"), b -> closeMapVillagePrompt())
+                .dimensions(0, 0, 72, 20)
+                .build();
+        villagePromptCancelButton.visible = false;
+        villagePromptCancelButton.active = false;
+        this.addDrawableChild(villagePromptCancelButton);
     }
 
     private void showStatus(String msg, int color) {
@@ -408,6 +457,39 @@ public class BaseManagerScreen extends Screen {
         constructionButton.setY(panelY + Math.max(2, (HEADER_H - constructionButton.getHeight()) / 2));
         constructionButton.visible = true;
         constructionButton.active = true;
+
+        layoutVillagePrompt();
+    }
+
+    private void layoutVillagePrompt() {
+        Rect dialog = mapVillageDialogRect();
+        int fieldX = dialog.x + 10;
+        int fieldY = dialog.y + 26;
+        int buttonY = dialog.bottom() - 28;
+
+        villagePromptField.setX(fieldX);
+        villagePromptField.setY(fieldY);
+        villagePromptField.setWidth(dialog.w - 20);
+        villagePromptField.visible = mapVillagePromptOpen;
+        villagePromptField.active = mapVillagePromptOpen;
+
+        villagePromptConfirmButton.setX(dialog.right() - 10 - villagePromptCancelButton.getWidth() - 6 - villagePromptConfirmButton.getWidth());
+        villagePromptConfirmButton.setY(buttonY);
+        villagePromptConfirmButton.visible = mapVillagePromptOpen;
+        villagePromptConfirmButton.active = mapVillagePromptOpen;
+
+        villagePromptCancelButton.setX(dialog.right() - 10 - villagePromptCancelButton.getWidth());
+        villagePromptCancelButton.setY(buttonY);
+        villagePromptCancelButton.visible = mapVillagePromptOpen;
+        villagePromptCancelButton.active = mapVillagePromptOpen;
+    }
+
+    private Rect mapVillageDialogRect() {
+        int w = Math.min(MODAL_W, this.width - 24);
+        int h = MODAL_H;
+        int x = (this.width - w) / 2;
+        int y = (this.height - h) / 2;
+        return new Rect(x, y, w, h);
     }
 
     private String elideForWidth(String raw, int maxWidth) {
@@ -528,13 +610,21 @@ public class BaseManagerScreen extends Screen {
             }
             if (b != null && b.isWall()) {
                 prefix = "§d[Wall] " + prefix;
+            } else if (b != null && b.isVillage()) {
+                prefix = "§b[Village] " + prefix;
+            } else if (b != null && b.isBase()) {
+                prefix = "§e[Base] " + prefix;
             }
             String label = prefix + rawLabel;
 
             String rightInfo;
             if (b != null && b.isWall()) {
                 String owner = (b.ownerName != null && !b.ownerName.isBlank()) ? b.ownerName : "Unclaimed";
-                rightInfo = "(" + b.x + "," + b.z + ") §7[" + b.wallStatus + "] §6{" + owner + "}";
+                String detail = b.detailText != null ? b.detailText : "";
+                rightInfo = "(" + b.x + "," + b.z + ") §7[" + detail + "] §6{" + owner + "}";
+            } else if (b != null && b.isVillage()) {
+                String detail = b.detailText != null ? b.detailText : "";
+                rightInfo = "(" + b.x + "," + b.z + ") §7[" + detail + "]";
             } else {
                 rightInfo = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ") §7r=" + b.radius) : "";
             }
@@ -592,6 +682,22 @@ public class BaseManagerScreen extends Screen {
         // Header widgets are outside content scissor
         resetLayoutButton.render(context, mouseX, mouseY, delta);
         constructionButton.render(context, mouseX, mouseY, delta);
+
+        if (mapVillagePromptOpen) {
+            renderVillagePrompt(context, mouseX, mouseY, delta);
+        }
+    }
+
+    private void renderVillagePrompt(DrawContext context, int mouseX, int mouseY, float delta) {
+        Rect dialog = mapVillageDialogRect();
+        context.fill(0, 0, this.width, this.height, 0x90000000);
+        context.fill(dialog.x - 1, dialog.y - 1, dialog.right() + 1, dialog.bottom() + 1, COL_BORDER);
+        context.fill(dialog.x, dialog.y, dialog.right(), dialog.bottom(), 0xF0151515);
+        context.drawTextWithShadow(this.textRenderer, "Map Local Village", dialog.x + 10, dialog.y + 8, COL_TITLE);
+        context.drawTextWithShadow(this.textRenderer, "Enter a shared village name.", dialog.x + 10, dialog.y + 16, 0xFFBBBBBB);
+        villagePromptField.render(context, mouseX, mouseY, delta);
+        villagePromptConfirmButton.render(context, mouseX, mouseY, delta);
+        villagePromptCancelButton.render(context, mouseX, mouseY, delta);
     }
 
     private int[] computeThumb(int trackTop, int trackH, int maxScroll) {
@@ -611,6 +717,9 @@ public class BaseManagerScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (mapVillagePromptOpen) {
+            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        }
         Rect content = contentRect();
         if (content.contains(mouseX, mouseY)) {
             int maxScroll = maxScroll();
@@ -626,6 +735,14 @@ public class BaseManagerScreen extends Screen {
     public boolean mouseClicked(Click click, boolean isInside) {
         double mx = click.x();
         double my = click.y();
+
+        if (mapVillagePromptOpen) {
+            if (isInsideMapVillageDialog(mx, my)) {
+                return super.mouseClicked(click, isInside);
+            }
+            closeMapVillagePrompt();
+            return true;
+        }
 
         // Header buttons take priority.
         if (resetLayoutButton.isMouseOver(mx, my) || constructionButton.isMouseOver(mx, my)) {
@@ -705,6 +822,9 @@ public class BaseManagerScreen extends Screen {
 
     @Override
     public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+        if (mapVillagePromptOpen) {
+            return false;
+        }
         int mx = (int) click.x();
         int my = (int) click.y();
 
@@ -792,6 +912,9 @@ public class BaseManagerScreen extends Screen {
 
     @Override
     public boolean mouseReleased(Click click) {
+        if (mapVillagePromptOpen) {
+            return super.mouseReleased(click);
+        }
         boolean wasDragging = draggingResize || draggingMove || draggingScroll;
         draggingResize = false;
         draggingMove = false;
@@ -949,7 +1072,7 @@ public class BaseManagerScreen extends Screen {
     private void sendRemoveSelected() {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
-            showStatus("Select a base to remove.", STATUS_WARN);
+            showStatus("Select an entry to remove.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseRemovePayload.ID)) {
@@ -962,7 +1085,7 @@ public class BaseManagerScreen extends Screen {
     private void sendRenameSelected() {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
-            showStatus("Select a base to rename.", STATUS_WARN);
+            showStatus("Select an entry to rename.", STATUS_WARN);
             return;
         }
         String newLabel = nameField != null ? nameField.getText() : "";
@@ -983,8 +1106,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a base first.", STATUS_WARN);
             return;
         }
-        if (selected.isWall()) {
-            showStatus("Walls use fort buffer, not radius.", STATUS_WARN);
+        if (!selected.isBase()) {
+            showStatus("Only bases use radius.", STATUS_WARN);
             return;
         }
         String text = nameField != null ? nameField.getText() : "";
@@ -1016,6 +1139,10 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a base first.", STATUS_WARN);
             return;
         }
+        if (!selected.isBase()) {
+            showStatus("Only bases can be set as home.", STATUS_WARN);
+            return;
+        }
         if (botAlias.isBlank()) {
             showStatus("No bot selected.", STATUS_WARN);
             return;
@@ -1031,6 +1158,10 @@ public class BaseManagerScreen extends Screen {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
             showStatus("Select a base first.", STATUS_WARN);
+            return;
+        }
+        if (!selected.isBase()) {
+            showStatus("Only bases are valid navigation targets here.", STATUS_WARN);
             return;
         }
         if (botAlias.isBlank()) {
@@ -1189,6 +1320,42 @@ public class BaseManagerScreen extends Screen {
         requestRefresh();
     }
 
+    private void openMapVillagePrompt() {
+        mapVillagePromptOpen = true;
+        if (villagePromptField != null) {
+            villagePromptField.setText("");
+            setFocused(villagePromptField);
+        }
+    }
+
+    private void closeMapVillagePrompt() {
+        mapVillagePromptOpen = false;
+        if (villagePromptField != null) {
+            villagePromptField.setText("");
+        }
+        setFocused(null);
+    }
+
+    private boolean isInsideMapVillageDialog(double mouseX, double mouseY) {
+        return mapVillageDialogRect().contains(mouseX, mouseY);
+    }
+
+    private void sendMapVillage() {
+        String label = villagePromptField != null ? villagePromptField.getText() : "";
+        if (label == null || label.isBlank()) {
+            showStatus("Enter a village name first.", STATUS_WARN);
+            return;
+        }
+        if (!ClientPlayNetworking.canSend(BaseMapVillagePayload.ID)) {
+            showStatus("Not connected to server.", STATUS_ERROR);
+            return;
+        }
+        ClientPlayNetworking.send(new BaseMapVillagePayload(label.trim()));
+        closeMapVillagePrompt();
+        showStatus("Mapping village...", STATUS_OK);
+        requestRefresh();
+    }
+
     private static void sendChatCommand(MinecraftClient client, String command) {
         if (client == null) {
             return;
@@ -1221,7 +1388,24 @@ public class BaseManagerScreen extends Screen {
     }
 
     @Override
+    public boolean keyPressed(KeyInput input) {
+        if (mapVillagePromptOpen) {
+            int key = input != null ? input.key() : -1;
+            if (key == 256) {
+                closeMapVillagePrompt();
+                return true;
+            }
+            if (key == 257 || key == 335) {
+                sendMapVillage();
+                return true;
+            }
+        }
+        return super.keyPressed(input);
+    }
+
+    @Override
     public void close() {
+        closeMapVillagePrompt();
         persistPanelPrefs();
         MinecraftClient client = this.client;
         if (client != null) {

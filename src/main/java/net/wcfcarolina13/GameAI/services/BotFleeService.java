@@ -17,6 +17,7 @@ import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -460,6 +461,7 @@ public final class BotFleeService {
      */
     public static boolean tryProactiveShelter(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server) {
         if (bot == null || server == null) return false;
+        if (!BotHomeService.isTacticalShelterEnabled(bot)) return false;
         if (BotAutoReturnSunsetService.isNightTravelSessionActive(bot.getUuid())
                 && !BotAutoReturnSunsetService.isTacticalShelterSession(bot.getUuid())) {
             return false;
@@ -1768,6 +1770,7 @@ public final class BotFleeService {
      * Called from the IDLE tick handler. Returns true if break-free was initiated.
      */
     public static boolean checkDaylightBreakFree(ServerPlayerEntity bot, MinecraftServer server) {
+        if (shouldAbortSurvival(bot)) return false;
         ShelterInfo info = SHELTER_ACTIVE.get(bot.getUuid());
         if (info == null) return false;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
@@ -1795,6 +1798,7 @@ public final class BotFleeService {
      * callers to check {@link #isBreakingFree(UUID)}.
      */
     public static Thread clearShelterAndBreakFree(ServerPlayerEntity bot) {
+        if (shouldAbortSurvival(bot)) return null;
         ShelterInfo info = SHELTER_ACTIVE.remove(bot.getUuid());
         if (info == null) return null;
         AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
@@ -1807,6 +1811,9 @@ public final class BotFleeService {
                 bot.getName().getString(), info.type());
         Thread t = new Thread(() -> {
             try {
+                if (shouldAbortSurvival(bot)) {
+                    return;
+                }
                 breakFreeFromShelter(bot, info);
             } finally {
                 lock.set(false);
@@ -1829,6 +1836,7 @@ public final class BotFleeService {
      * Guarded by SHELTER_LOCK to prevent duplicate concurrent break-free threads.
      */
     public static Thread forceBreakFree(ServerPlayerEntity bot) {
+        if (shouldAbortSurvival(bot)) return null;
         SHELTER_ACTIVE.remove(bot.getUuid());
         AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
         if (!lock.compareAndSet(false, true)) {
@@ -1838,6 +1846,9 @@ public final class BotFleeService {
         }
         Thread t = new Thread(() -> {
             try {
+                if (shouldAbortSurvival(bot)) {
+                    return;
+                }
                 breakFreeFromShelter(bot, null);
             } finally {
                 lock.set(false);
@@ -1853,6 +1864,9 @@ public final class BotFleeService {
      * then escapes to surface if still underground.
      */
     private static void breakFreeFromShelter(ServerPlayerEntity bot, ShelterInfo info) {
+        if (shouldAbortSurvival(bot)) {
+            return;
+        }
         boolean owner = beginSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.BREAK_FREE);
         try {
             BlockPos pos = bot.getBlockPos();
@@ -1860,6 +1874,9 @@ public final class BotFleeService {
 
             // 1. Collect torch — check current position and all adjacent
             collectNearbyTorch(bot, world, pos);
+            if (shouldAbortSurvival(bot)) {
+                return;
+            }
 
             // 2. Type-specific exit
             if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
@@ -1870,6 +1887,9 @@ public final class BotFleeService {
                 breakFreeVillageHouse(bot, world, info);
             } else {
                 breakFreeGeneric(bot, world, pos);
+            }
+            if (shouldAbortSurvival(bot)) {
+                return;
             }
 
             // 3. Surface escape — if still underground after breaking seal, pillar up
@@ -2005,33 +2025,26 @@ public final class BotFleeService {
     }
 
     /**
-     * Escape to surface using the collect_dirt skill's ascent-to-surface mode.
-     * This mines a proper staircase with tool selection and hazard detection,
-     * rather than the fragile pillar-up approach.
+     * Escape to surface using the dedicated system-owned surface recovery path.
      */
     public static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
             throws InterruptedException {
+        if (shouldAbortSurvival(bot) || world == null) return;
         if (isAtSurface(bot, world)) return; // already at surface
 
-        LOGGER.info("Bot {} underground — launching collect_dirt ascent to surface", bot.getName().getString());
-
-        java.util.Map<String, Object> params = new java.util.HashMap<>();
-        params.put("ascentToSurface", true);
-        params.put("skipTorches", true);
-
-        net.wcfcarolina13.GameAI.skills.SkillContext context =
-                new net.wcfcarolina13.GameAI.skills.SkillContext(
-                        bot.getCommandSource(),
-                        new java.util.HashMap<>(),
-                        params);
+        LOGGER.info("Bot {} underground — launching surface recovery", bot.getName().getString());
 
         net.wcfcarolina13.GameAI.skills.SkillExecutionResult result =
-                net.wcfcarolina13.GameAI.skills.SkillManager.runSkill("collect_dirt", context);
+                SurfaceRecoveryService.runSurfaceRecovery(bot, world);
+
+        if (shouldAbortSurvival(bot)) {
+            return;
+        }
 
         if (result != null && result.success()) {
             SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
             SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
-            LOGGER.info("Bot {} reached surface via collect_dirt ascent", bot.getName().getString());
+            LOGGER.info("Bot {} reached surface via dedicated surface recovery", bot.getName().getString());
         } else {
             long nowTick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
             SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
@@ -2063,6 +2076,10 @@ public final class BotFleeService {
         LOGGER.info("{}: preserveSupport={}", label, preserve != null ? preserve.toShortString() : "none");
 
         if (!teardownPillarGradually(bot, world, ordered, preserve, label)) {
+            // Best-effort cleanup of the preserved support block even on abort/removal.
+            if (preserve != null && bot != null && !bot.isRemoved()) {
+                ScaffoldService.teardownScaffolds(bot, world, List.of(preserve), Collections.emptySet());
+            }
             return false;
         }
 
@@ -2082,7 +2099,7 @@ public final class BotFleeService {
                 }
             }
         }
-        if (moved && preserve != null) {
+        if (preserve != null) {
             int cleaned = ScaffoldService.teardownScaffolds(bot, world, List.of(preserve), Collections.emptySet());
             LOGGER.info("{}: cleanup support {} removed={}", label, preserve.toShortString(), cleaned);
             waitForOnGround(bot, 800L);
@@ -2153,6 +2170,14 @@ public final class BotFleeService {
                 if (moveToOperationalSurface(bot, world, nearby.pos(), "surface-staging")) {
                     LOGGER.info("ensureAtSurface: {} reached operational surface via nearby staging",
                             bot.getName().getString());
+                    return true;
+                }
+                // Movement failed — try building scaffold steps toward the staging area
+                if (tryStepBuildToStaging(bot, world, nearby.pos())) {
+                    LOGGER.info("ensureAtSurface: {} reached operational surface via step-building",
+                            bot.getName().getString());
+                    SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                    SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
                     return true;
                 }
             } else {
@@ -2239,6 +2264,14 @@ public final class BotFleeService {
         CURRENT_SURVIVAL_ACTION.remove(botId, action);
     }
 
+    private static boolean shouldAbortSurvival(ServerPlayerEntity bot) {
+        return bot == null
+                || bot.isRemoved()
+                || Thread.currentThread().isInterrupted()
+                || TaskService.isServerStopping()
+                || SkillManager.shouldAbortSkill(bot);
+    }
+
     private static boolean hasMiningOrCombatTool(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
@@ -2263,6 +2296,97 @@ public final class BotFleeService {
             }
         }
         return false;
+    }
+
+    /**
+     * Attempt to build scaffold steps toward a nearby staging area that the bot couldn't walk to.
+     * Places blocks at wall faces to create step-ups, repeating until the bot reaches the staging Y
+     * or runs out of blocks/attempts. For shallow depressions (2-6 block Y gap) where movement fails
+     * on steep/irregular terrain.
+     */
+    private static boolean tryStepBuildToStaging(ServerPlayerEntity bot, ServerWorld world, BlockPos staging) {
+        if (bot == null || world == null || staging == null) return false;
+        int scaffoldCount = countScaffoldBlocks(bot);
+        if (scaffoldCount < 2) {
+            LOGGER.info("ensureAtSurface: {} step-build skipped (only {} scaffold blocks)",
+                    bot.getName().getString(), scaffoldCount);
+            return false;
+        }
+        int yGap = staging.getY() - bot.getBlockPos().getY();
+        if (yGap < 1 || yGap > 6) {
+            LOGGER.info("ensureAtSurface: {} step-build skipped (Y gap {} not in range 1-6)",
+                    bot.getName().getString(), yGap);
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) return false;
+
+        LOGGER.info("ensureAtSurface: {} step-build starting toward {} (Y gap={})",
+                bot.getName().getString(), staging.toShortString(), yGap);
+        int maxSteps = Math.min(6, scaffoldCount);
+        int placed = 0;
+        for (int step = 0; step < maxSteps; step++) {
+            BlockPos botPos = bot.getBlockPos();
+            if (botPos.getY() >= staging.getY()) {
+                LOGGER.info("ensureAtSurface: {} step-build reached staging Y after {} placed blocks",
+                        bot.getName().getString(), placed);
+                break;
+            }
+            // Find the best direction to place a step (toward the staging area)
+            Direction bestDir = null;
+            double bestDist = Double.MAX_VALUE;
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos stepTarget = botPos.offset(dir);
+                // Need a position where we can place a block at current Y (bot's feet level)
+                BlockState targetState = world.getBlockState(stepTarget);
+                if (!targetState.isAir() && !targetState.isReplaceable()) continue;
+                // Ensure 2-high clearance above the placed block
+                BlockState aboveState = world.getBlockState(stepTarget.up());
+                BlockState headState = world.getBlockState(stepTarget.up(2));
+                if ((!aboveState.isAir() && aboveState.blocksMovement())
+                        || (!headState.isAir() && headState.blocksMovement())) continue;
+                // Prefer directions that bring us closer to staging
+                double dist = stepTarget.getSquaredDistance(staging);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestDir = dir;
+                }
+            }
+            if (bestDir == null) {
+                LOGGER.info("ensureAtSurface: {} step-build no suitable placement at {}",
+                        bot.getName().getString(), botPos.toShortString());
+                break;
+            }
+            BlockPos placePos = botPos.offset(bestDir);
+            boolean ok = BotActions.placeBlockAt(bot, placePos, Direction.UP,
+                    new java.util.ArrayList<>(ScaffoldService.SCAFFOLD_BLOCKS));
+            if (!ok) {
+                LOGGER.info("ensureAtSurface: {} step-build placement failed at {}",
+                        bot.getName().getString(), placePos.toShortString());
+                break;
+            }
+            placed++;
+            // Jump up onto the placed block
+            BlockPos jumpTarget = placePos.up();
+            server.execute(() -> {
+                LookController.faceBlock(bot, jumpTarget);
+                BotActions.autoJumpIfNeeded(bot);
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(jumpTarget), 0.22D);
+            });
+            try { Thread.sleep(500); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (placed > 0) {
+            LOGGER.info("ensureAtSurface: {} step-build placed {} blocks, now at Y={}",
+                    bot.getName().getString(), placed, bot.getBlockPos().getY());
+            // Try moving to staging now that we're higher
+            if (moveToOperationalSurface(bot, world, staging, "step-build-staging")) {
+                return true;
+            }
+        }
+        return isAtSurface(bot, world);
     }
 
     private static boolean tryPillarOperationalSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {

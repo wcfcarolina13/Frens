@@ -14,10 +14,10 @@ import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
 import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.MovementService;
-import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -153,7 +153,7 @@ public final class GrassSeedSkill implements Skill {
         if (!isGrassLike(world.getBlockState(pos))) {
             return false;
         }
-        if (ProtectedZoneService.isProtected(pos, world, null)) {
+        if (CompanionSafeZoneService.isProtected(world, pos, null)) {
             return false;
         }
         return !TreeDetector.isNearHumanBlocks(world, pos, 3);

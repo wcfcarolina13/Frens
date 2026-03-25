@@ -12,6 +12,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -302,8 +303,31 @@ public final class ScaffoldService {
             BlockPos headSpace = targetPos.up().up();
             if (!world.getBlockState(headSpace).isAir()
                     && !world.getBlockState(headSpace).getCollisionShape(world, headSpace).isEmpty()) {
-                LOGGER.info("pillarUp step {}/{}: blocked overhead at {}", i, steps, headSpace.toShortString());
-                break;
+                // Try mining the overhead block instead of giving up — works bare-handed
+                // for soft blocks (dirt, sand, gravel, leaves) and with tools for harder blocks
+                LOGGER.info("pillarUp step {}/{}: overhead blocked at {} — attempting to mine",
+                        i, steps, headSpace.toShortString());
+                try {
+                    String mineResult = MiningTool.mineBlock(bot, headSpace).join();
+                    if (mineResult != null && mineResult.startsWith("\u26a0\ufe0f")) {
+                        LOGGER.info("pillarUp step {}/{}: cannot clear overhead at {}: {}",
+                                i, steps, headSpace.toShortString(), mineResult);
+                        break;
+                    }
+                    // Verify block was actually cleared
+                    if (!world.getBlockState(headSpace).isAir()
+                            && !world.getBlockState(headSpace).getCollisionShape(world, headSpace).isEmpty()) {
+                        LOGGER.info("pillarUp step {}/{}: overhead still blocked after mining at {}",
+                                i, steps, headSpace.toShortString());
+                        break;
+                    }
+                    LOGGER.info("pillarUp step {}/{}: cleared overhead at {}", i, steps, headSpace.toShortString());
+                    sleepQuiet(100L); // let world state settle before jump
+                } catch (Exception e) {
+                    LOGGER.info("pillarUp step {}/{}: overhead mining failed at {}: {}",
+                            i, steps, headSpace.toShortString(), e.getMessage());
+                    break;
+                }
             }
 
             BotActions.jump(bot);

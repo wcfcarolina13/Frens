@@ -3,13 +3,20 @@ package net.wcfcarolina13.GameAI;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ItemEnchantmentsComponent;
+import net.minecraft.enchantment.Enchantment;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.projectile.TridentEntity;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.EntityUtil;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.BowItem;
+import net.minecraft.item.CrossbowItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -19,6 +26,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
@@ -37,9 +48,9 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
-import net.wcfcarolina13.GameAI.services.VillageStructureProtectionService;
 
 
 
@@ -91,6 +102,11 @@ public final class BotActions {
     private static final double COMMITTED_REPOSITION_ARRIVE_SQ = 1.5D * 1.5D;
     private static final int COMMITTED_REPOSITION_TIMEOUT_TICKS = 60;
     private static final double SURVIVAL_REACH_SQ = 4.5D * 4.5D;
+    private static final double TRIDENT_THROW_MIN_DISTANCE = 7.0D;
+    private static final double TRIDENT_THROW_CROWD_RADIUS = 4.0D;
+    private static final double SPEAR_MIN_EFFECTIVE_DISTANCE = 1.35D;
+    private static final double SPEAR_PREFERRED_CHARGE_DISTANCE = 2.35D;
+    private static final double SPEAR_MAX_REACH_DISTANCE = 4.25D;
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
     private static final Map<UUID, String> LAST_COMBAT_PROFILE = new HashMap<>();
@@ -262,7 +278,7 @@ public final class BotActions {
         if (active == null || active.isEmpty()) {
             return;
         }
-        if (!isRangedWeapon(active)) {
+        if (!isRangedWeapon(bot, active)) {
             return;
         }
         bot.clearActiveItem();
@@ -306,12 +322,30 @@ public final class BotActions {
     }
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
-        int weaponSlot = findWeaponSlot(bot);
-        if (weaponSlot != -1) {
-            selectHotbarSlot(bot, weaponSlot);
-            return true;
+        if (bot == null) {
+            return false;
         }
-        // No weapon found — use fists rather than swinging food/blocks.
+        PlayerInventory inventory = bot.getInventory();
+        int bestSlot = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            int score = combatWeaponScore(stack);
+            if (score > bestScore) {
+                bestScore = score;
+                bestSlot = slot;
+            }
+        }
+
+        if (bestSlot != -1 && bestScore > 0) {
+            int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
+            selectHotbarSlot(bot, hotbarSlot);
+            return combatWeaponScore(bot.getMainHandStack()) > 0;
+        }
+
+        // No weapon found — fall back to fists rather than swinging food/blocks.
+        selectBareHandsForCombat(bot, "no-combat-weapon");
         return false;
     }
 
@@ -333,12 +367,17 @@ public final class BotActions {
         }
 
         if (bestSlot == -1 || bestScore <= 0) {
+            selectBareHandsForCombat(bot, "no-melee-weapon");
             return false;
         }
 
         int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
         selectHotbarSlot(bot, hotbarSlot);
-        return true;
+        if (meleeWeaponScore(bot.getMainHandStack()) > 0) {
+            return true;
+        }
+        selectBareHandsForCombat(bot, "melee-selection-failed");
+        return false;
     }
 
     public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
@@ -522,8 +561,13 @@ public final class BotActions {
      */
     public static void attackTarget(ServerPlayerEntity bot, Entity target) {
         if (bot == null || target == null) return;
+        ItemStack mainHand = bot.getMainHandStack();
+        boolean spear = isSpear(mainHand);
+        double maxReach = spear ? SPEAR_MAX_REACH_DISTANCE : 3.0D;
         double distanceSq = target.squaredDistanceTo(bot);
-        if (distanceSq > 9.0 || !bot.canSee(target)) return;
+        if (distanceSq > maxReach * maxReach || !bot.canSee(target)) return;
+        if (spear && distanceSq < SPEAR_MIN_EFFECTIVE_DISTANCE * SPEAR_MIN_EFFECTIVE_DISTANCE) return;
+        if (!ensureMeleeCombatReady(bot, target)) return;
 
         maybeLogCombatProfile(bot, describeMeleeProfile(bot.getMainHandStack()));
         float cooldown = bot.getAttackCooldownProgress(0.5f);
@@ -536,7 +580,6 @@ public final class BotActions {
         // Spears are excluded — their charge attack benefits from horizontal velocity (sprint),
         // not from falling. The bot should sprint into targets with a spear, not jump.
         // Conditions: on ground, not sprinting, not in water, not already jumped recently.
-        ItemStack mainHand = bot.getMainHandStack();
         if (cooldown >= 0.4f && cooldown <= 0.6f
                 && !isSpear(mainHand)
                 && bot.isOnGround() && !bot.isSprinting()
@@ -556,6 +599,10 @@ public final class BotActions {
                     LAST_CRIT_JUMP_TICK.put(bot.getUuid(), serverTick);
                 }
             }
+        }
+
+        if (spear && cooldown >= 0.7f && bot.isOnGround() && !isWaterLikeMovementContext(bot, bot.getEntityWorld() instanceof ServerWorld sw ? sw : null)) {
+            sprint(bot, true);
         }
 
         // Swing when cooldown is ready (may be a crit if we're mid-fall from the jump above).
@@ -1262,8 +1309,8 @@ public final class BotActions {
         if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
             return false;
         }
-        if (VillageStructureProtectionService.isVillageProtectedForGenericBreaking(world, pos)) {
-            LOGGER.info("Generic break rejected for {} at {} due to village protection",
+        if (CompanionSafeZoneService.isProtected(world, pos, null)) {
+            LOGGER.info("Generic break rejected for {} at {} due to protected zone",
                     bot != null ? bot.getName().getString() : "unknown-bot",
                     pos.toShortString());
             return false;
@@ -1346,6 +1393,23 @@ public final class BotActions {
         return 0;
     }
 
+    private static int combatWeaponScore(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return 0;
+        }
+        int meleeScore = meleeWeaponScore(stack);
+        if (meleeScore > 0) {
+            return meleeScore;
+        }
+        if (stack.getItem() instanceof BowItem) {
+            return 55;
+        }
+        if (stack.getItem() instanceof CrossbowItem) {
+            return 60;
+        }
+        return 0;
+    }
+
     /** Returns true if the item stack is a sword (supports sweep attacks). */
     public static boolean isSword(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
@@ -1356,6 +1420,34 @@ public final class BotActions {
     public static boolean isSpear(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         return stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT).contains("spear");
+    }
+
+    public static double getPreferredMeleeStopDistance(ItemStack stack) {
+        return isSpear(stack) ? 3.0D : 2.5D;
+    }
+
+    public static double getPreferredMeleeEngageDistance(ItemStack stack) {
+        return isSpear(stack) ? 4.0D : 3.0D;
+    }
+
+    public static boolean shouldReopenSpearSpacing(ServerPlayerEntity bot, Entity target) {
+        if (bot == null || target == null || !isSpear(bot.getMainHandStack())) {
+            return false;
+        }
+        return bot.squaredDistanceTo(target) < SPEAR_MIN_EFFECTIVE_DISTANCE * SPEAR_MIN_EFFECTIVE_DISTANCE;
+    }
+
+    public static boolean shouldPressSpearCharge(ServerPlayerEntity bot, Entity target) {
+        if (bot == null || target == null || !isSpear(bot.getMainHandStack())) {
+            return false;
+        }
+        if (!bot.canSee(target)) {
+            return false;
+        }
+        double distanceSq = bot.squaredDistanceTo(target);
+        return distanceSq >= SPEAR_PREFERRED_CHARGE_DISTANCE * SPEAR_PREFERRED_CHARGE_DISTANCE
+                && distanceSq <= SPEAR_MAX_REACH_DISTANCE * SPEAR_MAX_REACH_DISTANCE
+                && !isWaterLikeMovementContext(bot, bot.getEntityWorld() instanceof ServerWorld sw ? sw : null);
     }
 
     /**
@@ -1382,6 +1474,111 @@ public final class BotActions {
 
         String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
         return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("spear");
+    }
+
+    public static boolean hasAnyTrident(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        PlayerInventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (inventory.getStack(slot).isOf(Items.TRIDENT)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int getEnchantmentLevel(ServerPlayerEntity bot, ItemStack stack, RegistryKey<Enchantment> key) {
+        if (bot == null || stack == null || stack.isEmpty() || key == null
+                || bot.getEntityWorld() == null || bot.getEntityWorld().getRegistryManager() == null) {
+            return 0;
+        }
+        ItemEnchantmentsComponent enchantments = stack.getOrDefault(
+                DataComponentTypes.ENCHANTMENTS,
+                ItemEnchantmentsComponent.DEFAULT);
+        if (enchantments == null || enchantments == ItemEnchantmentsComponent.DEFAULT) {
+            return 0;
+        }
+        Registry<Enchantment> registry = bot.getEntityWorld().getRegistryManager().getOrThrow(RegistryKeys.ENCHANTMENT);
+        RegistryEntry<Enchantment> entry = registry.getOptional(key).orElse(null);
+        if (entry == null) {
+            return 0;
+        }
+        return enchantments.getLevel(entry);
+    }
+
+    private static boolean hasRiptide(ServerPlayerEntity bot, ItemStack stack) {
+        return stack != null
+                && stack.isOf(Items.TRIDENT)
+                && getEnchantmentLevel(bot, stack, Enchantments.RIPTIDE) > 0;
+    }
+
+    private static boolean ensureMeleeCombatReady(ServerPlayerEntity bot, Entity target) {
+        if (bot == null) {
+            return false;
+        }
+        ItemStack held = bot.getMainHandStack();
+        if (meleeWeaponScore(held) > 0 || held.isEmpty()) {
+            return true;
+        }
+
+        if (selectBestMeleeWeapon(bot)) {
+            return true;
+        }
+        if (selectBestWeapon(bot) && meleeWeaponScore(bot.getMainHandStack()) > 0) {
+            return true;
+        }
+
+        ItemStack sanitized = bot.getMainHandStack();
+        if (sanitized.isEmpty()) {
+            return true;
+        }
+
+        LOGGER.warn("Combat attack suppressed for {} against {} because main hand is not combat-ready: {}",
+                bot.getName().getString(),
+                target != null ? target.getName().getString() : "unknown-target",
+                sanitized.getName().getString());
+        return false;
+    }
+
+    private static void selectBareHandsForCombat(ServerPlayerEntity bot, String reason) {
+        if (bot == null) {
+            return;
+        }
+        PlayerInventory inventory = bot.getInventory();
+        int selectedSlot = MathHelper.clamp(inventory.getSelectedSlot(), 0, 8);
+        ItemStack selected = inventory.getStack(selectedSlot);
+        if (selected.isEmpty()) {
+            return;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (inventory.getStack(i).isEmpty()) {
+                selectHotbarSlot(bot, i);
+                LOGGER.info("Combat hand sanitized for {} via empty hotbar slot {} ({})",
+                        bot.getName().getString(), i, reason);
+                return;
+            }
+        }
+
+        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
+            if (inventory.getStack(i).isEmpty()) {
+                swapInventoryStacks(inventory, selectedSlot, i);
+                selectHotbarSlot(bot, selectedSlot);
+                LOGGER.info("Combat hand sanitized for {} by moving {} to inventory slot {} ({})",
+                        bot.getName().getString(),
+                        selected.getName().getString(),
+                        i,
+                        reason);
+                return;
+            }
+        }
+
+        LOGGER.warn("Combat hand for {} could not be cleared to fists; inventory full and selected item is {} ({})",
+                bot.getName().getString(),
+                selected.getName().getString(),
+                reason);
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance, boolean customDirection, double dirX, double dirZ) {
@@ -1776,6 +1973,9 @@ public final class BotActions {
             if (state.forceMelee && state.isCurrentTarget(target)) {
                 return false;
             }
+            if (!shouldThrowTrident(bot, target, stack)) {
+                return false;
+            }
             state.ensureTarget(target);
             maybeLogCombatProfile(bot, "trident-throw");
             return handleChargeWeapon(bot, target, selection.hand, stack, state, serverTick, 10);
@@ -1805,11 +2005,19 @@ public final class BotActions {
                     state.chargeStartTick = 0L;
                     return false;
                 }
+                if (stack.getItem() instanceof net.minecraft.item.TridentItem) {
+                    BotArrowRecoveryService.noteTridentThrown(bot, stack, serverTick);
+                }
                 bot.stopUsingItem();
+                if (stack.getItem() instanceof net.minecraft.item.TridentItem) {
+                    equipPostThrowFallbackWeapon(bot, target);
+                }
                 state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
                 state.chargeStartTick = 0L;
                 state.recordShot(bot, target, serverTick);
-                BotArrowRecoveryService.noteRangedShot(bot, serverTick);
+                if (!(stack.getItem() instanceof net.minecraft.item.TridentItem)) {
+                    BotArrowRecoveryService.noteRangedShot(bot, serverTick);
+                }
             }
             return true;
         }
@@ -1864,6 +2072,9 @@ public final class BotActions {
 
     private static boolean canFire(ServerPlayerEntity bot, ItemStack weapon) {
         if (weapon.getItem() instanceof net.minecraft.item.TridentItem) {
+            if (hasRiptide(bot, weapon)) {
+                return false;
+            }
             return true;
         }
         ItemStack projectile = bot.getProjectileType(weapon);
@@ -1874,52 +2085,83 @@ public final class BotActions {
         if (bot == null) return false;
         // Non-mutating check: scan inventory without equipping anything.
         // The actual weapon equip happens inside performRangedAttack() -> selectBestRangedWeapon().
-        if (isRangedWeapon(bot.getMainHandStack()) || isRangedWeapon(bot.getOffHandStack())) {
+        if (isRangedWeapon(bot, bot.getMainHandStack()) || isRangedWeapon(bot, bot.getOffHandStack())) {
             return true;
         }
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < inventory.size(); i++) {
-            if (isRangedWeapon(inventory.getStack(i))) return true;
+            if (isRangedWeapon(bot, inventory.getStack(i))) return true;
         }
         return false;
     }
 
     private static Selection selectBestRangedWeapon(ServerPlayerEntity bot) {
+        Selection best = null;
+        int bestScore = Integer.MIN_VALUE;
         ItemStack main = bot.getMainHandStack();
-        if (isRangedWeapon(main)) {
-            return new Selection(Hand.MAIN_HAND, main);
+        int mainScore = rangedWeaponScore(bot, main);
+        if (mainScore > bestScore) {
+            best = new Selection(Hand.MAIN_HAND, main);
+            bestScore = mainScore;
         }
 
         ItemStack off = bot.getOffHandStack();
-        if (isRangedWeapon(off)) {
-            return new Selection(Hand.OFF_HAND, off);
+        int offScore = rangedWeaponScore(bot, off);
+        if (offScore > bestScore) {
+            best = new Selection(Hand.OFF_HAND, off);
+            bestScore = offScore;
         }
 
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
-            if (isRangedWeapon(stack)) {
+            int score = rangedWeaponScore(bot, stack);
+            if (score > bestScore) {
                 int hotbarSlot = ensureHotbarAccess(bot, inventory, i);
                 ItemStack moved = inventory.getStack(hotbarSlot);
-                selectHotbarSlot(bot, hotbarSlot);
-                return new Selection(Hand.MAIN_HAND, moved);
+                best = new Selection(Hand.MAIN_HAND, moved);
+                bestScore = rangedWeaponScore(bot, moved);
             }
         }
-        return null;
+        if (best == null || bestScore <= 0) {
+            return null;
+        }
+        if (best.hand == Hand.MAIN_HAND) {
+            int desiredSlot = hotbarSlotOf(bot.getInventory(), best.stack);
+            if (desiredSlot >= 0) {
+                selectHotbarSlot(bot, desiredSlot);
+                return new Selection(Hand.MAIN_HAND, bot.getInventory().getStack(desiredSlot));
+            }
+        }
+        return best;
     }
 
-    private static boolean isRangedWeapon(ItemStack stack) {
+    private static int rangedWeaponScore(ServerPlayerEntity bot, ItemStack stack) {
         if (stack.isEmpty()) {
-            return false;
+            return 0;
         }
-        return stack.getItem() instanceof net.minecraft.item.BowItem ||
-                stack.getItem() instanceof net.minecraft.item.CrossbowItem ||
-                stack.getItem() instanceof net.minecraft.item.TridentItem;
+        if (stack.getItem() instanceof net.minecraft.item.CrossbowItem) {
+            return 90;
+        }
+        if (stack.getItem() instanceof net.minecraft.item.BowItem) {
+            return 80;
+        }
+        if (stack.getItem() instanceof net.minecraft.item.TridentItem) {
+            return hasRiptide(bot, stack) ? 0 : 70;
+        }
+        return 0;
+    }
+
+    private static boolean isRangedWeapon(ServerPlayerEntity bot, ItemStack stack) {
+        return rangedWeaponScore(bot, stack) > 0;
     }
 
     private static String describeMeleeProfile(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return null;
+        }
+        if (stack.isOf(Items.TRIDENT)) {
+            return "trident-melee";
         }
         if (isSword(stack)) {
             return "sword-sweep";
@@ -1947,6 +2189,81 @@ public final class BotActions {
                 bot.getName().getString(),
                 profile,
                 bot.getMainHandStack().isEmpty() ? "empty" : bot.getMainHandStack().getName().getString());
+    }
+
+    private static int hotbarSlotOf(PlayerInventory inventory, ItemStack stack) {
+        if (inventory == null || stack == null || stack.isEmpty()) {
+            return -1;
+        }
+        for (int i = 0; i < 9; i++) {
+            if (inventory.getStack(i) == stack) {
+                return i;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            if (ItemStack.areItemsAndComponentsEqual(inventory.getStack(i), stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean shouldThrowTrident(ServerPlayerEntity bot, LivingEntity target, ItemStack stack) {
+        if (bot == null || target == null || stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (hasRiptide(bot, stack)) {
+            return false;
+        }
+        if (!bot.canSee(target)) {
+            return false;
+        }
+        if (bot.squaredDistanceTo(target) < TRIDENT_THROW_MIN_DISTANCE * TRIDENT_THROW_MIN_DISTANCE) {
+            return false;
+        }
+        if (countNearbyHostiles(bot, TRIDENT_THROW_CROWD_RADIUS) > 1) {
+            return false;
+        }
+        return true;
+    }
+
+    private static void equipPostThrowFallbackWeapon(ServerPlayerEntity bot, LivingEntity target) {
+        if (bot == null) {
+            return;
+        }
+        ItemStack current = bot.getMainHandStack();
+        if (!current.isEmpty() && !(current.getItem() instanceof net.minecraft.item.TridentItem)) {
+            return;
+        }
+
+        if (!selectBestWeapon(bot)) {
+            return;
+        }
+
+        ItemStack fallback = bot.getMainHandStack();
+        if (fallback.isEmpty()) {
+            return;
+        }
+
+        if (fallback.getItem() instanceof net.minecraft.item.TridentItem) {
+            return;
+        }
+
+        LOGGER.info("Trident fallback armed: bot={} target={} weapon={}",
+                bot.getName().getString(),
+                target != null ? target.getName().getString() : "unknown-target",
+                fallback.getName().getString());
+    }
+
+    private static int countNearbyHostiles(ServerPlayerEntity bot, double radius) {
+        if (bot == null || bot.getEntityWorld() == null) {
+            return 0;
+        }
+        Box box = bot.getBoundingBox().expand(radius);
+        return bot.getEntityWorld().getEntitiesByClass(
+                HostileEntity.class,
+                box,
+                hostile -> hostile != null && hostile.isAlive()).size();
     }
 
     public static void resetRangedState(ServerPlayerEntity bot) {

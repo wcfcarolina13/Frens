@@ -20,6 +20,7 @@ import java.util.*;
 public class PathFinder {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
+    private static final int MAX_SEGMENT_MANHATTAN_SPAN = 6;
 
     /** A/B test flag: set to true to use the Baritone-style pathfinder. */
     public static boolean USE_BARITONE_STYLE = false;
@@ -147,7 +148,6 @@ public class PathFinder {
                 if (closedForward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor);
-                if (world.getBlockState(neighbor).isOf(Blocks.WATER)) tentativeG += 2.0;
 
                 if (openMapForward.containsKey(neighbor)) {
                     Node existing = openMapForward.get(neighbor);
@@ -181,7 +181,6 @@ public class PathFinder {
                 if (closedBackward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor);
-                if (world.getBlockState(neighbor).isOf(Blocks.WATER)) tentativeG += 2.0;
 
                 if (openMapBackward.containsKey(neighbor)) {
                     Node existing = openMapBackward.get(neighbor);
@@ -313,11 +312,16 @@ public class PathFinder {
 
             boolean axisChanged = !axis.equals(currentAxis);
             boolean directionChanged = sign != currentSign;
+            boolean verticalStep = dy != 0;
+            int segmentSpan = Math.abs(current.getPos().getX() - segmentStart.getPos().getX())
+                    + Math.abs(current.getPos().getY() - segmentStart.getPos().getY())
+                    + Math.abs(current.getPos().getZ() - segmentStart.getPos().getZ());
+            boolean spanBreak = segmentSpan > MAX_SEGMENT_MANHATTAN_SPAN;
 
             // Check if a jump is needed at either the start or end of the segment
             boolean jumpBreak = current.jumpNeeded() || prev.jumpNeeded();
 
-            if (jumpBreak || axisChanged || directionChanged) {
+            if (jumpBreak || verticalStep || axisChanged || directionChanged || spanBreak) {
                 // Create the segment up to prev node, use jump flag from either node
                 if (!segmentStart.getPos().equals(prev.getPos())) { // Skip zero-length segments
                     segments.add(new Segment(segmentStart.getPos(), prev.getPos(), segmentStart.jumpNeeded() || prev.jumpNeeded(), sprint));
@@ -519,10 +523,10 @@ public class PathFinder {
         }
         // Lava has an empty collision shape but must be rejected.
         FluidState fluid = world.getFluidState(pos);
-        if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) {
+        if (!fluid.isEmpty()) {
             return false;
         }
-        return blockState.isAir() || blockState.isOf(Blocks.WATER) || blockState.getCollisionShape(world, pos).isEmpty();
+        return blockState.isAir() || blockState.getCollisionShape(world, pos).isEmpty();
     }
 
 
@@ -533,15 +537,12 @@ public class PathFinder {
 
     private static boolean hasSupportedFloor(ServerWorld world, BlockPos pos) {
         if (isSolidBlock(world, pos.down())) return true;
-        // Water provides buoyancy — bot can swim through it.
-        // Water paths are discouraged via the +2.0 cost penalty in expansion loops.
-        if (world.getBlockState(pos).isOf(Blocks.WATER)) return true;
         return false;
     }
 
 
     private static boolean isWalkableBlock(String blockType) {
-        return blockType.equals("air") || blockType.contains("water");
+        return blockType.equals("air");
     }
 
     private static boolean isJumpableBlock(String blockType, ServerWorld world, BlockPos pos) {

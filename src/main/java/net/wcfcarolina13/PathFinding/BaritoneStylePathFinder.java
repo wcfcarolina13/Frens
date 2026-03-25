@@ -228,6 +228,10 @@ public class BaritoneStylePathFinder {
         if (isSolidBlock(cache, nx, cy, nz)
                 && isPassable(cache, nx, cy + 1, nz)
                 && isPassable(cache, nx, cy + 2, nz)) {
+            // Ensure bot has headroom to jump from its current position
+            if (!isPassable(cache, parent.x, parent.y + 2, parent.z)) {
+                return;
+            }
             tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, false, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
@@ -248,6 +252,10 @@ public class BaritoneStylePathFinder {
         if (isPassable(cache, nx, dropY, nz)
                 && isPassable(cache, nx, dropY + 1, nz)
                 && hasSupportedFloor(cache, nx, dropY, nz)) {
+            // Ensure the space the bot occupies before falling is passable
+            if (!isPassable(cache, nx, dropY + 2, nz)) {
+                return;
+            }
             tryAddNeighbor(nx, dropY, nz, parent, 1.2, false, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
@@ -285,8 +293,7 @@ public class BaritoneStylePathFinder {
         BlockState bodyState = cache.getBlockState(nx, ny, nz);
         if (bodyState.getBlock() instanceof CampfireBlock && bodyState.get(CampfireBlock.LIT)) return;
 
-        double waterPenalty = cache.getBlockState(nx, ny, nz).isOf(Blocks.WATER) ? 2.0 : 0.0;
-        double tentativeG = parent.gScore + moveCost + waterPenalty;
+        double tentativeG = parent.gScore + moveCost;
         double h = heuristic(nx, ny, nz, tx, ty, tz);
 
         Node existing = openMap.get(packed);
@@ -373,9 +380,7 @@ public class BaritoneStylePathFinder {
         }
 
         FluidState fluid = state.getFluidState();
-        if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) return false;
-
-        if (state.isOf(Blocks.WATER)) return true;
+        if (!fluid.isEmpty()) return false;
 
         // For remaining blocks, check collision shape. This requires a BlockPos
         // but is only reached for non-air, non-door, non-fluid blocks.
@@ -390,14 +395,10 @@ public class BaritoneStylePathFinder {
 
     /**
      * Returns true if position (nx, ny, nz) has a supported floor: solid ground
-     * below, or water (provides buoyancy — bot can swim). Only rejects pure air
-     * positions with nothing below (prevents impossible floating paths).
-     * Water paths are discouraged via the +2.0 cost penalty in tryAddNeighbor.
+     * below. Generic ground pathing must not treat water as normal support.
      */
     private static boolean hasSupportedFloor(ChunkCache cache, int nx, int ny, int nz) {
         if (isSolidBlock(cache, nx, ny - 1, nz)) return true;
-        // Water provides buoyancy — bot can swim through it
-        if (cache.getBlockState(nx, ny, nz).isOf(Blocks.WATER)) return true;
         return false;
     }
 
@@ -503,9 +504,8 @@ public class BaritoneStylePathFinder {
             return true;
         }
         FluidState fluid = world.getFluidState(pos);
-        if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) return false;
-        return state.isAir() || state.isOf(Blocks.WATER)
-                || state.getCollisionShape(world, pos).isEmpty();
+        if (!fluid.isEmpty()) return false;
+        return state.isAir() || state.getCollisionShape(world, pos).isEmpty();
     }
 
     private static boolean isSolidBlockWorld(ServerWorld world, BlockPos pos) {

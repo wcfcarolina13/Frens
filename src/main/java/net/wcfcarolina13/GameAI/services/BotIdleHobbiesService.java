@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -76,9 +77,13 @@ public final class BotIdleHobbiesService {
     private static final Map<UUID, Integer> LAST_WOODEN_FALLBACK_SIGNATURE = new ConcurrentHashMap<>();
 
     private static final Map<UUID, Long> NEXT_LEATHER_ARMOR_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> NEXT_COBBLESTONE_TOOLS_TICK = new ConcurrentHashMap<>();
 
     private static final Map<UUID, String> LAST_HOBBY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_HOBBY_END_MS = new ConcurrentHashMap<>();
+    /** When canStartFallbackWoodcut finds a distant tree via directional expansion, stores the radius to use. */
+    private static final Map<UUID, Integer> EXPANDED_WOODCUT_RADIUS = new ConcurrentHashMap<>();
+    private static final int DIRECTIONAL_WOODCUT_RADIUS = 48;
 
     /**
      * Clears all in-memory scheduler state.
@@ -96,6 +101,7 @@ public final class BotIdleHobbiesService {
         NEXT_WOODEN_FALLBACK_TICK.clear();
         LAST_WOODEN_FALLBACK_SIGNATURE.clear();
         NEXT_LEATHER_ARMOR_TICK.clear();
+        NEXT_COBBLESTONE_TOOLS_TICK.clear();
         LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
     }
@@ -171,6 +177,11 @@ public final class BotIdleHobbiesService {
             return t;
         }
     });
+
+    /** Interrupt all in-flight ambient hobby tasks. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        AMBIENT_EXECUTOR.shutdownNow();
+    }
 
     private BotIdleHobbiesService() {
     }
@@ -318,10 +329,28 @@ public final class BotIdleHobbiesService {
                 continue;
             }
 
+            // Skip resource fallbacks while surface recovery is in progress — prevents tight spin loops
+            // where the fallback fires, startAmbientSkill detects "not at surface," ensureAtSurface is
+            // already running, and the loop retries next tick.
+            if (BotFleeService.isSurfaceRecoveryActive(botUuid)) {
+                NEXT_DECISION_TICK.put(botUuid, nowTick + 200L);
+                noteBlocked(bot, nowTick, "surface-recovery-fallback");
+                continue;
+            }
+
             if (maybeHandleIdleWoodenFallback(server, bot, world, nowTick)) {
                 continue;
             }
             if (maybeHandleIdleLeatherArmorFallback(server, bot, world, nowTick)) {
+                continue;
+            }
+            if (maybeHandleIdleCobblestoneToolsFallback(server, bot, world, nowTick)) {
+                continue;
+            }
+            if (maybeHandleIdleStoneToolUpgrades(server, bot, world, nowTick)) {
+                continue;
+            }
+            if (maybeHandleIdleWoodcutForResources(server, bot, world, nowTick)) {
                 continue;
             }
 
@@ -423,6 +452,7 @@ public final class BotIdleHobbiesService {
         boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
         boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
         boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
+        boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12);
 
         // Build weighted options so available hobbies actually trigger instead of idling on random misses.
         ArrayList<String> weighted = new ArrayList<>();
@@ -457,6 +487,9 @@ public final class BotIdleHobbiesService {
         if (canHunt) {
             weighted.add("hunt");
         }
+        if (canMineStone) {
+            weighted.add("mining");
+        }
         if (canShadowCompanion) {
             weighted.add("shadow_companion");
         }
@@ -488,6 +521,7 @@ public final class BotIdleHobbiesService {
         boolean canForageMushrooms = hasNearbyMushrooms(world, bot.getBlockPos(), 16);
         boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
         boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
+        boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12);
 
         if (preferFood) {
             if (canHunt) {
@@ -512,6 +546,9 @@ public final class BotIdleHobbiesService {
         }
         if (canHunt) {
             return "hunt";
+        }
+        if (canMineStone) {
+            return "mining";
         }
         if (canShadowCompanion) {
             return "shadow_companion";
@@ -748,9 +785,17 @@ public final class BotIdleHobbiesService {
             params.put("radius", 10 + RNG.nextInt(5));
         }
 
+        if ("mining".equalsIgnoreCase(runSkillName)) {
+            params.put("count", 8 + RNG.nextInt(5));  // 8-12 cobblestone
+            params.put("searchRadius", 10);
+            params.put("verticalRange", 4);
+        }
+
         if ("woodcut".equalsIgnoreCase(runSkillName)) {
             params.put("count", 1);
-            params.put("searchRadius", 10);
+            int woodcutRadius = EXPANDED_WOODCUT_RADIUS.getOrDefault(bot.getUuid(), 12);
+            EXPANDED_WOODCUT_RADIUS.remove(bot.getUuid());
+            params.put("searchRadius", woodcutRadius);
             params.put("verticalRange", 6);
             params.put("replantSaplings", false);
             params.put("wooden_fallback", true);
@@ -844,7 +889,7 @@ public final class BotIdleHobbiesService {
         }
         String normalized = skillName.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "hunt", "flowers", "wander", "leaf_litter", "mushrooms", "feed_animals", "hangout", "grass_seeds", "woodcut" -> true;
+            case "hunt", "flowers", "wander", "leaf_litter", "mushrooms", "feed_animals", "hangout", "grass_seeds", "woodcut", "mining", "collect_dirt" -> true;
             default -> false;
         };
     }
@@ -986,6 +1031,163 @@ public final class BotIdleHobbiesService {
         return crafted;
     }
 
+    /**
+     * Crafts wooden pickaxe and wooden shovel when the bot has planks/logs but lacks these tools.
+     * Enables cobblestone gathering as an idle hobby once tools are available.
+     */
+    private static boolean maybeHandleIdleCobblestoneToolsFallback(MinecraftServer server,
+                                                                    ServerPlayerEntity bot,
+                                                                    ServerWorld world,
+                                                                    long nowTick) {
+        if (server == null || bot == null || world == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        if (bot.getHungerManager().getFoodLevel() <= WOODEN_FALLBACK_STARVING_HUNGER) {
+            return false;
+        }
+        boolean needPickaxe = !hasAnyPickaxe(bot);
+        boolean needShovel = !hasAnyShovel(bot);
+        if (!needPickaxe && !needShovel) {
+            return false;
+        }
+        // Only craft if the bot has planks/logs to work with
+        if (!ToolProvisionService.hasPlanksOrLogsInInventory(bot)) {
+            return false;
+        }
+        long nextAllowed = NEXT_COBBLESTONE_TOOLS_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (nowTick < nextAllowed) {
+            return false;
+        }
+
+        ServerCommandSource source = bot.getCommandSource().withSilent();
+        ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
+        boolean crafted = false;
+        if (needPickaxe) {
+            crafted |= ToolProvisionService.ensurePickaxe(bot, source, commander, true);
+        }
+        if (needShovel) {
+            crafted |= ToolProvisionService.ensureShovel(bot, source, commander, true);
+        }
+        if (crafted) {
+            CombatInventoryManager.ensureCombatLoadout(bot);
+            LOGGER.info("Idle cobblestone tools: {} crafted wooden tools (pickaxe={}, shovel={})",
+                    bot.getName().getString(),
+                    !hasAnyPickaxe(bot) ? "needed" : "ready",
+                    !hasAnyShovel(bot) ? "needed" : "ready");
+        }
+        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
+        return crafted;
+    }
+
+    private static boolean hasAnyPickaxe(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT).contains("pickaxe")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasAnyShovel(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT).contains("shovel")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNearbyStone(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) return false;
+        int r = Math.max(1, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) continue;
+            net.minecraft.block.BlockState state = world.getBlockState(pos);
+            if (state.isOf(net.minecraft.block.Blocks.STONE)
+                    || state.isOf(net.minecraft.block.Blocks.COBBLESTONE)
+                    || state.isOf(net.minecraft.block.Blocks.ANDESITE)
+                    || state.isOf(net.minecraft.block.Blocks.DIORITE)
+                    || state.isOf(net.minecraft.block.Blocks.GRANITE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Upgrades wooden tools to stone when cobblestone is available.
+     * Tech tree progression: wood → stone. The bot keeps both tiers; existing tool-selection
+     * logic naturally prefers the better tier.
+     */
+    private static boolean maybeHandleIdleStoneToolUpgrades(MinecraftServer server,
+                                                             ServerPlayerEntity bot,
+                                                             ServerWorld world,
+                                                             long nowTick) {
+        if (server == null || bot == null || world == null || bot.getCommandSource() == null) return false;
+        if (bot.getHungerManager().getFoodLevel() <= WOODEN_FALLBACK_STARVING_HUNGER) return false;
+
+        boolean canUpgradePickaxe = ToolProvisionService.hasOnlyWoodenTool(bot, "pickaxe");
+        boolean canUpgradeSword   = ToolProvisionService.hasOnlyWoodenTool(bot, "sword");
+        boolean canUpgradeAxe     = ToolProvisionService.hasOnlyWoodenTool(bot, "axe");
+        boolean canUpgradeShovel  = ToolProvisionService.hasOnlyWoodenTool(bot, "shovel");
+        if (!canUpgradePickaxe && !canUpgradeSword && !canUpgradeAxe && !canUpgradeShovel) return false;
+
+        if (!ToolProvisionService.hasStoneMaterialsAvailable(bot, world)) return false;
+
+        long nextAllowed = NEXT_COBBLESTONE_TOOLS_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (nowTick < nextAllowed) return false;
+
+        ServerCommandSource source = bot.getCommandSource().withSilent();
+        ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
+        boolean crafted = false;
+
+        // Upgrade order: pickaxe → sword → axe → shovel
+        if (canUpgradePickaxe) crafted |= CraftingHelper.craftGeneric(source, bot, commander, "pickaxe", 1, "stone") > 0;
+        if (canUpgradeSword)   crafted |= CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "stone") > 0;
+        if (canUpgradeAxe)     crafted |= CraftingHelper.craftGeneric(source, bot, commander, "axe", 1, "stone") > 0;
+        if (canUpgradeShovel)  crafted |= CraftingHelper.craftGeneric(source, bot, commander, "shovel", 1, "stone") > 0;
+
+        if (crafted) {
+            CombatInventoryManager.ensureCombatLoadout(bot);
+            LOGGER.info("Idle stone upgrade: {} upgraded wooden tools to stone", bot.getName().getString());
+        }
+        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
+        return crafted;
+    }
+
+    /**
+     * When the bot needs a pickaxe or shovel but has no planks/logs (in inventory or nearby chests)
+     * to craft them, trigger woodcutting to gather resources. This prevents the bot from idling on
+     * low-priority hobbies (grass seeds, wander) while lacking essential tools.
+     */
+    private static boolean maybeHandleIdleWoodcutForResources(MinecraftServer server,
+                                                               ServerPlayerEntity bot,
+                                                               ServerWorld world,
+                                                               long nowTick) {
+        if (server == null || bot == null || world == null || bot.getCommandSource() == null) return false;
+        // Respect the decision cooldown — prevents spin loop when surface recovery fails
+        if (nowTick < NEXT_DECISION_TICK.getOrDefault(bot.getUuid(), 0L)) return false;
+        if (bot.getHungerManager().getFoodLevel() <= WOODEN_FALLBACK_STARVING_HUNGER) return false;
+
+        boolean needPickaxe = !hasAnyPickaxe(bot);
+        boolean needShovel = !hasAnyShovel(bot);
+        if (!needPickaxe && !needShovel) return false;
+
+        // Only trigger if there's no wood available at all (inventory + nearby chests)
+        if (ToolProvisionService.hasPlanksOrLogsAvailable(bot)) return false;
+
+        if (!canStartFallbackWoodcut(world, bot)) return false;
+
+        startAmbientSkill(server, bot, "woodcut");
+        LOGGER.info("Idle resource woodcut: {} needs tools but has no wood — starting woodcut",
+                bot.getName().getString());
+        return true;
+    }
+
     private static boolean tryInterruptLowPriorityAmbientForFood(ServerPlayerEntity bot,
                                                                  ServerWorld world,
                                                                  TaskService.ActiveTaskInfo activeTask,
@@ -1023,7 +1225,7 @@ public final class BotIdleHobbiesService {
         }
         return switch (normalized) {
             case "grass_seeds", "flowers", "wander", "leaf_litter", "mushrooms",
-                 "hangout", "shadow_companion", "feed_animals" -> true;
+                 "hangout", "shadow_companion", "feed_animals", "mining" -> true;
             default -> false;
         };
     }
@@ -1050,25 +1252,52 @@ public final class BotIdleHobbiesService {
         if (TaskService.hasActiveTask(bot.getUuid())) {
             return false;
         }
-        if (TreeDetector.isProtected(world, bot.getBlockPos(), 4)) {
-            LOGGER.info("Idle wooden fallback: {} blocked inside protected village/base area at {}",
-                    bot.getName().getString(),
-                    bot.getBlockPos().toShortString());
-            return false;
-        }
-        if (TreeDetector.findNearestTree(bot, 12, 6, Collections.emptySet()).isPresent()) {
+        // Check for trees/logs that are NOT in a protected zone.
+        // Previously only checked if the bot was in a protected zone, but the trees
+        // themselves could be protected even when the bot is just outside the boundary.
+        var tree = TreeDetector.findNearestTree(bot, 12, 6, Collections.emptySet());
+        if (tree.isPresent() && !TreeDetector.isProtectedForWoodcut(world, tree.get().base(), Math.max(4, tree.get().height()))) {
             return true;
         }
-        if (TreeDetector.findNearestLooseLog(bot, 12, 6, Collections.emptySet()).isPresent()) {
+        var looseLog = TreeDetector.findNearestLooseLog(bot, 12, 6, Collections.emptySet());
+        if (looseLog.isPresent() && !TreeDetector.isProtectedForWoodcut(world, looseLog.get(), 4)) {
             return true;
         }
-        if (TreeDetector.findNearestAnyLog(bot, 12, 6, Collections.emptySet()).isPresent()) {
+        var anyLog = TreeDetector.findNearestAnyLog(bot, 12, 6, Collections.emptySet());
+        if (anyLog.isPresent() && !TreeDetector.isProtectedForWoodcut(world, anyLog.get(), 4)) {
             return true;
         }
-        LOGGER.info("Idle wooden fallback: {} blocked — no safe woodcut target near {}",
+
+        // Final fallback: expand search in the direction the bot is facing.
+        // If all nearby trees are protected, look further ahead for unprotected ones.
+        BlockPos directionalTarget = findDirectionalUnprotectedTree(world, bot);
+        if (directionalTarget != null) {
+            EXPANDED_WOODCUT_RADIUS.put(bot.getUuid(), DIRECTIONAL_WOODCUT_RADIUS);
+            LOGGER.info("Idle wooden fallback: {} found distant unprotected tree at {} (directional expansion)",
+                    bot.getName().getString(), directionalTarget.toShortString());
+            return true;
+        }
+
+        LOGGER.info("Idle wooden fallback: {} blocked — no safe woodcut target near or ahead of {}",
                 bot.getName().getString(),
                 bot.getBlockPos().toShortString());
         return false;
+    }
+
+    /**
+     * Searches for an unprotected tree in a forward cone (±60°) at an expanded radius,
+     * skipping the inner radius already checked by the normal search.
+     */
+    private static BlockPos findDirectionalUnprotectedTree(ServerWorld world, ServerPlayerEntity bot) {
+        float yaw = bot.getYaw();
+        double yawRad = Math.toRadians(yaw);
+        // Minecraft yaw: 0=south(+Z), 90=west(-X), 180=north(-Z), 270=east(+X)
+        double facingX = -Math.sin(yawRad);
+        double facingZ = Math.cos(yawRad);
+        return TreeDetector.findNearestUnprotectedTreeInRing(
+                world, bot.getBlockPos(),
+                12, DIRECTIONAL_WOODCUT_RADIUS, 6,
+                facingX, facingZ);
     }
 
     private static boolean isTooLateForWoodcut(ServerWorld world) {

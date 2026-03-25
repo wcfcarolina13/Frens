@@ -33,6 +33,7 @@ import java.util.Optional;
  *   <li>Last successful sleep position per bot</li>
  *   <li>Saved base locations per world/dimension</li>
  *   <li>Auto-return-at-sunset toggle per bot</li>
+ *   <li>Tactical-shelter automation toggle per bot</li>
  *   <li>Auto-return-at-sunset eligibility for guard/patrol per bot</li>
  *   <li>Idle/ambient hobbies toggle per bot</li>
  *   <li>Auto-hunt-when-starving toggle per bot</li>
@@ -236,6 +237,65 @@ public final class BotHomeService {
         return true;
     }
 
+    /**
+     * If enabled, the bot may use improvised tactical shelter automation:
+     * proactive night sheltering and the sunset tactical-shelter fallback.
+     *
+     * <p>Default: true.
+     */
+    public static boolean setTacticalShelterEnabled(ServerPlayerEntity bot, boolean enabled) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.tacticalShelterEnabledByBot == null) {
+                wd.tacticalShelterEnabledByBot = new HashMap<>();
+            }
+            wd.tacticalShelterEnabledByBot.put(botId, enabled);
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean toggleTacticalShelterEnabled(ServerPlayerEntity bot) {
+        boolean next = !isTacticalShelterEnabled(bot);
+        return setTacticalShelterEnabled(bot, next);
+    }
+
+    /** Default: true (bots may improvise local shelter unless explicitly disabled). */
+    public static boolean isTacticalShelterEnabled(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return true;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return true;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return true;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.tacticalShelterEnabledByBot == null) {
+                return true;
+            }
+            Boolean val = wd.tacticalShelterEnabledByBot.get(botId);
+            return val == null ? true : Boolean.TRUE.equals(val);
+        }
+    }
+
     public static boolean toggleAutoReturnAtSunset(ServerPlayerEntity bot) {
         boolean next = !isAutoReturnAtSunset(bot);
         return setAutoReturnAtSunset(bot, next);
@@ -412,29 +472,28 @@ public final class BotHomeService {
     /**
      * Whether GUARD/PATROL modes are eligible for sunset auto-return/sleep.
      * <p>
-     * Default: true (preserves the historical behavior where sunset automation did not
-     * differentiate modes).
+     * Default: false.
      */
     public static boolean isAutoReturnGuardPatrolEligible(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return true;
+            return false;
         }
         MinecraftServer server = world.getServer();
         if (server == null) {
-            return true;
+            return false;
         }
         String botId = botKey(bot);
         if (botId.isBlank()) {
-            return true;
+            return false;
         }
 
         WorldData wd = worldData(server, world);
         synchronized (LOCK) {
             if (wd.autoReturnGuardPatrolEligibleByBot == null) {
-                return true;
+                return false;
             }
             Boolean val = wd.autoReturnGuardPatrolEligibleByBot.get(botId);
-            return val == null ? true : Boolean.TRUE.equals(val);
+            return val == null ? false : Boolean.TRUE.equals(val);
         }
     }
 
@@ -934,6 +993,7 @@ public final class BotHomeService {
     private static final class WorldData {
         Map<String, SavedSleep> lastSleepByBot = new HashMap<>();
         Map<String, Boolean> autoReturnAtSunsetByBot = new HashMap<>();
+        Map<String, Boolean> tacticalShelterEnabledByBot = new HashMap<>();
         Map<String, Boolean> autoReturnSelfSufficientFallbackByBot = new HashMap<>();
         Map<String, Boolean> autoReturnPreferLastBedAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();

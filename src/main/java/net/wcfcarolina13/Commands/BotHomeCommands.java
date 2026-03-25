@@ -84,6 +84,30 @@ final class BotHomeCommands {
                                         StringArgumentType.getString(context, "target")))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildTacticalShelter() {
+        return CommandManager.literal("tactical_shelter")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeTacticalShelterSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeTacticalShelterSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeTacticalShelterSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeTacticalShelterSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeTacticalShelterToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeTacticalShelterToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildAutoReturnSunsetPreferLastBed() {
         return CommandManager.literal("auto_return_sunset_prefer_last_bed")
                 .then(CommandManager.literal("on")

@@ -63,6 +63,13 @@ public final class ToolProvisionService {
     public static boolean ensurePickaxe(ServerPlayerEntity bot,
                                         ServerCommandSource source,
                                         ServerPlayerEntity commander) {
+        return ensurePickaxe(bot, source, commander, false);
+    }
+
+    public static boolean ensurePickaxe(ServerPlayerEntity bot,
+                                        ServerCommandSource source,
+                                        ServerPlayerEntity commander,
+                                        boolean allowWoodenFallback) {
         if (bot == null || source == null) {
             return false;
         }
@@ -70,22 +77,20 @@ public final class ToolProvisionService {
             return true;
         }
         ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftPickaxe(historyOwner)) {
-            return false;
-        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (hasStoneMaterials(bot, world)) {
+        boolean canCraft = canCraftPickaxe(historyOwner);
+        if (canCraft && hasStoneMaterials(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "pickaxe", 1, "stone") > 0;
         }
-        if (hasMaterial(bot, world, Items.IRON_INGOT)) {
+        if (canCraft && hasMaterial(bot, world, Items.IRON_INGOT)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "pickaxe", 1, "iron") > 0;
         }
-        if (hasMaterial(bot, world, Items.DIAMOND)) {
+        if (canCraft && hasMaterial(bot, world, Items.DIAMOND)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "pickaxe", 1, "diamond") > 0;
         }
-        if (hasPlanksOrLogs(bot, world)) {
+        if ((canCraft || allowWoodenFallback) && hasPlanksOrLogs(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "pickaxe", 1, "wood") > 0;
         }
         return false;
@@ -94,6 +99,13 @@ public final class ToolProvisionService {
     public static boolean ensureShovel(ServerPlayerEntity bot,
                                        ServerCommandSource source,
                                        ServerPlayerEntity commander) {
+        return ensureShovel(bot, source, commander, false);
+    }
+
+    public static boolean ensureShovel(ServerPlayerEntity bot,
+                                       ServerCommandSource source,
+                                       ServerPlayerEntity commander,
+                                       boolean allowWoodenFallback) {
         if (bot == null || source == null) {
             return false;
         }
@@ -101,22 +113,20 @@ public final class ToolProvisionService {
             return true;
         }
         ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftShovel(historyOwner)) {
-            return false;
-        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (hasStoneMaterials(bot, world)) {
+        boolean canCraft = canCraftShovel(historyOwner);
+        if (canCraft && hasStoneMaterials(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "shovel", 1, "stone") > 0;
         }
-        if (hasMaterial(bot, world, Items.IRON_INGOT)) {
+        if (canCraft && hasMaterial(bot, world, Items.IRON_INGOT)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "shovel", 1, "iron") > 0;
         }
-        if (hasMaterial(bot, world, Items.DIAMOND)) {
+        if (canCraft && hasMaterial(bot, world, Items.DIAMOND)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "shovel", 1, "diamond") > 0;
         }
-        if (hasPlanksOrLogs(bot, world)) {
+        if ((canCraft || allowWoodenFallback) && hasPlanksOrLogs(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "shovel", 1, "wood") > 0;
         }
         return false;
@@ -1040,6 +1050,29 @@ public final class ToolProvisionService {
         return false;
     }
 
+    /**
+     * Returns true if the bot has the given tool type but ONLY at wooden tier.
+     * Used to decide if a stone upgrade is worthwhile.
+     */
+    public static boolean hasOnlyWoodenTool(ServerPlayerEntity bot, String toolKeyword) {
+        if (bot == null || toolKeyword == null) return false;
+        String key = toolKeyword.toLowerCase(Locale.ROOT);
+        boolean hasAny = false;
+        boolean allWooden = true;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            String translation = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (!matchesToolKeyword(translation, key)) continue;
+            hasAny = true;
+            if (!translation.contains("wooden_")) {
+                allWooden = false;
+                break;
+            }
+        }
+        return hasAny && allWooden;
+    }
+
     private static boolean matchesToolKeyword(String translation, String keyword) {
         if (translation == null || keyword == null || keyword.isBlank()) {
             return false;
@@ -1109,6 +1142,14 @@ public final class ToolProvisionService {
         return hasPlanksOrLogs(bot, world);
     }
 
+    public static boolean hasStoneMaterialsAvailable(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null) return false;
+        if (world == null && bot.getEntityWorld() instanceof ServerWorld sw) {
+            world = sw;
+        }
+        return world != null && hasStoneMaterials(bot, world);
+    }
+
     private static boolean hasStoneMaterials(ServerPlayerEntity bot, ServerWorld world) {
         return hasMaterial(bot, world, Items.COBBLESTONE)
                 || hasMaterial(bot, world, Items.COBBLED_DEEPSLATE)
@@ -1139,6 +1180,14 @@ public final class ToolProvisionService {
     /** Quick bot-inventory-only check for planks or logs (no world scan). */
     public static boolean hasPlanksOrLogsInInventory(ServerPlayerEntity bot) {
         return bot != null && (hasTaggedItem(bot, ItemTags.PLANKS) || hasTaggedItem(bot, ItemTags.LOGS));
+    }
+
+    /** Check inventory AND nearby chests for planks or logs. */
+    public static boolean hasPlanksOrLogsAvailable(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+        if (world == null) return hasPlanksOrLogsInInventory(bot);
+        return hasPlanksOrLogs(bot, world);
     }
 
     private static boolean hasPlanksOrLogs(ServerPlayerEntity bot, ServerWorld world) {

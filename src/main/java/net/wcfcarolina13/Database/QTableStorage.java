@@ -1,7 +1,5 @@
 package net.wcfcarolina13.Database;
 
-
-import net.fabricmc.loader.api.FabricLoader;
 import net.wcfcarolina13.LauncherDetection.LauncherEnvironment;
 import net.wcfcarolina13.GameAI.State;
 import org.slf4j.Logger;
@@ -12,11 +10,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.stream.Stream;
 
 
 public class QTableStorage {
-    private static final String gameDir = FabricLoader.getInstance().getGameDir().toString();
     private static final Logger LOGGER = LoggerFactory.getLogger("QTableStorage");
 
     /**
@@ -79,8 +78,11 @@ public class QTableStorage {
      * Enhanced Q-table loading with multiple location support
      */
     public static QTable loadQTable() {
-        String[] possiblePaths = LauncherEnvironment.getFallbackDirectories("qtable_storage");
+        return loadQTableFromDirectories(LauncherEnvironment.getFallbackDirectories("qtable_storage"));
+    }
 
+    static QTable loadQTableFromDirectories(String[] possiblePaths) {
+        Set<Path> quarantined = new HashSet<>();
         for (String dir : possiblePaths) {
             Path baseDir = Paths.get(dir);
             Path qTablePath = baseDir.resolve("qtable.bin");
@@ -92,7 +94,7 @@ public class QTableStorage {
                     LOGGER.info("✅ Q-table loaded from: {}", qTablePath);
                     return loadedTable;
                 } catch (Exception e) {
-                    LOGGER.warn("❌ Failed to load Q-table from {}: {}", qTablePath, e.getMessage());
+                    quarantineCorruptQTable(qTablePath, e, quarantined);
                 }
             } else {
                 Path legacyPath = locateLegacyQTable(baseDir, qTablePath);
@@ -103,7 +105,7 @@ public class QTableStorage {
                             LOGGER.info("✅ Loaded migrated Q-table from: {}", qTablePath);
                             return migratedTable;
                         } catch (Exception e) {
-                            LOGGER.warn("❌ Failed to load migrated Q-table from {}: {}", qTablePath, e.getMessage());
+                            quarantineCorruptQTable(qTablePath, e, quarantined);
                         }
                     } else {
                         try {
@@ -111,7 +113,7 @@ public class QTableStorage {
                             LOGGER.info("✅ Loaded legacy Q-table directly from: {}", legacyPath);
                             return legacyTable;
                         } catch (Exception e) {
-                            LOGGER.warn("❌ Failed to load legacy Q-table from {}: {}", legacyPath, e.getMessage());
+                            quarantineCorruptQTable(legacyPath, e, quarantined);
                         }
                     }
                 }
@@ -203,6 +205,30 @@ public class QTableStorage {
         } catch (IOException e) {
             LOGGER.warn("❌ Failed to migrate legacy Q-table from {} to {}: {}", legacyPath, targetPath, e.getMessage());
             return false;
+        }
+    }
+
+    private static void quarantineCorruptQTable(Path qTablePath, Exception error, Set<Path> quarantined) {
+        if (qTablePath == null) {
+            return;
+        }
+        Path normalized = qTablePath.toAbsolutePath().normalize();
+        if (!quarantined.add(normalized)) {
+            return;
+        }
+        if (!Files.exists(normalized)) {
+            LOGGER.warn("❌ Failed to load Q-table from {}: {}", normalized, error.getMessage());
+            return;
+        }
+
+        String quarantineName = normalized.getFileName().toString() + ".corrupt-" + System.currentTimeMillis();
+        Path quarantinePath = normalized.resolveSibling(quarantineName);
+        try {
+            Files.move(normalized, quarantinePath, StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.warn("❌ Failed to load Q-table from {}: {}", normalized, error.getMessage());
+            LOGGER.warn("⚠️ Quarantined unreadable Q-table to {}", quarantinePath);
+        } catch (IOException moveError) {
+            LOGGER.error("❌ Failed to quarantine unreadable Q-table {}: {}", normalized, moveError.getMessage());
         }
     }
 

@@ -135,8 +135,10 @@ public final class DropSweeper {
 
             MovementService.MovementPlan plan = planOpt.get();
             // Avoid teleport/snap during cleanup so we don't "yank" the bot around while staying in survival mechanics.
+            // Use fastReplan=true to keep movement attempts short (5s budget) — prevents the bot from
+            // getting stuck in nudge retry loops for minutes on unreachable drops.
             MovementService.clearRecentWalkAttempt(player.getUuid());
-            MovementService.MovementResult movement = MovementService.execute(source, player, plan, false, false, true, false);
+            MovementService.MovementResult movement = MovementService.execute(source, player, plan, false, true, true, false);
             LOGGER.info("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
             BotActions.stop(player);
             attempts++;

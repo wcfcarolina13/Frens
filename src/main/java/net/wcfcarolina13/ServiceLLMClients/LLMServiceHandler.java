@@ -23,12 +23,18 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class LLMServiceHandler {
     public static final Logger LOGGER = LoggerFactory.getLogger("LLMServiceHandler");
-    private static final ExecutorService BOT_TASK_POOL = Executors.newCachedThreadPool();
+    private static final AtomicInteger BOT_TASK_THREAD_ID = new AtomicInteger(0);
+    private static final ExecutorService BOT_TASK_POOL = Executors.newCachedThreadPool(runnable -> {
+        Thread t = new Thread(runnable, "llm-service-" + BOT_TASK_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
     private static final Pattern THINK_BLOCK = Pattern.compile("<think>([\\s\\S]*?)</think>");
     public static String initialResponse = "";
     private static final String host = "http://localhost:11434";

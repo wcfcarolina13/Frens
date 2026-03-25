@@ -105,6 +105,16 @@ public final class ChestStoreService {
             Items.SUSPICIOUS_STEW
     );
 
+    /** Minimum scaffold blocks to keep in inventory across all offload paths. */
+    private static final int SCAFFOLD_RESERVE = 32;
+    private static final Set<Item> SCAFFOLD_ITEMS = Set.of(
+            Items.DIRT, Items.COARSE_DIRT, Items.ROOTED_DIRT,
+            Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE,
+            Items.GRAVEL, Items.SAND, Items.RED_SAND,
+            Items.NETHERRACK, Items.SCAFFOLDING,
+            Items.DIORITE, Items.ANDESITE, Items.GRANITE, Items.TUFF
+    );
+
     private static final Set<Item> OFFLOAD_PROTECTED_ITEMS = Set.of(
             Items.TORCH,
             Items.SOUL_TORCH,
@@ -250,6 +260,36 @@ public final class ChestStoreService {
             return true;
         }
         return COOKED_FOOD_ITEMS.contains(item);
+    }
+
+    /**
+     * Count total scaffold-type blocks in the bot's inventory.
+     */
+    public static int countScaffoldInInventory(ServerPlayerEntity bot) {
+        if (bot == null) return 0;
+        int count = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && SCAFFOLD_ITEMS.contains(stack.getItem())) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Wrap a deposit filter to enforce a scaffold reserve: once the bot's scaffold
+     * inventory drops to SCAFFOLD_RESERVE, stop allowing scaffold-type items through.
+     */
+    static Predicate<ItemStack> withScaffoldReserve(ServerPlayerEntity bot, Predicate<ItemStack> inner) {
+        if (bot == null) return inner;
+        return stack -> {
+            if (!inner.test(stack)) return false;
+            if (SCAFFOLD_ITEMS.contains(stack.getItem()) && countScaffoldInInventory(bot) <= SCAFFOLD_RESERVE) {
+                return false; // keep scaffold reserve
+            }
+            return true;
+        };
     }
 
     private static BlockPos resolveRememberedChest(ServerCommandSource source, UUID botId) {
@@ -477,7 +517,7 @@ public final class ChestStoreService {
         }
 
         return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE,
-                stack -> !excluded.contains(stack.getItem()), true, DEFAULT_MOVEMENT);
+                withScaffoldReserve(bot, stack -> !excluded.contains(stack.getItem())), true, DEFAULT_MOVEMENT);
     }
 
     public static int depositMatching(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Predicate<ItemStack> matcher) {
@@ -489,7 +529,7 @@ public final class ChestStoreService {
             return 0;
         }
 
-        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, DEFAULT_MOVEMENT);
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, withScaffoldReserve(bot, matcher), true, DEFAULT_MOVEMENT);
     }
 
     public static int depositMatchingWalkOnly(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Predicate<ItemStack> matcher) {
@@ -507,7 +547,7 @@ public final class ChestStoreService {
                 + " serverThread=" + server.isOnThread()
                 + " sourceWorld=" + worldKeyName(source.getWorld())
                 + " botWorld=" + worldKeyName(bot.getEntityWorld()));
-        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, WALK_ONLY);
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, withScaffoldReserve(bot, matcher), true, WALK_ONLY);
     }
 
     /**

@@ -29,6 +29,7 @@ import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
 import net.wcfcarolina13.GameAI.services.TaskService;
@@ -209,6 +210,7 @@ public class CollectDirtSkill implements Skill {
         boolean ascentToSurface = getBooleanParameter(context, "ascentToSurface", false);
         Integer descentBlocks = getOptionalIntParameter(context, "descentBlocks");
         Integer descentTargetY = getOptionalIntParameter(context, "descentTargetY");
+        Integer maxNoProgressSteps = getOptionalIntParameter(context, "maxNoProgressSteps");
         
         boolean ascentMode = (ascentBlocks != null || ascentTargetY != null || ascentToSurface);
         boolean descentMode = (descentBlocks != null || descentTargetY != null);
@@ -253,7 +255,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, commander, playerForAbortCheck, targetY, ascentToSurface, resumeRequested, allowChestStore, skipTorches);
+            return runAscent(context, source, commander, playerForAbortCheck, targetY, ascentToSurface, resumeRequested, allowChestStore, skipTorches, maxNoProgressSteps);
         }
 
         // Handle descent mode
@@ -1034,7 +1036,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false, false, false);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false, false, false, null);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -1354,16 +1356,21 @@ public class CollectDirtSkill implements Skill {
         int carvedSteps = 0;
         while (player.getBlockY() > targetDepthY) {
             if (SkillManager.shouldAbortSkill(player)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
                 return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
             }
-            
+
             if (handleInventoryFull(player, source, allowChestStore)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 return SkillExecutionResult.failure("Mining paused: inventory full.");
             }
             if (handleWaterHazard(player, source)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 return SkillExecutionResult.failure("Mining paused: water flooded the dig site.");
             }
             if (handleLavaHazard(player, source)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 return SkillExecutionResult.failure("Mining paused: lava detected.");
             }
 
@@ -1568,7 +1575,8 @@ public class CollectDirtSkill implements Skill {
                                           boolean stopAtSurface,
                                           boolean resumeRequested,
                                           boolean allowChestStore,
-                                          boolean skipTorches) {
+                                          boolean skipTorches,
+                                          Integer maxNoProgressSteps) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for ascent.");
         }
@@ -1594,6 +1602,7 @@ public class CollectDirtSkill implements Skill {
             long startTime = System.currentTimeMillis();
             int steps = 0;
             int maxSteps = Math.abs(targetY - player.getBlockY()) * 5; // Generous limit
+            int consecutiveNoProgressSteps = 0;
             
             while ((player.getBlockY() < targetY || (stopAtSurface && !isOnSurface(player))) &&
                    System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS && 
@@ -1623,8 +1632,18 @@ public class CollectDirtSkill implements Skill {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 return stepResult;
             }
-            
+
             steps++;
+            String stepMessage = stepResult.message() != null ? stepResult.message() : "";
+            if ("No progress - will retry".equalsIgnoreCase(stepMessage)) {
+                consecutiveNoProgressSteps++;
+                if (shouldAbortStalledAscent(consecutiveNoProgressSteps, maxNoProgressSteps)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    return SkillExecutionResult.failure("Surface recovery stalled without gaining height.");
+                }
+            } else {
+                consecutiveNoProgressSteps = 0;
+            }
             if (stopAtSurface && isOnSurface(player)) {
                 LOGGER.info("Ascent surface mode complete after {} steps at Y={}", steps, player.getBlockY());
                 return SkillExecutionResult.success("Reached surface with open sky after " + steps + " steps.");
@@ -1674,6 +1693,12 @@ public class CollectDirtSkill implements Skill {
             // Always clear ascent mode flag when method exits
             TaskService.setAscentMode(player.getUuid(), false);
         }
+    }
+
+    static boolean shouldAbortStalledAscent(int consecutiveNoProgressSteps, Integer maxNoProgressSteps) {
+        return maxNoProgressSteps != null
+                && maxNoProgressSteps > 0
+                && consecutiveNoProgressSteps >= maxNoProgressSteps;
     }
     
     private SkillExecutionResult executeUpwardStep(ServerPlayerEntity player, Direction direction, ServerCommandSource source) {
@@ -1760,6 +1785,9 @@ public class CollectDirtSkill implements Skill {
         }
         // Clear headroom: break the step block itself AND 8 blocks above it
         for (int h = 0; h <= 8; h++) {
+            if (TaskService.isServerStopping() || SkillManager.shouldAbortSkill(player)) {
+                return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
+            }
             BlockPos clearPos = stepBlock.up(h);
             BlockState state = world.getBlockState(clearPos);
             
@@ -1774,6 +1802,9 @@ public class CollectDirtSkill implements Skill {
                 
                 // Mine the block - bot is now close enough
                 if (!mineStraightStairBlock(player, clearPos)) {
+                    if (TaskService.isServerStopping() || SkillManager.shouldAbortSkill(player)) {
+                        return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
+                    }
                     LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
                 }
             }
@@ -1828,8 +1859,35 @@ public class CollectDirtSkill implements Skill {
             LOGGER.debug("Climb attempt {} failed: beforeY={}, afterY={}", attempt, beforeY, afterY);
         }
         
-        // Didn't climb after 5 attempts, but don't fail - just report and continue
-        LOGGER.warn("Did not climb after 5 attempts, Y remains at {}", player.getBlockY());
+        // Didn't climb after 5 staircase attempts — try pillar-up as fallback.
+        // Mine the 2 blocks directly above the bot's head (always LOS-clear since adjacent)
+        // then jump straight up. This works in tight cave geometry where staircase LOS fails.
+        LOGGER.warn("Did not climb after 5 attempts, Y remains at {} — trying pillar-up fallback", player.getBlockY());
+        boolean clearedAbove = true;
+        for (int dy = 2; dy <= 3; dy++) {
+            BlockPos abovePos = player.getBlockPos().up(dy);
+            BlockState aboveState = world.getBlockState(abovePos);
+            if (!aboveState.isAir() && !aboveState.getCollisionShape(world, abovePos).isEmpty()) {
+                if (!mineStraightStairBlock(player, abovePos)) {
+                    LOGGER.warn("Pillar-up: could not mine block at {}", abovePos.toShortString());
+                    clearedAbove = false;
+                    break;
+                }
+            }
+        }
+        if (clearedAbove) {
+            runOnServerThread(player, () -> BotActions.jump(player));
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            int pillarY = player.getBlockY();
+            if (pillarY > beforeY) {
+                LOGGER.info("Pillar-up succeeded: climbed from Y={} to Y={}", beforeY, pillarY);
+                return SkillExecutionResult.success("Pillar-up climb");
+            }
+        }
         return SkillExecutionResult.success("No progress - will retry");
     }
     
@@ -1864,6 +1922,11 @@ public class CollectDirtSkill implements Skill {
         }
 
         if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+
+        if (CompanionSafeZoneService.isProtected(world, blockPos, null)) {
+            LOGGER.warn("Pillar/mining refusing to break protected block at {}", blockPos.toShortString());
             return false;
         }
 
@@ -1998,6 +2061,11 @@ public class CollectDirtSkill implements Skill {
         if (base == null) {
             base = scanForButtonDirection(player);
         }
+        // Check stored work direction before falling back to current facing
+        // (idle head-swivel can rotate the bot while paused, making getHorizontalFacing() unreliable)
+        if (base == null) {
+            base = WorkDirectionService.getDirection(player.getUuid()).orElse(null);
+        }
         if (base == null) {
             base = player.getHorizontalFacing();
         }
@@ -2019,6 +2087,8 @@ public class CollectDirtSkill implements Skill {
                 }
             }
             shared.put(key, current.asString());
+            // Also persist in WorkDirectionService for cross-resume survival
+            WorkDirectionService.setDirection(player.getUuid(), current);
         }
         LOGGER.info("Stair/stripmine direction resolved: {} (lockDirection={})", current, lock);
         // Persist button-based direction if derived

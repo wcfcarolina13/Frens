@@ -16,7 +16,9 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
+import net.wcfcarolina13.GameAI.services.MappedVillageService;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
+import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,8 +35,7 @@ public final class BaseNetworkManager {
 
     private BaseNetworkManager() {}
 
-    /** @param wallStatus null for regular bases; "complete" or "2/14 edges" for fortification walls */
-    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName, int radius) {}
+    public record BaseDto(String kind, String label, int x, int y, int z, boolean home, String detailText, String ownerName, int radius) {}
 
     public static void registerReceiversOnce() {
         if (REGISTERED) {
@@ -67,11 +68,57 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Enter a base name first.");
                         return;
                     }
+                    MinecraftServer server = player.getCommandSource().getServer();
+                    if (labelInUse(server, world, label, null)) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
+                        return;
+                    }
                     BlockPos pos = player.getBlockPos().toImmutable();
-                        boolean ok = BotHomeService.addBase(player.getCommandSource().getServer(), world, label, pos);
+                    boolean ok = BotHomeService.addBase(server, world, label, pos);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
                             ? "Saved base '" + label + "' at " + pos.toShortString() + "."
                             : "Failed to save base.");
+                    sendBasesList(player, currentBotAliasContext(player));
+                }));
+
+        ServerPlayNetworking.registerGlobalReceiver(BaseMapVillagePayload.ID, (payload, context) ->
+                context.server().execute(() -> {
+                    ServerPlayerEntity player = context.player();
+                    if (player == null) return;
+                    ServerWorld world = player.getCommandSource().getWorld();
+                    if (world.getRegistryKey() != World.OVERWORLD) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Villages are only managed in the Overworld.");
+                        return;
+                    }
+                    String label = payload != null ? payload.label() : null;
+                    if (label == null || label.isBlank()) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Enter a village name first.");
+                        return;
+                    }
+                    MinecraftServer server = player.getCommandSource().getServer();
+                    if (labelInUse(server, world, label, null)) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
+                        return;
+                    }
+                    var layout = VillageFortificationLayoutService.generateLayout(world, player.getBlockPos(), 64);
+                    if (layout.hullVertices() == null || layout.hullVertices().size() < 3) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Couldn't map a village here. Move closer to the settlement center and try again.");
+                        return;
+                    }
+                    boolean ok = MappedVillageService.save(
+                            server,
+                            world,
+                            MappedVillageService.create(
+                                    label.trim(),
+                                    FortificationPersistenceService.serverWorldKey(server, world),
+                                    world.getRegistryKey().getValue().toString(),
+                                    layout.center(),
+                                    layout.hullVertices()
+                            )
+                    );
+                    ChatUtils.sendSystemMessage(player.getCommandSource(), ok
+                            ? "Mapped village '" + label.trim() + "' with " + layout.hullVertices().size() + " perimeter vertices."
+                            : "Failed to save mapped village '" + label.trim() + "'.");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
 
@@ -90,15 +137,10 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
-                    boolean removed = BotHomeService.removeBase(srv, world, label);
-                    if (!removed) {
-                        // Try removing a fortification wall with that name
-                        String wKey = FortificationPersistenceService.serverWorldKey(srv, world);
-                        removed = FortificationPersistenceService.delete(srv, wKey, label);
-                    }
+                    boolean removed = removeAnyEntry(srv, world, label);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), removed
                             ? "Removed '" + label + "'."
-                            : "No base or wall named '" + label + "' found.");
+                            : "No base, wall, or village named '" + label + "' found.");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
 
@@ -118,12 +160,11 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
-                    boolean ok = BotHomeService.renameBase(srv, world, oldLabel, newLabel);
-                    if (!ok) {
-                        // Try renaming a fortification wall
-                        String wKey = FortificationPersistenceService.serverWorldKey(srv, world);
-                        ok = FortificationPersistenceService.rename(srv, wKey, oldLabel, newLabel);
+                    if (labelInUse(srv, world, newLabel, oldLabel)) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
+                        return;
                     }
+                    boolean ok = renameAnyEntry(srv, world, oldLabel, newLabel);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
                             ? "Renamed '" + oldLabel + "' -> '" + newLabel + "'."
                             : "Rename failed (does it exist? is the new name already used?).");
@@ -465,7 +506,7 @@ public final class BaseNetworkManager {
             if (b == null || b.pos() == null) continue;
             String label = b.label() != null ? b.label() : "";
             boolean home = !homeNorm.isBlank() && homeNorm.equals(label.trim().toLowerCase(java.util.Locale.ROOT));
-            out.add(new BaseDto(label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, null, b.radius()));
+            out.add(new BaseDto("base", label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, null, b.radius()));
         }
 
         // Include saved fortification walls
@@ -483,7 +524,13 @@ public final class BaseNetworkManager {
             int totalEdges = f.getHullWallPoints().size();
             String status = f.isComplete() ? "complete"
                     : f.getCompletedEdges().size() + "/" + totalEdges + " edges";
-                out.add(new BaseDto(fName, center.getX(), center.getY(), center.getZ(), false, status, f.getOwnerName(), 0));
+            out.add(new BaseDto("wall", fName, center.getX(), center.getY(), center.getZ(), false, status, f.getOwnerName(), 0));
+        }
+
+        for (MappedVillageService.MappedVillage village : MappedVillageService.listForWorld(server, world)) {
+            BlockPos center = village.getCenter();
+            String detail = village.getVertexCount() + " vertices";
+            out.add(new BaseDto("village", village.getName(), center.getX(), center.getY(), center.getZ(), false, detail, null, 0));
         }
 
         String json = GSON.toJson(out);
@@ -568,6 +615,58 @@ public final class BaseNetworkManager {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
+    }
+
+    private static boolean removeAnyEntry(MinecraftServer server, ServerWorld world, String label) {
+        if (server == null || world == null || label == null || label.isBlank()) {
+            return false;
+        }
+        if (BotHomeService.removeBase(server, world, label)) {
+            return true;
+        }
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        if (FortificationPersistenceService.delete(server, worldKey, label)) {
+            return true;
+        }
+        return MappedVillageService.delete(server, world, label);
+    }
+
+    private static boolean renameAnyEntry(MinecraftServer server, ServerWorld world, String oldLabel, String newLabel) {
+        if (server == null || world == null || oldLabel == null || oldLabel.isBlank() || newLabel == null || newLabel.isBlank()) {
+            return false;
+        }
+        if (BotHomeService.renameBase(server, world, oldLabel, newLabel)) {
+            return true;
+        }
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        if (FortificationPersistenceService.rename(server, worldKey, oldLabel, newLabel)) {
+            return true;
+        }
+        return MappedVillageService.rename(server, world, oldLabel, newLabel);
+    }
+
+    private static boolean labelInUse(MinecraftServer server, ServerWorld world, String label, String excludeLabel) {
+        if (server == null || world == null || label == null || label.isBlank()) {
+            return false;
+        }
+        String wanted = normalizeLabel(label);
+        String exclude = normalizeLabel(excludeLabel);
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
+            if (base != null && normalizeLabel(base.label()).equals(wanted) && !wanted.equals(exclude)) {
+                return true;
+            }
+        }
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        for (FortificationPersistenceService.SavedFortification fort : FortificationPersistenceService.listForWorld(server, worldKey)) {
+            if (fort != null && normalizeLabel(fort.getName()).equals(wanted) && !wanted.equals(exclude)) {
+                return true;
+            }
+        }
+        return MappedVillageService.containsLabel(server, world, label) && !wanted.equals(exclude);
+    }
+
+    private static String normalizeLabel(String raw) {
+        return raw == null ? "" : raw.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private record OwnerSubject(UUID ownerUuid, String ownerName) {}

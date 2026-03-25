@@ -29,6 +29,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,7 +43,12 @@ public class ollamaClient {
     public static String initialResponse = "";
     public static final OllamaAPI ollamaAPI = new OllamaAPI(host);
     private static final Pattern THINK_BLOCK = Pattern.compile("<think>([\\s\\S]*?)</think>");
-    private static final ExecutorService BOT_TASK_POOL = Executors.newCachedThreadPool();
+    private static final AtomicInteger BOT_TASK_THREAD_ID = new AtomicInteger(0);
+    private static final ExecutorService BOT_TASK_POOL = Executors.newCachedThreadPool(runnable -> {
+        Thread t = new Thread(runnable, "ollama-client-" + BOT_TASK_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
 
     public static void runFromChat(String botName, String message, UUID playerUUID) {
         MinecraftServer server = Frens.serverInstance;

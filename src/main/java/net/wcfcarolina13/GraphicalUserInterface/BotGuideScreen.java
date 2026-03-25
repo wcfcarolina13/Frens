@@ -952,11 +952,27 @@ public final class BotGuideScreen extends Screen {
                                 "dry_run — preview layout with particles (orange=towers, blue=walls, gold=gate, dark blue=moat, purple=overhang, red=clear).",
                                 "status <name> — per-edge completion stats + particles highlighting missing blocks in red.",
                                 "resume / patch / drift / expand / merge / list / name — manage saved walls and schema updates.",
-                                "Tip: Use the Base Manager screen (Wall Status button) for a quick visual check."
+                                "Tip: Use the Base Manager screen for wall status, ownership, and nearby village mapping."
                         ),
                         "bot fortify " + target,
                         "Actions > Construction > Fortify Village",
                         "fortify village wall defense perimeter tower gatehouse resume patch status merge hull particles"
+                ),
+                new GuideTopic(
+                        "construction_map_village",
+                        "Construction",
+                        "Map Village",
+                        "Saves the nearby settlement as a shared remembered no-go zone without building a wall.",
+                        List.of(
+                                "Open the Base Manager and use the Villages section to map the local settlement.",
+                                "The saved village reuses the fortification convex hull and stores it by name.",
+                                "Mapped villages are global shared data for the world, not personal claims.",
+                                "Bots avoid mapped villages for mining, woodcutting, dirt collection, flower/mushroom/grass gathering, and passive-mob hunting.",
+                                "Village rows appear in the same manager list as bases and walls, but they are not valid home or go-to targets."
+                        ),
+                        "UI-only flow",
+                        "Actions > Bases > Map Village",
+                        "village mapping perimeter convex hull no-go zone bases manager"
                 ),
                 new GuideTopic(
                         "modes_quest",

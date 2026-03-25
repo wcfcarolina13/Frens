@@ -22,6 +22,7 @@ import net.minecraft.world.GameMode;
 import net.minecraft.world.World;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -189,6 +190,126 @@ public final class NavigationArtifactService {
                     if (player.getEntityWorld().getBlockState(center.add(dx, dy, dz)).isOf(block)) return true;
                 }
             }
+        }
+        return false;
+    }
+
+    // ── Bot-to-bot artifact teleport (summon home) ─────────────
+
+    /** Distance threshold for bot-to-bot artifact teleport (same as sunset fast travel). */
+    private static final double BOT_SUMMON_RANGE_SQ = 96.0D * 96.0D;
+    /** Receiver must be within this range of the destination to qualify as "at base". */
+    private static final double RECEIVER_AT_DEST_RANGE_SQ = 32.0D * 32.0D;
+
+    /**
+     * Attempt to teleport a traveler bot to a destination by having a "receiver" bot
+     * already near that destination summon it via tier-2 artifact access.
+     *
+     * <p>Requirements:
+     * <ul>
+     *   <li>Traveler is &gt;96 blocks from destination</li>
+     *   <li>A same-owner bot ("receiver") exists within 32 blocks of destination</li>
+     *   <li>Receiver has tier-2 artifact access (Eye of Ender, Wizard's Tome,
+     *       Enchanting Table nearby, or both bots hold Ender Pearls)</li>
+     *   <li>Traveler is not in combat</li>
+     * </ul>
+     *
+     * @param server      the Minecraft server
+     * @param traveler    the bot that wants to get home
+     * @param destination the target position (home/base)
+     * @return true if the teleport was initiated
+     */
+    public static boolean tryBotToBotArtifactTeleport(MinecraftServer server,
+                                                       ServerPlayerEntity traveler,
+                                                       BlockPos destination) {
+        if (server == null || traveler == null || destination == null) {
+            return false;
+        }
+        if (isTraveling(traveler.getUuid())) {
+            return false;
+        }
+        if (BotCombatCalloutService.isInCombat(traveler.getUuid())) {
+            return false;
+        }
+
+        // Distance gate: traveler must be far enough from destination.
+        double distSq = traveler.getBlockPos().getSquaredDistance(destination);
+        if (distSq <= BOT_SUMMON_RANGE_SQ) {
+            return false;
+        }
+
+        UUID travelerOwner = BotTerritoryAuthorizationService.resolveBotOwnerUuid(traveler);
+        if (travelerOwner == null) {
+            return false;
+        }
+
+        // Find a receiver bot near the destination with tier-2 artifact access.
+        ServerPlayerEntity receiver = null;
+        for (ServerPlayerEntity candidate : BotEventHandler.getRegisteredBots(server)) {
+            if (candidate == null || candidate == traveler || candidate.isRemoved()) {
+                continue;
+            }
+            if (isTraveling(candidate.getUuid())) {
+                continue;
+            }
+            // Same owner check.
+            UUID candidateOwner = BotTerritoryAuthorizationService.resolveBotOwnerUuid(candidate);
+            if (!travelerOwner.equals(candidateOwner)) {
+                continue;
+            }
+            // Receiver must be near the destination.
+            if (candidate.getBlockPos().getSquaredDistance(destination) > RECEIVER_AT_DEST_RANGE_SQ) {
+                continue;
+            }
+            // Receiver must have tier-2 artifact access.
+            if (!hasReceiverTier2Access(candidate, traveler)) {
+                continue;
+            }
+            receiver = candidate;
+            break;
+        }
+
+        if (receiver == null) {
+            return false;
+        }
+
+        // Calculate delay using receiver's artifact multiplier (1.0x for tier-2).
+        double distance = Math.sqrt(distSq);
+        ServerWorld travelerWorld = (ServerWorld) traveler.getEntityWorld();
+        boolean crossDim = !travelerWorld.getRegistryKey().equals(
+                ((ServerWorld) receiver.getEntityWorld()).getRegistryKey());
+        int delayTicks = calculateDelayTicks(distance, crossDim, 1.0);
+
+        UUID ownerUuid = travelerOwner;
+        String travelerAlias = traveler.getName().getString();
+        String receiverAlias = receiver.getName().getString();
+
+        boolean started = beginDelayedTravel(server, traveler, travelerAlias, destination,
+                ((ServerWorld) receiver.getEntityWorld()).getRegistryKey(), delayTicks, ownerUuid);
+
+        if (started) {
+            LOGGER.info("Bot-to-bot summon: {} is summoning {} home via artifact (dist={}, delay={}t)",
+                    receiverAlias, travelerAlias, (int) distance, delayTicks);
+            notifyOwner(server, ownerUuid,
+                    "\u00A7d" + receiverAlias + " is summoning " + travelerAlias
+                    + " home via artifact (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
+        }
+        return started;
+    }
+
+    /**
+     * Check whether a receiver bot has tier-2 artifact access for summoning.
+     * Matches the tier-2 checks in {@link #artifactDelayMultiplier}.
+     */
+    private static boolean hasReceiverTier2Access(ServerPlayerEntity receiver,
+                                                   ServerPlayerEntity traveler) {
+        if (hasArtifact(receiver, net.minecraft.item.Items.ENDER_EYE)) return true;
+        if (CompanionCommunicationPolicy.hasWizardTome(receiver)) return true;
+        if (isNearBlock(receiver, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)) return true;
+        // Dual ender pearls: both receiver and traveler must hold one.
+        if (hasArtifact(receiver, net.minecraft.item.Items.ENDER_PEARL)
+                && hasArtifact(traveler, net.minecraft.item.Items.ENDER_PEARL)) {
+            return true;
         }
         return false;
     }

@@ -1159,6 +1159,9 @@ public final class BotMutualAidService {
         return weaponScore(bot.getMainHandStack()) > 0;
     }
 
+    /** Only donate wooden or stone tier weapons (unenchanted). Never iron/gold/diamond/netherite. */
+    private static final int MAX_DONATABLE_WEAPON_SCORE = 20;
+
     private static int pickSpareGearSlot(ServerPlayerEntity donor, ServerPlayerEntity recipient) {
         if (donor == null || recipient == null) {
             return -1;
@@ -1175,7 +1178,7 @@ public final class BotMutualAidService {
                     if (score <= 0) {
                         continue;
                     }
-                    if (score < bestScore) {
+                    if (score < bestScore && score <= MAX_DONATABLE_WEAPON_SCORE) {
                         bestScore = score;
                         bestSlot = i;
                     }
@@ -1239,11 +1242,16 @@ public final class BotMutualAidService {
         if (!weapon) {
             return 0;
         }
-        if (key.contains("diamond")) return 40;
-        if (key.contains("iron")) return 30;
-        if (key.contains("stone") || key.contains("cobble")) return 20;
-        if (key.contains("wood")) return 10;
-        return 5;
+        int base;
+        if (key.contains("netherite")) base = 50;
+        else if (key.contains("diamond")) base = 40;
+        else if (key.contains("iron")) base = 30;
+        else if (key.contains("stone") || key.contains("cobble")) base = 20;
+        else if (key.contains("gold")) base = 15;
+        else if (key.contains("wood")) base = 10;
+        else base = 5;
+        if (stack.hasEnchantments()) base += 100;
+        return base;
     }
 
     private static EquipmentSlot firstMissingArmorSlot(ServerPlayerEntity bot) {

@@ -13,9 +13,9 @@ import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.MovementService;
-import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -161,7 +161,7 @@ public final class MushroomForageSkill implements Skill {
         if (!world.isChunkLoaded(pos) || !isSmallMushroom(world.getBlockState(pos))) {
             return false;
         }
-        if (ProtectedZoneService.isProtected(pos, world, null)) {
+        if (CompanionSafeZoneService.isProtected(world, pos, null)) {
             return false;
         }
         if (isNearHome(world, bot, pos)) {

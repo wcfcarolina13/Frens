@@ -43,21 +43,46 @@ public final class SmeltingService {
     private SmeltingService() {}
 
     public static boolean startBatchCook(ServerPlayerEntity bot, ServerCommandSource source, String itemFilter, String fuelSpec) {
+        return startBatchCookInternal(bot, source, itemFilter, fuelSpec, false);
+    }
+
+    public static boolean startBatchCookFoodOnly(ServerPlayerEntity bot, ServerCommandSource source, String fuelSpec) {
+        return startBatchCookInternal(bot, source, "", fuelSpec, true);
+    }
+
+    private static boolean startBatchCookInternal(ServerPlayerEntity bot,
+                                                  ServerCommandSource source,
+                                                  String itemFilter,
+                                                  String fuelSpec,
+                                                  boolean foodOnly) {
         if (bot == null || source == null) {
             return false;
         }
         if (bot.getInventory().getEmptySlot() == -1) {
             CraftingHelper.offloadCheapItemsToNearbyChest(bot, source, 0, 0, Map.of());
         }
+        if (!(source.getWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        List<String> availableCookables = listCookablesForAnyStation(bot, world, foodOnly);
+        if (!hasMatchingCookables(bot, world, itemFilter, foodOnly)) {
+            if (availableCookables.isEmpty()) {
+                ChatUtils.sendSystemMessage(source, "I have nothing cookable.");
+            } else if (itemFilter == null || itemFilter.isBlank()) {
+                ChatUtils.sendSystemMessage(source, "I can cook: " + String.join(", ", availableCookables) + ". Specify one (e.g., /bot cook chicken).");
+            } else {
+                ChatUtils.sendSystemMessage(source, "No '" + itemFilter + "' to cook. I have: " + String.join(", ", availableCookables));
+            }
+            return false;
+        }
         var commander = source.getPlayer();
-        StationTarget station = resolveFurnaceTarget(bot, commander, source.getWorld());
+        StationTarget station = resolveFurnaceTarget(bot, commander, world);
         if (station == null) {
             ChatUtils.sendSystemMessage(source, "I need a furnace (or similar) placed nearby.");
             return false;
         }
         BlockPos pos = station.pos();
         BlockPos approachPos = station.approach();
-        ServerWorld world = source.getWorld();
         var state = world.getBlockState(pos);
         if (!(state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER))) {
             ChatUtils.sendSystemMessage(source, "Look at a furnace, blast furnace, or smoker.");
@@ -71,9 +96,9 @@ public final class SmeltingService {
         }
         BotFurnaceRegistryService.registerFurnace(bot, pos, world, "smelt");
 
-        Map<Item, List<ItemStack>> cookables = findCookables(bot, world, state, itemFilter);
+        Map<Item, List<ItemStack>> cookables = findCookables(bot, world, state, itemFilter, foodOnly);
         if (cookables.isEmpty()) {
-            List<String> available = listCookables(bot, world, state);
+            List<String> available = listCookables(bot, world, state, foodOnly);
             if (available.isEmpty()) {
                 ChatUtils.sendSystemMessage(source, "I have nothing cookable.");
             } else if (itemFilter == null || itemFilter.isBlank()) {
@@ -215,6 +240,19 @@ public final class SmeltingService {
     public static List<net.minecraft.util.Identifier> listCookableIds(ServerPlayerEntity bot,
                                                                       ServerWorld world,
                                                                       net.minecraft.block.BlockState furnaceState) {
+        return listCookableIds(bot, world, furnaceState, false);
+    }
+
+    public static List<net.minecraft.util.Identifier> listCookableFoodIds(ServerPlayerEntity bot,
+                                                                          ServerWorld world,
+                                                                          net.minecraft.block.BlockState furnaceState) {
+        return listCookableIds(bot, world, furnaceState, true);
+    }
+
+    private static List<net.minecraft.util.Identifier> listCookableIds(ServerPlayerEntity bot,
+                                                                       ServerWorld world,
+                                                                       net.minecraft.block.BlockState furnaceState,
+                                                                       boolean foodOnly) {
         List<net.minecraft.util.Identifier> ids = new ArrayList<>();
         if (bot == null || world == null || furnaceState == null) {
             return ids;
@@ -230,7 +268,7 @@ public final class SmeltingService {
             if (isFuelItem(stack, world)) {
                 continue;
             }
-            if (isCookable(stack, world, recipeType)) {
+            if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
                 unique.add(Registries.ITEM.getId(stack.getItem()));
             }
         }
@@ -260,6 +298,13 @@ public final class SmeltingService {
             return false;
         }
         return !listCookableIds(bot, world, Blocks.FURNACE.getDefaultState()).isEmpty();
+    }
+
+    public static boolean hasCookableFoodInventoryItems(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        return !listCookableFoodIds(bot, world, Blocks.FURNACE.getDefaultState()).isEmpty();
     }
 
     public static boolean hasFuelForAutoCook(ServerPlayerEntity bot, ServerWorld world) {
@@ -724,7 +769,8 @@ public final class SmeltingService {
     private static Map<Item, List<ItemStack>> findCookables(ServerPlayerEntity bot,
                                                             ServerWorld world,
                                                             net.minecraft.block.BlockState furnaceState,
-                                                            String itemFilter) {
+                                                            String itemFilter,
+                                                            boolean foodOnly) {
         Map<Item, List<ItemStack>> found = new LinkedHashMap<>();
         var recipeType = recipeTypeFor(furnaceState);
         if (recipeType == null) {
@@ -745,7 +791,7 @@ public final class SmeltingService {
                     && !stackNameSlug.contains(filterSlug)) {
                 continue;
             }
-            if (isCookable(stack, world, recipeType)) {
+            if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
                 found.computeIfAbsent(stack.getItem(), k -> new ArrayList<>()).add(stack.copy());
             }
         }
@@ -754,7 +800,8 @@ public final class SmeltingService {
 
     private static List<String> listCookables(ServerPlayerEntity bot,
                                               ServerWorld world,
-                                              net.minecraft.block.BlockState furnaceState) {
+                                              net.minecraft.block.BlockState furnaceState,
+                                              boolean foodOnly) {
         List<String> names = new ArrayList<>();
         var recipeType = recipeTypeFor(furnaceState);
         if (recipeType == null) {
@@ -766,7 +813,7 @@ public final class SmeltingService {
             if (isFuelItem(stack, world)) {
                 continue;
             }
-            if (isCookable(stack, world, recipeType)) {
+            if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
                 String n = stack.getName().getString();
                 if (names.stream().noneMatch(x -> normalizeName(x).equals(normalizeName(n)))) {
                     names.add(n);
@@ -774,6 +821,16 @@ public final class SmeltingService {
             }
         }
         return names;
+    }
+
+    private static List<String> listCookablesForAnyStation(ServerPlayerEntity bot,
+                                                           ServerWorld world,
+                                                           boolean foodOnly) {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        names.addAll(listCookables(bot, world, Blocks.FURNACE.getDefaultState(), foodOnly));
+        names.addAll(listCookables(bot, world, Blocks.BLAST_FURNACE.getDefaultState(), foodOnly));
+        names.addAll(listCookables(bot, world, Blocks.SMOKER.getDefaultState(), foodOnly));
+        return new ArrayList<>(names);
     }
 
     private static String normalizeName(String raw) {
@@ -803,6 +860,25 @@ public final class SmeltingService {
         String stackNameNorm = normalizeName(stack.getName().getString());
         String stackNameSlug = stackNameNorm.replace(" ", "");
         return stackNameNorm.contains(filterNorm) || stackNameSlug.contains(filterSlug);
+    }
+
+    private static boolean hasMatchingCookables(ServerPlayerEntity bot,
+                                                ServerWorld world,
+                                                String itemFilter,
+                                                boolean foodOnly) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        for (net.minecraft.block.BlockState furnaceState : List.of(
+                Blocks.FURNACE.getDefaultState(),
+                Blocks.BLAST_FURNACE.getDefaultState(),
+                Blocks.SMOKER.getDefaultState()
+        )) {
+            if (!findCookables(bot, world, furnaceState, itemFilter, foodOnly).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void maybeLoadFuel(ServerPlayerEntity bot,
@@ -942,7 +1018,7 @@ public final class SmeltingService {
             if (isFuelItem(stack, world)) {
                 continue;
             }
-            if (isCookable(stack, world, recipeType)) {
+            if (matchesCookablePolicy(stack, world, recipeType, false)) {
                 found.computeIfAbsent(stack.getItem(), k -> new ArrayList<>()).add(stack.copy());
             }
         }
@@ -1414,19 +1490,35 @@ public final class SmeltingService {
         return remaining;
     }
 
-    private static boolean isCookable(ItemStack stack,
-                                      ServerWorld world,
-                                      net.minecraft.recipe.RecipeType<? extends AbstractCookingRecipe> recipeType) {
+    private static boolean matchesCookablePolicy(ItemStack stack,
+                                                 ServerWorld world,
+                                                 net.minecraft.recipe.RecipeType<? extends AbstractCookingRecipe> recipeType,
+                                                 boolean foodOnly) {
+        RecipeEntry<? extends AbstractCookingRecipe> recipe = findMatchingCookingRecipe(stack, world, recipeType);
+        if (recipe == null) {
+            return false;
+        }
+        if (!foodOnly) {
+            return true;
+        }
+        ItemStack output = recipe.value().craft(new SingleStackRecipeInput(stack), world.getRegistryManager());
+        return output.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static RecipeEntry<? extends AbstractCookingRecipe> findMatchingCookingRecipe(ItemStack stack,
+                                                                                          ServerWorld world,
+                                                                                          net.minecraft.recipe.RecipeType<? extends AbstractCookingRecipe> recipeType) {
         var input = new SingleStackRecipeInput(stack);
         for (RecipeEntry<?> entry : world.getRecipeManager().values()) {
             if (!entry.value().getType().equals(recipeType)) {
                 continue;
             }
             if (entry.value() instanceof AbstractCookingRecipe cooking && cooking.matches(input, world)) {
-                return true;
+                return (RecipeEntry<? extends AbstractCookingRecipe>) entry;
             }
         }
-        return false;
+        return null;
     }
 
     private static net.minecraft.recipe.RecipeType<? extends AbstractCookingRecipe> recipeTypeFor(net.minecraft.block.BlockState state) {

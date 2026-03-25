@@ -5,9 +5,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.TaskLabelFormatter;
 import net.wcfcarolina13.GameAI.services.TaskService;
 
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -64,81 +64,12 @@ public final class BotTaskPeekNetworkManager {
             paused = state == TaskService.State.PAUSED;
             active = paused || state == TaskService.State.RUNNING;
             if (active) {
-                taskLabel = humanizeTaskName(info.name());
+                taskLabel = TaskLabelFormatter.humanizeTaskName(info.name());
             }
         }
 
         String alias = bot.getName() != null ? bot.getName().getString() : "bot";
         ServerPlayNetworking.send(requester,
                 new BotTaskPeekStatusPayload(botUuid.toString(), alias, active, paused, returningHome, taskLabel));
-    }
-
-    private static String humanizeTaskName(String taskName) {
-        if (taskName == null || taskName.isBlank()) {
-            return "working";
-        }
-        String raw = taskName.trim();
-        if (raw.regionMatches(true, 0, "skill:", 0, "skill:".length())) {
-            raw = raw.substring("skill:".length());
-        }
-        raw = raw.replace('_', ' ').trim().replaceAll("\\s+", " ");
-        if (raw.isEmpty()) {
-            return "working";
-        }
-        String normalized = raw.toLowerCase(Locale.ROOT);
-        switch (normalized) {
-            case "farm":
-                return "farming";
-            case "collect dirt":
-                return "collecting dirt";
-            case "drop sweep":
-                return "running cleanup";
-            case "woodcut":
-                return "woodcutting";
-            case "stripmine":
-            case "strip mine":
-                return "strip mining";
-            case "hangout":
-                return "hanging out";
-            case "hunt":
-                return "hunting";
-            case "fish":
-                return "fishing";
-            case "shelter":
-                return "building shelter";
-            case "build":
-                return "building";
-            case "flowers":
-                return "collecting flowers";
-            case "grass seeds":
-                return "collecting seeds";
-            case "leaf litter":
-                return "collecting leaf litter";
-            case "mushrooms":
-                return "foraging mushrooms";
-            case "feed animals":
-                return "feeding animals";
-            case "wander":
-                return "wandering";
-            case "fortify":
-            case "fortify village":
-                return "fortifying the village";
-            case "fortify patch":
-                return "repairing fortifications";
-            case "fortify moat":
-                return "digging the moat";
-            case "fortify drift":
-                return "checking wall drift";
-            case "fortify expand":
-                return "expanding the wall";
-            case "fortify status":
-                return "reviewing wall status";
-            case "fortify list":
-                return "reviewing saved walls";
-            case "fortify resume":
-                return "resuming wall construction";
-            default:
-                return raw;
-        }
     }
 }

@@ -142,6 +142,17 @@ Switching uses `/bot open <alias>` under the hood, so normal ownership/permissio
 
 ---
 
+## Village Mapping
+
+The Base Manager now supports **Map Village** in the `Villages` section.
+
+- This scans the nearby settlement, computes the same convex-hull perimeter used by fortification, and saves it by name.
+- Mapped villages are shared world-level no-go zones for bots.
+- They block destructive/resource-gathering behavior inside the saved perimeter, including mining, woodcutting, dirt collection, several small foraging hobbies, and passive-mob hunting.
+- Mapped villages show up in the Base Manager list alongside bases and walls, but they are not treated as home bases or navigation destinations.
+
+---
+
 ## Command Reference
 
 ### Bot Management

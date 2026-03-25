@@ -1,18 +1,17 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 
 /**
- * Shared village-structure protection helpers for generic navigation and safe mutation checks.
+ * Local helpers for explicit village workflows such as fortification planning.
+ * Do not use this as a generic runtime protection source; ambient protection comes
+ * from saved zones/bases/fortifications/mapped villages.
  */
 public final class VillageStructureProtectionService {
-
-    private static final int GENERIC_BREAK_ADJACENT_THRESHOLD = 2;
 
     private VillageStructureProtectionService() {
     }
@@ -28,7 +27,7 @@ public final class VillageStructureProtectionService {
         int required = Math.max(1, threshold);
         int count = 0;
         for (Direction dir : Direction.values()) {
-            BlockState neighbor = world.getBlockState(pos.offset(dir));
+            var neighbor = world.getBlockState(pos.offset(dir));
             if (!neighbor.isAir() && isVillageStructureBlock(neighbor.getBlock())) {
                 count++;
                 if (count >= required) {
@@ -37,17 +36,5 @@ public final class VillageStructureProtectionService {
             }
         }
         return false;
-    }
-
-    public static boolean isVillageProtectedForGenericBreaking(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null) {
-            return false;
-        }
-        BlockState state = world.getBlockState(pos);
-        if (state.isAir()) {
-            return false;
-        }
-        return isVillageStructureBlock(state.getBlock())
-                || isAdjacentToVillageStructure(world, pos, GENERIC_BREAK_ADJACENT_THRESHOLD);
     }
 }

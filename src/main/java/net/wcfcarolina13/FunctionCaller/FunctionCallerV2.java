@@ -30,6 +30,7 @@ import java.util.*;
 import java.util.LinkedHashSet;
 
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.time.format.DateTimeFormatter;
 
@@ -96,6 +97,7 @@ import static net.wcfcarolina13.ChatUtils.Helper.JsonUtils.cleanJsonString;
 public class FunctionCallerV2 {
 
     private static final Logger logger = LoggerFactory.getLogger("function-caller");
+    private static final AtomicInteger EXECUTOR_THREAD_ID = new AtomicInteger(0);
 
     private static final ThreadLocal<ServerCommandSource> ACTIVE_BOT_SOURCE = ThreadLocal.withInitial(() -> null);
     private static final ThreadLocal<UUID> ACTIVE_PLAYER_UUID = ThreadLocal.withInitial(() -> null);
@@ -107,7 +109,11 @@ public class FunctionCallerV2 {
 
     private static volatile String functionOutput = null;
 
-    private static final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private static final ExecutorService executor = Executors.newFixedThreadPool(4, runnable -> {
+        Thread t = new Thread(runnable, "function-caller-" + EXECUTOR_THREAD_ID.incrementAndGet());
+        t.setDaemon(true);
+        return t;
+    });
 
     private static final Map<String, Object> sharedState = new ConcurrentHashMap<>();  // Updated to Map<String, Object>
 

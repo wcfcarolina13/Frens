@@ -47,7 +47,6 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +57,6 @@ public class AutoFaceEntity {
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
     private static final double BOUNDING_BOX_SIZE = 10.0; // Detection range in blocks
     private static final long LOOP_INTERVAL_MS = 200; // Interval for behaviour loop
-    private static final ExecutorService executor3 = Executors.newSingleThreadExecutor();
     private static final long EMOTE_COOLDOWN_TICKS = 20L * 45; // ~45 seconds
     private static final long HOSTILE_COOLDOWN_TICKS = 20L * 15; // wait 15 seconds after combat
     private static final double EMOTE_MAX_DISTANCE = 6.0D;
@@ -101,7 +99,12 @@ public class AutoFaceEntity {
         shutdownExecutorsWithUuid(botId);
         stopAutoFace(bot);
 
-        ScheduledExecutorService botExecutor = Executors.newSingleThreadScheduledExecutor();
+        ScheduledExecutorService botExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            String botName = bot.getName().getString().replace(' ', '_');
+            Thread t = new Thread(runnable, "autoface-" + botName);
+            t.setDaemon(true);
+            return t;
+        });
 
         botExecutors.put(botId, botExecutor);
 
@@ -191,6 +194,10 @@ public class AutoFaceEntity {
 
     private static void runAutoFaceTick(ServerPlayerEntity bot, MinecraftServer server, RLAgent rlAgent) {
         if (server == null || bot == null) {
+            return;
+        }
+        if (TaskService.isServerStopping()) {
+            stopAutoFace(bot);
             return;
         }
         if (!server.isRunning() || bot.isDisconnected()) {
@@ -413,12 +420,14 @@ public class AutoFaceEntity {
         }
     }
 
+    public static void onServerStopping(MinecraftServer minecraftServer) {
+        for (UUID uuid : new ArrayList<>(botExecutors.keySet())) {
+            shutdownExecutorsWithUuid(uuid);
+        }
+    }
+
     public static void onServerStopped(MinecraftServer minecraftServer) {
-        executor3.submit(() -> {
-            for (UUID uuid : new ArrayList<>(botExecutors.keySet())) {
-                shutdownExecutorsWithUuid(uuid);
-            }
-        });
+        onServerStopping(minecraftServer);
     }
 
 

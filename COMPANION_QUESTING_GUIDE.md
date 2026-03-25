@@ -219,6 +219,15 @@ If your settlement keeps getting accidentally modified (or you want shared owner
 
 `<owner>` can be a player name, UUID, or a bot alias owner.
 
+### Mapped villages vs protected zones
+
+If you do not want to build a fort wall but still want bots to leave a settlement alone, use **Map Village** in the Base Manager.
+
+- A mapped village saves the settlement perimeter as a shared world-level no-go zone.
+- It is meant for cultural/settlement preservation, not ownership or permission management.
+- Bots use mapped villages to avoid destructive gathering inside the village footprint, including mining, woodcutting, dirt collection, several ambient forage actions, and passive-mob hunting.
+- Use protected zones when you need ownership, permits, or explicit access control instead of a simple shared exclusion area.
+
 ### Mode behavior
 
 - `owner_only`: only the zone owner can authorize bot edits inside the zone.

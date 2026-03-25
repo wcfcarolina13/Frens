@@ -3,6 +3,9 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.projectile.ArrowEntity;
 import net.minecraft.entity.projectile.PersistentProjectileEntity;
+import net.minecraft.entity.projectile.TridentEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -71,11 +74,17 @@ public final class BotArrowRecoveryService {
         Vec3d lastPos;
         long lastSeenTick;
         long stationarySinceTick;
+        boolean botOwned;
+        boolean trident;
+        boolean mandatoryRecovery;
 
-        TrackedArrow(Vec3d lastPos, long lastSeenTick) {
+        TrackedArrow(Vec3d lastPos, long lastSeenTick, boolean botOwned, boolean trident) {
             this.lastPos = lastPos;
             this.lastSeenTick = lastSeenTick;
             this.stationarySinceTick = 0L;
+            this.botOwned = botOwned;
+            this.trident = trident;
+            this.mandatoryRecovery = trident && botOwned;
         }
     }
 
@@ -92,6 +101,8 @@ public final class BotArrowRecoveryService {
         long chaseStartTick = -1L;
 
         long lastMissCalloutTick = -1L;
+        boolean outstandingTridentRecovery = false;
+        int expectedTridentCount = 0;
 
         final Map<UUID, TrackedArrow> tracked = new HashMap<>();
 
@@ -107,6 +118,8 @@ public final class BotArrowRecoveryService {
             nextScanTick = 0L;
             lastMissCalloutTick = -1L;
             lastCombatAnchorPos = null;
+            outstandingTridentRecovery = false;
+            expectedTridentCount = 0;
             tracked.clear();
             clearRecovery();
         }
@@ -146,6 +159,16 @@ public final class BotArrowRecoveryService {
         st.nextScanTick = Math.min(st.nextScanTick, serverTick);
     }
 
+    public static void noteTridentThrown(ServerPlayerEntity bot, ItemStack stack, long serverTick) {
+        if (bot == null || stack == null || stack.isEmpty()) {
+            return;
+        }
+        BotState st = stateFor(bot);
+        st.outstandingTridentRecovery = true;
+        st.expectedTridentCount = Math.max(st.expectedTridentCount, countTridents(bot));
+        noteRangedShot(bot, serverTick);
+    }
+
     public static void noteHostilesSeen(ServerPlayerEntity bot, long serverTick) {
         if (bot == null) {
             return;
@@ -174,6 +197,7 @@ public final class BotArrowRecoveryService {
 
         long nowTick = server.getTicks();
         BotState st = stateFor(bot);
+        refreshTridentRecoveryState(bot, st);
 
         long lastActivity = Math.max(st.lastShotTick, st.lastHostileSeenTick);
         if (lastActivity < 0L) {
@@ -224,6 +248,7 @@ public final class BotArrowRecoveryService {
 
         long nowTick = server.getTicks();
         BotState st = stateFor(bot);
+        refreshTridentRecoveryState(bot, st);
 
         // Recover if we've been in combat/shot recently, OR if there are arrows nearby.
         long lastActivity = Math.max(st.lastShotTick, st.lastHostileSeenTick);
@@ -231,7 +256,7 @@ public final class BotArrowRecoveryService {
             // No combat recorded for this bot. Do a speculative scan — if arrows are
             // nearby (e.g. from other bots' fights), bootstrap recovery state.
             scanForRecoverableArrows(bot, nowTick, false);
-            if (st.tracked.isEmpty()) {
+            if (st.tracked.isEmpty() && !st.outstandingTridentRecovery) {
                 return false;
             }
             // Bootstrap: set lastHostileSeenTick past the safe-delay so recovery starts immediately.
@@ -266,7 +291,9 @@ public final class BotArrowRecoveryService {
         // Abort session after a while.
         if (st.recoverySessionStartTick >= 0L && nowTick - st.recoverySessionStartTick > SESSION_TIMEOUT_TICKS) {
             st.clearRecovery();
-            return false;
+            if (!st.outstandingTridentRecovery) {
+                return false;
+            }
         }
 
         // Pick / validate current target arrow.
@@ -317,7 +344,9 @@ public final class BotArrowRecoveryService {
 
         // If the target arrow hasn't been seen recently, don't drive movement toward stale positions.
         if ((nowTick - tracked.lastSeenTick) > ARROW_STALE_TICKS) {
-            st.tracked.remove(st.chasingArrowId);
+            if (!tracked.mandatoryRecovery) {
+                st.tracked.remove(st.chasingArrowId);
+            }
             st.chasingArrowId = null;
             st.chaseStartTick = -1L;
             return false;
@@ -325,7 +354,9 @@ public final class BotArrowRecoveryService {
 
         // Give up if chasing too long.
         if (st.chaseStartTick >= 0L && nowTick - st.chaseStartTick > CHASE_TIMEOUT_TICKS) {
-            st.tracked.remove(st.chasingArrowId);
+            if (!tracked.mandatoryRecovery) {
+                st.tracked.remove(st.chasingArrowId);
+            }
             st.chasingArrowId = null;
             st.chaseStartTick = -1L;
             return false;
@@ -359,36 +390,43 @@ public final class BotArrowRecoveryService {
         List<PersistentProjectileEntity> projectiles = world.getEntitiesByClass(
                 PersistentProjectileEntity.class,
                 box,
-                p -> p instanceof ArrowEntity
+                p -> p instanceof ArrowEntity || p instanceof TridentEntity
         );
 
         for (PersistentProjectileEntity p : projectiles) {
-            if (!(p instanceof ArrowEntity arrow)) {
+            boolean tridentProjectile = p instanceof TridentEntity;
+            if (!tridentProjectile && !(p instanceof ArrowEntity)) {
                 continue;
             }
 
-            // Track ALL arrows for recovery, but only callout misses for bot-owned ones.
-            Entity owner = arrow.getOwner();
+            // Track all arrows for QoL recovery. Tridents are only tracked when this bot owns them.
+            Entity owner = p.getOwner();
             boolean botOwned = owner != null && owner.getUuid() != null
                     && owner.getUuid().equals(bot.getUuid());
+            if (tridentProjectile && !botOwned) {
+                continue;
+            }
 
-            UUID id = arrow.getUuid();
-            Vec3d pos = new Vec3d(arrow.getX(), arrow.getY(), arrow.getZ());
+            UUID id = p.getUuid();
+            Vec3d pos = new Vec3d(p.getX(), p.getY(), p.getZ());
             TrackedArrow t = st.tracked.get(id);
             if (t == null) {
-                t = new TrackedArrow(pos, nowTick);
+                t = new TrackedArrow(pos, nowTick, botOwned, tridentProjectile);
                 st.tracked.put(id, t);
             } else {
                 t.lastPos = pos;
                 t.lastSeenTick = nowTick;
+                t.botOwned = botOwned;
+                t.trident = tridentProjectile;
+                t.mandatoryRecovery = tridentProjectile && botOwned;
             }
 
-            boolean stationary = arrow.getVelocity().lengthSquared() < 0.0004D;
+            boolean stationary = p.getVelocity().lengthSquared() < 0.0004D;
             if (stationary) {
                 if (t.stationarySinceTick == 0L) {
                     t.stationarySinceTick = nowTick;
                     // "I missed!" callout only for bot-owned arrows.
-                    if (botOwned) {
+                    if (botOwned && !tridentProjectile) {
                         if (hostilesPresent) {
                             BotActions.noteRangedMiss(bot, nowTick);
                         }
@@ -406,7 +444,11 @@ public final class BotArrowRecoveryService {
         while (it.hasNext()) {
             Map.Entry<UUID, TrackedArrow> e = it.next();
             TrackedArrow t = e.getValue();
-            if (t == null || t.lastSeenTick < pruneBefore) {
+            if (t == null) {
+                it.remove();
+                continue;
+            }
+            if (t.lastSeenTick < pruneBefore && !t.mandatoryRecovery) {
                 it.remove();
             }
         }
@@ -467,13 +509,53 @@ public final class BotArrowRecoveryService {
         }
 
         return candidates.stream()
-                .min(Comparator.comparingDouble(id -> {
-                    TrackedArrow t = st.tracked.get(id);
-                    if (t == null || t.lastPos == null) {
-                        return Double.POSITIVE_INFINITY;
-                    }
-                    return t.lastPos.squaredDistanceTo(bot.getX(), bot.getY(), bot.getZ());
-                }))
+                .min(Comparator
+                        .comparing((UUID id) -> {
+                            TrackedArrow t = st.tracked.get(id);
+                            return t == null || !t.mandatoryRecovery;
+                        })
+                        .thenComparingDouble(id -> {
+                            TrackedArrow t = st.tracked.get(id);
+                            if (t == null || t.lastPos == null) {
+                                return Double.POSITIVE_INFINITY;
+                            }
+                            return t.lastPos.squaredDistanceTo(bot.getX(), bot.getY(), bot.getZ());
+                        }))
                 .orElse(null);
+    }
+
+    private static void refreshTridentRecoveryState(ServerPlayerEntity bot, BotState st) {
+        if (bot == null || st == null || !st.outstandingTridentRecovery) {
+            return;
+        }
+        if (countTridents(bot) >= st.expectedTridentCount) {
+            st.outstandingTridentRecovery = false;
+            st.expectedTridentCount = 0;
+            st.tracked.entrySet().removeIf(entry -> {
+                TrackedArrow tracked = entry.getValue();
+                return tracked != null && tracked.trident;
+            });
+            if (st.chasingArrowId != null) {
+                TrackedArrow chasing = st.tracked.get(st.chasingArrowId);
+                if (chasing == null || chasing.trident) {
+                    st.chasingArrowId = null;
+                    st.chaseStartTick = -1L;
+                }
+            }
+        }
+    }
+
+    private static int countTridents(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return 0;
+        }
+        int count = 0;
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isOf(Items.TRIDENT)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 }

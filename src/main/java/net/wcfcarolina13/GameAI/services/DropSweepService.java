@@ -107,6 +107,10 @@ public final class DropSweepService {
         dropSweepCancelReason = null;
     }
 
+    static boolean shouldSuppressBackgroundSweep(boolean commandDrivenSweep, boolean hasActiveTask) {
+        return hasActiveTask && !commandDrivenSweep;
+    }
+
     public static void collectNearbyDrops(ServerPlayerEntity bot,
                                           double radius,
                                           boolean trainingMode,
@@ -125,6 +129,13 @@ public final class DropSweepService {
         }
         World rawWorld = bot.getEntityWorld();
         if (!(rawWorld instanceof ServerWorld world)) {
+            return;
+        }
+        boolean hasActiveTask = TaskService.hasActiveTask(bot.getUuid());
+        if (shouldSuppressBackgroundSweep(commandDrivenSweep, hasActiveTask)) {
+            LOGGER.info("Drop sweep suppressed for {} due to active task {}",
+                    bot.getName().getString(),
+                    TaskService.getActiveTaskName(bot.getUuid()).orElse("unknown"));
             return;
         }
 
@@ -258,4 +269,3 @@ public final class DropSweepService {
         }));
     }
 }
-

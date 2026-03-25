@@ -45,6 +45,7 @@ public class HuntablesScreen extends Screen {
 
     private static final String[] ZONE_NAMES = {"STANDARD", "EXPANDED", "SPRAWLING"};
     private static final String[] ZONE_LABELS = {"Standard", "Expanded", "Sprawling"};
+    private static final int[] ZONE_RADII = {48, 80, 120};
 
     public static void applyHuntablesJson(String json) {
         if (json == null) {
@@ -134,7 +135,7 @@ public class HuntablesScreen extends Screen {
         this.countField = new TextFieldWidget(this.textRenderer, cx - 110, y, 100, 18, Text.literal("Count"));
         this.countField.setMaxLength(5);
         this.countField.setPlaceholder(Text.literal("Count"));
-        this.countField.setTooltip(Tooltip.of(Text.literal("How many animals to hunt. Leave empty to hunt until sunset.")));
+        this.countField.setTooltip(Tooltip.of(Text.literal("How many animals to hunt.\nLeave empty to hunt until sunset.")));
         this.addDrawableChild(this.countField);
 
         ButtonWidget refreshBtn = ButtonWidget.builder(Text.literal("Refresh"), btn -> requestRefresh())
@@ -150,28 +151,29 @@ public class HuntablesScreen extends Screen {
                     btn.setMessage(Text.literal(depopLabel()));
                     saveConfig();
                 }).dimensions(cx - 110, y, 110, BUTTON_H).build();
-        depopBtn.setTooltip(Tooltip.of(Text.literal("When ON, your companion won't overhunt an area. Turn OFF to hunt freely regardless of animal numbers.")));
+        depopBtn.setTooltip(Tooltip.of(Text.literal("When ON, the hunt ends early if animal populations\nget too low, and zombie kills won't count toward\nyour hunt goal. Turn OFF to hunt freely.")));
         this.addDrawableChild(depopBtn);
 
         ButtonWidget zoneBtn = ButtonWidget.builder(
                 Text.literal("Zone: " + ZONE_LABELS[zoneIndex]), btn -> {
                     zoneIndex = (zoneIndex + 1) % ZONE_NAMES.length;
                     btn.setMessage(Text.literal("Zone: " + ZONE_LABELS[zoneIndex]));
+                    btn.setTooltip(Tooltip.of(Text.literal(zoneTooltip())));
                     saveConfig();
                 }).dimensions(cx + 10, y, 100, BUTTON_H).build();
-        zoneBtn.setTooltip(Tooltip.of(Text.literal("How far your companion will roam to find prey. Larger zones mean longer trips.")));
+        zoneBtn.setTooltip(Tooltip.of(Text.literal(zoneTooltip())));
         this.addDrawableChild(zoneBtn);
 
         // Row 3: Hunt + Target + All Edible + Close
         y += 24;
         ButtonWidget huntBtn = ButtonWidget.builder(Text.literal("Hunt"), btn -> huntSelected())
                 .dimensions(cx - 110, y, 50, BUTTON_H).build();
-        huntBtn.setTooltip(Tooltip.of(Text.literal("Send your companion out to hunt the selected animals")));
+        huntBtn.setTooltip(Tooltip.of(Text.literal("Send your companion out to hunt the selected\nanimals. If none are selected, hunts anything edible.")));
         this.addDrawableChild(huntBtn);
 
         ButtonWidget targetBtn = ButtonWidget.builder(Text.literal("Target"), btn -> activateTargetPicker())
                 .dimensions(cx - 52, y, 52, BUTTON_H).build();
-        targetBtn.setTooltip(Tooltip.of(Text.literal("Pick a specific animal in the world for your companion to hunt")));
+        targetBtn.setTooltip(Tooltip.of(Text.literal("Pick a specific mob in the world for your companion\nto hunt. Green particles mark valid targets.")));
         this.addDrawableChild(targetBtn);
 
         ButtonWidget allEdibleBtn = ButtonWidget.builder(Text.literal("All Edible"), btn -> selectAllEdible())
@@ -189,6 +191,11 @@ public class HuntablesScreen extends Screen {
 
     private String depopLabel() {
         return depopulationEnabled ? "Depop: ON" : "Depop: OFF";
+    }
+
+    private String zoneTooltip() {
+        return "How far your companion will roam to find prey.\nCurrent: " + ZONE_LABELS[zoneIndex]
+                + " (" + ZONE_RADII[zoneIndex] + " block radius)";
     }
 
     private static int zoneIndexOf(String name) {

@@ -10,8 +10,8 @@ import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MovementService;
-import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
@@ -90,7 +90,7 @@ public final class FlowerPickSkill implements Skill {
             if (picked >= count) {
                 break;
             }
-            if (ProtectedZoneService.isProtected(flower, world, null)) {
+            if (CompanionSafeZoneService.isProtected(world, flower, null)) {
                 continue;
             }
             if (isNearHome(world, bot, flower)) {

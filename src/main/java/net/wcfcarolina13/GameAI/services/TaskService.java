@@ -217,6 +217,17 @@ public final class TaskService {
         ABORT_LATCH.remove(slot);
         TaskTicket existing = ACTIVE.putIfAbsent(slot, ticket);
         if (existing != null) {
+            if (existing.origin() == Origin.SYSTEM) {
+                LOGGER.info("Preempting system task '{}' for bot {} with command skill '{}'",
+                        existing.name(), botUuid, skillName);
+                abortTicket(existing, "§eSystem recovery interrupted by new command.", false);
+                TaskTicket replaced = ACTIVE.putIfAbsent(slot, ticket);
+                if (replaced == null) {
+                    LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
+                    return Optional.of(ticket);
+                }
+                existing = replaced;
+            }
             System.out.println("[TaskService] beginSkill blocked: bot=" + botUuid
                     + " existing=" + existing.name()
                     + " state=" + existing.state()
@@ -240,6 +251,40 @@ public final class TaskService {
             return Optional.empty();
         }
         LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
+        return Optional.of(ticket);
+    }
+
+    public static Optional<TaskTicket> beginSystemTask(String taskName,
+                                                       ServerCommandSource source,
+                                                       UUID botUuid) {
+        if (SERVER_STOPPING) {
+            LOGGER.info("Rejecting system task '{}' for bot {} because server is stopping", taskName, botUuid);
+            return Optional.empty();
+        }
+        TaskTicket ticket = new TaskTicket("system:" + taskName, source, botUuid);
+        ticket.setOrigin(Origin.SYSTEM);
+        UUID slot = key(botUuid);
+        ABORT_LATCH.remove(slot);
+        TaskTicket existing = ACTIVE.putIfAbsent(slot, ticket);
+        if (existing != null) {
+            LOGGER.warn("System task slot busy for bot {} (existing='{}' state={} origin={} threadAlive={})",
+                    botUuid,
+                    existing.name(),
+                    existing.state(),
+                    existing.origin(),
+                    existing.isExecutingThreadAlive());
+            boolean staleState = existing.state() != State.RUNNING;
+            boolean deadThread = !existing.isExecutingThreadAlive();
+            if (staleState || deadThread) {
+                if (ACTIVE.replace(slot, existing, ticket)) {
+                    LOGGER.warn("Replaced stale task '{}' (state={}, threadAlive={}) with '{}'",
+                            existing.name(), existing.state(), !deadThread, ticket.name());
+                    return Optional.of(ticket);
+                }
+            }
+            return Optional.empty();
+        }
+        LOGGER.info("System task '{}' started for bot {}", taskName, botUuid);
         return Optional.of(ticket);
     }
 
@@ -477,12 +522,18 @@ public final class TaskService {
     }
 
     private static void abortTicket(TaskTicket ticket, String reason) {
+        abortTicket(ticket, reason, true);
+    }
+
+    private static void abortTicket(TaskTicket ticket, String reason, boolean dispatchMessage) {
         ABORT_LATCH.put(key(ticket.botUuid()), reason == null ? "" : reason);
         if (ticket.requestCancel(reason)) {
             ticket.setState(State.ABORTED);
-            dispatchMessage(ticket, reason != null && !reason.isBlank()
-                    ? reason
-                    : "§cHalting current task.");
+            if (dispatchMessage) {
+                dispatchMessage(ticket, reason != null && !reason.isBlank()
+                        ? reason
+                        : "§cHalting current task.");
+            }
             LOGGER.warn("Task '{}' aborted: {}", ticket.name(), ticket.cancelReason());
         }
         // Best-effort: interrupt the executing thread so long-running loops/sleeps unwind promptly.

@@ -5,9 +5,12 @@ import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BundleService;
+import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.DebugFileLogger;
+import net.wcfcarolina13.GameAI.services.DropSweepService;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
 import net.wcfcarolina13.GameAI.skills.impl.BuildSchematicSkill;
 import net.wcfcarolina13.GameAI.skills.impl.CollectDirtSkill;
 import net.wcfcarolina13.GameAI.skills.impl.DirtShovelSkill;
@@ -47,7 +50,6 @@ public final class SkillManager {
     private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
     private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
     private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
-
     static {
         DebugFileLogger.log("SkillManager.staticInit start");
         register(new DirtShovelSkill());
@@ -122,6 +124,7 @@ public final class SkillManager {
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY);
+                WoodcutCleanupMemoryService.clearForBot(context.sharedState(), botUuid);
             }
         } catch (Exception ignored) {
         }
@@ -134,6 +137,14 @@ public final class SkillManager {
         } catch (Exception ignored) {
         }
         TaskService.attachExecutingThread(ticket, Thread.currentThread());
+        if (botPlayer != null) {
+            boolean hadIdleSweepState = BackgroundSweepPolicy.clearPendingIdleSweepState(botPlayer.getUuid());
+            boolean hadInFlightSweep = DropSweepService.isInProgressFor(botPlayer);
+            DropSweepService.requestCancel(botPlayer, "skill-start");
+            if (hadIdleSweepState || hadInFlightSweep) {
+                LOGGER.info("Background drop sweep canceled for {} because skill '{}' started", botName, name);
+            }
+        }
 
         UUID resumeFollowUuid = null;
         net.minecraft.util.math.BlockPos resumeFixedGoal = null;

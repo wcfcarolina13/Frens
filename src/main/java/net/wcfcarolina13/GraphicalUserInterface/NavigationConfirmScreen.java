@@ -59,6 +59,9 @@ public class NavigationConfirmScreen extends Screen {
         // Find home base.
         String homeLabel = null;
         for (BaseManagerScreen.BaseDto b : bases) {
+            if (b == null || !b.isBase()) {
+                continue;
+            }
             if (b.home()) {
                 homeLabel = b.label();
                 break;
@@ -72,6 +75,7 @@ public class NavigationConfirmScreen extends Screen {
 
         // Add each saved base.
         for (BaseManagerScreen.BaseDto b : bases) {
+            if (b == null || !b.isBase()) continue;
             if (b.label() == null || b.label().isBlank()) continue;
             // Skip if already shown as home.
             if (homeLabel != null && b.label().equalsIgnoreCase(homeLabel)) continue;

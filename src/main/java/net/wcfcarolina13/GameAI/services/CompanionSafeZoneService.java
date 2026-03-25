@@ -18,6 +18,7 @@ import java.util.UUID;
  *   <li>Admin {@link ProtectedZoneService} zones (cubic regions)</li>
  *   <li>Saved bases with per-base configurable radius ({@link BotHomeService})</li>
  *   <li>Fortification convex hulls with configurable buffer ({@link FortificationPersistenceService})</li>
+ *   <li>Mapped villages saved as shared no-go convex hulls ({@link MappedVillageService})</li>
  * </ol>
  *
  * <p>Skills call {@link #isProtected(ServerWorld, BlockPos, UUID)} to decide whether a
@@ -54,12 +55,12 @@ public final class CompanionSafeZoneService {
         if (world == null || pos == null) return false;
 
         // 1. Admin protected zones
-        if (ProtectedZoneService.isProtected(pos, world, botOwner)) {
+        if (isInExplicitProtectedZone(world, pos, botOwner)) {
             return true;
         }
 
         // 2. Saved bases with per-base radius
-        if (isNearAnySavedBase(world, pos)) {
+        if (isNearSavedBase(world, pos)) {
             return true;
         }
 
@@ -68,10 +69,20 @@ public final class CompanionSafeZoneService {
             return true;
         }
 
+        // 4. Mapped villages
+        if (MappedVillageService.isInsideMappedVillage(world, pos)) {
+            return true;
+        }
+
         return false;
     }
 
-    private static boolean isNearAnySavedBase(ServerWorld world, BlockPos pos) {
+    public static boolean isInExplicitProtectedZone(ServerWorld world, BlockPos pos, @Nullable UUID botOwner) {
+        if (world == null || pos == null) return false;
+        return ProtectedZoneService.isProtected(pos, world, botOwner);
+    }
+
+    public static boolean isNearSavedBase(ServerWorld world, BlockPos pos) {
         MinecraftServer server = world.getServer();
         if (server == null) return false;
 
@@ -86,7 +97,7 @@ public final class CompanionSafeZoneService {
         return false;
     }
 
-    private static boolean isInsideFortificationZone(ServerWorld world, BlockPos pos) {
+    public static boolean isInsideFortificationZone(ServerWorld world, BlockPos pos) {
         MinecraftServer server = world.getServer();
         if (server == null) return false;
 

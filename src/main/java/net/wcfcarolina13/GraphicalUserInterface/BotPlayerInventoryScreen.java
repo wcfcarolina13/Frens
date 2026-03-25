@@ -453,6 +453,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SLEEP,
         AUTO_RETURN_SUNSET,
         AUTO_RETURN_SELF_SUFFICIENT,
+        TACTICAL_SHELTER,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         AUTO_RETURN_SKIP_PERMISSION,
         IDLE_HOBBIES,
@@ -568,6 +569,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skillHeader("Automation"),
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             TopicEntry.skill("Self-Sufficiency", TopicAction.AUTO_RETURN_SELF_SUFFICIENT, true, 1),
+            TopicEntry.skill("Tactical Shelter", TopicAction.TACTICAL_SHELTER, true, 1),
             TopicEntry.skill("Guard/Patrol Eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Skip Permission", TopicAction.AUTO_RETURN_SKIP_PERMISSION, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
@@ -1579,6 +1581,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                  SKILL_DESCENT,
                  AUTO_RETURN_SUNSET,
                  AUTO_RETURN_SELF_SUFFICIENT,
+                 TACTICAL_SHELTER,
                  AUTO_RETURN_SUNSET_GUARD_PATROL,
                  AUTO_RETURN_SKIP_PERMISSION -> false;
             default -> true;
@@ -3127,6 +3130,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SLEEP -> "🛌";
             case AUTO_RETURN_SUNSET -> "☾";
             case AUTO_RETURN_SELF_SUFFICIENT -> "🏕";
+            case TACTICAL_SHELTER -> "⛏";
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> "↔";
             case AUTO_RETURN_SKIP_PERMISSION -> "⏩";
             case IDLE_HOBBIES -> "✦";
@@ -3541,6 +3545,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SELF_SUFFICIENT -> java.util.List.of(
                 "Self-Sufficiency",
                 "If home is too far or unreachable at dusk, the bot falls back to nearby safe anchors like bases, beds, allied bots, remembered chests, or tactical shelter."
+            );
+            case TACTICAL_SHELTER -> java.util.List.of(
+                "Tactical Shelter",
+                "Allows improvised night sheltering and the local tactical-shelter fallback. Turn this OFF if you do not want the bot digging in or building emergency shelter at night."
             );
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> java.util.List.of(
                 "Guard/Patrol Eligible",
@@ -4255,6 +4263,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SLEEP -> runSleep();
             case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
             case AUTO_RETURN_SELF_SUFFICIENT -> toggleAutoReturnSelfSufficient();
+            case TACTICAL_SHELTER -> toggleTacticalShelter();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case AUTO_RETURN_SKIP_PERMISSION -> toggleAutoReturnSkipPermission();
             case IDLE_HOBBIES -> toggleIdleHobbies();
@@ -4703,6 +4712,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case RETURN_HOME -> isReturningToBase();
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
             case AUTO_RETURN_SELF_SUFFICIENT -> isAutoReturnSelfSufficientActive();
+            case TACTICAL_SHELTER -> isTacticalShelterActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case AUTO_RETURN_SKIP_PERMISSION -> isAutoReturnSkipPermissionActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
@@ -4837,6 +4847,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAutoReturnSelfSufficientActive() {
         return this.handler != null && this.handler.isBotAutoReturnSelfSufficientFallback();
+    }
+
+    private boolean isTacticalShelterActive() {
+        return this.handler != null && this.handler.isBotTacticalShelterEnabled();
     }
 
     private boolean isIdleHobbiesActive() {
@@ -5451,6 +5465,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void toggleAutoReturnSelfSufficient() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_self_sufficient toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleTacticalShelter() {
+        String botTarget = formatBotTarget();
+        String command = "bot tactical_shelter toggle " + botTarget;
         sendChatCommand(command);
     }
 

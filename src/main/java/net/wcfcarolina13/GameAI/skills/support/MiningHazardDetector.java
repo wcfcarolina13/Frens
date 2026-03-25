@@ -13,8 +13,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -412,6 +416,10 @@ public final class MiningHazardDetector {
             if (!hasExposedFace(world, neighbor)) {
                 continue;
             }
+            // Only announce if the bot can actually see the block (no X-ray through walls)
+            if (!canBotSeeBlock(bot, world, neighbor)) {
+                continue;
+            }
             if (!registerWarning(bot, neighbor)) {
                 continue;
             }
@@ -451,6 +459,31 @@ public final class MiningHazardDetector {
         
         LAST_WARNING_TS.put(uuid, now);
         return true;
+    }
+
+    /**
+     * Line-of-sight check: can the bot see the target block?
+     * Uses the same raycast pattern as {@code MiningTool.mineBlock()}.
+     * Adjacent blocks (manhattan ≤ 1) always pass — no wall can exist between them.
+     */
+    private static boolean canBotSeeBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+        if (bot == null || world == null || target == null) {
+            return false;
+        }
+        BlockPos botBlock = bot.getBlockPos();
+        boolean adjacent = botBlock.getManhattanDistance(target) <= 1
+                        || botBlock.up().getManhattanDistance(target) <= 1;
+        if (adjacent) {
+            return true;
+        }
+        Vec3d eyePos = bot.getEyePos();
+        Vec3d blockCenter = Vec3d.ofCenter(target);
+        BlockHitResult hit = world.raycast(new RaycastContext(
+                eyePos, blockCenter,
+                RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE, bot));
+        return hit.getType() == HitResult.Type.MISS
+            || hit.getBlockPos().equals(target);
     }
 
     /**
