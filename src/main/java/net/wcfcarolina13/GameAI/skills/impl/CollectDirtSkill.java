@@ -29,6 +29,7 @@ import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
@@ -1702,192 +1703,85 @@ public class CollectDirtSkill implements Skill {
     }
     
     private SkillExecutionResult executeUpwardStep(ServerPlayerEntity player, Direction direction, ServerCommandSource source) {
-        BlockPos feet = player.getBlockPos();
         ServerWorld world = (ServerWorld) player.getEntityWorld();
-        
-        // 1. Find next step-up block (search forward 1-8 blocks for solid block at Y+1)
-        BlockPos stepBlock = null;
-        for (int distance = 1; distance <= 8; distance++) {
-            BlockPos candidate = feet.offset(direction, distance).up();
-            BlockState state = world.getBlockState(candidate);
-            if (!state.isAir() && !state.getCollisionShape(world, candidate).isEmpty()) {
-                stepBlock = candidate;
-                LOGGER.debug("Found step-up block at {} (distance {})", stepBlock.toShortString(), distance);
-                break;
-            }
-        }
-        
-        if (stepBlock == null) {
-            // No step found - walk forward on flat ground to find one
-            LOGGER.debug("No step-up block found within 8 blocks - walking forward");
-            runOnServerThread(player, () -> {
-                LookController.faceBlock(player, feet.offset(direction, 3));
-                BotActions.moveForwardStep(player, 1.0);
-            });
-            try {
-                Thread.sleep(400);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            runOnServerThread(player, () -> BotActions.stop(player));
-            return SkillExecutionResult.success("Walking forward");
-        }
-        
-        // 2. Walk toward the step block until close enough to mine it
         int beforeY = player.getBlockY();
-        BlockPos horizontalTarget = new BlockPos(stepBlock.getX(), feet.getY(), stepBlock.getZ());
-        Vec3d targetVec = Vec3d.ofBottomCenter(horizontalTarget);
-        final BlockPos finalStepBlock = stepBlock;
-        
-        // Walk closer until within mining reach (closer than 1.8 blocks horizontally)
-        double distanceToStep = Math.sqrt(player.squaredDistanceTo(targetVec));
-        while (distanceToStep > 1.8) {
-            runOnServerThread(player, () -> {
-                LookController.faceBlock(player, finalStepBlock);
-                BotActions.moveForwardStep(player, 1.0);
-            });
-            
-            try {
-                Thread.sleep(400);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return SkillExecutionResult.failure("Interrupted while walking to step.");
+
+        // Vertical-first ascent: mine straight up (always adjacent = always passes LoS),
+        // then pillar-up one step. Avoids the LoS-through-terrain problem of forward mining.
+
+        // 1. Hazard check on the 2 blocks directly above
+        BlockPos headBlock = player.getBlockPos().up(2);
+        List<BlockPos> aboveVolume = new java.util.ArrayList<>();
+        for (int dy = 2; dy <= 3; dy++) {
+            BlockPos pos = player.getBlockPos().up(dy);
+            if (!isTorchBlock(world.getBlockState(pos))) {
+                aboveVolume.add(pos);
             }
-            
-            runOnServerThread(player, () -> BotActions.stop(player));
-            
-            double newDistance = Math.sqrt(player.squaredDistanceTo(targetVec));
-            if (newDistance >= distanceToStep) {
-                // Not making progress walking
-                break;
-            }
-            distanceToStep = newDistance;
         }
-        
-        // 3. Scan headroom for hazards/rares before clearing, then break step block + 8 above it
-        List<BlockPos> headroomVolume = new java.util.ArrayList<>();
-        for (int hh = 0; hh <= 8; hh++) {
-            BlockPos pos = stepBlock.up(hh);
-            if (isTorchBlock(world.getBlockState(pos))) {
-                continue;
-            }
-            headroomVolume.add(pos);
-        }
-        DetectionResult ascentDetection = MiningHazardDetector.detect(player, headroomVolume, java.util.List.of(stepBlock));
-        ascentDetection.adjacentWarnings().forEach(w ->
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), w.chatMessage()));
-        if (ascentDetection.blockingHazard().isPresent()) {
-            Hazard hazard = ascentDetection.blockingHazard().get();
-            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-            SkillResumeService.flagManualResume(player);
-            ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
-            return SkillExecutionResult.failure(hazard.failureMessage());
-        }
-        // Clear headroom: break the step block itself AND 8 blocks above it
-        for (int h = 0; h <= 8; h++) {
-            if (TaskService.isServerStopping() || SkillManager.shouldAbortSkill(player)) {
-                return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
-            }
-            BlockPos clearPos = stepBlock.up(h);
-            BlockState state = world.getBlockState(clearPos);
-            
-            if (!state.isAir()) {
-                Block blockType = state.getBlock();
-                // Skip torches
-                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
-                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
-                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
-                    continue;
-                }
-                
-                // Mine the block - bot is now close enough
-                if (!mineStraightStairBlock(player, clearPos)) {
-                    if (TaskService.isServerStopping() || SkillManager.shouldAbortSkill(player)) {
-                        return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
-                    }
-                    LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
-                }
+        if (!aboveVolume.isEmpty()) {
+            DetectionResult hazardCheck = MiningHazardDetector.detect(player, aboveVolume, java.util.List.of(headBlock));
+            hazardCheck.adjacentWarnings().forEach(w ->
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
+                            net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), w.chatMessage()));
+            if (hazardCheck.blockingHazard().isPresent()) {
+                Hazard hazard = hazardCheck.blockingHazard().get();
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
+                        net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
+                return SkillExecutionResult.failure(hazard.failureMessage());
             }
         }
 
-        // Falling blocks (sand/gravel/etc.) can refill the cleared headroom after mining.
-        // Mirror descent safety: wait for settling, then re-clear any falling refills before jumping.
-        if (!FallingBlockStabilizer.stabilizeAndReclear(
-                player,
-                source,
-                stepBlock,
-                headroomVolume,
-                this::isPassableForStairs,
-                this::isTorchBlock,
-                pos -> mineStraightStairBlock(player, pos),
-                true
-        )) {
-            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-            SkillResumeService.flagManualResume(player);
-            return SkillExecutionResult.failure("Ascent paused: falling blocks won't settle. Use /bot resume.");
+        // 2. Pillar up one step — ScaffoldService handles overhead mining, jump, and block placement.
+        //    It mines feet.up(2) (always Manhattan-1 from head, always passes LoS), jumps, and
+        //    places a block under the bot's feet. This is the proven reliable pillar mechanism.
+        List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(player, 1);
+        int afterY = player.getBlockY();
+        if (afterY > beforeY) {
+            LOGGER.info("Vertical ascent step: climbed from Y={} to Y={}", beforeY, afterY);
+            return SkillExecutionResult.success("Pillar-up climb");
         }
-        
-        // 4. Now jump onto the step block
-        for (int attempt = 1; attempt <= 5; attempt++) {
-            runOnServerThread(player, () -> {
-                LookController.faceBlock(player, finalStepBlock);
-                BotActions.moveForwardStep(player, 0.5);
-                BotActions.jump(player);
-            });
-            
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return SkillExecutionResult.failure("Interrupted during jump.");
-            }
-            
-            runOnServerThread(player, () -> BotActions.stop(player));
-            
-            int afterY = player.getBlockY();
-            if (afterY > beforeY) {
-                LOGGER.info("Successfully climbed from Y={} to Y={} (attempt {})", beforeY, afterY, attempt);
-                return SkillExecutionResult.success("Climbed step");
-            }
-            
-            // If we went DOWN instead of up, that's okay - recalculate and continue
-            if (afterY < beforeY) {
-                LOGGER.debug("Fell from Y={} to Y={} - will recalculate next step", beforeY, afterY);
-                return SkillExecutionResult.success("Position adjusted");
-            }
-            
-            LOGGER.debug("Climb attempt {} failed: beforeY={}, afterY={}", attempt, beforeY, afterY);
-        }
-        
-        // Didn't climb after 5 staircase attempts — try pillar-up as fallback.
-        // Mine the 2 blocks directly above the bot's head (always LOS-clear since adjacent)
-        // then jump straight up. This works in tight cave geometry where staircase LOS fails.
-        LOGGER.warn("Did not climb after 5 attempts, Y remains at {} — trying pillar-up fallback", player.getBlockY());
-        boolean clearedAbove = true;
-        for (int dy = 2; dy <= 3; dy++) {
-            BlockPos abovePos = player.getBlockPos().up(dy);
-            BlockState aboveState = world.getBlockState(abovePos);
-            if (!aboveState.isAir() && !aboveState.getCollisionShape(world, abovePos).isEmpty()) {
-                if (!mineStraightStairBlock(player, abovePos)) {
-                    LOGGER.warn("Pillar-up: could not mine block at {}", abovePos.toShortString());
-                    clearedAbove = false;
-                    break;
-                }
+
+        // 3. Pillar failed (no scaffold material or couldn't place). Try mining above + bare jump.
+        //    Mine feet.up(2) directly — always adjacent to head (Manhattan 1 from botBlock.up()).
+        BlockPos aboveHead = player.getBlockPos().up(2);
+        BlockState aboveState = world.getBlockState(aboveHead);
+        if (!aboveState.isAir() && !aboveState.getCollisionShape(world, aboveHead).isEmpty()) {
+            if (!mineStraightStairBlock(player, aboveHead)) {
+                LOGGER.warn("Vertical ascent: could not mine overhead block at {}", aboveHead.toShortString());
+                return SkillExecutionResult.success("No progress - will retry");
             }
         }
-        if (clearedAbove) {
-            runOnServerThread(player, () -> BotActions.jump(player));
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            int pillarY = player.getBlockY();
-            if (pillarY > beforeY) {
-                LOGGER.info("Pillar-up succeeded: climbed from Y={} to Y={}", beforeY, pillarY);
-                return SkillExecutionResult.success("Pillar-up climb");
-            }
+        // Also clear feet.up(3) if solid, so the bot has room after jumping
+        BlockPos aboveHead2 = player.getBlockPos().up(3);
+        BlockState aboveState2 = world.getBlockState(aboveHead2);
+        if (!aboveState2.isAir() && !aboveState2.getCollisionShape(world, aboveHead2).isEmpty()) {
+            // This one is Manhattan 2 from head — try mining, but don't fail the step if it can't
+            mineStraightStairBlock(player, aboveHead2);
         }
+
+        // Stabilize falling blocks above
+        List<BlockPos> overhead = java.util.List.of(aboveHead, aboveHead2);
+        FallingBlockStabilizer.stabilizeAndReclear(
+                player, source, aboveHead, overhead,
+                this::isPassableForStairs, this::isTorchBlock,
+                pos -> mineStraightStairBlock(player, pos), true);
+
+        // Try jumping — if there's a solid block at feet.up(1), the bot will land on it after headroom clears
+        runOnServerThread(player, () -> BotActions.jump(player));
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return SkillExecutionResult.failure("Interrupted during ascent.");
+        }
+        int jumpY = player.getBlockY();
+        if (jumpY > beforeY) {
+            LOGGER.info("Vertical ascent bare jump: climbed from Y={} to Y={}", beforeY, jumpY);
+            return SkillExecutionResult.success("Jump climb");
+        }
+
         return SkillExecutionResult.success("No progress - will retry");
     }
     
@@ -1966,18 +1860,18 @@ public class CollectDirtSkill implements Skill {
                 // Use a timeout >= MiningTool's failsafe (12s) so slow tools don't get canceled early.
                 String result = future.get(13, TimeUnit.SECONDS);
                 if (result != null && result.toLowerCase(Locale.ROOT).contains("out of reach")) {
-                    LOGGER.warn("Descent mining attempt {}/3 out-of-reach at {} (botPos={} dist={})",
+                    LOGGER.warn("Mining attempt {}/3 out-of-reach at {} (botPos={} dist={})",
                             attempt,
                             blockPos.toShortString(),
                             player.getBlockPos().toShortString(),
                             String.format("%.2f", Math.sqrt(player.squaredDistanceTo(Vec3d.ofCenter(blockPos)))));
                 } else if (result != null && result.startsWith("⚠️")) {
-                    LOGGER.warn("Descent mining attempt {}/3 returned '{}' at {} (botPos={})",
+                    LOGGER.warn("Mining attempt {}/3 returned '{}' at {} (botPos={})",
                             attempt, result, blockPos.toShortString(), player.getBlockPos().toShortString());
                 }
             } catch (TimeoutException timeout) {
                 // Don't cancel: canceling the future stops the MiningTool task early.
-                LOGGER.warn("Descent mining attempt {}/3 timed out waiting at {} (state={})",
+                LOGGER.warn("Mining attempt {}/3 timed out waiting at {} (state={})",
                         attempt,
                         blockPos.toShortString(),
                         world.getBlockState(blockPos).getBlock().getName().getString());
@@ -1985,7 +1879,7 @@ public class CollectDirtSkill implements Skill {
                 Thread.currentThread().interrupt();
                 return false;
             } catch (Exception e) {
-                LOGGER.warn("Descent mining attempt {}/3 failed at {}: {}", attempt, blockPos.toShortString(), e.getMessage());
+                LOGGER.warn("Mining attempt {}/3 failed at {}: {}", attempt, blockPos.toShortString(), e.getMessage());
             }
 
             if (isPassableForStairs(world, blockPos)) {
@@ -1999,7 +1893,7 @@ public class CollectDirtSkill implements Skill {
                 return false;
             }
         }
-        LOGGER.warn("Descent aborted: couldn't clear {} after multiple mining attempts (state={})",
+        LOGGER.warn("Mining aborted: couldn't clear {} after multiple mining attempts (state={})",
                 blockPos.toShortString(),
                 world.getBlockState(blockPos).getBlock().getName().getString());
         return false;

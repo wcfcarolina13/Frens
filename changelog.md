@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-03-25 (session 2)
+
+- **Fix: Surface recovery ascent stuck on LoS.** `executeUpwardStep()` tried to mine blocks 2-8 blocks forward, but MiningTool's line-of-sight raycast hit intervening terrain. Rewrote to vertical-first strategy: mine `feet.up(2)` (always adjacent to head, always passes LoS), then pillar up one step via `ScaffoldService.pillarUpWithPositions`. Falls back to bare mine+jump if no scaffold material. Simple, reliable, no forward LoS issues.
+
+- **Fix: Task display shows "system:" prefix.** `TaskLabelFormatter.humanizeTaskName()` stripped "skill:" prefix but not "system:". Added "system:" prefix stripping + friendly mappings: "surface recovery" → "climbing to the surface", "break free" → "breaking free". HUD now shows "Jake is climbing to the surface" instead of "Jake is working on system:surface recovery".
+
+- **Feature: Fast-travel cost overhaul.** Travel was too cheap (one-time Map+Compass, no resource cost). Added: (1) hunger drain proportional to distance (1 food point per 40 blocks via exhaustion), (2) food safety gate — refuses if bot would arrive below 6 food (3 drumsticks), (3) 3-minute per-bot cooldown between fast-travels, (4) increased base travel time to ~1.5s/chunk (from 1s), (5) underground delay penalty increased from 1.5x to 2.0x. Emergency travel bypasses all gates.
+
+- **Fix: Misnamed "Descent mining attempt" log.** `mineStraightStairBlock()` is used by both ascent and descent but logged "Descent mining attempt". Renamed to "Mining attempt".
+
 ## 2026-03-25
 
 - **Fix: Surface detection scans through tree trunks.** `SafePositionService.getWalkableGroundY()` uses MOTION_BLOCKING_NO_LEAVES as a ceiling hint, then scans downward skipping log/leaf blocks to find actual solid ground. Fixes false underground detection under tree canopies, scaffold scanner finding 130 underground stone false positives, and hole recovery overreacting to trunk-biased Y values.

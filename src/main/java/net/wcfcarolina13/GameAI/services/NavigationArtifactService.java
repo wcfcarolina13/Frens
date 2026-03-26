@@ -52,6 +52,16 @@ public final class NavigationArtifactService {
     private static final Object LOCK = new Object();
     private static final String TRAVEL_FILE = "pending_travels.json";
 
+    // ── Fast-travel cost constants ──────────────────────────────────────
+    /** Hunger cost formula: 1 food point per HUNGER_DISTANCE_DIVISOR blocks traveled. */
+    private static final double HUNGER_DISTANCE_DIVISOR = 40.0;
+    /** Minimum food level the bot must retain after travel (6 = 3 drumsticks). */
+    private static final int MIN_POST_TRAVEL_FOOD = 6;
+    /** Cooldown between fast-travels per bot, in ticks (3 minutes = 3600 ticks). */
+    private static final long TRAVEL_COOLDOWN_TICKS = 3600L;
+    /** Per-bot cooldown tracker: bot UUID -> server tick of last departure. */
+    private static final Map<UUID, Long> TRAVEL_COOLDOWNS = new ConcurrentHashMap<>();
+
     private NavigationArtifactService() {}
 
     /** Gson-serializable DTO mirroring {@link PendingTravel} with primitive/String fields. */
@@ -64,6 +74,7 @@ public final class NavigationArtifactService {
         public long arrivalTick;
         public String ownerUuid;
         public String mountEntityTypeId;
+        public double travelDistance;
     }
 
     private static Path travelFile() {
@@ -145,9 +156,10 @@ public final class NavigationArtifactService {
 
     public static int calculateDelayTicks(double distance, boolean crossDimension, double multiplier) {
         int chunks = Math.max(1, (int) Math.ceil(distance / 16.0));
-        int seconds = chunks;
+        // ~1.5 seconds per chunk base travel time (up from 1s)
+        int seconds = chunks + chunks / 2;
         if (crossDimension) seconds += 30;
-        seconds = Math.max(5, Math.min(300, (int) (seconds * multiplier)));
+        seconds = Math.max(7, Math.min(300, (int) (seconds * multiplier)));
         return seconds * 20;
     }
 
@@ -319,7 +331,7 @@ public final class NavigationArtifactService {
     /** Tracks a bot that is currently in transit (removed from world, awaiting respawn). */
     public record PendingTravel(UUID botUuid, String botAlias, BlockPos destination,
                                 RegistryKey<World> dimension, long departureTick, long arrivalTick,
-                                UUID ownerUuid, String mountEntityTypeId) {}
+                                UUID ownerUuid, String mountEntityTypeId, double travelDistance) {}
 
     /** Bots currently in transit, keyed by bot UUID. */
     private static final Map<UUID, PendingTravel> PENDING_TRAVELS = new ConcurrentHashMap<>();
@@ -434,11 +446,39 @@ public final class NavigationArtifactService {
             return false;
         }
 
+        double travelDistance = bot.getBlockPos().getManhattanDistance(destination);
+
         if (!skipGates) {
             // ── Combat gate ──────────────────────────────────────────────
             if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
                 notifyOwner(server, ownerUuid,
                         "\u00A7c" + botAlias + " cannot fast-travel while in combat.\u00A7r");
+                return false;
+            }
+
+            // ── Cooldown gate ────────────────────────────────────────────
+            long now = server.getOverworld().getTime();
+            Long lastDeparture = TRAVEL_COOLDOWNS.get(bot.getUuid());
+            if (lastDeparture != null) {
+                long elapsed = now - lastDeparture;
+                if (elapsed < TRAVEL_COOLDOWN_TICKS) {
+                    long remainingTicks = TRAVEL_COOLDOWN_TICKS - elapsed;
+                    int remainingSec = Math.max(1, (int) (remainingTicks / 20));
+                    String timeStr = remainingSec >= 60
+                            ? (remainingSec / 60) + "m " + (remainingSec % 60) + "s"
+                            : remainingSec + "s";
+                    notifyOwner(server, ownerUuid,
+                            "\u00A7c" + botAlias + " needs to rest before traveling again (" + timeStr + " remaining).\u00A7r");
+                    return false;
+                }
+            }
+
+            // ── Food safety gate ─────────────────────────────────────────
+            double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
+            int projectedFood = bot.getHungerManager().getFoodLevel() - (int) Math.ceil(hungerCost);
+            if (projectedFood < MIN_POST_TRAVEL_FOOD) {
+                notifyOwner(server, ownerUuid,
+                        "\u00A7c" + botAlias + " doesn't have enough energy to travel that far. Feed them first.\u00A7r");
                 return false;
             }
 
@@ -451,8 +491,8 @@ public final class NavigationArtifactService {
                     // Tier 2+ artifacts — proceed normally, no penalty
                 } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
                         && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
-                    // Map + Compass on bot — allow but with 50% extra delay
-                    delayTicks = (int) (delayTicks * 1.5);
+                    // Map + Compass on bot — allow but with 2x delay (underground is harder)
+                    delayTicks = (int) (delayTicks * 2.0);
                 } else {
                     notifyOwner(server, ownerUuid,
                             "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
@@ -497,8 +537,13 @@ public final class NavigationArtifactService {
         long arrival = now + delayTicks;
 
         PendingTravel travel = new PendingTravel(botUuid, botAlias, destination, dimension,
-                now, arrival, ownerUuid, mountEntityTypeId);
+                now, arrival, ownerUuid, mountEntityTypeId, travelDistance);
         PENDING_TRAVELS.put(botUuid, travel);
+
+        // Record cooldown timestamp for this bot.
+        if (!skipGates) {
+            TRAVEL_COOLDOWNS.put(botUuid, now);
+        }
 
         // Set mode to TRAVELING so other systems ignore this bot.
         BotCommandStateService.State state = BotCommandStateService.stateFor(botUuid);
@@ -734,6 +779,19 @@ public final class NavigationArtifactService {
         // Force position + send position packet to ALL clients in the dimension.
         bot.setPosition(dx, dy, dz);
         bot.setVelocity(Vec3d.ZERO);
+
+        // ── Hunger drain proportional to travel distance ─────────────
+        double dist = ps.travel().travelDistance();
+        if (dist > 0) {
+            double hungerCost = dist / HUNGER_DISTANCE_DIVISOR;
+            // Use exhaustion to drain saturation first, then hunger bars.
+            // Minecraft: 4.0 exhaustion = 1 saturation point; once saturation is 0,
+            // 4.0 exhaustion = 1 food point.
+            float exhaustion = (float) (hungerCost * 4.0);
+            bot.getHungerManager().addExhaustion(exhaustion);
+            LOGGER.info("Applied travel hunger drain to '{}': distance={}, hungerCost={}, exhaustion={}",
+                    ps.botAlias(), (int) dist, String.format("%.1f", hungerCost), String.format("%.1f", exhaustion));
+        }
         // Broadcast entity position to all players in the dimension (same approach as createFake).
         EntityPosition ep = EntityPosition.fromEntity(bot).withRotation(0.0F, 0.0F);
         server.getPlayerManager().sendToDimension(
@@ -888,6 +946,7 @@ public final class NavigationArtifactService {
         QUEUED_NOTIFICATIONS.clear();
         PENDING_POST_SPAWN.clear();
         PENDING_POST_ARRIVAL.clear();
+        TRAVEL_COOLDOWNS.clear();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────
@@ -915,6 +974,7 @@ public final class NavigationArtifactService {
                     s.arrivalTick = t.arrivalTick();
                     s.ownerUuid = t.ownerUuid() != null ? t.ownerUuid().toString() : null;
                     s.mountEntityTypeId = t.mountEntityTypeId();
+                    s.travelDistance = t.travelDistance();
                     list.add(s);
                 }
 
@@ -963,7 +1023,7 @@ public final class NavigationArtifactService {
                         long newArrival = now + remainingTicks;
 
                         PendingTravel travel = new PendingTravel(botUuid, s.botAlias, dest, dim,
-                                now, newArrival, ownerUuid, s.mountEntityTypeId);
+                                now, newArrival, ownerUuid, s.mountEntityTypeId, s.travelDistance);
                         PENDING_TRAVELS.put(botUuid, travel);
 
                         LOGGER.info("Restored pending travel for '{}': destination {} in {}, ETA {} ticks",

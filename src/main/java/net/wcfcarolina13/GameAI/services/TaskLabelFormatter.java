@@ -17,6 +17,8 @@ public final class TaskLabelFormatter {
         String raw = taskName.trim();
         if (raw.regionMatches(true, 0, "skill:", 0, "skill:".length())) {
             raw = raw.substring("skill:".length());
+        } else if (raw.regionMatches(true, 0, "system:", 0, "system:".length())) {
+            raw = raw.substring("system:".length());
         }
         raw = raw.replace('_', ' ').trim().replaceAll("\\s+", " ");
         if (raw.isEmpty()) {
@@ -58,6 +60,10 @@ public final class TaskLabelFormatter {
                 return "feeding animals";
             case "wander":
                 return "wandering";
+            case "surface recovery":
+                return "climbing to the surface";
+            case "break free":
+                return "breaking free";
             case "fortify":
             case "fortify village":
                 return "fortifying the village";
