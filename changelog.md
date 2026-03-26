@@ -4,6 +4,24 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-03-25
 
+- **Fix: Surface detection scans through tree trunks.** `SafePositionService.getWalkableGroundY()` uses MOTION_BLOCKING_NO_LEAVES as a ceiling hint, then scans downward skipping log/leaf blocks to find actual solid ground. Fixes false underground detection under tree canopies, scaffold scanner finding 130 underground stone false positives, and hole recovery overreacting to trunk-biased Y values.
+
+- **Fix: Scaffold detection hardened.** Hard blocks (cobblestone, stone) require at least one exposed face (floating or isolated) — eliminates underground natural stone false positives. Dirt columns only count upward (not into terrain). GRASS_BLOCK removed from detection — was destroying natural terrain (57 blocks shaved in one session).
+
+- **Fix: Shelter breakfree at dawn.** `checkDaylightBreakFree()` was defined but never called. Now wired into the IDLE tick handler. After breaking free, triggers `SkillResumeService.requestAutoResume()` to resume interrupted tasks (e.g., woodcut stopped at sunset). Verified working: woodcut → sunset shelter → dawn breakfree → woodcut auto-resume.
+
+- **Fix: Follow blocked by stale idle sweep.** When follow was toggled ON, a lingering `DropSweepService.isInProgressFor()` from a stuck idle sweep consumed every tick, preventing follow movement. `setFollowMode` now clears idle sweep state and cancels in-progress sweeps.
+
+- **Feature: Scaffold reserve in chest offload.** `ChestStoreService` keeps minimum 32 scaffold blocks across all offload paths. Prevents the bot from dumping all pillar material into chests.
+
+- **Fix: Surface recovery between failed trees.** After PATH_OR_REACH_FAILURE (bot fell into hole), the woodcut skill now calls `recoverSurfacePosition` before selecting the next tree. Prevents cascading failures where 5 consecutive trees fail because the bot is stuck in a depression.
+
+- **Fix: DropSweeper breaks leaf blocks trapping drops.** When nudge-for-pickup fails and the item is inside a leaf block within 2 blocks above the bot, the leaf is broken to free the drop. Drops more than 4 blocks above are skipped entirely.
+
+- **Fix: Pitch reset after skill completion.** SkillManager resets bot pitch to 0 after any skill finishes, preventing leftover look-up angles from pillar operations.
+
+- **Fix: ReturnBaseStuck direct pillar-up.** When scaffold escape can't find an adjacent wall to place against (wide depression), falls back to jump-and-place-underfoot pillar.
+
 - **Feature: Chest offload in woodcut cleanup.** `tryCleanupChestOffload()` runs when inventory is full during the main cleanup loop. Searches 18-block radius for existing chests, deposits logs/planks/saplings/leaf litter/apples via `ChestStoreService.depositMatchingWalkOnly`. Places a new chest if none found. Keeps pillar blocks (scaffold material), tools, and protected items.
 
 - **Fix: Max pillar height increased from 5 to 7.** Most floaters at Y=75 from ground Y=68 need 6-7 steps. Cap of 5 was skipping the majority of overhead targets, leaving cleanup "done" with 0 actionable but visible floaters overhead.
