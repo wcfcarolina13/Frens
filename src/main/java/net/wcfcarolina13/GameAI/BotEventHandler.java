@@ -1489,6 +1489,15 @@ public class BotEventHandler {
             FollowStateService.clearIdleSweep(bot.getUuid());
         }
 
+        // ---- Daylight break-free (IDLE only) ----
+        // If the bot sealed itself in a shelter overnight, break free at dawn.
+        // Must run BEFORE proactive shelter check to avoid re-sheltering immediately.
+        if (mode == Mode.IDLE && BotFleeService.isInShelter(bot.getUuid())) {
+            if (BotFleeService.checkDaylightBreakFree(bot, server)) {
+                return true;
+            }
+        }
+
         // ---- Proactive shelter (IDLE only, after sweep completes) ----
         // At night in survival, idle bots seek shelter once they're done collecting items.
         if (mode == Mode.IDLE && augmentedHostiles.isEmpty()) {
@@ -1649,9 +1658,12 @@ public class BotEventHandler {
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
         clearBase(bot);
+        // Clear any lingering idle sweep — it consumes ticks and blocks follow movement.
+        UUID id = bot.getUuid();
+        FollowStateService.clearIdleSweep(id);
+        DropSweepService.requestCancel(bot, "follow-start");
         // Kick off a follow plan immediately so "around the corner / door enclosures" work even when
         // the commander isn't standing in front of the door. This is async + bounded, so it won't block ticks.
-        UUID id = bot.getUuid();
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start");
@@ -1687,6 +1699,8 @@ public class BotEventHandler {
         clearGuard(bot);
         clearBase(bot);
         UUID id = bot.getUuid();
+        FollowStateService.clearIdleSweep(id);
+        DropSweepService.requestCancel(bot, "follow-start-walk");
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start-walk");

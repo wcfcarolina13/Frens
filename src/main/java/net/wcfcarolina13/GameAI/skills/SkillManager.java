@@ -216,6 +216,11 @@ public final class SkillManager {
                 LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
             }
             AutoFaceEntity.setBotExecutingTask(false);
+            // Reset pitch to level after skill completion — prevents leftover look-up
+            // angles from pillar/scaffold operations persisting into idle state.
+            if (botPlayer != null) {
+                botPlayer.setPitch(0);
+            }
             BotEventHandler.setExternalOverrideActive(false);
             if (botPlayer != null && !abortRequested) {
                 if (resumeFixedGoal != null) {

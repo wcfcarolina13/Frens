@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI;
 
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.block.BlockState;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -174,6 +175,15 @@ public final class DropSweeper {
                 } else {
                     LOGGER.warn("Drop sweep manual nudge failed near {}", dropPos);
                 }
+                // If item is trapped inside a leaf block within reach, break the leaf to free it.
+                if (!targetDrop.isRemoved() && player.getEntityWorld() instanceof ServerWorld sweepWorld) {
+                    BlockPos itemBlock = targetDrop.getBlockPos();
+                    if (sweepWorld.getBlockState(itemBlock).isIn(BlockTags.LEAVES)
+                            && itemBlock.getY() - player.getBlockY() <= 2) {
+                        LOGGER.info("Drop sweep: breaking leaf at {} to free trapped item", itemBlock.toShortString());
+                        net.wcfcarolina13.PlayerUtils.MiningTool.mineBlock(player, itemBlock);
+                    }
+                }
             } else {
                 LOGGER.warn("Drop sweep failed to approach {}: {}", dropPos, movement.detail());
             }
@@ -188,7 +198,9 @@ public final class DropSweeper {
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
-                        drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop) && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED)
+                        drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop)
+                                && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED
+                                && drop.getBlockY() - player.getBlockY() <= 4) // skip unreachable elevated drops
                 .stream()
                 .min(Comparator.comparingDouble(player::squaredDistanceTo))
                 .orElse(null);

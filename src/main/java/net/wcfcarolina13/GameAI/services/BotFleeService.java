@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
+import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.entity.Entity;
@@ -1783,8 +1784,11 @@ public final class BotFleeService {
         LOGGER.info("Bot {} breaking free from tactical shelter (daylight, tod={})",
                 bot.getName().getString(), tod);
 
-        Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
-                "shelter-breakfree-" + bot.getName().getString());
+        Thread t = new Thread(() -> {
+            breakFreeFromShelter(bot, info);
+            // After breaking free, try to resume the interrupted task (e.g., woodcut stopped at sunset).
+            SkillResumeService.requestAutoResume(bot);
+        }, "shelter-breakfree-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
         return true;
