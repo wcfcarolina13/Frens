@@ -118,6 +118,10 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, Long> UNDERGROUND_LINGER_START = new ConcurrentHashMap<>();
     /** Tick when the bot last exited a shelter (suppresses immediate re-trigger of surface recovery). */
     private static final ConcurrentHashMap<UUID, Long> RECENT_SHELTER_EXIT_TICK = new ConcurrentHashMap<>();
+    /** Tick when the commander last left proximity (grace period before hunger checks activate). */
+    private static final ConcurrentHashMap<UUID, Long> COMMANDER_LEFT_TICK = new ConcurrentHashMap<>();
+    /** Whether the commander was nearby on the previous check (for edge detection). */
+    private static final ConcurrentHashMap<UUID, Boolean> COMMANDER_WAS_NEARBY = new ConcurrentHashMap<>();
     /** Grace period after shelter exit before surface recovery can trigger (60 seconds). */
     private static final long SHELTER_EXIT_GRACE_TICKS = 1200L;
 
@@ -2082,10 +2086,38 @@ public final class BotFleeService {
             return true;
         }
 
-        // 4. Commander nearby and also underground — player brought the bot here
-        if (isCommanderNearbyAndUnderground(bot, world, server)) {
+        // 4. Commander proximity with edge-detected grace timer.
+        //    While commander is nearby + underground: suppress and reset timers.
+        //    When commander leaves: start a grace timer (= linger duration).
+        //    Only after that grace timer expires do hunger checks activate.
+        boolean commanderNearby = isCommanderNearbyAndUnderground(bot, world, server);
+        boolean wasNearby = COMMANDER_WAS_NEARBY.getOrDefault(botId, false);
+        COMMANDER_WAS_NEARBY.put(botId, commanderNearby);
+
+        if (commanderNearby) {
+            // Commander is here — suppress, reset all timers
+            COMMANDER_LEFT_TICK.remove(botId);
+            UNDERGROUND_LINGER_START.remove(botId);
             LOGGER.info("Bot {} linger: suppressed — commander nearby and underground", name);
             return true;
+        }
+
+        // Commander not nearby — check if they just left (transition edge)
+        if (wasNearby && !commanderNearby) {
+            COMMANDER_LEFT_TICK.put(botId, tick);
+            LOGGER.info("Bot {} linger: commander left proximity — starting grace timer", name);
+        }
+
+        // If commander left recently, enforce grace period before any hunger checks
+        Long commanderLeftAt = COMMANDER_LEFT_TICK.get(botId);
+        if (commanderLeftAt != null) {
+            int lingerMinutes = net.wcfcarolina13.Frens.CONFIG.getUndergroundLingerMinutes();
+            long graceTicks = lingerMinutes * 60L * 20L;
+            if ((tick - commanderLeftAt) < graceTicks) {
+                return true; // still in post-commander grace period
+            }
+            // Grace expired — clear and fall through to hunger checks
+            COMMANDER_LEFT_TICK.remove(botId);
         }
 
         // 5. No tools and NOT near surface with soft blocks — can't mine out, wait for rescue
