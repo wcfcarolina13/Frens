@@ -41,6 +41,12 @@ public final class BotInventoryStorageService {
     private static final AtomicBoolean MIGRATION_DONE = new AtomicBoolean(false);
     private static final long SNAPSHOT_STALE_GRACE_MS = 2_000L;
     private static final long SAVE_LOG_COOLDOWN_MS = 60_000L;
+    /**
+     * Minimum file size (bytes) for a save to be considered valid.
+     * A bot with any real inventory is typically 500+ bytes compressed.
+     * An empty/reset bot is ~200 bytes. We use 300 as the threshold.
+     */
+    private static final long MIN_VALID_SAVE_BYTES = 300L;
 
     private static final String KEY_ALIAS = "Alias";
     private static final String KEY_UUID = "Uuid";
@@ -119,6 +125,28 @@ public final class BotInventoryStorageService {
         root.putInt(KEY_TOTAL_XP, bot.totalExperience);
 
         try {
+            // Guard: if the new save has no items but the existing file is substantial,
+            // this is likely a blank-state overwrite after a crash. Refuse to save.
+            if (items.isEmpty() && Files.exists(path)) {
+                long existingSize = Files.size(path);
+                if (existingSize > MIN_VALID_SAVE_BYTES) {
+                    LOGGER.warn("Refusing to overwrite substantial save ({} bytes) with empty inventory for '{}'",
+                            existingSize, bot.getName().getString());
+                    return false;
+                }
+            }
+
+            // Backup: copy existing file to .bak before overwriting.
+            // If a crash corrupts the save, the .bak preserves the last good state.
+            if (Files.exists(path)) {
+                Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
+                try {
+                    Files.copy(path, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException bakErr) {
+                    LOGGER.warn("Failed to create backup for '{}': {}", bot.getName().getString(), bakErr.getMessage());
+                }
+            }
+
             net.minecraft.nbt.NbtIo.writeCompressed(root, path);
             maybeLogSave(bot, path);
             return true;
@@ -147,12 +175,40 @@ public final class BotInventoryStorageService {
                     primaryPath.getFileName());
         }
 
+        // If primary file is suspiciously small (likely blank state from a crash recovery),
+        // fall back to the .bak file which preserves the last known good state.
+        Path loadPath = path;
+        try {
+            if (Files.exists(path) && Files.size(path) < MIN_VALID_SAVE_BYTES) {
+                Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
+                if (Files.exists(backup) && Files.size(backup) >= MIN_VALID_SAVE_BYTES) {
+                    LOGGER.warn("Primary save for '{}' is suspiciously small ({} bytes) — falling back to .bak ({} bytes)",
+                            bot.getName().getString(), Files.size(path), Files.size(backup));
+                    loadPath = backup;
+                }
+            }
+        } catch (IOException sizeErr) {
+            LOGGER.debug("Size check failed for '{}': {}", bot.getName().getString(), sizeErr.getMessage());
+        }
+
         NbtCompound root;
         try {
-            root = net.minecraft.nbt.NbtIo.readCompressed(path, NbtSizeTracker.ofUnlimitedBytes());
+            root = net.minecraft.nbt.NbtIo.readCompressed(loadPath, NbtSizeTracker.ofUnlimitedBytes());
         } catch (IOException e) {
-            LOGGER.error("Failed to read inventory for fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
-            return false;
+            // Primary/chosen path failed — try .bak as last resort
+            Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
+            if (Files.exists(backup) && !backup.equals(loadPath)) {
+                LOGGER.warn("Primary load failed for '{}', trying .bak: {}", bot.getName().getString(), e.getMessage());
+                try {
+                    root = net.minecraft.nbt.NbtIo.readCompressed(backup, NbtSizeTracker.ofUnlimitedBytes());
+                } catch (IOException bakErr) {
+                    LOGGER.error("Both primary and .bak failed for '{}': {}", bot.getName().getString(), bakErr.getMessage());
+                    return false;
+                }
+            } else {
+                LOGGER.error("Failed to read inventory for fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
+                return false;
+            }
         }
 
         String savedAlias = root.getString(KEY_ALIAS).orElse("");
