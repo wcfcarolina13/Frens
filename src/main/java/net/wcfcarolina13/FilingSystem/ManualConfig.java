@@ -58,6 +58,8 @@ public class ManualConfig {
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
     private int fortBufferRadius = 8;
+    private int undergroundLingerMinutes = 3;
+    private int undergroundProximityBlocks = 32;
     private Map<String, String> botSkins = new HashMap<>();
     private Map<String, BotSkinSelection> botSkinSelections = new HashMap<>();
     private Map<String, BotControlSettings> botControls = new HashMap<>();
@@ -678,6 +680,12 @@ public class ManualConfig {
 
     public int getFortBufferRadius() { return fortBufferRadius > 0 ? fortBufferRadius : 8; }
     public void setFortBufferRadius(int r) { this.fortBufferRadius = r; }
+
+    public int getUndergroundLingerMinutes() { return undergroundLingerMinutes > 0 ? undergroundLingerMinutes : 3; }
+    public void setUndergroundLingerMinutes(int m) { this.undergroundLingerMinutes = m; }
+
+    public int getUndergroundProximityBlocks() { return undergroundProximityBlocks > 0 ? undergroundProximityBlocks : 32; }
+    public void setUndergroundProximityBlocks(int b) { this.undergroundProximityBlocks = b; }
 
     /** @deprecated Legacy accessor. Use {@link #getBotControlsByWorld()} or {@link #getAllBotAliases()} instead. */
     @Deprecated

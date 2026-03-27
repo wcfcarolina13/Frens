@@ -113,6 +113,14 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> CURRENT_SURVIVAL_ACTION = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> PENDING_SURVIVAL_RESUME = new ConcurrentHashMap<>();
 
+    // ── Underground linger system state ──────────────────────────────────
+    /** Tick when the bot's underground linger timer started (hunger-driven surface decision). */
+    private static final ConcurrentHashMap<UUID, Long> UNDERGROUND_LINGER_START = new ConcurrentHashMap<>();
+    /** Tick when the bot last exited a shelter (suppresses immediate re-trigger of surface recovery). */
+    private static final ConcurrentHashMap<UUID, Long> RECENT_SHELTER_EXIT_TICK = new ConcurrentHashMap<>();
+    /** Grace period after shelter exit before surface recovery can trigger (60 seconds). */
+    private static final long SHELTER_EXIT_GRACE_TICKS = 1200L;
+
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
             Items.COBBLESTONE, Items.STONE, Items.DIRT, Items.COBBLED_DEEPSLATE,
@@ -1896,6 +1904,13 @@ public final class BotFleeService {
                 return;
             }
 
+            // Record shelter exit so the underground linger system doesn't immediately
+            // re-trigger surface recovery after a shelter breakfree.
+            MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                noteShelterExit(bot.getUuid(), srv.getTicks());
+            }
+
             // 3. Surface escape — if still underground after breaking seal, pillar up
             escapeToSurface(bot, world);
 
@@ -2028,18 +2043,209 @@ public final class BotFleeService {
         return SafePositionService.isRecoveryReadySurface(world, bot.getBlockPos());
     }
 
+    // ── Underground linger decision helpers ─────────────────────────────
+
+    /** Record that a bot just exited a shelter (called from breakFreeFromShelter). */
+    public static void noteShelterExit(UUID botUuid, long serverTick) {
+        if (botUuid != null) RECENT_SHELTER_EXIT_TICK.put(botUuid, serverTick);
+    }
+
+    /**
+     * Central decision: should surface recovery be suppressed for this bot?
+     * Evaluates context (player proximity, hunger, tools, time of day, chests, tasks)
+     * to decide if the bot should stay underground rather than panic-escaping.
+     */
+    private static boolean shouldSuppressSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
+        UUID botId = bot.getUuid();
+        MinecraftServer server = bot.getCommandSource().getServer();
+        long tick = server != null ? server.getTicks() : 0L;
+        String name = bot.getName().getString();
+        int foodLevel = bot.getHungerManager().getFoodLevel();
+
+        // 1. Teleport grace period (already checked earlier, but belt-and-suspenders)
+        if (BotEventHandler.isInTeleportGracePeriod(bot)) {
+            LOGGER.info("Bot {} linger: suppressed — teleport grace period", name);
+            return true;
+        }
+
+        // 2. Active task running — bot is mining/working, don't interrupt
+        if (TaskService.hasActiveTask(botId)) {
+            LOGGER.info("Bot {} linger: suppressed — active task running", name);
+            return true;
+        }
+
+        // 3. Recently exited shelter — don't immediately re-trigger surface recovery
+        Long shelterExitTick = RECENT_SHELTER_EXIT_TICK.get(botId);
+        if (shelterExitTick != null && (tick - shelterExitTick) < SHELTER_EXIT_GRACE_TICKS) {
+            LOGGER.info("Bot {} linger: suppressed — recently exited shelter ({}s ago)",
+                    name, (tick - shelterExitTick) / 20);
+            return true;
+        }
+
+        // 4. Commander nearby and also underground — player brought the bot here
+        if (isCommanderNearbyAndUnderground(bot, world, server)) {
+            LOGGER.info("Bot {} linger: suppressed — commander nearby and underground", name);
+            return true;
+        }
+
+        // 5. No tools and NOT near surface with soft blocks — can't mine out, wait for rescue
+        boolean hasPickaxe = hasAnyPickaxe(bot);
+        if (!hasPickaxe && !isNearSurfaceWithSoftBlocks(bot, world)) {
+            LOGGER.info("Bot {} linger: suppressed — no tools, deep underground, waiting for rescue", name);
+            return true;
+        }
+
+        // 6. Nighttime on surface — stay underground unless critically starving
+        if (!world.isDay() || world.isThundering()) {
+            if (foodLevel > 3) {
+                LOGGER.info("Bot {} linger: suppressed — nighttime, waiting for dawn (food={})", name, foodLevel);
+                return true;
+            }
+        }
+
+        // 7. Commander recently died — linger near death site to guard drops
+        if (isCommanderRecentlyDied(bot, server, tick)) {
+            LOGGER.info("Bot {} linger: suppressed — commander died recently, guarding drops", name);
+            return true;
+        }
+
+        // 8. Try to get food from nearby chests before surfacing
+        try {
+            if (BotMutualAidService.tryImmediateChestFoodRecovery(bot, world)) {
+                LOGGER.info("Bot {} linger: suppressed — found food in nearby chest", name);
+                UNDERGROUND_LINGER_START.remove(botId); // reset timer since we found food
+                return true;
+            }
+        } catch (Throwable t) {
+            LOGGER.debug("Bot {} linger: chest food check failed: {}", name, t.getMessage());
+        }
+
+        // 9. Well-fed — no survival urgency, stay underground indefinitely
+        if (foodLevel >= 14) {
+            LOGGER.info("Bot {} linger: suppressed — well-fed (food={})", name, foodLevel);
+            UNDERGROUND_LINGER_START.remove(botId); // no urgency, reset timer
+            return true;
+        }
+
+        // 10. Critically hungry — allow surface recovery immediately
+        if (foodLevel <= 6) {
+            LOGGER.info("Bot {} linger: allowing surface recovery — critically hungry (food={})", name, foodLevel);
+            UNDERGROUND_LINGER_START.remove(botId);
+            return false;
+        }
+
+        // 11. Moderately hungry (food 7-13) — wait for linger timer to expire
+        int lingerMinutes = net.wcfcarolina13.Frens.CONFIG.getUndergroundLingerMinutes();
+        long lingerTicks = lingerMinutes * 60L * 20L; // minutes → ticks
+        Long lingerStart = UNDERGROUND_LINGER_START.get(botId);
+        if (lingerStart == null) {
+            UNDERGROUND_LINGER_START.put(botId, tick);
+            LOGGER.info("Bot {} linger: timer started — moderately hungry (food={}), will surface in {}min",
+                    name, foodLevel, lingerMinutes);
+            return true;
+        }
+        if ((tick - lingerStart) < lingerTicks) {
+            return true; // still waiting
+        }
+
+        // Timer expired — allow surface recovery
+        LOGGER.info("Bot {} linger: timer expired after {}min — allowing surface recovery (food={})",
+                name, lingerMinutes, foodLevel);
+        UNDERGROUND_LINGER_START.remove(botId);
+        return false;
+    }
+
+    /** Check if the bot's commander/owner is nearby and also underground. */
+    private static boolean isCommanderNearbyAndUnderground(ServerPlayerEntity bot, ServerWorld world, MinecraftServer server) {
+        if (server == null) return false;
+        UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (ownerUuid == null) return false;
+        ServerPlayerEntity commander = server.getPlayerManager().getPlayer(ownerUuid);
+        if (commander == null || commander.isRemoved()) return false;
+        // Must be in the same world
+        if (commander.getEntityWorld() != bot.getEntityWorld()) return false;
+        int proximityBlocks = net.wcfcarolina13.Frens.CONFIG.getUndergroundProximityBlocks();
+        double distSq = bot.squaredDistanceTo(commander);
+        if (distSq > (double) proximityBlocks * proximityBlocks) return false;
+        // Commander must also be underground (no sky visible)
+        return !world.isSkyVisible(commander.getBlockPos().up());
+    }
+
+    /** Check if the bot has any pickaxe in inventory. */
+    private static boolean hasAnyPickaxe(ServerPlayerEntity bot) {
+        var inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty()) {
+                String id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).getPath();
+                if (id.endsWith("_pickaxe")) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if the bot is near the surface with only soft blocks overhead.
+     * Allows tool-less breakfree when the bot is just a few blocks below ground
+     * with dirt/sand/gravel above (e.g., after tactical shelter with no tools).
+     */
+    private static boolean isNearSurfaceWithSoftBlocks(ServerPlayerEntity bot, ServerWorld world) {
+        int botY = bot.getBlockY();
+        int surfaceY = SafePositionService.getWalkableGroundY(world, bot.getBlockX(), bot.getBlockZ());
+        int delta = surfaceY - botY;
+        if (delta < 1 || delta > 5) return false; // must be 1-5 blocks below surface
+
+        // Check all blocks between bot head and surface are soft (mineable by hand quickly)
+        for (int y = botY + 2; y <= surfaceY; y++) {
+            BlockPos pos = new BlockPos(bot.getBlockX(), y, bot.getBlockZ());
+            net.minecraft.block.BlockState state = world.getBlockState(pos);
+            if (state.isAir()) continue;
+            if (!isSoftBlock(state)) return false;
+        }
+        return true;
+    }
+
+    /** Blocks that can be mined quickly by hand (no tool required). */
+    private static boolean isSoftBlock(net.minecraft.block.BlockState state) {
+        net.minecraft.block.Block block = state.getBlock();
+        return block == Blocks.DIRT || block == Blocks.GRASS_BLOCK || block == Blocks.SAND
+                || block == Blocks.GRAVEL || block == Blocks.CLAY || block == Blocks.SOUL_SAND
+                || block == Blocks.SOUL_SOIL || block == Blocks.SNOW_BLOCK || block == Blocks.MOSS_BLOCK
+                || block == Blocks.MUD || block == Blocks.MUDDY_MANGROVE_ROOTS
+                || block == Blocks.ROOTED_DIRT || block == Blocks.COARSE_DIRT
+                || block == Blocks.FARMLAND || block == Blocks.DIRT_PATH
+                || state.isIn(BlockTags.LEAVES);
+    }
+
+    /** Check if the commander recently died (within last 2 minutes). */
+    private static boolean isCommanderRecentlyDied(ServerPlayerEntity bot, MinecraftServer server, long tick) {
+        if (server == null) return false;
+        UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (ownerUuid == null) return false;
+        ServerPlayerEntity commander = server.getPlayerManager().getPlayer(ownerUuid);
+        // If commander is null or dead, they recently died/disconnected
+        if (commander == null) return false; // disconnected, not dead — don't guard
+        if (!commander.isAlive()) {
+            // Commander is dead — check if they're in the same world and nearby
+            if (commander.getEntityWorld() == bot.getEntityWorld()
+                    && bot.squaredDistanceTo(commander) < 64.0 * 64.0) {
+                return true; // guard their drops
+            }
+        }
+        return false;
+    }
+
     /**
      * Escape to surface using the dedicated system-owned surface recovery path.
+     * Evaluates the underground linger decision tree before attempting escape.
      */
     public static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
             throws InterruptedException {
         if (shouldAbortSurvival(bot) || world == null) return;
         if (isAtSurface(bot, world)) return; // already at surface
 
-        // Suppress surface recovery during teleport grace period — the bot may have been
-        // teleported under canopy by a console command, not actually stuck underground.
-        if (BotEventHandler.isInTeleportGracePeriod(bot)) {
-            LOGGER.info("Bot {} skipping surface recovery — within teleport grace period", bot.getName().getString());
+        // Evaluate the full underground linger decision tree
+        if (shouldSuppressSurfaceRecovery(bot, world)) {
             return;
         }
 

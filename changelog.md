@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-03-27
+
+- **Feature: Underground linger system — smart surface recovery.** Bots no longer panic-escape to surface when idle underground. New `shouldSuppressSurfaceRecovery()` evaluates 12 contextual conditions: teleport grace, active tasks, recent shelter exit (60s grace), commander nearby + underground, no tools + deep underground (wait for rescue), nighttime safety, nearby chest food recovery, well-fed status (food >= 14 lingers indefinitely), critically hungry (food <= 6 surfaces immediately), moderately hungry starts configurable linger timer (default 3 min), and commander death guarding. Tool-less breakfree still allowed near surface with soft blocks overhead (dirt/sand/gravel). Config: `undergroundLingerMinutes` and `undergroundProximityBlocks` in settings.json5.
+
 ## 2026-03-26 (session 2)
 
 - **Fix: False teleport detection on fast-travel arrival.** Bot spawns at (0,0,0) then teleports to destination, triggering "External teleport detected" and clearing tasks. Added `BotEventHandler.notifyTravelArrival()` — called from `completePostSpawnSetup()` to seed the position tracker and grace period before the first behavior tick.
