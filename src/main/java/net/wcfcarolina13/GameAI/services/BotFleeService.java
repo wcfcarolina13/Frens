@@ -2419,6 +2419,16 @@ public final class BotFleeService {
             return true;
         }
 
+        // Suppress all surface recovery for idle bots when the linger decision tree says stay.
+        // Skill callers (hasActiveTask=true) bypass this — they need staging/pillar paths
+        // and have their own suppression inside escapeToSurface() for the heavy ascent only.
+        if (!TaskService.hasActiveTask(bot.getUuid())
+                && shouldSuppressSurfaceRecovery(bot, world)) {
+            LOGGER.info("ensureAtSurface: {} suppressed by linger decision tree",
+                    bot.getName().getString());
+            return false;
+        }
+
         AtomicBoolean lock = SURFACE_RECOVERY_LOCK.computeIfAbsent(bot.getUuid(), ignored -> new AtomicBoolean(false));
         if (!lock.compareAndSet(false, true)) {
             LOGGER.info("ensureAtSurface: {} recovery already in progress, skipping duplicate request",
