@@ -210,9 +210,13 @@ public final class SmeltingService {
                 }
             });
 
+            if (TaskService.isServerStopping()) break;
             boolean loaded;
             try {
-                loaded = loadResult.get(10, TimeUnit.SECONDS);
+                loaded = loadResult.get(3, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                LOGGER.warn("cookAllFoodSync: load future timed out");
+                continue;
             } catch (Exception e) {
                 LOGGER.warn("cookAllFoodSync: load future failed: {}", e.getMessage());
                 continue;
@@ -286,9 +290,13 @@ public final class SmeltingService {
                     }
                 });
 
+                if (TaskService.isServerStopping()) break;
                 boolean batchDone;
                 try {
-                    batchDone = pollResult.get(10, TimeUnit.SECONDS);
+                    batchDone = pollResult.get(3, TimeUnit.SECONDS);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    LOGGER.warn("cookAllFoodSync: poll future timed out");
+                    break;
                 } catch (Exception e) {
                     LOGGER.warn("cookAllFoodSync: poll future failed: {}", e.getMessage());
                     break;
@@ -329,9 +337,11 @@ public final class SmeltingService {
                     evacuateFuture.complete(null);
                 }
             });
-            try {
-                evacuateFuture.get(10, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
+            if (!TaskService.isServerStopping()) {
+                try {
+                    evacuateFuture.get(3, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                }
             }
         }
 

@@ -1601,6 +1601,7 @@ public final class MovementService {
         if (world == null || goal == null) {
             return false;
         }
+        if (abortRequested(player)) return false;
         Direction toward = Direction.getFacing(goal.getX() - player.getX(), 0, goal.getZ() - player.getZ());
         if (!toward.getAxis().isHorizontal()) {
             toward = player.getHorizontalFacing();
@@ -1626,6 +1627,7 @@ public final class MovementService {
         standCandidates.add(start.offset(toward.getOpposite()));
 
         for (BlockPos stand : standCandidates) {
+            if (abortRequested(player)) break;
             if (!isSolidStandable(world, stand.down(), stand)) {
                 continue;
             }
@@ -1637,7 +1639,7 @@ public final class MovementService {
             // If pursuit is disabled elsewhere, try a short manual nudge.
             Vec3d standCenter = centerOf(stand);
             long deadline = System.currentTimeMillis() + 900L;
-            while (System.currentTimeMillis() < deadline) {
+            while (System.currentTimeMillis() < deadline && !abortRequested(player)) {
                 double distSq = player.squaredDistanceTo(standCenter);
                 if (distSq <= 2.25D) {
                     BotActions.stop(player);
@@ -2106,7 +2108,10 @@ public final class MovementService {
         if (tryDoorEscapeToward(bot, target, null, label)) return true;
         if (tryStepUpToward(bot, target, label)) return true;
         if (tryLocalUnstick(bot, target, label)) return true;
-        if (trySidestepAround(bot, target)) return true;
+        // NOTE: trySidestepAround intentionally NOT called here — it causes unbounded
+        // indirect recursion (pursuitUntilClose → executeStuckRecoveryHeuristics →
+        // trySidestepAround → pursuitUntilClose → ...). Callers like walkSegment and
+        // walkDirect invoke trySidestepAround directly when needed.
         if (allowMineObstruction && tryMineObstructionToward(bot, target, label)) return true;
         return false;
     }
