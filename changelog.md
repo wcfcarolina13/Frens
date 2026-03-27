@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-03-27
 
+- **Feat: Food self-sufficiency after hunting.** Bots now keep hunting until they have 4+ food items in inventory (not just a full food bar). Post-hunt cooking is a synchronous multi-batch cycle: walks to furnace, loads each raw food type sequentially, waits for cooking to finish, refuels as needed, eats while waiting if hungry. Cooking added as an idle hobby (2x weighted when raw food exists); after a hunt (auto or commanded), a "prefer cooking" flag makes it the deterministic next hobby pick. `BotAutoCookingService` threshold raised from food<=5 to food<=10 so auto-cooking activates much sooner. Auto-hunt trigger also considers inventory food: at food 11-14 with zero backup items, hunting still activates.
+
 - **Feat: `/bot set hunger <level> <bot>` command.** Sets a bot's food level (0–20) and zeros saturation immediately, so the bot enters a genuinely hungry behavioral state for testing without waiting for natural drain.
 
 - **Fix: Idle underground bot never triggers surface recovery.** The linger decision tree was only reachable through opt-in services (idle hobbies, auto-hunt). New `BotUndergroundSurvivalService` runs on the tick loop with no opt-in gate — checks idle underground bots every 10s and dispatches `ensureAtSurface()`, which evaluates the full linger tree. Survival self-rescue is now always active.

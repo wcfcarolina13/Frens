@@ -47,6 +47,7 @@ import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
+import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.DebugFileLogger;
 import net.wcfcarolina13.network.HuntablesNetworkManager;
@@ -91,6 +92,7 @@ public final class HuntSkill implements Skill {
     private static final int STARVING_HUNGER = 5;
     private static final int EMERGENCY_HUNGER = 1;
     private static final float EMERGENCY_HEALTH = 2.0F;
+    public static final int MIN_BACKUP_FOOD_ITEMS = 4;
 
     private static final Set<Item> RAW_MEAT = Set.of(
             Items.BEEF,
@@ -319,7 +321,9 @@ public final class HuntSkill implements Skill {
                 }
             }
 
-            if (request.autoStopOnHunger && bot.getHungerManager().getFoodLevel() >= 16) {
+            if (request.autoStopOnHunger
+                    && bot.getHungerManager().getFoodLevel() >= 16
+                    && countFoodItems(bot) >= MIN_BACKUP_FOOD_ITEMS) {
                 break;
             }
 
@@ -507,9 +511,16 @@ public final class HuntSkill implements Skill {
             }
         }
 
+        // Post-hunt cooking: synchronous multi-batch cycle through all raw food types
         if (hasRawFood(bot)) {
-            SmeltingService.startBatchCook(bot, source, "", "auto");
+            SmeltingService.cookAllFoodSync(bot, source, world);
         }
+        // If raw food still remains after cooking, signal idle hobbies to prefer cooking next
+        boolean commandOrigin = !systemOrigin && !request.hobby;
+        if (hasRawFood(bot) || commandOrigin) {
+            BotIdleHobbiesService.setPreferCooking(bot.getUuid());
+        }
+
         if (request.hobby) {
             if (bot.getHungerManager().getFoodLevel() <= 19) {
                 eatCookedIfHungry(bot, world);
@@ -1521,7 +1532,7 @@ public final class HuntSkill implements Skill {
         }
     }
 
-    private static boolean hasRawFood(ServerPlayerEntity bot) {
+    public static boolean hasRawFood(ServerPlayerEntity bot) {
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
@@ -1532,6 +1543,23 @@ public final class HuntSkill implements Skill {
             }
         }
         return false;
+    }
+
+    /**
+     * Counts all food items (raw and cooked) in the bot's inventory.
+     */
+    public static int countFoodItems(ServerPlayerEntity bot) {
+        if (bot == null) return 0;
+        int count = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
+            if (food != null && food.nutrition() > 0) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 
     private static boolean isSunset(ServerWorld world) {

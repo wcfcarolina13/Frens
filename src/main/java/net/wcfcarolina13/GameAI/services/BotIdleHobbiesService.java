@@ -20,6 +20,7 @@ import net.minecraft.world.World;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
+import net.wcfcarolina13.GameAI.services.SmeltingService;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
@@ -81,6 +82,8 @@ public final class BotIdleHobbiesService {
 
     private static final Map<UUID, String> LAST_HOBBY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_HOBBY_END_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> PREFER_COOKING_UNTIL = new ConcurrentHashMap<>();
+    private static final long PREFER_COOKING_DURATION_MS = 5L * 60L * 1000L; // 5 minutes
     /** When canStartFallbackWoodcut finds a distant tree via directional expansion, stores the radius to use. */
     private static final Map<UUID, Integer> EXPANDED_WOODCUT_RADIUS = new ConcurrentHashMap<>();
     private static final int DIRECTIONAL_WOODCUT_RADIUS = 48;
@@ -104,6 +107,7 @@ public final class BotIdleHobbiesService {
         NEXT_COBBLESTONE_TOOLS_TICK.clear();
         LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
+        PREFER_COOKING_UNTIL.clear();
     }
 
     /** Returns the last idle-hobby skill name (e.g. "fish"/"hangout"), or null if unknown. */
@@ -166,6 +170,29 @@ public final class BotIdleHobbiesService {
         }
         long now = server.getTicks();
         NEXT_DECISION_TICK.put(bot.getUuid(), now);
+    }
+
+    /**
+     * Signals that the next idle hobby for this bot should strongly prefer cooking raw food.
+     * Expires after {@link #PREFER_COOKING_DURATION_MS}.
+     */
+    public static void setPreferCooking(UUID botUuid) {
+        if (botUuid == null) return;
+        PREFER_COOKING_UNTIL.put(botUuid, System.currentTimeMillis() + PREFER_COOKING_DURATION_MS);
+    }
+
+    public static void clearPreferCooking(UUID botUuid) {
+        if (botUuid != null) PREFER_COOKING_UNTIL.remove(botUuid);
+    }
+
+    private static boolean shouldPreferCooking(UUID botUuid) {
+        Long until = PREFER_COOKING_UNTIL.get(botUuid);
+        if (until == null) return false;
+        if (System.currentTimeMillis() > until) {
+            PREFER_COOKING_UNTIL.remove(botUuid);
+            return false;
+        }
+        return true;
     }
 
     private static final AtomicInteger AMBIENT_THREAD_ID = new AtomicInteger(0);
@@ -437,6 +464,16 @@ public final class BotIdleHobbiesService {
         if (bot == null || world == null) {
             return null;
         }
+
+        // Cooking check: if prefer-cooking flag is set and bot has raw food + fuel, cook first
+        boolean canCook = SmeltingService.hasCookableFoodInventoryItems(bot, world)
+                && (SmeltingService.hasFuelForAutoCook(bot, world)
+                    || hasNearbyLeafLitter(world, bot.getBlockPos(), 14));
+        if (shouldPreferCooking(bot.getUuid()) && canCook) {
+            clearPreferCooking(bot.getUuid());
+            return "cook";
+        }
+
         boolean hasRod = hasItem(bot, Items.FISHING_ROD);
         boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER);
         // Campfire can be a bit further away; it still "feels" local but avoids being too finicky.
@@ -497,6 +534,10 @@ public final class BotIdleHobbiesService {
         if (hasCampfireNearby) {
             weighted.add("hangout");
         }
+        if (canCook) {
+            weighted.add("cook");
+            weighted.add("cook");
+        }
         if (weighted.isEmpty()) {
             return null;
         }
@@ -507,6 +548,16 @@ public final class BotIdleHobbiesService {
         if (bot == null || world == null) {
             return null;
         }
+
+        // Cooking takes priority in fallback if flag is set
+        boolean canCook = SmeltingService.hasCookableFoodInventoryItems(bot, world)
+                && (SmeltingService.hasFuelForAutoCook(bot, world)
+                    || hasNearbyLeafLitter(world, bot.getBlockPos(), 14));
+        if (shouldPreferCooking(bot.getUuid()) && canCook) {
+            clearPreferCooking(bot.getUuid());
+            return "cook";
+        }
+
         boolean hasRod = hasItem(bot, Items.FISHING_ROD);
         boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER);
         boolean hasCampfireNearby = hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.CAMPFIRE)
@@ -802,6 +853,36 @@ public final class BotIdleHobbiesService {
         }
 
 
+        // Cook hobby: runs SmeltingService.cookAllFoodSync directly (no registered Skill needed)
+        if ("cook".equalsIgnoreCase(runSkillName)) {
+            AMBIENT_EXECUTOR.submit(() -> {
+                try {
+                    if (TaskService.isServerStopping()) return;
+                    ServerWorld sw = bot.getEntityWorld() instanceof ServerWorld s ? s : null;
+                    if (sw == null) return;
+                    if (!BotFleeService.isAtSurface(bot, sw) && !BotFleeService.ensureAtSurface(bot, sw)) {
+                        LOGGER.info("Cook hobby: {} could not reach surface, skipping", bot.getName().getString());
+                        LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                        return;
+                    }
+                    LOGGER.info("Cook hobby starting for {}", bot.getName().getString());
+                    boolean result = SmeltingService.cookAllFoodSync(bot, botSource, sw);
+                    LOGGER.info("Cook hobby finished for {}: success={}", bot.getName().getString(), result);
+                    LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                    clearPreferCooking(botUuid);
+                    server.execute(() -> {
+                        if (TaskService.isServerStopping() || bot.isRemoved() || !bot.isAlive()) return;
+                        long now = server.getTicks();
+                        NEXT_DECISION_TICK.put(botUuid, now + (result ? 300L + RNG.nextInt(300) : 200L));
+                    });
+                } catch (Throwable t) {
+                    LOGGER.warn("Cook hobby crashed for {}: {}", bot.getName().getString(), t.getMessage());
+                    LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                }
+            });
+            return;
+        }
+
         // Ambient hangouts should be short so they don't starve other hobbies (like fishing) after failures.
         // If a user explicitly runs /bot ... hangout they can still pass duration_sec.
         if ("hangout".equalsIgnoreCase(runSkillName)) {
@@ -889,7 +970,7 @@ public final class BotIdleHobbiesService {
         }
         String normalized = skillName.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "hunt", "flowers", "wander", "leaf_litter", "mushrooms", "feed_animals", "hangout", "grass_seeds", "woodcut", "mining", "collect_dirt" -> true;
+            case "hunt", "flowers", "wander", "leaf_litter", "mushrooms", "feed_animals", "hangout", "grass_seeds", "woodcut", "mining", "collect_dirt", "cook" -> true;
             default -> false;
         };
     }

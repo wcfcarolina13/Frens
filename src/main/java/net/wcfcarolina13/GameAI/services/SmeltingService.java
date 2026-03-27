@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Minimal smelting helper: inserts raw items into the first furnace the bot is looking at.
@@ -39,6 +40,9 @@ public final class SmeltingService {
     private static final double STATION_REACH_SQ = 4.5D * 4.5D;
     private static final int CHEST_SEARCH_RADIUS = 10;
     private static final double COMMANDER_LOOK_RANGE = 24.0D;
+    private static final long COOK_BATCH_TIMEOUT_MS = 3L * 60L * 1000L;
+    private static final long COOK_TOTAL_TIMEOUT_MS = 10L * 60L * 1000L;
+    private static final long COOK_POLL_INTERVAL_MS = 2000L;
 
     private SmeltingService() {}
 
@@ -48,6 +52,294 @@ public final class SmeltingService {
 
     public static boolean startBatchCookFoodOnly(ServerPlayerEntity bot, ServerCommandSource source, String fuelSpec) {
         return startBatchCookInternal(bot, source, "", fuelSpec, true);
+    }
+
+    /**
+     * Synchronous multi-batch cooking: cycles through ALL distinct raw food types in inventory,
+     * waits for each batch to finish, refuels as needed, and eats cooked food if hungry.
+     *
+     * <p>Must be called from a worker thread (not the server thread). Furnace mutations are
+     * dispatched to the server thread via {@code server.execute()}.
+     *
+     * @return true if any food was cooked
+     */
+    public static boolean cookAllFoodSync(ServerPlayerEntity bot,
+                                           ServerCommandSource source,
+                                           ServerWorld world) {
+        if (bot == null || source == null || world == null) {
+            return false;
+        }
+        var server = source.getServer();
+        if (server == null || TaskService.isServerStopping()) {
+            return false;
+        }
+
+        // Resolve furnace (null commander = bot-only, no commander look-at)
+        StationTarget station = resolveFurnaceTarget(bot, null, world);
+        if (station == null) {
+            LOGGER.info("cookAllFoodSync: no furnace available for {}", bot.getName().getString());
+            return false;
+        }
+        BlockPos furnacePos = station.pos().toImmutable();
+        BlockPos approachPos = station.approach().toImmutable();
+        var worldKey = world.getRegistryKey();
+        UUID botId = bot.getUuid();
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+
+        // Move to furnace synchronously (we are on a worker thread)
+        boolean moved = false;
+        try {
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    approachPos, approachPos, null, null, bot.getHorizontalFacing());
+            MovementService.MovementResult moveRes = MovementService.execute(
+                    bot.getCommandSource(), bot, plan, allowTeleport, true);
+            moved = moveRes.success() || bot.getBlockPos().getSquaredDistance(approachPos) <= STATION_REACH_SQ;
+            if (!moved) {
+                MovementService.clearRecentWalkAttempt(botId);
+                moved = MovementService.nudgeTowardUntilClose(
+                        bot, approachPos, STATION_REACH_SQ, 2600L, 0.15, "cook-sync-nudge");
+            }
+        } catch (Exception e) {
+            LOGGER.warn("cookAllFoodSync: movement failed for {}: {}", bot.getName().getString(), e.getMessage());
+        }
+        if (!moved) {
+            LOGGER.info("cookAllFoodSync: {} couldn't reach furnace at {}", bot.getName().getString(), furnacePos.toShortString());
+            return false;
+        }
+
+        LOGGER.info("cookAllFoodSync: {} starting cook cycle at furnace {}", bot.getName().getString(), furnacePos.toShortString());
+        long totalStartMs = System.currentTimeMillis();
+        boolean anyCooked = false;
+
+        // Gather distinct raw food item types that are cookable
+        var furnaceState = world.getBlockState(furnacePos);
+        Map<Item, List<ItemStack>> allCookables = findCookables(bot, world, furnaceState, "", true);
+        if (allCookables.isEmpty()) {
+            LOGGER.info("cookAllFoodSync: {} has no cookable food", bot.getName().getString());
+            return false;
+        }
+
+        List<Item> itemTypes = new ArrayList<>(allCookables.keySet());
+        for (Item rawItem : itemTypes) {
+            if (Thread.currentThread().isInterrupted() || TaskService.isServerStopping()) {
+                break;
+            }
+            if (System.currentTimeMillis() - totalStartMs > COOK_TOTAL_TIMEOUT_MS) {
+                LOGGER.info("cookAllFoodSync: {} total timeout reached", bot.getName().getString());
+                break;
+            }
+
+            // Re-check this item type still exists in inventory (may have been eaten)
+            Map<Item, List<ItemStack>> currentCookables = findCookables(bot, world, furnaceState, "", true);
+            List<ItemStack> stacks = currentCookables.get(rawItem);
+            if (stacks == null || stacks.isEmpty()) {
+                continue;
+            }
+
+            LOGGER.info("cookAllFoodSync: {} cooking {} ({}x stacks)",
+                    bot.getName().getString(), rawItem.getName().getString(), stacks.size());
+
+            // All furnace mutations happen on the server thread
+            CompletableFuture<Boolean> loadResult = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    ServerWorld liveWorld = server.getWorld(worldKey);
+                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                        loadResult.complete(false);
+                        return;
+                    }
+                    var be = liveWorld.getBlockEntity(furnacePos);
+                    if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
+                        loadResult.complete(false);
+                        return;
+                    }
+                    if (!ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                        loadResult.complete(false);
+                        return;
+                    }
+
+                    // Evacuate output
+                    ItemStack output = furnace.getStack(2);
+                    if (!output.isEmpty()) {
+                        ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                        if (remaining != null && remaining.isEmpty()) {
+                            furnace.setStack(2, ItemStack.EMPTY);
+                        } else if (remaining != null && remaining.getCount() < output.getCount()) {
+                            furnace.setStack(2, remaining);
+                        }
+                    }
+
+                    // Evacuate input if different item type
+                    ItemStack existingInput = furnace.getStack(0);
+                    if (!existingInput.isEmpty() && !existingInput.isOf(rawItem)) {
+                        ItemStack remaining = evacuateInput(liveBot, source, existingInput.copy(), STATION_REACH_SQ);
+                        if (remaining != null && remaining.isEmpty()) {
+                            furnace.setStack(0, ItemStack.EMPTY);
+                        } else if (remaining != null && remaining.getCount() < existingInput.getCount()) {
+                            furnace.setStack(0, remaining);
+                        }
+                    }
+
+                    // Load all stacks of this raw food type
+                    // Re-read cookables on server thread for thread safety
+                    var liveFurnaceState = liveWorld.getBlockState(furnacePos);
+                    Map<Item, List<ItemStack>> liveCookables = findCookables(liveBot, liveWorld, liveFurnaceState, "", true);
+                    List<ItemStack> liveStacks = liveCookables.get(rawItem);
+                    int inserted = 0;
+                    if (liveStacks != null) {
+                        for (ItemStack stack : liveStacks) {
+                            if (insertIntoInput(furnace, stack.copy())) {
+                                consumeFromInventory(liveBot, stack);
+                                inserted++;
+                            }
+                        }
+                    }
+                    if (inserted == 0) {
+                        loadResult.complete(false);
+                        return;
+                    }
+
+                    // Ensure fuel
+                    ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                    loadResult.complete(true);
+                } catch (Throwable t) {
+                    LOGGER.warn("cookAllFoodSync: load failed: {}", t.getMessage());
+                    loadResult.complete(false);
+                }
+            });
+
+            boolean loaded;
+            try {
+                loaded = loadResult.get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                LOGGER.warn("cookAllFoodSync: load future failed: {}", e.getMessage());
+                continue;
+            }
+            if (!loaded) {
+                continue;
+            }
+
+            // Poll until this batch is done
+            long batchStartMs = System.currentTimeMillis();
+            while (!Thread.currentThread().isInterrupted() && !TaskService.isServerStopping()) {
+                if (System.currentTimeMillis() - batchStartMs > COOK_BATCH_TIMEOUT_MS) {
+                    LOGGER.info("cookAllFoodSync: {} batch timeout for {}", bot.getName().getString(), rawItem.getName().getString());
+                    break;
+                }
+                if (System.currentTimeMillis() - totalStartMs > COOK_TOTAL_TIMEOUT_MS) {
+                    break;
+                }
+
+                try {
+                    Thread.sleep(COOK_POLL_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+
+                // Check furnace state + refuel + eat on server thread
+                CompletableFuture<Boolean> pollResult = new CompletableFuture<>();
+                server.execute(() -> {
+                    try {
+                        ServerWorld liveWorld = server.getWorld(worldKey);
+                        ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                        if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                            pollResult.complete(true); // done — bot gone
+                            return;
+                        }
+                        var be = liveWorld.getBlockEntity(furnacePos);
+                        if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
+                            pollResult.complete(true); // done — furnace gone
+                            return;
+                        }
+
+                        // Eat from output if hungry
+                        ItemStack output = furnace.getStack(2);
+                        if (!output.isEmpty() && liveBot.getHungerManager().getFoodLevel() < 18) {
+                            ItemStack taken = output.copy();
+                            liveBot.getInventory().insertStack(taken);
+                            int consumed = output.getCount() - taken.getCount();
+                            if (consumed > 0) {
+                                output.decrement(consumed);
+                                if (output.isEmpty()) {
+                                    furnace.setStack(2, ItemStack.EMPTY);
+                                }
+                                furnace.markDirty();
+                            }
+                            HealingService.autoEat(liveBot);
+                        }
+
+                        // Refuel if needed and input still has items
+                        ItemStack input = furnace.getStack(0);
+                        if (!input.isEmpty() && needsFuel(furnace)) {
+                            ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                        }
+
+                        // Check if batch is done (input slot empty)
+                        boolean inputEmpty = furnace.getStack(0).isEmpty();
+                        pollResult.complete(inputEmpty);
+                    } catch (Throwable t) {
+                        LOGGER.warn("cookAllFoodSync: poll failed: {}", t.getMessage());
+                        pollResult.complete(true);
+                    }
+                });
+
+                boolean batchDone;
+                try {
+                    batchDone = pollResult.get(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    LOGGER.warn("cookAllFoodSync: poll future failed: {}", e.getMessage());
+                    break;
+                }
+                if (batchDone) {
+                    anyCooked = true;
+                    break;
+                }
+            }
+
+            // Evacuate final output for this batch
+            CompletableFuture<Void> evacuateFuture = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    ServerWorld liveWorld = server.getWorld(worldKey);
+                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                        evacuateFuture.complete(null);
+                        return;
+                    }
+                    var be = liveWorld.getBlockEntity(furnacePos);
+                    if (be instanceof AbstractFurnaceBlockEntity furnace) {
+                        ItemStack output = furnace.getStack(2);
+                        if (!output.isEmpty()) {
+                            ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                            if (remaining != null && remaining.isEmpty()) {
+                                furnace.setStack(2, ItemStack.EMPTY);
+                            } else if (remaining != null && remaining.getCount() < output.getCount()) {
+                                furnace.setStack(2, remaining);
+                            }
+                        }
+                        // Eat cooked food if hungry
+                        HealingService.autoEat(liveBot);
+                    }
+                    evacuateFuture.complete(null);
+                } catch (Throwable t) {
+                    LOGGER.warn("cookAllFoodSync: evacuate failed: {}", t.getMessage());
+                    evacuateFuture.complete(null);
+                }
+            });
+            try {
+                evacuateFuture.get(10, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (anyCooked) {
+            LOGGER.info("cookAllFoodSync: {} finished cooking cycle ({}ms)",
+                    bot.getName().getString(), System.currentTimeMillis() - totalStartMs);
+        }
+        return anyCooked;
     }
 
     private static boolean startBatchCookInternal(ServerPlayerEntity bot,

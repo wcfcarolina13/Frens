@@ -22,7 +22,7 @@ public final class BotAutoCookingService {
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-auto-cooking");
     private static final Random RNG = new Random();
 
-    private static final int VERY_HUNGRY_THRESHOLD = 5;
+    private static final int COOK_HUNGER_THRESHOLD = 10;
     private static final long START_COOLDOWN_TICKS = 20L * 14L;
     private static final long COLLECT_COOLDOWN_TICKS = 20L * 8L;
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
@@ -57,7 +57,7 @@ public final class BotAutoCookingService {
                 }
             }
 
-            if (hunger > VERY_HUNGRY_THRESHOLD) {
+            if (hunger > COOK_HUNGER_THRESHOLD) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 80L);
                 continue;
             }
@@ -89,11 +89,11 @@ public final class BotAutoCookingService {
     }
 
     static boolean shouldStartEmergencyAutoCook(int hungerLevel, boolean hasCookableFood, boolean hasFuel) {
-        return hungerLevel <= VERY_HUNGRY_THRESHOLD && hasCookableFood && hasFuel;
+        return hungerLevel <= COOK_HUNGER_THRESHOLD && hasCookableFood && hasFuel;
     }
 
     static boolean shouldCollectReadyFood(int hungerLevel, boolean hasReadyFoodOutput) {
-        return hungerLevel <= VERY_HUNGRY_THRESHOLD && hasReadyFoodOutput;
+        return hungerLevel <= COOK_HUNGER_THRESHOLD && hasReadyFoodOutput;
     }
 
     private static boolean isEligible(ServerPlayerEntity bot) {

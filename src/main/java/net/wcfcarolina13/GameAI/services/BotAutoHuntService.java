@@ -8,6 +8,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
@@ -131,8 +132,13 @@ public final class BotAutoHuntService {
                     continue;
                 }
             }
-            if (bot.getHungerManager().getFoodLevel() > AUTO_HUNT_HUNGER_THRESHOLD) {
-                continue;
+            int foodLevel = bot.getHungerManager().getFoodLevel();
+            if (foodLevel > AUTO_HUNT_HUNGER_THRESHOLD) {
+                // Food bar is above threshold, but if still moderately hungry (11-14)
+                // with no backup food items, keep hunting for self-sufficiency
+                if (foodLevel > 14 || HuntSkill.countFoodItems(bot) >= HuntSkill.MIN_BACKUP_FOOD_ITEMS) {
+                    continue;
+                }
             }
             long next = NEXT_DECISION_TICK.getOrDefault(bot.getUuid(), 0L);
             if (nowTick < next) {
@@ -189,6 +195,11 @@ public final class BotAutoHuntService {
                         bot.getName().getString(),
                         result != null && result.success(),
                         result != null ? result.message() : "null");
+                // Post-hunt: signal idle hobbies to prefer cooking if raw food remains
+                if (HuntSkill.hasRawFood(bot)) {
+                    BotIdleHobbiesService.setPreferCooking(bot.getUuid());
+                }
+                BotIdleHobbiesService.requestDecisionNow(bot);
             } catch (Throwable t) {
                 LOGGER.warn("Auto-hunt crashed for {}: {}",
                         bot.getName().getString(),
