@@ -1211,6 +1211,26 @@ public class modCommandRegistry {
                                 )
                         )
 
+                        .then(literal("set")
+                                .then(literal("hunger")
+                                        .then(CommandManager.argument("level", IntegerArgumentType.integer(0, 20))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> {
+                                                            int foodLevel = IntegerArgumentType.getInteger(context, "level");
+                                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                            bot.getHungerManager().setFoodLevel(foodLevel);
+                                                            bot.getHungerManager().setSaturationLevel(0.0f);
+                                                            context.getSource().sendFeedback(
+                                                                () -> Text.literal("Set " + bot.getName().getString() + "'s hunger to " + foodLevel + " (saturation zeroed)."),
+                                                                false
+                                                            );
+                                                            return 1;
+                                                        })
+                                                )
+                                        )
+                                )
+                        )
+
                         .then(literal("getOxygenLevel")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> {
