@@ -119,7 +119,6 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
     private Rect permissionsActionRect;
-    private Rect regroupRect;
     private Rect saveRect;
     private Rect closeRect;
     private final LinkedHashMap<CyclingButtonWidget<?>, Rect> settingChipRects = new LinkedHashMap<>();
@@ -242,7 +241,6 @@ public class BotControlScreen extends Screen {
         int footerGap = 8;
         closeRect = new Rect(outerPanelX + outerPanelW - 10 - footerBtnW, footerY, footerBtnW, BUTTON_H);
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
-        regroupRect = new Rect(saveRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 160, BUTTON_H);
     }
 
@@ -504,9 +502,6 @@ public class BotControlScreen extends Screen {
         drawActionButton(context, permissionsActionRect,
                 "Permissions Editor",
                 false,
-                this.client != null && selectedAlias != null && !selectedAlias.isBlank(),
-                mouseX, mouseY);
-        drawActionButton(context, regroupRect, "Regroup", false,
                 this.client != null && selectedAlias != null && !selectedAlias.isBlank(),
                 mouseX, mouseY);
         drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
@@ -904,15 +899,6 @@ public class BotControlScreen extends Screen {
         if (permissionsActionRect.contains(mx, my)) {
             if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
                 this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
-            }
-            return true;
-        }
-
-        // Footer: Regroup
-        if (regroupRect.contains(mx, my)) {
-            if (this.client != null && this.client.getNetworkHandler() != null
-                    && selectedAlias != null && !selectedAlias.isBlank()) {
-                this.client.getNetworkHandler().sendChatCommand("bot regroup " + selectedAlias);
             }
             return true;
         }
