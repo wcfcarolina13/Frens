@@ -600,6 +600,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.Commands.modCommandRegistry.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.shutdownExecutors();
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);
@@ -829,6 +830,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotEmergencyRescueService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotMutualAidService::onServerTick);

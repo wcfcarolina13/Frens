@@ -6,6 +6,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 - **Feat: `/bot set hunger <level> <bot>` command.** Sets a bot's food level (0–20) and zeros saturation immediately, so the bot enters a genuinely hungry behavioral state for testing without waiting for natural drain.
 
+- **Fix: Idle underground bot never triggers surface recovery.** The linger decision tree was only reachable through opt-in services (idle hobbies, auto-hunt). New `BotUndergroundSurvivalService` runs on the tick loop with no opt-in gate — checks idle underground bots every 10s and dispatches `ensureAtSurface()`, which evaluates the full linger tree. Survival self-rescue is now always active.
+
 - **Feature: Underground linger system — smart surface recovery.** Bots no longer panic-escape to surface when idle underground. New `shouldSuppressSurfaceRecovery()` evaluates 12 contextual conditions: teleport grace, active tasks, recent shelter exit (60s grace), commander nearby + underground, no tools + deep underground (wait for rescue), nighttime safety, nearby chest food recovery, well-fed status (food >= 14 lingers indefinitely), critically hungry (food <= 6 surfaces immediately), moderately hungry starts configurable linger timer (default 3 min), and commander death guarding. Tool-less breakfree still allowed near surface with soft blocks overhead (dirt/sand/gravel). Config: `undergroundLingerMinutes` and `undergroundProximityBlocks` in settings.json5.
 
 ## 2026-03-26 (session 2)
