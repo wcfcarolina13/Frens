@@ -494,6 +494,11 @@ public final class BotFleeService {
                 lock.set(false);
                 return false;
             }
+            // Underground bots are already safe from nighttime mobs — no need to dig shelter
+            if (!world.isSkyVisible(bot.getBlockPos().up())) {
+                lock.set(false);
+                return false;
+            }
         }
 
         // Skip shelter on peaceful difficulty — no hostile mobs spawn
@@ -2085,15 +2090,7 @@ public final class BotFleeService {
             return true;
         }
 
-        // 3. Recently exited shelter — don't immediately re-trigger surface recovery
-        Long shelterExitTick = RECENT_SHELTER_EXIT_TICK.get(botId);
-        if (shelterExitTick != null && (tick - shelterExitTick) < SHELTER_EXIT_GRACE_TICKS) {
-            LOGGER.info("Bot {} linger: suppressed — recently exited shelter ({}s ago)",
-                    name, (tick - shelterExitTick) / 20);
-            return true;
-        }
-
-        // 4. Commander proximity with edge-detected grace timer.
+        // 3. Commander proximity with edge-detected grace timer.
         //    While commander is nearby + underground: suppress and reset timers.
         //    When commander leaves: start a grace timer (= linger duration).
         //    Only after that grace timer expires do hunger checks activate.
@@ -2109,13 +2106,31 @@ public final class BotFleeService {
             return true;
         }
 
+        // 4. Critically hungry — override grace periods (shelter-exit, commander-left)
+        //    and surface immediately.  Commander-nearby (#3) is still respected so the
+        //    bot stays if the player is right there to help.
+        if (foodLevel <= 6) {
+            LOGGER.info("Bot {} linger: allowing surface recovery — critically hungry (food={})", name, foodLevel);
+            UNDERGROUND_LINGER_START.remove(botId);
+            COMMANDER_LEFT_TICK.remove(botId);
+            return false;
+        }
+
+        // 5. Recently exited shelter — don't immediately re-trigger surface recovery
+        Long shelterExitTick = RECENT_SHELTER_EXIT_TICK.get(botId);
+        if (shelterExitTick != null && (tick - shelterExitTick) < SHELTER_EXIT_GRACE_TICKS) {
+            LOGGER.info("Bot {} linger: suppressed — recently exited shelter ({}s ago)",
+                    name, (tick - shelterExitTick) / 20);
+            return true;
+        }
+
         // Commander not nearby — check if they just left (transition edge)
         if (wasNearby && !commanderNearby) {
             COMMANDER_LEFT_TICK.put(botId, tick);
             LOGGER.info("Bot {} linger: commander left proximity — starting grace timer", name);
         }
 
-        // If commander left recently, enforce grace period before any hunger checks
+        // 6. If commander left recently, enforce grace period before hunger checks
         Long commanderLeftAt = COMMANDER_LEFT_TICK.get(botId);
         if (commanderLeftAt != null) {
             int lingerMinutes = net.wcfcarolina13.Frens.CONFIG.getUndergroundLingerMinutes();
@@ -2127,14 +2142,14 @@ public final class BotFleeService {
             COMMANDER_LEFT_TICK.remove(botId);
         }
 
-        // 5. No tools and NOT near surface with soft blocks — can't mine out, wait for rescue
+        // 8. No tools and NOT near surface with soft blocks — can't mine out, wait for rescue
         boolean hasPickaxe = hasAnyPickaxe(bot);
         if (!hasPickaxe && !isNearSurfaceWithSoftBlocks(bot, world)) {
             LOGGER.info("Bot {} linger: suppressed — no tools, deep underground, waiting for rescue", name);
             return true;
         }
 
-        // 6. Nighttime on surface — stay underground unless critically starving
+        // 9. Nighttime on surface — stay underground unless critically starving
         if (!world.isDay() || world.isThundering()) {
             if (foodLevel > 3) {
                 LOGGER.info("Bot {} linger: suppressed — nighttime, waiting for dawn (food={})", name, foodLevel);
@@ -2142,13 +2157,13 @@ public final class BotFleeService {
             }
         }
 
-        // 7. Commander recently died — linger near death site to guard drops
+        // 10. Commander recently died — linger near death site to guard drops
         if (isCommanderRecentlyDied(bot, server, tick)) {
             LOGGER.info("Bot {} linger: suppressed — commander died recently, guarding drops", name);
             return true;
         }
 
-        // 8. Try to get food from nearby chests before surfacing
+        // 11. Try to get food from nearby chests before surfacing
         try {
             if (BotMutualAidService.tryImmediateChestFoodRecovery(bot, world)) {
                 LOGGER.info("Bot {} linger: suppressed — found food in nearby chest", name);
@@ -2159,21 +2174,15 @@ public final class BotFleeService {
             LOGGER.debug("Bot {} linger: chest food check failed: {}", name, t.getMessage());
         }
 
-        // 9. Well-fed — no survival urgency, stay underground indefinitely
+        // 12. Well-fed — no survival urgency, stay underground indefinitely
         if (foodLevel >= 14) {
             LOGGER.info("Bot {} linger: suppressed — well-fed (food={})", name, foodLevel);
             UNDERGROUND_LINGER_START.remove(botId); // no urgency, reset timer
             return true;
         }
 
-        // 10. Critically hungry — allow surface recovery immediately
-        if (foodLevel <= 6) {
-            LOGGER.info("Bot {} linger: allowing surface recovery — critically hungry (food={})", name, foodLevel);
-            UNDERGROUND_LINGER_START.remove(botId);
-            return false;
-        }
-
-        // 11. Moderately hungry (food 7-13) — wait for linger timer to expire
+        // Moderately hungry (food 7-13) — wait for linger timer to expire
+        // (Critically hungry food ≤ 6 is handled earlier as check #4, overriding grace periods.)
         int lingerMinutes = net.wcfcarolina13.Frens.CONFIG.getUndergroundLingerMinutes();
         long lingerTicks = lingerMinutes * 60L * 20L; // minutes → ticks
         Long lingerStart = UNDERGROUND_LINGER_START.get(botId);
