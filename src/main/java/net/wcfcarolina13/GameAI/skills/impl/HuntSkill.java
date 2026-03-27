@@ -1076,7 +1076,15 @@ public final class HuntSkill implements Skill {
         BlockPos targetPos = target.getBlockPos();
         Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(bot, targetPos, MovementService.MovementOptions.skillLoot());
         if (planOpt.isEmpty()) {
-            return false;
+            // Fallback: attempt direct movement toward the target even without a verified
+            // standable position.  This covers targets under tree canopy where leaf blocks
+            // cause hasClearance to reject every nearby position.  The movement system's
+            // existing stuck-recovery (leaf mining, sidestep, obstruction mining) will
+            // handle obstructions along the way.
+            LOGGER.info("Hunt approach: planLootApproach empty for {} — falling back to direct movement",
+                    targetPos.toShortString());
+            planOpt = Optional.of(new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, targetPos, targetPos, null, null, Direction.UP));
         }
         MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), Boolean.FALSE, true);
         return result.success() || bot.getBlockPos().getSquaredDistance(targetPos) <= ATTACK_RANGE_SQ;

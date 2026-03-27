@@ -749,17 +749,20 @@ public final class SmeltingService {
         ItemStack invFurnace = findInventoryFurnace(bot);
         if (invFurnace != null) {
             BlockPos placeAt = chooseTacticalPlacementTarget(bot, world);
-            BotActions.placeBlockAt(bot, placeAt, java.util.List.of(invFurnace.getItem()));
-            LOGGER.info("Placed furnace-like {} at {}", invFurnace.getItem().getName().getString(), placeAt.toShortString());
-            try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-            // Re-scan to confirm block entity is ready (avoids race condition)
-            BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
-            BlockPos target3 = confirmed != null ? confirmed : placeAt;
-            if (isFurnaceLike(world, target3)) {
-                BotFurnaceRegistryService.registerFurnace(bot, target3, world, "tactical");
+            boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(invFurnace.getItem()));
+            if (placed) {
+                LOGGER.info("Placed furnace-like {} at {}", invFurnace.getItem().getName().getString(), placeAt.toShortString());
+                try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                // Re-scan to confirm block entity is ready (avoids race condition)
+                BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
+                if (confirmed != null && isFurnaceLike(world, confirmed)) {
+                    BotFurnaceRegistryService.registerFurnace(bot, confirmed, world, "tactical");
+                    BlockPos approach3 = chooseApproach(world, confirmed);
+                    if (approach3 != null) return new StationTarget(confirmed.toImmutable(), approach3);
+                }
+            } else {
+                LOGGER.info("Failed to place furnace-like {} at {}", invFurnace.getItem().getName().getString(), placeAt.toShortString());
             }
-            BlockPos approach3 = chooseApproach(world, target3);
-            if (approach3 != null) return new StationTarget(target3.toImmutable(), approach3);
         }
 
         // 5) Craft furnace if possible, then place
@@ -767,17 +770,20 @@ public final class SmeltingService {
             ItemStack crafted = findInventoryFurnace(bot);
             if (crafted != null) {
                 BlockPos placeAt = chooseTacticalPlacementTarget(bot, world);
-                BotActions.placeBlockAt(bot, placeAt, java.util.List.of(crafted.getItem()));
-                LOGGER.info("Crafted and placed furnace at {}", placeAt.toShortString());
-                try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-                // Re-scan to confirm block entity is ready (avoids race condition)
-                BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
-                BlockPos target4 = confirmed != null ? confirmed : placeAt;
-                if (isFurnaceLike(world, target4)) {
-                    BotFurnaceRegistryService.registerFurnace(bot, target4, world, "tactical");
+                boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(crafted.getItem()));
+                if (placed) {
+                    LOGGER.info("Crafted and placed furnace at {}", placeAt.toShortString());
+                    try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                    // Re-scan to confirm block entity is ready (avoids race condition)
+                    BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
+                    if (confirmed != null && isFurnaceLike(world, confirmed)) {
+                        BotFurnaceRegistryService.registerFurnace(bot, confirmed, world, "tactical");
+                        BlockPos approach4 = chooseApproach(world, confirmed);
+                        if (approach4 != null) return new StationTarget(confirmed.toImmutable(), approach4);
+                    }
+                } else {
+                    LOGGER.info("Failed to place crafted furnace at {}", placeAt.toShortString());
                 }
-                BlockPos approach4 = chooseApproach(world, target4);
-                if (approach4 != null) return new StationTarget(target4.toImmutable(), approach4);
             }
         }
         return null;

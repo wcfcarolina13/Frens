@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-03-27 (session 2)
+
+- **Fix: Hunt approach under tree canopy.** `planLootApproach` rejected all positions under leaf canopy because leaf blocks have non-empty collision shapes, failing the `hasClearance` check. Bot would spin for 60s selecting the same target every 0.5s without ever attempting movement. Fix: `approachTarget` now falls back to direct movement toward the target when `planLootApproach` returns empty, allowing the movement system's existing leaf-mining and stuck-recovery to clear the path.
+
+- **Fix: Furnace placement failure causes confusing "Look at a furnace" message.** `resolveFurnaceTarget` ignored the return value of `BotActions.placeBlockAt`. When placement failed (e.g., target position occupied by leaves), the code returned a `StationTarget` pointing to a non-furnace block, causing the caller to show "Look at a furnace, blast furnace, or smoker." Fix: both step 4 (place from inventory) and step 5 (craft then place) now check the return value and only return a `StationTarget` when the furnace is confirmed via re-scan.
+
 ## 2026-03-27
 
 - **Feat: Food self-sufficiency after hunting.** Bots now keep hunting until they have 4+ food items in inventory (not just a full food bar). Post-hunt cooking is a synchronous multi-batch cycle: walks to furnace, loads each raw food type sequentially, waits for cooking to finish, refuels as needed, eats while waiting if hungry. Cooking added as an idle hobby (2x weighted when raw food exists); after a hunt (auto or commanded), a "prefer cooking" flag makes it the deterministic next hobby pick. `BotAutoCookingService` threshold raised from food<=5 to food<=10 so auto-cooking activates much sooner. Auto-hunt trigger also considers inventory food: at food 11-14 with zero backup items, hunting still activates.
