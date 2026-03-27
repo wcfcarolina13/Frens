@@ -5827,6 +5827,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             fallbackBot.copyPositionAndRotation(this.client.player);
         }
         fallbackBot.tick();
+        // Sync equipment from handler slots to fallback entity for armor rendering.
+        // Handler bot slots: 0=head(inv39), 1=chest(inv38), 2=legs(inv37), 3=feet(inv36), 4=offhand(inv40)
+        if (this.handler != null && this.handler.slots.size() > 4) {
+            fallbackBot.equipStack(net.minecraft.entity.EquipmentSlot.HEAD, this.handler.getSlot(0).getStack());
+            fallbackBot.equipStack(net.minecraft.entity.EquipmentSlot.CHEST, this.handler.getSlot(1).getStack());
+            fallbackBot.equipStack(net.minecraft.entity.EquipmentSlot.LEGS, this.handler.getSlot(2).getStack());
+            fallbackBot.equipStack(net.minecraft.entity.EquipmentSlot.FEET, this.handler.getSlot(3).getStack());
+            fallbackBot.equipStack(net.minecraft.entity.EquipmentSlot.OFFHAND, this.handler.getSlot(4).getStack());
+        }
         return fallbackBot;
     }
 

@@ -1970,7 +1970,7 @@ public class modCommandRegistry {
                     NavigationArtifactService.getPendingTravelByName(botName);
             if (pendingTravel != null) {
                 NavigationArtifactService.cancelTravel(pendingTravel.botUuid());
-                ChatUtils.sendSystemMessage(serverSource,
+                ChatUtils.sendSystemMessage(context.getSource(),
                         "\u00A7e" + botName + " was mid-travel. Trip canceled — spawning here instead.\u00A7r");
             }
 

@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-03-26 (session 2)
+
+- **Fix: False teleport detection on fast-travel arrival.** Bot spawns at (0,0,0) then teleports to destination, triggering "External teleport detected" and clearing tasks. Added `BotEventHandler.notifyTravelArrival()` — called from `completePostSpawnSetup()` to seed the position tracker and grace period before the first behavior tick.
+
+- **Fix: "No companions present" at distance.** `shouldOfferNoBotsRestore()` and `isCompanionPresentInClientWorld()` used `client.world.getPlayers()` (entity tracking range ~128 blocks). Replaced with `client.getNetworkHandler().getPlayerList()` (TAB list — all connected players regardless of distance).
+
+- **Fix: Armor not displayed on fallback bot.** When bot entity is beyond tracking range, `findBotEntity()` creates a fallback `OtherClientPlayerEntity` without equipment. Now copies armor/offhand from handler slots 0-4 to the fallback entity via `equipStack()`.
+
+- **Fix: Travel cancel warning not delivered.** `spawnBot()` used `server.getCommandSource()` (no player context) for the message. Changed to `context.getSource()` which carries the issuing player.
+
+- **Fix: Close inventory on fast-travel (item duplication).** When a bot departs via fast-travel, any open `BotPlayerInventoryScreenHandler` for that bot is now closed via `viewer.closeHandledScreen()`. Prevents players from manipulating stale inventory copies while the bot respawns with the original.
+
+- **Fix: Hunger drain uses direct food/saturation set.** Replaced `addExhaustion()` (gradual, may not process before next save) with immediate `setFoodLevel()`/`setSaturationLevel()`. Drains saturation first, then food level for remainder. Visible and reliable.
+
 ## 2026-03-26
 
 - **Fix: Food safety gate counts inventory food.** The fast-travel gate only checked current food level, ignoring food items in inventory. Bot with food=18 and a stack of cooked meat was refused a 642-block trip. Now sums `currentFoodLevel + totalNutritionInInventory` as the budget.

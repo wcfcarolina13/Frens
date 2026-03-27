@@ -605,6 +605,21 @@ public final class NavigationArtifactService {
         BotWorldStateService.saveStateManual(server, botAlias,
                 destination.getX() + 0.5, destination.getY(), destination.getZ() + 0.5, 0, 0);
 
+        // Close any open inventory screens for this bot to prevent item duplication.
+        // If a player has the bot's inventory open when it departs, they could continue
+        // manipulating the stale copy while the bot respawns with the persisted original.
+        try {
+            for (ServerPlayerEntity viewer : server.getPlayerManager().getPlayerList()) {
+                if (viewer != null && !viewer.isRemoved()
+                        && viewer.currentScreenHandler instanceof net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler handler
+                        && handler.getBotRef() == bot) {
+                    viewer.closeHandledScreen();
+                }
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to close inventory screens for departing bot '{}': {}", botAlias, t.getMessage());
+        }
+
         // Persist bot state (inventory, position) before removal so it survives the trip.
         // Save explicitly, then disconnect the bot cleanly.
         try {
@@ -829,16 +844,29 @@ public final class NavigationArtifactService {
         bot.setVelocity(Vec3d.ZERO);
 
         // ── Hunger drain proportional to travel distance ─────────────
+        // Direct food/saturation set — exhaustion-based drain is gradual and may not
+        // process before the next persistence save, leaving the bot with unchanged hunger.
         double dist = ps.travel().travelDistance();
         if (dist > 0) {
             double hungerCost = dist / HUNGER_DISTANCE_DIVISOR;
-            // Use exhaustion to drain saturation first, then hunger bars.
-            // Minecraft: 4.0 exhaustion = 1 saturation point; once saturation is 0,
-            // 4.0 exhaustion = 1 food point.
-            float exhaustion = (float) (hungerCost * 4.0);
-            bot.getHungerManager().addExhaustion(exhaustion);
-            LOGGER.info("Applied travel hunger drain to '{}': distance={}, hungerCost={}, exhaustion={}",
-                    ps.botAlias(), (int) dist, String.format("%.1f", hungerCost), String.format("%.1f", exhaustion));
+            int foodBefore = bot.getHungerManager().getFoodLevel();
+            float satBefore = bot.getHungerManager().getSaturationLevel();
+
+            // Drain saturation first (1:1 with hunger cost)
+            float satDrain = (float) Math.min(satBefore, hungerCost);
+            float remaining = (float) (hungerCost - satDrain);
+            bot.getHungerManager().setSaturationLevel(satBefore - satDrain);
+
+            // Drain food level for any remaining cost
+            if (remaining > 0) {
+                int foodDrain = (int) Math.ceil(remaining);
+                bot.getHungerManager().setFoodLevel(Math.max(0, foodBefore - foodDrain));
+            }
+
+            LOGGER.info("Applied travel hunger drain to '{}': distance={}, hungerCost={}, food={}→{}, sat={}→{}",
+                    ps.botAlias(), (int) dist, String.format("%.1f", hungerCost),
+                    foodBefore, bot.getHungerManager().getFoodLevel(),
+                    String.format("%.1f", satBefore), String.format("%.1f", bot.getHungerManager().getSaturationLevel()));
         }
         // Broadcast entity position to all players in the dimension (same approach as createFake).
         EntityPosition ep = EntityPosition.fromEntity(bot).withRotation(0.0F, 0.0F);
@@ -849,6 +877,9 @@ public final class NavigationArtifactService {
 
         try { BotEventHandler.registerBot(bot); }
         catch (Throwable t) { LOGGER.warn("Failed to register bot '{}' after travel: {}", ps.botAlias(), t.getMessage()); }
+
+        // Seed teleport detector so the spawn-to-destination jump isn't flagged as an external teleport.
+        BotEventHandler.notifyTravelArrival(bot.getUuid(), new Vec3d(dx, dy, dz), (long) server.getTicks());
 
         try { AutoFaceEntity.startAutoFace(bot); }
         catch (Throwable t) { LOGGER.debug("AutoFaceEntity start failed for '{}': {}", ps.botAlias(), t.getMessage()); }

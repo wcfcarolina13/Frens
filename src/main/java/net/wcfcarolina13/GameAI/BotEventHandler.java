@@ -732,6 +732,13 @@ public class BotEventHandler {
         return until != null && server.getTicks() < until;
     }
 
+    /** Called after fast-travel arrival so the teleport detector doesn't see the spawn-to-destination jump. */
+    public static void notifyTravelArrival(UUID botUuid, Vec3d arrivalPos, long currentTick) {
+        if (botUuid == null || arrivalPos == null) return;
+        TELEPORT_DETECT_LAST_POS.put(botUuid, arrivalPos);
+        TELEPORT_GRACE_UNTIL_TICK.put(botUuid, currentTick + 40L);
+    }
+
     public static List<ServerPlayerEntity> getRegisteredBots(MinecraftServer fallback) {
         MinecraftServer srv = server != null ? server : fallback;
         if (srv == null) {

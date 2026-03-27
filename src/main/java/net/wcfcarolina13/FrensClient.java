@@ -1075,17 +1075,17 @@ public class FrensClient implements ClientModInitializer {
         for (String alias : knownAliases) {
             normalizedAliases.add(alias.toLowerCase(java.util.Locale.ROOT));
         }
+        // Use the TAB player list (all connected players regardless of distance) instead of
+        // client.world.getPlayers() which only returns entities within tracking range (~128 blocks).
         try {
-            for (PlayerEntity player : client.world.getPlayers()) {
-                if (player == null || player == client.player) {
-                    continue;
-                }
-                String name = player.getName() != null ? player.getName().getString() : null;
-                if (name == null || name.isBlank()) {
-                    continue;
-                }
-                if (normalizedAliases.contains(name.trim().toLowerCase(java.util.Locale.ROOT))) {
-                    return false;
+            if (client.getNetworkHandler() != null) {
+                for (net.minecraft.client.network.PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
+                    if (entry.getProfile() != null && entry.getProfile().name() != null) {
+                        String name = entry.getProfile().name().trim().toLowerCase(java.util.Locale.ROOT);
+                        if (normalizedAliases.contains(name)) {
+                            return false;
+                        }
+                    }
                 }
             }
         } catch (Throwable ignored) {
@@ -1685,15 +1685,15 @@ public class FrensClient implements ClientModInitializer {
         if (recruitmentBotAlias == null || recruitmentBotAlias.isBlank()) {
             return false;
         }
-        String alias = recruitmentBotAlias.trim();
+        String alias = recruitmentBotAlias.trim().toLowerCase(java.util.Locale.ROOT);
         try {
-            for (PlayerEntity p : world.getPlayers()) {
-                if (p == null || p == client.player) {
-                    continue;
-                }
-                String name = p.getName() != null ? p.getName().getString() : null;
-                if (name != null && name.equalsIgnoreCase(alias)) {
-                    return true;
+            if (client.getNetworkHandler() != null) {
+                for (net.minecraft.client.network.PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
+                    if (entry.getProfile() != null && entry.getProfile().name() != null) {
+                        if (entry.getProfile().name().trim().equalsIgnoreCase(alias)) {
+                            return true;
+                        }
+                    }
                 }
             }
         } catch (Throwable ignored) {
