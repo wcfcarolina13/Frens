@@ -504,6 +504,13 @@ public final class BotFleeService {
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
         if (state != null && state.baseTarget != null) { lock.set(false); return false; }
 
+        // Suppress shelter if commander is nearby — player is present and doesn't want the bot to vanish
+        if (isCommanderNearby(bot, server)) {
+            LOGGER.debug("Bot {} skipping shelter — commander nearby", bot.getName().getString());
+            lock.set(false);
+            return false;
+        }
+
         // Skip cooldown when phantoms are the only threat — bot needs immediate cover
         boolean phantomBypass = false;
         if (bot.getEntityWorld() instanceof ServerWorld shelterWorld) {
@@ -2185,6 +2192,18 @@ public final class BotFleeService {
                 name, lingerMinutes, foodLevel);
         UNDERGROUND_LINGER_START.remove(botId);
         return false;
+    }
+
+    /** Check if the bot's commander is nearby (any surface state — used for shelter suppression). */
+    private static boolean isCommanderNearby(ServerPlayerEntity bot, MinecraftServer server) {
+        if (server == null) return false;
+        UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (ownerUuid == null) return false;
+        ServerPlayerEntity commander = server.getPlayerManager().getPlayer(ownerUuid);
+        if (commander == null || commander.isRemoved()) return false;
+        if (commander.getEntityWorld() != bot.getEntityWorld()) return false;
+        int proximityBlocks = net.wcfcarolina13.Frens.CONFIG.getUndergroundProximityBlocks();
+        return bot.squaredDistanceTo(commander) <= (double) proximityBlocks * proximityBlocks;
     }
 
     /** Check if the bot's commander/owner is nearby and also underground. */
