@@ -1190,7 +1190,7 @@ public class ManualConfig {
         @Deprecated @SuppressWarnings("unused")
         private boolean autoSpawn;
         private Boolean autoRespawnOnDeath;  // null = use mode-based default
-        private String spawnMode = "training";
+        private String spawnMode = "admin";
         private String gameMode = "survival";
         private boolean teleportDuringSkills = false;
         private boolean pauseOnFullInventory;
@@ -1235,12 +1235,12 @@ public class ManualConfig {
         }
 
         public String getSpawnMode() {
-            return (spawnMode == null || spawnMode.isBlank()) ? "training" : spawnMode;
+            return (spawnMode == null || spawnMode.isBlank()) ? "admin" : spawnMode;
         }
 
         public void setSpawnMode(String spawnMode) {
             if (spawnMode == null) {
-                this.spawnMode = "training";
+                this.spawnMode = "admin";
                 return;
             }
             String normalized = spawnMode.trim().toLowerCase();
@@ -1248,7 +1248,7 @@ public class ManualConfig {
             // Legacy 'play' is kept as-is for backward compat.
             switch (normalized) {
                 case "admin", "questing", "training", "play" -> this.spawnMode = normalized;
-                default -> this.spawnMode = "training";
+                default -> this.spawnMode = "admin";
             }
         }
 
