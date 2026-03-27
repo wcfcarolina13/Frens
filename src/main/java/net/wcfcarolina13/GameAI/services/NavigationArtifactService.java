@@ -57,7 +57,7 @@ public final class NavigationArtifactService {
 
     // ── Fast-travel cost constants ──────────────────────────────────────
     /** Hunger cost formula: 1 food point per HUNGER_DISTANCE_DIVISOR blocks traveled. */
-    private static final double HUNGER_DISTANCE_DIVISOR = 40.0;
+    private static final double HUNGER_DISTANCE_DIVISOR = 20.0;
     /** Minimum food level the bot must retain after travel (6 = 3 drumsticks). */
     private static final int MIN_POST_TRAVEL_FOOD = 6;
     /** Cooldown between fast-travels per bot, in ticks (3 minutes = 3600 ticks). */
@@ -844,23 +844,23 @@ public final class NavigationArtifactService {
         bot.setVelocity(Vec3d.ZERO);
 
         // ── Hunger drain proportional to travel distance ─────────────
-        // Direct food/saturation set — exhaustion-based drain is gradual and may not
-        // process before the next persistence save, leaving the bot with unchanged hunger.
+        // Direct food/saturation set — drain food level FIRST (visible on HUD), then saturation.
+        // This ensures the player sees the hunger bar drop on arrival.
         double dist = ps.travel().travelDistance();
         if (dist > 0) {
             double hungerCost = dist / HUNGER_DISTANCE_DIVISOR;
             int foodBefore = bot.getHungerManager().getFoodLevel();
             float satBefore = bot.getHungerManager().getSaturationLevel();
 
-            // Drain saturation first (1:1 with hunger cost)
-            float satDrain = (float) Math.min(satBefore, hungerCost);
-            float remaining = (float) (hungerCost - satDrain);
-            bot.getHungerManager().setSaturationLevel(satBefore - satDrain);
+            // Drain food level first (visible on hunger bar)
+            int foodDrain = (int) Math.min(foodBefore, Math.ceil(hungerCost));
+            double remaining = hungerCost - foodDrain;
+            bot.getHungerManager().setFoodLevel(foodBefore - foodDrain);
 
-            // Drain food level for any remaining cost
+            // Drain saturation for any remaining fractional cost
             if (remaining > 0) {
-                int foodDrain = (int) Math.ceil(remaining);
-                bot.getHungerManager().setFoodLevel(Math.max(0, foodBefore - foodDrain));
+                float satDrain = (float) Math.min(satBefore, remaining);
+                bot.getHungerManager().setSaturationLevel(satBefore - satDrain);
             }
 
             LOGGER.info("Applied travel hunger drain to '{}': distance={}, hungerCost={}, food={}→{}, sat={}→{}",
