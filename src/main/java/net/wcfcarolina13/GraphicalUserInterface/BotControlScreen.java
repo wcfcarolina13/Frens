@@ -39,7 +39,8 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Text Chat", "Shows companion dialogue in chat and as nearby overhead text. Turn this off for a quieter experience."),
-            new GlobalToggleDef("Voice", "Enables voiced companion lines when matching audio exists. Voice playback is optional and separate from normal text dialogue.")
+            new GlobalToggleDef("Voice", "Enables voiced companion lines when matching audio exists. Voice playback is optional and separate from normal text dialogue."),
+            new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply.")
     );
 
     // Layout constants
@@ -167,6 +168,8 @@ public class BotControlScreen extends Screen {
         globalValues[2] = Frens.CONFIG.isFortifyForcePlaceEnabled();
         globalValues[3] = Frens.CONFIG.isTextDialogueEnabled();
         globalValues[4] = Frens.CONFIG.isVoicedDialogueEnabled();
+        // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
+        globalValues[5] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
 
         recomputeLayout();
 
@@ -430,6 +433,8 @@ public class BotControlScreen extends Screen {
         config.setFortifyForcePlaceEnabled(globalValues[2]);
         config.setTextDialogueEnabled(globalValues[3]);
         config.setVoicedDialogueEnabled(globalValues[4]);
+        // Teleport toggle: ON (true) = clear global override (null), OFF (false) = globally disabled
+        config.setGlobalTeleportDuringSkills(globalValues[5] ? null : Boolean.FALSE);
 
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
             String saveWorldKey = null;

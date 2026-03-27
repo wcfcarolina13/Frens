@@ -57,6 +57,8 @@ public class ManualConfig {
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
+    /** Global override for teleportDuringSkills. When non-null, overrides all per-bot settings. */
+    private Boolean globalTeleportDuringSkills = null;
     private int fortBufferRadius = 8;
     private int undergroundLingerMinutes = 3;
     private int undergroundProximityBlocks = 32;
@@ -678,6 +680,10 @@ public class ManualConfig {
     public boolean isFortifyForcePlaceEnabled() { return fortifyForcePlaceEnabled; }
     public void setFortifyForcePlaceEnabled(boolean v) { this.fortifyForcePlaceEnabled = v; }
 
+    /** Returns the global teleport override, or null if per-bot settings should apply. */
+    public Boolean getGlobalTeleportDuringSkills() { return globalTeleportDuringSkills; }
+    public void setGlobalTeleportDuringSkills(Boolean v) { this.globalTeleportDuringSkills = v; }
+
     public int getFortBufferRadius() { return fortBufferRadius > 0 ? fortBufferRadius : 8; }
     public void setFortBufferRadius(int r) { this.fortBufferRadius = r; }
 
@@ -1186,10 +1192,10 @@ public class ManualConfig {
         private Boolean autoRespawnOnDeath;  // null = use mode-based default
         private String spawnMode = "training";
         private String gameMode = "survival";
-        private boolean teleportDuringSkills = true;
+        private boolean teleportDuringSkills = false;
         private boolean pauseOnFullInventory;
         private boolean teleportDuringDropSweep = false;
-        private boolean llmEnabled = true;
+        private boolean llmEnabled = false;
         private boolean voicedDialogue = true;
         private String failsafeSpawnMode = "world_spawn";  // owner_bed | world_spawn | saved_base
         private boolean autoRegroupOnLost = false;  // auto-regroup when bot loses contact at a drop-off

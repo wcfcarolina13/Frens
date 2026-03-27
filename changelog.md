@@ -6,6 +6,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 - **Fix: Hunt approach under tree canopy.** `planLootApproach` rejected all positions under leaf canopy because leaf blocks have non-empty collision shapes, failing the `hasClearance` check. Bot would spin for 60s selecting the same target every 0.5s without ever attempting movement. Fix: `approachTarget` now falls back to direct movement toward the target when `planLootApproach` returns empty, allowing the movement system's existing leaf-mining and stuck-recovery to clear the path.
 
+- **Change: Defaults flipped for teleportDuringSkills (now false) and llmEnabled (now false).** New bots/worlds start with teleport and LLM disabled instead of enabled. Existing per-bot per-world settings in settings.json5 are unchanged.
+
+- **Feat: Global teleport override.** New `globalTeleportDuringSkills` setting overrides all per-bot teleport settings. Command: `/bot config globalTeleport <on|off|clear>`. Also available as "Teleport" toggle in the Global Settings panel of the Bot Control config screen. When off, no bot can teleport or snap during skills. When on (or cleared), per-bot settings apply.
+
 - **Fix: Furnace placement failure causes confusing "Look at a furnace" message.** `resolveFurnaceTarget` ignored the return value of `BotActions.placeBlockAt`. When placement failed (e.g., target position occupied by leaves), the code returned a `StationTarget` pointing to a non-furnace block, causing the caller to show "Look at a furnace, blast furnace, or smoker." Fix: both step 4 (place from inventory) and step 5 (craft then place) now check the return value and only return a `StationTarget` when the furnace is confirmed via re-scan.
 
 ## 2026-03-27

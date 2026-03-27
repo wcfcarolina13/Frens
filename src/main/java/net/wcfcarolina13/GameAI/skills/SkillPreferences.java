@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.skills;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.Frens;
 
 import java.util.Map;
 import java.util.UUID;
@@ -22,27 +23,27 @@ public final class SkillPreferences {
 
     public static boolean teleportDuringSkills(ServerPlayerEntity player) {
         if (player == null) {
-            return true;
+            return false;
         }
         return teleportDuringSkills(player.getUuid());
     }
 
     public static boolean teleportDuringSkills(UUID uuid) {
+        // Global override takes precedence over all per-bot settings.
+        Boolean global = Frens.CONFIG.getGlobalTeleportDuringSkills();
+        if (global != null) return global;
+        // Per-bot setting, default false.
         if (uuid == null) {
-            return true;
+            return false;
         }
-        return TELEPORT_PREFS.getOrDefault(uuid, Boolean.TRUE);
+        return TELEPORT_PREFS.getOrDefault(uuid, Boolean.FALSE);
     }
 
     public static void setTeleportDuringSkills(UUID uuid, boolean enabled) {
         if (uuid == null) {
             return;
         }
-        if (enabled) {
-            TELEPORT_PREFS.remove(uuid);
-        } else {
-            TELEPORT_PREFS.put(uuid, Boolean.FALSE);
-        }
+        TELEPORT_PREFS.put(uuid, enabled);
     }
 
     public static boolean pauseOnFullInventory(ServerPlayerEntity player) {

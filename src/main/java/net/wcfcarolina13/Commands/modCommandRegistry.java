@@ -492,6 +492,44 @@ public class modCommandRegistry {
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
                                         )
                                 )
+                                .then(literal("globalTeleport")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    String mode = StringArgumentType.getString(context, "mode").toLowerCase();
+                                                    switch (mode) {
+                                                        case "on": case "true":
+                                                            Frens.CONFIG.setGlobalTeleportDuringSkills(Boolean.TRUE);
+                                                            Frens.CONFIG.save();
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Global teleport override: ON (all bots will teleport)"), true);
+                                                            return 1;
+                                                        case "off": case "false":
+                                                            Frens.CONFIG.setGlobalTeleportDuringSkills(Boolean.FALSE);
+                                                            Frens.CONFIG.save();
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Global teleport override: OFF (no bot will teleport)"), true);
+                                                            return 1;
+                                                        case "clear": case "auto": case "reset":
+                                                            Frens.CONFIG.setGlobalTeleportDuringSkills(null);
+                                                            Frens.CONFIG.save();
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Global teleport override: cleared (per-bot settings apply)"), true);
+                                                            return 1;
+                                                        default:
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Usage: /bot config globalTeleport <on|off|clear>"), false);
+                                                            return 0;
+                                                    }
+                                                }))
+                                        .executes(context -> {
+                                            Boolean global = Frens.CONFIG.getGlobalTeleportDuringSkills();
+                                            String status = global == null ? "not set (per-bot settings apply)"
+                                                    : global ? "ON (all bots teleport)" : "OFF (no bot teleports)";
+                                            context.getSource().sendFeedback(
+                                                    () -> Text.literal("Global teleport override: " + status), false);
+                                            return 1;
+                                        })
+                                )
                                 .then(literal("owner")
                                         .then(CommandManager.argument("alias", StringArgumentType.string())
                                                 .then(CommandManager.argument("player", EntityArgumentType.player())
