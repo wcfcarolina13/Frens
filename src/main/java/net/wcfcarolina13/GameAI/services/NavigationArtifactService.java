@@ -5,6 +5,9 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.EntityPosition;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.FoodComponent;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.EntityPositionS2CPacket;
 import net.minecraft.registry.RegistryKey;
@@ -370,6 +373,37 @@ public final class NavigationArtifactService {
         return botUuid != null ? PENDING_TRAVELS.get(botUuid) : null;
     }
 
+    /** Find a pending travel by bot name (case-insensitive). Returns null if not traveling. */
+    public static PendingTravel getPendingTravelByName(String botName) {
+        if (botName == null) return null;
+        String lower = botName.toLowerCase(java.util.Locale.ROOT);
+        for (PendingTravel t : PENDING_TRAVELS.values()) {
+            if (t.botAlias() != null && t.botAlias().toLowerCase(java.util.Locale.ROOT).equals(lower)) {
+                return t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Cancel a pending fast-travel, removing the bot from the travel queue.
+     * Call this before force-spawning a bot that is mid-travel.
+     *
+     * @return the canceled travel record, or null if no travel was pending.
+     */
+    public static PendingTravel cancelTravel(UUID botUuid) {
+        if (botUuid == null) return null;
+        PendingTravel removed = PENDING_TRAVELS.remove(botUuid);
+        if (removed != null) {
+            RESPAWN_RETRY_COUNTS.remove(botUuid);
+            PENDING_POST_ARRIVAL.remove(removed.botAlias().toLowerCase(java.util.Locale.ROOT));
+            PENDING_POST_SPAWN.remove(removed.botAlias().toLowerCase(java.util.Locale.ROOT));
+            flushPendingTravels();
+            LOGGER.info("Canceled pending travel for '{}' to {}", removed.botAlias(), removed.destination().toShortString());
+        }
+        return removed;
+    }
+
     /**
      * Begin fast travel for a bot. The bot is removed from the world and will be
      * respawned at the destination after {@code delayTicks} have elapsed.
@@ -474,8 +508,22 @@ public final class NavigationArtifactService {
             }
 
             // ── Food safety gate ─────────────────────────────────────────
+            // Budget = current food level + nutrition from all food items in inventory.
+            // The bot could eat before/during travel, so inventory food counts toward the budget.
             double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
-            int projectedFood = bot.getHungerManager().getFoodLevel() - (int) Math.ceil(hungerCost);
+            int currentFood = bot.getHungerManager().getFoodLevel();
+            int inventoryNutrition = 0;
+            for (int i = 0; i < bot.getInventory().size(); i++) {
+                ItemStack stack = bot.getInventory().getStack(i);
+                if (stack != null && !stack.isEmpty()) {
+                    FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
+                    if (food != null) {
+                        inventoryNutrition += food.nutrition() * stack.getCount();
+                    }
+                }
+            }
+            int totalBudget = currentFood + inventoryNutrition;
+            int projectedFood = totalBudget - (int) Math.ceil(hungerCost);
             if (projectedFood < MIN_POST_TRAVEL_FOOD) {
                 notifyOwner(server, ownerUuid,
                         "\u00A7c" + botAlias + " doesn't have enough energy to travel that far. Feed them first.\u00A7r");

@@ -225,6 +225,12 @@ public class BotEventHandler {
     private static final Map<UUID, Long> LAST_JOIN_ENCLOSURE_CHECK_TICK = new ConcurrentHashMap<>();
     /** Per-bot current combat target UUID for threat-scoring stickiness. */
     private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
+    /** Teleport detection: last known position per bot, updated each tick. */
+    private static final Map<UUID, Vec3d> TELEPORT_DETECT_LAST_POS = new ConcurrentHashMap<>();
+    /** Grace period after external teleport: suppress surface recovery until this tick. */
+    private static final Map<UUID, Long> TELEPORT_GRACE_UNTIL_TICK = new ConcurrentHashMap<>();
+    /** Minimum squared distance between ticks to consider as an external teleport. 16 blocks = 256. */
+    private static final double EXTERNAL_TELEPORT_THRESHOLD_SQ = 256.0;
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
     private static volatile boolean externalOverrideActive = false;
     // Stage-2 refactor: lifecycle respawn flag moved to BotLifecycleService.
@@ -664,6 +670,8 @@ public class BotEventHandler {
                                 rideSuppression);
                         return;
                     }
+                    // Suppress enclosure check during teleport grace period (e.g., arrived via fast-travel)
+                    if (isInTeleportGracePeriod(candidate)) return;
                     // Use isAtSurface (heightmap + wide sky check) instead of raw isSkyVisible —
                     // previous mining sessions can create skylights that fool isSkyVisible.
                     if (BotFleeService.isAtSurface(candidate, sw)) return;
@@ -715,6 +723,13 @@ public class BotEventHandler {
 
     public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
         return candidate != null && BotRegistry.isRegistered(candidate.getUuid());
+    }
+
+    /** Check if the bot is within the post-teleport grace period (suppresses surface recovery). */
+    public static boolean isInTeleportGracePeriod(ServerPlayerEntity bot) {
+        if (bot == null || server == null) return false;
+        Long until = TELEPORT_GRACE_UNTIL_TICK.get(bot.getUuid());
+        return until != null && server.getTicks() < until;
     }
 
     public static List<ServerPlayerEntity> getRegisteredBots(MinecraftServer fallback) {
@@ -1423,6 +1438,32 @@ public class BotEventHandler {
                     bot.getName().getString(), ticksSinceRespawn,
                     bot.isInvulnerable(), bot.timeUntilRegen, bot.hurtTime,
                     String.format("%.1f", bot.getHealth()), bot.isAlive(), bot.isRemoved());
+        }
+
+        // ── External teleport detection ─────────────────────────────────
+        // If the bot's position jumped >16 blocks in a single tick (and it's not mid-travel),
+        // it was likely teleported by a console command. Cancel tasks, clear goals, and
+        // suppress surface recovery for 40 ticks (2 seconds) to avoid false underground detection.
+        UUID botId = bot.getUuid();
+        Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d lastPos = TELEPORT_DETECT_LAST_POS.put(botId, currentPos);
+        if (lastPos != null && currentPos.squaredDistanceTo(lastPos) > EXTERNAL_TELEPORT_THRESHOLD_SQ) {
+            BotCommandStateService.State tpState = stateFor(bot);
+            // Don't trigger during fast-travel arrival (mode == TRAVELING)
+            if (tpState != null && tpState.mode != Mode.TRAVELING) {
+                LOGGER.info("External teleport detected for {} (moved {} blocks in 1 tick) — clearing tasks and goals",
+                        bot.getName().getString(), (int) Math.sqrt(currentPos.squaredDistanceTo(lastPos)));
+                // Cancel any active skill/task (forceAbort sets the abort latch that skills check)
+                TaskService.forceAbort(botId, "External teleport detected.");
+                // Clear follow/movement goals
+                if (tpState.followFixedGoal != null) {
+                    tpState.followFixedGoal = null;
+                }
+                // Stop movement
+                BotActions.stop(bot);
+                // Suppress surface recovery for 2 seconds
+                TELEPORT_GRACE_UNTIL_TICK.put(botId, (long) server.getTicks() + 40L);
+            }
         }
 
         BotCommandStateService.State state = stateFor(bot);
@@ -7093,6 +7134,8 @@ public class BotEventHandler {
                 FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.clear();
                 FOLLOW_COMMANDER_LADDER_HINT.clear();
                 COMBAT_TARGET.clear();
+                TELEPORT_DETECT_LAST_POS.clear();
+                TELEPORT_GRACE_UNTIL_TICK.clear();
 
             isExecuting = false;
             externalOverrideActive = false;

@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-03-26
+
+- **Fix: Food safety gate counts inventory food.** The fast-travel gate only checked current food level, ignoring food items in inventory. Bot with food=18 and a stack of cooked meat was refused a 642-block trip. Now sums `currentFoodLevel + totalNutritionInInventory` as the budget.
+
+- **Fix: External teleport cancels bot tasks.** When a bot is teleported >16 blocks via console (`/tp`), it now cancels active tasks, clears movement goals, stops movement, and suppresses surface recovery for 2 seconds (grace period). Prevents bots from walking back to old destinations or pillaring up through tree canopy after being teleported to a forest.
+
+- **Fix: Fast-travel spawn hardening.** `spawnBot()` now checks `NavigationArtifactService.getPendingTravelByName()` before spawning. If the bot is mid-travel, the trip is canceled and the bot spawns at the player's location with a warning message. Added `cancelTravel()` and `getPendingTravelByName()` to NavigationArtifactService. Prevents duplicate bots from spawn-during-travel race conditions.
+
 ## 2026-03-25 (session 2)
 
 - **Fix: Surface recovery ascent stuck on LoS.** `executeUpwardStep()` tried to mine blocks 2-8 blocks forward, but MiningTool's line-of-sight raycast hit intervening terrain. Rewrote to vertical-first strategy: mine `feet.up(2)` (always adjacent to head, always passes LoS), then pillar up one step via `ScaffoldService.pillarUpWithPositions`. Falls back to bare mine+jump if no scaffold material. Simple, reliable, no forward LoS issues.

@@ -2036,6 +2036,13 @@ public final class BotFleeService {
         if (shouldAbortSurvival(bot) || world == null) return;
         if (isAtSurface(bot, world)) return; // already at surface
 
+        // Suppress surface recovery during teleport grace period — the bot may have been
+        // teleported under canopy by a console command, not actually stuck underground.
+        if (BotEventHandler.isInTeleportGracePeriod(bot)) {
+            LOGGER.info("Bot {} skipping surface recovery — within teleport grace period", bot.getName().getString());
+            return;
+        }
+
         LOGGER.info("Bot {} underground — launching surface recovery", bot.getName().getString());
 
         net.wcfcarolina13.GameAI.skills.SkillExecutionResult result =

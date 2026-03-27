@@ -55,6 +55,7 @@ import net.wcfcarolina13.FilingSystem.LLMClientFactory;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
@@ -1962,6 +1963,15 @@ public class modCommandRegistry {
                 ChatUtils.sendSystemMessage(serverSource,
                         "A bot named '" + botName + "' is already active. Use a different name, or /bot stop " + botName + " first.");
                 return;
+            }
+
+            // Check if the bot is mid-fast-travel. If so, cancel the travel and warn.
+            NavigationArtifactService.PendingTravel pendingTravel =
+                    NavigationArtifactService.getPendingTravelByName(botName);
+            if (pendingTravel != null) {
+                NavigationArtifactService.cancelTravel(pendingTravel.botUuid());
+                ChatUtils.sendSystemMessage(serverSource,
+                        "\u00A7e" + botName + " was mid-travel. Trip canceled — spawning here instead.\u00A7r");
             }
 
             // If an admin force-spawns a bot before recruitment, treat the world as recruited.
