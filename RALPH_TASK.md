@@ -175,15 +175,18 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Recipe awareness: refuse and explain if commander lacks recipe
 
 ### Farming & Survival
-- [ ] **Hunger-aware task interruption**: Bot should stop working (e.g. auto-patching, fortifying) when starving instead of working until death. HungerService should trigger a food acquisition flow: (1) search nearby chests/barrels for food, (2) find raw food and cook it in a furnace/smoker/campfire, or (3) hunt or fish to obtain food to cook. Resume the interrupted task after eating.
+- [ ] **Hunger-aware task interruption**: Bot should stop working (e.g. auto-patching, fortifying) when starving instead of working until death. HungerService should trigger a food acquisition flow: (1) search nearby chests/barrels for food, (2) ~~find raw food and cook it in a furnace/smoker/campfire~~ DONE (cookAllFoodSync), or (3) ~~hunt or fish to obtain food to cook~~ DONE (auto-hunt inventory check). Resume the interrupted task after eating.
 - [ ] Till soil, plant seeds, harvest, replant
-- [ ] Furnace usage with various fuels
+- [x] Furnace usage with various fuels — cookAllFoodSync handles fuel auto-selection (leaf litter > leaves > logs), refueling mid-batch, multi-batch cycling (2026-03-27)
 - [ ] Create infinite water source
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
 - [ ] **Farm irrigation leak patching**: Detect and patch leakage
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
+- [ ] **HealingService cooked food preference**: Auto-eat should prefer cooked over raw food (better saturation, saves raw for cooking)
+- [ ] **Smoker preference for food cooking**: resolveFurnaceTarget should prefer smokers for food-only cooking (2x faster)
+- [ ] **Fuel acquisition fallback**: If no fuel in inventory, attempt mini leaf-litter collection before giving up on cooking
 
 ### Hunting — Multi-Day Self-Sufficiency (Future Phase)
 
