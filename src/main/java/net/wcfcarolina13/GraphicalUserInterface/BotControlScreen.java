@@ -868,8 +868,31 @@ public class BotControlScreen extends Screen {
             return handled;
         }
 
-        // If dropdown is open, consume outside clicks through widget system
+        // If dropdown is open, still allow footer buttons before consuming via widget system
         if (aliasDropdown.isOpen()) {
+            if (saveRect.contains(mx, my)) {
+                saveSettings();
+                if (this.client != null) {
+                    this.client.getToastManager().add(SystemToast.create(this.client,
+                            SystemToast.Type.NARRATOR_TOGGLE,
+                            Text.of("Bot settings saved"),
+                            Text.of("Applied new bot preferences")));
+                }
+                // Close dropdown via a harmless re-select
+                aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
+                return true;
+            }
+            if (closeRect.contains(mx, my)) {
+                close();
+                return true;
+            }
+            if (permissionsActionRect.contains(mx, my)) {
+                aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
+                if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
+                    this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
+                }
+                return true;
+            }
             return super.mouseClicked(click, isInside);
         }
 
