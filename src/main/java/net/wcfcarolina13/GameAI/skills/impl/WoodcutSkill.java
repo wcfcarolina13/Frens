@@ -1365,7 +1365,59 @@ public final class WoodcutSkill implements Skill {
             LOGGER.info("Woodcut unified: mined {} logs for base {}", totalMined, trunkBase.toShortString());
             reachSession.trunkMineAttemptsStarted = totalMined;
 
+            // Fallback: if column entry completely failed, pillar up near the tree and bridge outward
             List<BlockPos> leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
+            if (!leftoverClusterLogs.isEmpty() && totalMined == 0 && !isAbortRequested(bot)) {
+                LOGGER.info("Woodcut fallback bridge: column entry failed, attempting pillar+bridge for {} remaining logs at base {}",
+                        leftoverClusterLogs.size(), trunkBase.toShortString());
+                int highestLogY = leftoverClusterLogs.stream().mapToInt(BlockPos::getY).max().orElse(trunkBase.getY());
+                int pillarNeeded = Math.max(0, highestLogY - bot.getBlockY() - 1);
+                pillarNeeded = Math.min(pillarNeeded, MAX_COLUMN_PILLAR_STEPS);
+                if (pillarNeeded > 0) {
+                    List<BlockPos> pillarPlaced = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
+                    if (!pillarPlaced.isEmpty()) {
+                        recordRecoveryPlacements(world, pillarPlaced, sharedState, reachSession);
+                        sleepQuiet(PILLAR_STEP_DELAY_MS);
+                    }
+                }
+                // Bridge in all 4 directions from current (elevated) position
+                for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                    if (isAbortRequested(bot)) break;
+                    boolean hasTargetsInDir = false;
+                    for (int d = 1; d <= 6 && !hasTargetsInDir; d++) {
+                        BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                        for (int dy = -3; dy <= 4; dy++) {
+                            if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                hasTargetsInDir = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!hasTargetsInDir) continue;
+                    BridgeScaffoldService.BridgeResult bridgeResult =
+                            BridgeScaffoldService.bridgeAndRetract(
+                                    bot, bridgeDir, 6, false,
+                                    state -> state.isIn(BlockTags.LOGS),
+                                    trunkBase, PILLAR_BLOCKS);
+                    if (bridgeResult.targetsMined() > 0) {
+                        totalMined += bridgeResult.targetsMined();
+                        LOGGER.info("Woodcut fallback bridge: dir={} mined={} placed={} adopted={}",
+                                bridgeDir.asString(), bridgeResult.targetsMined(),
+                                bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
+                    }
+                }
+                // Mine anything now in reach after bridging
+                totalMined += mineReachableBranches(bot, world, reachSession, target);
+                // Clean up the fallback pillar
+                if (reachSession != null && reachSession.hasPlacements() && !isAbortRequested(bot)) {
+                    cleanupReachSession(source, bot, target.base(), reachSession, sharedState);
+                }
+                // Re-collect leftovers after fallback
+                leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
+                if (totalMined > 0) {
+                    reachSession.trunkMineAttemptsStarted = totalMined;
+                }
+            }
             if (!leftoverClusterLogs.isEmpty()) {
                 WoodcutKnowledgeService.updateTreeSite(bot, world, target, leftoverClusterLogs, visitedColumns);
                 leftoverClusterLogs.forEach(pos -> {
