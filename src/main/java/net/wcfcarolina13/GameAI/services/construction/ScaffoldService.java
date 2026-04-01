@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services.construction;
 
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -277,26 +279,41 @@ public final class ScaffoldService {
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
 
-            // If feet position is occupied (e.g. standing on stairs), shift target up to air
+            // If feet position is occupied (e.g. standing on stairs), shift target up to air.
+            // Torches are a special case: break them in place so the scaffold can go there.
             var feetState = world.getBlockState(targetPos);
             if (!feetState.isAir() && !feetState.isReplaceable()) {
-                BlockPos adjusted = null;
-                for (int dy = 1; dy <= 2; dy++) {
-                    BlockPos candidate = targetPos.up(dy);
-                    var cs = world.getBlockState(candidate);
-                    if (cs.isAir() || cs.isReplaceable()) {
-                        adjusted = candidate;
+                Block feetBlock = feetState.getBlock();
+                if (feetBlock == Blocks.TORCH || feetBlock == Blocks.WALL_TORCH
+                        || feetBlock == Blocks.SOUL_TORCH || feetBlock == Blocks.SOUL_WALL_TORCH) {
+                    LOGGER.info("pillarUp step {}/{}: clearing torch at {} for scaffold",
+                            i, steps, targetPos.toShortString());
+                    try {
+                        MiningTool.mineBlock(bot, targetPos).get(5_000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (Exception ignored) {}
+                    sleepQuiet(60L);
+                    // Re-check after mining
+                    feetState = world.getBlockState(targetPos);
+                }
+                if (!feetState.isAir() && !feetState.isReplaceable()) {
+                    BlockPos adjusted = null;
+                    for (int dy = 1; dy <= 2; dy++) {
+                        BlockPos candidate = targetPos.up(dy);
+                        var cs = world.getBlockState(candidate);
+                        if (cs.isAir() || cs.isReplaceable()) {
+                            adjusted = candidate;
+                            break;
+                        }
+                    }
+                    if (adjusted == null) {
+                        LOGGER.info("pillarUp step {}/{}: feet occupied by {} at {}, no air within 2 above — skipping",
+                                i, steps, feetState.getBlock().getName().getString(), targetPos.toShortString());
                         break;
                     }
+                    LOGGER.info("pillarUp step {}/{}: feet occupied by {}, targeting {} instead",
+                            i, steps, feetState.getBlock().getName().getString(), adjusted.toShortString());
+                    targetPos = adjusted;
                 }
-                if (adjusted == null) {
-                    LOGGER.info("pillarUp step {}/{}: feet occupied by {} at {}, no air within 2 above — skipping",
-                            i, steps, feetState.getBlock().getName().getString(), targetPos.toShortString());
-                    break;
-                }
-                LOGGER.info("pillarUp step {}/{}: feet occupied by {}, targeting {} instead",
-                        i, steps, feetState.getBlock().getName().getString(), adjusted.toShortString());
-                targetPos = adjusted;
             }
 
             // Check if there's head clearance to jump (2 blocks above)
@@ -308,7 +325,7 @@ public final class ScaffoldService {
                 LOGGER.info("pillarUp step {}/{}: overhead blocked at {} — attempting to mine",
                         i, steps, headSpace.toShortString());
                 try {
-                    String mineResult = MiningTool.mineBlock(bot, headSpace).join();
+                    String mineResult = MiningTool.mineBlock(bot, headSpace).get(5_000, java.util.concurrent.TimeUnit.MILLISECONDS);
                     if (mineResult != null && mineResult.startsWith("\u26a0\ufe0f")) {
                         LOGGER.info("pillarUp step {}/{}: cannot clear overhead at {}: {}",
                                 i, steps, headSpace.toShortString(), mineResult);
