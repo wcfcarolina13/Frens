@@ -40,6 +40,7 @@ import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
 import net.wcfcarolina13.GameAI.services.WoodcutKnowledgeService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
+import net.wcfcarolina13.GameAI.services.construction.BridgeScaffoldService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
@@ -1505,6 +1506,37 @@ public final class WoodcutSkill implements Skill {
                         ensureAxeEquipped(bot);
                         if (mineBlock(bot, found, true)) {
                             mined++;
+                        }
+                    }
+                    // Bridge sweep: try bridging in each cardinal direction to reach distant targets
+                    if (!isAbortRequested(bot)) {
+                        for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                            if (isAbortRequested(bot)) break;
+                            boolean hasTargetsInDir = false;
+                            for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
+                                BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                                for (int dy = -2; dy <= 4; dy++) {
+                                    if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                        hasTargetsInDir = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!hasTargetsInDir) continue;
+                            BridgeScaffoldService.BridgeResult bridgeResult =
+                                    BridgeScaffoldService.bridgeAndRetract(
+                                            bot, bridgeDir, 6, false,
+                                            state -> state.isIn(BlockTags.LOGS),
+                                            target.base(),
+                                            PILLAR_BLOCKS);
+                            if (bridgeResult.targetsMined() > 0) {
+                                mined += bridgeResult.targetsMined();
+                                LOGGER.info("Woodcut bridge sweep: dir={} mined={} placed={} adopted={}",
+                                        bridgeDir.asString(),
+                                        bridgeResult.targetsMined(),
+                                        bridgeResult.placedBlocks().size(),
+                                        bridgeResult.adoptedBlocks());
+                            }
                         }
                     }
                 }
