@@ -1373,46 +1373,48 @@ public final class WoodcutSkill implements Skill {
                 int highestLogY = leftoverClusterLogs.stream().mapToInt(BlockPos::getY).max().orElse(trunkBase.getY());
                 int pillarNeeded = Math.max(0, highestLogY - bot.getBlockY() - 1);
                 pillarNeeded = Math.min(pillarNeeded, MAX_COLUMN_PILLAR_STEPS);
+                boolean canBridge = pillarNeeded <= 0;
                 if (pillarNeeded > 0) {
                     List<BlockPos> pillarPlaced = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
                     if (!pillarPlaced.isEmpty()) {
                         recordRecoveryPlacements(world, pillarPlaced, sharedState, reachSession);
                         sleepQuiet(PILLAR_STEP_DELAY_MS);
+                        canBridge = true;
+                    } else {
+                        LOGGER.info("Woodcut fallback bridge: pillar failed, skipping bridge sweep");
                     }
                 }
-                // Bridge in all 4 directions from current (elevated) position
-                for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
-                    if (isAbortRequested(bot)) break;
-                    boolean hasTargetsInDir = false;
-                    for (int d = 1; d <= 6 && !hasTargetsInDir; d++) {
-                        BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
-                        for (int dy = -3; dy <= 4; dy++) {
-                            if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
-                                hasTargetsInDir = true;
-                                break;
+                if (canBridge) {
+                    for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                        if (isAbortRequested(bot)) break;
+                        boolean hasTargetsInDir = false;
+                        for (int d = 1; d <= 6 && !hasTargetsInDir; d++) {
+                            BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                            for (int dy = -3; dy <= 4; dy++) {
+                                if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                    hasTargetsInDir = true;
+                                    break;
+                                }
                             }
                         }
+                        if (!hasTargetsInDir) continue;
+                        BridgeScaffoldService.BridgeResult bridgeResult =
+                                BridgeScaffoldService.bridgeAndRetract(
+                                        bot, bridgeDir, 6, false,
+                                        state -> state.isIn(BlockTags.LOGS),
+                                        trunkBase, PILLAR_BLOCKS);
+                        if (bridgeResult.targetsMined() > 0) {
+                            totalMined += bridgeResult.targetsMined();
+                            LOGGER.info("Woodcut fallback bridge: dir={} mined={} placed={} adopted={}",
+                                    bridgeDir.asString(), bridgeResult.targetsMined(),
+                                    bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
+                        }
                     }
-                    if (!hasTargetsInDir) continue;
-                    BridgeScaffoldService.BridgeResult bridgeResult =
-                            BridgeScaffoldService.bridgeAndRetract(
-                                    bot, bridgeDir, 6, false,
-                                    state -> state.isIn(BlockTags.LOGS),
-                                    trunkBase, PILLAR_BLOCKS);
-                    if (bridgeResult.targetsMined() > 0) {
-                        totalMined += bridgeResult.targetsMined();
-                        LOGGER.info("Woodcut fallback bridge: dir={} mined={} placed={} adopted={}",
-                                bridgeDir.asString(), bridgeResult.targetsMined(),
-                                bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
-                    }
+                    totalMined += mineReachableBranches(bot, world, reachSession, target);
                 }
-                // Mine anything now in reach after bridging
-                totalMined += mineReachableBranches(bot, world, reachSession, target);
-                // Clean up the fallback pillar
                 if (reachSession != null && reachSession.hasPlacements() && !isAbortRequested(bot)) {
                     cleanupReachSession(source, bot, target.base(), reachSession, sharedState);
                 }
-                // Re-collect leftovers after fallback
                 leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
                 if (totalMined > 0) {
                     reachSession.trunkMineAttemptsStarted = totalMined;
@@ -4792,20 +4794,25 @@ public final class WoodcutSkill implements Skill {
             }
             return true;
         }
-        // Try nearby offsets to recover from collision/leaf interference
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos alt = placePos.offset(dir);
-            if (!isPlaceableTarget(world, alt)) {
-                breakSoftBlock(world, bot, alt);
-            }
-            ensureSupportBlock(bot, alt, sharedState, reachSession);
-            if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
-                recordScaffoldPlacement(sharedState, world, alt);
-                if (reachSession != null) {
-                    reachSession.recordPlacement(alt);
+        // Try nearby offsets ONLY if on solid ground — from a scaffold pillar,
+        // horizontal offsets place blocks into thin air or the tree canopy
+        boolean onScaffold = reachSession != null && reachSession.hasPlacements()
+                && reachSession.placedKeys.contains(bot.getBlockPos().down().asLong());
+        if (!onScaffold) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos alt = placePos.offset(dir);
+                if (!isPlaceableTarget(world, alt)) {
+                    breakSoftBlock(world, bot, alt);
                 }
-                LOGGER.debug("Woodcut pillar: placed via offset {} at {}", dir, alt.toShortString());
-                return true;
+                ensureSupportBlock(bot, alt, sharedState, reachSession);
+                if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
+                    recordScaffoldPlacement(sharedState, world, alt);
+                    if (reachSession != null) {
+                        reachSession.recordPlacement(alt);
+                    }
+                    LOGGER.debug("Woodcut pillar: placed via offset {} at {}", dir, alt.toShortString());
+                    return true;
+                }
             }
         }
         return false;
