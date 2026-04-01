@@ -1620,10 +1620,15 @@ public final class WoodcutSkill implements Skill {
                 describeSupportBlock(world, desiredStand),
                 blockerSignature);
 
-        // Pre-approach pillar: if stand is elevated above reach, pillar up adjacent to column first
+        // Pre-approach pillar: if stand is elevated above reach, move adjacent to column then pillar up
         int heightGap = desiredStand.getY() - bot.getBlockY();
         if (heightGap > 3 && !standChoice.occupiable()) {
-            int pillarNeeded = heightGap - 2;
+            // Move to an adjacent ground position first so the pillar ends up near the column
+            BlockPos adjacentGround = findEntryStagingStand(world, new BlockPos(column.getX(), bot.getBlockY(), column.getZ()), bot.getBlockPos());
+            if (adjacentGround != null && !adjacentGround.equals(bot.getBlockPos())) {
+                moveToStand(source, bot, world, adjacentGround, desiredStand, reachSession);
+            }
+            int pillarNeeded = desiredStand.getY() - bot.getBlockY() - 2;
             LOGGER.info("Woodcut trunk entry pre-pillar: gap={} pillaring={} bot={} stand={}",
                     heightGap, pillarNeeded, bot.getBlockPos().toShortString(), desiredStand.toShortString());
             if (pillarNeeded > 0 && pillarNeeded <= MAX_COLUMN_PILLAR_STEPS) {
@@ -2551,10 +2556,11 @@ public final class WoodcutSkill implements Skill {
         if (stand.getX() != column.getX() || stand.getZ() != column.getZ()) {
             return new ColumnEntryMoveResult(false, "stand-not-in-column");
         }
+        // Clear shaft BEFORE checking control — carving may make the stand valid
+        int prepared = clearEntryShaftCells(bot, world, stand, target.base(), reachSession);
         if (!isControlledTrunkEntryStand(world, stand)) {
             return new ColumnEntryMoveResult(false, "stand-not-controlled");
         }
-        int prepared = clearEntryShaftCells(bot, world, stand, target.base(), reachSession);
         clearExactStandSoftBlockers(bot, world, stand, target.base(), reachSession);
         boolean supportReady = ensureControlledTrunkEntrySupport(bot, world, stand, reachSession, sharedState);
         if (prepared > 0 || supportReady) {
