@@ -4,6 +4,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-01
 
+- **Fix: Cherry/hillside trees rejected by soil validation.** `resolveStandingTreeBasic` checked only `base.down()` for valid soil — cherry trees on hillsides have trunks starting above ground (e.g., base Y=106, dirt at Y=101), so the block at Y=105 is air and fails the check. Now scans downward up to 5 blocks through air/replaceable blocks looking for soil, stopping at the first solid non-soil block (stone, etc.). Unblocks cherry blossom, acacia on cliffs, and any tree with an air gap below its trunk.
+
+- **Fix: Beehive-protected logs no longer cause infinite mine-reject loop.** `mineReachableBranches` rescanned every pass, re-finding the same protected block. Added `protectedSkips` set to both WoodcutSkill and BridgeScaffoldService so each protected block is attempted only once.
+
 - **Feat: Horizontal bridge scaffold service.** New `BridgeScaffoldService` builds temporary 1-block-wide horizontal bridges outward from a perch, mines targets at each step, then retracts. Supports safe mode (full sneak) and ninja bridging (sneak-toggle at block edges for ~2x speed). Integrated into WoodcutSkill descent phase — at each pillar level, the bot probes all 4 cardinal directions for reachable logs and bridges out up to 6 blocks to harvest them. Handles: sneak-lock safety, fall detection, proactive leaf clearing, target-at-floor mining, pre-flight material check, and clean retraction with scaffold teardown.
 
 - **Fix: Chest offload corridor clearing skips tree trunks.** `clearSoftStorageBlock()` in ChestStoreService only cleared leaves/snow/replaceable blocks. When a tree trunk log blocked the 4-block corridor between the bot and the chest stand, the clearing skipped it and the bot got permanently stuck — unable to take even 1 step, burning 55+ seconds before the 3-consecutive-no-move early exit fired. Added `BlockTags.LOGS` to the clearable set so trunk logs in the approach corridor are mined (1-tick with any axe).

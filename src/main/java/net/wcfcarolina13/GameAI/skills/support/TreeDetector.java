@@ -9,6 +9,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
 
@@ -79,10 +80,10 @@ public final class TreeDetector {
                              int height,
                              BlockPos envelopeMin,
                              BlockPos envelopeMax,
-                             Set<BlockPos> nearbyRootedBases,
+                             Map<BlockPos, Integer> nearbyRootedBases,
                              Set<BlockPos> canopyLeaves) {
         public TreeTarget {
-            nearbyRootedBases = nearbyRootedBases == null ? Set.of() : Set.copyOf(nearbyRootedBases);
+            nearbyRootedBases = nearbyRootedBases == null ? Map.of() : Map.copyOf(nearbyRootedBases);
             canopyLeaves = canopyLeaves == null ? Set.of() : Set.copyOf(canopyLeaves);
         }
 
@@ -93,7 +94,7 @@ public final class TreeDetector {
                     height,
                     base.add(-1, -1, -1).toImmutable(),
                     top.add(1, 1, 1).toImmutable(),
-                    Set.of(),
+                    Map.of(),
                     Set.of()
             );
         }
@@ -358,8 +359,22 @@ public final class TreeDetector {
             base = base.down();
         }
 
-        BlockState below = world.getBlockState(base.down());
-        if (!isValidSoil(below)) {
+        // Scan downward up to 5 blocks for valid soil — handles cherry trees and
+        // hillside trees whose trunks start above ground level with air gaps below.
+        boolean foundSoil = false;
+        for (int dy = 1; dy <= 5; dy++) {
+            BlockState soilCandidate = world.getBlockState(base.down(dy));
+            if (isValidSoil(soilCandidate)) {
+                foundSoil = true;
+                break;
+            }
+            // Stop scanning if we hit a solid non-soil block (stone, etc.)
+            if (!soilCandidate.isAir() && !soilCandidate.isReplaceable()
+                    && !soilCandidate.getCollisionShape(world, base.down(dy)).isEmpty()) {
+                break;
+            }
+        }
+        if (!foundSoil) {
             if (mode == TreeDetectionMode.STRICT_STANDING) {
                 return Optional.empty();
             }
@@ -391,7 +406,7 @@ public final class TreeDetector {
     }
 
     private static TreeTarget buildTreeTarget(ServerWorld world, BasicTreeInfo basic) {
-        Set<BlockPos> nearbyRootedBases = findNearbyRootedBases(world, basic);
+        Map<BlockPos, Integer> nearbyRootedBases = findNearbyRootedBases(world, basic);
         Set<BlockPos> canopyLeaves = collectLeafEnvelope(world, basic, nearbyRootedBases);
         BlockPos envelopeMin = basic.base().add(-1, -1, -1);
         BlockPos envelopeMax = basic.top().add(1, 1, 1);
@@ -424,8 +439,8 @@ public final class TreeDetector {
         );
     }
 
-    private static Set<BlockPos> findNearbyRootedBases(ServerWorld world, BasicTreeInfo selected) {
-        Set<BlockPos> bases = new HashSet<>();
+    private static Map<BlockPos, Integer> findNearbyRootedBases(ServerWorld world, BasicTreeInfo selected) {
+        Map<BlockPos, Integer> bases = new HashMap<>();
         if (world == null || selected == null) {
             return bases;
         }
@@ -445,7 +460,7 @@ public final class TreeDetector {
             }
             BasicTreeInfo info = infoOpt.get();
             if (!info.base().equals(selected.base())) {
-                bases.add(info.base().toImmutable());
+                bases.merge(info.base().toImmutable(), info.top().getY(), Math::max);
             }
         }
         return bases;
@@ -453,7 +468,7 @@ public final class TreeDetector {
 
     private static Set<BlockPos> collectLeafEnvelope(ServerWorld world,
                                                      BasicTreeInfo selected,
-                                                     Set<BlockPos> nearbyRootedBases) {
+                                                     Map<BlockPos, Integer> nearbyRootedBases) {
         Set<BlockPos> leaves = new HashSet<>();
         if (world == null || selected == null) {
             return leaves;
@@ -523,18 +538,21 @@ public final class TreeDetector {
 
     private static boolean leafBelongsToSelectedTree(BlockPos leaf,
                                                      BlockPos selectedBase,
-                                                     Set<BlockPos> nearbyRootedBases) {
+                                                     Map<BlockPos, Integer> nearbyRootedBases) {
         if (leaf == null || selectedBase == null) {
             return false;
         }
         double selectedDistSq = horizontalDistanceSq(leaf, selectedBase);
-        for (BlockPos otherBase : nearbyRootedBases) {
+        for (var entry : nearbyRootedBases.entrySet()) {
+            BlockPos otherBase = entry.getKey();
+            int otherTopY = entry.getValue();
             if (otherBase == null) {
                 continue;
             }
             if (Math.abs(leaf.getX() - otherBase.getX()) <= 1
                     && Math.abs(leaf.getZ() - otherBase.getZ()) <= 1
-                    && leaf.getY() >= otherBase.getY() - 1) {
+                    && leaf.getY() >= otherBase.getY() - 1
+                    && leaf.getY() <= otherTopY + 1) {
                 return false;
             }
             double otherDistSq = horizontalDistanceSq(leaf, otherBase);
@@ -574,10 +592,13 @@ public final class TreeDetector {
         if (strictOwner.isPresent() && !strictOwner.get().base().equals(target.base())) {
             return false;
         }
-        for (BlockPos otherBase : target.nearbyRootedBases()) {
+        for (var entry : target.nearbyRootedBases().entrySet()) {
+            BlockPos otherBase = entry.getKey();
+            int otherTopY = entry.getValue();
             if (Math.abs(candidate.getX() - otherBase.getX()) <= 1
                     && Math.abs(candidate.getZ() - otherBase.getZ()) <= 1
-                    && candidate.getY() >= otherBase.getY() - 1) {
+                    && candidate.getY() >= otherBase.getY() - 1
+                    && candidate.getY() <= otherTopY + 1) {
                 return false;
             }
         }
@@ -733,6 +754,9 @@ public final class TreeDetector {
     public static WoodcutProtectionDecision getWoodcutProtectionDecision(ServerWorld world, BlockPos pos, int height) {
         if (world == null || pos == null) {
             return WOODCUT_ALLOWED;
+        }
+        if (BotBeehiveRegistryService.findProtectingBeehive(world, pos) != null) {
+            return new WoodcutProtectionDecision(true, "beehive");
         }
         return VillageRuntimeProtectionPolicy.decideWoodcutProtection(
                 CompanionSafeZoneService.isInExplicitProtectedZone(world, pos, null),
