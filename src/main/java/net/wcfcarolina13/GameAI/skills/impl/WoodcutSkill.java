@@ -3466,14 +3466,6 @@ public final class WoodcutSkill implements Skill {
                                       ServerPlayerEntity bot,
                                       ServerWorld world,
                                       BlockPos stand,
-                                      BlockPos target) {
-        return moveToStandDirect(source, bot, world, stand, target, null);
-    }
-
-    private boolean moveToStandDirect(ServerCommandSource source,
-                                      ServerPlayerEntity bot,
-                                      ServerWorld world,
-                                      BlockPos stand,
                                       BlockPos target,
                                       WoodcutReachSession reachSession) {
         if (source == null || bot == null || world == null || stand == null) {
@@ -3494,15 +3486,6 @@ public final class WoodcutSkill implements Skill {
         return result.success()
                 || bot.getBlockPos().getSquaredDistance(stand) <= 4.0D
                 || (target != null && isWithinReach(bot, target));
-    }
-
-    private boolean tryRerouteUnsafeWoodcutMove(ServerCommandSource source,
-                                                ServerPlayerEntity bot,
-                                                ServerWorld world,
-                                                BlockPos desiredStand,
-                                                BlockPos target,
-                                                String label) {
-        return tryRerouteUnsafeWoodcutMove(source, bot, world, desiredStand, target, label, null);
     }
 
     private boolean tryRerouteUnsafeWoodcutMove(ServerCommandSource source,
@@ -4185,10 +4168,6 @@ public final class WoodcutSkill implements Skill {
                 snapshot.protectedLogs(),
                 TreeDetector.summarizeProtectionReasons(snapshot.protectedReasonCounts()),
                 snapshot.allLocalLogsProtectedOrHuman());
-    }
-
-    private void clearBlockingLeaves(ServerPlayerEntity bot, BlockPos target) {
-        clearBlockingLeaves(bot, target, target, null);
     }
 
     private void clearBlockingLeaves(ServerPlayerEntity bot,
@@ -5671,10 +5650,6 @@ public final class WoodcutSkill implements Skill {
         Vec3d center = Vec3d.ofCenter(pos);
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         return botPos.squaredDistanceTo(center) <= REACH_DISTANCE_SQ;
-    }
-
-    private void clearHeadroom(ServerPlayerEntity bot) {
-        clearHeadroom(bot, null, null);
     }
 
     private void clearHeadroom(ServerPlayerEntity bot,
