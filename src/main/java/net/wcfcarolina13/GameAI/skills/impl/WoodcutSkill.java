@@ -1681,7 +1681,7 @@ public final class WoodcutSkill implements Skill {
 
         // Pre-approach pillar: if stand is elevated above reach, move adjacent to column then pillar up
         int heightGap = desiredStand.getY() - bot.getBlockY();
-        if (heightGap > 3 && !standChoice.occupiable()) {
+        if (heightGap > 3) {
             // Move to an adjacent ground position first so the pillar ends up near the column
             BlockPos adjacentGround = findEntryStagingStand(world, new BlockPos(column.getX(), bot.getBlockY(), column.getZ()), bot.getBlockPos());
             if (adjacentGround != null && !adjacentGround.equals(bot.getBlockPos())) {
