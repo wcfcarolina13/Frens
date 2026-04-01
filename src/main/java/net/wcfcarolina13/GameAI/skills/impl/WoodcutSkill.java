@@ -1486,6 +1486,27 @@ public final class WoodcutSkill implements Skill {
                     sleepQuiet(200L);
                     bot.setSneaking(true);
                     mined += mineReachableBranches(bot, world, reachSession, target);
+                    // Elevated sweep: mine any reachable log from this height (catches non-envelope stragglers)
+                    for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
+                        if (isAbortRequested(bot)) break;
+                        BlockPos botPos = bot.getBlockPos();
+                        BlockPos found = null;
+                        for (BlockPos check : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 4, 4))) {
+                            if (!world.getBlockState(check).isIn(BlockTags.LOGS)) continue;
+                            if (!isWithinReach(bot, check)) continue;
+                            TreeDetector.WoodcutProtectionDecision prot =
+                                    getWoodcutMutationDecision(world, check, target.base());
+                            if (prot.blocked()) continue;
+                            found = check.toImmutable();
+                            break;
+                        }
+                        if (found == null) break;
+                        clearPathToTarget(bot, found);
+                        ensureAxeEquipped(bot);
+                        if (mineBlock(bot, found, true)) {
+                            mined++;
+                        }
+                    }
                 }
             }
             mined += mineReachableBranches(bot, world, reachSession, target);
@@ -1834,12 +1855,12 @@ public final class WoodcutSkill implements Skill {
             return 3;
         }
         if (target.height() <= 4) {
-            return 1;
-        }
-        if (target.height() <= 7) {
             return 2;
         }
-        return 3;
+        if (target.height() <= 7) {
+            return 3;
+        }
+        return 5;
     }
 
     private int scoreScaffoldColumn(ServerWorld world,
