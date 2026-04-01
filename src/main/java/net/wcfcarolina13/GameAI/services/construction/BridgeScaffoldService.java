@@ -331,6 +331,7 @@ public final class BridgeScaffoldService {
                                              BlockPos associatedBase) {
         if (isTarget == null) return 0;
         int mined = 0;
+        java.util.Set<Long> protectedSkips = new java.util.HashSet<>();
         for (int pass = 0; pass < TARGET_SWEEP_PASSES; pass++) {
             if (isAbortRequested(bot)) break;
             BlockPos botPos = bot.getBlockPos();
@@ -338,13 +339,17 @@ public final class BridgeScaffoldService {
             for (BlockPos check : BlockPos.iterate(
                     botPos.add(-TARGET_SWEEP_RADIUS, -2, -TARGET_SWEEP_RADIUS),
                     botPos.add(TARGET_SWEEP_RADIUS, TARGET_SWEEP_RADIUS, TARGET_SWEEP_RADIUS))) {
+                if (protectedSkips.contains(check.asLong())) continue;
                 BlockState state = world.getBlockState(check);
                 if (!isTarget.test(state)) continue;
                 if (!isWithinReach(bot, check)) continue;
                 if (associatedBase != null) {
                     var prot = net.wcfcarolina13.GameAI.skills.support.TreeDetector
                             .getWoodcutProtectionDecision(world, check, 4);
-                    if (prot.blocked()) continue;
+                    if (prot.blocked()) {
+                        protectedSkips.add(check.asLong());
+                        continue;
+                    }
                 }
                 found = check.toImmutable();
                 break;
@@ -356,6 +361,8 @@ public final class BridgeScaffoldService {
                 String result = MiningTool.mineBlock(bot, found).get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 if (result != null && result.toLowerCase().contains("complete")) {
                     mined++;
+                } else if (!world.getBlockState(found).isAir()) {
+                    protectedSkips.add(found.asLong());
                 }
             } catch (Exception ignored) {}
         }

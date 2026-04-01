@@ -2120,11 +2120,15 @@ public final class WoodcutSkill implements Skill {
                                       WoodcutReachSession reachSession,
                                       TreeDetector.TreeTarget target) {
         int mined = 0;
+        Set<Long> protectedSkips = new HashSet<>();
         for (int pass = 0; pass < 20; pass++) {
             if (isAbortRequested(bot)) {
                 break;
             }
             List<BlockPos> logs = scanReachableLogs(bot, world, target);
+            if (!protectedSkips.isEmpty()) {
+                logs.removeIf(p -> protectedSkips.contains(p.asLong()));
+            }
             if (logs.isEmpty()) {
                 break;
             }
@@ -2140,6 +2144,10 @@ public final class WoodcutSkill implements Skill {
             if (mineBlock(bot, log, true)) {
                 mined++;
             } else {
+                // Block still exists after failed mine — likely protected; skip on future passes
+                if (!world.getBlockState(log).isAir()) {
+                    protectedSkips.add(log.asLong());
+                }
                 logs.remove(0);
                 if (logs.isEmpty()) {
                     break;
