@@ -1438,6 +1438,37 @@ public final class WoodcutSkill implements Skill {
                 int minedThisLevel = mineReachableBranches(bot, world, reachSession, target);
                 mined += minedThisLevel;
                 progressMade |= minedThisLevel > 0;
+
+                // Bridge sweep during ascent: reach distant branch logs from current pillar height
+                if (!isAbortRequested(bot)) {
+                    for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                        if (isAbortRequested(bot)) break;
+                        boolean hasTargetsInDir = false;
+                        for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
+                            BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                            for (int dy = -2; dy <= 4; dy++) {
+                                if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                    hasTargetsInDir = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!hasTargetsInDir) continue;
+                        BridgeScaffoldService.BridgeResult bridgeResult =
+                                BridgeScaffoldService.bridgeAndRetract(
+                                        bot, bridgeDir, 6, false,
+                                        state -> state.isIn(BlockTags.LOGS),
+                                        target.base(), PILLAR_BLOCKS);
+                        if (bridgeResult.targetsMined() > 0) {
+                            mined += bridgeResult.targetsMined();
+                            progressMade = true;
+                            LOGGER.info("Woodcut ascent bridge: dir={} mined={} placed={} adopted={}",
+                                    bridgeDir.asString(), bridgeResult.targetsMined(),
+                                    bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
+                        }
+                    }
+                }
+
                 boolean reachableRemain = !scanReachableLogs(bot, world, target).isEmpty();
 
                 boolean logsAbove = hasLogsAboveInColumn(world, column, bot.getBlockY(), maxScanY);
@@ -1588,6 +1619,22 @@ public final class WoodcutSkill implements Skill {
                 standChoice.needsSupport(),
                 describeSupportBlock(world, desiredStand),
                 blockerSignature);
+
+        // Pre-approach pillar: if stand is elevated above reach, pillar up adjacent to column first
+        int heightGap = desiredStand.getY() - bot.getBlockY();
+        if (heightGap > 3 && !standChoice.occupiable()) {
+            int pillarNeeded = heightGap - 2;
+            LOGGER.info("Woodcut trunk entry pre-pillar: gap={} pillaring={} bot={} stand={}",
+                    heightGap, pillarNeeded, bot.getBlockPos().toShortString(), desiredStand.toShortString());
+            if (pillarNeeded > 0 && pillarNeeded <= MAX_COLUMN_PILLAR_STEPS) {
+                List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
+                if (!placed.isEmpty()) {
+                    recordRecoveryPlacements(world, placed, sharedState, reachSession);
+                    progressMade = true;
+                    sleepQuiet(PILLAR_STEP_DELAY_MS);
+                }
+            }
+        }
 
         int preMined = mineReachableBranches(bot, world, reachSession, target);
         if (preMined > 0) {
