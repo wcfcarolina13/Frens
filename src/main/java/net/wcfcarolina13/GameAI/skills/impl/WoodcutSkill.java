@@ -92,9 +92,6 @@ public final class WoodcutSkill implements Skill {
     private static final int MAX_LEAF_CLEAR_BLOCKS_PER_TARGET = 24;
     private static final int MAX_LEAF_CLEAR_BLOCKS_PER_ATTEMPT = 8;
     private static final int MAX_TRUNK_LOS_RECOVERY_ATTEMPTS = 2;
-    private static final int MAX_TRUNK_ENTRY_CARVE_BLOCKS = 6;
-    private static final int MAX_SCAFFOLD_COLUMN_ATTEMPTS = 12;
-    private static final int MAX_RETRYABLE_COLUMN_ATTEMPTS = 2;
     private static final int MAX_COLUMN_PILLAR_STEPS = 18;
     private static final int WOODCUT_LOG_SCAN_EXPANSION = 4;
     private static final int MAX_IDENTICAL_REPOSITION_FAILURES = 2;
@@ -238,50 +235,6 @@ public final class WoodcutSkill implements Skill {
                                      String detail) {
     }
 
-    private record ColumnVisitRecord(ColumnVisitStatus status,
-                                     int attempts) {
-        private boolean isTerminal() {
-            return switch (status) {
-                case COMPLETED, EXHAUSTED_NO_TARGETS -> true;
-                case FAILED_ENTRY, FAILED_ASCENT -> attempts >= MAX_RETRYABLE_COLUMN_ATTEMPTS;
-            };
-        }
-    }
-
-    private enum ColumnVisitStatus {
-        COMPLETED,
-        FAILED_ENTRY,
-        FAILED_ASCENT,
-        EXHAUSTED_NO_TARGETS
-    }
-
-    private record TrunkEntryResult(boolean entered,
-                                    boolean supportedStance,
-                                    boolean progressMade,
-                                    boolean everOccupiedColumn,
-                                    int blocksBroken,
-                                    String failureReason,
-                                    BlockPos standPos,
-                                    BlockPos column,
-                                    String blockerSignature) {
-    }
-
-    private record ColumnMineResult(int mined,
-                                    boolean progressMade,
-                                    String terminalReason,
-                                    ColumnVisitStatus visitStatus,
-                                    int pillarSteps) {
-    }
-
-    private record ColumnEntryMoveResult(boolean success,
-                                         String detail) {
-    }
-
-    private record TrunkEntryStandChoice(BlockPos stand,
-                                         String reason,
-                                         boolean occupiable,
-                                         boolean needsSupport) {
-    }
 
     private static final class WoodcutWorkAreaState {
         private final BlockPos searchOrigin;
@@ -1305,76 +1258,218 @@ public final class WoodcutSkill implements Skill {
         int totalMined = 0;
         try {
             BlockPos trunkBase = target.base();
-            Map<Long, ColumnVisitRecord> visitedColumns = new HashMap<>();
-            String terminalReason = "no-columns";
+            BlockPos column = trunkBase; // unified: always pillar at trunk position
+            String terminalReason = "no-work";
+            boolean wasSneaking = bot.isSneaking();
+            try {
+                bot.setSneaking(false);
 
-            for (int attempt = 0; attempt < MAX_SCAFFOLD_COLUMN_ATTEMPTS; attempt++) {
-                if (TaskService.isServerStopping() || isAbortRequested(bot)) {
-                    return new TreeHarvestResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "abort-requested");
-                }
+                // Phase 1: Mine reachable trunk logs from ground level
+                rememberGroundedWoodcutStandIfSafe(world, bot, reachSession, "fell-start");
+                int groundMined = mineReachableBranches(bot, world, reachSession, target);
+                totalMined += groundMined;
 
-                rememberGroundedWoodcutStandIfSafe(world, bot, reachSession, "tree-loop");
-                List<BlockPos> remainingLogs = collectRemainingEnvelopeLogs(bot, world, target);
-                if (remainingLogs.isEmpty()) {
+                List<BlockPos> remainingAfterGround = collectRemainingEnvelopeLogs(bot, world, target);
+                if (remainingAfterGround.isEmpty()) {
                     success = true;
                     terminalReason = "all-logs-cleared";
-                    break;
                 }
 
-                if (!ensureWoodcutOperationalStanceForNextColumn(source, bot, world, target.base(), reachSession, sharedState)) {
-                    terminalReason = "not-grounded-for-next-column";
-                    break;
-                }
+                if (!success && !isAbortRequested(bot)) {
+                    // Phase 2: Position at trunk base (walk into cleared column)
+                    boolean positioned = false;
+                    if (isDryWoodcutStandCell(world, trunkBase)) {
+                        positioned = moveToStand(source, bot, world, trunkBase, trunkBase, reachSession);
+                    }
+                    if (!positioned) {
+                        MovementService.nudgeTowardUntilClose(bot, trunkBase, 2.25D, 1_800L, 0.20D, "fell-enter-trunk");
+                        positioned = isBotInColumn(bot, column);
+                    }
+                    if (!positioned) {
+                        BlockPos staging = findEntryStagingStand(world, trunkBase, bot.getBlockPos());
+                        if (staging != null) {
+                            moveToStand(source, bot, world, staging, trunkBase, reachSession);
+                            MovementService.nudgeTowardUntilClose(bot, trunkBase, 2.25D, 1_200L, 0.20D, "fell-staged-nudge");
+                            positioned = isBotInColumn(bot, column);
+                        }
+                    }
 
-                BlockPos column = pickNextScaffoldColumn(world, bot, target, remainingLogs, visitedColumns);
-                if (column == null) {
-                    terminalReason = "no-unvisited-column";
-                    break;
-                }
-                long columnKey = toColumnKey(column);
-                LOGGER.info("Woodcut column: selected {} for base {} (remainingLogs={} visitedColumns={} anchorY={})",
-                        column.toShortString(), trunkBase.toShortString(), remainingLogs.size(), visitedColumns.size(), column.getY());
+                    // Phase 3: Ascent loop (pillar up + mine branches + bridge sweep)
+                    if (positioned || isBotInColumn(bot, column)) {
+                        bot.setSneaking(true);
+                        int maxScanY = target.top().getY() + 2;
+                        int maxSteps = Math.min(target.height() + 4, MAX_COLUMN_PILLAR_STEPS);
+                        int pillarSteps = 0;
+                        for (int step = 0; step <= maxSteps; step++) {
+                            if (TaskService.isServerStopping() || isAbortRequested(bot)) {
+                                terminalReason = "abort-requested";
+                                break;
+                            }
 
-                ColumnMineResult result = mineFromScaffoldColumn(source, bot, world, target, column, reachSession, sharedState);
-                totalMined += result.mined();
-                ColumnVisitRecord previousVisit = visitedColumns.get(columnKey);
-                int attemptsForColumn = previousVisit == null ? 1 : previousVisit.attempts() + 1;
-                ColumnVisitRecord visitRecord = new ColumnVisitRecord(result.visitStatus(), attemptsForColumn);
-                visitedColumns.put(columnKey, visitRecord);
-                terminalReason = result.terminalReason();
-                if (visitRecord.isTerminal()
-                        && (visitRecord.status() == ColumnVisitStatus.FAILED_ENTRY
-                        || visitRecord.status() == ColumnVisitStatus.FAILED_ASCENT)) {
-                    LOGGER.info("Woodcut column: retry cap reached for {} status={} attempts={} reason={}",
-                            column.toShortString(),
-                            visitRecord.status(),
-                            visitRecord.attempts(),
-                            result.terminalReason());
-                }
+                            int minedThisLevel = mineReachableBranches(bot, world, reachSession, target);
+                            totalMined += minedThisLevel;
+                            boolean reachableRemain = !scanReachableLogs(bot, world, target).isEmpty();
 
-                if (reachSession != null && reachSession.hasPlacements() && !isAbortRequested(bot)) {
-                    cleanupReachSession(source, bot, target.base(), reachSession, sharedState);
-                    cleanupNearbyScaffold(bot, target.base(), sharedState);
-                    cleanupNearbyScaffold(bot, bot.getBlockPos(), sharedState);
-                }
+                            boolean logsAbove = hasLogsAboveInColumn(world, column, bot.getBlockY(), maxScanY);
+                            if (!logsAbove && !reachableRemain) {
+                                break;
+                            }
+                            if (!isSupportedWoodcutStance(bot, world, column, target, reachSession, true)) {
+                                LOGGER.info("Woodcut pillar: invalid stance before step at {} support={}",
+                                        bot.getBlockPos().toShortString(), describeSupportBlock(world, bot.getBlockPos()));
+                                terminalReason = "unsupported-stance";
+                                break;
+                            }
+                            if (!clearOverheadForClimb(bot, world, target.base(), reachSession)) {
+                                terminalReason = "no-jump-headroom";
+                                break;
+                            }
 
-                LOGGER.info("Woodcut column: finished {} for base {} mined={} reason={} status={} attempts={} terminal={}",
-                        column.toShortString(),
-                        trunkBase.toShortString(),
-                        result.mined(),
-                        result.terminalReason(),
-                        visitRecord.status(),
-                        visitRecord.attempts(),
-                        visitRecord.isTerminal());
+                            int startY = bot.getBlockY();
+                            List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, 1);
+                            LOGGER.info("Woodcut pillar step {} via ScaffoldService placed={}",
+                                    step + 1, placed.size());
+                            if (placed.isEmpty()) {
+                                terminalReason = "pillar-failed";
+                                break;
+                            }
+                            recordRecoveryPlacements(world, placed, sharedState, reachSession);
+                            bot.setSneaking(true);
+                            sleepQuiet(PILLAR_STEP_DELAY_MS);
+                            if (!verifyPillarProgress(bot, world, column, target, reachSession, startY)) {
+                                LOGGER.info("Woodcut pillar verification failed: startY={} bot={} support={}",
+                                        startY, bot.getBlockPos().toShortString(), describeSupportBlock(world, bot.getBlockPos()));
+                                terminalReason = "pillar-drifted";
+                                break;
+                            }
+                            pillarSteps++;
+                            if (reachSession != null) {
+                                reachSession.verifiedPillarSteps++;
+                            }
+
+                            // Bridge sweep from elevated pillar: reach distant branch logs laterally
+                            if (!isAbortRequested(bot) && pillarSteps >= 2) {
+                                BlockPos preBridgePos = bot.getBlockPos().toImmutable();
+                                for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                                    if (isAbortRequested(bot)) break;
+                                    boolean hasTargetsInDir = false;
+                                    for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
+                                        BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                                        for (int dy = -2; dy <= 4; dy++) {
+                                            if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                                hasTargetsInDir = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (!hasTargetsInDir) continue;
+                                    BridgeScaffoldService.BridgeResult bridgeResult =
+                                            BridgeScaffoldService.bridgeAndRetract(
+                                                    bot, bridgeDir, 6, false,
+                                                    state -> state.isIn(BlockTags.LOGS),
+                                                    target.base(), PILLAR_BLOCKS);
+                                    if (bridgeResult.targetsMined() > 0) {
+                                        totalMined += bridgeResult.targetsMined();
+                                        LOGGER.info("Woodcut ascent bridge: dir={} mined={} placed={} adopted={}",
+                                                bridgeDir.asString(), bridgeResult.targetsMined(),
+                                                bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
+                                    }
+                                    // Re-center on pillar if bridge drifted the bot
+                                    if (!bot.getBlockPos().equals(preBridgePos)) {
+                                        MovementService.nudgeTowardUntilClose(
+                                                bot, preBridgePos, 1.0, 1_500L, 0.15, "bridge-recenter");
+                                    }
+                                }
+                            }
+                        }
+
+                        // Phase 4: Descent loop (scaffold teardown + elevated sweep + bridge)
+                        List<BlockPos> currentPlacements = currentColumnPlacements(reachSession, column);
+                        for (BlockPos scaffold : currentPlacements) {
+                            if (TaskService.isServerStopping() || isAbortRequested(bot)) {
+                                break;
+                            }
+                            bot.setSneaking(true);
+                            totalMined += mineReachableBranches(bot, world, reachSession, target);
+                            if (!world.getBlockState(scaffold).isAir() && mineAdaptiveBlock(bot, scaffold, target.base(), reachSession)) {
+                                forgetScaffoldPlacement(sharedState, world, scaffold);
+                                reachSession.recordRemoval(scaffold);
+                                sleepQuiet(200L);
+                                bot.setSneaking(true);
+                                totalMined += mineReachableBranches(bot, world, reachSession, target);
+                                // Elevated sweep: mine any reachable log from this height
+                                for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
+                                    if (isAbortRequested(bot)) break;
+                                    BlockPos botPos = bot.getBlockPos();
+                                    BlockPos found = null;
+                                    for (BlockPos check : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 4, 4))) {
+                                        if (!world.getBlockState(check).isIn(BlockTags.LOGS)) continue;
+                                        if (!isWithinReach(bot, check)) continue;
+                                        TreeDetector.WoodcutProtectionDecision prot =
+                                                getWoodcutMutationDecision(world, check, target.base());
+                                        if (prot.blocked()) continue;
+                                        found = check.toImmutable();
+                                        break;
+                                    }
+                                    if (found == null) break;
+                                    clearPathToTarget(bot, found);
+                                    ensureAxeEquipped(bot);
+                                    if (mineBlock(bot, found, true)) {
+                                        totalMined++;
+                                    }
+                                }
+                                // Bridge sweep: try bridging in each cardinal direction
+                                if (!isAbortRequested(bot)) {
+                                    for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                                        if (isAbortRequested(bot)) break;
+                                        boolean hasTargetsInDir = false;
+                                        for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
+                                            BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                                            for (int dy = -2; dy <= 4; dy++) {
+                                                if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                                    hasTargetsInDir = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (!hasTargetsInDir) continue;
+                                        BridgeScaffoldService.BridgeResult bridgeResult =
+                                                BridgeScaffoldService.bridgeAndRetract(
+                                                        bot, bridgeDir, 6, false,
+                                                        state -> state.isIn(BlockTags.LOGS),
+                                                        target.base(),
+                                                        PILLAR_BLOCKS);
+                                        if (bridgeResult.targetsMined() > 0) {
+                                            totalMined += bridgeResult.targetsMined();
+                                            LOGGER.info("Woodcut bridge sweep: dir={} mined={} placed={} adopted={}",
+                                                    bridgeDir.asString(),
+                                                    bridgeResult.targetsMined(),
+                                                    bridgeResult.placedBlocks().size(),
+                                                    bridgeResult.adoptedBlocks());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Phase 5: Final sweep
+                        totalMined += mineReachableBranches(bot, world, reachSession, target);
+                        totalMined += clearNearbyLowHangingCaps(source, bot, world, column, target, reachSession);
+                    } else {
+                        terminalReason = "positioning-failed";
+                    }
+                }
+            } finally {
+                bot.setSneaking(wasSneaking);
             }
 
             LOGGER.info("Woodcut unified: mined {} logs for base {}", totalMined, trunkBase.toShortString());
             reachSession.trunkMineAttemptsStarted = totalMined;
 
-            // Fallback: if column entry completely failed, pillar up near the tree and bridge outward
+            // Fallback: if leftovers remain, pillar up near the tree and bridge outward
             List<BlockPos> leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
-            if (!leftoverClusterLogs.isEmpty() && totalMined == 0 && !isAbortRequested(bot)) {
-                LOGGER.info("Woodcut fallback bridge: column entry failed, attempting pillar+bridge for {} remaining logs at base {}",
+            if (!leftoverClusterLogs.isEmpty() && !isAbortRequested(bot)) {
+                LOGGER.info("Woodcut fallback bridge: attempting pillar+bridge for {} remaining logs at base {}",
                         leftoverClusterLogs.size(), trunkBase.toShortString());
                 int highestLogY = leftoverClusterLogs.stream().mapToInt(BlockPos::getY).max().orElse(trunkBase.getY());
                 int pillarNeeded = Math.max(0, highestLogY - bot.getBlockY() - 1);
@@ -1427,7 +1522,7 @@ public final class WoodcutSkill implements Skill {
                 }
             }
             if (!leftoverClusterLogs.isEmpty()) {
-                WoodcutKnowledgeService.updateTreeSite(bot, world, target, leftoverClusterLogs, visitedColumns);
+                WoodcutKnowledgeService.updateTreeSite(bot, world, target, leftoverClusterLogs, Map.of());
                 leftoverClusterLogs.forEach(pos -> {
                     pendingFloaters.add(pos.toImmutable());
                     recordCleanupFloater(bot, sharedState, world, pos);
@@ -1439,7 +1534,7 @@ public final class WoodcutSkill implements Skill {
                 return new TreeHarvestResult(false, totalMined > 0 ? WoodcutFailureReason.PATH_OR_REACH_FAILURE : WoodcutFailureReason.TRUNK_NEVER_STARTED,
                         totalMined > 0 ? "cluster-logs-remained" : terminalReason);
             }
-            WoodcutKnowledgeService.updateTreeSite(bot, world, target, List.of(), visitedColumns);
+            WoodcutKnowledgeService.updateTreeSite(bot, world, target, List.of(), Map.of());
 
             success = totalMined > 0 || terminalReason.equals("all-logs-cleared");
             return new TreeHarvestResult(success, success ? WoodcutFailureReason.NO_TARGET : WoodcutFailureReason.PATH_OR_REACH_FAILURE,
@@ -1453,377 +1548,6 @@ public final class WoodcutSkill implements Skill {
                 }
             }
         }
-    }
-
-    private ColumnMineResult mineFromScaffoldColumn(ServerCommandSource source,
-                                                    ServerPlayerEntity bot,
-                                                    ServerWorld world,
-                                                    TreeDetector.TreeTarget target,
-                                                    BlockPos column,
-                                                    WoodcutReachSession reachSession,
-                                                    Map<String, Object> sharedState) {
-        int mined = 0;
-        boolean progressMade = false;
-        int pillarSteps = 0;
-        boolean wasSneaking = bot.isSneaking();
-        try {
-            bot.setSneaking(false);
-            TrunkEntryResult entry = enterTrunkColumn(source, bot, world, column, target, reachSession, sharedState);
-            progressMade = entry.progressMade();
-            if (!entry.entered() || !entry.supportedStance()) {
-                LOGGER.info("Woodcut trunk entry failed: column={} reason={} supportedStance={} everOccupiedColumn={} carved={} stand={} blocker={}",
-                        column.toShortString(),
-                        entry.failureReason(),
-                        entry.supportedStance(),
-                        entry.everOccupiedColumn(),
-                        entry.blocksBroken(),
-                        entry.standPos() == null ? "none" : entry.standPos().toShortString(),
-                        entry.blockerSignature());
-                return new ColumnMineResult(0, progressMade, "entry-" + entry.failureReason(), ColumnVisitStatus.FAILED_ENTRY, pillarSteps);
-            }
-            LOGGER.info("Woodcut trunk entry success: column={} stand={} support={} carved={}",
-                    column.toShortString(),
-                    entry.standPos() == null ? "none" : entry.standPos().toShortString(),
-                    describeSupportBlock(world, entry.standPos() == null ? bot.getBlockPos() : entry.standPos()),
-                    entry.blocksBroken());
-            bot.setSneaking(true);
-
-            int maxScanY = target.top().getY() + 2;
-            int maxSteps = Math.min(target.height() + 4, MAX_COLUMN_PILLAR_STEPS);
-            for (int step = 0; step <= maxSteps; step++) {
-                if (TaskService.isServerStopping() || isAbortRequested(bot)) {
-                    return new ColumnMineResult(mined, true, "abort-requested", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-
-                int minedThisLevel = mineReachableBranches(bot, world, reachSession, target);
-                mined += minedThisLevel;
-                progressMade |= minedThisLevel > 0;
-                boolean reachableRemain = !scanReachableLogs(bot, world, target).isEmpty();
-
-                boolean logsAbove = hasLogsAboveInColumn(world, column, bot.getBlockY(), maxScanY);
-                if (!logsAbove && !reachableRemain) {
-                    break;
-                }
-                if (!isSupportedWoodcutStance(bot, world, column, target, reachSession, true)) {
-                    LOGGER.info("Woodcut pillar: invalid stance before step at {} support={}",
-                            bot.getBlockPos().toShortString(), describeSupportBlock(world, bot.getBlockPos()));
-                    return new ColumnMineResult(mined, true, "unsupported-stance", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-                if (!clearOverheadForClimb(bot, world, target.base(), reachSession)) {
-                    return new ColumnMineResult(mined, progressMade, "no-jump-headroom", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-
-                int startY = bot.getBlockY();
-                List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, 1);
-                LOGGER.info("Woodcut pillar column {} step {} via ScaffoldService placed={}",
-                        column.toShortString(), step + 1, placed.size());
-                if (placed.isEmpty()) {
-                    return new ColumnMineResult(mined, progressMade, "pillar-failed", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-                recordRecoveryPlacements(world, placed, sharedState, reachSession);
-                bot.setSneaking(true);
-                sleepQuiet(PILLAR_STEP_DELAY_MS);
-                if (!verifyPillarProgress(bot, world, column, target, reachSession, startY)) {
-                    LOGGER.info("Woodcut pillar verification failed: column={} startY={} bot={} support={}",
-                            column.toShortString(), startY, bot.getBlockPos().toShortString(), describeSupportBlock(world, bot.getBlockPos()));
-                    return new ColumnMineResult(mined, true, "pillar-drifted", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-                pillarSteps++;
-                if (reachSession != null) {
-                    reachSession.verifiedPillarSteps++;
-                }
-
-                // Bridge sweep from elevated pillar: reach distant branch logs laterally
-                if (!isAbortRequested(bot) && pillarSteps >= 2) {
-                    BlockPos preBridgePos = bot.getBlockPos().toImmutable();
-                    for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
-                        if (isAbortRequested(bot)) break;
-                        boolean hasTargetsInDir = false;
-                        for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
-                            BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
-                            for (int dy = -2; dy <= 4; dy++) {
-                                if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
-                                    hasTargetsInDir = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!hasTargetsInDir) continue;
-                        BridgeScaffoldService.BridgeResult bridgeResult =
-                                BridgeScaffoldService.bridgeAndRetract(
-                                        bot, bridgeDir, 6, false,
-                                        state -> state.isIn(BlockTags.LOGS),
-                                        target.base(), PILLAR_BLOCKS);
-                        if (bridgeResult.targetsMined() > 0) {
-                            mined += bridgeResult.targetsMined();
-                            progressMade = true;
-                            LOGGER.info("Woodcut ascent bridge: dir={} mined={} placed={} adopted={}",
-                                    bridgeDir.asString(), bridgeResult.targetsMined(),
-                                    bridgeResult.placedBlocks().size(), bridgeResult.adoptedBlocks());
-                        }
-                        // Re-center on pillar if bridge drifted the bot
-                        if (!bot.getBlockPos().equals(preBridgePos)) {
-                            MovementService.nudgeTowardUntilClose(
-                                    bot, preBridgePos, 1.0, 1_500L, 0.15, "bridge-recenter");
-                        }
-                    }
-                }
-            }
-
-            List<BlockPos> currentPlacements = currentColumnPlacements(reachSession, column);
-            for (BlockPos scaffold : currentPlacements) {
-                if (TaskService.isServerStopping() || isAbortRequested(bot)) {
-                    return new ColumnMineResult(mined, true, "abort-requested", ColumnVisitStatus.FAILED_ASCENT, pillarSteps);
-                }
-                bot.setSneaking(true);
-                mined += mineReachableBranches(bot, world, reachSession, target);
-                if (!world.getBlockState(scaffold).isAir() && mineAdaptiveBlock(bot, scaffold, target.base(), reachSession)) {
-                    forgetScaffoldPlacement(sharedState, world, scaffold);
-                    reachSession.recordRemoval(scaffold);
-                    sleepQuiet(200L);
-                    bot.setSneaking(true);
-                    mined += mineReachableBranches(bot, world, reachSession, target);
-                    // Elevated sweep: mine any reachable log from this height (catches non-envelope stragglers)
-                    for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
-                        if (isAbortRequested(bot)) break;
-                        BlockPos botPos = bot.getBlockPos();
-                        BlockPos found = null;
-                        for (BlockPos check : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 4, 4))) {
-                            if (!world.getBlockState(check).isIn(BlockTags.LOGS)) continue;
-                            if (!isWithinReach(bot, check)) continue;
-                            TreeDetector.WoodcutProtectionDecision prot =
-                                    getWoodcutMutationDecision(world, check, target.base());
-                            if (prot.blocked()) continue;
-                            found = check.toImmutable();
-                            break;
-                        }
-                        if (found == null) break;
-                        clearPathToTarget(bot, found);
-                        ensureAxeEquipped(bot);
-                        if (mineBlock(bot, found, true)) {
-                            mined++;
-                        }
-                    }
-                    // Bridge sweep: try bridging in each cardinal direction to reach distant targets
-                    if (!isAbortRequested(bot)) {
-                        for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
-                            if (isAbortRequested(bot)) break;
-                            boolean hasTargetsInDir = false;
-                            for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
-                                BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
-                                for (int dy = -2; dy <= 4; dy++) {
-                                    if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
-                                        hasTargetsInDir = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (!hasTargetsInDir) continue;
-                            BridgeScaffoldService.BridgeResult bridgeResult =
-                                    BridgeScaffoldService.bridgeAndRetract(
-                                            bot, bridgeDir, 6, false,
-                                            state -> state.isIn(BlockTags.LOGS),
-                                            target.base(),
-                                            PILLAR_BLOCKS);
-                            if (bridgeResult.targetsMined() > 0) {
-                                mined += bridgeResult.targetsMined();
-                                LOGGER.info("Woodcut bridge sweep: dir={} mined={} placed={} adopted={}",
-                                        bridgeDir.asString(),
-                                        bridgeResult.targetsMined(),
-                                        bridgeResult.placedBlocks().size(),
-                                        bridgeResult.adoptedBlocks());
-                            }
-                        }
-                    }
-                }
-            }
-            mined += mineReachableBranches(bot, world, reachSession, target);
-            mined += clearNearbyLowHangingCaps(source, bot, world, column, target, reachSession);
-            List<BlockPos> remainingClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
-            boolean exhausted = remainingClusterLogs.isEmpty()
-                    || remainingClusterLogs.stream().noneMatch(pos -> pos.getX() == column.getX() && pos.getZ() == column.getZ());
-            if (mined == 0 && pillarSteps == 0) {
-                return new ColumnMineResult(0, progressMade,
-                        exhausted ? "column-exhausted-no-work" : "column-no-work",
-                        exhausted ? ColumnVisitStatus.EXHAUSTED_NO_TARGETS : ColumnVisitStatus.FAILED_ASCENT,
-                        pillarSteps);
-            }
-            ColumnVisitStatus visitStatus = mined > 0 || pillarSteps > 0
-                    ? ColumnVisitStatus.COMPLETED
-                    : ColumnVisitStatus.EXHAUSTED_NO_TARGETS;
-            return new ColumnMineResult(mined, progressMade || mined > 0 || pillarSteps > 0,
-                    exhausted ? "column-exhausted" : "column-complete", visitStatus, pillarSteps);
-        } finally {
-            bot.setSneaking(wasSneaking);
-        }
-    }
-
-    private TrunkEntryResult enterTrunkColumn(ServerCommandSource source,
-                                              ServerPlayerEntity bot,
-                                              ServerWorld world,
-                                              BlockPos column,
-                                              TreeDetector.TreeTarget target,
-                                              WoodcutReachSession reachSession,
-                                              Map<String, Object> sharedState) {
-        int blocksBroken = 0;
-        boolean progressMade = false;
-        boolean everOccupiedColumn = isBotInColumn(bot, column);
-        TrunkEntryStandChoice standChoice = resolveTrunkEntryStand(world, column, column.getY());
-        BlockPos desiredStand = standChoice == null ? null : standChoice.stand();
-        String blockerSignature = describeEntryBlockers(world, desiredStand);
-        if (desiredStand == null) {
-            LOGGER.info("Woodcut trunk entry candidate: column={} stand=none reason=no-exact-column-stand",
-                    column.toShortString());
-            return new TrunkEntryResult(false, false, false, everOccupiedColumn, 0, "no-stand", null, column, blockerSignature);
-        }
-        LOGGER.info("Woodcut trunk entry candidate: column={} stand={} reason={} occupiable={} needsSupport={} support={} blocker={}",
-                column.toShortString(),
-                desiredStand.toShortString(),
-                standChoice.reason(),
-                standChoice.occupiable(),
-                standChoice.needsSupport(),
-                describeSupportBlock(world, desiredStand),
-                blockerSignature);
-
-        // Pre-approach pillar: if stand is elevated above reach, move adjacent to column then pillar up
-        int heightGap = desiredStand.getY() - bot.getBlockY();
-        if (heightGap > 3) {
-            // Move to an adjacent ground position first so the pillar ends up near the column
-            BlockPos adjacentGround = findEntryStagingStand(world, new BlockPos(column.getX(), bot.getBlockY(), column.getZ()), bot.getBlockPos());
-            if (adjacentGround != null && !adjacentGround.equals(bot.getBlockPos())) {
-                moveToStand(source, bot, world, adjacentGround, desiredStand, reachSession);
-            }
-            int pillarNeeded = desiredStand.getY() - bot.getBlockY() - 2;
-            LOGGER.info("Woodcut trunk entry pre-pillar: gap={} pillaring={} bot={} stand={}",
-                    heightGap, pillarNeeded, bot.getBlockPos().toShortString(), desiredStand.toShortString());
-            if (pillarNeeded > 0 && pillarNeeded <= MAX_COLUMN_PILLAR_STEPS) {
-                List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
-                if (!placed.isEmpty()) {
-                    recordRecoveryPlacements(world, placed, sharedState, reachSession);
-                    progressMade = true;
-                    sleepQuiet(PILLAR_STEP_DELAY_MS);
-                }
-            }
-        }
-
-        int preMined = mineReachableBranches(bot, world, reachSession, target);
-        if (preMined > 0) {
-            progressMade = true;
-        }
-        int remainingBudget = MAX_TRUNK_ENTRY_CARVE_BLOCKS;
-        String moveDetail = "not-attempted";
-        BlockPos lastStalledPos = null;
-        String lastStallSignature = null;
-        int repeatedStalls = 0;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            boolean attemptProgress = false;
-            if (!isDryWoodcutStandCell(world, desiredStand)) {
-                BlockPos staging = findEntryStagingStand(world, desiredStand, bot.getBlockPos());
-                if (staging != null && !staging.equals(bot.getBlockPos()) && bot.getBlockPos().getSquaredDistance(staging) > 2.25D) {
-                    boolean wasSneaking = bot.isSneaking();
-                    bot.setSneaking(false);
-                    try {
-                        boolean staged = moveToStand(source, bot, world, staging, desiredStand, reachSession);
-                        LOGGER.info("Woodcut trunk entry pre-stage: stand={} staging={} attempt={} success={} bot={}",
-                                desiredStand.toShortString(),
-                                staging.toShortString(),
-                                attempt + 1,
-                                staged,
-                                bot.getBlockPos().toShortString());
-                        progressMade |= staged;
-                        attemptProgress |= staged;
-                    } finally {
-                        bot.setSneaking(wasSneaking);
-                    }
-                }
-            }
-            int clearedShaft = clearEntryShaftCells(bot, world, desiredStand, target.base(), reachSession);
-            blocksBroken += clearedShaft;
-            progressMade |= clearedShaft > 0;
-            attemptProgress |= clearedShaft > 0;
-            everOccupiedColumn |= isBotInColumn(bot, column);
-            if (isSupportedWoodcutStance(bot, world, column, target, reachSession, true)
-                    && clearOverheadForClimb(bot, world, target.base(), reachSession)) {
-                return new TrunkEntryResult(true, true, true, true, blocksBroken, "already-in-column", bot.getBlockPos().toImmutable(), column, blockerSignature);
-            }
-
-            ColumnEntryMoveResult moveResult =
-                    moveToColumnStand(source, bot, world, desiredStand, column, target, reachSession, sharedState);
-            moveDetail = moveResult.detail();
-            everOccupiedColumn |= isBotInColumn(bot, column);
-            LOGGER.info("Woodcut trunk entry move: column={} stand={} attempt={} success={} detail={} bot={}",
-                    column.toShortString(),
-                    desiredStand.toShortString(),
-                    attempt + 1,
-                    moveResult.success(),
-                    moveResult.detail(),
-                    bot.getBlockPos().toShortString());
-            if (moveResult.success()
-                    && clearOverheadForClimb(bot, world, target.base(), reachSession)
-                    && isSupportedWoodcutStance(bot, world, column, target, reachSession, true)) {
-                return new TrunkEntryResult(true, true, true, true, blocksBroken, "direct-move", bot.getBlockPos().toImmutable(), column, blockerSignature);
-            }
-            String stallSignature = desiredStand.toShortString() + "|" + moveDetail;
-            if (!moveResult.success()
-                    && !attemptProgress
-                    && bot.getBlockPos().equals(lastStalledPos)
-                    && stallSignature.equals(lastStallSignature)) {
-                repeatedStalls++;
-            } else if (!moveResult.success() && !attemptProgress) {
-                repeatedStalls = 0;
-            } else {
-                repeatedStalls = 0;
-            }
-            lastStalledPos = bot.getBlockPos().toImmutable();
-            lastStallSignature = stallSignature;
-            if (!moveResult.success() && !attemptProgress && repeatedStalls >= MAX_REPEATED_TRUNK_ENTRY_STALLS) {
-                LOGGER.info("Woodcut trunk entry escalating repeated stall: column={} stand={} attempt={} bot={} detail={}",
-                        column.toShortString(),
-                        desiredStand.toShortString(),
-                        attempt + 1,
-                        bot.getBlockPos().toShortString(),
-                        moveDetail);
-                break;
-            }
-
-            Direction toward = directionToward(bot.getBlockPos(), desiredStand);
-            if (toward != null) {
-                MovementService.clearLeafObstructionDetailed(bot, toward);
-            }
-            if (remainingBudget <= 0) {
-                break;
-            }
-
-            int carved = carveEntryHeadway(bot, world, desiredStand, target.base(), reachSession, sharedState, remainingBudget);
-            blocksBroken += carved;
-            progressMade |= carved > 0;
-            attemptProgress |= carved > 0;
-            remainingBudget = Math.max(0, remainingBudget - carved);
-            if (canCreateMinorSupportStand(world, desiredStand)) {
-                BlockPos support = desiredStand.down();
-                if (tryPlaceScaffold(bot, support, sharedState, reachSession)) {
-                    progressMade = true;
-                    attemptProgress = true;
-                    remainingBudget = Math.max(0, remainingBudget - 1);
-                }
-            }
-
-            blockerSignature = describeEntryBlockers(world, desiredStand);
-            if (!progressMade && carved <= 0) {
-                break;
-            }
-        }
-        if (isSupportedWoodcutStance(bot, world, column, target, reachSession, true)
-                && clearOverheadForClimb(bot, world, target.base(), reachSession)) {
-            return new TrunkEntryResult(true, true, true, true, blocksBroken, "entered-after-carve", bot.getBlockPos().toImmutable(), column, blockerSignature);
-        }
-        recoverAfterFailedColumnEntry(source, bot, world, desiredStand, column, reachSession, sharedState);
-        runQuickPerTreeDropSweep(bot, source, reachSession);
-        return new TrunkEntryResult(false, false, progressMade, everOccupiedColumn, blocksBroken,
-                (blocksBroken > 0 ? "entry-still-blocked" : "entry-no-progress") + ":" + moveDetail,
-                desiredStand,
-                column,
-                blockerSignature);
     }
 
     private List<BlockPos> collectRemainingEnvelopeLogs(ServerPlayerEntity bot,
@@ -1895,180 +1619,6 @@ public final class WoodcutSkill implements Skill {
         return remaining;
     }
 
-    private BlockPos pickNextScaffoldColumn(ServerWorld world,
-                                            ServerPlayerEntity bot,
-                                            TreeDetector.TreeTarget target,
-                                            List<BlockPos> remainingLogs,
-                                            Map<Long, ColumnVisitRecord> visitedColumns) {
-        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
-        int baseAnchorY = determineColumnAnchorY(target.base(), remainingLogs, target);
-        candidates.add(new BlockPos(target.base().getX(), baseAnchorY, target.base().getZ()));
-        for (BlockPos log : remainingLogs) {
-            int anchorY = determineColumnAnchorY(log, remainingLogs, target);
-            candidates.add(new BlockPos(log.getX(), anchorY, log.getZ()));
-        }
-        List<BlockPos> unvisited = candidates.stream()
-                .filter(Objects::nonNull)
-                .filter(pos -> {
-                    ColumnVisitRecord record = visitedColumns.get(toColumnKey(pos));
-                    return record == null || !record.isTerminal();
-                })
-                .filter(pos -> resolveTrunkEntryStand(world, pos, pos.getY()) != null)
-                .toList();
-        if (unvisited.isEmpty()) {
-            if (!candidates.isEmpty()) {
-                LOGGER.info("Woodcut column: no selectable columns remain after retry caps for base {}",
-                        target.base().toShortString());
-            }
-            return null;
-        }
-        List<BlockPos> corridorCandidates = unvisited.stream()
-                .filter(pos -> isWithinPreferredColumnCorridor(target, pos))
-                .toList();
-        if (!corridorCandidates.isEmpty()) {
-            unvisited = corridorCandidates;
-        }
-        List<BlockPos> sameColumnLocal = unvisited.stream()
-                .filter(pos -> countSameColumnLogs(remainingLogs, pos) > 0)
-                .toList();
-        if (!sameColumnLocal.isEmpty()) {
-            unvisited = sameColumnLocal;
-        }
-        List<BlockPos> preferred = unvisited.stream()
-                .filter(pos -> isPreferredScaffoldColumn(world, target, remainingLogs, pos))
-                .toList();
-        List<BlockPos> pool = preferred.isEmpty() ? unvisited : preferred;
-        return pool.stream()
-                .min(Comparator
-                        .comparingInt((BlockPos pos) -> scoreScaffoldColumn(world, bot, target, remainingLogs, pos)
-                                + retryPenaltyForColumn(visitedColumns.get(toColumnKey(pos))))
-                        .thenComparingDouble(pos -> bot.getBlockPos().getSquaredDistance(pos)))
-                .orElse(null);
-    }
-
-    private boolean isPreferredScaffoldColumn(ServerWorld world,
-                                              TreeDetector.TreeTarget target,
-                                              List<BlockPos> remainingLogs,
-                                              BlockPos column) {
-        if (world == null || target == null || column == null) {
-            return false;
-        }
-        int sameColumnLogs = 0;
-        int lowestLogY = Integer.MAX_VALUE;
-        if (remainingLogs != null) {
-            for (BlockPos log : remainingLogs) {
-                if (log == null || log.getX() != column.getX() || log.getZ() != column.getZ()) {
-                    continue;
-                }
-                sameColumnLogs++;
-                lowestLogY = Math.min(lowestLogY, log.getY());
-            }
-        }
-        if (sameColumnLogs == 0) {
-            return false;
-        }
-        TrunkEntryStandChoice standChoice = resolveTrunkEntryStand(world, column, column.getY());
-        if (standChoice == null || standChoice.stand() == null) {
-            return false;
-        }
-        BlockPos stand = standChoice.stand();
-        boolean nearBase = isWithinPreferredColumnCorridor(target, column);
-        boolean closeToLowest = lowestLogY != Integer.MAX_VALUE && (lowestLogY - stand.getY()) <= 5;
-        return nearBase && closeToLowest;
-    }
-
-    private boolean isWithinPreferredColumnCorridor(TreeDetector.TreeTarget target, BlockPos column) {
-        if (target == null || column == null) {
-            return false;
-        }
-        int corridor = preferredColumnCorridorRadius(target);
-        return Math.abs(column.getX() - target.base().getX()) <= corridor
-                && Math.abs(column.getZ() - target.base().getZ()) <= corridor;
-    }
-
-    private int countSameColumnLogs(List<BlockPos> remainingLogs, BlockPos column) {
-        if (remainingLogs == null || column == null) {
-            return 0;
-        }
-        int count = 0;
-        for (BlockPos log : remainingLogs) {
-            if (log != null && log.getX() == column.getX() && log.getZ() == column.getZ()) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private int preferredColumnCorridorRadius(TreeDetector.TreeTarget target) {
-        if (target == null) {
-            return 3;
-        }
-        if (target.height() <= 4) {
-            return 2;
-        }
-        if (target.height() <= 7) {
-            return 3;
-        }
-        return 5;
-    }
-
-    private int scoreScaffoldColumn(ServerWorld world,
-                                    ServerPlayerEntity bot,
-                                    TreeDetector.TreeTarget target,
-                                    List<BlockPos> remainingLogs,
-                                    BlockPos column) {
-        if (column == null || target == null) {
-            return Integer.MAX_VALUE;
-        }
-        int score = 0;
-        boolean trunkColumn = Math.abs(column.getX() - target.base().getX()) <= 1
-                && Math.abs(column.getZ() - target.base().getZ()) <= 1;
-        if (trunkColumn) {
-            score -= 1000;
-        }
-        int sameColumnLogs = 0;
-        int lowestLogY = Integer.MAX_VALUE;
-        if (remainingLogs != null) {
-            for (BlockPos log : remainingLogs) {
-                if (log == null) {
-                    continue;
-                }
-                if (log.getX() == column.getX() && log.getZ() == column.getZ()) {
-                    sameColumnLogs++;
-                    lowestLogY = Math.min(lowestLogY, log.getY());
-                }
-            }
-        }
-        score -= sameColumnLogs * 40;
-        if (lowestLogY != Integer.MAX_VALUE) {
-            score += Math.max(0, lowestLogY - target.base().getY()) * 6;
-        }
-        TrunkEntryStandChoice standChoice = world != null ? resolveTrunkEntryStand(world, column, column.getY()) : null;
-        BlockPos stand = standChoice == null ? null : standChoice.stand();
-        if (stand == null) {
-            score += 20_000;
-        } else {
-            score += Math.max(0, column.getY() - stand.getY()) * 18;
-            if (standChoice.needsSupport()) {
-                score += 220;
-            }
-            if (standChoice.occupiable() && isLeafFloorStand(world, stand)) {
-                score += 140;
-            }
-        }
-        int baseDx = Math.abs(column.getX() - target.base().getX());
-        int baseDz = Math.abs(column.getZ() - target.base().getZ());
-        int baseDist = baseDx + baseDz;
-        score += baseDist * baseDist * 15;
-        int corridor = preferredColumnCorridorRadius(target);
-        if (baseDx > corridor || baseDz > corridor) {
-            score += 15_000;
-        }
-        if (bot != null) {
-            score += (int) Math.round(bot.getBlockPos().getSquaredDistance(column) / 4.0D);
-        }
-        return score;
-    }
 
     private List<BlockPos> currentColumnPlacements(WoodcutReachSession reachSession, BlockPos column) {
         List<BlockPos> placements = new ArrayList<>();
@@ -2168,19 +1718,6 @@ public final class WoodcutSkill implements Skill {
         return below.toShortString() + ":" + state.getBlock().getTranslationKey();
     }
 
-    private String describeEntryBlockers(ServerWorld world, BlockPos stand) {
-        if (world == null || stand == null) {
-            return "none";
-        }
-        List<String> blockers = new ArrayList<>();
-        for (BlockPos pos : List.of(stand, stand.up(), stand.up(2), stand.down())) {
-            BlockState state = world.getBlockState(pos);
-            if (!state.isAir()) {
-                blockers.add(pos.toShortString() + "=" + state.getBlock().getTranslationKey());
-            }
-        }
-        return blockers.isEmpty() ? "clear" : String.join(",", blockers);
-    }
 
     private boolean isClusterConnectedByLeaves(ServerWorld world, BlockPos from, BlockPos to) {
         if (world == null || from == null || to == null) {
@@ -2433,77 +1970,12 @@ public final class WoodcutSkill implements Skill {
         return null;
     }
 
-    private int retryPenaltyForColumn(ColumnVisitRecord record) {
-        if (record == null || record.isTerminal()) {
-            return 0;
-        }
-        return record.attempts() * 600;
-    }
-
-    private int scoreTrunkEntryStandPriority(int anchorY, BlockPos stand) {
-        if (stand == null) {
-            return Integer.MAX_VALUE;
-        }
-        int dy = stand.getY() - anchorY;
-        if (dy >= 0) {
-            return dy;
-        }
-        return 100 + Math.abs(dy);
-    }
-
-    private TrunkEntryStandChoice resolveTrunkEntryStand(ServerWorld world, BlockPos column, int anchorY) {
-        if (world == null || column == null) {
-            return null;
-        }
-        List<TrunkEntryStandChoice> occupiable = new ArrayList<>();
-        List<TrunkEntryStandChoice> carveable = new ArrayList<>();
-        for (int phase = 0; phase < 2; phase++) {
-            int start = phase == 0 ? 0 : -1;
-            int end = phase == 0 ? 6 : -18;
-            int step = phase == 0 ? 1 : -1;
-            for (int dy = start; phase == 0 ? dy <= end : dy >= end; dy += step) {
-                BlockPos foot = new BlockPos(column.getX(), anchorY + dy, column.getZ());
-                if (!isControlledTrunkEntryStand(world, foot)) {
-                    continue;
-                }
-                boolean occupiableNow = isDryWoodcutStandCell(world, foot);
-                boolean needsSupport = world.getBlockState(foot.down()).getCollisionShape(world, foot.down()).isEmpty();
-                String phaseLabel = dy == 0
-                        ? "anchor"
-                        : dy > 0 ? "upward+" + dy : "downward" + dy;
-                TrunkEntryStandChoice choice = new TrunkEntryStandChoice(
-                        foot.toImmutable(),
-                        occupiableNow ? "exact-column-" + phaseLabel + "-occupiable"
-                                : "exact-column-" + phaseLabel + "-carveable",
-                        occupiableNow,
-                        needsSupport);
-                if (occupiableNow) {
-                    occupiable.add(choice);
-                } else {
-                    carveable.add(choice);
-                }
-            }
-        }
-        // Merge both lists — carveable near the anchor beats occupiable far above the canopy.
-        // Small penalty (+3) for carveable so occupiable is still preferred at similar heights.
-        List<TrunkEntryStandChoice> all = new ArrayList<>(occupiable);
-        all.addAll(carveable);
-        if (all.isEmpty()) {
-            return null;
-        }
-        Comparator<TrunkEntryStandChoice> comparator = Comparator
-                .comparingInt((TrunkEntryStandChoice choice) ->
-                    scoreTrunkEntryStandPriority(anchorY, choice.stand()) + (choice.occupiable() ? 0 : 3))
-                .thenComparingInt(choice -> choice.needsSupport() ? 1 : 0);
-        return all.stream().min(comparator).orElse(null);
-    }
 
     private BlockPos resolveColumnStand(ServerWorld world, BlockPos column, int anchorY) {
         if (world == null || column == null) {
             return null;
         }
         List<BlockPos> safeCandidates = new ArrayList<>();
-        List<BlockPos> fallbackCandidates = new ArrayList<>();
         // Scan upward first (cleared trunk interior), then downward
         for (int phase = 0; phase < 2; phase++) {
             int start = phase == 0 ? 0 : -1;
@@ -2519,225 +1991,13 @@ public final class WoodcutSkill implements Skill {
                 }
                 if (isSafeWoodcutWorkStand(world, foot)) {
                     safeCandidates.add(foot.toImmutable());
-                    continue;
-                }
-                if (isCarveableWoodcutStand(world, foot)
-                        && isStableWorkingLeafSupport(world.getBlockState(foot.down()))
-                        && !FollowMovementService.isDangerousDropCell(world, foot)) {
-                    fallbackCandidates.add(foot.toImmutable());
                 }
             }
         }
-        Comparator<BlockPos> comparator = Comparator
-                .comparingInt(BlockPos::getY)
-                .thenComparingInt(pos -> Math.abs(anchorY - pos.getY()));
-        if (!safeCandidates.isEmpty()) {
-            return safeCandidates.stream().min(comparator).orElse(null);
-        }
-        return fallbackCandidates.stream().min(comparator).orElse(null);
-    }
-
-    private boolean isControlledTrunkEntryStand(ServerWorld world, BlockPos foot) {
-        if (world == null || foot == null || !world.isChunkLoaded(foot) || !world.isChunkLoaded(foot.up()) || !world.isChunkLoaded(foot.down())) {
-            return false;
-        }
-        if (!world.getFluidState(foot).isEmpty() || !world.getFluidState(foot.up()).isEmpty()) {
-            return false;
-        }
-        if (FollowMovementService.isDangerousDropCell(world, foot)) {
-            return false;
-        }
-        BlockState support = world.getBlockState(foot.down());
-        if (support.isIn(BlockTags.LEAVES) && !isStableWorkingLeafSupport(support)) {
-            return false;
-        }
-        return isDryWoodcutStandCell(world, foot) || isCarveableWoodcutStand(world, foot);
-    }
-
-    private boolean isCarveableWoodcutStand(ServerWorld world, BlockPos foot) {
-        if (world == null || foot == null) {
-            return false;
-        }
-        BlockPos head = foot.up();
-        BlockPos jump = foot.up(2);
-        BlockPos below = foot.down();
-        if (!world.isChunkLoaded(head) || !world.isChunkLoaded(jump) || !world.isChunkLoaded(below)) {
-            return false;
-        }
-        if (!world.getFluidState(foot).isEmpty()
-                || !world.getFluidState(head).isEmpty()
-                || !world.getFluidState(jump).isEmpty()
-                || !world.getFluidState(below).isEmpty()) {
-            return false;
-        }
-        boolean supportOk = !world.getBlockState(below).getCollisionShape(world, below).isEmpty()
-                || canCreateMinorSupportStand(world, foot);
-        return supportOk
-                && isEntryCellPassableOrCarveable(world, foot)
-                && isEntryCellPassableOrCarveable(world, head)
-                && isEntryCellPassableOrCarveable(world, jump);
-    }
-
-    private boolean isEntryCellPassableOrCarveable(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null) {
-            return false;
-        }
-        BlockState state = world.getBlockState(pos);
-        return state.getCollisionShape(world, pos).isEmpty() || isSoftTerrainEntryBlocker(state);
-    }
-
-    private boolean isSoftTerrainEntryBlocker(BlockState state) {
-        if (state == null) {
-            return false;
-        }
-        return state.isIn(BlockTags.LOGS)
-                || state.isIn(BlockTags.LEAVES)
-                || state.isOf(Blocks.SNOW)
-                || state.isReplaceable()
-                || state.isIn(BlockTags.DIRT)
-                || state.isOf(Blocks.GRASS_BLOCK)
-                || state.isOf(Blocks.DIRT_PATH)
-                || state.isOf(Blocks.GRAVEL)
-                || state.isOf(Blocks.SAND)
-                || state.isOf(Blocks.RED_SAND)
-                || state.isOf(Blocks.SHORT_GRASS)
-                || state.isOf(Blocks.TALL_GRASS)
-                || state.isOf(Blocks.FERN)
-                || state.isOf(Blocks.LARGE_FERN)
-                || state.isOf(Blocks.LEAF_LITTER);
-    }
-
-    private ColumnEntryMoveResult moveToColumnStand(ServerCommandSource source,
-                                                    ServerPlayerEntity bot,
-                                                    ServerWorld world,
-                                                    BlockPos stand,
-                                                    BlockPos column,
-                                                    TreeDetector.TreeTarget target,
-                                                    WoodcutReachSession reachSession,
-                                                    Map<String, Object> sharedState) {
-        if (source == null || bot == null || world == null || stand == null || column == null) {
-            return new ColumnEntryMoveResult(false, "invalid-args");
-        }
-        if (stand.getX() != column.getX() || stand.getZ() != column.getZ()) {
-            return new ColumnEntryMoveResult(false, "stand-not-in-column");
-        }
-        // Clear shaft BEFORE checking control — carving may make the stand valid
-        int prepared = clearEntryShaftCells(bot, world, stand, target.base(), reachSession);
-        if (!isControlledTrunkEntryStand(world, stand)) {
-            return new ColumnEntryMoveResult(false, "stand-not-controlled");
-        }
-        clearExactStandSoftBlockers(bot, world, stand, target.base(), reachSession);
-        boolean supportReady = ensureControlledTrunkEntrySupport(bot, world, stand, reachSession, sharedState);
-        if (prepared > 0 || supportReady) {
-            LOGGER.info("Woodcut trunk entry prep: column={} stand={} cleared={} supportReady={} bot={}",
-                    column.toShortString(),
-                    stand.toShortString(),
-                    prepared,
-                    supportReady,
-                    bot.getBlockPos().toShortString());
-        }
-        boolean standReadyForDirectMove = isDryWoodcutStandCell(world, stand);
-        ColumnEntryMoveResult exact = standReadyForDirectMove
-                ? moveToExactStand(source, bot, world, stand, target.base(), reachSession)
-                : new ColumnEntryMoveResult(false, "stand-not-ready");
-        if (exact.success()) {
-            boolean supported = isSupportedWoodcutStance(bot, world, column, target, reachSession, false);
-            return new ColumnEntryMoveResult(supported, supported ? "exact-occupied" : "exact-but-unsupported");
-        }
-
-        BlockPos staging = findEntryStagingStand(world, stand, bot.getBlockPos());
-        if (staging != null && !staging.equals(stand)) {
-            boolean staged = moveToStand(source, bot, world, staging, stand, reachSession);
-            LOGGER.info("Woodcut trunk entry staging: stand={} staging={} success={} bot={}",
-                    stand.toShortString(), staging.toShortString(), staged, bot.getBlockPos().toShortString());
-            if (staged) {
-                clearEntryShaftCells(bot, world, stand, target.base(), reachSession);
-                clearExactStandSoftBlockers(bot, world, stand, target.base(), reachSession);
-                ensureControlledTrunkEntrySupport(bot, world, stand, reachSession, sharedState);
-                exact = moveToExactStand(source, bot, world, stand, target.base(), reachSession);
-                if (exact.success()) {
-                    boolean supported = isSupportedWoodcutStance(bot, world, column, target, reachSession, false);
-                    return new ColumnEntryMoveResult(supported, supported ? "staged-then-exact" : "staged-exact-unsupported");
-                }
-            }
-        }
-
-        clearEntryShaftCells(bot, world, stand, target.base(), reachSession);
-        clearExactStandSoftBlockers(bot, world, stand, target.base(), reachSession);
-        ensureControlledTrunkEntrySupport(bot, world, stand, reachSession, sharedState);
-        if (isNearExactStand(bot.getBlockPos(), stand)) {
-            boolean nudged = MovementService.nudgeTowardUntilClose(bot, stand, 2.25D, 1_800L, 0.20D, "woodcut-shaft-step");
-            if (nudged && bot.getBlockPos().equals(stand)) {
-                boolean supported = isSupportedWoodcutStance(bot, world, column, target, reachSession, false);
-                return new ColumnEntryMoveResult(supported, supported ? "nudged-into-shaft" : "nudged-but-unsupported");
-            }
-            if (forceStepIntoExactStand(bot, stand)) {
-                boolean supported = isSupportedWoodcutStance(bot, world, column, target, reachSession, false);
-                return new ColumnEntryMoveResult(supported, supported ? "forced-step-into-shaft" : "forced-step-but-unsupported");
-            }
-        }
-        return new ColumnEntryMoveResult(false, "exact-move-failed:" + exact.detail());
-    }
-
-    private boolean ensureControlledTrunkEntrySupport(ServerPlayerEntity bot,
-                                                      ServerWorld world,
-                                                      BlockPos stand,
-                                                      WoodcutReachSession reachSession,
-                                                      Map<String, Object> sharedState) {
-        if (bot == null || world == null || stand == null) {
-            return false;
-        }
-        BlockPos support = stand.down();
-        if (!world.getBlockState(support).getCollisionShape(world, support).isEmpty()) {
-            return true;
-        }
-        if (!canCreateMinorSupportStand(world, stand) || !isWithinReach(bot, support)) {
-            return false;
-        }
-        if (!isPlaceableTarget(world, support)) {
-            return false;
-        }
-        boolean placed = tryPlaceScaffold(bot, support, sharedState, reachSession);
-        if (placed) {
-            LOGGER.info("Woodcut trunk entry support: placed under {} at {}", stand.toShortString(), support.toShortString());
-        }
-        return placed || !world.getBlockState(support).getCollisionShape(world, support).isEmpty();
-    }
-
-    private boolean isNearExactStand(BlockPos botPos, BlockPos stand) {
-        if (botPos == null || stand == null) {
-            return false;
-        }
-        int dx = Math.abs(botPos.getX() - stand.getX());
-        int dy = Math.abs(botPos.getY() - stand.getY());
-        int dz = Math.abs(botPos.getZ() - stand.getZ());
-        return dx <= 1 && dz <= 1 && dy <= 1;
-    }
-
-    private boolean forceStepIntoExactStand(ServerPlayerEntity bot, BlockPos stand) {
-        if (bot == null || stand == null) {
-            return false;
-        }
-        boolean wasSneaking = bot.isSneaking();
-        try {
-            bot.setSneaking(false);
-            for (int i = 0; i < 12; i++) {
-                if (bot.getBlockPos().equals(stand)) {
-                    BotActions.stop(bot);
-                    return true;
-                }
-                LookController.faceBlock(bot, stand);
-                if (stand.getY() >= bot.getBlockY()) {
-                    BotActions.jump(bot);
-                }
-                BotActions.applyMovementInput(bot, Vec3d.ofCenter(stand), 0.24D);
-                sleepQuiet(90L);
-            }
-            BotActions.stop(bot);
-            return bot.getBlockPos().equals(stand);
-        } finally {
-            bot.setSneaking(wasSneaking);
-        }
+        return safeCandidates.stream()
+                .min(Comparator.comparingInt(BlockPos::getY)
+                        .thenComparingInt(pos -> Math.abs(anchorY - pos.getY())))
+                .orElse(null);
     }
 
     private boolean isJumpHeadroomClear(ServerWorld world, BlockPos foot) {
@@ -2748,107 +2008,6 @@ public final class WoodcutSkill implements Skill {
         return world.getBlockState(jumpHead).getCollisionShape(world, jumpHead).isEmpty();
     }
 
-    private int carveEntryHeadway(ServerPlayerEntity bot,
-                                  ServerWorld world,
-                                  BlockPos stand,
-                                  BlockPos associatedTargetBase,
-                                  WoodcutReachSession reachSession,
-                                  Map<String, Object> sharedState,
-                                  int budget) {
-        if (bot == null || world == null || stand == null || budget <= 0) {
-            return 0;
-        }
-        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
-        candidates.add(stand);
-        candidates.add(stand.up());
-        candidates.add(stand.up(2));
-        Direction toward = directionToward(bot.getBlockPos(), stand);
-        if (toward != null) {
-            BlockPos entryCell = stand.offset(toward.getOpposite());
-            candidates.add(entryCell);
-            candidates.add(entryCell.up());
-        }
-        int carved = 0;
-        boolean progress;
-        do {
-            progress = false;
-            for (BlockPos candidate : candidates) {
-                if (candidate == null || carved >= budget) {
-                    break;
-                }
-                BlockState state = world.getBlockState(candidate);
-                if (state.isAir()) {
-                    continue;
-                }
-                boolean carveable = state.isIn(BlockTags.LOGS)
-                        || state.isIn(BlockTags.LEAVES)
-                        || state.isOf(Blocks.SNOW)
-                        || state.isReplaceable()
-                        || state.isIn(BlockTags.DIRT)
-                        || state.isOf(Blocks.GRAVEL)
-                        || state.isOf(Blocks.SAND)
-                        || state.isOf(Blocks.RED_SAND)
-                        || state.isIn(BlockTags.PICKAXE_MINEABLE)
-                        || state.isIn(BlockTags.SHOVEL_MINEABLE);
-                if (!carveable) {
-                    continue;
-                }
-                boolean terrainLike = state.isIn(BlockTags.DIRT)
-                        || state.isOf(Blocks.GRASS_BLOCK)
-                        || state.isOf(Blocks.DIRT_PATH)
-                        || state.isOf(Blocks.GRAVEL)
-                        || state.isOf(Blocks.SAND)
-                        || state.isOf(Blocks.RED_SAND);
-                boolean allowSupportCarve = candidate.equals(stand.down())
-                        && canCreateMinorSupportStand(world, stand)
-                        && isPlaceableTarget(world, stand.down());
-                if (WoodcutRecoveryHeuristics.shouldProtectTerrainCarve(
-                        stand.getY(), candidate.getY(), terrainLike, allowSupportCarve)) {
-                    continue;
-                }
-                if (terrainLike && reachSession != null) {
-                    reachSession.recordTemporaryEntryTerrainRepair(candidate, state);
-                }
-                if (mineAdaptiveBlock(bot, candidate, associatedTargetBase, reachSession)) {
-                    carved++;
-                    progress = true;
-                    LOGGER.info("Woodcut trunk entry carve: carved {} at {} state={}",
-                            carved, candidate.toShortString(), state.getBlock().getTranslationKey());
-                }
-            }
-        } while (progress && carved < budget);
-        if (!world.getBlockState(stand.down()).getCollisionShape(world, stand.down()).isEmpty()) {
-            return carved;
-        }
-        if (isPlaceableTarget(world, stand.down()) && tryPlaceScaffold(bot, stand.down(), sharedState, reachSession)) {
-            return carved + 1;
-        }
-        return carved;
-    }
-
-    private int clearEntryShaftCells(ServerPlayerEntity bot,
-                                     ServerWorld world,
-                                     BlockPos stand,
-                                     BlockPos associatedTargetBase,
-                                     WoodcutReachSession reachSession) {
-        if (bot == null || world == null || stand == null) {
-            return 0;
-        }
-        int cleared = 0;
-        for (BlockPos pos : List.of(stand, stand.up(), stand.up(2))) {
-            BlockState state = world.getBlockState(pos);
-            if (state.isAir()) {
-                continue;
-            }
-            if (!isSoftTerrainEntryBlocker(state)) {
-                continue;
-            }
-            if (mineAdaptiveBlock(bot, pos, associatedTargetBase, reachSession)) {
-                cleared++;
-            }
-        }
-        return cleared;
-    }
 
     private BlockPos findEntryStagingStand(ServerWorld world, BlockPos stand, BlockPos botPos) {
         if (world == null || stand == null) {
@@ -3758,136 +2917,6 @@ public final class WoodcutSkill implements Skill {
         candidates.add(candidate.toImmutable());
     }
 
-    private ColumnEntryMoveResult moveToExactStand(ServerCommandSource source,
-                                                   ServerPlayerEntity bot,
-                                                   ServerWorld world,
-                                                   BlockPos stand,
-                                                   BlockPos associatedTargetBase,
-                                                   WoodcutReachSession reachSession) {
-        if (source == null || bot == null || world == null || stand == null) {
-            return new ColumnEntryMoveResult(false, "invalid-args");
-        }
-        boolean wasSneaking = bot.isSneaking();
-        bot.setSneaking(false);
-        try {
-            breakSoftBlock(world, bot, stand);
-            Direction towardStand = directionToward(bot.getBlockPos(), stand);
-            if (towardStand != null) {
-                MovementService.clearLeafObstructionDetailed(bot, towardStand);
-            }
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT,
-                    stand,
-                    stand,
-                    null,
-                    null,
-                    bot.getHorizontalFacing());
-            MovementService.MovementResult result = MovementService.execute(source, bot, plan, false, true, true, false);
-            if (!result.success()) {
-                MovementService.clearRecentWalkAttempt(bot.getUuid());
-            }
-            if (bot.getBlockPos().equals(stand)) {
-                return new ColumnEntryMoveResult(true, "arrived-exact");
-            }
-            String resultDetail = result.detail() == null ? "" : result.detail();
-            boolean falsePositiveExact = result.success()
-                    || resultDetail.toLowerCase(Locale.ROOT).contains("already at destination")
-                    || isNearExactStand(bot.getBlockPos(), stand);
-            if (falsePositiveExact) {
-                boolean recovered = recoverExactStandOccupancy(source, bot, world, stand, associatedTargetBase, reachSession);
-                if (recovered && bot.getBlockPos().equals(stand)) {
-                    return new ColumnEntryMoveResult(true, "recovered-exact");
-                }
-                if (reachSession != null) {
-                    reachSession.recordFailedReroute(associatedTargetBase, stand, "exact-recovery-failed");
-                }
-                return new ColumnEntryMoveResult(false,
-                        "exact-recovery-failed:move-result=" + result.detail()
-                                + " bot=" + bot.getBlockPos().toShortString()
-                                + " target=" + stand.toShortString());
-            }
-            if (reachSession != null) {
-                reachSession.recordFailedReroute(associatedTargetBase, stand, result.detail());
-            }
-            return new ColumnEntryMoveResult(false,
-                    "move-result=" + result.detail() + " bot=" + bot.getBlockPos().toShortString() + " target=" + stand.toShortString());
-        } finally {
-            bot.setSneaking(wasSneaking);
-        }
-    }
-
-    private boolean recoverExactStandOccupancy(ServerCommandSource source,
-                                               ServerPlayerEntity bot,
-                                               ServerWorld world,
-                                               BlockPos stand,
-                                               BlockPos associatedTargetBase,
-                                               WoodcutReachSession reachSession) {
-        if (source == null || bot == null || world == null || stand == null) {
-            return false;
-        }
-        clearExactStandSoftBlockers(bot, world, stand, associatedTargetBase, reachSession);
-        if (bot.getBlockPos().equals(stand)) {
-            return true;
-        }
-        MovementService.clearRecentWalkAttempt(bot.getUuid());
-        boolean nudged = MovementService.nudgeTowardUntilClose(bot, stand, 1.25D, 1_500L, 0.18D, "woodcut-exact-stand");
-        if ((nudged || isNearExactStand(bot.getBlockPos(), stand)) && bot.getBlockPos().equals(stand)) {
-            return true;
-        }
-        return isNearExactStand(bot.getBlockPos(), stand) && forceStepIntoExactStand(bot, stand);
-    }
-
-    private void clearExactStandSoftBlockers(ServerPlayerEntity bot,
-                                             ServerWorld world,
-                                             BlockPos stand,
-                                             BlockPos associatedTargetBase,
-                                             WoodcutReachSession reachSession) {
-        if (bot == null || world == null || stand == null) {
-            return;
-        }
-        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
-        candidates.add(stand);
-        candidates.add(stand.up());
-        candidates.add(stand.up(2));
-        Direction toward = directionToward(bot.getBlockPos(), stand);
-        if (toward != null) {
-            BlockPos lip = stand.offset(toward.getOpposite());
-            candidates.add(lip);
-            candidates.add(lip.up());
-        }
-        for (BlockPos candidate : candidates) {
-            BlockState state = world.getBlockState(candidate);
-            if (state.isAir() || !isSoftTerrainEntryBlocker(state)) {
-                continue;
-            }
-            mineAdaptiveBlock(bot, candidate, associatedTargetBase, reachSession);
-        }
-    }
-
-    private void recoverAfterFailedColumnEntry(ServerCommandSource source,
-                                               ServerPlayerEntity bot,
-                                               ServerWorld world,
-                                               BlockPos desiredStand,
-                                               BlockPos column,
-                                               WoodcutReachSession reachSession,
-                                               Map<String, Object> sharedState) {
-        if (source == null || bot == null || world == null || TaskService.isServerStopping() || isAbortRequested(bot)) {
-            return;
-        }
-        BlockPos focus = desiredStand != null ? desiredStand : column;
-        if (focus == null) {
-            return;
-        }
-        if (reachSession != null && reachSession.hasPlacements()) {
-            cleanupReachSession(source, bot, focus, reachSession, sharedState);
-        }
-        if (tryRecoverWoodcutLocalStance(source, bot, world, focus, focus, reachSession, "entry-failure")) {
-            return;
-        }
-        LOGGER.info("Woodcut entry recovery: rejected generic surface recovery from {} toward {} reason=woodcut-local-recovery-failed",
-                bot.getBlockPos().toShortString(),
-                focus.toShortString());
-    }
 
     private boolean isReadyToMineTarget(ServerPlayerEntity bot, BlockPos target) {
         return bot != null
@@ -4000,45 +3029,6 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
-    private boolean ensureWoodcutOperationalStanceForNextColumn(ServerCommandSource source,
-                                                                ServerPlayerEntity bot,
-                                                                ServerWorld world,
-                                                                BlockPos base,
-                                                                WoodcutReachSession reachSession,
-                                                                Map<String, Object> sharedState) {
-        if (source == null || bot == null || world == null) {
-            return false;
-        }
-        if (reachSession == null
-                || (!reachSession.usedScaffold
-                && !reachSession.cleanupIncomplete
-                && !reachSession.hasPlacements()
-                && !reachSession.hasVerifiedPillarSteps())) {
-            return true;
-        }
-        if (isWoodcutOperationallyGrounded(world, bot, reachSession)) {
-            rememberGroundedWoodcutStandIfSafe(world, bot, reachSession, "next-column-ready");
-            return true;
-        }
-        LOGGER.info("Woodcut column gating: bot={} base={} reason=not-grounded-for-next-column support={} hasPlacements={}",
-                bot.getBlockPos().toShortString(),
-                base == null ? "none" : base.toShortString(),
-                describeSupportBlock(world, bot.getBlockPos()),
-                reachSession != null && reachSession.hasPlacements());
-        if (reachSession != null && reachSession.hasPlacements()) {
-            cleanupReachSession(source, bot, base == null ? bot.getBlockPos() : base, reachSession, sharedState);
-            if (isWoodcutOperationallyGrounded(world, bot, reachSession)) {
-                rememberGroundedWoodcutStandIfSafe(world, bot, reachSession, "next-column-after-cleanup");
-                return true;
-            }
-        }
-        if (tryRecoverWoodcutLocalStance(source, bot, world, base, base, reachSession, "next-column")) {
-            return true;
-        }
-        LOGGER.info("Woodcut column gating: rejected generic surface recovery at {} reason=not-grounded-for-next-column",
-                bot.getBlockPos().toShortString());
-        return false;
-    }
 
     private void logTargetTrace(TreeDetector.TreeTarget target,
                                 WoodcutReachSession reachSession,
@@ -4775,8 +3765,6 @@ public final class WoodcutSkill implements Skill {
         }
         return success;
     }
-
-
 
     private boolean tryPlaceScaffold(ServerPlayerEntity bot,
                                      BlockPos target,
