@@ -60,7 +60,11 @@ public final class LodestoneCompassService {
         BlockPos pos = target.pos();
         WorldChunk chunk = world.getChunkManager().getWorldChunk(
                 pos.getX() >> 4, pos.getZ() >> 4);
-        if (chunk == null) return false;
+        if (chunk == null) {
+            LOGGER.debug("Cannot validate lodestone at {} in {} — chunk not loaded",
+                    pos.toShortString(), dimKey.getValue());
+            return false;
+        }
         return world.getBlockState(pos).isOf(Blocks.LODESTONE);
     }
 

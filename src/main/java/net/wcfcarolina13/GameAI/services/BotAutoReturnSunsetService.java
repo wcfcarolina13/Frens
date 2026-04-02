@@ -826,11 +826,10 @@ public final class BotAutoReturnSunsetService {
         if (server != null) {
             RegistryKey<World> botDim = world.getRegistryKey();
             var lodestoneCompasses = LodestoneCompassService.findLodestoneCompasses(bot);
+            String homeName = LodestoneCompassService.getHomeCompassName(bot);
             for (var lc : lodestoneCompasses) {
                 if (lc.target().dimension().equals(botDim)
                         && LodestoneCompassService.validateLodestone(server, lc.target())) {
-                    // Check designated home first
-                    String homeName = LodestoneCompassService.getHomeCompassName(bot);
                     if (homeName != null && lc.displayName().equalsIgnoreCase(homeName)) {
                         return new SunsetAnchor(lc.target().pos().toImmutable(),
                                 AnchorKind.LODESTONE_COMPASS,
@@ -838,7 +837,7 @@ public final class BotAutoReturnSunsetService {
                     }
                 }
             }
-            // If no home compass matched, use nearest valid same-dimension compass
+            // If no home compass matched, use first valid same-dimension compass
             for (var lc : lodestoneCompasses) {
                 if (lc.target().dimension().equals(botDim)
                         && LodestoneCompassService.validateLodestone(server, lc.target())) {
