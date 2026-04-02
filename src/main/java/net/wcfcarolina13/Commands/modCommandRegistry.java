@@ -56,6 +56,8 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
+import net.wcfcarolina13.GameAI.services.LodestoneCompassService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
@@ -1592,10 +1594,165 @@ public class modCommandRegistry {
                                 )
                             )
                         )
+                        .then(literal("compass")
+                            .then(literal("list")
+                                .then(CommandManager.argument("bot_name", StringArgumentType.string())
+                                    .executes(context -> {
+                                        String botName = StringArgumentType.getString(context, "bot_name");
+                                        MinecraftServer server = context.getSource().getServer();
+                                        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+                                        if (bot == null) {
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "\u00A7cBot '" + botName + "' not found.\u00A7r"), false);
+                                            return 0;
+                                        }
+                                        var compasses = LodestoneCompassService.findLodestoneCompasses(bot);
+                                        if (compasses.isEmpty()) {
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "\u00A77" + botName + " has no lodestone compasses.\u00A7r"), false);
+                                            return 0;
+                                        }
+                                        String homeName = LodestoneCompassService.getHomeCompassName(bot);
+                                        context.getSource().sendFeedback(() -> Text.literal(
+                                                "\u00A7e" + botName + "'s lodestone compasses:\u00A7r"), false);
+                                        for (var c : compasses) {
+                                            String dimName = c.target().dimension().getValue().toString();
+                                            boolean isHome = homeName != null
+                                                    && c.displayName().equalsIgnoreCase(homeName);
+                                            String homeTag = isHome ? " \u00A7a[HOME]\u00A7r" : "";
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "  \u00A7f" + c.displayName() + "\u00A77 \u2192 "
+                                                    + c.target().pos().getX() + ", "
+                                                    + c.target().pos().getY() + ", "
+                                                    + c.target().pos().getZ()
+                                                    + " (" + dimName + ")" + homeTag), false);
+                                        }
+                                        return 1;
+                                    })))
+                            .then(literal("home")
+                                .then(CommandManager.argument("bot_name", StringArgumentType.string())
+                                    .then(CommandManager.argument("name", StringArgumentType.greedyString())
+                                        .executes(context -> {
+                                            String botName = StringArgumentType.getString(context, "bot_name");
+                                            String compassName = StringArgumentType.getString(context, "name");
+                                            MinecraftServer server = context.getSource().getServer();
+                                            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+                                            if (bot == null) {
+                                                context.getSource().sendFeedback(() -> Text.literal(
+                                                        "\u00A7cBot '" + botName + "' not found.\u00A7r"), false);
+                                                return 0;
+                                            }
+                                            var match = LodestoneCompassService.selectCompassByName(bot, compassName);
+                                            if (match.isEmpty()) {
+                                                context.getSource().sendFeedback(() -> Text.literal(
+                                                        "\u00A7c" + botName + " has no compass named '"
+                                                        + compassName + "'.\u00A7r"), false);
+                                                return 0;
+                                            }
+                                            LodestoneCompassService.setHomeCompassName(bot, compassName);
+                                            var target = match.get().target();
+                                            String dimName = target.dimension().getValue().toString();
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "\u00A7a" + botName + "'s home compass set to '"
+                                                    + compassName + "' (pointing to "
+                                                    + target.pos().getX() + ", "
+                                                    + target.pos().getY() + ", "
+                                                    + target.pos().getZ()
+                                                    + ", " + dimName + ").\u00A7r"), false);
+                                            return 1;
+                                        }))))
+                            .then(literal("travel")
+                                .then(CommandManager.argument("bot_name", StringArgumentType.string())
+                                    .executes(context -> {
+                                        String botName = StringArgumentType.getString(context, "bot_name");
+                                        return executeLodestoneTravel(context, botName, null);
+                                    })
+                                    .then(CommandManager.argument("name", StringArgumentType.greedyString())
+                                        .executes(context -> {
+                                            String botName = StringArgumentType.getString(context, "bot_name");
+                                            String compassName = StringArgumentType.getString(context, "name");
+                                            return executeLodestoneTravel(context, botName, compassName);
+                                        })))))
                 );
         });
     }
 
+    private static int executeLodestoneTravel(
+            CommandContext<ServerCommandSource> context,
+            String botName, String compassName) {
+        MinecraftServer server = context.getSource().getServer();
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+        if (bot == null) {
+            context.getSource().sendFeedback(() -> Text.literal(
+                    "\u00A7cBot '" + botName + "' not found.\u00A7r"), false);
+            return 0;
+        }
+
+        Optional<LodestoneCompassService.LodestoneCompassEntry> selected;
+        if (compassName != null) {
+            selected = LodestoneCompassService.selectCompassByName(bot, compassName);
+            if (selected.isEmpty()) {
+                context.getSource().sendFeedback(() -> Text.literal(
+                        "\u00A7c" + botName + " has no compass named '"
+                        + compassName + "'.\u00A7r"), false);
+                return 0;
+            }
+        } else {
+            selected = LodestoneCompassService.selectAutonomousCompass(bot, server);
+            if (selected.isEmpty()) {
+                var all = LodestoneCompassService.findLodestoneCompasses(bot);
+                if (all.isEmpty()) {
+                    context.getSource().sendFeedback(() -> Text.literal(
+                            "\u00A7c" + botName + " has no lodestone compass.\u00A7r"), false);
+                } else {
+                    context.getSource().sendFeedback(() -> Text.literal(
+                            "\u00A7c" + botName + "'s compass no longer points to a valid lodestone.\u00A7r"), false);
+                }
+                return 0;
+            }
+        }
+
+        var compass = selected.get();
+
+        if (!LodestoneCompassService.validateLodestone(server, compass.target())) {
+            context.getSource().sendFeedback(() -> Text.literal(
+                    "\u00A7c" + botName + "'s compass '" + compass.displayName()
+                    + "' no longer points to a valid lodestone.\u00A7r"), false);
+            return 0;
+        }
+
+        BlockPos dest = compass.target().pos();
+        RegistryKey<World> dim = compass.target().dimension();
+        boolean crossDim = !bot.getEntityWorld().getRegistryKey().equals(dim);
+        double distance = bot.getBlockPos().getManhattanDistance(dest);
+        int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim, 1.0);
+
+        UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (ownerUuid == null) {
+            try {
+                ServerPlayerEntity player = context.getSource().getPlayer();
+                if (player != null) ownerUuid = player.getUuid();
+            } catch (Exception ignored) {}
+        }
+
+        boolean started = NavigationArtifactService.beginDelayedTravel(
+                server, bot, botName, dest, dim, delayTicks, ownerUuid);
+
+        if (started) {
+            String dimName = dim.getValue().toString();
+            int etaSec = Math.max(1, delayTicks / 20);
+            context.getSource().sendFeedback(() -> Text.literal(
+                    "\u00A7d" + botName + " is traveling to "
+                    + dest.getX() + ", " + dest.getY() + ", " + dest.getZ()
+                    + " (" + dimName + ") via lodestone compass '"
+                    + compass.displayName() + "' (ETA ~" + etaSec + "s).\u00A7r"), false);
+            return 1;
+        } else {
+            context.getSource().sendFeedback(() -> Text.literal(
+                    "\u00A7c" + botName + " cannot travel right now (cooldown, combat, or insufficient food).\u00A7r"), false);
+            return 0;
+        }
+    }
 
     private static GameMode parseGameModeOrNull(String value) {
         if (value == null) {
