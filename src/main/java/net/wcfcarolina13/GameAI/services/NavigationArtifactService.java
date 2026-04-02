@@ -97,6 +97,11 @@ public final class NavigationArtifactService {
         if (hasItemInInventory(bot, Items.ENDER_EYE) || hasItemInInventory(player, Items.ENDER_EYE)) {
             return NavTier.ENHANCED;
         }
+        // Lodestone compass with binding → ENHANCED tier (component check only, no chunk validation —
+        // the travel-commit path validates the block separately; tier classification should be cheap)
+        if (LodestoneCompassService.hasLodestoneCompass(bot)) {
+            return NavTier.ENHANCED;
+        }
         if (hasItemInInventory(bot, Items.COMPASS)
                 || hasItemInInventory(bot, Items.RECOVERY_COMPASS)
                 || hasItemInInventory(bot, Items.FILLED_MAP)
@@ -168,6 +173,10 @@ public final class NavigationArtifactService {
 
     /** Determine delay multiplier based on bot/player artifact tier. 2x for Tier 1, 1x for Tier 2+. */
     public static double artifactDelayMultiplier(ServerPlayerEntity bot, ServerPlayerEntity owner) {
+        // Lodestone compass (component check only — full block validation happens at travel-commit)
+        if (LodestoneCompassService.hasLodestoneCompass(bot)) {
+            return 1.0;
+        }
         // Tier 2+: Eye of Ender, Wizard's Tome, Enchanting Table, or both hold Ender Pearls.
         if (hasArtifact(bot, net.minecraft.item.Items.ENDER_EYE)
                 || hasArtifact(owner, net.minecraft.item.Items.ENDER_EYE)
