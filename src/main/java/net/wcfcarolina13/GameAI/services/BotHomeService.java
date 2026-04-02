@@ -791,6 +791,39 @@ public final class BotHomeService {
         }
     }
 
+    /** Get the designated home compass name for a bot, or null if not set. */
+    public static String getHomeCompassName(ServerPlayerEntity bot) {
+        if (bot == null) return null;
+        ensureLoaded();
+        String botId = botKey(bot);
+        if (botId.isBlank()) return null;
+        synchronized (LOCK) {
+            if (DATA.homeCompassNameByBot == null) {
+                DATA.homeCompassNameByBot = new HashMap<>();
+            }
+            return DATA.homeCompassNameByBot.get(botId);
+        }
+    }
+
+    /** Set the designated home compass name for a bot. Pass null to clear. */
+    public static void setHomeCompassName(ServerPlayerEntity bot, String name) {
+        if (bot == null) return;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return;
+        ensureLoaded();
+        synchronized (LOCK) {
+            if (DATA.homeCompassNameByBot == null) {
+                DATA.homeCompassNameByBot = new HashMap<>();
+            }
+            if (name == null || name.isBlank()) {
+                DATA.homeCompassNameByBot.remove(botId);
+            } else {
+                DATA.homeCompassNameByBot.put(botId, name);
+            }
+        }
+        flush();
+    }
+
     public static boolean removeBase(MinecraftServer server, ServerWorld world, String label) {
         if (server == null || world == null || label == null || label.isBlank()) {
             return false;
@@ -988,6 +1021,7 @@ public final class BotHomeService {
 
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
+        Map<String, String> homeCompassNameByBot = new HashMap<>();
     }
 
     private static final class WorldData {
