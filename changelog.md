@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
+- **Feat: Lodestone compass fast-travel.** Bots can fast-travel to lodestone compass destinations, including cross-dimension. `/bot compass list <bot>` lists all lodestone compasses a bot holds. `/bot compass home <bot> <name>` designates a named compass as the bot's home compass. `/bot compass travel <bot> [name]` fast-travels to a lodestone compass destination. Lodestone compass promotes to ENHANCED nav tier (1x delay multiplier, same as Eye of Ender). Autonomous sunset return uses the designated home compass as a fallback anchor (after HOME/BASE/BED, same-dimension only). Lodestone block is validated before travel; broken lodestones notify the owner.
+
 - **Fix: Co-sleep skips bot silently when commander enters bed.** When the commander enters a bed, `triggerCoSleep` checks each bot for eligibility (idle, nearby, nighttime, etc.). All skip reasons logged at DEBUG level, making failures invisible. Upgraded all skip logs to INFO for diagnostics. Added 3-second delayed retry for bots skipped due to active tasks — handles the common case where a follow/come transition is still completing when the commander gets into bed. The retry re-checks all conditions independently.
 
 ## 2026-04-01
