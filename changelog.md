@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-02
+
+- **Fix: Co-sleep skips bot silently when commander enters bed.** When the commander enters a bed, `triggerCoSleep` checks each bot for eligibility (idle, nearby, nighttime, etc.). All skip reasons logged at DEBUG level, making failures invisible. Upgraded all skip logs to INFO for diagnostics. Added 3-second delayed retry for bots skipped due to active tasks — handles the common case where a follow/come transition is still completing when the commander gets into bed. The retry re-checks all conditions independently.
+
 ## 2026-04-01
 
 - **Fix: Cherry/hillside trees rejected by soil validation.** `resolveStandingTreeBasic` checked only `base.down()` for valid soil — cherry trees on hillsides have trunks starting above ground (e.g., base Y=106, dirt at Y=101), so the block at Y=105 is air and fails the check. Now scans downward up to 5 blocks through air/replaceable blocks looking for soil, stopping at the first solid non-soil block (stone, etc.). Unblocks cherry blossom, acacia on cliffs, and any tree with an air gap below its trunk.

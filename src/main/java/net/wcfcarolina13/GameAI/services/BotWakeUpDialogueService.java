@@ -7,6 +7,8 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -185,23 +187,32 @@ public final class BotWakeUpDialogueService {
      * When a real player goes to sleep, queue sleep for any nearby idle bots
      * that this player commands.
      */
+    /** Delay (ticks) before retrying co-sleep for bots skipped due to transient conditions. */
+    private static final int CO_SLEEP_RETRY_DELAY_TICKS = 60; // 3 seconds
+
     private static void triggerCoSleep(MinecraftServer server, ServerPlayerEntity player, long nowTick) {
-        LOGGER.info("Co-sleep: commander {} went to sleep, checking bots...", player.getName().getString());
-        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+        List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(server);
+        LOGGER.info("Co-sleep: commander {} went to sleep, checking {} bot(s)...",
+                player.getName().getString(), bots.size());
+        List<UUID> retryBots = new ArrayList<>();
+        for (ServerPlayerEntity bot : bots) {
             if (bot == null || bot.isRemoved()) continue;
             String botName = bot.getName().getString();
             if (bot.isSleeping()) {
-                LOGGER.debug("Co-sleep: {} skipped — already sleeping", botName);
+                LOGGER.info("Co-sleep: {} skipped — already sleeping", botName);
                 continue;
             }
-            if (bot.getEntityWorld() != player.getEntityWorld()) continue;
+            if (bot.getEntityWorld() != player.getEntityWorld()) {
+                LOGGER.info("Co-sleep: {} skipped — different world", botName);
+                continue;
+            }
 
             UUID botId = bot.getUuid();
 
             // Cooldown: don't re-queue co-sleep within 5 minutes.
             long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
             if (nowTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) {
-                LOGGER.debug("Co-sleep: {} skipped — cooldown ({} ticks remaining)",
+                LOGGER.info("Co-sleep: {} skipped — cooldown ({} ticks remaining)",
                         botName, CO_SLEEP_COOLDOWN_TICKS - (nowTick - lastQueued));
                 continue;
             }
@@ -209,7 +220,7 @@ public final class BotWakeUpDialogueService {
             // Bot must be within 16 blocks of the player.
             double distSq = bot.squaredDistanceTo(player);
             if (distSq > CO_SLEEP_RADIUS_SQ) {
-                LOGGER.debug("Co-sleep: {} skipped — too far ({} blocks)",
+                LOGGER.info("Co-sleep: {} skipped — too far ({} blocks)",
                         botName, String.format("%.1f", Math.sqrt(distSq)));
                 continue;
             }
@@ -217,7 +228,7 @@ public final class BotWakeUpDialogueService {
             // Player must be the bot's commander/owner.
             ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
             if (commander == null || !commander.getUuid().equals(player.getUuid())) {
-                LOGGER.debug("Co-sleep: {} skipped — {} is not commander (resolved={})",
+                LOGGER.info("Co-sleep: {} skipped — {} is not commander (resolved={})",
                         botName, player.getName().getString(),
                         commander != null ? commander.getName().getString() : "null");
                 continue;
@@ -225,14 +236,16 @@ public final class BotWakeUpDialogueService {
 
             // Bot must be idle (no active task).
             if (TaskService.hasActiveTask(botId)) {
-                LOGGER.debug("Co-sleep: {} skipped — has active task", botName);
+                LOGGER.info("Co-sleep: {} skipped — has active task ({}), will retry in {}t",
+                        botName, TaskService.getActiveTaskName(botId).orElse("?"), CO_SLEEP_RETRY_DELAY_TICKS);
+                retryBots.add(botId);
                 continue;
             }
 
             // Must be valid sleep time.
             if (bot.getEntityWorld() instanceof ServerWorld sw) {
                 if (sw.isDay() && !sw.isThundering()) {
-                    LOGGER.debug("Co-sleep: {} skipped — daytime", botName);
+                    LOGGER.info("Co-sleep: {} skipped — daytime", botName);
                     continue;
                 }
             }
@@ -241,6 +254,36 @@ public final class BotWakeUpDialogueService {
             LOGGER.info("Co-sleep: {} going to sleep because commander {} slept nearby",
                     botName, player.getName().getString());
             scheduleCoSleep(server, bot);
+        }
+
+        // Schedule a delayed retry for bots skipped due to transient conditions (active task).
+        if (!retryBots.isEmpty()) {
+            UUID playerUuid = player.getUuid();
+            server.send(new net.minecraft.server.ServerTask((int) (nowTick + CO_SLEEP_RETRY_DELAY_TICKS), () -> {
+                ServerPlayerEntity retryPlayer = server.getPlayerManager().getPlayer(playerUuid);
+                if (retryPlayer == null || retryPlayer.isRemoved() || !retryPlayer.isSleeping()) return;
+                long retryTick = server.getTicks();
+                LOGGER.info("Co-sleep retry: checking {} bot(s) that were busy earlier", retryBots.size());
+                for (UUID botId : retryBots) {
+                    ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
+                    if (bot == null || bot.isRemoved() || bot.isSleeping()) continue;
+                    if (bot.getEntityWorld() != retryPlayer.getEntityWorld()) continue;
+                    if (TaskService.hasActiveTask(botId)) {
+                        LOGGER.info("Co-sleep retry: {} still has active task, giving up", bot.getName().getString());
+                        continue;
+                    }
+                    long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
+                    if (retryTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) continue;
+                    double distSq = bot.squaredDistanceTo(retryPlayer);
+                    if (distSq > CO_SLEEP_RADIUS_SQ) continue;
+                    if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                        if (sw.isDay() && !sw.isThundering()) continue;
+                    }
+                    CO_SLEEP_QUEUED_TICK.put(botId, retryTick);
+                    LOGGER.info("Co-sleep retry: {} going to sleep (task cleared)", bot.getName().getString());
+                    scheduleCoSleep(server, bot);
+                }
+            }));
         }
     }
 
