@@ -7,6 +7,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.world.World;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -71,6 +72,7 @@ public final class BotAutoReturnSunsetService {
         SPAWN,
         BASE,
         BED,
+        LODESTONE_COMPASS,
         COMMANDER,
         ALLY_BOT,
         VILLAGE_HOUSE,
@@ -817,6 +819,36 @@ public final class BotAutoReturnSunsetService {
         }
 
         MinecraftServer server = world.getServer();
+
+        // Lodestone compass: same-dimension only (SunsetAnchor has no dimension field,
+        // and the sunset session walks to the anchor — cross-dimension would navigate
+        // to wrong coordinates). Ranks above social fallbacks.
+        if (server != null) {
+            RegistryKey<World> botDim = world.getRegistryKey();
+            var lodestoneCompasses = LodestoneCompassService.findLodestoneCompasses(bot);
+            for (var lc : lodestoneCompasses) {
+                if (lc.target().dimension().equals(botDim)
+                        && LodestoneCompassService.validateLodestone(server, lc.target())) {
+                    // Check designated home first
+                    String homeName = LodestoneCompassService.getHomeCompassName(bot);
+                    if (homeName != null && lc.displayName().equalsIgnoreCase(homeName)) {
+                        return new SunsetAnchor(lc.target().pos().toImmutable(),
+                                AnchorKind.LODESTONE_COMPASS,
+                                "lodestone compass: " + lc.displayName());
+                    }
+                }
+            }
+            // If no home compass matched, use nearest valid same-dimension compass
+            for (var lc : lodestoneCompasses) {
+                if (lc.target().dimension().equals(botDim)
+                        && LodestoneCompassService.validateLodestone(server, lc.target())) {
+                    return new SunsetAnchor(lc.target().pos().toImmutable(),
+                            AnchorKind.LODESTONE_COMPASS,
+                            "lodestone compass: " + lc.displayName());
+                }
+            }
+        }
+
         if (server != null) {
             ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
             if (commander != null
