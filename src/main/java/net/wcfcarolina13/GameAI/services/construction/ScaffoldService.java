@@ -38,7 +38,10 @@ public final class ScaffoldService {
 
     // Blocks suitable for scaffolding (cheap, easily broken)
     public static final List<Item> SCAFFOLD_BLOCKS = List.of(
-            Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK
+            Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK,
+            Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS, Items.JUNGLE_PLANKS,
+            Items.ACACIA_PLANKS, Items.DARK_OAK_PLANKS, Items.CHERRY_PLANKS, Items.MANGROVE_PLANKS,
+            Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
 
     private static final int MAX_SCAFFOLD_HEIGHT = ConstructionPlacementRules.DEFAULT_MAX_SCAFFOLD_HEIGHT;

@@ -135,7 +135,17 @@ public final class WoodcutSkill implements Skill {
             Items.RED_SAND,
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
-            Items.NETHERRACK
+            Items.NETHERRACK,
+            Items.OAK_PLANKS,
+            Items.SPRUCE_PLANKS,
+            Items.BIRCH_PLANKS,
+            Items.JUNGLE_PLANKS,
+            Items.ACACIA_PLANKS,
+            Items.DARK_OAK_PLANKS,
+            Items.CHERRY_PLANKS,
+            Items.MANGROVE_PLANKS,
+            Items.CRIMSON_PLANKS,
+            Items.WARPED_PLANKS
     );
 
     // Ephemeral memory (persists across woodcut/woodcut_cleanup until another skill starts).
@@ -1296,9 +1306,10 @@ public final class WoodcutSkill implements Skill {
 
                     // Phase 3: Ascent loop (pillar up + mine branches + bridge sweep)
                     if (positioned || isBotInColumn(bot, column)) {
+                        int maxSteps = Math.min(target.height() + 4, MAX_COLUMN_PILLAR_STEPS);
+                        ensurePillarStock(bot, Math.min(maxSteps, 6), source, target.top().getY(), reachSession, sharedState);
                         bot.setSneaking(true);
                         int maxScanY = target.top().getY() + 2;
-                        int maxSteps = Math.min(target.height() + 4, MAX_COLUMN_PILLAR_STEPS);
                         int pillarSteps = 0;
                         for (int step = 0; step <= maxSteps; step++) {
                             if (TaskService.isServerStopping() || isAbortRequested(bot)) {
@@ -4272,6 +4283,18 @@ public final class WoodcutSkill implements Skill {
         if (current >= needed) {
             return true;
         }
+        // Craft planks from logs if no scaffold blocks available
+        int shortfall = needed - current;
+        int planksNeeded = shortfall;
+        int logsToConvert = (int) Math.ceil(planksNeeded / 4.0);
+        int craftedPlanks = craftPlanksForScaffold(bot, world, logsToConvert);
+        if (craftedPlanks > 0) {
+            LOGGER.info("Pillar stock: crafted {} planks from logs for scaffold", craftedPlanks);
+            current = countPillarBlocks(bot);
+            if (current >= needed) {
+                return true;
+            }
+        }
         int surfaceY = findSurfaceY(world, bot.getBlockPos());
         boolean skyVisible = world.isSkyVisible(bot.getBlockPos().up());
         if (WoodcutScaffoldRecoveryHeuristics.shouldRecoverSurface(bot.getBlockY(), workingY, surfaceY, skyVisible)) {
@@ -4292,6 +4315,48 @@ public final class WoodcutSkill implements Skill {
         int finalCount = countPillarBlocks(bot);
         LOGGER.info("Pillar stock after bounded recovery: {} (needed {})", finalCount, needed);
         return finalCount >= needed;
+    }
+
+    private int craftPlanksForScaffold(ServerPlayerEntity bot, ServerWorld world, int logsToConvert) {
+        if (bot == null || logsToConvert <= 0) {
+            return 0;
+        }
+        int crafted = 0;
+        for (int i = 0; i < bot.getInventory().size() && logsToConvert > 0; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty() || !stack.isIn(ItemTags.LOGS)) {
+                continue;
+            }
+            int use = Math.min(stack.getCount(), logsToConvert);
+            Item plankItem = mapLogToPlank(stack.getItem());
+            if (plankItem == null || plankItem == Items.AIR) {
+                continue;
+            }
+            int produce = use * 4;
+            stack.decrement(use);
+            if (stack.isEmpty()) {
+                bot.getInventory().setStack(i, ItemStack.EMPTY);
+            }
+            bot.getInventory().insertStack(new ItemStack(plankItem, produce));
+            crafted += produce;
+            logsToConvert -= use;
+        }
+        return crafted;
+    }
+
+    private static Item mapLogToPlank(Item logItem) {
+        net.minecraft.util.Identifier id = net.minecraft.registry.Registries.ITEM.getId(logItem);
+        String path = id.getPath();
+        String base = path;
+        for (String suffix : new String[]{"_log", "_wood", "_stem", "_hyphae"}) {
+            if (path.endsWith(suffix)) {
+                base = path.substring(0, path.length() - suffix.length());
+                break;
+            }
+        }
+        net.minecraft.util.Identifier plankId = net.minecraft.util.Identifier.of(id.getNamespace(), base + "_planks");
+        Item mapped = net.minecraft.registry.Registries.ITEM.get(plankId);
+        return (mapped == null || mapped == Items.AIR) ? Items.OAK_PLANKS : mapped;
     }
 
     private int gatherNearbyPillarBlocks(ServerPlayerEntity bot, ServerWorld world, int toGather) {
