@@ -20,12 +20,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Persistent registry of bot-placed chests per bot per world.
@@ -63,6 +65,10 @@ public final class BotChestRegistryService {
         public long placedAtMs;
         public boolean destroyed;
         public List<ItemSnapshot> contentsSnapshot; // null if never captured
+        public int occupiedSlots = -1;
+        public int totalSlots = -1;
+        public int emptySlots = -1;
+        public long lastVerifiedAtMs;
 
         public ChestRecord() {}
 
@@ -86,6 +92,23 @@ public final class BotChestRegistryService {
 
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
+    }
+
+    public record DepositCandidate(BlockPos pos,
+                                   String context,
+                                   boolean knownCapacity,
+                                   int emptySlots,
+                                   int totalSlots,
+                                   boolean containsPreferredItems,
+                                   long lastVerifiedAtMs,
+                                   double distSq) {
+    }
+
+    private record SnapshotData(List<ItemSnapshot> contents,
+                                int occupiedSlots,
+                                int totalSlots,
+                                int emptySlots,
+                                long verifiedAtMs) {
     }
 
     // ── Persistence ─────────────────────────────────────────────────────
@@ -253,6 +276,68 @@ public final class BotChestRegistryService {
         }
     }
 
+    public static List<DepositCandidate> listDepositCandidatesForOwner(ServerPlayerEntity bot,
+                                                                       ServerWorld world,
+                                                                       BlockPos origin,
+                                                                       Predicate<ItemSnapshot> preferredMatcher,
+                                                                       double maxDistSq) {
+        if (bot == null || world == null || origin == null) {
+            return List.of();
+        }
+        List<ChestRecord> records = listChestsForOwner(bot, world);
+        if (records.isEmpty()) {
+            return List.of();
+        }
+        List<DepositCandidate> candidates = new ArrayList<>();
+        for (ChestRecord record : records) {
+            if (record == null || record.destroyed) {
+                continue;
+            }
+            BlockPos pos = record.toBlockPos();
+            if (pos == null) {
+                continue;
+            }
+            double distSq = origin.getSquaredDistance(pos);
+            if (distSq > maxDistSq) {
+                continue;
+            }
+            if (world.isChunkLoaded(pos)) {
+                boolean isChest = world.getBlockState(pos).isOf(Blocks.CHEST)
+                        || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST)
+                        || world.getBlockState(pos).isOf(Blocks.BARREL);
+                if (!isChest) {
+                    continue;
+                }
+            }
+            boolean containsPreferred = false;
+            if (preferredMatcher != null && record.contentsSnapshot != null) {
+                for (ItemSnapshot snapshot : record.contentsSnapshot) {
+                    if (snapshot != null && preferredMatcher.test(snapshot)) {
+                        containsPreferred = true;
+                        break;
+                    }
+                }
+            }
+            boolean knownCapacity = record.totalSlots > 0 && record.emptySlots >= 0;
+            candidates.add(new DepositCandidate(
+                    pos.toImmutable(),
+                    record.context == null ? "unknown" : record.context,
+                    knownCapacity,
+                    record.emptySlots,
+                    record.totalSlots,
+                    containsPreferred,
+                    record.lastVerifiedAtMs,
+                    distSq));
+        }
+        candidates.sort(Comparator
+                .comparing((DepositCandidate candidate) -> !candidate.containsPreferredItems())
+                .thenComparing(candidate -> !candidate.knownCapacity())
+                .thenComparing(candidate -> candidate.knownCapacity() && candidate.emptySlots() <= 0)
+                .thenComparing(Comparator.comparingInt(DepositCandidate::emptySlots).reversed())
+                .thenComparingDouble(DepositCandidate::distSq));
+        return List.copyOf(candidates);
+    }
+
     private static String shareKeyForAlias(String alias) {
         if (alias == null || alias.isBlank()) {
             return "";
@@ -318,7 +403,12 @@ public final class BotChestRegistryService {
                 if (!world.isChunkLoaded(pos)) continue;
                 var be = world.getBlockEntity(pos);
                 if (be instanceof net.minecraft.inventory.Inventory inv) {
-                    r.contentsSnapshot = captureContents(inv);
+                    SnapshotData snapshot = captureSnapshotData(inv);
+                    r.contentsSnapshot = snapshot.contents();
+                    r.occupiedSlots = snapshot.occupiedSlots();
+                    r.totalSlots = snapshot.totalSlots();
+                    r.emptySlots = snapshot.emptySlots();
+                    r.lastVerifiedAtMs = snapshot.verifiedAtMs();
                     changed = true;
                 }
             }
@@ -328,11 +418,20 @@ public final class BotChestRegistryService {
 
     /** Capture a snapshot of a chest's contents (merges duplicate items across slots). */
     public static List<ItemSnapshot> captureContents(net.minecraft.inventory.Inventory inv) {
-        if (inv == null) return List.of();
+        return captureSnapshotData(inv).contents();
+    }
+
+    private static SnapshotData captureSnapshotData(net.minecraft.inventory.Inventory inv) {
+        if (inv == null) {
+            return new SnapshotData(List.of(), 0, 0, 0, System.currentTimeMillis());
+        }
         List<ItemSnapshot> items = new ArrayList<>();
+        int occupiedSlots = 0;
+        int totalSlots = inv.size();
         for (int i = 0; i < inv.size(); i++) {
             net.minecraft.item.ItemStack stack = inv.getStack(i);
             if (stack == null || stack.isEmpty()) continue;
+            occupiedSlots++;
             String id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString();
             boolean merged = false;
             for (ItemSnapshot existing : items) {
@@ -344,7 +443,7 @@ public final class BotChestRegistryService {
             }
             if (!merged) items.add(new ItemSnapshot(id, stack.getCount()));
         }
-        return items;
+        return new SnapshotData(items, occupiedSlots, totalSlots, Math.max(0, totalSlots - occupiedSlots), System.currentTimeMillis());
     }
 
     /** Update the contents snapshot for a chest at the given position. */
@@ -354,17 +453,27 @@ public final class BotChestRegistryService {
         MinecraftServer server = world.getServer();
         if (server == null) return;
 
-        List<ItemSnapshot> snapshot = captureContents(inv);
+        SnapshotData snapshot = captureSnapshotData(inv);
         WorldData wd = worldData(server, world);
-        String key = botKey(bot);
+        String targetShareKey = shareKey(bot);
         synchronized (LOCK) {
             if (wd.chestsByBot == null) return;
-            List<ChestRecord> records = wd.chestsByBot.get(key);
-            if (records == null) return;
-            for (ChestRecord r : records) {
-                if (r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
-                    r.contentsSnapshot = snapshot;
-                    break;
+            for (Map.Entry<String, List<ChestRecord>> entry : wd.chestsByBot.entrySet()) {
+                if (!Objects.equals(targetShareKey, shareKeyForAlias(entry.getKey()))) {
+                    continue;
+                }
+                List<ChestRecord> records = entry.getValue();
+                if (records == null) {
+                    continue;
+                }
+                for (ChestRecord r : records) {
+                    if (r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
+                        r.contentsSnapshot = snapshot.contents();
+                        r.occupiedSlots = snapshot.occupiedSlots();
+                        r.totalSlots = snapshot.totalSlots();
+                        r.emptySlots = snapshot.emptySlots();
+                        r.lastVerifiedAtMs = snapshot.verifiedAtMs();
+                    }
                 }
             }
         }

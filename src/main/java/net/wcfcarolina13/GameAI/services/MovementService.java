@@ -30,6 +30,9 @@ import net.wcfcarolina13.PathFinding.Segment;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
+import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.minecraft.item.ItemStack;
 import net.minecraft.state.property.Properties;
 import org.slf4j.Logger;
@@ -37,7 +40,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -109,6 +114,9 @@ public final class MovementService {
     private static final Map<UUID, Integer> LEAF_BYPASS_FAILURE_STREAK = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> LEAF_LAST_BYPASS_ORIGIN = new ConcurrentHashMap<>();
     private static final int LEAF_BYPASS_FORCE_MINE_THRESHOLD = 3;
+    private static final Map<UUID, LocalEscapeDirective> LOCAL_ESCAPE_DIRECTIVES = new ConcurrentHashMap<>();
+    private static final Map<UUID, LocalEscapeCommitment> LOCAL_ESCAPE_COMMITMENTS = new ConcurrentHashMap<>();
+    private static final long LOCAL_ESCAPE_COMMITMENT_MS = 2200L;
 
     private MovementService() {
     }
@@ -270,7 +278,42 @@ public final class MovementService {
                                  String detail) {
     }
 
+    private record LocalEscapeDirective(BlockPos target, long expiresAtMs, String reason) {}
+
+    private record LocalEscapeCommitment(BlockPos routeTarget,
+                                         BlockPos destinationHint,
+                                         boolean precision,
+                                         long expiresAtMs,
+                                         String reason) {}
+
+    private record LocalEscapeCandidate(BlockPos target,
+                                        double score,
+                                        boolean stepUp,
+                                        boolean leavesTrap,
+                                        boolean overrideTarget,
+                                        String reason,
+                                        List<BlockPos> route) {}
+
+    private record LocalEscapeMove(BlockPos target, boolean stepUp) {}
+
+    private record LocalEscapeSearchState(BlockPos pos, List<BlockPos> route) {}
+
     public record DoorSubgoalPlan(BlockPos doorBase, BlockPos approachPos, BlockPos stepThroughPos, double improveSq) {}
+
+    public static void setLocalEscapeDirective(ServerPlayerEntity bot, BlockPos target, long ttlMs, String reason) {
+        if (bot == null || target == null) {
+            return;
+        }
+        long expiresAtMs = System.currentTimeMillis() + Math.max(500L, ttlMs);
+        LOCAL_ESCAPE_DIRECTIVES.put(bot.getUuid(), new LocalEscapeDirective(target.toImmutable(), expiresAtMs, reason));
+    }
+
+    public static void clearLocalEscapeDirective(UUID botId) {
+        if (botId != null) {
+            LOCAL_ESCAPE_DIRECTIVES.remove(botId);
+            LOCAL_ESCAPE_COMMITMENTS.remove(botId);
+        }
+    }
 
     /**
      * Finds a nearby openable (door/gate) that would bring the bot closer to the goal if it steps through it.
@@ -723,7 +766,7 @@ public final class MovementService {
             return new MovementResult(true, mode, destination, label + ": already at destination");
         }
         if (!allowTeleport) {
-            LOGGER.info("Movement choosing walk only: {} -> {}", player.getName().getString(), destination);
+            LOGGER.info("Movement choosing path walk: {} -> {}", player.getName().getString(), destination);
             WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (!walkResult.success() && allowPursuit) {
                 long pursuitBudget = fastReplan ? 1200L : TimeUnit.SECONDS.toMillis(3);
@@ -833,6 +876,13 @@ public final class MovementService {
         if (throttled != null) {
             return throttled;
         }
+        if (tryImmediateLocalEscape(player, destination, label + "-prewalk")) {
+            currentPos = player.getBlockPos();
+            if (currentPos.getSquaredDistance(destination) <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                return recordAttempt(player.getUuid(), destination,
+                        new WalkResult(true, currentPos, label + ": escaped locally"));
+            }
+        }
 
         // For very short moves, avoid pathfinding entirely (it can be expensive and noisy).
         if (currentPos != null) {
@@ -857,8 +907,20 @@ public final class MovementService {
                         new WalkResult(false, player.getBlockPos(), label + ": aborted"));
             }
             List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+            if (preclearPlannedStepUps(player, rawPath, "walkTo-preclear")) {
+                rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+            }
             List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
-            Queue<Segment> segments = PathFinder.convertPathToSegments(simplified, shouldSprintForDestination(player, destination));
+            boolean useRawSegments = shouldUseRawPathSegmentsForLocalEscape(rawPath, player.getBlockPos(), destination);
+            if (player.getBlockPos().getSquaredDistance(destination) <= 256.0D) {
+                LOGGER.info("walkTo lead-in [{}]: strategy={} rawFirst={}",
+                        label,
+                        useRawSegments ? "raw" : "simplified",
+                        describeLeadingPathNodes(rawPath, 5));
+            }
+            Queue<Segment> segments = useRawSegments
+                    ? convertRawPathToSegments(rawPath, world, shouldSprintForDestination(player, destination))
+                    : PathFinder.convertPathToSegments(simplified, shouldSprintForDestination(player, destination));
             LOGGER.debug("walkTo path (attempt={}): raw={} simplified={} segments={} firstSegment={}",
                     attempt + 1,
                     rawPath.size(),
@@ -866,6 +928,9 @@ public final class MovementService {
                     segments.size(),
                     segments.peek());
             if (segments.isEmpty()) {
+                if (tryImmediateLocalEscape(player, destination, label + "-nop-path")) {
+                    continue;
+                }
                 boolean straightWalk = walkDirect(player, destination, fastReplan ? 1400L : 3500L);
                 if (straightWalk) {
                     return recordAttempt(player.getUuid(), destination,
@@ -877,6 +942,18 @@ public final class MovementService {
 
             boolean allOk = true;
             for (Segment segment : segments) {
+                if (tryImmediateLocalEscape(player, segment.end(), label + "-segment-pre")) {
+                    lastReached = player.getBlockPos();
+                    if (lastReached.getSquaredDistance(segment.end()) <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                        continue;
+                    }
+                    if (!replanned) {
+                        replanned = true;
+                        LOGGER.info("walkTo local-escape adopted [{}]: replanning from {}", label, lastReached.toShortString());
+                        allOk = false;
+                        break;
+                    }
+                }
                 SegmentResult seg = walkSegment(player, segment, deadline, allowSnap);
                 if (!seg.success()) {
                     lastReached = player.getBlockPos();
@@ -903,6 +980,753 @@ public final class MovementService {
         }
         return recordAttempt(player.getUuid(), destination,
                 new WalkResult(false, player.getBlockPos(), label + ": walk blocked after replans"));
+    }
+
+    static boolean shouldUseRawPathSegmentsForLocalEscape(List<PathFinder.PathNode> rawPath, BlockPos start, BlockPos destination) {
+        if (rawPath == null || rawPath.size() < 2 || start == null || destination == null) {
+            return false;
+        }
+        if (start.getSquaredDistance(destination) > 256.0D) {
+            return false;
+        }
+        int inspect = Math.min(rawPath.size() - 1, 4);
+        for (int i = 1; i <= inspect; i++) {
+            BlockPos prev = rawPath.get(i - 1).getPos();
+            BlockPos cur = rawPath.get(i).getPos();
+            boolean diagonal = cur.getX() != prev.getX() && cur.getZ() != prev.getZ();
+            boolean vertical = cur.getY() != prev.getY();
+            if (diagonal || vertical) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Queue<Segment> convertRawPathToSegments(List<PathFinder.PathNode> rawPath,
+                                                           ServerWorld world,
+                                                           boolean sprint) {
+        ArrayDeque<Segment> segments = new ArrayDeque<>();
+        if (rawPath == null || rawPath.size() < 2) {
+            return segments;
+        }
+        for (int i = 1; i < rawPath.size(); i++) {
+            PathFinder.PathNode prev = rawPath.get(i - 1);
+            PathFinder.PathNode cur = rawPath.get(i);
+            if (prev.getPos().equals(cur.getPos())) {
+                continue;
+            }
+            segments.add(new Segment(prev.getPos(), cur.getPos(), prev.jumpNeeded() || cur.jumpNeeded(), sprint));
+        }
+        return collapseFluidRawSegments(segments, world);
+    }
+
+    private static ArrayDeque<Segment> collapseFluidRawSegments(Queue<Segment> rawSegments, ServerWorld world) {
+        ArrayDeque<Segment> collapsed = new ArrayDeque<>();
+        if (rawSegments == null || rawSegments.isEmpty()) {
+            return collapsed;
+        }
+        Segment current = null;
+        for (Segment next : rawSegments) {
+            if (next == null) {
+                continue;
+            }
+            if (current == null) {
+                current = next;
+                continue;
+            }
+            if (canMergeFluidSegment(current, next, world)) {
+                current = new Segment(current.start(), next.end(), false, current.sprint() || next.sprint());
+            } else {
+                collapsed.add(current);
+                current = next;
+            }
+        }
+        if (current != null) {
+            collapsed.add(current);
+        }
+        return collapsed;
+    }
+
+    private static boolean canMergeFluidSegment(Segment current, Segment next, ServerWorld world) {
+        if (current == null || next == null || world == null) {
+            return false;
+        }
+        if (current.jump() || next.jump()) {
+            return false;
+        }
+        if (!current.end().equals(next.start())) {
+            return false;
+        }
+        if (current.start().getY() != current.end().getY()
+                || next.start().getY() != next.end().getY()
+                || current.end().getY() != next.end().getY()) {
+            return false;
+        }
+        if (isDiagonalMove(current.start(), current.end()) || isDiagonalMove(next.start(), next.end())) {
+            return false;
+        }
+        if (current.start().getSquaredDistance(next.end()) > 25.0D) {
+            return false;
+        }
+        return !isTrapLikeLocalCell(world, current.end()) && !isTrapLikeLocalCell(world, next.end());
+    }
+
+    private static boolean isDiagonalMove(BlockPos from, BlockPos to) {
+        if (from == null || to == null) {
+            return false;
+        }
+        return from.getX() != to.getX() && from.getZ() != to.getZ();
+    }
+
+    private static String describeLeadingPathNodes(List<PathFinder.PathNode> rawPath, int limit) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "(empty)";
+        }
+        StringBuilder builder = new StringBuilder();
+        int count = Math.min(rawPath.size(), Math.max(1, limit));
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                builder.append(" -> ");
+            }
+            builder.append(rawPath.get(i).getPos().toShortString());
+        }
+        return builder.toString();
+    }
+
+    private static String describeBlockRoute(List<BlockPos> route, int limit) {
+        if (route == null || route.isEmpty()) {
+            return "(empty)";
+        }
+        StringBuilder builder = new StringBuilder();
+        int count = Math.min(route.size(), Math.max(1, limit));
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                builder.append(" -> ");
+            }
+            builder.append(route.get(i).toShortString());
+        }
+        if (route.size() > count) {
+            builder.append(" -> ...");
+        }
+        return builder.toString();
+    }
+
+    private static boolean tryImmediateLocalEscape(ServerPlayerEntity player, BlockPos destination, String label) {
+        return tryImmediateLocalEscape(player, destination, label, false);
+    }
+
+    private static boolean tryImmediateLocalEscape(ServerPlayerEntity player,
+                                                   BlockPos destination,
+                                                   String label,
+                                                   boolean stagnant) {
+        if (shouldSuppressLocalEscapeReplan(player, destination, label, stagnant)) {
+            return false;
+        }
+        LocalEscapeCandidate candidate = findBestLocalEscapeCandidate(player, destination);
+        if (candidate == null || candidate.target() == null) {
+            return false;
+        }
+        LOGGER.info("movement local escape [{}]: mode=precision bot={} target={} route={} stepUp={} leavesTrap={} override={} score={} reason={}",
+                label,
+                player.getName().getString(),
+                candidate.target().toShortString(),
+                describeBlockRoute(candidate.route(), 4),
+                candidate.stepUp(),
+                candidate.leavesTrap(),
+                candidate.overrideTarget(),
+                String.format(Locale.ROOT, "%.2f", candidate.score()),
+                candidate.reason());
+        boolean success = executeLocalEscapeCandidate(player, candidate, destination, label);
+        if (success && player.getUuid() != null) {
+            LocalEscapeDirective directive = LOCAL_ESCAPE_DIRECTIVES.get(player.getUuid());
+            if (directive != null && directive.target().equals(candidate.target())) {
+                LOCAL_ESCAPE_DIRECTIVES.remove(player.getUuid());
+            }
+        }
+        return success;
+    }
+
+    private static boolean executeLocalEscapeCandidate(ServerPlayerEntity player,
+                                                       LocalEscapeCandidate candidate,
+                                                       BlockPos destination,
+                                                       String label) {
+        if (player == null || candidate == null) {
+            return false;
+        }
+        List<BlockPos> route = candidate.route() == null || candidate.route().isEmpty()
+                ? List.of(candidate.target())
+                : candidate.route();
+        BlockPos firstHop = route.get(0);
+        BlockPos beforeHop = player.getBlockPos();
+        if (beforeHop.equals(firstHop)) {
+            commitLocalEscape(player, candidate, destination);
+            return true;
+        }
+        if (firstHop.getY() > beforeHop.getY()) {
+            tryTrimStepUpClearance(player, beforeHop, firstHop, label + "-route");
+        }
+        boolean reached = nudgeTowardExactBlock(player, firstHop, firstHop.getY() > beforeHop.getY(), label + "-route-1");
+        if (reached) {
+            commitLocalEscape(player, candidate, destination);
+        } else {
+            clearLocalEscapeCommitment(player.getUuid());
+        }
+        return reached || !player.getBlockPos().equals(beforeHop);
+    }
+
+    private static boolean nudgeTowardExactBlock(ServerPlayerEntity bot,
+                                                 BlockPos target,
+                                                 boolean stepUp,
+                                                 String label) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        long timeoutMs = stepUp ? 1600L : 1100L;
+        boolean reached = nudgeTowardUntilClose(bot, target, 0.64D, timeoutMs, 0.18D, label);
+        if (bot.getBlockPos().equals(target)) {
+            return true;
+        }
+        return reached && bot.squaredDistanceTo(Vec3d.ofCenter(target)) <= 0.64D;
+    }
+
+    private static void commitLocalEscape(ServerPlayerEntity player,
+                                          LocalEscapeCandidate candidate,
+                                          BlockPos destination) {
+        if (player == null || candidate == null || player.getUuid() == null) {
+            return;
+        }
+        List<BlockPos> route = candidate.route() == null || candidate.route().isEmpty()
+                ? List.of(candidate.target())
+                : candidate.route();
+        BlockPos routeTarget = route.get(route.size() - 1).toImmutable();
+        boolean precision = candidate.overrideTarget()
+                || candidate.stepUp()
+                || route.size() <= 1
+                || hasVerticalMove(route, player.getBlockPos());
+        LOCAL_ESCAPE_COMMITMENTS.put(player.getUuid(), new LocalEscapeCommitment(
+                routeTarget,
+                destination == null ? routeTarget : destination.toImmutable(),
+                precision,
+                System.currentTimeMillis() + LOCAL_ESCAPE_COMMITMENT_MS,
+                candidate.reason()
+        ));
+    }
+
+    private static boolean hasVerticalMove(List<BlockPos> route, BlockPos start) {
+        if (route == null || route.isEmpty() || start == null) {
+            return false;
+        }
+        BlockPos prev = start;
+        for (BlockPos pos : route) {
+            if (pos != null && pos.getY() != prev.getY()) {
+                return true;
+            }
+            if (pos != null) {
+                prev = pos;
+            }
+        }
+        return false;
+    }
+
+    private static void clearLocalEscapeCommitment(UUID botId) {
+        if (botId != null) {
+            LOCAL_ESCAPE_COMMITMENTS.remove(botId);
+        }
+    }
+
+    private static boolean shouldSuppressLocalEscapeReplan(ServerPlayerEntity player,
+                                                           BlockPos destination,
+                                                           String label,
+                                                           boolean stagnant) {
+        if (player == null || destination == null || player.getUuid() == null) {
+            return false;
+        }
+        LocalEscapeCommitment commitment = LOCAL_ESCAPE_COMMITMENTS.get(player.getUuid());
+        if (commitment == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (now >= commitment.expiresAtMs()) {
+            LOCAL_ESCAPE_COMMITMENTS.remove(player.getUuid());
+            return false;
+        }
+        ServerWorld world = getWorld(player);
+        if (world == null) {
+            LOCAL_ESCAPE_COMMITMENTS.remove(player.getUuid());
+            return false;
+        }
+        if (stagnant || commitment.precision() || isTrapLikeLocalCell(world, player.getBlockPos())) {
+            return false;
+        }
+        double destinationShiftSq = destination.getSquaredDistance(commitment.destinationHint());
+        double routeShiftSq = destination.getSquaredDistance(commitment.routeTarget());
+        if (destinationShiftSq > 100.0D && routeShiftSq > 64.0D) {
+            LOCAL_ESCAPE_COMMITMENTS.remove(player.getUuid());
+            return false;
+        }
+        if (player.getBlockPos().getSquaredDistance(commitment.routeTarget()) <= 2.25D) {
+            LOCAL_ESCAPE_COMMITMENTS.remove(player.getUuid());
+            return false;
+        }
+        if (player.getBlockPos().getSquaredDistance(destination) > 256.0D) {
+            return false;
+        }
+        LOGGER.info("movement local escape [{}]: mode=fluid suppress=true routeTarget={} reason={}",
+                label,
+                commitment.routeTarget().toShortString(),
+                commitment.reason());
+        return true;
+    }
+
+    private static boolean isTrapLikeLocalCell(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        int openNeighbors = countOpenCardinalNeighbors(world, pos);
+        int reachableArea = estimateLocalEscapeReachableArea(world, pos, 2);
+        return openNeighbors < 3 && reachableArea < 10;
+    }
+
+    private static LocalEscapeCandidate findBestLocalEscapeCandidate(ServerPlayerEntity player, BlockPos destination) {
+        if (player == null || destination == null) {
+            return null;
+        }
+        ServerWorld world = getWorld(player);
+        if (world == null) {
+            return null;
+        }
+        BlockPos start = player.getBlockPos();
+        LocalEscapeCandidate directiveCandidate = peekLocalEscapeDirective(player, destination, world, start);
+        if (directiveCandidate != null) {
+            return directiveCandidate;
+        }
+
+        int currentOpenNeighbors = countOpenCardinalNeighbors(world, start);
+        int currentReachableArea = estimateLocalEscapeReachableArea(world, start, 2);
+        double startDistBlocks = Math.sqrt(start.getSquaredDistance(destination));
+        if (currentOpenNeighbors >= 3 && currentReachableArea >= 7 && startDistBlocks > 4.5D) {
+            return null;
+        }
+        LocalEscapeCandidate best = searchForLocalEscapeRoute(
+                world,
+                start,
+                destination,
+                currentOpenNeighbors,
+                currentReachableArea,
+                startDistBlocks
+        );
+        if (best != null) {
+            return best;
+        }
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                BlockPos flat = start.add(dx, 0, dz);
+                best = chooseBetterLocalEscape(best,
+                        evaluateLocalEscapeCandidate(world, start, destination, flat, false, currentOpenNeighbors, startDistBlocks));
+
+                BlockPos step = start.add(dx, 1, dz);
+                best = chooseBetterLocalEscape(best,
+                        evaluateLocalEscapeCandidate(world, start, destination, step, true, currentOpenNeighbors, startDistBlocks));
+            }
+        }
+        return best;
+    }
+
+    private static LocalEscapeCandidate peekLocalEscapeDirective(ServerPlayerEntity player,
+                                                                 BlockPos destination,
+                                                                 ServerWorld world,
+                                                                 BlockPos start) {
+        if (player == null || destination == null || world == null || start == null) {
+            return null;
+        }
+        LocalEscapeDirective directive = LOCAL_ESCAPE_DIRECTIVES.get(player.getUuid());
+        if (directive == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        if (now >= directive.expiresAtMs()) {
+            LOCAL_ESCAPE_DIRECTIVES.remove(player.getUuid());
+            return null;
+        }
+        if (start.getSquaredDistance(directive.target()) <= CLOSE_ENOUGH_DISTANCE_SQ) {
+            LOCAL_ESCAPE_DIRECTIVES.remove(player.getUuid());
+            return null;
+        }
+        boolean stepUp = directive.target().getY() > start.getY();
+        if (!isValidLocalEscapeCandidate(world, start, directive.target(), stepUp)) {
+            return null;
+        }
+        int currentOpen = countOpenCardinalNeighbors(world, start);
+        int candidateOpen = countOpenCardinalNeighbors(world, directive.target());
+        boolean leavesTrap = stepUp || candidateOpen > currentOpen;
+                double progressBlocks = Math.sqrt(start.getSquaredDistance(destination))
+                - Math.sqrt(directive.target().getSquaredDistance(destination));
+        double score = scoreLocalEscapeCandidate(progressBlocks, currentOpen, candidateOpen, stepUp, leavesTrap, true);
+        return new LocalEscapeCandidate(
+                directive.target(),
+                score,
+                stepUp,
+                leavesTrap,
+                true,
+                directive.reason(),
+                List.of(directive.target().toImmutable())
+        );
+    }
+
+    private static LocalEscapeCandidate chooseBetterLocalEscape(LocalEscapeCandidate best, LocalEscapeCandidate candidate) {
+        if (candidate == null) {
+            return best;
+        }
+        if (best == null || candidate.score() > best.score()) {
+            return candidate;
+        }
+        return best;
+    }
+
+    private static LocalEscapeCandidate searchForLocalEscapeRoute(ServerWorld world,
+                                                                  BlockPos start,
+                                                                  BlockPos destination,
+                                                                  int currentOpenNeighbors,
+                                                                  int currentReachableArea,
+                                                                  double startDistBlocks) {
+        if (world == null || start == null || destination == null) {
+            return null;
+        }
+        int maxHops = startDistBlocks <= 6.0D ? 4 : 3;
+        ArrayDeque<LocalEscapeSearchState> frontier = new ArrayDeque<>();
+        Map<BlockPos, Integer> bestDepth = new HashMap<>();
+        frontier.add(new LocalEscapeSearchState(start, List.of(start.toImmutable())));
+        bestDepth.put(start.toImmutable(), 0);
+
+        LocalEscapeCandidate best = null;
+        while (!frontier.isEmpty()) {
+            LocalEscapeSearchState state = frontier.poll();
+            int depth = state.route().size() - 1;
+            if (depth >= maxHops) {
+                continue;
+            }
+
+            for (LocalEscapeMove move : enumerateLocalEscapeMoves(world, state.pos())) {
+                BlockPos next = move.target().toImmutable();
+                int nextDepth = depth + 1;
+                Integer previousDepth = bestDepth.get(next);
+                if (previousDepth != null && previousDepth <= nextDepth) {
+                    continue;
+                }
+
+                List<BlockPos> route = new ArrayList<>(state.route());
+                route.add(next);
+                bestDepth.put(next, nextDepth);
+
+                int candidateOpenNeighbors = countOpenCardinalNeighbors(world, next);
+                int candidateReachableArea = estimateLocalEscapeReachableArea(world, next, 2);
+                int elevationGain = next.getY() - start.getY();
+                boolean leavesTrap = isCompellingLocalEscapeEndpoint(
+                        currentOpenNeighbors,
+                        currentReachableArea,
+                        candidateOpenNeighbors,
+                        candidateReachableArea,
+                        elevationGain,
+                        nextDepth
+                );
+                double progressBlocks = startDistBlocks - Math.sqrt(next.getSquaredDistance(destination));
+                double score = scoreLocalEscapeRoute(
+                        progressBlocks,
+                        currentOpenNeighbors,
+                        candidateOpenNeighbors,
+                        currentReachableArea,
+                        candidateReachableArea,
+                        elevationGain,
+                        leavesTrap,
+                        false,
+                        nextDepth
+                );
+                if (leavesTrap && route.size() > 1) {
+                    BlockPos firstHop = route.get(1);
+                    best = chooseBetterLocalEscape(best, new LocalEscapeCandidate(
+                            firstHop,
+                            score,
+                            firstHop.getY() > start.getY(),
+                            true,
+                            false,
+                            describeLocalEscapeReason(route, candidateOpenNeighbors, candidateReachableArea, elevationGain),
+                            List.copyOf(route.subList(1, route.size()))
+                    ));
+                }
+
+                if (nextDepth < maxHops) {
+                    frontier.add(new LocalEscapeSearchState(next, List.copyOf(route)));
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private static List<LocalEscapeMove> enumerateLocalEscapeMoves(ServerWorld world, BlockPos start) {
+        List<LocalEscapeMove> moves = new ArrayList<>(24);
+        if (world == null || start == null) {
+            return moves;
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+
+                BlockPos flat = start.add(dx, 0, dz);
+                if (isValidLocalEscapeMove(world, start, flat)) {
+                    moves.add(new LocalEscapeMove(flat.toImmutable(), false));
+                }
+
+                BlockPos stepUp = start.add(dx, 1, dz);
+                if (isValidLocalEscapeMove(world, start, stepUp)) {
+                    moves.add(new LocalEscapeMove(stepUp.toImmutable(), true));
+                }
+
+                BlockPos stepDown = start.add(dx, -1, dz);
+                if (isValidLocalEscapeMove(world, start, stepDown)) {
+                    moves.add(new LocalEscapeMove(stepDown.toImmutable(), false));
+                }
+            }
+        }
+        return moves;
+    }
+
+    private static int estimateLocalEscapeReachableArea(ServerWorld world, BlockPos start, int maxDepth) {
+        if (world == null || start == null || maxDepth < 0) {
+            return 0;
+        }
+        ArrayDeque<LocalEscapeSearchState> frontier = new ArrayDeque<>();
+        Map<BlockPos, Integer> seen = new HashMap<>();
+        BlockPos root = start.toImmutable();
+        frontier.add(new LocalEscapeSearchState(root, List.of(root)));
+        seen.put(root, 0);
+
+        while (!frontier.isEmpty()) {
+            LocalEscapeSearchState state = frontier.poll();
+            int depth = state.route().size() - 1;
+            if (depth >= maxDepth) {
+                continue;
+            }
+            for (LocalEscapeMove move : enumerateLocalEscapeMoves(world, state.pos())) {
+                BlockPos next = move.target();
+                int nextDepth = depth + 1;
+                Integer priorDepth = seen.get(next);
+                if (priorDepth != null && priorDepth <= nextDepth) {
+                    continue;
+                }
+                seen.put(next, nextDepth);
+                List<BlockPos> route = new ArrayList<>(state.route());
+                route.add(next);
+                frontier.add(new LocalEscapeSearchState(next, List.copyOf(route)));
+            }
+        }
+        return seen.size();
+    }
+
+    static boolean isCompellingLocalEscapeEndpoint(int currentOpenNeighbors,
+                                                   int currentReachableArea,
+                                                   int candidateOpenNeighbors,
+                                                   int candidateReachableArea,
+                                                   int elevationGain,
+                                                   int pathLength) {
+        if (candidateOpenNeighbors >= 3 || candidateReachableArea >= 7) {
+            return true;
+        }
+        if (elevationGain > 0 && candidateReachableArea >= currentReachableArea + 2) {
+            return true;
+        }
+        if (pathLength >= 2 && candidateReachableArea > currentReachableArea) {
+            return true;
+        }
+        return false;
+    }
+
+    static double scoreLocalEscapeRoute(double progressBlocks,
+                                        int currentOpenNeighbors,
+                                        int candidateOpenNeighbors,
+                                        int currentReachableArea,
+                                        int candidateReachableArea,
+                                        int elevationGain,
+                                        boolean leavesTrap,
+                                        boolean overrideTarget,
+                                        int pathLength) {
+        double score = progressBlocks * 4.0D;
+        score += Math.max(0, candidateOpenNeighbors - currentOpenNeighbors) * 1.5D;
+        score += Math.max(0, candidateReachableArea - currentReachableArea) * 1.2D;
+        score += Math.max(0, elevationGain) * 1.0D;
+        score -= Math.max(0, pathLength - 1) * 0.75D;
+        if (leavesTrap) {
+            score += 5.0D;
+        }
+        if (overrideTarget) {
+            score += 6.0D;
+        }
+        return score;
+    }
+
+    private static String describeLocalEscapeReason(List<BlockPos> route,
+                                                    int candidateOpenNeighbors,
+                                                    int candidateReachableArea,
+                                                    int elevationGain) {
+        String routeKind = elevationGain > 0 ? "route-step-up" : "route-flat";
+        return routeKind
+                + " len=" + Math.max(0, route.size() - 1)
+                + " open=" + candidateOpenNeighbors
+                + " area=" + candidateReachableArea;
+    }
+
+    private static LocalEscapeCandidate evaluateLocalEscapeCandidate(ServerWorld world,
+                                                                     BlockPos start,
+                                                                     BlockPos destination,
+                                                                     BlockPos candidate,
+                                                                     boolean stepUp,
+                                                                     int currentOpenNeighbors,
+                                                                     double startDistBlocks) {
+        if (world == null || start == null || destination == null || candidate == null) {
+            return null;
+        }
+        if (!isValidLocalEscapeCandidate(world, start, candidate, stepUp)) {
+            return null;
+        }
+        int candidateOpenNeighbors = countOpenCardinalNeighbors(world, candidate);
+        boolean leavesTrap = stepUp || candidateOpenNeighbors > currentOpenNeighbors;
+        double candidateDistBlocks = Math.sqrt(candidate.getSquaredDistance(destination));
+        double progressBlocks = startDistBlocks - candidateDistBlocks;
+        if (progressBlocks < -0.35D && !leavesTrap) {
+            return null;
+        }
+        double score = scoreLocalEscapeCandidate(
+                progressBlocks,
+                currentOpenNeighbors,
+                candidateOpenNeighbors,
+                stepUp,
+                leavesTrap,
+                false
+        );
+        return new LocalEscapeCandidate(
+                candidate.toImmutable(),
+                score,
+                stepUp,
+                leavesTrap,
+                false,
+                stepUp ? "step-up" : "flat",
+                List.of(candidate.toImmutable())
+        );
+    }
+
+    static double scoreLocalEscapeCandidate(double progressBlocks,
+                                            int currentOpenNeighbors,
+                                            int candidateOpenNeighbors,
+                                            boolean stepUp,
+                                            boolean leavesTrap,
+                                            boolean overrideTarget) {
+        return scoreLocalEscapeRoute(
+                progressBlocks,
+                currentOpenNeighbors,
+                candidateOpenNeighbors,
+                currentOpenNeighbors * 2,
+                candidateOpenNeighbors * 2,
+                stepUp ? 1 : 0,
+                leavesTrap,
+                overrideTarget,
+                1
+        );
+    }
+
+    private static boolean isValidLocalEscapeCandidate(ServerWorld world, BlockPos start, BlockPos candidate, boolean stepUp) {
+        if (world == null || start == null || candidate == null) {
+            return false;
+        }
+        int dy = candidate.getY() - start.getY();
+        if (stepUp) {
+            if (dy != 1) {
+                return false;
+            }
+        } else if (dy != 0) {
+            return false;
+        }
+        int dx = candidate.getX() - start.getX();
+        int dz = candidate.getZ() - start.getZ();
+        if (Math.abs(dx) > 1 || Math.abs(dz) > 1 || (dx == 0 && dz == 0)) {
+            return false;
+        }
+        if (!isSolidStandable(world, candidate.down(), candidate)) {
+            return false;
+        }
+        if (!isLocalEscapePathClear(world, start, candidate, stepUp)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidLocalEscapeMove(ServerWorld world, BlockPos start, BlockPos candidate) {
+        if (world == null || start == null || candidate == null) {
+            return false;
+        }
+        int dy = candidate.getY() - start.getY();
+        if (dy < -1 || dy > 1) {
+            return false;
+        }
+        int dx = candidate.getX() - start.getX();
+        int dz = candidate.getZ() - start.getZ();
+        if (Math.abs(dx) > 1 || Math.abs(dz) > 1 || (dx == 0 && dz == 0)) {
+            return false;
+        }
+        if (!isSolidStandable(world, candidate.down(), candidate)) {
+            return false;
+        }
+        return isLocalEscapePathClear(world, start, candidate, dy > 0);
+    }
+
+    private static boolean isLocalEscapePathClear(ServerWorld world, BlockPos origin, BlockPos candidate, boolean stepUp) {
+        if (world == null || origin == null || candidate == null) {
+            return false;
+        }
+        int dx = candidate.getX() - origin.getX();
+        int dz = candidate.getZ() - origin.getZ();
+
+        if (stepUp && !hasClearance(world, origin)) {
+            return false;
+        }
+
+        if (dx != 0 && dz != 0) {
+            BlockPos xAdj = origin.add(dx, 0, 0);
+            BlockPos zAdj = origin.add(0, 0, dz);
+            boolean xBlocked = isBlockingPassage(world, xAdj);
+            boolean zBlocked = isBlockingPassage(world, zAdj);
+            if (xBlocked && zBlocked) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isBlockingPassage(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return true;
+        }
+        return !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()
+                || !world.getBlockState(pos.up()).getCollisionShape(world, pos.up()).isEmpty();
+    }
+
+    private static int countOpenCardinalNeighbors(ServerWorld world, BlockPos center) {
+        if (world == null || center == null) {
+            return 0;
+        }
+        int open = 0;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos candidate = center.offset(dir);
+            if (isSolidStandable(world, candidate.down(), candidate)) {
+                open++;
+            }
+        }
+        return open;
     }
 
     private static WalkResult maybeThrottle(UUID botId, BlockPos destination, BlockPos currentPos, String label) {
@@ -975,6 +1799,11 @@ public final class MovementService {
                 String.format("%.2f", segmentDistance),
                 maxSteps,
                 segmentAllowance);
+        if (tryImmediateLocalEscape(player, segment.end(), "walkSegment-entry")) {
+            if (player.getBlockPos().getSquaredDistance(segment.end()) <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                return new SegmentResult(true, false);
+            }
+        }
 
         double lastDistanceSq = Double.MAX_VALUE;
         int stagnantSteps = 0;
@@ -1005,6 +1834,12 @@ public final class MovementService {
             if (distanceSq >= lastDistanceSq - 0.01) {
                 stagnantSteps++;
                 if (stagnantSteps == 3) {
+                    if (tryImmediateLocalEscape(player, segment.end(), "walkSegment-local-escape", true)) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryOpenDoorToward(player, segment.end())) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
@@ -1957,6 +2792,11 @@ public final class MovementService {
                 String.format("%.2f", Math.sqrt(player.getBlockPos().getSquaredDistance(destination))),
                 timeoutMs,
                 maxSteps);
+        if (tryImmediateLocalEscape(player, destination, "walkDirect-entry")) {
+            if (player.getBlockPos().getSquaredDistance(destination) <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                return true;
+            }
+        }
         double lastDistanceSq = Double.MAX_VALUE;
         int stagnantSteps = 0;
         boolean sprint = shouldSprintForDestination(player, destination);
@@ -1983,6 +2823,12 @@ public final class MovementService {
             if (distanceSq >= lastDistanceSq - 0.01) {
                 stagnantSteps++;
                 if (stagnantSteps == 3) {
+                    if (tryImmediateLocalEscape(player, destination, "walkDirect-local-escape", true)) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryOpenDoorToward(player, destination)) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
@@ -2349,9 +3195,29 @@ public final class MovementService {
                 }
             }
         }
-        LOGGER.warn("pursuit failed [{}]: finalDist={}", label, Math.sqrt(bot.squaredDistanceTo(targetCenter)));
+        double finalDist = Math.sqrt(bot.squaredDistanceTo(targetCenter));
+        if (shouldWarnOnPursuitFailure(label)) {
+            LOGGER.warn("pursuit failed [{}]: finalDist={}", label, finalDist);
+        } else {
+            LOGGER.info("pursuit failed [{}]: finalDist={}", label, finalDist);
+        }
         BotActions.stop(bot);
         return false;
+    }
+
+    private static boolean shouldWarnOnPursuitFailure(String label) {
+        if (label == null || label.isBlank()) {
+            return true;
+        }
+        String normalized = label.toLowerCase(Locale.ROOT);
+        return !(normalized.contains("woodcut")
+                || normalized.contains("drop")
+                || normalized.contains("sweep")
+                || normalized.contains("loot")
+                || normalized.contains("craft")
+                || normalized.contains("table")
+                || normalized.contains("chest")
+                || normalized.contains("station"));
     }
 
     public static boolean tryTraverseDoorway(ServerPlayerEntity bot, BlockPos destination, String label) {
@@ -2588,6 +3454,7 @@ public final class MovementService {
             if (!isSolidStandable(world, step.down(), step)) {
                 continue;
             }
+            tryTrimStepUpClearance(bot, start, step, label + "-trim");
 
             LOGGER.debug("step-up assist [{}]: from={} dir={} front={} step={}",
                     label,
@@ -2603,6 +3470,183 @@ public final class MovementService {
         }
 
         return false;
+    }
+
+    private static boolean preclearPlannedStepUps(ServerPlayerEntity bot, List<PathFinder.PathNode> rawPath, String label) {
+        if (bot == null || rawPath == null || rawPath.size() < 2) {
+            return false;
+        }
+        BlockPos origin = bot.getBlockPos();
+        boolean trimmedAny = false;
+        int inspectedUpSteps = 0;
+
+        for (int i = 1; i < rawPath.size() && inspectedUpSteps < 4; i++) {
+            BlockPos from = rawPath.get(i - 1).getPos();
+            BlockPos to = rawPath.get(i).getPos();
+            if (to.getY() <= from.getY()) {
+                continue;
+            }
+            if (from.getSquaredDistance(origin) > 20.25D && to.getSquaredDistance(origin) > 20.25D) {
+                break;
+            }
+            inspectedUpSteps++;
+            if (tryTrimStepUpClearance(bot, from, to, label)) {
+                trimmedAny = true;
+            }
+        }
+        return trimmedAny;
+    }
+
+    private static boolean tryTrimStepUpClearance(ServerPlayerEntity bot, BlockPos from, BlockPos step, String label) {
+        if (bot == null || from == null || step == null) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+        if (step.getY() - from.getY() != 1) {
+            return false;
+        }
+        int horizontal = Math.abs(step.getX() - from.getX()) + Math.abs(step.getZ() - from.getZ());
+        if (horizontal > 1) {
+            return false;
+        }
+
+        LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
+        candidates.add(from.up(2));
+        candidates.add(step);
+        candidates.add(step.up());
+        candidates.add(step.up(2));
+        if (bot.isInsideWall()) {
+            candidates.add(from);
+            candidates.add(from.up());
+        }
+
+        boolean trimmedAny = false;
+        for (BlockPos pos : candidates) {
+            if (tryMinePlannedStepTrim(bot, world, pos, label)) {
+                trimmedAny = true;
+            }
+        }
+        if (trimmedAny) {
+            LOGGER.info("movement planned step trim [{}]: bot={} from={} step={}",
+                    label,
+                    bot.getName().getString(),
+                    from.toShortString(),
+                    step.toShortString());
+        }
+        return trimmedAny;
+    }
+
+    private static boolean tryMinePlannedStepTrim(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, String label) {
+        if (bot == null || world == null || pos == null) {
+            return false;
+        }
+        if (!isWithinReach(bot, pos)) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
+            return false;
+        }
+        if (!plannedStepTrimAllowed(bot, world, pos, state)) {
+            return false;
+        }
+        if (!obstructionMineAllowed(bot.getUuid(), pos)) {
+            return false;
+        }
+
+        if (state.isIn(BlockTags.LEAVES)) {
+            selectHarmlessForLeaves(bot);
+        } else if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+            BotActions.selectHarvestToolOrHands(bot, "pickaxe");
+        } else if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
+            BotActions.selectHarvestToolOrHands(bot, "shovel");
+        } else if (state.isIn(BlockTags.AXE_MINEABLE)) {
+            BotActions.selectHarvestToolOrHands(bot, "axe");
+        }
+
+        LOGGER.info("movement planned step trim [{}]: bot={} pos={} state={}",
+                label,
+                bot.getName().getString(),
+                pos.toShortString(),
+                state.getBlock().getTranslationKey());
+
+        try {
+            boolean leafBlock = state.isIn(BlockTags.LEAVES);
+            MiningTool.mineBlock(bot, pos, leafBlock).get(6, TimeUnit.SECONDS);
+            sleep(120L);
+            boolean mined = world.getBlockState(pos).isAir();
+            if (mined && ConstructionRepairService.hasActiveSession(bot.getUuid())) {
+                ConstructionRepairService.noteDamageAndAttemptImmediateRepair(
+                        bot,
+                        world,
+                        pos,
+                        "movement-planned-step-trim:" + label,
+                        20.25D
+                );
+            }
+            return mined;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean plannedStepTrimAllowed(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, BlockState state) {
+        if (bot == null || world == null || pos == null || state == null) {
+            return false;
+        }
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+        if (!auth.allowed()) {
+            return false;
+        }
+        if (ProtectedZoneService.isProtected(pos, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))) {
+            return false;
+        }
+        if (TreeDetector.isNearHumanBlocks(world, pos, 6)) {
+            return false;
+        }
+        MiningHazardDetector.DetectionResult hazards = MiningHazardDetector.detect(bot, List.of(pos), List.of(), false);
+        if (hazards.blockingHazard().isPresent()) {
+            return false;
+        }
+        if (ConstructionProtectionService.protectionReason(bot.getUuid(), pos) != null) {
+            return false;
+        }
+        if (world.getBlockEntity(pos) != null) {
+            return false;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            return false;
+        }
+        if (state.getBlock() instanceof DoorBlock) {
+            return false;
+        }
+        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL) || state.isOf(Blocks.ENDER_CHEST)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+            return false;
+        }
+        if (state.isOf(Blocks.DIRT_PATH)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
+            return false;
+        }
+        if (ScaffoldService.isTrackedScaffold(bot.getUuid(), pos)) {
+            return true;
+        }
+        if (state.isIn(BlockTags.LEAVES)) {
+            return isBreakableLeaf(world, pos);
+        }
+        float hardness = state.getHardness(world, pos);
+        return hardness >= 0.0F && hardness < 12.0F;
     }
 
     private static boolean tryMineObstructionToward(ServerPlayerEntity bot, BlockPos goal, String label) {

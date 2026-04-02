@@ -83,6 +83,31 @@ public final class MiningHazardDetector {
         }
     }
 
+    /**
+     * Ores that must NEVER be mined with a tool that cannot harvest them.
+     * Mining these with an inadequate tool drops nothing, wasting the resource.
+     */
+    private static final Set<Block> HARVEST_PROTECTED_ORES = Set.of(
+            Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE,
+            Blocks.EMERALD_ORE, Blocks.DEEPSLATE_EMERALD_ORE,
+            Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE, Blocks.NETHER_GOLD_ORE,
+            Blocks.REDSTONE_ORE, Blocks.DEEPSLATE_REDSTONE_ORE,
+            Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE,
+            Blocks.COPPER_ORE, Blocks.DEEPSLATE_COPPER_ORE,
+            Blocks.ANCIENT_DEBRIS, Blocks.NETHER_QUARTZ_ORE
+    );
+
+    /** Returns true if the block is a harvest-protected ore (would drop nothing with wrong tool). */
+    public static boolean isHarvestProtectedOre(BlockState state) {
+        return state != null && HARVEST_PROTECTED_ORES.contains(state.getBlock());
+    }
+
+    /** Returns true if the given tool can actually harvest drops from the given block state. */
+    public static boolean canToolHarvest(net.minecraft.item.ItemStack tool, BlockState state) {
+        if (tool == null || tool.isEmpty()) return false;
+        return tool.isSuitableFor(state);
+    }
+
     private static final Set<Block> STRUCTURE_BLOCKS = Set.of(
             Blocks.SPAWNER,
             Blocks.OAK_PLANKS,
@@ -116,6 +141,9 @@ public final class MiningHazardDetector {
     private static final Map<UUID, Set<BlockPos>> DISCOVERED_RARES = new ConcurrentHashMap<>();
     private static final Map<UUID, Set<BlockPos>> WARNED_HAZARDS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_WARNING_TS = new ConcurrentHashMap<>();
+    /** Per-bot, per-message-text cooldown: suppresses duplicate ore announcements across iterations. */
+    private static final long MESSAGE_DEDUP_COOLDOWN_MS = 10_000L;
+    private static final Map<UUID, Map<String, Long>> LAST_MESSAGE_TEXT_TS = new ConcurrentHashMap<>();
     private static final DetectionResult NO_HAZARDS = new DetectionResult(Optional.empty(), List.of());
 
     private MiningHazardDetector() {
@@ -203,6 +231,13 @@ public final class MiningHazardDetector {
             }
         }
         if (blocking != null) {
+            // Suppress duplicate announcement for blocking hazards (e.g., 7x "I found coal!").
+            // The hazard still blocks the skill, but the chat is silenced if recently sent.
+            if (!isMessageFresh(bot.getUuid(), blocking.chatMessage())) {
+                blocking = new Hazard("", blocking.failureMessage(), blocking.location(), blocking.blocking());
+            } else {
+                markMessageSent(bot.getUuid(), blocking.chatMessage());
+            }
             return new DetectionResult(Optional.of(blocking), List.of());
         }
         List<Hazard> adjacentWarnings = collectAdjacentHazards(bot, world, inspection, steps, ignoreTorchHazards);
@@ -330,8 +365,9 @@ public final class MiningHazardDetector {
         // DON'T clear DISCOVERED_RARES - those persist across pauses within the same job
         WARNED_HAZARDS.remove(uuid);
         LAST_WARNING_TS.remove(uuid);
+        // DON'T clear LAST_MESSAGE_TEXT_TS — dedup window should survive pause/resume
     }
-    
+
     /**
      * Clears ALL state for a bot, including discovered rares.
      * Should only be called when a job is completely stopped or finished.
@@ -345,6 +381,7 @@ public final class MiningHazardDetector {
         DISCOVERED_RARES.remove(uuid);
         WARNED_HAZARDS.remove(uuid);
         LAST_WARNING_TS.remove(uuid);
+        LAST_MESSAGE_TEXT_TS.remove(uuid);
     }
 
     private static boolean isBlockerAcknowledged(ServerPlayerEntity bot, BlockPos pos) {
@@ -428,7 +465,30 @@ public final class MiningHazardDetector {
         if (warnings.isEmpty()) {
             return List.of();
         }
+        // Deduplicate: only announce each distinct message once per detection pass,
+        // AND suppress messages recently announced across iterations.
+        UUID uuid = bot.getUuid();
+        Set<String> seenMessages = new LinkedHashSet<>();
+        warnings.removeIf(w -> !seenMessages.add(w.chatMessage()) || !isMessageFresh(uuid, w.chatMessage()));
+        for (String msg : seenMessages) {
+            markMessageSent(uuid, msg);
+        }
         return List.copyOf(warnings);
+    }
+
+    /** Returns true if this message text hasn't been announced for this bot recently. */
+    private static boolean isMessageFresh(UUID uuid, String message) {
+        if (uuid == null || message == null) return true;
+        Map<String, Long> texts = LAST_MESSAGE_TEXT_TS.get(uuid);
+        if (texts == null) return true;
+        Long lastTs = texts.get(message);
+        return lastTs == null || System.currentTimeMillis() - lastTs >= MESSAGE_DEDUP_COOLDOWN_MS;
+    }
+
+    private static void markMessageSent(UUID uuid, String message) {
+        if (uuid == null || message == null) return;
+        LAST_MESSAGE_TEXT_TS.computeIfAbsent(uuid, id -> new ConcurrentHashMap<>())
+                .put(message, System.currentTimeMillis());
     }
 
     private static boolean registerWarning(ServerPlayerEntity bot, BlockPos pos) {

@@ -170,6 +170,10 @@ public final class BotRescueService {
                 && !feetState.isOf(Blocks.FARMLAND)
                 && !feetState.isOf(Blocks.DIRT_PATH)
                 && !feetState.isOf(Blocks.WHEAT)
+                && !feetState.isOf(Blocks.MUD)
+                && !feetState.isOf(Blocks.MUDDY_MANGROVE_ROOTS)
+                && !feetState.isOf(Blocks.SOUL_SAND)
+                && !feetState.isOf(Blocks.HONEY_BLOCK)
                 && !feetState.getCollisionShape(world, feet).isEmpty()
                 && !isClimbableNonBlocking(feetState)
                 && !isRescueProtectedBlock(feetState);
@@ -877,6 +881,10 @@ public final class BotRescueService {
                 && !feetState.isOf(Blocks.FARMLAND)
                 && !feetState.isOf(Blocks.DIRT_PATH)
                 && !feetState.isOf(Blocks.WHEAT)
+                && !feetState.isOf(Blocks.MUD)
+                && !feetState.isOf(Blocks.MUDDY_MANGROVE_ROOTS)
+                && !feetState.isOf(Blocks.SOUL_SAND)
+                && !feetState.isOf(Blocks.HONEY_BLOCK)
                 && !feetState.getCollisionShape(world, feet).isEmpty()
                 && !isClimbableNonBlocking(feetState)
                 && !isRescueProtectedBlock(feetState);

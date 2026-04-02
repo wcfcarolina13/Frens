@@ -5629,6 +5629,9 @@ public class modCommandRegistry {
         LOGGER.info("Stop command invoked: caller={} targetBot={} trainingMode={}", caller, alias, isTrainingMode);
         // Cancel any in-flight drop sweep so it doesn't keep driving movement after /stop.
         net.wcfcarolina13.GameAI.services.DropSweepService.requestCancel(bot, "command-stop");
+        // Suppress the join-enclosure check that stopFollowing→registerBot will schedule,
+        // so stopping a bot underground doesn't launch an unwanted break-free.
+        net.wcfcarolina13.GameAI.BotEventHandler.noteStopCommand(bot.getUuid());
         // Ensure follow state is cleared so the bot truly stops.
         net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot);
         stopMoving(server, context.getSource(), alias);
@@ -5715,6 +5718,8 @@ public class modCommandRegistry {
         return switch (normalized) {
             case "woodcutting", "chopwood", "chop_wood", "chop-wood" -> "woodcut";
             case "woodcutcleanup", "woodcut-cleanup", "woodcut_cleanup", "cleanupwoodcut", "cleanup-woodcut", "tidywoodcut", "tidy-woodcut" -> "woodcut_cleanup";
+            case "plant_seeds", "planting", "plant-seeds", "plantseed", "plantseeds" -> "plant";
+            case "harvesting", "harvest_crops", "harvest-crops", "harvestcrops", "reap" -> "harvest";
             default -> normalized;
         };
     }

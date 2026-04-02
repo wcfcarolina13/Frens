@@ -10,6 +10,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
@@ -27,11 +28,13 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -44,11 +47,15 @@ public final class LeafLitterSkill implements Skill {
     private static final Random RNG = new Random();
 
     private static final int DEFAULT_COUNT = 5;
+    private static final int COMMAND_COUNT = 64;
     private static final int DEFAULT_RADIUS = 12;
+    private static final int COMMAND_RADIUS = 24;
     private static final int BASE_AVOID_RADIUS = 16;
     private static final int STORAGE_RADIUS = 12;
     private static final int STORAGE_YSPAN = 5;
     private static final double REACH_SQ = 20.25D;
+    private static final double DROP_SWEEP_RADIUS = 8.0D;
+    private static final long DROP_SWEEP_DURATION_MS = 10_000L;
 
     private static final long DIALOGUE_COOLDOWN_MS = 22_000L;
     private static final double DIALOGUE_CHANCE = 0.20D;
@@ -61,6 +68,20 @@ public final class LeafLitterSkill implements Skill {
             "Can start a fire with this",
             "gathering leaves",
             "collecting leaves"
+    };
+    private static final String[] SURVIVAL_DIALOGUE_LINES = new String[] {
+            "Need this for the fire",
+            "Gotta cook that food",
+            "Gathering fuel",
+            "Need kindling to cook",
+            "This'll get the furnace going",
+            "Fuel run"
+    };
+    private static final String[] FOREST_DIALOGUE_LINES = new String[] {
+            "Lots of leaf litter around here",
+            "Forests are great for kindling",
+            "No shortage of leaves in this forest",
+            "The forest floor is covered in these"
     };
 
     @Override
@@ -79,47 +100,98 @@ public final class LeafLitterSkill implements Skill {
             return SkillExecutionResult.failure("World unavailable.");
         }
 
-        int count = clamp(getIntParameter(context.parameters(), "count", DEFAULT_COUNT), 1, 16);
-        int radius = clamp(getIntParameter(context.parameters(), "radius", DEFAULT_RADIUS), 6, 24);
+        boolean ambient = isAmbient(context.parameters());
+        boolean survival = isSurvivalMode(context.parameters());
+        boolean forest = isForestBiome(context.parameters());
 
-        List<BlockPos> candidates = findLeafLitter(world, bot, radius);
-        if (candidates.isEmpty()) {
-            return SkillExecutionResult.failure("No leaf litter nearby.");
-        }
+        int defaultCount = ambient ? DEFAULT_COUNT : COMMAND_COUNT;
+        int defaultRadius = ambient ? DEFAULT_RADIUS : COMMAND_RADIUS;
+        int maxCount = ambient ? 16 : 64;
+        int count = clamp(getIntParameter(context.parameters(), "count", defaultCount), 1, maxCount);
+        int radius = clamp(getIntParameter(context.parameters(), "radius", defaultRadius), 6, 32);
 
         int gathered = 0;
-        for (BlockPos target : candidates) {
-            if (gathered >= count) {
+        int sweepRound = 0;
+        Set<BlockPos> unreachable = new HashSet<>();
+
+        // Collect in rounds: find candidates, gather, sweep drops, repeat until count or area exhausted.
+        while (gathered < count && sweepRound < 8) {
+            sweepRound++;
+            List<BlockPos> candidates = findLeafLitter(world, bot, radius);
+            if (candidates.isEmpty()) {
                 break;
             }
-            if (SkillManager.shouldAbortSkill(bot)) {
-                return SkillExecutionResult.failure("Leaf litter collection paused by another task.");
-            }
-            if (!isValidTarget(world, bot, target)) {
-                continue;
-            }
-            if (!moveIntoReach(source, bot, target)) {
-                continue;
-            }
-            if (!equipSafeHandItem(bot)) {
-                continue;
+
+            int beforeRound = gathered;
+            int consecutiveFailures = 0;
+            for (BlockPos target : candidates) {
+                if (gathered >= count) {
+                    break;
+                }
+                if (consecutiveFailures >= 3) {
+                    break;
+                }
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    return SkillExecutionResult.failure("Leaf litter collection paused by another task.");
+                }
+                if (unreachable.contains(target)) {
+                    continue;
+                }
+                if (!isValidTarget(world, bot, target)) {
+                    continue;
+                }
+                long moveStart = System.currentTimeMillis();
+                if (!moveIntoReach(source, bot, target)) {
+                    unreachable.add(target);
+                    consecutiveFailures++;
+                    continue;
+                }
+                // If movement took too long (terrain struggle), mark as slow and count as failure.
+                if (System.currentTimeMillis() - moveStart > 8_000L) {
+                    unreachable.add(target);
+                    consecutiveFailures++;
+                    // Still mine if we actually got there — don't waste the effort.
+                }
+                if (!equipSafeHandItem(bot)) {
+                    continue;
+                }
+
+                LookController.faceBlock(bot, target);
+                try {
+                    String result = MiningTool.mineBlock(bot, target, true).get(8, TimeUnit.SECONDS);
+                    if (result != null && result.toLowerCase(Locale.ROOT).contains("complete")) {
+                        gathered++;
+                        consecutiveFailures = 0;
+                        maybeShowDialogue(bot, survival, forest);
+                        sleepQuietly(ambient ? 180L + RNG.nextInt(120) : 80L + RNG.nextInt(60));
+                    }
+                } catch (Exception e) {
+                    LOGGER.debug("Leaf litter break failed at {}: {}", target.toShortString(), e.getMessage());
+                }
             }
 
-            LookController.faceBlock(bot, target);
+            // No progress this round — area exhausted.
+            if (gathered == beforeRound) {
+                break;
+            }
+
+            // Sweep nearby drops so nothing is left behind.
             try {
-                String result = MiningTool.mineBlock(bot, target, true).get(8, TimeUnit.SECONDS);
-                if (result != null && result.toLowerCase(Locale.ROOT).contains("complete")) {
-                    gathered++;
-                    maybeShowDialogue(bot);
-                    sleepQuietly(180L + RNG.nextInt(120));
-                }
+                DropSweeper.sweep(source, DROP_SWEEP_RADIUS, 4.0D, 16, DROP_SWEEP_DURATION_MS);
             } catch (Exception e) {
-                LOGGER.debug("Leaf litter break failed at {}: {}", target.toShortString(), e.getMessage());
+                LOGGER.debug("Drop sweep after leaf litter round failed: {}", e.getMessage());
             }
         }
 
         if (gathered <= 0) {
             return SkillExecutionResult.failure("Couldn't gather leaf litter.");
+        }
+
+        // Final drop sweep to catch any remaining items.
+        try {
+            DropSweeper.sweep(source, DROP_SWEEP_RADIUS, 4.0D, 16, DROP_SWEEP_DURATION_MS);
+        } catch (Exception e) {
+            LOGGER.debug("Final drop sweep failed: {}", e.getMessage());
         }
 
         int deposited = depositNearbyLeafLitter(source, bot, world);
@@ -262,11 +334,12 @@ public final class LeafLitterSkill implements Skill {
                 && !key.contains("crossbow");
     }
 
-    private static void maybeShowDialogue(ServerPlayerEntity bot) {
+    private static void maybeShowDialogue(ServerPlayerEntity bot, boolean survival, boolean forest) {
         if (bot == null || bot.isRemoved()) {
             return;
         }
-        if (RNG.nextDouble() > DIALOGUE_CHANCE) {
+        double chance = survival ? 0.30D : DIALOGUE_CHANCE;
+        if (RNG.nextDouble() > chance) {
             return;
         }
         UUID id = bot.getUuid();
@@ -276,9 +349,17 @@ public final class LeafLitterSkill implements Skill {
             return;
         }
         LAST_DIALOGUE_MS.put(id, now);
+        String[] pool;
+        if (survival) {
+            pool = SURVIVAL_DIALOGUE_LINES;
+        } else if (forest) {
+            pool = FOREST_DIALOGUE_LINES;
+        } else {
+            pool = DIALOGUE_LINES;
+        }
         CompanionOverheadDialogueService.showOverheadLine(
                 bot,
-                DIALOGUE_LINES[RNG.nextInt(DIALOGUE_LINES.length)],
+                pool[RNG.nextInt(pool.length)],
                 2_800,
                 32.0D,
                 "leaf-litter-hobby",
@@ -339,6 +420,24 @@ public final class LeafLitterSkill implements Skill {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static boolean isAmbient(Map<String, Object> params) {
+        if (params == null) return false;
+        Object origin = params.get("_origin");
+        return origin != null && "ambient".equalsIgnoreCase(origin.toString());
+    }
+
+    private static boolean isSurvivalMode(Map<String, Object> params) {
+        if (params == null) return false;
+        Object val = params.get("survival_mode");
+        return Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
+    }
+
+    private static boolean isForestBiome(Map<String, Object> params) {
+        if (params == null) return false;
+        Object val = params.get("forest_biome");
+        return Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
     }
 
     private static void sleepQuietly(long millis) {

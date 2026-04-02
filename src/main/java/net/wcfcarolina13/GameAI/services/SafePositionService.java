@@ -172,7 +172,7 @@ public final class SafePositionService {
         );
     }
 
-    static boolean isOperationalSurfaceAssessment(SurfaceCandidateAssessment assessment) {
+    public static boolean isOperationalSurfaceAssessment(SurfaceCandidateAssessment assessment) {
         if (assessment == null) {
             return false;
         }

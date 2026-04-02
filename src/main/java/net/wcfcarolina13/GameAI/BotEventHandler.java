@@ -140,7 +140,7 @@ public class BotEventHandler {
     private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
     private static final double FOLLOW_SPRINT_DISTANCE_SQ = 4.0D; // >2 blocks -> sprint
     private static final double FOLLOW_TELEPORT_DISTANCE_SQ = 225.0D; // ~15 blocks
-    private static final int FOLLOW_TELEPORT_STUCK_TICKS = 60; // ~3 seconds @20tps
+    private static final int FOLLOW_TELEPORT_STUCK_TICKS = 30; // ~1.5 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
     private static final double COME_REACHABILITY_PROBE_RANGE_SQ = 32.0D * 32.0D;
@@ -229,6 +229,8 @@ public class BotEventHandler {
     private static final Map<UUID, Vec3d> TELEPORT_DETECT_LAST_POS = new ConcurrentHashMap<>();
     /** Grace period after external teleport: suppress surface recovery until this tick. */
     private static final Map<UUID, Long> TELEPORT_GRACE_UNTIL_TICK = new ConcurrentHashMap<>();
+    /** Grace period after /bot stop: suppress join-enclosure check so it doesn't launch break-free. */
+    private static final Map<UUID, Long> STOP_COMMAND_GRACE_UNTIL_TICK = new ConcurrentHashMap<>();
     /** Minimum squared distance between ticks to consider as an external teleport. 16 blocks = 256. */
     private static final double EXTERNAL_TELEPORT_THRESHOLD_SQ = 256.0;
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
@@ -390,6 +392,10 @@ public class BotEventHandler {
 
     private static double getGuardRadius(ServerPlayerEntity bot) {
         return bot == null ? 6.0D : GuardPatrolService.getGuardRadius(bot.getUuid());
+    }
+
+    private static double getPatrolRadius(ServerPlayerEntity bot) {
+        return bot == null ? 6.0D : GuardPatrolService.getPatrolRadius(bot.getUuid());
     }
 
     private static void setBaseTarget(ServerPlayerEntity bot, Vec3d base) {
@@ -672,6 +678,17 @@ public class BotEventHandler {
                     }
                     // Suppress enclosure check during teleport grace period (e.g., arrived via fast-travel)
                     if (isInTeleportGracePeriod(candidate)) return;
+                    // Suppress enclosure check after /bot stop — the player intentionally stopped the bot;
+                    // launching break-free would undermine the stop command.
+                    Long stopGrace = STOP_COMMAND_GRACE_UNTIL_TICK.get(candidate.getUuid());
+                    if (stopGrace != null && srv.getTicks() < stopGrace) return;
+                    // Suppress enclosure check when near a registered base — underground bases
+                    // always look "enclosed" but the bot is at home, not trapped.
+                    if (net.wcfcarolina13.GameAI.services.BotHomeService.isNearAnyBase(candidate, 32.0D)) {
+                        LOGGER.info("Bot {} join enclosure check suppressed: near registered base",
+                                candidate.getName().getString());
+                        return;
+                    }
                     // Use isAtSurface (heightmap + wide sky check) instead of raw isSkyVisible —
                     // previous mining sessions can create skylights that fool isSkyVisible.
                     if (BotFleeService.isAtSurface(candidate, sw)) return;
@@ -730,6 +747,12 @@ public class BotEventHandler {
         if (bot == null || server == null) return false;
         Long until = TELEPORT_GRACE_UNTIL_TICK.get(bot.getUuid());
         return until != null && server.getTicks() < until;
+    }
+
+    /** Record that /bot stop was just issued — suppresses the join-enclosure check for 60 ticks (3s). */
+    public static void noteStopCommand(UUID botUuid) {
+        if (botUuid == null || server == null) return;
+        STOP_COMMAND_GRACE_UNTIL_TICK.put(botUuid, (long) server.getTicks() + 60L);
     }
 
     /** Called after fast-travel arrival so the teleport detector doesn't see the spawn-to-destination jump. */
@@ -1923,6 +1946,7 @@ public class BotEventHandler {
         setFollowTarget(bot, null);
         clearBase(bot);
         GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+        GuardPatrolService.resetStuck(bot.getUuid());
         sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Guarding the area.";
     }
@@ -1931,12 +1955,13 @@ public class BotEventHandler {
         registerBot(bot);
         // If a drop sweep is currently driving movement, cancel it so PATROL can take over immediately.
         DropSweepService.requestCancel(bot, "mode-switch-patrol");
-        setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
+        GuardPatrolService.setPatrolState(bot.getUuid(), positionOf(bot), Math.max(3.0D, radius));
         setMode(bot, Mode.PATROL);
         setFollowTarget(bot, null);
         clearBase(bot);
         GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
-        sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getGuardRadius(bot)));
+        GuardPatrolService.resetStuck(bot.getUuid());
+        sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getPatrolRadius(bot)));
         return "Patrolling the area.";
     }
 
@@ -2275,7 +2300,7 @@ public class BotEventHandler {
         boolean soulOfEnderActive = net.wcfcarolina13.GameAI.services.SoulOfEnderService.isActive(bot.getUuid());
         boolean forceWalk = state != null && state.followNoTeleport && !soulOfEnderActive;
         double stopRange = state != null ? state.followStopRange : 0.0D;
-        boolean allowTeleportPref = (SkillPreferences.teleportDuringSkills(bot) || soulOfEnderActive) && !forceWalk;
+        boolean allowTeleportPref = (SkillPreferences.teleportDuringSkills(bot) || SkillPreferences.followTeleport(bot) || soulOfEnderActive) && !forceWalk;
         boolean canSee = target != null && bot.canSee(target);
         if (fixedGoal != null) {
             canSee = !isDirectRouteBlocked(bot, targetPos, fixedGoal);
@@ -3119,6 +3144,37 @@ public class BotEventHandler {
             return true;
         }
 
+        // If an escape is already running on a worker thread, yield.
+        if (GuardPatrolService.isEscapeInProgress(bot.getUuid())) {
+            return true;
+        }
+
+        // Stuck detection: track position and check for stagnation.
+        GuardPatrolService.updateStuckTracker(bot.getUuid(), positionOf(bot));
+        long currentTick = server != null ? server.getTicks() : 0L;
+        if (GuardPatrolService.isStuck(bot.getUuid(), currentTick)) {
+            if (bot.getEntityWorld() instanceof ServerWorld sw && !BotFleeService.isAtSurface(bot, sw)) {
+                GuardPatrolService.setEscapeInProgress(bot.getUuid(), true);
+                LOGGER.info("Guard escape: {} starting surface escape", bot.getName().getString());
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
+                        if (!escaped) {
+                            LOGGER.warn("Guard escape: {} failed — cooldown 30s", bot.getName().getString());
+                            GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
+                        } else {
+                            LOGGER.info("Guard escape: {} succeeded", bot.getName().getString());
+                        }
+                    } finally {
+                        GuardPatrolService.setEscapeInProgress(bot.getUuid(), false);
+                    }
+                });
+                return true;
+            }
+            // At surface but stuck — reset and let normal movement retry.
+            GuardPatrolService.resetStuck(bot.getUuid());
+        }
+
         Entity nearestItem = findNearestDrop(bot, radius);
         if (nearestItem != null) {
             collectNearbyDrops(bot, Math.max(radius, 4.0D));
@@ -3137,10 +3193,10 @@ public class BotEventHandler {
 
     private static boolean handlePatrol(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
         Vec3d center = getGuardCenter(bot);
-        double radius = getGuardRadius(bot);
+        double radius = getPatrolRadius(bot);
         if (center == null) {
             center = positionOf(bot);
-            setGuardState(bot, center, radius);
+            GuardPatrolService.setPatrolState(bot.getUuid(), center, radius);
         }
         MinecraftServer server = bot.getCommandSource().getServer();
 
@@ -3158,6 +3214,38 @@ public class BotEventHandler {
         // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
         if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
             return true;
+        }
+
+        // If an escape is already running on a worker thread, yield.
+        if (GuardPatrolService.isEscapeInProgress(bot.getUuid())) {
+            return true;
+        }
+
+        // Stuck detection: track position and check for stagnation.
+        GuardPatrolService.updateStuckTracker(bot.getUuid(), positionOf(bot));
+        long currentTick = server != null ? server.getTicks() : 0L;
+        if (GuardPatrolService.isStuck(bot.getUuid(), currentTick)) {
+            if (bot.getEntityWorld() instanceof ServerWorld sw && !BotFleeService.isAtSurface(bot, sw)) {
+                GuardPatrolService.setEscapeInProgress(bot.getUuid(), true);
+                LOGGER.info("Patrol escape: {} starting surface escape", bot.getName().getString());
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
+                        if (!escaped) {
+                            LOGGER.warn("Patrol escape: {} failed — cooldown 30s", bot.getName().getString());
+                            GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
+                        } else {
+                            LOGGER.info("Patrol escape: {} succeeded", bot.getName().getString());
+                        }
+                    } finally {
+                        GuardPatrolService.setEscapeInProgress(bot.getUuid(), false);
+                    }
+                });
+                return true;
+            }
+            // At surface but stuck — reset tracker and pick a new patrol target.
+            GuardPatrolService.resetStuck(bot.getUuid());
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
         }
 
         Entity nearestItem = findNearestDrop(bot, radius);
@@ -4022,6 +4110,17 @@ public class BotEventHandler {
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
             FOLLOW_DOOR_RECOVERY.remove(id);
             FOLLOW_WAYPOINTS.remove(id);
+            // Check wolf-teleport BEFORE returning — otherwise the early exit
+            // prevents the teleport check at the end of this method from ever firing.
+            boolean soulBypassEarly = net.wcfcarolina13.GameAI.services.SoulOfEnderService.isActive(bot.getUuid());
+            if ((!fixedGoalActive || soulBypassEarly) && allowTeleportPref
+                    && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
+                if (tryWolfTeleport(bot, target, server)) {
+                    FOLLOW_LAST_DISTANCE_SQ.remove(id);
+                    FOLLOW_STAGNANT_TICKS.remove(id);
+                    return true;
+                }
+            }
             maybeLogFollowDecision(bot, "skip-door-magnet: forcing direct follow dist="
                     + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
                     + " sealed=" + botSealed + "/" + commanderSealed);
@@ -6648,7 +6747,9 @@ public class BotEventHandler {
         boolean farAndNotVisible = distanceSq >= FOLLOW_TELEPORT_DISTANCE_SQ && !canSee;
         boolean verticalSeparation = absDeltaY >= 10.0D && !canSee && distanceSq >= 49.0D;
         boolean stuckTooLong = stagnantTicks >= FOLLOW_TELEPORT_STUCK_TICKS && distanceSq >= 49.0D;
-        return farAndNotVisible || verticalSeparation || stuckTooLong;
+        // Far + stagnant: teleport even WITH line-of-sight (e.g. across ravines/gaps).
+        boolean farAndStagnant = distanceSq >= 400.0D && stagnantTicks >= 20;
+        return farAndNotVisible || verticalSeparation || stuckTooLong || farAndStagnant;
     }
 
     private static boolean tryWolfTeleport(ServerPlayerEntity bot, ServerPlayerEntity target, MinecraftServer server) {
@@ -6807,11 +6908,30 @@ public class BotEventHandler {
         }
         double verticalRange = Math.max(6.0D, radius);
         Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
+        Vec3d eyePos = bot.getEyePos();
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         searchBox,
                         drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
                 .stream()
+                .filter(drop -> {
+                    // Skip items behind solid blocks — raycast from bot eye to item position.
+                    Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());
+                    net.minecraft.world.RaycastContext ctx = new net.minecraft.world.RaycastContext(
+                            eyePos, dropPos,
+                            net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
+                            net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                            bot);
+                    net.minecraft.util.hit.BlockHitResult hit = world.raycast(ctx);
+                    if (hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+                        // Ray hit a block before reaching the item — check if the block
+                        // is close to the item (item sitting on/beside a surface) or far
+                        // (item behind a wall/floor).
+                        double hitDistSq = hit.getPos().squaredDistanceTo(dropPos);
+                        return hitDistSq <= 4.0; // within 2 blocks of the item = probably reachable
+                    }
+                    return true; // clear line of sight
+                })
                 .min(Comparator.comparingDouble(bot::squaredDistanceTo))
                 .orElse(null);
     }
@@ -7143,6 +7263,7 @@ public class BotEventHandler {
                 COMBAT_TARGET.clear();
                 TELEPORT_DETECT_LAST_POS.clear();
                 TELEPORT_GRACE_UNTIL_TICK.clear();
+                STOP_COMMAND_GRACE_UNTIL_TICK.clear();
 
             isExecuting = false;
             externalOverrideActive = false;

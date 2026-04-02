@@ -406,7 +406,24 @@ public final class TaskService {
         if (SERVER_STOPPING) {
             return;
         }
-        
+
+        // Post-task grace: for command-origin tasks, suppress surface recovery briefly
+        // so the commander has time to issue follow-up orders.
+        if (ticket.origin() == Origin.COMMAND) {
+            ServerCommandSource src = ticket.source();
+            MinecraftServer srv = src != null ? src.getServer() : null;
+            if (srv != null) {
+                BotFleeService.noteTaskCompleted(ticket.botUuid(), srv.getTicks());
+                ServerPlayerEntity taskBot = srv.getPlayerManager().getPlayer(ticket.botUuid());
+                if (taskBot != null) {
+                    BotIdleHobbiesService.snoozeFor(taskBot, 600L);
+                    // Post-task return: if enabled and bot is underground, schedule fast-travel
+                    // to nearest bed/base/commander after a short grace period.
+                    schedulePostTaskReturnIfEnabled(srv, taskBot);
+                }
+            }
+        }
+
         // After task completion, check if bot is stuck in blocks and needs rescue.
         // IMPORTANT: keep this conservative to avoid fighting legitimate movement around doors/bed wakeups.
         ServerCommandSource source = ticket.source();
@@ -469,11 +486,13 @@ public final class TaskService {
     }
 
     public static void forceAbort(UUID botUuid, String reason) {
+        // Always latch the abort so survival actions (break-free, surface recovery)
+        // see it even when no skill ticket is active.
+        ABORT_LATCH.put(key(botUuid), reason == null ? "" : reason);
         TaskTicket ticket = ACTIVE.get(key(botUuid));
-        if (ticket == null) {
-            return;
+        if (ticket != null) {
+            abortTicket(ticket, reason);
         }
-        abortTicket(ticket, reason);
         BotEventHandler.setExternalOverrideActive(false);
     }
 
@@ -575,5 +594,85 @@ public final class TaskService {
 
     public static boolean isServerStopping() {
         return SERVER_STOPPING;
+    }
+
+    // ── Post-task autonomous return ──────────────────────────────────────
+
+    /** Grace period before post-task return triggers (5 seconds). */
+    private static final long POST_TASK_RETURN_DELAY_TICKS = 100L;
+
+    /**
+     * If the "post_task_return" admin permission is enabled for this bot's commander
+     * and the bot is underground, schedule a fast-travel to the nearest safe destination
+     * after a short grace period.
+     */
+    private static void schedulePostTaskReturnIfEnabled(MinecraftServer srv, ServerPlayerEntity bot) {
+        if (srv == null || bot == null || bot.isRemoved()) return;
+        if (!(bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) return;
+
+        // Must be underground
+        if (BotFleeService.isAtSurface(bot, sw)) return;
+
+        // Check if commander has the permission enabled
+        ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(srv, bot);
+        if (commander == null) return;
+        if (!SurvivalRecruitmentService.isAdminPermissionAllowed(commander, "post_task_return")) return;
+
+        UUID botUuid = bot.getUuid();
+        LOGGER.info("Post-task return: scheduling for {} in {} ticks",
+                bot.getName().getString(), POST_TASK_RETURN_DELAY_TICKS);
+
+        srv.send(new ServerTask((int) (srv.getTicks() + POST_TASK_RETURN_DELAY_TICKS), () -> {
+            if (bot.isRemoved()) return;
+            // Abort if the bot started a new task or already reached surface
+            if (hasActiveTask(botUuid)) return;
+            if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world
+                    && BotFleeService.isAtSurface(bot, world)) return;
+
+            net.minecraft.util.math.BlockPos destination = resolvePostTaskDestination(bot, srv);
+            if (destination == null) {
+                LOGGER.info("Post-task return: no valid destination for {}", bot.getName().getString());
+                return;
+            }
+
+            UUID ownerUuid = commander.getUuid();
+            String alias = bot.getName().getString();
+            LOGGER.info("Post-task return: {} fast-traveling to {}", alias, destination.toShortString());
+            NavigationArtifactService.beginDelayedTravel(
+                    srv, bot, alias, destination,
+                    bot.getEntityWorld().getRegistryKey(), 40, ownerUuid);
+        }));
+    }
+
+    /**
+     * Find the closest destination among: commander position, last-used bed, nearest base.
+     */
+    private static net.minecraft.util.math.BlockPos resolvePostTaskDestination(
+            ServerPlayerEntity bot, MinecraftServer srv) {
+        net.minecraft.util.math.Vec3d origin = new net.minecraft.util.math.Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        net.minecraft.util.math.BlockPos closest = null;
+        double closestSq = Double.MAX_VALUE;
+
+        // Commander position (same dimension only)
+        ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(srv, bot);
+        if (commander != null && commander.getEntityWorld() == bot.getEntityWorld()) {
+            double sq = origin.squaredDistanceTo(new net.minecraft.util.math.Vec3d(
+                    commander.getX(), commander.getY(), commander.getZ()));
+            if (sq < closestSq) {
+                closestSq = sq;
+                closest = commander.getBlockPos();
+            }
+        }
+
+        // Home target: preferred base → last bed / nearest base (whichever closer)
+        java.util.Optional<net.minecraft.util.math.BlockPos> home = BotHomeService.resolveHomeTarget(bot);
+        if (home.isPresent()) {
+            double sq = origin.squaredDistanceTo(net.minecraft.util.math.Vec3d.ofCenter(home.get()));
+            if (sq < closestSq) {
+                closest = home.get();
+            }
+        }
+
+        return closest;
     }
 }

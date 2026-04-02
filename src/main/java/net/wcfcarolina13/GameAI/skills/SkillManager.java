@@ -64,6 +64,8 @@ public final class SkillManager {
         register(new FishingSkill());
         register(new net.wcfcarolina13.GameAI.skills.impl.HangoutSkill());
         register(new net.wcfcarolina13.GameAI.skills.impl.FarmSkill());
+        register(new net.wcfcarolina13.GameAI.skills.impl.PlantSeedsSkill());
+        register(new net.wcfcarolina13.GameAI.skills.impl.HarvestCropSkill());
         register(new net.wcfcarolina13.GameAI.skills.impl.WoolSkill());
         register(new net.wcfcarolina13.GameAI.skills.impl.FlareSkill());
         register(new net.wcfcarolina13.GameAI.skills.impl.LeashToFenceSkill());

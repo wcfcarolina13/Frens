@@ -625,7 +625,7 @@ public final class FollowMovementService {
                 || world.getFluidState(head).isOf(Fluids.WATER);
     }
 
-    private static boolean isDangerousDropCell(ServerWorld world, BlockPos pos) {
+    public static boolean isDangerousDropCell(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) {
             return false;
         }

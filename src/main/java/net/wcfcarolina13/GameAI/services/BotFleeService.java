@@ -124,6 +124,10 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, Boolean> COMMANDER_WAS_NEARBY = new ConcurrentHashMap<>();
     /** Grace period after shelter exit before surface recovery can trigger (60 seconds). */
     private static final long SHELTER_EXIT_GRACE_TICKS = 1200L;
+    /** Tick when a commander-issued task last completed (post-task grace period). */
+    private static final ConcurrentHashMap<UUID, Long> TASK_COMPLETED_TICK = new ConcurrentHashMap<>();
+    /** Grace period after commander task completion before surface recovery triggers (30 seconds). */
+    private static final long TASK_GRACE_TICKS = 600L;
 
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
@@ -2019,6 +2023,13 @@ public final class BotFleeService {
             boolean feetSolid = world.getBlockState(exitFeet).isSolidBlock(world, exitFeet);
             boolean headSolid = world.getBlockState(exitHead).isSolidBlock(world, exitHead);
             if (feetSolid || headSolid) {
+                // Skip direction if either block is a protected ore the bot can't harvest
+                if ((feetSolid && isUnharvestableOre(bot, world.getBlockState(exitFeet)))
+                        || (headSolid && isUnharvestableOre(bot, world.getBlockState(exitHead)))) {
+                    LOGGER.info("Bot {} break-free skipping {} — protected ore without adequate tool",
+                            bot.getName().getString(), dir.asString());
+                    continue;
+                }
                 if (feetSolid) {
                     MiningTool.mineBlock(bot, exitFeet, false).join();
                     Thread.sleep(200);
@@ -2042,10 +2053,22 @@ public final class BotFleeService {
         // Fallback: mine one block up
         BlockPos capBlock = pos.up(2);
         if (world.getBlockState(capBlock).isSolidBlock(world, capBlock)) {
+            if (isUnharvestableOre(bot, world.getBlockState(capBlock))) {
+                LOGGER.warn("Bot {} break-free: overhead block is protected ore — staying put",
+                        bot.getName().getString());
+                return;
+            }
             MiningTool.mineBlock(bot, capBlock, false).join();
             Thread.sleep(200);
         }
         LOGGER.info("Bot {} generic break-free (mined upward)", bot.getName().getString());
+    }
+
+    /** Returns true if the block is a harvest-protected ore the bot's best tool cannot harvest. */
+    private static boolean isUnharvestableOre(ServerPlayerEntity bot, net.minecraft.block.BlockState state) {
+        if (!net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.isHarvestProtectedOre(state)) return false;
+        net.minecraft.item.ItemStack best = net.wcfcarolina13.PlayerUtils.ToolSelector.selectBestToolForBlock(bot, state);
+        return !net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.canToolHarvest(best, state);
     }
 
     /**
@@ -2066,6 +2089,11 @@ public final class BotFleeService {
         if (botUuid != null) RECENT_SHELTER_EXIT_TICK.put(botUuid, serverTick);
     }
 
+    /** Record that a commander-issued task just completed for this bot. */
+    public static void noteTaskCompleted(UUID botId, long serverTick) {
+        if (botId != null) TASK_COMPLETED_TICK.put(botId, serverTick);
+    }
+
     /**
      * Central decision: should surface recovery be suppressed for this bot?
      * Evaluates context (player proximity, hunger, tools, time of day, chests, tasks)
@@ -2078,10 +2106,40 @@ public final class BotFleeService {
         String name = bot.getName().getString();
         int foodLevel = bot.getHungerManager().getFoodLevel();
 
+        // 0. Non-functional position override — if the bot is stuck in a pit (no open sky
+        //    AND not near the terrain surface), bypass the entire linger tree. The bot can't
+        //    do anything useful from here, so all suppression conditions are moot.
+        //    EXCEPT: if the commander is nearby or the bot is near a base, this is likely an
+        //    intentional underground location, not a random pit.
+        SafePositionService.SurfaceCandidateAssessment posCheck =
+                SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
+        if (!posCheck.openSky() && !posCheck.nearSurface()) {
+            boolean commanderHere = isCommanderNearby(bot, server);
+            boolean nearBase = BotHomeService.isNearAnyBase(bot, 32.0D);
+            if (commanderHere || nearBase) {
+                LOGGER.info("Bot {} linger: non-functional position but {} — staying put",
+                        name, commanderHere ? "commander nearby" : "near base");
+            } else {
+                LOGGER.info("Bot {} linger: bypassed — stuck at non-functional position (openSky=false nearSurface=false)", name);
+                return false;
+            }
+        }
+
         // 1. Teleport grace period (already checked earlier, but belt-and-suspenders)
         if (BotEventHandler.isInTeleportGracePeriod(bot)) {
             LOGGER.info("Bot {} linger: suppressed — teleport grace period", name);
             return true;
+        }
+
+        // 1b. Post-task grace — commander just finished a task, don't surface immediately
+        Long taskCompletedAt = TASK_COMPLETED_TICK.get(botId);
+        if (taskCompletedAt != null) {
+            if ((tick - taskCompletedAt) < TASK_GRACE_TICKS) {
+                LOGGER.info("Bot {} linger: suppressed — task completed {}s ago",
+                        name, (tick - taskCompletedAt) / 20);
+                return true;
+            }
+            TASK_COMPLETED_TICK.remove(botId);
         }
 
         // 2. Active task running — bot is mining/working, don't interrupt
@@ -2091,10 +2149,10 @@ public final class BotFleeService {
         }
 
         // 3. Commander proximity with edge-detected grace timer.
-        //    While commander is nearby + underground: suppress and reset timers.
+        //    While commander is nearby (any depth): suppress and reset timers.
         //    When commander leaves: start a grace timer (= linger duration).
         //    Only after that grace timer expires do hunger checks activate.
-        boolean commanderNearby = isCommanderNearbyAndUnderground(bot, world, server);
+        boolean commanderNearby = isCommanderNearby(bot, server);
         boolean wasNearby = COMMANDER_WAS_NEARBY.getOrDefault(botId, false);
         COMMANDER_WAS_NEARBY.put(botId, commanderNearby);
 
@@ -2203,6 +2261,35 @@ public final class BotFleeService {
         return false;
     }
 
+    /**
+     * Lightweight safety check for hobby/guard surface escape.
+     * Enforces critical constraints without the full linger tree.
+     */
+    public static boolean shouldSuppressHobbyEscape(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) return false;
+        MinecraftServer server = bot.getCommandSource() != null
+                ? bot.getCommandSource().getServer() : null;
+        String name = bot.getName().getString();
+
+        if (isCommanderNearby(bot, server)) {
+            LOGGER.info("Bot {} hobby-escape: suppressed — commander nearby", name);
+            return true;
+        }
+        if ((!world.isDay() || world.isThundering()) && bot.getHungerManager().getFoodLevel() > 3) {
+            LOGGER.info("Bot {} hobby-escape: suppressed — nighttime (food={})",
+                    name, bot.getHungerManager().getFoodLevel());
+            return true;
+        }
+        UUID botId = bot.getUuid();
+        long tick = server != null ? server.getTicks() : 0L;
+        Long taskDone = TASK_COMPLETED_TICK.get(botId);
+        if (taskDone != null && (tick - taskDone) < TASK_GRACE_TICKS) {
+            LOGGER.info("Bot {} hobby-escape: suppressed — post-task grace", name);
+            return true;
+        }
+        return false;
+    }
+
     /** Check if the bot's commander is nearby (any surface state — used for shelter suppression). */
     private static boolean isCommanderNearby(ServerPlayerEntity bot, MinecraftServer server) {
         if (server == null) return false;
@@ -2227,6 +2314,9 @@ public final class BotFleeService {
         int proximityBlocks = net.wcfcarolina13.Frens.CONFIG.getUndergroundProximityBlocks();
         double distSq = bot.squaredDistanceTo(commander);
         if (distSq > (double) proximityBlocks * proximityBlocks) return false;
+        // If commander is significantly above the bot, the bot needs to escape
+        // to reach them — don't suppress surface recovery.
+        if (commander.getY() - bot.getY() >= 3.0) return false;
         // Commander must also be underground (no sky visible)
         return !world.isSkyVisible(commander.getBlockPos().up());
     }
@@ -2402,7 +2492,21 @@ public final class BotFleeService {
      *
      * @return true if the bot is at the surface after this call
      */
+    /**
+     * Like {@link #ensureAtSurface(ServerPlayerEntity, ServerWorld)} but skips the
+     * underground linger decision tree.  Used by the hobby system where the bot
+     * simply needs to reach surface to start a hobby — not a survival decision.
+     */
+    public static boolean ensureAtSurfaceForHobby(ServerPlayerEntity bot, ServerWorld world) {
+        return ensureAtSurface(bot, world, true);
+    }
+
     public static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world) {
+        return ensureAtSurface(bot, world, false);
+    }
+
+    private static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world,
+                                           boolean skipLingerCheck) {
         if (bot == null || world == null) {
             return false;
         }
@@ -2428,10 +2532,19 @@ public final class BotFleeService {
             return true;
         }
 
-        // Suppress all surface recovery for idle bots when the linger decision tree says stay.
-        // Skill callers (hasActiveTask=true) bypass this — they need staging/pillar paths
-        // and have their own suppression inside escapeToSurface() for the heavy ascent only.
-        if (!TaskService.hasActiveTask(bot.getUuid())
+        // Suppress surface recovery based on context:
+        // - Hobby/guard callers (skipLingerCheck=true): lightweight safety check only
+        //   (commander nearby, nighttime, post-task grace).
+        // - Idle/survival callers: full linger decision tree (hunger timers, chest food, etc.).
+        // - Skill callers (hasActiveTask=true): bypass entirely — they need staging/pillar
+        //   paths and have their own suppression inside escapeToSurface().
+        if (skipLingerCheck) {
+            if (shouldSuppressHobbyEscape(bot, world)) {
+                LOGGER.info("ensureAtSurface: {} suppressed by hobby-escape safety check",
+                        bot.getName().getString());
+                return false;
+            }
+        } else if (!TaskService.hasActiveTask(bot.getUuid())
                 && shouldSuppressSurfaceRecovery(bot, world)) {
             LOGGER.info("ensureAtSurface: {} suppressed by linger decision tree",
                     bot.getName().getString());
@@ -2459,7 +2572,15 @@ public final class BotFleeService {
                             bot.getName().getString());
                     return true;
                 }
-                // Movement failed — try building scaffold steps toward the staging area
+                // Movement failed — pillar up first (fast escape from surface pits/overhangs)
+                if (countScaffoldBlocks(bot) >= 2 && tryPillarOperationalSurfaceRecovery(bot, world)) {
+                    SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                    SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                    LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
+                            bot.getName().getString());
+                    return true;
+                }
+                // Pillar didn't work — try building scaffold steps toward the staging area
                 if (tryStepBuildToStaging(bot, world, nearby.pos())) {
                     LOGGER.info("ensureAtSurface: {} reached operational surface via step-building",
                             bot.getName().getString());
@@ -2472,9 +2593,11 @@ public final class BotFleeService {
                         bot.getName().getString());
             }
 
-            // If the bot is starving or effectively unequipped but has scaffold blocks, prefer a quick pillar escape.
-            if (shouldPrioritizeEmergencyPillar(bot) && tryPillarOperationalSurfaceRecovery(bot, world)) {
-                LOGGER.info("ensureAtSurface: {} reached operational surface via nearby staging",
+            // Try pillar escape before heavy ascent — fast for shallow surface pits.
+            if (countScaffoldBlocks(bot) >= 2 && tryPillarOperationalSurfaceRecovery(bot, world)) {
+                SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
                         bot.getName().getString());
                 return true;
             }
@@ -2518,14 +2641,6 @@ public final class BotFleeService {
         }
     }
 
-    private static boolean shouldPrioritizeEmergencyPillar(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        boolean starving = bot.getHungerManager().getFoodLevel() <= 6;
-        boolean noTool = !hasMiningOrCombatTool(bot);
-        return countScaffoldBlocks(bot) >= 3 && (starving || noTool);
-    }
 
     private static boolean shouldBreakShelterForStarvation(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null || !HealingService.isStarving(bot)) {
@@ -2559,31 +2674,6 @@ public final class BotFleeService {
                 || SkillManager.shouldAbortSkill(bot);
     }
 
-    private static boolean hasMiningOrCombatTool(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            String key = stack.getItem().getTranslationKey();
-            if (key == null) {
-                continue;
-            }
-            String lower = key.toLowerCase(java.util.Locale.ROOT);
-            if (lower.contains("pickaxe")
-                    || lower.contains("shovel")
-                    || lower.contains("axe")
-                    || lower.contains("sword")
-                    || lower.contains("trident")
-                    || lower.contains("mace")) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /**
      * Attempt to build scaffold steps toward a nearby staging area that the bot couldn't walk to.
@@ -2750,6 +2840,7 @@ public final class BotFleeService {
         if (bot == null || world == null || target == null) {
             return false;
         }
+        boolean targetOperational = SafePositionService.isOperationalSurface(world, target);
         Optional<MovementService.MovementPlan> plan =
                 MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
         boolean moved = false;
@@ -2763,17 +2854,43 @@ public final class BotFleeService {
                     true,
                     false
             );
-            moved = result != null && (result.success() || bot.getBlockPos().getSquaredDistance(target) <= 4.0D);
-            LOGGER.info("{}: movement success={} detail={}",
+            double targetDistSq = bot.getBlockPos().getSquaredDistance(target);
+            moved = result != null && result.success() && targetDistSq <= 2.25D;
+            LOGGER.info("{}: movement success={} detail={} dist={} targetOperational={} bot={}",
                     label,
                     moved,
-                    result != null ? result.detail() : "null");
+                    result != null ? result.detail() : "null",
+                    String.format(java.util.Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)),
+                    targetOperational,
+                    bot.getBlockPos().toShortString());
         }
-        if (!moved) {
-            moved = MovementService.nudgeTowardUntilClose(bot, target, 2.5D, 4_000L, 0.20D, label);
-            LOGGER.info("{}: nudge success={}", label, moved);
+        boolean ready = isAtSurface(bot, world);
+        if (!moved || !ready) {
+            boolean nudged = MovementService.nudgeTowardUntilClose(bot, target, 1.25D, 4_500L, 0.20D, label + "-exact");
+            ready = isAtSurface(bot, world);
+            moved = nudged && bot.getBlockPos().getSquaredDistance(target) <= 2.25D;
+            LOGGER.info("{}: exact nudge success={} ready={} dist={} bot={}",
+                    label,
+                    moved,
+                    ready,
+                    String.format(java.util.Locale.ROOT, "%.2f", Math.sqrt(bot.getBlockPos().getSquaredDistance(target))),
+                    bot.getBlockPos().toShortString());
         }
-        return moved && isAtSurface(bot, world);
+        if (!ready && targetOperational) {
+            SafePositionService.SurfaceStagingCandidate nearby =
+                    SafePositionService.findBestSurfaceStaging(world, target, 2, true);
+            if (nearby != null && !nearby.pos().equals(target)) {
+                boolean redirected = MovementService.nudgeTowardUntilClose(bot, nearby.pos(), 1.25D, 3_000L, 0.20D, label + "-redirect");
+                ready = isAtSurface(bot, world);
+                LOGGER.info("{}: redirect success={} ready={} target={} bot={}",
+                        label,
+                        redirected,
+                        ready,
+                        nearby.pos().toShortString(),
+                        bot.getBlockPos().toShortString());
+            }
+        }
+        return ready;
     }
 
     private static BlockPos chooseStepOffSupport(List<BlockPos> ordered, BlockPos stagingPos) {
@@ -2848,7 +2965,10 @@ public final class BotFleeService {
     private static boolean logOperationalSurfaceState(ServerPlayerEntity bot, ServerWorld world, String label) {
         SafePositionService.SurfaceCandidateAssessment assessment =
                 SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
-        boolean ready = SafePositionService.isRecoveryReadySurface(world, bot.getBlockPos());
+        // Use strict operational check (requires openSky + nearSurface) — the lenient
+        // isRecoveryReadySurface fallback was returning "ready" for bots in pits with
+        // overhead cover, preventing ensureAtSurface from attempting pillar/step-build.
+        boolean ready = SafePositionService.isOperationalSurfaceAssessment(assessment);
         LOGGER.info("{}: {} pos={} {}",
                 label,
                 ready ? "ready" : "not-ready",

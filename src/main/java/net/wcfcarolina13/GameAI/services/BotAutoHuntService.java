@@ -180,8 +180,10 @@ public final class BotAutoHuntService {
                         return;
                     }
                     BotEmergencyRescueService.tryEmergencyRescue(bot, sw, "auto-hunt-surface-failure");
-                    LOGGER.info("Auto-hunt: {} could not reach surface, aborting",
-                            bot.getName().getString());
+                    // Set cooldown AFTER emergency rescue to prevent requestDecisionNow() from resetting it
+                    NEXT_DECISION_TICK.put(bot.getUuid(), (long) server.getTicks() + COOLDOWN_TICKS);
+                    LOGGER.info("Auto-hunt: {} could not reach surface, aborting (cooldown {}t)",
+                            bot.getName().getString(), COOLDOWN_TICKS);
                     return;
                 }
                 if (Thread.currentThread().isInterrupted()) {

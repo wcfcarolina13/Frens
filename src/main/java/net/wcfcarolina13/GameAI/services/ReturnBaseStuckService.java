@@ -43,6 +43,8 @@ public final class ReturnBaseStuckService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("return-base-stuck");
 
+    private record LocalEscapeResult(BlockPos target, boolean naturalStep) {}
+
     public enum StuckProfile {
         DEFAULT(1.0, false),
         WOODCUT(1.0 / 3.0, true);
@@ -580,6 +582,7 @@ public final class ReturnBaseStuckService {
             LAST_PANIC_FLEE_MS.remove(botId);
             SCAFFOLD_ATTEMPTED.remove(botId);
             LAST_SCAFFOLD_ESCAPE_MS.remove(botId);
+            MovementService.clearLocalEscapeDirective(botId);
         }
     }
 
@@ -1984,23 +1987,11 @@ public final class ReturnBaseStuckService {
         BlockPos origin = bot.getBlockPos();
         double originDist = horizontalDistSq(origin, baseTarget);
 
-        // Phase 1: scan for natural step-ups at Y+1 (jump-reachable)
-        int[][] offsets = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
-        BlockPos bestStep = null;
-        double bestDist = originDist;
-        for (int[] off : offsets) {
-            BlockPos cand = origin.add(off[0], 1, off[1]);
-            if (isPassable(world, cand)) {
-                double d = horizontalDistSq(cand, baseTarget);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestStep = cand;
-                }
-            }
-        }
-        if (bestStep != null) {
-            BlockPos target = bestStep;
+        LocalEscapeResult naturalEscape = findNaturalScaffoldEscape(world, origin, baseTarget);
+        if (naturalEscape != null) {
+            BlockPos target = naturalEscape.target();
             LOGGER.info("ReturnBaseStuck: scaffold-escape found natural step-up at {}", target.toShortString());
+            MovementService.setLocalEscapeDirective(bot, target, 2500L, "return-base-scaffold-natural-step");
             server.execute(() -> {
                 LookController.faceBlock(bot, target);
                 BotActions.autoJumpIfNeeded(bot);
@@ -2082,6 +2073,57 @@ public final class ReturnBaseStuckService {
             }
         }
         LOGGER.info("ReturnBaseStuck: scaffold-escape failed (no suitable placement found)");
+    }
+
+    private static LocalEscapeResult findNaturalScaffoldEscape(ServerWorld world, BlockPos origin, Vec3d baseTarget) {
+        if (world == null || origin == null || baseTarget == null) {
+            return null;
+        }
+        int[][] offsets = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+        BlockPos bestStep = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        int currentOpen = countOpenCardinalNeighbors(world, origin);
+        double originDist = horizontalDistSq(origin, baseTarget);
+
+        for (int[] off : offsets) {
+            BlockPos cand = origin.add(off[0], 1, off[1]);
+            if (!isPassable(world, cand) || !isPassable(world, cand.up())) {
+                continue;
+            }
+            if (!isPathClearForNudge(world, origin, cand)) {
+                continue;
+            }
+            int openNeighbors = countOpenCardinalNeighbors(world, cand);
+            double newDist = horizontalDistSq(cand, baseTarget);
+            boolean improvesBase = newDist < originDist;
+            boolean leavesTrap = cand.getY() > origin.getY() || openNeighbors > currentOpen;
+            if (!improvesBase && !leavesTrap) {
+                continue;
+            }
+            double score = (improvesBase ? (originDist - newDist) : 0.0D)
+                    + (openNeighbors - currentOpen) * 1.5D
+                    + (cand.getY() > origin.getY() ? 3.0D : 0.0D);
+            if (score > bestScore) {
+                bestScore = score;
+                bestStep = cand.toImmutable();
+            }
+        }
+        return bestStep != null ? new LocalEscapeResult(bestStep, true) : null;
+    }
+
+    private static int countOpenCardinalNeighbors(ServerWorld world, BlockPos center) {
+        if (world == null || center == null) {
+            return 0;
+        }
+        int open = 0;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos candidate = center.offset(dir);
+            if (!isBlockBlocking(world, candidate, world.getBlockState(candidate))
+                    && !isBlockBlocking(world, candidate.up(), world.getBlockState(candidate.up()))) {
+                open++;
+            }
+        }
+        return open;
     }
 
     private static double horizontalDistSq(BlockPos pos, Vec3d target) {

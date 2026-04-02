@@ -11,7 +11,8 @@ public record BotTaskPeekStatusPayload(String botUuid,
                                        boolean active,
                                        boolean paused,
                                        boolean returningHome,
-                                       String taskLabel) implements CustomPayload {
+                                       String taskLabel,
+                                       String modeName) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "bot_task_peek_status");
     public static final CustomPayload.Id<BotTaskPeekStatusPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
@@ -29,16 +30,31 @@ public record BotTaskPeekStatusPayload(String botUuid,
         }
     };
 
-    public static final PacketCodec<PacketByteBuf, BotTaskPeekStatusPayload> CODEC =
-            PacketCodec.tuple(
-                    STRING_CODEC, BotTaskPeekStatusPayload::botUuid,
-                    STRING_CODEC, BotTaskPeekStatusPayload::botAlias,
-                    BOOL_CODEC, BotTaskPeekStatusPayload::active,
-                    BOOL_CODEC, BotTaskPeekStatusPayload::paused,
-                    BOOL_CODEC, BotTaskPeekStatusPayload::returningHome,
-                    STRING_CODEC, BotTaskPeekStatusPayload::taskLabel,
-                    BotTaskPeekStatusPayload::new
+    public static final PacketCodec<PacketByteBuf, BotTaskPeekStatusPayload> CODEC = new PacketCodec<>() {
+        @Override
+        public void encode(PacketByteBuf buf, BotTaskPeekStatusPayload val) {
+            STRING_CODEC.encode(buf, val.botUuid);
+            STRING_CODEC.encode(buf, val.botAlias);
+            BOOL_CODEC.encode(buf, val.active);
+            BOOL_CODEC.encode(buf, val.paused);
+            BOOL_CODEC.encode(buf, val.returningHome);
+            STRING_CODEC.encode(buf, val.taskLabel);
+            STRING_CODEC.encode(buf, val.modeName);
+        }
+
+        @Override
+        public BotTaskPeekStatusPayload decode(PacketByteBuf buf) {
+            return new BotTaskPeekStatusPayload(
+                    STRING_CODEC.decode(buf),
+                    STRING_CODEC.decode(buf),
+                    BOOL_CODEC.decode(buf),
+                    BOOL_CODEC.decode(buf),
+                    BOOL_CODEC.decode(buf),
+                    STRING_CODEC.decode(buf),
+                    STRING_CODEC.decode(buf)
             );
+        }
+    };
 
     @Override
     public Id<? extends CustomPayload> getId() {

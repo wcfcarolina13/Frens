@@ -228,6 +228,7 @@ public final class BotIdleHobbiesService {
             if (!BotHomeService.isIdleHobbiesEnabled(bot)) {
                 IDLE_SINCE_TICK.remove(botUuid);
                 clearWoodenFallbackState(botUuid);
+                noteBlocked(bot, nowTick, "hobbies-disabled");
                 continue;
             }
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
@@ -318,8 +319,17 @@ public final class BotIdleHobbiesService {
 
             int tod = (int) (world.getTimeOfDay() % 24_000L);
             if (tod >= DONT_START_AFTER_TOD) {
-                noteBlocked(bot, nowTick, "late-day");
-                continue;
+                // R4 exception: allow underground night mining when stuck with no bed
+                boolean undergroundNightException = hasAnyPickaxe(bot)
+                        && !BotFleeService.isAtSurface(bot, world)
+                        && !world.isSkyVisible(bot.getBlockPos().up())
+                        && bot.getHungerManager().getFoodLevel() >= 10
+                        && !hasNearbyBed(world, bot.getBlockPos(), 16)
+                        && hasNearbyStone(world, bot.getBlockPos(), 12);
+                if (!undergroundNightException) {
+                    noteBlocked(bot, nowTick, "late-day");
+                    continue;
+                }
             }
 
             // First-seen grace window: let persistence restoration and chunk ticketing settle.
@@ -382,6 +392,14 @@ public final class BotIdleHobbiesService {
             }
 
             long next = NEXT_DECISION_TICK.getOrDefault(botUuid, 0L);
+
+            // Grace period: if NEXT_DECISION_TICK was never set (bot just finished a command skill
+            // or was just spawned), defer hobby scheduling by 5 seconds so the bot doesn't
+            // instantly jump into a hobby after /bot stop.
+            if (next == 0L && nowTick > 0L) {
+                NEXT_DECISION_TICK.put(botUuid, nowTick + 100L);
+                next = nowTick + 100L;
+            }
 
             // Integrated-server reload safety: if we carried a huge "next" tick value from a prior
             // world instance, the new server tick counter starts near 0 and the bot may never idle.
@@ -490,6 +508,13 @@ public final class BotIdleHobbiesService {
         boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
         boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
         boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12);
+        if (canMineStone && shouldSuppressMiningHobby(bot, world)) {
+            canMineStone = false;
+        }
+        boolean undergroundNightMining = canMineStone && isUndergroundNightMiningCandidate(bot, world);
+        boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
+        boolean inLeafLitterBiome = canCollectLeafLitter && isLeafLitterFriendlyBiome(world, bot.getBlockPos());
+        boolean leafLitterSurvival = canCollectLeafLitter && needsLeafLitterForSurvival(bot, world);
 
         // Build weighted options so available hobbies actually trigger instead of idling on random misses.
         ArrayList<String> weighted = new ArrayList<>();
@@ -526,6 +551,11 @@ public final class BotIdleHobbiesService {
         }
         if (canMineStone) {
             weighted.add("mining");
+            if (undergroundNightMining) {
+                // R4: underground at night with food, no bed — mining is productive
+                weighted.add("mining");
+                weighted.add("mining");
+            }
         }
         if (canShadowCompanion) {
             weighted.add("shadow_companion");
@@ -537,6 +567,12 @@ public final class BotIdleHobbiesService {
         if (canCook) {
             weighted.add("cook");
             weighted.add("cook");
+        }
+        if (leafLitterSurvival) {
+            weighted.add("leaf_litter");
+            weighted.add("leaf_litter");
+        } else if (inLeafLitterBiome) {
+            weighted.add("leaf_litter");
         }
         if (weighted.isEmpty()) {
             return null;
@@ -573,6 +609,9 @@ public final class BotIdleHobbiesService {
         boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
         boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
         boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12);
+        if (canMineStone && shouldSuppressMiningHobby(bot, world)) {
+            canMineStone = false;
+        }
 
         if (preferFood) {
             if (canHunt) {
@@ -581,6 +620,11 @@ public final class BotIdleHobbiesService {
             if (hasWaterNearby) {
                 return "fish";
             }
+        }
+
+        // Survival leaf litter: if bot needs fuel for cooking, prioritize collection
+        if (canCollectLeafLitter && needsLeafLitterForSurvival(bot, world)) {
+            return "leaf_litter";
         }
 
         if (canFeedAnimals) {
@@ -680,6 +724,40 @@ public final class BotIdleHobbiesService {
             }
         }
         return false;
+    }
+
+    /** True when the bot is in a biome where leaf litter naturally generates. */
+    private static boolean isLeafLitterFriendlyBiome(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        var biomeEntry = world.getBiome(pos);
+        if (biomeEntry == null) {
+            return false;
+        }
+        String biomeKey = biomeEntry.getKey()
+                .map(k -> k.getValue().toString())
+                .orElse("")
+                .toLowerCase(Locale.ROOT);
+        return biomeKey.contains("forest")
+                || biomeKey.contains("taiga")
+                || biomeKey.contains("grove");
+    }
+
+    /** True when the bot would benefit from collecting leaf litter as fuel. */
+    private static boolean needsLeafLitterForSurvival(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        if (shouldPreferCooking(bot.getUuid())) {
+            return true;
+        }
+        if (SmeltingService.hasCookableFoodInventoryItems(bot, world)
+                && !SmeltingService.hasFuelForAutoCook(bot, world)) {
+            return true;
+        }
+        return bot.getHungerManager().getFoodLevel() <= 14
+                && SmeltingService.hasCookableFoodInventoryItems(bot, world);
     }
 
     private static boolean hasNearbyMushrooms(ServerWorld world, BlockPos origin, int radius) {
@@ -822,8 +900,23 @@ public final class BotIdleHobbiesService {
         }
 
         if ("leaf_litter".equalsIgnoreCase(runSkillName)) {
-            params.put("count", 3 + RNG.nextInt(3));   // 3-5
-            params.put("radius", 10 + RNG.nextInt(5)); // 10-14
+            ServerWorld sw = bot.getEntityWorld() instanceof ServerWorld s ? s : null;
+            boolean survival = sw != null && needsLeafLitterForSurvival(bot, sw);
+            boolean forestBiome = sw != null && isLeafLitterFriendlyBiome(sw, bot.getBlockPos());
+
+            int countMin  = survival ? 6 : 3;
+            int countRange = (survival ? 5 : 3) + (forestBiome ? 2 : 0);   // survival 6-10(+2), ambient 3-5(+2)
+            int radiusMin  = survival ? 14 : 10;
+            int radiusRange = (survival ? 7 : 5) + (forestBiome ? 4 : 0);  // survival 14-20(+4), ambient 10-14(+4)
+
+            params.put("count", countMin + RNG.nextInt(countRange));
+            params.put("radius", radiusMin + RNG.nextInt(radiusRange));
+            if (survival) {
+                params.put("survival_mode", true);
+            }
+            if (forestBiome) {
+                params.put("forest_biome", true);
+            }
         }
 
         if ("mushrooms".equalsIgnoreCase(runSkillName)) {
@@ -840,6 +933,12 @@ public final class BotIdleHobbiesService {
             params.put("count", 8 + RNG.nextInt(5));  // 8-12 cobblestone
             params.put("searchRadius", 10);
             params.put("verticalRange", 4);
+            // R3/R4: if underground at night with no bed, mine in place without surface escape
+            if (bot.getEntityWorld() instanceof ServerWorld sw
+                    && isUndergroundNightMiningCandidate(bot, sw)
+                    && !shouldSuppressMiningHobby(bot, sw)) {
+                params.put("_skip_surface_escape", true);
+            }
         }
 
         if ("woodcut".equalsIgnoreCase(runSkillName)) {
@@ -848,13 +947,13 @@ public final class BotIdleHobbiesService {
             EXPANDED_WOODCUT_RADIUS.remove(bot.getUuid());
             params.put("searchRadius", woodcutRadius);
             params.put("verticalRange", 6);
-            params.put("replantSaplings", false);
             params.put("wooden_fallback", true);
         }
 
 
         // Cook hobby: runs SmeltingService.cookAllFoodSync directly (no registered Skill needed)
         if ("cook".equalsIgnoreCase(runSkillName)) {
+            try {
             AMBIENT_EXECUTOR.submit(() -> {
                 try {
                     if (TaskService.isServerStopping()) return;
@@ -880,6 +979,9 @@ public final class BotIdleHobbiesService {
                     LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
                 }
             });
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // Executor shut down during server stop — safe to ignore.
+            }
             return;
         }
 
@@ -893,29 +995,33 @@ public final class BotIdleHobbiesService {
         final String skillToRun = runSkillName;
         final boolean woodenFallback = Boolean.TRUE.equals(params.get("wooden_fallback"));
 
+        try {
         AMBIENT_EXECUTOR.submit(() -> {
             try {
                 if (TaskService.isServerStopping()) {
                     return;
                 }
                 if (requiresOperationalSurface(skillToRun)
+                        && !Boolean.TRUE.equals(params.get("_skip_surface_escape"))
                         && bot.getEntityWorld() instanceof ServerWorld sw
                         && !BotFleeService.isAtSurface(bot, sw)) {
-                    LOGGER.info("Idle hobby: {} not at surface — escaping before '{}'",
-                            bot.getName().getString(), skillToRun);
-                    if (!BotFleeService.ensureAtSurface(bot, sw)) {
-                        LOGGER.warn("Idle hobby: {} could not reach surface, skipping '{}'",
+                    if (!BotFleeService.isAtSurface(bot, sw)) {
+                        LOGGER.info("Idle hobby: {} not at surface — escaping before '{}'",
                                 bot.getName().getString(), skillToRun);
-                        server.execute(() -> {
-                            if (!bot.isRemoved() && bot.isAlive()) {
-                                NEXT_DECISION_TICK.put(botUuid, server.getTicks() + 600L);
-                                if (woodenFallback) {
-                                    NEXT_WOODEN_FALLBACK_TICK.put(botUuid, server.getTicks() + 600L);
+                        if (!BotFleeService.ensureAtSurfaceForHobby(bot, sw)) {
+                            LOGGER.warn("Idle hobby: {} could not reach surface, skipping '{}'",
+                                    bot.getName().getString(), skillToRun);
+                            server.execute(() -> {
+                                if (!bot.isRemoved() && bot.isAlive()) {
+                                    NEXT_DECISION_TICK.put(botUuid, server.getTicks() + 600L);
+                                    if (woodenFallback) {
+                                        NEXT_WOODEN_FALLBACK_TICK.put(botUuid, server.getTicks() + 600L);
+                                    }
                                 }
-                            }
-                        });
-                        LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
-                        return;
+                            });
+                            LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                            return;
+                        }
                     }
                 }
                 SkillContext skillContext = new SkillContext(botSource, SharedStateService.safeSharedState("idle-hobbies"), params, botSource);
@@ -962,6 +1068,9 @@ public final class BotIdleHobbiesService {
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
             }
         });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // Executor shut down during server stop — safe to ignore.
+        }
     }
 
     private static boolean requiresOperationalSurface(String skillName) {
@@ -1180,6 +1289,60 @@ public final class BotIdleHobbiesService {
             }
         }
         return false;
+    }
+
+    private static boolean hasNearbyBed(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) return false;
+        int r = Math.max(1, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -4, -r), origin.add(r, 4, r))) {
+            if (!world.isChunkLoaded(pos)) continue;
+            if (world.getBlockState(pos).isIn(BlockTags.BEDS)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the mining hobby should be suppressed at the bot's current location.
+     * Gates: near base (R1), near village (R2), near surface while underground (R5).
+     */
+    private static boolean shouldSuppressMiningHobby(ServerPlayerEntity bot, ServerWorld world) {
+        BlockPos pos = bot.getBlockPos();
+
+        // R1: Don't mine near any saved base
+        if (BotHomeService.isNearAnyBase(bot, 24.0)) return true;
+
+        // R2: Don't mine near villages (mapped or signal-detected)
+        if (MappedVillageService.isInsideMappedVillage(world, pos)
+                || MappedVillageService.isNearMappedVillage(world, pos, 8)
+                || SurvivalRecruitmentService.isVillageSignalNearby(world, pos)) {
+            return true;
+        }
+
+        // R5: If underground but close to the surface, prefer escape over mining
+        if (!BotFleeService.isAtSurface(bot, world)) {
+            int surfaceY = SafePositionService.getWalkableGroundY(world, bot.getBlockX(), bot.getBlockZ());
+            if (bot.getBlockY() >= surfaceY - 3) return true;
+            // Trees nearby = surface indicator; only check when near-ish surface to limit scan cost
+            if (bot.getBlockY() >= surfaceY - 6
+                    && TreeDetector.findNearestTree(bot, 8, 4, null).isPresent()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns true if the bot qualifies for underground night mining (R4):
+     * underground, nighttime, enough food, no nearby bed to sleep in.
+     */
+    private static boolean isUndergroundNightMiningCandidate(ServerPlayerEntity bot, ServerWorld world) {
+        if (BotFleeService.isAtSurface(bot, world)) return false;
+        if (world.isSkyVisible(bot.getBlockPos().up())) return false;
+        if (world.isDay() && !world.isThundering()) return false;
+        if (bot.getHungerManager().getFoodLevel() < 10) return false;
+        if (hasNearbyBed(world, bot.getBlockPos(), 16)) return false;
+        return true;
     }
 
     private static boolean hasNearbyStone(ServerWorld world, BlockPos origin, int radius) {

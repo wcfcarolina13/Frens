@@ -1869,13 +1869,14 @@ public final class BotActions {
 
     private static int findPreferredBlockItemSlot(ServerPlayerEntity bot, List<Item> prioritizedBlocks) {
         PlayerInventory inventory = bot.getInventory();
-        if (prioritizedBlocks != null) {
+        if (prioritizedBlocks != null && !prioritizedBlocks.isEmpty()) {
             for (Item item : prioritizedBlocks) {
                 int slot = findBlockItemSlot(inventory, stack -> stack.isOf(item));
                 if (slot != -1) {
                     return slot;
                 }
             }
+            return -1;
         }
         return findBlockItemSlot(inventory, stack -> true);
     }

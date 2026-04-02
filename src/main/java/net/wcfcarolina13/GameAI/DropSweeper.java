@@ -50,11 +50,11 @@ public final class DropSweeper {
                              double verticalRange,
                              int maxTargets,
                              long maxDurationMillis) {
-        LOGGER.info("Drop sweep initiated with radius={}, vRange={}, maxTargets={}, duration={}ms",
+        LOGGER.debug("Drop sweep initiated with radius={}, vRange={}, maxTargets={}, duration={}ms",
                 horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
         ServerPlayerEntity player = source.getPlayer();
         if (player != null) {
-            LOGGER.info("Bot is holding: {}", player.getMainHandStack().getItem().getName().getString());
+            LOGGER.debug("Drop sweep bot is holding: {}", player.getMainHandStack().getItem().getName().getString());
         }
         if (player == null) {
             LOGGER.debug("Drop sweep skipped: no bot player available.");
@@ -112,9 +112,8 @@ public final class DropSweeper {
                 break;
             }
 
-            LOGGER.info("Found {} drops, closest is {}.", excludedDrops.size() + 1, describeDrop(targetDrop));
-
             BlockPos dropBlock = targetDrop.getBlockPos().toImmutable();
+            LOGGER.debug("Drop sweep target {} selected near {}", describeDrop(targetDrop), dropBlock.toShortString());
             excludedDrops.add(targetDrop);
 
             double distanceSq = player.squaredDistanceTo(targetDrop);
@@ -140,7 +139,11 @@ public final class DropSweeper {
             // getting stuck in nudge retry loops for minutes on unreachable drops.
             MovementService.clearRecentWalkAttempt(player.getUuid());
             MovementService.MovementResult movement = MovementService.execute(source, player, plan, false, true, true, false);
-            LOGGER.info("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
+            if (movement.success()) {
+                LOGGER.debug("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
+            } else {
+                LOGGER.info("Drop sweep approach failed at {} ({})", dropPos.toShortString(), movement.detail());
+            }
             BotActions.stop(player);
             attempts++;
 
@@ -154,7 +157,7 @@ public final class DropSweeper {
                 );
                 if (distanceToDestinationSq > 9.0) {
                     success = false;
-                    LOGGER.info("Drop sweep movement ended {} blocks from {}", String.format("%.2f", Math.sqrt(distanceToDestinationSq)), checkPos);
+                    LOGGER.debug("Drop sweep movement ended {} blocks from {}", String.format("%.2f", Math.sqrt(distanceToDestinationSq)), checkPos);
                 }
             }
 
@@ -170,10 +173,10 @@ public final class DropSweeper {
                     if (targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED) {
                         LOGGER.info("Drop sweep manual nudge collected {} near {}", describeDrop(targetDrop), dropPos);
                     } else {
-                        LOGGER.warn("Drop sweep manual nudge near {} completed but item still present.", dropPos);
+                        LOGGER.info("Drop sweep manual nudge near {} completed but item still present.", dropPos);
                     }
                 } else {
-                    LOGGER.warn("Drop sweep manual nudge failed near {}", dropPos);
+                    LOGGER.info("Drop sweep manual nudge failed near {}", dropPos);
                 }
                 // If item is trapped inside a leaf block within reach, break the leaf to free it.
                 if (!targetDrop.isRemoved() && player.getEntityWorld() instanceof ServerWorld sweepWorld) {
@@ -185,7 +188,7 @@ public final class DropSweeper {
                     }
                 }
             } else {
-                LOGGER.warn("Drop sweep failed to approach {}: {}", dropPos, movement.detail());
+                LOGGER.info("Drop sweep failed to approach {}: {}", dropPos, movement.detail());
             }
         }
 
@@ -195,6 +198,7 @@ public final class DropSweeper {
     }
 
     private static ItemEntity findClosestDrop(ServerPlayerEntity player, ServerWorld world, double radius, double verticalRange, Set<ItemEntity> excludedDrops) {
+        Vec3d eyePos = player.getEyePos();
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
@@ -202,6 +206,21 @@ public final class DropSweeper {
                                 && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED
                                 && drop.getBlockY() - player.getBlockY() <= 4) // skip unreachable elevated drops
                 .stream()
+                .filter(drop -> {
+                    // Skip items behind solid blocks — raycast from bot eye to item.
+                    Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());
+                    net.minecraft.world.RaycastContext ctx = new net.minecraft.world.RaycastContext(
+                            eyePos, dropPos,
+                            net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
+                            net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                            player);
+                    net.minecraft.util.hit.BlockHitResult hit = world.raycast(ctx);
+                    if (hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+                        double hitDistSq = hit.getPos().squaredDistanceTo(dropPos);
+                        return hitDistSq <= 4.0; // within 2 blocks of item = probably reachable
+                    }
+                    return true;
+                })
                 .min(Comparator.comparingDouble(player::squaredDistanceTo))
                 .orElse(null);
     }
@@ -238,13 +257,24 @@ public final class DropSweeper {
         if (BundleService.packInventory(source, player, commander) && !isInventoryFull(player)) {
             return true;
         }
+        boolean chestStoreSucceeded = false;
         if (source != null) {
             boolean stored = attemptChestStore(source, player);
             if (stored && !isInventoryFull(player)) {
                 return true;
             }
+            chestStoreSucceeded = stored;
         }
         maybePlaceCraftingTableForBundle(player, source);
+        if (!isInventoryFull(player)) {
+            return true;
+        }
+        // Only drop items if chest storage partially worked (some items offloaded).
+        // If no viable offload target exists, dropping is futile — DropSweeper will
+        // immediately re-acquire the dropped items, causing an infinite cycle.
+        if (!chestStoreSucceeded) {
+            return false;
+        }
         java.util.Set<net.minecraft.item.Item> reserved = java.util.Set.of(
                 Items.LEATHER,
                 Items.STRING,
@@ -278,9 +308,14 @@ public final class DropSweeper {
         if (!(player.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        BlockPos origin = player.getBlockPos();
-        for (BlockPos chestPos : findNearbyChests(world, origin, 12, 6)) {
-            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, chestPos, DropSweeper::isChestOffloadCandidate);
+        for (ChestStoreService.StorageChestCandidate candidate : ChestStoreService.listDepositChestCandidates(
+                source,
+                player,
+                null,
+                12,
+                6,
+                140.0D * 140.0D)) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, candidate.pos(), DropSweeper::isChestOffloadCandidate);
             if (moved > 0) {
                 return true;
             }

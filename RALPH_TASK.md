@@ -1,53 +1,40 @@
 ---
-task: Construction parity across builders
+task: (none — backlog only)
 test_command: "./gradlew build -x test"
 ---
 
-# Task: Construction Reliability + Runtime Parity
+# Task: (No active task)
 
-Bring all existing construction abilities and their associated services to the same reliability and runtime baseline, using the best existing patterns from `FortifyVillageSkill`, shelter/hovel flows, and the generic construction services.
+No active Ralph criteria. Pick from the backlog below when starting a new iteration.
 
-## Active Criteria
+## Recent Session Notes (2026-03-31)
 
-- [ ] Establish a measurable parity baseline for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other construction-adjacent block-placement paths
-- [ ] Standardize shared construction reach/scaffold behavior in the generic service layer (feet-based reach, LOS-aware recovery, scaffold stance rules, approximate-arrival handling, and shared tuning constants)
-- [ ] Remove remaining generic schematic bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService` (including tall-structure scaffold gating and scaffold stance/headroom failures)
-- [ ] Move shelter / hovel / burrow onto the same shared reach/scaffold semantics without regressing their geometry-specific behavior
-- [ ] Preserve fortify-specific hull/gate/moat/tower behavior while extracting only the generic mechanics worth sharing
-- [ ] Verify parity in-game with representative build scenarios and record metrics/results
-
-## Success Criteria
-
-All active criteria above marked `[x]`, with build verification plus in-game evidence that construction paths converge on the same failure taxonomy and no longer diverge badly on scaffold usage, no-LOS retry loops, or wall-hugging stalls.
-
-## Notes
-
-- Treat `FortifyVillageSkill` as the behavioral reference for elevated reach/scaffold recovery
-- Standardize generic mechanics in shared construction services; do not flatten fortify-specific policy into generic code
-- Build must pass (`./gradlew build -x test`) after each implementation slice
-- After code changes, deploy the built JAR to PrismLauncher for immediate playtesting
-
-### In-Flight: FortifyVillageSkill Refactoring — Phase 1 Complete, Phase 2 Blocked
-
-**Completed (commits `2ee2253`, `38a3526`, and current session):**
-- Extracted `FortifyEntombmentHelper.java` (411 lines) — pure state tracking, 21 methods, no skill dependencies
-- Extracted `FortifySkillTypes.java` (~300 lines) — 9 enums, 16 records, 5 inner classes
-  - Enums: `FortifyNavMode`, `FortifyCleanupKind`, `CleanupState`, `NavBreakRejectReason`, `ReplaceFailureKind`, `TowerPillarOutcome`, `TowerStepOutcome`, `TowerReturnOutcome`, `TowerScaffoldSideOutcome`
-  - Classes: `DeferredCleanupTask`, `FortifyCarveSession`, `FortifyNavRuntimeScope`, `TowerNavAttemptState`, `ScaffoldLedger`
-- Extracted `FortifyCleanupHelper.java` (143 lines) — deferred cleanup queue, throttle state, 9 pure management methods
-  - Methods: `queue`, `queueCarveRepairs`, `noteSkip`, `noteImmediateRetry`, `noteResolved`, `checkAndUpdateThrottle`, `isForcedContext`, `allowActiveRecovery`, static utilities
-- Skill is now **9161 lines** (was 9901 — reduced by **740 lines** across 3 extraction sessions)
-
-**Why Phase 2 is blocked:**
-- Cleanup, tower, gate, and nav sections are deeply coupled — most methods call 5–15 other private skill methods (`walkToTarget`, `digBlock`, `sleepQuiet`, carve sessions, protected positions, nav scopes)
-- Entombment was uniquely extractable as pure state-tracking with no outgoing calls to other skill methods
-- Remaining sections would need a `FortifySharedContext` shared-state object or a `FortifySkillContext` callback interface (~15 methods) before they can be split
-
-**Next step when resuming refactoring:**
-- Design `FortifySharedContext` (mutable shared state struct) or `FortifySkillContext` callback interface
-- Decide which approach, then extract one section (suggest cleanup or tower first as most self-contained after nav refs are abstracted)
-
----
+- Implemented the critical shallow-hole navigation fix: the main pathfinder now supports 8-direction local movement (including diagonal step-ups/step-downs with anti-corner-cutting), the movement follower preserves nearby diagonal/vertical lead-in hops instead of collapsing them into the same bad wall-hump, and `ReturnBaseStuckService` now promotes discovered natural step-ups into a temporary local escape target instead of just nudging once and immediately losing control back to the old blocked destination.
+- In-game validation now confirms the shallow-hole work is materially better: recent Prism logs show multi-hop `movement local escape ... route=...` selections and successful terrain progress instead of the original repeated wall-jump failure loop. The remaining navigation issue shifted from "cannot escape" to "movement still feels too micro-step / exact-hop heavy."
+- Follow-up pass landed on top of that validated route escape:
+  - `MovementService` now keeps a short-lived commitment to a successful local route so ordinary path following stays fluid instead of re-triggering precision local escape on every next segment.
+  - same-level raw lead-in segments are merged into longer runs when the bot is no longer in trap-like terrain.
+  - woodcut trunk-entry carving no longer digs the support block under the stance by default, reducing the 1-block pits left around harvested trees.
+  - per-tree maintenance now includes a narrow terrain-restore hook for tracked entry repairs.
+  - sapling replanting returns to planting range after drop sweep/cleanup and idle woodcut no longer disables replanting.
+- Implemented woodcut utility-placement recovery: when the bot needs to place a crafting table or chest while stuck in a cramped hole, it now tries to clear a minimal safe pocket from soft-natural blocks or bot scaffold, and can do a short local relocation before giving up.
+- Tightened woodcut exact-stand occupancy: trunk-entry movement now requires real block occupancy, runs bounded recovery on false-positive `"already at destination"` / near-stand movement results, and performs short post-failure stance recovery so the bot does not resume from the same bad hole stance.
+- Follow-up tuning pass landed:
+  - faster escalation out of repeated shallow-hole / exact-stand stalls
+  - more frequent and broader woodcut drop sweeping
+  - reduced log spam for utility-placement rejection scans, drop-sweep tactical traces, and expected woodcut/crafting pursuit misses
+- Verified this session with:
+  - `./gradlew compileJava`
+  - `./gradlew remapJar`
+  - `./gradlew test --tests 'net.wcfcarolina13.PathFinding.BaritoneStylePathFinderTest' --tests 'net.wcfcarolina13.PathFinding.PathFinderSegmentTest' --tests 'net.wcfcarolina13.GameAI.services.MovementServiceLocalEscapeHeuristicsTest'`
+- Jar deployment status:
+  - the latest navigation build with diagonal/local shallow-hole escape fixes and the movement-smoothing / replant / terrain-preservation follow-up is copied to the Prism `1.21.11` and `1.21.10` instances
+  - `1.21.10 TEST` still has the older jar and was intentionally not touched during the latest deploy
+- Best next validation target:
+  - in-game regression run focused on:
+    - shallow pits with diagonal one-block exits, verifying fewer repeated micro-hop local-escape restarts
+    - woodcut trunk-entry cases that previously carved `grass_block` / `dirt` support under the stand
+    - standalone and idle woodcut runs, verifying `Planted sapling at ...` or explicit replant skip summaries after per-tree cleanup
 
 ## Ralph Instructions
 
@@ -61,55 +48,31 @@ All active criteria above marked `[x]`, with build verification plus in-game evi
 
 ---
 
-# Recently Completed: Spells Tab, Storage Screen, Fast Travel (2026-03-15)
-
-- [x] **Spells promoted to top-level tab** — 4th tab in inventory overlay (Actions | Dialogue | ✦/Spells | Admin). Three spell entries + Remote Inventory with hover tooltips. Access gating is bidirectional (player OR bot artifacts).
-- [x] **Remote Guidance wired to fast travel** — `beginDelayedTravel()` replaces `setReturnToBase()`. Bot disappears and reappears at destination (~1s/chunk). Always uses fast travel.
-- [x] **Base picker in NavigationConfirmScreen** — Guidance mode shows "Guide to me", "Home (label)", plus all saved bases. Reuses existing `RequestBasesPayload`/`BasesListPayload`.
-- [x] **Storage screen: contents snapshot** — `ChestRecord` stores `List<ItemSnapshot>` captured after every deposit/withdrawal. Inline summary + hover tooltip in BotStorageScreen.
-- [x] **Smart chest collect** — Beyond 100 blocks, bot fast-travels to chest. Under 100, walks using `setReturnToBase` (follow mode with stuck-escape). Bot selector dropdown fixed, button tooltips added.
-- [x] **Bidirectional enchanting table access** — Bot near enchanting table grants spell access (both client and server checks).
-- [x] **"Delayed travel" → "fast travel" rename** — All user-facing text updated.
-
----
-
-# Recently Completed: BaseManagerScreen Feedback Fixes (2026-03-13)
-
-- [x] **Bases screen silent failures fixed** — All 14+ button handlers in `BaseManagerScreen.java` now show a transient status message (2.5s, yellow/red/green) instead of silently returning when preconditions aren't met.
-- [x] **Empty-state list hint** — When no bases are saved, the list area now shows "No bases saved yet. Type a name above, then click 'Set here'." so users understand how to create their first base.
-- [x] **Name field placeholder** — Text field now shows "Base name or radius..." hint so users know to type there before clicking "Set here" or "Set Radius".
-- [x] **All handlers covered**: `sendSetHere`, `sendRemoveSelected`, `sendRenameSelected`, `sendSetRadiusSelected`, `sendSetHomeSelected`, `sendGoToSelected`, `sendResumeWall`, `sendPatchWall`, `sendAutoPatchWall`, `sendWallStatus`, `sendDigMoat`, `sendDriftCheckWall`, `sendExpandWall`, `sendClaimWall`, `sendUnclaimWall`, `sendPermitWallAccess`, `sendRevokeWallAccess`.
-
----
-
-# Recently Completed: Navigation + Combat + Companion Overhaul (2026-03-13)
-
-All criteria met and verified in-game:
-
-- [x] **Ranged kill drop recovery** — Bots record mob death positions via AFTER_DEATH hook (all bot kills). Post-combat sweep walks to kill sites with items (cap 24, 12-block radius, waypoint-step navigation for terrain).
-- [x] **Reachability probe** — `PathFinder.canReach()` uses Baritone 150-200ms timeout. Integrated into come-early-exit fallback and `triggerComeRecoverySkill` pre-check to skip mining when surface path exists.
-- [x] **Simplified regroup** — `/bot regroup` uses pure pathfinding (no mining/pillar). Snapshots player position, stops with contextual wait message if player moves >128 blocks.
-- [x] **Conservative surface detection** — `isOnSurface()` now requires ≥2 of 4 cardinal neighbors to also be at surface Y. 1×1 shaft openings no longer trigger false surface detection.
-- [x] **Kill position accumulation fix** — Kill positions and combat center are no longer wiped every tick while hostiles exist. `cancelPendingSweep()` only removes the timer; full clear only on sweep completion or bot death.
-- [x] **Companion spell bidirectional tools** — `canUseCompanionCome/Summon/Home` check both commander AND bot inventories for Eye of Ender, Ender Pearl, Wizard's Tome. Immersive themed messages and sounds per tool type.
-- [x] **Questing-mode base navigation** — Non-HOME bases >256 blocks require compass/map. HOME always reachable. Recovery skills enabled during base nav. `BotHomeService.resolvePreferredHomeBase` made public.
-- [x] **Opportunistic idle drop-sweep** — After 15s idle (FOLLOW/STAY/IDLE mode, no hostiles), bot sweeps ground items within 20 blocks. Cancels if player moves >1 block (block-distance, not sub-pixel). Committed target tracking prevents flip-flopping with follow mode.
-- [x] **Pillar-up escape** — Verified working in-game.
-
----
-
 # Backlog
 
 Future work items, organized by priority. Not active Ralph criteria — these are candidates for future RALPH_TASK.md iterations.
 
 ## P1 — High
+
 - [ ] **Elder Scrolls-style dialogue menu**: Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal**: Conversation topics, quests, important information with simple filter search
+- [ ] **Drop-sweep cobblestone loop**: During patrol, drop sweep detects full inventory → tries bundle (no leather) → tries chest (none) → drops 64x Cobblestone "to free space" → sweep picks it back up → repeats every ~7s indefinitely. Fix: skip "drop items to make room" when no reachable offload target exists. Log evidence: `"Store: no chest in inventory and couldn't craft one."` → `"Dropped 64x Cobblestone to free inventory space."` → sweep picks it up → cycle. See `ForkJoinPool.commonPool-worker-1` thread in logs 22:45:21–22:46:08 (2026-03-28).
+- [ ] **Escape-with-full-inventory**: Guard/patrol stuck escape (pillar via `ensureAtSurfaceForHobby`) fails when inventory has no room for scaffold blocks — `"pillar recovery placed no blocks"` repeated every ~12s. Bot stuck in 1-block hole with full cobblestone inventory. Consider: temporarily drop a non-essential stack, pillar out, pick it back up. Or: use cobblestone directly as scaffold material.
 
 ## P2 — Medium
 
+### Inventory & Storage
+
+- [ ] **Furnace offload fallback**: When no chest is available but furnaces are nearby, dump fuel-eligible items (leaves, sticks, planks) into the fuel slot and smeltable items into the input slot. Especially useful during patrol when bot accumulates items with no chest infrastructure.
+- [ ] **Craft chest from wood**: When inventory is full and bot has logs/planks but no chest, craft one (8 planks) and place it. Currently: try bundle → try chest → give up → drop items. Missing step: "craft chest if materials available."
+- [ ] Shift-click, double-click, drag support in inventory UI
+- [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
+- [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full
+- [ ] Chest management overhaul: locking/access policy, categorization rules, organization modes
+
 ### Follow / Come
-- [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, interaction with other tasks)
+
+- [ ] **Guard/patrol verification**: In-game tests for radius handling, stuck escape in various terrain, interaction with combat and drop sweeps (partially done 2026-03-28: UI radius controls, stuck escape, HUD mode display)
 - [ ] **Come tool crafting (verification)**: Verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit
 - [ ] **Follow stability (verification)**: Core planner/backoff/waypoint recovery runtime verification across dimensions/terrain
 - [ ] **Deterministic follow/come assertions (verification)**: Run `FOLLOW_COME_ASSERT_RUNBOOK.md` and record pass/fail outcomes
@@ -118,6 +81,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
   - [ ] In-game check: while following, place a 1x1 deep shaft in the movement lane; verify bot sidesteps/stops
 
 ### Shelter (Redo Needed)
+
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes
 - [ ] **ScaffoldService extraction**: Centralize pillaring/scaffolding + ladder placement into a reusable service
 - [ ] **LeafClearService extraction**: Centralize leaf-block clearing so other skills can reuse it
@@ -126,19 +90,22 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Shelter chest workflow**: Withdraw/deposit resources and place chests inside planned interior
 - [ ] **Burrow "descend-stripmine-descend"**: Restore intended method
 
+### Construction (Blocked — formerly active task)
+
+- [ ] **Construction parity baseline**: Establish measurable parity for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other block-placement paths
+- [ ] **Shared construction reach/scaffold**: Standardize feet-based reach, LOS-aware recovery, scaffold stance rules in the generic service layer
+- [ ] **Generic schematic bottlenecks**: Remove remaining bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService`
+- [ ] **Shelter onto shared semantics**: Move shelter/hovel/burrow onto shared reach/scaffold without regressing geometry-specific behavior
+- [ ] **FortifyVillageSkill Phase 2 refactoring**: Design `FortifySharedContext` callback interface (~15 methods), then extract cleanup/tower sections. Phase 1 complete (extracted EntombmentHelper, SkillTypes, CleanupHelper, LayoutHelper, EscapeHelper — reduced by ~740 lines)
+
 ### Commands / UX
+
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed
 - [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments
 
-### Inventory & Items
-- [ ] Shift-click, double-click, drag support
-- [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
-- [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full
-- [ ] Chest management overhaul: locking/access policy, categorization rules, organization modes
-
 ### Navigation & Movement
-- [ ] Swimming parity (surface and underwater)
-- [ ] Verify swimming behavior matches survival movement
+
+- [ ] Swimming parity (surface and underwater, verify behavior matches survival movement)
 - [ ] Boat support (enter, exit, navigate)
 - [ ] Test fishing from a boat
 - [ ] Portal following (Nether, End)
@@ -148,6 +115,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Add shelves and containers to no-break list
 
 ### Fishing
+
 - [ ] Verify leaf-block clearing when navigating far from shoreline
 - [ ] Verify fishing from higher vertical positions (cliffs/piers)
 - [ ] In-game check: trigger `/bot fish` while bot is swimming/submerged and verify it relocates to dry shore before first cast
@@ -155,6 +123,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Water location memory**: Store/recall known water locations
 
 ### Combat & Safety
+
 - [ ] Creeper evasion (sprint away when unarmed)
 - [ ] Protected build zones (no-grief areas)
 - [ ] Fight with teammates
@@ -164,36 +133,37 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Ride sync leashed persistence: tethered after disconnect/rejoin
 
 ### Crafting & Building
-- [ ] Place and use crafting table, furnace, chest
+
 - [ ] Craft common items (armor, torches, etc.)
 - [ ] Crafting helper: detect required inputs in bot inventory and report missing items
 - [ ] Crafting table craft: craft when inputs exist; announce success or missing items in chat
-- [ ] Placement: place crafted table near commander safely
+- [ ] Placement: place crafted table/furnace/chest near commander safely
 - [ ] Build walls (specified materials, dimensions)
 - [ ] Simple 2-person house
 - [ ] Block placement primitives
 - [ ] Recipe awareness: refuse and explain if commander lacks recipe
 
 ### Farming & Survival
-- [ ] **Hunger-aware task interruption**: Bot should stop working (e.g. auto-patching, fortifying) when starving instead of working until death. HungerService should trigger a food acquisition flow: (1) search nearby chests/barrels for food, (2) ~~find raw food and cook it in a furnace/smoker/campfire~~ DONE (cookAllFoodSync), or (3) ~~hunt or fish to obtain food to cook~~ DONE (auto-hunt inventory check). Resume the interrupted task after eating.
+
+- [ ] **Hunger-aware task interruption**: Bot should stop working when starving instead of working until death. HungerService should trigger food acquisition: (1) search chests/barrels, (2) cook raw food (DONE: cookAllFoodSync), (3) hunt/fish (DONE: auto-hunt). Resume after eating.
 - [ ] Till soil, plant seeds, harvest, replant
-- [x] Furnace usage with various fuels — cookAllFoodSync handles fuel auto-selection (leaf litter > leaves > logs), refueling mid-batch, multi-batch cycling (2026-03-27)
 - [ ] Create infinite water source
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
 - [ ] **Farm irrigation leak patching**: Detect and patch leakage
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
-- [ ] **HealingService cooked food preference**: Auto-eat should prefer cooked over raw food (better saturation, saves raw for cooking)
+- [ ] **HealingService cooked food preference**: Auto-eat should prefer cooked over raw food
 - [ ] **Smoker preference for food cooking**: resolveFurnaceTarget should prefer smokers for food-only cooking (2x faster)
 - [ ] **Fuel acquisition fallback**: If no fuel in inventory, attempt mini leaf-litter collection before giving up on cooking
 
 ### Hunting — Multi-Day Self-Sufficiency (Future Phase)
 
-- [ ] **Hunt camp shelter**: Bot builds a small hut with a bed and door at hunting grounds for multi-day hunts. Falls back to placeholder blocks (e.g. fence gate) if no door materials available. Keeps builds small and tidy.
-- [ ] **Hunt self-sufficient resource gathering**: Bot gathers wood, dirt, or cobblestone (whichever is most abundant at the hunting grounds) for camp building and chest crafting. Keeps quarrying clean and contained rather than sprawling.
+- [ ] **Hunt camp shelter**: Bot builds a small hut with a bed and door at hunting grounds for multi-day hunts
+- [ ] **Hunt self-sufficient resource gathering**: Bot gathers wood/dirt/cobblestone for camp building and chest crafting
 
 ### Mining & Resource Gathering
+
 - [ ] Tree chopping (safe climbing, late drop collection)
 - [ ] Strip mining with safety offset (sand, gravel, lava)
 - [ ] Cave/structure detection and reporting
@@ -202,20 +172,24 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 ## P3 — Low
 
 ### Multi-Bot Features
+
 - [ ] Per-bot chat behaviors/personas (beyond routing)
 - [ ] Broadcast command UX polish (feedback per bot)
 - [ ] Shared job coordination (queue fan-out, conflict handling)
 - [ ] Resume prompts respect group commands
 
 ### Advanced Combat
+
 - [ ] PVP sparring mode
 - [ ] Army formations (line, grid)
 - [ ] Archer positioning
 - [ ] Horse flank maneuvers
 
 ### Quality of Life
+
 - [ ] Command queuing (multi-step instructions)
 - [ ] Voiced banter variants for follow-adventure lines
 
 ## LLM Integration (Future)
+
 - [ ] Phase 1+: Core architecture, toggles, identity & memory, routing, performance, social awareness, integration & testing

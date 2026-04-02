@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SkillPreferences {
 
     private static final Map<UUID, Boolean> TELEPORT_PREFS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> FOLLOW_TELEPORT_PREFS = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> PAUSE_ON_FULL_INV = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> TELEPORT_DROP_SWEEP = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> EMERGENCY_TACTICS = new ConcurrentHashMap<>();
@@ -44,6 +45,20 @@ public final class SkillPreferences {
             return;
         }
         TELEPORT_PREFS.put(uuid, enabled);
+    }
+
+    public static boolean followTeleport(ServerPlayerEntity player) {
+        return player != null && followTeleport(player.getUuid());
+    }
+
+    public static boolean followTeleport(UUID uuid) {
+        if (uuid == null) return false;
+        return FOLLOW_TELEPORT_PREFS.getOrDefault(uuid, Boolean.FALSE);
+    }
+
+    public static void setFollowTeleport(UUID uuid, boolean enabled) {
+        if (uuid == null) return;
+        FOLLOW_TELEPORT_PREFS.put(uuid, enabled);
     }
 
     public static boolean pauseOnFullInventory(ServerPlayerEntity player) {

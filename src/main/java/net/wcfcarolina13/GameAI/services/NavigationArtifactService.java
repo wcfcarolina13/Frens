@@ -533,18 +533,23 @@ public final class NavigationArtifactService {
             // ── Underground gate (requires Map+Compass or Tier 2+) ──────
             ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
             if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
-                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
-                double mult = artifactDelayMultiplier(bot, owner);
-                if (mult <= 1.0) {
-                    // Tier 2+ artifacts — proceed normally, no penalty
-                } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                        && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
-                    // Map + Compass on bot — allow but with 2x delay (underground is harder)
-                    delayTicks = (int) (delayTicks * 2.0);
-                } else {
-                    notifyOwner(server, ownerUuid,
-                            "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
-                    return false;
+                // Check if bot is actually underground vs just under tree canopy
+                int surfaceY = SafePositionService.getWalkableGroundY(currentWorld, bot.getBlockX(), bot.getBlockZ());
+                boolean nearSurface = bot.getBlockPos().getY() >= surfaceY - 4;
+                if (!nearSurface) {
+                    ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+                    double mult = artifactDelayMultiplier(bot, owner);
+                    if (mult <= 1.0) {
+                        // Tier 2+ artifacts — proceed normally, no penalty
+                    } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                            && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
+                        // Map + Compass on bot — allow but with 2x delay (underground is harder)
+                        delayTicks = (int) (delayTicks * 2.0);
+                    } else {
+                        notifyOwner(server, ownerUuid,
+                                "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
+                        return false;
+                    }
                 }
             }
         }
@@ -676,12 +681,16 @@ public final class NavigationArtifactService {
             }
             ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
             if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
-                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
-                double mult = artifactDelayMultiplier(bot, owner);
-                if (mult > 1.0
-                        && !(hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                        && hasArtifact(bot, net.minecraft.item.Items.COMPASS))) {
-                    return false;
+                int surfaceY = SafePositionService.getWalkableGroundY(currentWorld, bot.getBlockX(), bot.getBlockZ());
+                boolean nearSurface = bot.getBlockPos().getY() >= surfaceY - 4;
+                if (!nearSurface) {
+                    ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+                    double mult = artifactDelayMultiplier(bot, owner);
+                    if (mult > 1.0
+                            && !(hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                            && hasArtifact(bot, net.minecraft.item.Items.COMPASS))) {
+                        return false;
+                    }
                 }
             }
         }

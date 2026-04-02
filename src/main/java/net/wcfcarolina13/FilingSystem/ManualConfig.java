@@ -1193,6 +1193,7 @@ public class ManualConfig {
         private String spawnMode = "admin";
         private String gameMode = "survival";
         private boolean teleportDuringSkills = false;
+        private boolean followTeleport = false;
         private boolean pauseOnFullInventory;
         private boolean teleportDuringDropSweep = false;
         private boolean llmEnabled = false;
@@ -1272,6 +1273,9 @@ public class ManualConfig {
         public void setTeleportDuringSkills(boolean teleportDuringSkills) {
             this.teleportDuringSkills = teleportDuringSkills;
         }
+
+        public boolean isFollowTeleport() { return followTeleport; }
+        public void setFollowTeleport(boolean v) { this.followTeleport = v; }
 
         public boolean isPauseOnFullInventory() {
             return pauseOnFullInventory;

@@ -161,6 +161,25 @@ public class MiningTool {
                         held == null || held.isEmpty() ? "empty-hand" : held.getItem().toString(),
                         bot.getAbilities().creativeMode);
             }
+
+            // Harvest-level protection: refuse to mine valuable ores with inadequate tools.
+            // Applies to ALL callers (mining skills, break-free, surface recovery, hobbies).
+            if (net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.isHarvestProtectedOre(blockState)) {
+                ItemStack heldTool = bot.getMainHandStack();
+                if (!net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.canToolHarvest(heldTool, blockState)) {
+                    String oreName = net.minecraft.registry.Registries.BLOCK.getId(blockState.getBlock()).getPath()
+                            .replace('_', ' ');
+                    String toolName = heldTool.isEmpty() ? "bare hands"
+                            : net.minecraft.registry.Registries.ITEM.getId(heldTool.getItem()).getPath()
+                                    .replace('_', ' ');
+                    LOGGER.warn("Refusing to mine {} at {} with {} — inadequate tool",
+                            oreName, targetBlockPos.toShortString(), toolName);
+                    miningResult.complete("⚠️ Cannot mine " + oreName
+                            + ": " + toolName + " cannot harvest it. Need a better tool.");
+                    return miningResult;
+                }
+            }
+
             bot.swingHand(Hand.MAIN_HAND);
 
             float delta = blockState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);

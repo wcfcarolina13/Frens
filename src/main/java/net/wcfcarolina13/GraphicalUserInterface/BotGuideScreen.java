@@ -794,6 +794,22 @@ public final class BotGuideScreen extends Screen {
                         "trail escort companion"
                 ),
                 new GuideTopic(
+                        "settings_follow_teleport",
+                        "Settings",
+                        "Follow Teleport",
+                        "Wolf-style catch-up teleport during follow mode.",
+                        List.of(
+                                "When enabled, the bot teleports near you if it falls more than 15 blocks behind, gets stuck for 3 seconds, or loses vertical contact (10+ block Y gap).",
+                                "This only affects follow mode — it does not enable teleport during skills, sweeps, or other behaviors.",
+                                "The bot finds a safe spot behind you, so it won't teleport into lava or off cliffs.",
+                                "Toggle in Bot Controls > Behavior > Follow Teleport.",
+                                "Admins can control which players see this toggle in Player Settings."
+                        ),
+                        "",
+                        "",
+                        "follow teleport wolf catch-up warp tp stuck lost"
+                ),
+                new GuideTopic(
                         "move_come",
                         "Movement",
                     "Regroup",
@@ -850,9 +866,9 @@ public final class BotGuideScreen extends Screen {
                         "gather_woodcut",
                         "Gathering",
                         "Woodcut",
-                        "Cuts trees and gathers logs with configurable tree count.",
+                        "Clears nearby woodcut targets in the local area with a configurable minimum count.",
                         List.of(
-                                "Use +/- to set how many trees to cut.",
+                                "Use +/- to set the minimum number of targets to clear before checking whether the area is exhausted.",
                                 "Use Cleanup after large runs to gather leftovers quickly."
                         ),
                         "bot skill woodcut <count> " + target,
@@ -873,9 +889,23 @@ public final class BotGuideScreen extends Screen {
                         "sheep wool"
                 ),
                 new GuideTopic(
+                        "gather_leaf_litter",
+                        "Gathering",
+                        "Leaf Litter",
+                        "Collects leaf litter from the ground for cheap furnace fuel.",
+                        List.of(
+                                "Works best in forested biomes where leaf litter is abundant.",
+                                "Leaf litter is the cheapest fuel — always preferred over logs or coal.",
+                                "Manual command collects up to a full stack; idle hobby collects a few."
+                        ),
+                        "bot skill leaf_litter " + target,
+                        "Actions menu",
+                        "leaf litter fuel kindling fire forest"
+                ),
+                new GuideTopic(
                         "farm",
                         "Farming",
-                        "Farm",
+                        "Build Farm",
                         "Builds and plants a small farm with irrigation.",
                         List.of(
                                 "Chooses a site, prepares tilled rows, and handles irrigation.",
@@ -883,7 +913,33 @@ public final class BotGuideScreen extends Screen {
                         ),
                         "bot skill farm " + target,
                         "No keybind by default",
-                        "crop irrigation agriculture"
+                        "crop irrigation agriculture build"
+                ),
+                new GuideTopic(
+                        "plant",
+                        "Farming",
+                        "Plant Seeds",
+                        "Plants seeds on any empty tilled soil nearby.",
+                        List.of(
+                                "Scans a 16-block radius for empty farmland and plants available seeds.",
+                                "Supports wheat, beetroot, melon, pumpkin, potato, and carrot."
+                        ),
+                        "bot skill plant " + target,
+                        "No keybind by default",
+                        "seed plant crop sow farming"
+                ),
+                new GuideTopic(
+                        "harvest",
+                        "Farming",
+                        "Harvest Crops",
+                        "Harvests fully mature crops without damaging the soil.",
+                        List.of(
+                                "Scans a 16-block radius for ripe crops on farmland and carefully breaks them.",
+                                "Sneaks to avoid trampling tilled soil and picks up drops."
+                        ),
+                        "bot skill harvest " + target,
+                        "No keybind by default",
+                        "harvest reap crop gather farming mature"
                 ),
                 new GuideTopic(
                         "mine_dirt",

@@ -48,7 +48,7 @@ public final class BotTaskPeekNetworkManager {
         ServerPlayerEntity bot = server.getPlayerManager() != null ? server.getPlayerManager().getPlayer(botUuid) : null;
         if (bot == null || bot.isRemoved() || !BotEventHandler.isRegisteredBot(bot)) {
             ServerPlayNetworking.send(requester,
-                    new BotTaskPeekStatusPayload(botUuid.toString(), "bot", false, false, false, ""));
+                    new BotTaskPeekStatusPayload(botUuid.toString(), "bot", false, false, false, "", ""));
             return;
         }
 
@@ -68,8 +68,11 @@ public final class BotTaskPeekNetworkManager {
             }
         }
 
+        BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+        String modeName = mode != null && mode != BotEventHandler.Mode.IDLE ? mode.name() : "";
+
         String alias = bot.getName() != null ? bot.getName().getString() : "bot";
         ServerPlayNetworking.send(requester,
-                new BotTaskPeekStatusPayload(botUuid.toString(), alias, active, paused, returningHome, taskLabel));
+                new BotTaskPeekStatusPayload(botUuid.toString(), alias, active, paused, returningHome, taskLabel, modeName));
     }
 }

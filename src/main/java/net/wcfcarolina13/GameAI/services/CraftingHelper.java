@@ -1,7 +1,9 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -14,18 +16,24 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
+import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.List;
 import java.util.ArrayList;
@@ -33,6 +41,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 /**
@@ -90,7 +99,109 @@ public final class CraftingHelper {
     private static final Map<UUID, Long> CRAFT_TABLE_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_MSG_COOLDOWN_MS = 30_000L;
 
+    // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
+    private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CRAFT_TABLE_CRAFT_COOLDOWN_MS = 60_000L;
+    private static final int LOCAL_PLACEMENT_RELOCATION_RADIUS = 4;
+    private static final int UTILITY_PLACEMENT_REJECTION_SAMPLE_LIMIT = 3;
+    private static final Set<net.minecraft.block.Block> SOFT_PLACEMENT_BLOCKS = Set.of(
+            Blocks.SNOW,
+            Blocks.SNOW_BLOCK,
+            Blocks.GRASS_BLOCK,
+            Blocks.DIRT_PATH,
+            Blocks.GRAVEL,
+            Blocks.SAND,
+            Blocks.RED_SAND,
+            Blocks.SHORT_GRASS,
+            Blocks.TALL_GRASS,
+            Blocks.FERN,
+            Blocks.LARGE_FERN,
+            Blocks.LEAF_LITTER
+    );
+
     private record WorldPos(net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey, BlockPos pos) {}
+    static record PreparedPlacement(BlockPos placePos,
+                                    BlockPos standPos,
+                                    boolean carvedPocket,
+                                    boolean relocated,
+                                    String detail) {}
+    private static final class PlacementAttemptLog {
+        private final String label;
+        private final BlockPos origin;
+        private final Map<String, Integer> rejectionCounts = new LinkedHashMap<>();
+        private final List<String> rejectionSamples = new ArrayList<>();
+        private int clearedCells;
+        private BlockPos relocationStand;
+        private boolean emitted;
+
+        private PlacementAttemptLog(String label, BlockPos origin) {
+            this.label = label;
+            this.origin = origin == null ? null : origin.toImmutable();
+        }
+
+        private void reject(BlockPos pos, String reason) {
+            if (reason == null || reason.isBlank()) {
+                reason = "unknown";
+            }
+            rejectionCounts.merge(reason, 1, Integer::sum);
+            if (pos != null && rejectionSamples.size() < UTILITY_PLACEMENT_REJECTION_SAMPLE_LIMIT) {
+                rejectionSamples.add(pos.toShortString() + ":" + reason);
+            }
+        }
+
+        private void noteClearedCell() {
+            clearedCells++;
+        }
+
+        private void noteRelocation(BlockPos stand) {
+            if (stand != null) {
+                relocationStand = stand.toImmutable();
+            }
+        }
+
+        private void flush(String outcome, PreparedPlacement prepared, BlockPos botPos, boolean warnOnFailure) {
+            if (emitted) {
+                return;
+            }
+            emitted = true;
+            boolean interesting = !rejectionCounts.isEmpty()
+                    || clearedCells > 0
+                    || relocationStand != null
+                    || warnOnFailure;
+            if (!interesting) {
+                return;
+            }
+            String place = prepared != null && prepared.placePos() != null ? prepared.placePos().toShortString() : "none";
+            String stand = prepared != null && prepared.standPos() != null ? prepared.standPos().toShortString() : "none";
+            String bot = botPos != null ? botPos.toShortString() : "unknown";
+            String relocation = relocationStand != null ? relocationStand.toShortString() : "none";
+            if (warnOnFailure) {
+                LOGGER.warn("Utility placement summary [{}]: outcome={} origin={} bot={} place={} stand={} relocation={} clearedCells={} rejectionCounts={} samples={}",
+                        label,
+                        outcome,
+                        origin == null ? "unknown" : origin.toShortString(),
+                        bot,
+                        place,
+                        stand,
+                        relocation,
+                        clearedCells,
+                        rejectionCounts,
+                        rejectionSamples);
+                return;
+            }
+            LOGGER.info("Utility placement summary [{}]: outcome={} origin={} bot={} place={} stand={} relocation={} clearedCells={} rejectionCounts={} samples={}",
+                    label,
+                    outcome,
+                    origin == null ? "unknown" : origin.toShortString(),
+                    bot,
+                    place,
+                    stand,
+                    relocation,
+                    clearedCells,
+                    rejectionCounts,
+                    rejectionSamples);
+        }
+    }
 
     private CraftingHelper() {
     }
@@ -1226,6 +1337,10 @@ public final class CraftingHelper {
                     CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                     return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
                 }
+
+                // Clear leaf/snow obstructions along the path to the crafting table.
+                clearPathObstructions(bot, world, approach);
+
                 boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
                 MovementService.MovementPlan plan = new MovementService.MovementPlan(
                         MovementService.Mode.DIRECT,
@@ -1254,41 +1369,40 @@ public final class CraftingHelper {
                     CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                     return true;
                 }
-                return false;
+                // Fall through to placement/crafting path instead of giving up.
+                LOGGER.info("Unreachable crafting table at {}; trying to place or craft one nearby", nearest.toShortString());
             }
         }
 
         // Try placing from inventory
         int slot = findItemInInventory(bot, Items.CRAFTING_TABLE);
         if (slot != -1) {
-            BlockPos placeAt = findNearbyStationPlacement(world, botPos);
-            if (placeAt == null) {
-                placeAt = botPos.offset(bot.getHorizontalFacing());
-            }
-            boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
-            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                // Fallback: try a few nearby cells if the forward placement failed (blocked/fluids/odd footing).
-                for (BlockPos alt : findNearbyStationPlacementOptions(world, botPos)) {
-                    if (BotActions.placeBlockAt(bot, alt, java.util.List.of(Items.CRAFTING_TABLE))
-                            && world.getBlockState(alt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                        placeAt = alt.toImmutable();
-                        placed = true;
-                        break;
-                    }
-                }
-            }
-            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+            PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
+            if (prepared == null) {
                 LOGGER.warn("Failed to place crafting table from inventory near {}", botPos.toShortString());
+                ChatUtils.sendSystemMessage(source, "I couldn't place a crafting table here.");
+                return false;
+            }
+            BlockPos placeAt = prepared.placePos();
+            BotActions.PlaceResult placeResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
+            boolean placed = placeResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
+            if (!placed && isLocalPlacementIntersection(placeResult)) {
+                placed = retryCraftingTablePlacementAfterLocalReposition(source, bot, world, prepared, placeAt, "crafting-table-place");
+            }
+            if (!placed) {
+                LOGGER.warn("Failed to place crafting table from inventory near {} detail={}",
+                        bot.getBlockPos().toShortString(), placeResult.reason());
                 ChatUtils.sendSystemMessage(source, "I couldn't place a crafting table here.");
                 return false;
             }
             LOGGER.info("Placed crafting table from inventory at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+            BlockPos approachTarget = prepared.standPos() != null ? prepared.standPos() : placeAt;
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
-                    placeAt,
-                    placeAt,
+                    approachTarget,
+                    approachTarget,
                     null,
                     null,
                     bot.getHorizontalFacing());
@@ -1305,38 +1419,58 @@ public final class CraftingHelper {
             return close;
         }
 
-        // Try crafting a crafting table from materials
+        // Try crafting a crafting table from materials — but only if we don't already have one in inventory
+        // (prevents crafting duplicates when repeated calls fail to reach a just-placed table).
+        if (findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
+            LOGGER.info("Already have a crafting table in inventory; skipping craft, placing directly.");
+            // Jump to placement logic below via the "place from inventory" path above — re-check.
+            BlockPos placeAtDirect = findNearbyStationPlacement(world, botPos);
+            if (placeAtDirect == null) placeAtDirect = botPos.offset(bot.getHorizontalFacing());
+            if (BotActions.placeBlockAt(bot, placeAtDirect, java.util.List.of(Items.CRAFTING_TABLE))
+                    && world.getBlockState(placeAtDirect).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                LOGGER.info("Placed existing crafting table at {}", placeAtDirect.toShortString());
+                LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAtDirect.toImmutable()));
+                return bot.getBlockPos().getSquaredDistance(placeAtDirect) <= STATION_REACH_SQ;
+            }
+        }
+        // Don't spam-craft tables — if we crafted one recently, give up.
+        Long lastCraft = CRAFT_TABLE_CRAFT_COOLDOWN.get(bot.getUuid());
+        if (lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS) {
+            LOGGER.info("Skipping crafting table craft (cooldown active, last craft {}ms ago)",
+                    System.currentTimeMillis() - lastCraft);
+            return false;
+        }
         LOGGER.info("No crafting table found; attempting to craft one.");
+        CRAFT_TABLE_CRAFT_COOLDOWN.put(bot.getUuid(), System.currentTimeMillis());
         ensurePlanksAvailable(bot, source, 4);
         boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1);
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
-            BlockPos placeAt = findNearbyStationPlacement(world, botPos);
-            if (placeAt == null) {
-                placeAt = botPos.offset(bot.getHorizontalFacing());
-            }
-            boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
-            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                for (BlockPos alt : findNearbyStationPlacementOptions(world, botPos)) {
-                    if (BotActions.placeBlockAt(bot, alt, java.util.List.of(Items.CRAFTING_TABLE))
-                            && world.getBlockState(alt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                        placeAt = alt.toImmutable();
-                        placed = true;
-                        break;
-                    }
-                }
-            }
-            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+            PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
+            if (prepared == null) {
                 LOGGER.warn("Crafted a crafting table but failed to place it near {}", botPos.toShortString());
+                ChatUtils.sendSystemMessage(source, "I crafted a crafting table but couldn't place it here.");
+                return false;
+            }
+            BlockPos placeAt = prepared.placePos();
+            BotActions.PlaceResult placeResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
+            boolean placed = placeResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
+            if (!placed && isLocalPlacementIntersection(placeResult)) {
+                placed = retryCraftingTablePlacementAfterLocalReposition(source, bot, world, prepared, placeAt, "crafting-table-crafted-place");
+            }
+            if (!placed) {
+                LOGGER.warn("Crafted a crafting table but failed to place it near {} detail={}",
+                        bot.getBlockPos().toShortString(), placeResult.reason());
                 ChatUtils.sendSystemMessage(source, "I crafted a crafting table but couldn't place it here.");
                 return false;
             }
             LOGGER.info("Crafted and placed crafting table at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+            BlockPos approachTarget = prepared.standPos() != null ? prepared.standPos() : placeAt;
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
-                    placeAt,
-                    placeAt,
+                    approachTarget,
+                    approachTarget,
                     null,
                     null,
                     bot.getHorizontalFacing());
@@ -1357,9 +1491,415 @@ public final class CraftingHelper {
         return false;
     }
 
+    /**
+     * Clears leaf/snow obstructions between the bot and a target position.
+     * Also clears headroom (2 blocks above bot) and at the target position.
+     */
+    private static void clearPathObstructions(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+        if (bot == null || world == null || target == null) return;
+        // Clear headroom above bot (leaves blocking upward step)
+        for (int dy = 1; dy <= 2; dy++) {
+            BlockPos overhead = bot.getBlockPos().up(dy);
+            BlockState state = world.getBlockState(overhead);
+            if (state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW) || (state.isReplaceable() && !state.isAir())) {
+                LookController.faceBlock(bot, overhead);
+                MiningTool.mineBlock(bot, overhead);
+                try { Thread.sleep(80); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
+        }
+        // Clear foot and head height at the target position
+        for (int dy = 0; dy <= 1; dy++) {
+            BlockPos atTarget = target.up(dy);
+            BlockState state = world.getBlockState(atTarget);
+            if (state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW) || (state.isReplaceable() && !state.isAir())) {
+                LookController.faceBlock(bot, atTarget);
+                MiningTool.mineBlock(bot, atTarget);
+                try { Thread.sleep(80); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
+        }
+    }
+
     private static BlockPos findNearbyStationPlacement(ServerWorld world, BlockPos origin) {
         List<BlockPos> options = findNearbyStationPlacementOptions(world, origin);
         return options.isEmpty() ? null : options.get(0);
+    }
+
+    private static boolean isLocalPlacementIntersection(BotActions.PlaceResult placeResult) {
+        if (placeResult == null || placeResult.reason() == null) {
+            return false;
+        }
+        return placeResult.reason().toLowerCase(Locale.ROOT).contains("bot-intersects-target");
+    }
+
+    private static boolean retryCraftingTablePlacementAfterLocalReposition(ServerCommandSource source,
+                                                                           ServerPlayerEntity bot,
+                                                                           ServerWorld world,
+                                                                           PreparedPlacement prepared,
+                                                                           BlockPos placeAt,
+                                                                           String label) {
+        if (source == null || bot == null || world == null || prepared == null || placeAt == null) {
+            return false;
+        }
+        BlockPos stand = prepared.standPos();
+        if (stand == null || stand.equals(bot.getBlockPos())) {
+            stand = findPlacementRelocationStand(world, bot.getBlockPos(), placeAt);
+        }
+        if (stand == null || stand.equals(bot.getBlockPos())) {
+            return false;
+        }
+        LOGGER.info("Crafting table local reposition [{}]: bot={} stand={} place={}",
+                label,
+                bot.getBlockPos().toShortString(),
+                stand.toShortString(),
+                placeAt.toShortString());
+        if (!moveToPlacementStand(source, bot, stand, STATION_REACH_SQ, label + "-reposition")) {
+            return false;
+        }
+        BotActions.PlaceResult retryResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
+        boolean placed = retryResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
+        if (!placed) {
+            LOGGER.info("Crafting table local reposition [{}] retry failed detail={}",
+                    label,
+                    retryResult.reason());
+        }
+        return placed;
+    }
+
+    static PreparedPlacement prepareNearbyUtilityPlacement(ServerCommandSource source,
+                                                           ServerPlayerEntity bot,
+                                                           ServerWorld world,
+                                                           BlockPos origin,
+                                                           String label,
+                                                           double interactionReachSq) {
+        if (source == null || bot == null || world == null || origin == null) {
+            return null;
+        }
+        PlacementAttemptLog attemptLog = new PlacementAttemptLog(label, origin);
+        PreparedPlacement immediate = findPreparedPlacement(world, origin, origin, label, false, false, attemptLog);
+        if (immediate != null) {
+            attemptLog.flush("ready", immediate, bot.getBlockPos(), false);
+            return immediate;
+        }
+        PreparedPlacement carved = carvePlacementPocket(source, bot, world, origin, origin, label, attemptLog);
+        if (carved != null) {
+            attemptLog.flush("carved-pocket", carved, bot.getBlockPos(), false);
+            return carved;
+        }
+
+        BlockPos relocation = findPlacementRelocationStand(world, bot.getBlockPos(), origin);
+        if (relocation != null && !relocation.equals(bot.getBlockPos())) {
+            attemptLog.noteRelocation(relocation);
+            if (moveToPlacementStand(source, bot, relocation, interactionReachSq, label + "-placement-relocate")) {
+                BlockPos movedOrigin = bot.getBlockPos();
+                PreparedPlacement relocatedImmediate = findPreparedPlacement(world, movedOrigin, movedOrigin, label, false, true, attemptLog);
+                if (relocatedImmediate != null) {
+                    attemptLog.flush("relocated-ready", relocatedImmediate, bot.getBlockPos(), false);
+                    return relocatedImmediate;
+                }
+                PreparedPlacement relocatedCarved = carvePlacementPocket(source, bot, world, movedOrigin, movedOrigin, label, attemptLog);
+                if (relocatedCarved != null) {
+                    PreparedPlacement prepared = new PreparedPlacement(relocatedCarved.placePos(),
+                            relocatedCarved.standPos(),
+                            relocatedCarved.carvedPocket(),
+                            true,
+                            relocatedCarved.detail());
+                    attemptLog.flush("relocated-carved-pocket", prepared, bot.getBlockPos(), false);
+                    return prepared;
+                }
+            }
+        }
+        attemptLog.flush("failed", null, bot.getBlockPos(), true);
+        return null;
+    }
+
+    private static PreparedPlacement carvePlacementPocket(ServerCommandSource source,
+                                                          ServerPlayerEntity bot,
+                                                          ServerWorld world,
+                                                          BlockPos origin,
+                                                          BlockPos reference,
+                                                          String label,
+                                                          PlacementAttemptLog attemptLog) {
+        for (BlockPos pos : buildNearbyPlacementCandidates(origin)) {
+            if (!world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
+                continue;
+            }
+            BlockPos stand = findAdjacentStandCandidate(world, pos, reference, true);
+            if (stand == null) {
+                logPlacementRejection(attemptLog, pos, "no-stand-to-carve");
+                continue;
+            }
+            if (!hasSolidSupport(world, pos.down())) {
+                logPlacementRejection(attemptLog, pos, "placement-support-missing");
+                continue;
+            }
+            if (!hasSolidSupport(world, stand.down())) {
+                logPlacementRejection(attemptLog, pos, "stand-support-missing");
+                continue;
+            }
+            boolean cleared = clearPlacementCell(bot, world, pos, label, "placement", attemptLog)
+                    && clearPlacementCell(bot, world, pos.up(), label, "placement-head", attemptLog)
+                    && clearPlacementCell(bot, world, stand, label, "stand", attemptLog)
+                    && clearPlacementCell(bot, world, stand.up(), label, "stand-head", attemptLog);
+            if (!cleared) {
+                continue;
+            }
+            if (isPlacementCellReady(world, pos) && isStandCellReady(world, stand)) {
+                return new PreparedPlacement(pos.toImmutable(), stand.toImmutable(), true, false, "carved-pocket");
+            }
+        }
+        return null;
+    }
+
+    private static PreparedPlacement findPreparedPlacement(ServerWorld world,
+                                                           BlockPos origin,
+                                                           BlockPos reference,
+                                                           String label,
+                                                           boolean carved,
+                                                           boolean relocated,
+                                                           PlacementAttemptLog attemptLog) {
+        for (BlockPos pos : buildNearbyPlacementCandidates(origin)) {
+            if (!isPlacementCellReady(world, pos)) {
+                logPlacementRejection(attemptLog, pos, placementRejectReason(world, pos));
+                continue;
+            }
+            BlockPos stand = findAdjacentStandCandidate(world, pos, reference, false);
+            if (stand == null) {
+                logPlacementRejection(attemptLog, pos, "no-adjacent-stand");
+                continue;
+            }
+            return new PreparedPlacement(pos.toImmutable(), stand.toImmutable(), carved, relocated,
+                    carved ? "carved-pocket" : "ready");
+        }
+        return null;
+    }
+
+    private static List<BlockPos> buildNearbyPlacementCandidates(BlockPos origin) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            candidates.add(origin.offset(dir));
+        }
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                candidates.add(origin.add(dx, 0, dz));
+            }
+        }
+        LinkedHashSet<BlockPos> ordered = new LinkedHashSet<>();
+        candidates.stream()
+                .sorted(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)))
+                .forEach(pos -> ordered.add(pos.toImmutable()));
+        return new ArrayList<>(ordered);
+    }
+
+    private static BlockPos findPlacementRelocationStand(ServerWorld world, BlockPos botPos, BlockPos origin) {
+        if (world == null || origin == null) {
+            return null;
+        }
+        for (int radius = 1; radius <= LOCAL_PLACEMENT_RELOCATION_RADIUS; radius++) {
+            BlockPos safe = SafePositionService.findSafeNear(world, origin, radius);
+            if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))) {
+                return safe.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    private static boolean moveToPlacementStand(ServerCommandSource source,
+                                                ServerPlayerEntity bot,
+                                                BlockPos stand,
+                                                double interactionReachSq,
+                                                String label) {
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                stand,
+                stand,
+                null,
+                null,
+                bot.getHorizontalFacing());
+        MovementService.MovementResult result = MovementService.execute(source, bot, plan, false, true, true, false);
+        if (result.success() || bot.getBlockPos().getSquaredDistance(stand) <= interactionReachSq) {
+            return true;
+        }
+        MovementService.clearRecentWalkAttempt(bot.getUuid());
+        return MovementService.nudgeTowardUntilClose(bot, stand, interactionReachSq, 2_000L, 0.18D, label);
+    }
+
+    private static String placementRejectReason(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return "invalid";
+        }
+        if (!world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
+            return "chunk-unloaded";
+        }
+        if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.down()).isEmpty()) {
+            return "fluid-blocked";
+        }
+        if (!hasSolidSupport(world, pos.down())) {
+            return "placement-support-missing";
+        }
+        BlockState state = world.getBlockState(pos);
+        if (!state.isAir() && !state.isReplaceable() && !state.isOf(Blocks.SNOW)) {
+            return "occupied=" + state.getBlock().getTranslationKey();
+        }
+        return "unknown";
+    }
+
+    private static void logPlacementRejection(PlacementAttemptLog attemptLog, BlockPos pos, String reason) {
+        if (attemptLog == null || pos == null || reason == null) {
+            return;
+        }
+        attemptLog.reject(pos, reason);
+    }
+
+    private static boolean clearPlacementCell(ServerPlayerEntity bot,
+                                              ServerWorld world,
+                                              BlockPos pos,
+                                              String label,
+                                              String role,
+                                              PlacementAttemptLog attemptLog) {
+        if (bot == null || world == null || pos == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || (state.isReplaceable() && state.getCollisionShape(world, pos).isEmpty())) {
+            return true;
+        }
+        if (!isAllowedPlacementRecoveryBlock(bot, world, pos, state)) {
+            logPlacementRejection(attemptLog, pos, "blocked-by=" + state.getBlock().getTranslationKey());
+            return false;
+        }
+        try {
+            String result = MiningTool.mineBlock(bot, pos, false, false).get(6, TimeUnit.SECONDS);
+            boolean cleared = world.getBlockState(pos).isAir()
+                    || (world.getBlockState(pos).isReplaceable() && world.getBlockState(pos).getCollisionShape(world, pos).isEmpty());
+            if (cleared) {
+                if (attemptLog != null) {
+                    attemptLog.noteClearedCell();
+                }
+                LOGGER.debug("Utility placement cleared [{}]: role={} pos={} result={}",
+                        label, role, pos.toShortString(), result);
+            }
+            return cleared;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOGGER.warn("Utility placement clear failed [{}]: role={} pos={} error={}",
+                    label, role, pos.toShortString(), e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean isAllowedPlacementRecoveryBlock(ServerPlayerEntity bot,
+                                                           ServerWorld world,
+                                                           BlockPos pos,
+                                                           BlockState state) {
+        if (bot == null || world == null || pos == null || state == null || state.isAir()) {
+            return false;
+        }
+        if (state.isOf(Blocks.CHEST)
+                || state.isOf(Blocks.TRAPPED_CHEST)
+                || state.isOf(Blocks.BARREL)
+                || state.isOf(Blocks.ENDER_CHEST)
+                || state.isIn(BlockTags.BEDS)
+                || state.isIn(BlockTags.SHULKER_BOXES)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.LEAVES)
+                || state.isOf(Blocks.SNOW)
+                || state.isReplaceable()
+                || state.isIn(BlockTags.DIRT)
+                || SOFT_PLACEMENT_BLOCKS.contains(state.getBlock())) {
+            return true;
+        }
+        return ScaffoldService.isTrackedScaffold(bot.getUuid(), pos)
+                && state.getBlock().asItem() != Items.AIR
+                && ScaffoldService.SCAFFOLD_BLOCKS.contains(state.getBlock().asItem());
+    }
+
+    private static boolean isPlacementCellReady(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null || !world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.down()).isEmpty()) {
+            return false;
+        }
+        if (!hasSolidSupport(world, pos.down())) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        return state.isAir() || state.isReplaceable() || state.isOf(Blocks.SNOW);
+    }
+
+    private static BlockPos findAdjacentStandCandidate(ServerWorld world,
+                                                       BlockPos placePos,
+                                                       BlockPos reference,
+                                                       boolean allowCarveable) {
+        if (world == null || placePos == null) {
+            return null;
+        }
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            candidates.add(placePos.offset(dir).toImmutable());
+        }
+        candidates.sort(java.util.Comparator.comparingDouble(pos ->
+                reference == null ? placePos.getSquaredDistance(pos) : reference.getSquaredDistance(pos)));
+        for (BlockPos stand : candidates) {
+            if (allowCarveable ? isStandCellCarveable(world, stand) : isStandCellReady(world, stand)) {
+                return stand;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isStandCellCarveable(ServerWorld world, BlockPos stand) {
+        if (world == null || stand == null || !world.isChunkLoaded(stand) || !world.isChunkLoaded(stand.down()) || !world.isChunkLoaded(stand.up())) {
+            return false;
+        }
+        if (!world.getFluidState(stand).isEmpty()
+                || !world.getFluidState(stand.up()).isEmpty()
+                || !world.getFluidState(stand.down()).isEmpty()) {
+            return false;
+        }
+        return hasSolidSupport(world, stand.down())
+                && isCarveableUtilityCell(world.getBlockState(stand))
+                && isCarveableUtilityCell(world.getBlockState(stand.up()));
+    }
+
+    private static boolean isCarveableUtilityCell(BlockState state) {
+        if (state == null || state.isAir()) {
+            return true;
+        }
+        return state.isIn(BlockTags.LEAVES)
+                || state.isOf(Blocks.SNOW)
+                || state.isReplaceable()
+                || state.isIn(BlockTags.DIRT)
+                || SOFT_PLACEMENT_BLOCKS.contains(state.getBlock());
+    }
+
+    private static boolean isStandCellReady(ServerWorld world, BlockPos stand) {
+        if (world == null || stand == null || !world.isChunkLoaded(stand) || !world.isChunkLoaded(stand.down()) || !world.isChunkLoaded(stand.up())) {
+            return false;
+        }
+        if (!world.getFluidState(stand).isEmpty()
+                || !world.getFluidState(stand.down()).isEmpty()
+                || !world.getFluidState(stand.up()).isEmpty()) {
+            return false;
+        }
+        if (!hasSolidSupport(world, stand.down())) {
+            return false;
+        }
+        return world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()
+                && world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty();
+    }
+
+    private static boolean hasSolidSupport(ServerWorld world, BlockPos pos) {
+        return world != null
+                && pos != null
+                && world.isChunkLoaded(pos)
+                && !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
     }
 
     private static List<BlockPos> findNearbyStationPlacementOptions(ServerWorld world, BlockPos origin) {
@@ -2054,18 +2594,19 @@ public final class CraftingHelper {
         if (findItemInInventory(bot, Items.CHEST) == -1) {
             return null;
         }
-        BlockPos origin = bot.getBlockPos();
-        for (BlockPos pos : findNearbyStationPlacementOptions(world, origin)) {
-            if (!BlockInteractionService.canInteract(bot, pos, reachSq)) {
-                continue;
-            }
-            if (BotActions.placeBlockAt(bot, pos, java.util.List.of(Items.CHEST))
-                    && world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CHEST)) {
-                var be = world.getBlockEntity(pos);
-                if (be instanceof net.minecraft.block.entity.ChestBlockEntity chest) {
-                    ChatUtils.sendSystemMessage(bot.getCommandSource(), "Placed a chest to store items.");
-                    return chest;
-                }
+        PreparedPlacement prepared = prepareNearbyUtilityPlacement(bot.getCommandSource(), bot, world, bot.getBlockPos(), "chest", reachSq);
+        if (prepared == null) {
+            return null;
+        }
+        if (prepared.standPos() != null && !BlockInteractionService.canInteract(bot, prepared.placePos(), reachSq)) {
+            moveToPlacementStand(bot.getCommandSource(), bot, prepared.standPos(), reachSq, "chest-stand");
+        }
+        if (BotActions.placeBlockAt(bot, prepared.placePos(), java.util.List.of(Items.CHEST))
+                && world.getBlockState(prepared.placePos()).isOf(net.minecraft.block.Blocks.CHEST)) {
+            var be = world.getBlockEntity(prepared.placePos());
+            if (be instanceof net.minecraft.block.entity.ChestBlockEntity chest) {
+                ChatUtils.sendSystemMessage(bot.getCommandSource(), "Placed a chest to store items.");
+                return chest;
             }
         }
         return null;
@@ -2392,7 +2933,7 @@ public final class CraftingHelper {
         if (world == null || center == null) {
             return options;
         }
-        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -1, -radius), center.add(radius, 1, radius))) {
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -3, -radius), center.add(radius, 3, radius))) {
             BlockPos foot = pos.toImmutable();
             BlockPos head = foot.up();
             BlockPos below = foot.down();

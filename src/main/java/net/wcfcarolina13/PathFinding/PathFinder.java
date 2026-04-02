@@ -276,7 +276,7 @@ public class PathFinder {
 
         PathNode segmentStart = simplifiedPath.get(0);
         String currentAxis = null;
-        int currentSign = 0;
+        String currentDirectionKey = null;
 
         for (int i = 1; i < simplifiedPath.size(); i++) {
             PathNode prev = simplifiedPath.get(i - 1);
@@ -287,31 +287,21 @@ public class PathFinder {
             int dz = current.getPos().getZ() - prev.getPos().getZ();
             int dy = current.getPos().getY() - prev.getPos().getY();
 
-            String axis;
-            int sign;
-
-            if (dx != 0) {
-                axis = "x";
-                sign = Integer.signum(dx);
-            } else if (dz != 0) {
-                axis = "z";
-                sign = Integer.signum(dz);
-            } else if (dy != 0) {
-                axis = "y";
-                sign = Integer.signum(dy);
-            } else {
+            String axis = movementAxis(dx, dy, dz);
+            if (axis == null) {
                 // No movement, skip
                 continue;
             }
+            String directionKey = movementDirectionKey(dx, dy, dz);
 
             // Initialize axis and sign for the first comparison
             if (currentAxis == null) {
                 currentAxis = axis;
-                currentSign = sign;
+                currentDirectionKey = directionKey;
             }
 
             boolean axisChanged = !axis.equals(currentAxis);
-            boolean directionChanged = sign != currentSign;
+            boolean directionChanged = !Objects.equals(directionKey, currentDirectionKey);
             boolean verticalStep = dy != 0;
             int segmentSpan = Math.abs(current.getPos().getX() - segmentStart.getPos().getX())
                     + Math.abs(current.getPos().getY() - segmentStart.getPos().getY())
@@ -330,7 +320,7 @@ public class PathFinder {
 
                 // Update current direction state
                 currentAxis = axis;
-                currentSign = sign;
+                currentDirectionKey = directionKey;
             }
         }
 
@@ -341,6 +331,39 @@ public class PathFinder {
         }
 
         return segments;
+    }
+
+    static String movementAxis(int dx, int dy, int dz) {
+        if (dx != 0 && dz != 0) {
+            return "diag";
+        }
+        if (dx != 0) {
+            return "x";
+        }
+        if (dz != 0) {
+            return "z";
+        }
+        if (dy != 0) {
+            return "y";
+        }
+        return null;
+    }
+
+    static String movementDirectionKey(int dx, int dy, int dz) {
+        String axis = movementAxis(dx, dy, dz);
+        if (axis == null) {
+            return null;
+        }
+        if ("diag".equals(axis)) {
+            return Integer.signum(dx) + "," + Integer.signum(dz);
+        }
+        if ("x".equals(axis)) {
+            return Integer.toString(Integer.signum(dx));
+        }
+        if ("z".equals(axis)) {
+            return Integer.toString(Integer.signum(dz));
+        }
+        return Integer.toString(Integer.signum(dy));
     }
 
     // These two are outdated methods, but I am still keeping them for a while.

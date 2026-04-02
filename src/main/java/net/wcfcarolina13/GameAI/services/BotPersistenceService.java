@@ -159,6 +159,7 @@ public final class BotPersistenceService {
                                 state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                         float clampedPitch = Math.max(-90.0F, Math.min(90.0F, state.pitch()));
                         bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), clampedPitch);
+                        bot.fallDistance = 0.0F;
 
                         // Validate restored position — if inside solid blocks, find a safe spot nearby
                         if (bot.getEntityWorld() instanceof ServerWorld world) {

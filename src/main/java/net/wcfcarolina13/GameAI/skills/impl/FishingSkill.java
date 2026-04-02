@@ -344,10 +344,15 @@ public final class FishingSkill implements Skill {
                  continue;
             }
 
-            castTarget = chooseCastTarget(world, bot, stand, spot.water(), castTarget);
-            aimTowardWater(bot, castTarget != null ? castTarget : spot.water());
+            // Reel in immediately on bite — do NOT re-aim first, as that
+            // invalidates the bobber position and lets the fish escape.
+            if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
+                return SkillExecutionResult.failure("Lost fishing rod before reel-in.");
+            }
             BotActions.useSelectedItem(bot); // Reel in
             waitForBobberRemoval(bot);
+            // Choose next cast target AFTER reeling (for the next cast cycle).
+            castTarget = chooseCastTarget(world, bot, stand, spot.water(), castTarget);
             
             sleep(600L); // Wait for item arrival
 
@@ -890,7 +895,12 @@ public final class FishingSkill implements Skill {
         
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
+        int evaluated = 0;
+        int MAX_WATER_EVALUATIONS = 200; // Cap to prevent 18+ second searches
         for (BlockPos water : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (evaluated >= MAX_WATER_EVALUATIONS && best != null) {
+                break; // Good-enough spot found; stop searching
+            }
             if (!world.isChunkLoaded(water)) {
                 continue;
             }
@@ -900,6 +910,7 @@ public final class FishingSkill implements Skill {
             if (!isOpenWaterSurface(world, water)) {
                 continue;
             }
+            evaluated++;
 
             List<StandOption> options = findStandOptions(world, water, origin);
             if (options.isEmpty()) {

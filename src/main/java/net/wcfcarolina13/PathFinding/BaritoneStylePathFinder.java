@@ -81,6 +81,8 @@ public class BaritoneStylePathFinder {
         private final ServerWorld world;
         // Reusable mutable BlockPos for getBlockState calls
         private final BlockPos.Mutable mutablePos = new BlockPos.Mutable();
+        // Path origin Y — used to avoid routing through 3+ block deep pits
+        int startY;
 
         ChunkCache(ServerWorld world) {
             this.world = world;
@@ -129,6 +131,7 @@ public class BaritoneStylePathFinder {
                 sx, sy, sz, tx, ty, tz, timeoutMs);
 
         ChunkCache cache = new ChunkCache(world);
+        cache.startY = sy;
 
         // Open set (priority queue) and closed set (packed-long map)
         PriorityQueue<Node> openSet = new PriorityQueue<>();
@@ -198,6 +201,10 @@ public class BaritoneStylePathFinder {
         tryAddNeighbor(cx - 1, cy, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryAddNeighbor(cx, cy, cz + 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryAddNeighbor(cx, cy, cz - 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx + 1, cy, cz + 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx + 1, cy, cz - 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx - 1, cy, cz + 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx - 1, cy, cz - 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
         // Down — require floor at landing position
         tryAddNeighbor(cx, cy - 1, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
@@ -210,12 +217,37 @@ public class BaritoneStylePathFinder {
         tryStepUp(cx - 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepUp(cx, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepUp(cx, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepUp(cx + 1, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepUp(cx + 1, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepUp(cx - 1, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepUp(cx - 1, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
         // Smart step-down moves: drop one block for staircase descents (4 cardinals)
         tryStepDown(cx + 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepDown(cx - 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepDown(cx, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepDown(cx, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepDown(cx + 1, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepDown(cx + 1, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepDown(cx - 1, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryDiagonalStepDown(cx - 1, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+    }
+
+    private static void tryAddDiagonalNeighbor(
+            int nx, int ny, int nz,
+            Node parent, double moveCost,
+            boolean requireFloor,
+            int tx, int ty, int tz,
+            ChunkCache cache,
+            PriorityQueue<Node> openSet, Map<Long, Node> openMap, Map<Long, Node> closedSet,
+            Node[] bestSoFar, double[] bestScores) {
+        int dx = Integer.compare(nx, parent.x);
+        int dz = Integer.compare(nz, parent.z);
+        if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
+            return;
+        }
+        tryAddNeighbor(nx, ny, nz, parent, moveCost, requireFloor, tx, ty, tz, cache,
+                openSet, openMap, closedSet, bestSoFar, bestScores);
     }
 
     private static void tryStepUp(int nx, int cy, int nz,
@@ -233,6 +265,28 @@ public class BaritoneStylePathFinder {
                 return;
             }
             tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, false, tx, ty, tz, cache,
+                    openSet, openMap, closedSet, bestSoFar, bestScores);
+        }
+    }
+
+    private static void tryDiagonalStepUp(int nx, int cy, int nz,
+                                          Node parent, int tx, int ty, int tz,
+                                          ChunkCache cache,
+                                          PriorityQueue<Node> openSet, Map<Long, Node> openMap,
+                                          Map<Long, Node> closedSet,
+                                          Node[] bestSoFar, double[] bestScores) {
+        int dx = Integer.compare(nx, parent.x);
+        int dz = Integer.compare(nz, parent.z);
+        if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
+            return;
+        }
+        if (isSolidBlock(cache, nx, cy, nz)
+                && isPassable(cache, nx, cy + 1, nz)
+                && isPassable(cache, nx, cy + 2, nz)) {
+            if (!isPassable(cache, parent.x, parent.y + 2, parent.z)) {
+                return;
+            }
+            tryAddNeighbor(nx, cy + 1, nz, parent, 1.8, false, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
     }
@@ -261,6 +315,29 @@ public class BaritoneStylePathFinder {
         }
     }
 
+    private static void tryDiagonalStepDown(int nx, int cy, int nz,
+                                            Node parent, int tx, int ty, int tz,
+                                            ChunkCache cache,
+                                            PriorityQueue<Node> openSet, Map<Long, Node> openMap,
+                                            Map<Long, Node> closedSet,
+                                            Node[] bestSoFar, double[] bestScores) {
+        int dx = Integer.compare(nx, parent.x);
+        int dz = Integer.compare(nz, parent.z);
+        if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
+            return;
+        }
+        int dropY = cy - 1;
+        if (isPassable(cache, nx, dropY, nz)
+                && isPassable(cache, nx, dropY + 1, nz)
+                && hasSupportedFloor(cache, nx, dropY, nz)) {
+            if (!isPassable(cache, nx, dropY + 2, nz)) {
+                return;
+            }
+            tryAddNeighbor(nx, dropY, nz, parent, 1.5, false, tx, ty, tz, cache,
+                    openSet, openMap, closedSet, bestSoFar, bestScores);
+        }
+    }
+
     private static void tryAddNeighbor(
             int nx, int ny, int nz,
             Node parent, double moveCost,
@@ -272,6 +349,11 @@ public class BaritoneStylePathFinder {
 
         long packed = packPos(nx, ny, nz);
         if (closedSet.containsKey(packed)) return;
+
+        // Reject nodes 3+ blocks below the lower of start or target Y — avoids
+        // routing through surface pits/overhangs that the bot can't easily escape.
+        int depthFloor = Math.min(cache.startY, ty) - 2;
+        if (ny < depthFloor) return;
 
         // Walkability check using chunk cache (body + head passable)
         if (!isPassable(cache, nx, ny, nz) || !isPassable(cache, nx, ny + 1, nz)) return;
@@ -390,6 +472,23 @@ public class BaritoneStylePathFinder {
     private static boolean isSolidBlock(ChunkCache cache, int x, int y, int z) {
         BlockState state = cache.getBlockState(x, y, z);
         return !state.isAir() && state.isOpaque();
+    }
+
+    static boolean diagonalMovementAllowed(boolean xLaneBlocked, boolean zLaneBlocked) {
+        return !(xLaneBlocked && zLaneBlocked);
+    }
+
+    private static boolean hasDiagonalClearance(ChunkCache cache, int x, int y, int z, int dx, int dz) {
+        if (dx == 0 || dz == 0) {
+            return true;
+        }
+        boolean xLaneBlocked = isPassageBlocked(cache, x + dx, y, z);
+        boolean zLaneBlocked = isPassageBlocked(cache, x, y, z + dz);
+        return diagonalMovementAllowed(xLaneBlocked, zLaneBlocked);
+    }
+
+    private static boolean isPassageBlocked(ChunkCache cache, int x, int y, int z) {
+        return !isPassable(cache, x, y, z) || !isPassable(cache, x, y + 1, z);
     }
 
 

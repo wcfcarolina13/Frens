@@ -73,15 +73,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     // Collapsed (shared inventory) quick-actions grid.
     private static final String TOPIC_PANEL_TITLE = "Actions";
-    private static final int QUICK_TOPIC_COLS = 3;
+    private static final int QUICK_TOPIC_COLS = 4;
     private static final int QUICK_TOPIC_MAX_ROWS = 2;
     private static final int QUICK_TOPIC_GAP = 2;
     private static final int QUICK_TOPIC_MIN_BUTTON_H = 12;
     private static final float QUICK_TOPIC_TEXT_SCALE = 0.85f;
+    private static final boolean QUICK_TOPIC_ICON_ONLY = true;
     private static final double FOLLOW_DISTANCE_STEP = 1.0D;
     private static final double FOLLOW_DISTANCE_MIN = 1.0D;
     private static final double FOLLOW_DISTANCE_MAX = 64.0D;
     private static final double FOLLOW_DISTANCE_DEFAULT = 4.0D;
+    private static final double GUARD_RADIUS_STEP = 1.0D;
+    private static final double GUARD_RADIUS_MIN = 3.0D;
+    private static final double GUARD_RADIUS_MAX = 32.0D;
+    private static final double GUARD_RADIUS_DEFAULT = 6.0D;
     private static final int WOODCUT_TREE_COUNT_MIN = 1;
     private static final int WOODCUT_TREE_COUNT_MAX = 64;
     private static final int WOODCUT_TREE_COUNT_DEFAULT = 4;
@@ -89,19 +94,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int SKILL_FISH_COUNT_MIN = 1;
     private static final int SKILL_FISH_COUNT_MAX = 128;
     private static final int SKILL_FISH_COUNT_DEFAULT = 8;
-    private static final int SKILL_WOOL_COUNT_MIN = 1;
+    private static final int SKILL_WOOL_COUNT_MIN = 0;
     private static final int SKILL_WOOL_COUNT_MAX = 256;
     private static final int SKILL_WOOL_COUNT_DEFAULT = 16;
     private static final int SKILL_WOOL_RANGE_MIN = 16;
     private static final int SKILL_WOOL_RANGE_MAX = 128;
     private static final int SKILL_WOOL_RANGE_DEFAULT = 48;
-    private static final int SKILL_STRIPMINE_COUNT_MIN = 1;
+    private static final int SKILL_STRIPMINE_COUNT_MIN = 0;
     private static final int SKILL_STRIPMINE_COUNT_MAX = 128;
     private static final int SKILL_STRIPMINE_COUNT_DEFAULT = 8;
-    private static final int SKILL_ASCENT_COUNT_MIN = 1;
+    private static final int SKILL_ASCENT_COUNT_MIN = 0;
     private static final int SKILL_ASCENT_COUNT_MAX = 128;
     private static final int SKILL_ASCENT_COUNT_DEFAULT = 5;
-    private static final int SKILL_DESCENT_COUNT_MIN = 1;
+    private static final int SKILL_DESCENT_COUNT_MIN = 0;
     private static final int SKILL_DESCENT_COUNT_MAX = 128;
     private static final int SKILL_DESCENT_COUNT_DEFAULT = 5;
     private static final int TOPICS_OVERLAY_SEARCH_H = 14;
@@ -132,7 +137,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 1700L;
     private TopicEntry quickHoveredEntry = null;
     private long quickHoverStartedAtMs = 0L;
-    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1700L;
+    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 450L;
+
+    // Header icon buttons (Guide & Spells) positioned in the Actions header row.
+    private static final TopicEntry HEADER_GUIDE_ENTRY = TopicEntry.skill("Guide", TopicAction.OPEN_GUIDE, false, 0);
+    private static final TopicEntry HEADER_SPELLS_ENTRY = TopicEntry.skill("Spells", TopicAction.OPEN_SPELLS, false, 0);
+    private static final int HEADER_ICON_BTN_SIZE = 11;
+    private static final int HEADER_ICON_BTN_GAP = 2;
+    private TopicEntry headerHoveredEntry = null;
+    private long headerHoverStartedAtMs = 0L;
     private String overlayHoveredControlKey = null;
     private long overlayControlHoverStartedAtMs = 0L;
     private long lastBotSwitchHintAtMs = 0L;
@@ -175,6 +188,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int ascentBlocks = SKILL_COUNT_UNSET;
     private int descentBlocks = SKILL_COUNT_UNSET;
     private boolean ascentSurfaceMode = false;
+    private int guardRadiusPreset = SKILL_COUNT_UNSET;
+    private int patrolRadiusPreset = SKILL_COUNT_UNSET;
     private String topicSearchQuery = "";
     private boolean topicSearchFocused = false;
     private boolean spellsTabHovered = false;
@@ -481,6 +496,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_STRIPMINE,
         SKILL_ASCENT,
         SKILL_DESCENT,
+        SKILL_LEAF_LITTER,
         OPEN_BOT_CONTROLS,
         OPEN_PLAYER_SETTINGS,
         ADMIN_PREVIEW_NON_ADMIN,
@@ -570,7 +586,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             TopicEntry.skill("Self-Sufficiency", TopicAction.AUTO_RETURN_SELF_SUFFICIENT, true, 1),
             TopicEntry.skill("Tactical Shelter", TopicAction.TACTICAL_SHELTER, true, 1),
-            TopicEntry.skill("Guard/Patrol Eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
+            TopicEntry.skill("Sunset Return in Guard/Patrol", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Skip Permission", TopicAction.AUTO_RETURN_SKIP_PERMISSION, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
             TopicEntry.skill("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
@@ -593,6 +609,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Wool", TopicAction.SKILL_WOOL, false, 0),
             TopicEntry.skill("Farming", TopicAction.SKILL_FARM, false, 0),
             TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 0),
+            TopicEntry.skill("Leaf Litter", TopicAction.SKILL_LEAF_LITTER, false, 0),
             TopicEntry.skill("Mining", TopicAction.SKILL_MINING, false, 0),
             TopicEntry.skill("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
             TopicEntry.skill("Ascent", TopicAction.SKILL_ASCENT, false, 1),
@@ -609,12 +626,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             // Curated, non-scroll quick actions for the collapsed panel.
             // (These are intentionally short labels; the expanded overlay still shows the full list.)
             private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
-                TopicEntry.skill("Guide", TopicAction.OPEN_GUIDE, false, 0),
-                TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
-                TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
                 TopicEntry.skill("Home", TopicAction.RETURN_HOME, true, 0),
+                TopicEntry.skill("Bases", TopicAction.BASES, false, 0),
                 TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
-                TopicEntry.skill("Guard", TopicAction.GUARD, true, 0)
+                TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
+                TopicEntry.skill("Patrol", TopicAction.PATROL, true, 0),
+                TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
+                TopicEntry.skill("Store", TopicAction.QUICK_STORE, false, 0),
+                TopicEntry.skill("Sweep", TopicAction.DROP_SWEEP, false, 0)
             );
 
     // Dialogue/quest topics are intentionally local/scripted: they feed the dialogue panel without
@@ -1287,8 +1306,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
         context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
         String openLabel = "Open";
-        int openX = panelX + panelWidth - TOPIC_PADDING - this.textRenderer.getWidth(openLabel);
+        int openLabelW = this.textRenderer.getWidth(openLabel);
+        int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
         context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
+
+        // Header icon buttons: [Guide] [Spells] just left of "Open"
+        int btnY = panelY + 1;
+        int spellsBtnX = openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        int guideBtnX = spellsBtnX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        drawHeaderIconButton(context, guideBtnX, btnY, HEADER_GUIDE_ENTRY, mouseX, mouseY);
+        drawHeaderIconButton(context, spellsBtnX, btnY, HEADER_SPELLS_ENTRY, mouseX, mouseY);
+        drawHeaderIconHoverTooltip(context, mouseX, mouseY);
+
         int rowX = panelX + TOPIC_PADDING;
         int rowY = panelY + 2 + this.textRenderer.fontHeight + 1;
         int rowW = panelWidth - TOPIC_PADDING * 2;
@@ -1394,7 +1423,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private java.util.List<String> getQuickTooltipLines(TopicEntry entry) {
-        return java.util.List.of();
+        if (entry == null || entry.action == null) {
+            return java.util.List.of();
+        }
+        String name = entry.label != null ? entry.label : "";
+        if (name.isBlank()) {
+            return java.util.List.of();
+        }
+        if (entry.toggle) {
+            boolean active = isEntryActive(entry.action);
+            return java.util.List.of(name + " [" + (active ? "ON" : "OFF") + "]");
+        }
+        return java.util.List.of(name);
     }
 
     private void drawQuickTopicButton(DrawContext context, int x, int y, int w, int h, TopicEntry entry,
@@ -1418,14 +1458,33 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x, y, x + 1, y + h, border);
         context.fill(x + w - 1, y, x + w, y + h, border);
 
-        String label = entry.label != null ? entry.label : "";
-        int maxTextW = Math.max(1, (int) ((w - 6) / QUICK_TOPIC_TEXT_SCALE));
-        String drawn = elideToWidth(label, maxTextW);
+        String icon = (entry.action != null) ? iconForAction(entry.action) : "";
         int textColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
-        int textW = this.textRenderer.getWidth(drawn);
-        int drawX = x + Math.max(2, (w - Math.round(textW * QUICK_TOPIC_TEXT_SCALE)) / 2);
-        int drawY = y + Math.max(1, (h - Math.round(this.textRenderer.fontHeight * QUICK_TOPIC_TEXT_SCALE)) / 2);
-        drawScaledText(context, drawn, drawX, drawY, textColor, false, QUICK_TOPIC_TEXT_SCALE);
+        int iconColor = enabled ? 0xFFB9D6EC : COLOR_TEXT_DISABLED;
+
+        if (QUICK_TOPIC_ICON_ONLY) {
+            // Icon-only mode: center the icon in the button at native scale.
+            if (icon != null && !icon.isBlank()) {
+                int iconW = this.textRenderer.getWidth(icon);
+                int drawX = x + Math.max(1, (w - iconW) / 2);
+                int drawY = y + Math.max(1, (h - this.textRenderer.fontHeight) / 2);
+                context.drawText(this.textRenderer, icon, drawX, drawY, iconColor, false);
+            }
+        } else {
+            // Icon + text fallback mode.
+            String label = entry.label != null ? entry.label : "";
+            int iconSlot = (icon != null && !icon.isBlank()) ? this.textRenderer.getWidth(icon) + 2 : 0;
+            if (icon != null && !icon.isBlank()) {
+                int iconDrawY = y + Math.max(1, (h - this.textRenderer.fontHeight) / 2);
+                context.drawText(this.textRenderer, icon, x + 2, iconDrawY, iconColor, false);
+            }
+            int maxTextW = Math.max(1, (int) ((w - 4 - iconSlot) / QUICK_TOPIC_TEXT_SCALE));
+            String drawn = elideToWidth(label, maxTextW);
+            int tw = this.textRenderer.getWidth(drawn);
+            int drawX = x + iconSlot + Math.max(1, (w - iconSlot - Math.round(tw * QUICK_TOPIC_TEXT_SCALE)) / 2);
+            int drawY = y + Math.max(1, (h - Math.round(this.textRenderer.fontHeight * QUICK_TOPIC_TEXT_SCALE)) / 2);
+            drawScaledText(context, drawn, drawX, drawY, textColor, false, QUICK_TOPIC_TEXT_SCALE);
+        }
     }
 
     private void drawScaledText(DrawContext context, String text, int x, int y, int color, boolean shadow, float scale) {
@@ -1440,6 +1499,73 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int sy = (int) Math.floor(y / (double) s);
         context.drawText(this.textRenderer, text, sx, sy, color, shadow);
         matrices.popMatrix();
+    }
+
+    private void drawHeaderIconButton(DrawContext context, int x, int y, TopicEntry entry, int mouseX, int mouseY) {
+        int s = HEADER_ICON_BTN_SIZE;
+        boolean hover = mouseX >= x && mouseX < x + s && mouseY >= y && mouseY < y + s;
+
+        int fill = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
+        context.fill(x, y, x + s, y + s, fill);
+        context.fill(x, y, x + s, y + 1, 0xFF000000);
+        context.fill(x, y + s - 1, x + s, y + s, 0xFF000000);
+        context.fill(x, y, x + 1, y + s, 0xFF000000);
+        context.fill(x + s - 1, y, x + s, y + s, 0xFF000000);
+
+        String icon = entry.action != null ? iconForAction(entry.action) : "";
+        if (icon != null && !icon.isBlank()) {
+            float scale = 0.75f;
+            int iconW = this.textRenderer.getWidth(icon);
+            int drawX = x + Math.max(1, (s - Math.round(iconW * scale)) / 2);
+            int drawY = y + Math.max(1, (s - Math.round(this.textRenderer.fontHeight * scale)) / 2);
+            drawScaledText(context, icon, drawX, drawY, 0xFFB9D6EC, false, scale);
+        }
+    }
+
+    private int getHeaderGuideBtnX() {
+        return getHeaderSpellsBtnX() - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+    }
+
+    private int getHeaderSpellsBtnX() {
+        int panelX = getTopicPanelX();
+        int panelWidth = getTopicPanelWidth();
+        String openLabel = "Open";
+        int openLabelW = this.textRenderer.getWidth(openLabel);
+        int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
+        return openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+    }
+
+    private int getHeaderBtnY() {
+        return getTopicPanelY() + 1;
+    }
+
+    private TopicEntry getHeaderIconEntryAt(double mouseX, double mouseY) {
+        int btnY = getHeaderBtnY();
+        int s = HEADER_ICON_BTN_SIZE;
+        if (mouseY < btnY || mouseY >= btnY + s) return null;
+
+        int guideX = getHeaderGuideBtnX();
+        if (mouseX >= guideX && mouseX < guideX + s) return HEADER_GUIDE_ENTRY;
+
+        int spellsX = getHeaderSpellsBtnX();
+        if (mouseX >= spellsX && mouseX < spellsX + s) return HEADER_SPELLS_ENTRY;
+
+        return null;
+    }
+
+    private void drawHeaderIconHoverTooltip(DrawContext context, int mouseX, int mouseY) {
+        TopicEntry hovered = getHeaderIconEntryAt(mouseX, mouseY);
+        if (hovered != headerHoveredEntry) {
+            headerHoveredEntry = hovered;
+            headerHoverStartedAtMs = System.currentTimeMillis();
+        }
+        if (headerHoveredEntry == null) return;
+        if (System.currentTimeMillis() - headerHoverStartedAtMs < QUICK_HOVER_TOOLTIP_DELAY_MS) return;
+
+        String label = headerHoveredEntry.label != null ? headerHoveredEntry.label : "";
+        if (!label.isBlank()) {
+            drawTooltipBox(context, mouseX, mouseY, java.util.List.of(label));
+        }
     }
 
     private Rect computeTopicsOverlayRect() {
@@ -1503,8 +1629,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int panelY = getTopicPanelY();
         int panelW = getTopicPanelWidth();
         int headerH = this.textRenderer.fontHeight + 4;
-        return mouseX >= panelX && mouseX < panelX + panelW
-                && mouseY >= panelY && mouseY < panelY + headerH;
+        if (mouseX < panelX || mouseX >= panelX + panelW
+                || mouseY < panelY || mouseY >= panelY + headerH) {
+            return false;
+        }
+        // Exclude header icon button regions so they don't toggle the overlay.
+        if (getHeaderIconEntryAt(mouseX, mouseY) != null) {
+            return false;
+        }
+        return true;
     }
 
     private boolean isMouseOverTopicsOverlay(double mouseX, double mouseY) {
@@ -1572,6 +1705,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         return switch (entry.action) {
             case FOLLOW,
+                 GUARD,
+                 PATROL,
                  SKILL_WOODCUT,
                  SKILL_FISH,
                  SKILL_WOOL,
@@ -1642,6 +1777,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         if (entry.action == TopicAction.FOLLOW) {
             drawFollowRow(context, rowX, rowY, rowW, mouseX, mouseY);
+            return;
+        }
+        if (entry.action == TopicAction.GUARD) {
+            drawGuardRow(context, rowX, rowY, rowW, mouseX, mouseY);
+            return;
+        }
+        if (entry.action == TopicAction.PATROL) {
+            drawPatrolRow(context, rowX, rowY, rowW, mouseX, mouseY);
             return;
         }
         if (entry.action == TopicAction.SKILL_WOODCUT) {
@@ -2370,6 +2513,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 beginHeldAdjust(() -> adjustFollowDistance(adjust));
                 return true;
             }
+            int guardAdjust = getGuardAdjustDirectionInOverlay(mouseX, mouseY);
+            if (guardAdjust != 0) {
+                adjustGuardRadius(guardAdjust);
+                beginHeldAdjust(() -> adjustGuardRadius(guardAdjust));
+                return true;
+            }
+            int patrolAdjust = getPatrolAdjustDirectionInOverlay(mouseX, mouseY);
+            if (patrolAdjust != 0) {
+                adjustPatrolRadius(patrolAdjust);
+                beginHeldAdjust(() -> adjustPatrolRadius(patrolAdjust));
+                return true;
+            }
             int woodcutAdjust = getWoodcutAdjustDirectionInOverlay(mouseX, mouseY);
             if (woodcutAdjust != 0) {
                 adjustWoodcutTreeCount(woodcutAdjust);
@@ -2403,8 +2558,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         // If direct input is active and the click landed outside the value label, close it.
+        // Consume the click so the dismissal doesn't also trigger an action.
         if (directInputAction != null) {
             commitDirectInput();
+            return true;
         }
 
         // Action control box hit test — only fires when the click lands on the
@@ -2553,6 +2710,76 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return 0;
     }
 
+    private int getGuardAdjustDirectionInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return 0;
+        }
+        Rect rowRect = getSkillEntryRectInOverlay(TopicAction.GUARD);
+        if (rowRect == null) {
+            return 0;
+        }
+        int labelX = getSkillLabelStartX(rowRect.x, TopicAction.GUARD, 0);
+        String status = isGuardActive() ? "ON" : "OFF";
+        String radiusLabel = formatGuardRadius();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowRect.y + 1;
+        int statusGap = 6;
+        int controlRight = getCompactControlRight(
+                rowRect.x,
+                rowRect.w,
+                labelX,
+                this.textRenderer.getWidth(radiusLabel) + statusGap + this.textRenderer.getWidth(status),
+                2
+        );
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        if (mouseY >= controlY && mouseY < controlY + controlSize) {
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return 1;
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    private int getPatrolAdjustDirectionInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return 0;
+        }
+        Rect rowRect = getSkillEntryRectInOverlay(TopicAction.PATROL);
+        if (rowRect == null) {
+            return 0;
+        }
+        int labelX = getSkillLabelStartX(rowRect.x, TopicAction.PATROL, 0);
+        String status = isPatrolActive() ? "ON" : "OFF";
+        String radiusLabel = formatPatrolRadius();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowRect.y + 1;
+        int statusGap = 6;
+        int controlRight = getCompactControlRight(
+                rowRect.x,
+                rowRect.w,
+                labelX,
+                this.textRenderer.getWidth(radiusLabel) + statusGap + this.textRenderer.getWidth(status),
+                2
+        );
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        if (mouseY >= controlY && mouseY < controlY + controlSize) {
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return 1;
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
     private int getWoodcutAdjustDirectionInOverlay(double mouseX, double mouseY) {
         if (overlayCategory != TopicCategory.SKILL) {
             return 0;
@@ -2562,7 +2789,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return 0;
         }
         int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
-        String countLabel = "Trees " + woodcutTreeCount;
+        String countLabel = "Area min " + woodcutTreeCount;
         int controlSize = TOPIC_ROW_HEIGHT - 2;
         int controlY = rowRect.y + 1;
         int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
@@ -2595,8 +2822,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry)) {
             return false;
         }
-        // Adjustable skills have their own +/- controls, not action control boxes.
-        if (entry.action == TopicAction.FOLLOW || entry.action == TopicAction.SKILL_WOODCUT
+        // Custom rows with their own +/- controls are not action control boxes.
+        if (entry.action == TopicAction.FOLLOW || entry.action == TopicAction.GUARD
+                || entry.action == TopicAction.PATROL || entry.action == TopicAction.SKILL_WOODCUT
                 || isAdjustableSkillAction(entry.action)) {
             return false;
         }
@@ -2779,7 +3007,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Rect rowRect = getSkillEntryRectInOverlay(TopicAction.SKILL_WOODCUT);
             if (rowRect != null) {
                 int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
-                String countLabel = "Trees " + woodcutTreeCount;
+                String countLabel = "Area min " + woodcutTreeCount;
                 int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
                 int plusX = controlRight - controlSize;
                 int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
@@ -2825,6 +3053,55 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 return action;
             }
         }
+
+        // Check guard radius label (only the radius text, not the ON/OFF status).
+        {
+            Rect rowRect = getSkillEntryRectInOverlay(TopicAction.GUARD);
+            if (rowRect != null) {
+                int labelX = getSkillLabelStartX(rowRect.x, TopicAction.GUARD, 0);
+                String status = isGuardActive() ? "ON" : "OFF";
+                String radiusLabel = formatGuardRadius();
+                int statusGap = 6;
+                int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX,
+                        this.textRenderer.getWidth(radiusLabel) + statusGap + this.textRenderer.getWidth(status), 2);
+                int plusX = controlRight - controlSize;
+                int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+                int statusX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(status);
+                int radiusX = statusX - statusGap - this.textRenderer.getWidth(radiusLabel);
+                if (radiusX < labelX + 40) radiusX = labelX + 40;
+                int clusterLeft = radiusX - 4;
+                int controlY = rowRect.y + 1;
+                if (mouseX >= clusterLeft && mouseX < statusX
+                        && mouseY >= controlY && mouseY < controlY + controlSize) {
+                    return TopicAction.GUARD;
+                }
+            }
+        }
+
+        // Check patrol radius label (only the radius text, not the ON/OFF status).
+        {
+            Rect rowRect = getSkillEntryRectInOverlay(TopicAction.PATROL);
+            if (rowRect != null) {
+                int labelX = getSkillLabelStartX(rowRect.x, TopicAction.PATROL, 0);
+                String status = isPatrolActive() ? "ON" : "OFF";
+                String radiusLabel = formatPatrolRadius();
+                int statusGap = 6;
+                int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX,
+                        this.textRenderer.getWidth(radiusLabel) + statusGap + this.textRenderer.getWidth(status), 2);
+                int plusX = controlRight - controlSize;
+                int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+                int statusX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(status);
+                int radiusX = statusX - statusGap - this.textRenderer.getWidth(radiusLabel);
+                if (radiusX < labelX + 40) radiusX = labelX + 40;
+                int clusterLeft = radiusX - 4;
+                int controlY = rowRect.y + 1;
+                if (mouseX >= clusterLeft && mouseX < statusX
+                        && mouseY >= controlY && mouseY < controlY + controlSize) {
+                    return TopicAction.PATROL;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -2865,6 +3142,88 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
     }
 
+    private void drawGuardRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
+        boolean active = isGuardActive();
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int baseRow = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.GUARD);
+
+        String status = active ? "ON" : "OFF";
+        String radiusLabel = formatGuardRadius();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int statusW = this.textRenderer.getWidth(status);
+        int statusGap = 6;
+        int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(radiusLabel) + statusGap + statusW, 2);
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+        int statusX = minusX - TOPIC_CONTROL_GAP - statusW;
+        int radiusX = statusX - statusGap - this.textRenderer.getWidth(radiusLabel);
+
+        if (radiusX < labelX + 40) {
+            radiusX = labelX + 40;
+        }
+
+        drawValueClusterBox(context, radiusX - 4, rowY, plusX + controlSize + 3, hover);
+
+        int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, "Guard", labelX, textY, COLOR_TEXT_PARCHMENT, false);
+        if (directInputAction == TopicAction.GUARD) {
+            drawDirectInputField(context, radiusX, controlY, statusX - statusGap - radiusX, controlSize, textY);
+        } else {
+            context.drawText(this.textRenderer, radiusLabel, radiusX, textY, 0xFFE6D7A3, false);
+        }
+        context.drawText(this.textRenderer, status, statusX, textY, active ? 0xFFE6D7A3 : 0xFFB0B0B0, false);
+
+        drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
+        drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
+    }
+
+    private void drawPatrolRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
+        boolean active = isPatrolActive();
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int baseRow = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.PATROL);
+
+        String status = active ? "ON" : "OFF";
+        String radiusLabel = formatPatrolRadius();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int statusW = this.textRenderer.getWidth(status);
+        int statusGap = 6;
+        int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(radiusLabel) + statusGap + statusW, 2);
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+        int statusX = minusX - TOPIC_CONTROL_GAP - statusW;
+        int radiusX = statusX - statusGap - this.textRenderer.getWidth(radiusLabel);
+
+        if (radiusX < labelX + 40) {
+            radiusX = labelX + 40;
+        }
+
+        drawValueClusterBox(context, radiusX - 4, rowY, plusX + controlSize + 3, hover);
+
+        int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, "Patrol", labelX, textY, COLOR_TEXT_PARCHMENT, false);
+        if (directInputAction == TopicAction.PATROL) {
+            drawDirectInputField(context, radiusX, controlY, statusX - statusGap - radiusX, controlSize, textY);
+        } else {
+            context.drawText(this.textRenderer, radiusLabel, radiusX, textY, 0xFFE6D7A3, false);
+        }
+        context.drawText(this.textRenderer, status, statusX, textY, active ? 0xFFE6D7A3 : 0xFFB0B0B0, false);
+
+        drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
+        drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
+    }
+
     private void drawWoodcutRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
         boolean hover = mouseX >= rowX && mouseX < rowX + rowW
                 && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
@@ -2873,7 +3232,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.SKILL_WOODCUT);
 
-        String countLabel = "Trees " + woodcutTreeCount;
+        String countLabel = "Area min " + woodcutTreeCount;
         int controlSize = TOPIC_ROW_HEIGHT - 2;
         int controlY = rowY + 1;
         int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(countLabel), 2);
@@ -3139,6 +3498,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case LEASH_ON_DISMOUNT -> "⌁";
             case DROP_SWEEP -> "🧹";
             case BASES -> "⌂";
+            case OPEN_SPELLS -> "✦";
             case CRAFTING -> "⚒";
             case CONSTRUCTION -> "▧";
             case COOKING -> "♨";
@@ -3152,6 +3512,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOOL -> "✂";
             case SKILL_FARM -> "❀";
             case SKILL_COLLECT_DIRT -> "";
+            case SKILL_LEAF_LITTER -> "🍂";
             case SKILL_MINING -> "⛏";
             case SKILL_STRIPMINE -> "↦";
             case SKILL_ASCENT -> "↑";
@@ -3228,7 +3589,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "follow:+",
                         java.util.List.of(
                                 "Increase Follow Distance",
-                                "Adds " + String.format(Locale.ROOT, "%.1f", FOLLOW_DISTANCE_STEP) + " blocks.",
+                                "Adds " + String.format(Locale.ROOT, "%.0f", FOLLOW_DISTANCE_STEP) + " block.",
                                 "Current: " + formatFollowDistance()
                         )
                 );
@@ -3237,8 +3598,52 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     "follow:-",
                     java.util.List.of(
                             "Decrease Follow Distance",
-                            "Reduces follow spacing by " + String.format(Locale.ROOT, "%.1f", FOLLOW_DISTANCE_STEP) + ".",
+                            "Reduces follow spacing by " + String.format(Locale.ROOT, "%.0f", FOLLOW_DISTANCE_STEP) + " block.",
                             "Current: " + formatFollowDistance()
+                    )
+            );
+        }
+
+        int guardDir = getGuardAdjustDirectionInOverlay(mouseX, mouseY);
+        if (guardDir != 0) {
+            if (guardDir > 0) {
+                return new OverlayControlHover(
+                        "guard:+",
+                        java.util.List.of(
+                                "Increase Guard Radius",
+                                "Adds " + String.format(Locale.ROOT, "%.0f", GUARD_RADIUS_STEP) + " block.",
+                                "Current: " + formatGuardRadius()
+                        )
+                );
+            }
+            return new OverlayControlHover(
+                    "guard:-",
+                    java.util.List.of(
+                            "Decrease Guard Radius",
+                            "Reduces guard area by " + String.format(Locale.ROOT, "%.0f", GUARD_RADIUS_STEP) + " block.",
+                            "Current: " + formatGuardRadius()
+                    )
+            );
+        }
+
+        int patrolDir = getPatrolAdjustDirectionInOverlay(mouseX, mouseY);
+        if (patrolDir != 0) {
+            if (patrolDir > 0) {
+                return new OverlayControlHover(
+                        "patrol:+",
+                        java.util.List.of(
+                                "Increase Patrol Radius",
+                                "Adds " + String.format(Locale.ROOT, "%.0f", GUARD_RADIUS_STEP) + " block.",
+                                "Current: " + formatPatrolRadius()
+                        )
+                );
+            }
+            return new OverlayControlHover(
+                    "patrol:-",
+                    java.util.List.of(
+                            "Decrease Patrol Radius",
+                            "Reduces patrol area by " + String.format(Locale.ROOT, "%.0f", GUARD_RADIUS_STEP) + " block.",
+                            "Current: " + formatPatrolRadius()
                     )
             );
         }
@@ -3268,14 +3673,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     key,
                     java.util.List.of(
                             "Increase Amount",
-                            "Raises the value for " + readableSkillLabel(hit.action()) + "."
+                            "Raises the value for " + readableSkillLabel(hit.action()) + ".",
+                            "Double-click the number to type a value directly."
                     )
             );
             case DECREMENT -> new OverlayControlHover(
                     key,
                     java.util.List.of(
                             "Decrease Amount",
-                            "Lowers the value for " + readableSkillLabel(hit.action()) + "."
+                            "Lowers the value for " + readableSkillLabel(hit.action()) + ".",
+                            "Double-click the number to type a value directly."
                     )
             );
             case TOGGLE_MODE -> {
@@ -3551,7 +3958,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Allows improvised night sheltering and the local tactical-shelter fallback. Turn this OFF if you do not want the bot digging in or building emergency shelter at night."
             );
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> java.util.List.of(
-                "Guard/Patrol Eligible",
+                "Sunset Return in Guard/Patrol",
                 "When ON, Guard and Patrol bots may still auto-return home at sunset."
             );
             case AUTO_RETURN_SKIP_PERMISSION -> java.util.List.of(
@@ -3640,6 +4047,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Collect Dirt",
                 "Gathers common soft terrain blocks like dirt, gravel, sand, and similar shovel-friendly material."
             );
+            case SKILL_LEAF_LITTER -> java.util.List.of(
+                "Leaf Litter",
+                "Collects nearby leaf litter from the ground.",
+                "Leaf litter is cheap furnace fuel; great in forested biomes.",
+                "Requires leaf litter blocks in the area."
+            );
             case SKILL_MINING -> java.util.List.of(
                 "Mining",
                 "Starts the bot's standard mining routine for nearby ores and underground resources."
@@ -3658,6 +4071,34 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Descent",
                 "Digs a safe downward staircase in the direction you choose.",
                 "Set the depth first, then look where you want it to begin and confirm from the world."
+            );
+            case COMPANION_COME -> java.util.List.of(
+                "Regroup",
+                "Teleports all your bots to your current position."
+            );
+            case FOLLOW -> java.util.List.of(
+                "Follow",
+                "The bot follows you at a set distance.",
+                "Adjust the follow distance with +/- controls."
+            );
+            case GUARD -> java.util.List.of(
+                "Guard",
+                "The bot guards its current position within a set radius.",
+                "Engages hostiles and collects drops nearby."
+            );
+            case PATROL -> java.util.List.of(
+                "Patrol",
+                "The bot patrols around its current position,",
+                "wandering randomly within the patrol radius."
+            );
+            case SLEEP -> java.util.List.of(
+                "Sleep",
+                "Makes the bot find and sleep in the nearest available bed."
+            );
+            case RETURN_HOME -> java.util.List.of(
+                "Return Home",
+                "The bot navigates back to its assigned home base.",
+                "Click again to cancel the return trip."
             );
             default -> java.util.List.of();
             };
@@ -3888,7 +4329,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (value <= 0.0D) {
             return "Distance --";
         }
-        return "Distance " + String.format(Locale.ROOT, "%.1f", value);
+        return "Distance " + String.format(Locale.ROOT, "%.0f", value);
     }
 
     @Override
@@ -3917,6 +4358,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return clickTopicsOverlay(click);
         }
 
+        TopicEntry headerIconEntry = getHeaderIconEntryAt(click.x(), click.y());
+        if (headerIconEntry != null) {
+            handleTopicEntry(headerIconEntry);
+            return true;
+        }
         if (isMouseOverTopicsHeader(click.x(), click.y())) {
             toggleTopicsExpanded(true);
             return true;
@@ -4296,6 +4742,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_BURROW -> runShelterWithLook("burrow");
             case SKILL_FARM -> runSkillCommand("farm", null);
             case SKILL_COLLECT_DIRT -> runSkillCommand("collect_dirt", null);
+            case SKILL_LEAF_LITTER -> runSkillCommand("leaf_litter", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
             case SKILL_STRIPMINE -> runStripmineSkillCommand();
             case SKILL_ASCENT -> runAscentSkillCommand();
@@ -5236,6 +5683,34 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return this.handler != null ? this.handler.getBotFollowDistance() : 0.0D;
     }
 
+    private double getServerGuardRadius() {
+        return this.handler != null ? this.handler.getBotGuardRadius() : GUARD_RADIUS_DEFAULT;
+    }
+
+    private double getServerPatrolRadius() {
+        return this.handler != null ? this.handler.getBotPatrolRadius() : GUARD_RADIUS_DEFAULT;
+    }
+
+    private int getEffectiveGuardRadius() {
+        return guardRadiusPreset > SKILL_COUNT_UNSET
+                ? guardRadiusPreset
+                : (int) Math.round(getServerGuardRadius());
+    }
+
+    private int getEffectivePatrolRadius() {
+        return patrolRadiusPreset > SKILL_COUNT_UNSET
+                ? patrolRadiusPreset
+                : (int) Math.round(getServerPatrolRadius());
+    }
+
+    private String formatGuardRadius() {
+        return "Radius " + getEffectiveGuardRadius();
+    }
+
+    private String formatPatrolRadius() {
+        return "Radius " + getEffectivePatrolRadius();
+    }
+
     private String formatBotTarget() {
         return formatBotTarget(botAlias);
     }
@@ -5271,6 +5746,24 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String botTarget = formatBotTarget();
         String command = "bot follow-distance " + String.format(Locale.ROOT, "%.1f", next) + " " + botTarget;
         sendChatCommand(command);
+    }
+
+    private void adjustGuardRadius(int direction) {
+        int current = getEffectiveGuardRadius();
+        guardRadiusPreset = (int) MathHelper.clamp(current + direction, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
+        if (isGuardActive()) {
+            String botTarget = formatBotTarget();
+            sendChatCommand("bot guard " + botTarget + " " + guardRadiusPreset);
+        }
+    }
+
+    private void adjustPatrolRadius(int direction) {
+        int current = getEffectivePatrolRadius();
+        patrolRadiusPreset = (int) MathHelper.clamp(current + direction, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
+        if (isPatrolActive()) {
+            String botTarget = formatBotTarget();
+            sendChatCommand("bot patrol " + botTarget + " " + patrolRadiusPreset);
+        }
     }
 
     private void adjustWoodcutTreeCount(int direction) {
@@ -5364,7 +5857,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         } catch (NumberFormatException e) {
             return;
         }
-        if (value <= 0) {
+        if (value < 0) {
             return;
         }
         switch (action) {
@@ -5385,6 +5878,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
             case SKILL_DESCENT -> descentBlocks = MathHelper.clamp(value,
                     SKILL_DESCENT_COUNT_MIN, SKILL_DESCENT_COUNT_MAX);
+            case GUARD -> {
+                guardRadiusPreset = (int) MathHelper.clamp(value, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
+                if (isGuardActive()) {
+                    String botTarget = formatBotTarget();
+                    sendChatCommand("bot guard " + botTarget + " " + guardRadiusPreset);
+                }
+            }
+            case PATROL -> {
+                patrolRadiusPreset = (int) MathHelper.clamp(value, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
+                if (isPatrolActive()) {
+                    String botTarget = formatBotTarget();
+                    sendChatCommand("bot patrol " + botTarget + " " + patrolRadiusPreset);
+                }
+            }
             default -> {}
         }
     }
@@ -5394,7 +5901,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return MathHelper.clamp(current, SKILL_COUNT_UNSET, max);
         }
         if (current <= SKILL_COUNT_UNSET) {
-            return direction > 0 ? MathHelper.clamp(defaultValue, min, max) : SKILL_COUNT_UNSET;
+            // First click in either direction: start from the displayed default.
+            int start = MathHelper.clamp(defaultValue + direction, min, max);
+            return Math.max(start, min);
         }
         int next = current + direction;
         if (next < min) {
@@ -5405,14 +5914,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void toggleGuard() {
         String botTarget = formatBotTarget();
-        String command = isGuardActive() ? "bot stop " + botTarget : "bot guard " + botTarget;
-        sendChatCommand(command);
+        if (isGuardActive()) {
+            sendChatCommand("bot stop " + botTarget);
+        } else {
+            int radius = getEffectiveGuardRadius();
+            sendChatCommand("bot guard " + botTarget + " " + radius);
+        }
     }
 
     private void togglePatrol() {
         String botTarget = formatBotTarget();
-        String command = isPatrolActive() ? "bot stop " + botTarget : "bot patrol " + botTarget;
-        sendChatCommand(command);
+        if (isPatrolActive()) {
+            sendChatCommand("bot stop " + botTarget);
+        } else {
+            int radius = getEffectivePatrolRadius();
+            sendChatCommand("bot patrol " + botTarget + " " + radius);
+        }
     }
 
     private void runStop() {
@@ -5442,6 +5959,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String botTarget = formatBotTarget();
         String command = "bot sleep " + botTarget;
         sendChatCommand(command);
+        this.close();
     }
 
     private void runCompanionCome() {

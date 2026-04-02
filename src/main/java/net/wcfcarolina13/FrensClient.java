@@ -2346,7 +2346,19 @@ public class FrensClient implements ClientModInitializer {
                     : "working";
             line = alias + " is " + task + ". Press [" + stopKey + "] to stop.";
         } else {
-            return;
+            String mode = lookedAtBotStatus.modeName();
+            if (mode != null && !mode.isBlank()) {
+                String modeLabel = switch (mode) {
+                    case "GUARD" -> "guarding";
+                    case "PATROL" -> "patrolling";
+                    case "FOLLOW" -> "following";
+                    case "STAY" -> "staying";
+                    default -> mode.toLowerCase(java.util.Locale.ROOT);
+                };
+                line = alias + " is " + modeLabel + ". Press [" + stopKey + "] to stop.";
+            } else {
+                return;
+            }
         }
 
         int w = client.textRenderer.getWidth(line);

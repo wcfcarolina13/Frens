@@ -19,6 +19,7 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotInventoryStorageService;
+import net.wcfcarolina13.GameAI.services.GuardPatrolService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 
 /**
@@ -59,7 +60,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(22);
+        this.botStats = new ArrayPropertyDelegate(24);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -248,6 +249,9 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(19, BotHomeService.isAutoReturnSkipPermission(botRef) ? 1 : 0);
         botStats.set(20, BotHomeService.isAutoReturnSelfSufficientFallback(botRef) ? 1 : 0);
         botStats.set(21, BotHomeService.isTacticalShelterEnabled(botRef) ? 1 : 0);
+        // Index 22: guard radius, Index 23: patrol radius (encoded as value * 10)
+        botStats.set(22, (int) Math.round(GuardPatrolService.getGuardRadius(botRef.getUuid()) * 10.0D));
+        botStats.set(23, (int) Math.round(GuardPatrolService.getPatrolRadius(botRef.getUuid()) * 10.0D));
     }
 
     public float getBotHealth() {
@@ -336,6 +340,14 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public double getBotFollowDistance() {
         return botStats.get(9) / 10.0D;
+    }
+
+    public double getBotGuardRadius() {
+        return botStats.get(22) / 10.0D;
+    }
+
+    public double getBotPatrolRadius() {
+        return botStats.get(23) / 10.0D;
     }
 
     public int getSectionWidth() {

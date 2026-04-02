@@ -52,6 +52,15 @@ public final class BotWakeUpDialogueService {
     /** Last tick a wake-up line was shown for each bot. */
     private static final ConcurrentHashMap<UUID, Long> LAST_WAKE_LINE_TICK = new ConcurrentHashMap<>();
 
+    /** Tracks which bots have already been queued for co-sleep this night cycle. */
+    private static final ConcurrentHashMap<UUID, Long> CO_SLEEP_QUEUED_TICK = new ConcurrentHashMap<>();
+
+    /** Co-sleep cooldown: don't re-queue for 5 minutes after a co-sleep attempt. */
+    private static final long CO_SLEEP_COOLDOWN_TICKS = 20L * 60L * 5L;
+
+    /** Co-sleep proximity: bot must be within 16 blocks of commander. */
+    private static final double CO_SLEEP_RADIUS_SQ = 16.0 * 16.0;
+
     private BotWakeUpDialogueService() {
     }
 
@@ -62,13 +71,17 @@ public final class BotWakeUpDialogueService {
 
         long nowTick = server.getTicks();
 
-        // --- Phase 1: Track real player sleep edges ---
+        // --- Phase 1: Track real player sleep edges and trigger co-sleep ---
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             if (player == null || player.isRemoved()) continue;
             if (BotEventHandler.isRegisteredBot(player)) continue;
             UUID pid = player.getUuid();
             boolean sleeping = player.isSleeping();
             boolean was = PLAYER_WAS_SLEEPING.getOrDefault(pid, false);
+            if (!was && sleeping) {
+                // Player just went to sleep — try to co-sleep nearby bots.
+                triggerCoSleep(server, player, nowTick);
+            }
             if (was && !sleeping) {
                 // Player just woke up — record the tick so bots can reference it.
                 PLAYER_WAS_SLEEPING.put(pid, false);
@@ -157,10 +170,114 @@ public final class BotWakeUpDialogueService {
         }));
     }
 
+    // ── Co-sleep: when commander goes to sleep, nearby idle bots sleep too ──
+
+    private static final java.util.concurrent.atomic.AtomicInteger CO_SLEEP_THREAD_ID =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private static final java.util.concurrent.ExecutorService CO_SLEEP_EXECUTOR =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "co-sleep-" + CO_SLEEP_THREAD_ID.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * When a real player goes to sleep, queue sleep for any nearby idle bots
+     * that this player commands.
+     */
+    private static void triggerCoSleep(MinecraftServer server, ServerPlayerEntity player, long nowTick) {
+        LOGGER.info("Co-sleep: commander {} went to sleep, checking bots...", player.getName().getString());
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+            if (bot == null || bot.isRemoved()) continue;
+            String botName = bot.getName().getString();
+            if (bot.isSleeping()) {
+                LOGGER.debug("Co-sleep: {} skipped — already sleeping", botName);
+                continue;
+            }
+            if (bot.getEntityWorld() != player.getEntityWorld()) continue;
+
+            UUID botId = bot.getUuid();
+
+            // Cooldown: don't re-queue co-sleep within 5 minutes.
+            long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
+            if (nowTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) {
+                LOGGER.debug("Co-sleep: {} skipped — cooldown ({} ticks remaining)",
+                        botName, CO_SLEEP_COOLDOWN_TICKS - (nowTick - lastQueued));
+                continue;
+            }
+
+            // Bot must be within 16 blocks of the player.
+            double distSq = bot.squaredDistanceTo(player);
+            if (distSq > CO_SLEEP_RADIUS_SQ) {
+                LOGGER.debug("Co-sleep: {} skipped — too far ({} blocks)",
+                        botName, String.format("%.1f", Math.sqrt(distSq)));
+                continue;
+            }
+
+            // Player must be the bot's commander/owner.
+            ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
+            if (commander == null || !commander.getUuid().equals(player.getUuid())) {
+                LOGGER.debug("Co-sleep: {} skipped — {} is not commander (resolved={})",
+                        botName, player.getName().getString(),
+                        commander != null ? commander.getName().getString() : "null");
+                continue;
+            }
+
+            // Bot must be idle (no active task).
+            if (TaskService.hasActiveTask(botId)) {
+                LOGGER.debug("Co-sleep: {} skipped — has active task", botName);
+                continue;
+            }
+
+            // Must be valid sleep time.
+            if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                if (sw.isDay() && !sw.isThundering()) {
+                    LOGGER.debug("Co-sleep: {} skipped — daytime", botName);
+                    continue;
+                }
+            }
+
+            CO_SLEEP_QUEUED_TICK.put(botId, nowTick);
+            LOGGER.info("Co-sleep: {} going to sleep because commander {} slept nearby",
+                    botName, player.getName().getString());
+            scheduleCoSleep(server, bot);
+        }
+    }
+
+    private static void scheduleCoSleep(MinecraftServer server, ServerPlayerEntity bot) {
+        if (server == null || bot == null || bot.isRemoved()) return;
+        UUID botUuid = bot.getUuid();
+
+        // Avoid double-queueing.
+        var active = TaskService.getActiveTaskInfo(botUuid);
+        if (active.isPresent() && "skill:sleep".equalsIgnoreCase(active.get().name())) return;
+
+        net.minecraft.server.command.ServerCommandSource source = bot.getCommandSource().withSilent();
+        var ticketOpt = TaskService.beginSkill("sleep", source, botUuid);
+        if (ticketOpt.isEmpty()) return;
+
+        TaskService.TaskTicket ticket = ticketOpt.get();
+        ticket.setOrigin(TaskService.Origin.SYSTEM);
+        ticket.setOpenEnded(false);
+
+        CO_SLEEP_EXECUTOR.submit(() -> {
+            boolean success = false;
+            try {
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                success = SleepService.sleep(source, bot) && !TaskService.isAbortRequested(botUuid);
+            } catch (Exception e) {
+                LOGGER.warn("Co-sleep failed for {}: {}", bot.getName().getString(), e.getMessage());
+            } finally {
+                TaskService.complete(ticket, success);
+            }
+        });
+    }
+
     /** Call on server stop / world unload to prevent stale state. */
     public static void clear() {
         WAS_SLEEPING.clear();
         PLAYER_WAS_SLEEPING.clear();
         LAST_WAKE_LINE_TICK.clear();
+        CO_SLEEP_QUEUED_TICK.clear();
     }
 }

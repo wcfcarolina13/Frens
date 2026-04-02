@@ -59,17 +59,22 @@ public final class CompanionSafeZoneService {
             return true;
         }
 
-        // 2. Saved bases with per-base radius
+        // 2. Natural beehives / bee nests and their nearby tree volume
+        if (isNearRegisteredBeehive(world, pos)) {
+            return true;
+        }
+
+        // 3. Saved bases with per-base radius
         if (isNearSavedBase(world, pos)) {
             return true;
         }
 
-        // 3. Fortification hulls with buffer
+        // 4. Fortification hulls with buffer
         if (isInsideFortificationZone(world, pos)) {
             return true;
         }
 
-        // 4. Mapped villages
+        // 5. Mapped villages
         if (MappedVillageService.isInsideMappedVillage(world, pos)) {
             return true;
         }
@@ -80,6 +85,11 @@ public final class CompanionSafeZoneService {
     public static boolean isInExplicitProtectedZone(ServerWorld world, BlockPos pos, @Nullable UUID botOwner) {
         if (world == null || pos == null) return false;
         return ProtectedZoneService.isProtected(pos, world, botOwner);
+    }
+
+    public static boolean isNearRegisteredBeehive(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) return false;
+        return BotBeehiveRegistryService.isProtected(world, pos);
     }
 
     public static boolean isNearSavedBase(ServerWorld world, BlockPos pos) {

@@ -273,7 +273,8 @@ public class BotControlScreen extends Screen {
     private record SettingsSnapshot(
             boolean autoRespawnOnDeath, String spawnMode, String gameMode,
             String failsafeSpawnMode,
-            boolean teleportDuringSkills, boolean pauseOnFullInventory,
+            boolean teleportDuringSkills, boolean followTeleport,
+            boolean pauseOnFullInventory,
             boolean teleportDuringDropSweep, boolean autoRegroupOnLost,
             boolean llmEnabled, boolean voicedDialogue) {}
 
@@ -286,18 +287,19 @@ public class BotControlScreen extends Screen {
     private void captureCurrentWidgets() {
         if (settingGroups.isEmpty() || selectedAlias == null) return;
         List<CyclingButtonWidget<?>> ws = settingWidgets;
-        if (ws.size() < 10) return;
+        if (ws.size() < 11) return;
 
         boolean autoRespawn = Boolean.TRUE.equals(ws.get(0).getValue());
         Object spawnModeValue = ws.get(1).getValue();
         Object gameModeValue = ws.get(2).getValue();
         Object failsafeValue = ws.get(3).getValue();
         boolean teleportSkills = Boolean.TRUE.equals(ws.get(4).getValue());
-        boolean pauseInventory = Boolean.TRUE.equals(ws.get(5).getValue());
-        boolean teleportSweep = Boolean.TRUE.equals(ws.get(6).getValue());
-        boolean autoRegroup = Boolean.TRUE.equals(ws.get(7).getValue());
-        boolean llmEnabled = Boolean.TRUE.equals(ws.get(8).getValue());
-        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(9).getValue());
+        boolean followTeleport = Boolean.TRUE.equals(ws.get(5).getValue());
+        boolean pauseInventory = Boolean.TRUE.equals(ws.get(6).getValue());
+        boolean teleportSweep = Boolean.TRUE.equals(ws.get(7).getValue());
+        boolean autoRegroup = Boolean.TRUE.equals(ws.get(8).getValue());
+        boolean llmEnabled = Boolean.TRUE.equals(ws.get(9).getValue());
+        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(10).getValue());
 
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 autoRespawn,
@@ -305,6 +307,7 @@ public class BotControlScreen extends Screen {
                 gameModeValue instanceof String s ? s : "survival",
                 failsafeValue instanceof String s ? s : "world_spawn",
                 teleportSkills,
+                followTeleport,
                 pauseInventory,
                 teleportSweep,
                 autoRegroup,
@@ -335,6 +338,7 @@ public class BotControlScreen extends Screen {
         String gameMode = snap != null ? snap.gameMode : cfg.getGameMode();
         String failsafe = snap != null ? snap.failsafeSpawnMode : cfg.getFailsafeSpawnMode();
         boolean teleSkills = snap != null ? snap.teleportDuringSkills : cfg.isTeleportDuringSkills();
+        boolean followTp = snap != null ? snap.followTeleport : cfg.isFollowTeleport();
         boolean pauseInv = snap != null ? snap.pauseOnFullInventory : cfg.isPauseOnFullInventory();
         boolean teleDrop = snap != null ? snap.teleportDuringDropSweep : cfg.isTeleportDuringDropSweep();
         boolean autoRegroup = snap != null ? snap.autoRegroupOnLost : cfg.isAutoRegroupOnLost();
@@ -364,6 +368,7 @@ public class BotControlScreen extends Screen {
 
         List<SettingEntry> behavior = new ArrayList<>();
         behavior.add(makeOnOff("Teleport During Skills", "Allows short recovery teleports if a bot gets badly stuck during skills like mining, building, or escape logic.", teleSkills, TOGGLE_W));
+        behavior.add(makeOnOff("Follow Teleport", "Wolf-style catch-up: the bot teleports near you when it falls far behind or gets stuck during follow. Does not affect skill or sweep teleport.", followTp, TOGGLE_W));
         behavior.add(makeOnOff("Pause on Full Inventory", "Pauses the current job when inventory is full so the bot does not keep working and waste drops. Use resume after unloading.", pauseInv, TOGGLE_W));
         behavior.add(makeOnOff("Teleport During Sweeps", "Lets cleanup/drop-sweep runs use teleport shortcuts so the bot can gather scattered drops faster after combat, mining, or building.", teleDrop, TOGGLE_W));
         behavior.add(makeOnOff("Auto-Regroup on Lost", "When the bot loses you at a drop-off, it will automatically regroup after a delay instead of waiting indefinitely. Risky but keeps the bot moving.", autoRegroup, TOGGLE_W));
@@ -447,6 +452,7 @@ public class BotControlScreen extends Screen {
             s.setGameMode(v.gameMode);
             s.setFailsafeSpawnMode(v.failsafeSpawnMode);
             s.setTeleportDuringSkills(v.teleportDuringSkills);
+            s.setFollowTeleport(v.followTeleport);
             s.setPauseOnFullInventory(v.pauseOnFullInventory);
             s.setTeleportDuringDropSweep(v.teleportDuringDropSweep);
             s.setAutoRegroupOnLost(v.autoRegroupOnLost);
