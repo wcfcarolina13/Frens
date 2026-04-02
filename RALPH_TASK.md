@@ -1,7 +1,15 @@
 ---
-task: (none — backlog only)
+task: fellTree simplification refactor
 test_command: "./gradlew build -x test"
 ---
+
+## Next Session: fellTree Simplification Refactor
+
+**Plan:** `docs/superpowers/plans/2026-04-01-felltree-simplification.md`  
+**Checkpoint:** commit `6a770c5` (safe revert point)  
+**Status:** Plan approved, ready to execute
+
+Replace the 680-line column-entry system in `fellTree` with a simpler mine-from-outside → pillar → bridge approach. Works for all tree types including cherry blossoms and floaters. ~600 lines removed, ~50 lines added.
 
 # Task: (No active task)
 
