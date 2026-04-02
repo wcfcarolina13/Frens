@@ -359,18 +359,16 @@ public final class TreeDetector {
             base = base.down();
         }
 
-        // Scan downward up to 5 blocks for valid soil — handles cherry trees and
-        // hillside trees whose trunks start above ground level with air gaps below.
+        // Scan downward up to 8 blocks for valid soil — handles cherry trees and
+        // hillside trees whose trunks start above ground with air/stone gaps below.
+        // Scans through stone layers (hillside terrain: air → stone → dirt).
         boolean foundSoil = false;
-        for (int dy = 1; dy <= 5; dy++) {
-            BlockState soilCandidate = world.getBlockState(base.down(dy));
+        for (int dy = 1; dy <= 8; dy++) {
+            BlockPos probe = base.down(dy);
+            if (!world.isChunkLoaded(probe)) break;
+            BlockState soilCandidate = world.getBlockState(probe);
             if (isValidSoil(soilCandidate)) {
                 foundSoil = true;
-                break;
-            }
-            // Stop scanning if we hit a solid non-soil block (stone, etc.)
-            if (!soilCandidate.isAir() && !soilCandidate.isReplaceable()
-                    && !soilCandidate.getCollisionShape(world, base.down(dy)).isEmpty()) {
                 break;
             }
         }

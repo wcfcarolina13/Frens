@@ -629,7 +629,7 @@ public final class WoodcutSkill implements Skill {
                     }
                 }
                 if (targetOpt.isEmpty()) {
-                    if (detection.floatingLog() != null) {
+                    if (detection.floatingLog() != null && !failedBases.contains(detection.floatingLog())) {
                         LOGGER.warn("Woodcut: cleaning floating log at {}", detection.floatingLog().toShortString());
                         TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(detection.floatingLog(), detection.floatingLog(), 1);
                         targetOpt = Optional.of(synthetic);
@@ -656,6 +656,12 @@ public final class WoodcutSkill implements Skill {
                         }
                         if (detection.totalLogs() <= 0) {
                             LOGGER.warn("Woodcut: found no detectable trees/logs within {}x{}", effectiveSearchRadius, verticalRange);
+                            consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
+                            continue;
+                        }
+                        // All logs detected but none selectable (soilFail etc.) — skip to relocation
+                        if (detection.soilFail() >= detection.totalLogs()) {
+                            LOGGER.info("Woodcut: all {} detected logs failed soil check, forcing relocation", detection.totalLogs());
                             consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
                             continue;
                         }

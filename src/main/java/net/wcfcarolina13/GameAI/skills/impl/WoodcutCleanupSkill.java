@@ -382,8 +382,8 @@ public final class WoodcutCleanupSkill implements Skill {
                 if (cachedTargets.isEmpty()) {
                     // No fast targets — wait briefly for async scan to finish.
                     if (asyncScan != null && !asyncScan.isDone()) {
-                        for (int waitAttempt = 0; waitAttempt < 10 && !asyncScan.isDone(); waitAttempt++) {
-                            sleepQuiet(500L);
+                        for (int waitAttempt = 0; waitAttempt < 4 && !asyncScan.isDone(); waitAttempt++) {
+                            sleepQuiet(250L);
                             if (SkillManager.shouldAbortSkill(bot)) {
                                 return SkillExecutionResult.failure("woodcut_cleanup paused due to nearby threat.");
                             }
