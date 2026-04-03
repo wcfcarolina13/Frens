@@ -2,9 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
-## 2026-04-02
+## 2026-04-03
 
-- **Feat: Woodcut terrain hazard scanner.** New `WoodcutHazardScanner` probes 6 blocks in each cardinal direction from a tree base, classifying terrain as SAFE, SHALLOW_WATER, DEEP_WATER, or RAVINE. Trees fully enclosed by hazardous terrain (all 4 sides ravine/deep water) are rejected during tree selection. Scaffold placement skips hazardous directions and water. Bridge sweeps skip ravine/deep-water directions. Prevents bots from falling into ravines or drowning while woodcutting near cliffs and water.
+- **Feat: Woodcut hazard avoidance.** New `WoodcutHazardScanner` probes 6 blocks in each cardinal direction from a tree base, classifying terrain as SAFE, SHALLOW_WATER, DEEP_WATER, or RAVINE. Trees fully enclosed by hazardous terrain are rejected. Scaffold placement skips hazardous directions and never places over water. Bridge sweeps skip ravine/deep-water directions.
+
+- **Feat: Scaffold cleanup recovery.** When scaffold blocks are unreachable during cleanup (e.g., over a ravine), the bot now tries to bridge to nearby safe ground first. If bridging fails, it abandons the scaffold and escapes via `findEscapeStandNear` (allows precarious positions if 2+ cardinal neighbors are standable).
+
+## 2026-04-02
 
 - **Fix: Stairs/slabs cause false-positive stuck detection.** Stairs and slabs are partial blocks the bot walks through normally, but `BotRescueService` saw them as solid collisions and triggered "stuck in blocks" rescue. Added `BlockTags.STAIRS` and `BlockTags.SLABS` to `isRescueProtectedBlock()`, which is checked in both `rescueFromBurial()` and `isLikelyStuckInBlock()`.
 
