@@ -248,21 +248,35 @@ public final class BridgeScaffoldService {
         Direction returnDir = direction.getOpposite();
         bot.setSneaking(true);
 
+        // Retract from far end back toward perch. The bot walks backward one
+        // block at a time toward the perch, mining the scaffold block it just
+        // stepped OFF (behind it). This preserves the floor ahead of the bot.
+        //
+        // placedBlocks is ordered nearest-to-perch (index 0) → farthest (last).
+        // We iterate farthest→nearest so the bot retreats toward the perch.
         for (int i = placedBlocks.size() - 1; i >= 0; i--) {
             if (TaskService.isServerStopping()) break;
 
             BlockPos scaffold = placedBlocks.get(i);
-            BlockPos stepTarget = bot.getBlockPos().offset(returnDir);
-            Vec3d dest = Vec3d.ofCenter(stepTarget);
-            for (int tick = 0; tick < 20; tick++) {
-                BotActions.applyMovementInput(bot, dest, 0.08);
-                sleepQuiet(50L);
-                if (bot.getBlockPos().equals(stepTarget) || bot.getBlockPos().getSquaredDistance(stepTarget) <= 1.5) {
-                    break;
-                }
-            }
-            BotActions.stop(bot);
 
+            // If we're standing on/near this scaffold, step toward perch first
+            // so we don't mine the block under our own feet
+            if (bot.getBlockPos().getSquaredDistance(scaffold.up()) <= 2.0
+                    || bot.getBlockPos().equals(scaffold.up())) {
+                BlockPos stepTarget = bot.getBlockPos().offset(returnDir);
+                Vec3d dest = Vec3d.ofCenter(stepTarget);
+                for (int tick = 0; tick < 20; tick++) {
+                    BotActions.applyMovementInput(bot, dest, 0.08);
+                    sleepQuiet(50L);
+                    if (bot.getBlockPos().equals(stepTarget)
+                            || bot.getBlockPos().getSquaredDistance(stepTarget) <= 1.5) {
+                        break;
+                    }
+                }
+                BotActions.stop(bot);
+            }
+
+            // Now mine the scaffold block (should be behind/below us)
             if (!BlockInteractionService.canInteract(bot, scaffold)) {
                 LOGGER.info("bridge retract: can't reach scaffold at {} from {}, skipping",
                         scaffold.toShortString(), bot.getBlockPos().toShortString());
