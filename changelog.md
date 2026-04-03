@@ -4,7 +4,15 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
-- **Feat: Sunrise resume infrastructure (Tasks 4-6).** Added `SunriseResumeRecord` to `SkillResumeService` with save/get/clear/expiry (1 in-game day), plus `getLastRawArgs()` accessor. Death clears any pending sunrise resume. Added `findBaseNearPosition()` to `BotHomeService` for radius-based base lookup by position. Added `beginBaseBypassTravel()` to `NavigationArtifactService` that skips the underground artifact gate (for returning to known bases), with new `skipArtifactGate` parameter threaded through the private `beginDelayedTravel` overload.
+- **Feat: Woodcut 'Until sunset' mode.** Actions menu now defaults to "Until sunset" (like fishing). Use +/- to set a specific tree count. Updated tooltip and in-game guide. `SkillManager.isOpenEnded()` extended to treat woodcut without a count as open-ended.
+
+- **Feat: Generic sunrise skill resume.** Any open-ended skill interrupted by sunset is saved and automatically resumed at sunrise. At sunset, the system evaluates 4 cases: (1) lodestone compass available → fast-travel home + save resume, (2) at a saved base → save resume, (3) tactical shelter ON → shelter in place + save resume, (4) nothing → no resume. At sunrise, the bot fast-travels back to the worksite via the nearest lodestone compass (within 128 blocks) and re-runs the skill via `PostArrivalAction`. Hunt keeps its own session system.
+
+- **Feat: Lodestones in Bases menu.** Lodestone compass destinations auto-populate in the bases list with a "Lodestone" tag. "Go To" triggers compass fast-travel; "Set Home" designates the compass as home. Edit controls (rename/delete/radius) disabled for lodestone entries.
+
+- **Feat: Smoke signal navigation beacon.** A lit campfire (or soul campfire) with a hay bale underneath acts as a navigation beacon at saved bases. Extends artifact-free fast-travel range: 5x base radius above ground, 2x below ground. 3x delay penalty still applies. Cached for 60 seconds to avoid per-tick scanning.
+
+- **Infra: Base-bypass travel.** Added `beginBaseBypassTravel()` to `NavigationArtifactService` that skips the underground artifact gate for bots at known bases. `findBaseNearPosition()` added to `BotHomeService` for radius-based base lookup by position.
 
 - **Feat: Lodestone compass fast-travel.** Bots can fast-travel to lodestone compass destinations, including cross-dimension. `/bot compass list <bot>` lists all lodestone compasses a bot holds. `/bot compass home <bot> <name>` designates a named compass as the bot's home compass. `/bot compass travel <bot> [name]` fast-travels to a lodestone compass destination. Lodestone compass promotes to ENHANCED nav tier (1x delay multiplier, same as Eye of Ender). Autonomous sunset return uses the designated home compass as a fallback anchor (after HOME/BASE/BED, same-dimension only). Lodestone block is validated before travel; broken lodestones notify the owner.
 
