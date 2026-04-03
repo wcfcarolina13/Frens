@@ -429,7 +429,7 @@ public final class NavigationArtifactService {
                                              String botAlias, BlockPos destination,
                                              RegistryKey<World> dimension, int delayTicks,
                                              UUID ownerUuid) {
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false);
     }
 
     /**
@@ -440,7 +440,21 @@ public final class NavigationArtifactService {
                                                String botAlias, BlockPos destination,
                                                RegistryKey<World> dimension, int delayTicks,
                                                UUID ownerUuid) {
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, true, true);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, true, true, false);
+    }
+
+    /**
+     * Base-bypass travel used by sunrise resume. Skips the underground artifact gate
+     * (the bot is returning to a known base) but keeps other gates active.
+     */
+    public static boolean beginBaseBypassTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                                 String botAlias, BlockPos destination,
+                                                 RegistryKey<World> dimension, UUID ownerUuid) {
+        if (server == null || bot == null || destination == null || dimension == null) return false;
+        double distance = bot.getBlockPos().getManhattanDistance(destination);
+        boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(dimension);
+        int delayTicks = calculateDelayTicks(distance, crossDim, 3.0);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, true);
     }
 
     /**
@@ -471,19 +485,20 @@ public final class NavigationArtifactService {
             return false;
         }
         boolean primaryStarted = beginDelayedTravel(server, primaryBot, primaryAlias, primaryDestination, primaryDimension,
-                delayTicks, ownerUuid, true, true);
+                delayTicks, ownerUuid, true, true, false);
         if (!primaryStarted) {
             return false;
         }
         boolean secondaryStarted = beginDelayedTravel(server, secondaryBot, secondaryAlias, secondaryDestination, secondaryDimension,
-                delayTicks, ownerUuid, true, true);
+                delayTicks, ownerUuid, true, true, false);
         return secondaryStarted;
     }
 
     private static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
                                               String botAlias, BlockPos destination,
                                               RegistryKey<World> dimension, int delayTicks,
-                                              UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify) {
+                                              UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
+                                              boolean skipArtifactGate) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return false;
@@ -546,18 +561,22 @@ public final class NavigationArtifactService {
                 int surfaceY = SafePositionService.getWalkableGroundY(currentWorld, bot.getBlockX(), bot.getBlockZ());
                 boolean nearSurface = bot.getBlockPos().getY() >= surfaceY - 4;
                 if (!nearSurface) {
-                    ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
-                    double mult = artifactDelayMultiplier(bot, owner);
-                    if (mult <= 1.0) {
-                        // Tier 2+ artifacts — proceed normally, no penalty
-                    } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                            && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
-                        // Map + Compass on bot — allow but with 2x delay (underground is harder)
-                        delayTicks = (int) (delayTicks * 2.0);
+                    if (skipArtifactGate) {
+                        // Base bypass: skip underground artifact check
                     } else {
-                        notifyOwner(server, ownerUuid,
-                                "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
-                        return false;
+                        ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+                        double mult = artifactDelayMultiplier(bot, owner);
+                        if (mult <= 1.0) {
+                            // Tier 2+ artifacts — proceed normally, no penalty
+                        } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                                && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
+                            // Map + Compass on bot — allow but with 2x delay (underground is harder)
+                            delayTicks = (int) (delayTicks * 2.0);
+                        } else {
+                            notifyOwner(server, ownerUuid,
+                                    "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
+                            return false;
+                        }
                     }
                 }
             }
@@ -1023,7 +1042,7 @@ public final class NavigationArtifactService {
                     botAlias, returnDest.toShortString(), returnLabel, (int) dist, delayTicks / 20);
             beginDelayedTravel(server, bot, botAlias, returnDest,
                     ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid(),
-                    true /* skipGates: return trip after collection */, false);
+                    true /* skipGates: return trip after collection */, false, false);
             notifyOwner(server, action.ownerUuid(),
                     "\u00A7e" + botAlias + " is returning to " + returnLabel + " (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
         }
