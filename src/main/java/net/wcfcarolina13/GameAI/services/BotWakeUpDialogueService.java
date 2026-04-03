@@ -210,8 +210,9 @@ public final class BotWakeUpDialogueService {
             UUID botId = bot.getUuid();
 
             // Cooldown: don't re-queue co-sleep within 5 minutes.
-            long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
-            if (nowTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) {
+            // Use -1 as sentinel (not Long.MIN_VALUE which overflows on subtraction).
+            long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, -1L);
+            if (lastQueued >= 0 && lastQueued <= nowTick && (nowTick - lastQueued) < CO_SLEEP_COOLDOWN_TICKS) {
                 LOGGER.info("Co-sleep: {} skipped — cooldown ({} ticks remaining)",
                         botName, CO_SLEEP_COOLDOWN_TICKS - (nowTick - lastQueued));
                 continue;

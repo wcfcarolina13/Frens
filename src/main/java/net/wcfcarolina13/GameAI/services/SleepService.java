@@ -150,12 +150,28 @@ public final class SleepService {
                 continue;
             }
 
-            // Try both halves: selection may have found head/foot, and vanilla accepts either.
-            ActionResult resultFoot = interactBed(bot, world, bed.foot);
-            LOGGER.info("Bed interact foot result={} botSleeping={}", resultFoot, bot.isSleeping());
-            if (!bot.isSleeping()) {
-                ActionResult resultHead = interactBed(bot, world, bed.head);
-                LOGGER.info("Bed interact head result={} botSleeping={}", resultHead, bot.isSleeping());
+            // Primary: direct trySleep — more reliable for fake players than interactBlock.
+            // interactBlock goes through the bed block's onUse which can silently fail.
+            CompletableFuture<String> sleepFuture = new CompletableFuture<>();
+            runOnServerThread(bot, () -> {
+                try {
+                    selectEmptyOrSafeHand(bot);
+                    var result = bot.trySleep(bed.foot);
+                    result.ifLeft(reason ->
+                            sleepFuture.complete("rejected: " + reason));
+                    result.ifRight(unit ->
+                            sleepFuture.complete("accepted"));
+                } catch (Throwable t) {
+                    sleepFuture.complete("exception: " + t.getMessage());
+                }
+            });
+            try {
+                String result = sleepFuture.get(1, java.util.concurrent.TimeUnit.SECONDS);
+                LOGGER.info("trySleep {} at bed {}: {}", bot.getName().getString(),
+                        bed.foot.toShortString(), result);
+            } catch (Exception e) {
+                LOGGER.warn("trySleep timed out for {} at bed {}", bot.getName().getString(),
+                        bed.foot.toShortString());
             }
             if (bot.isSleeping()) {
                 // Verify the server updated the player's sleeping position to be on/near the bed.

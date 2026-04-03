@@ -422,7 +422,7 @@ public final class TaskService {
                     // Skip for underground-centric skills (stripmine, mining) — the bot is
                     // intentionally underground and fast-travel will just spam an artifact
                     // refusal message.
-                    if (!isUndergroundSkill(ticket.name())) {
+                    if (!shouldSuppressPostTaskReturn(ticket.name())) {
                         schedulePostTaskReturnIfEnabled(srv, taskBot);
                     }
                 }
@@ -608,10 +608,14 @@ public final class TaskService {
      * should not fire for these because the bot lacks the navigation artifacts
      * to fast-travel and the resulting refusal message is pure spam.
      */
-    private static boolean isUndergroundSkill(String taskName) {
+    private static boolean shouldSuppressPostTaskReturn(String taskName) {
         if (taskName == null) return false;
         String lower = taskName.toLowerCase(java.util.Locale.ROOT);
-        return lower.equals("skill:stripmine") || lower.equals("skill:mining");
+        // Underground skills: bot is intentionally underground, fast-travel just spams refusal
+        if (lower.equals("skill:stripmine") || lower.equals("skill:mining")) return true;
+        // Sleep: bot is in bed, trying to fast-travel it away is nonsensical
+        if (lower.equals("skill:sleep")) return true;
+        return false;
     }
 
     /** Grace period before post-task return triggers (5 seconds). */
