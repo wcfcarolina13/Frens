@@ -47,6 +47,7 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -316,6 +317,7 @@ public final class WoodcutSkill implements Skill {
         private String replantStatus = "not-run";
         private String lastRepositionFailureSignature;
         private BlockPos lastGroundedWoodcutStand;
+        private WoodcutHazardScanner.TreeHazardProfile hazardProfile;
 
         private void recordPlacement(BlockPos pos) {
             if (pos == null) {
@@ -676,6 +678,9 @@ public final class WoodcutSkill implements Skill {
                 }
                 visitedBases.add(target.base());
                 WoodcutReachSession reachSession = new WoodcutReachSession();
+                if (bot.getEntityWorld() instanceof ServerWorld hazardWorld) {
+                    reachSession.hazardProfile = WoodcutHazardScanner.scan(hazardWorld, target.base());
+                }
 
                 // Track footprint to size post-run drop sweep.
                 BlockPos posNow = bot.getBlockPos();
@@ -1374,6 +1379,14 @@ public final class WoodcutSkill implements Skill {
                                         }
                                     }
                                     if (!hasTargetsInDir) continue;
+                                    if (reachSession != null && reachSession.hazardProfile != null) {
+                                        WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(bridgeDir);
+                                        if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
+                                                || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
+                                            LOGGER.debug("Woodcut bridge: skipping {} direction (hazard={})", bridgeDir, rating);
+                                            continue;
+                                        }
+                                    }
                                     BridgeScaffoldService.BridgeResult bridgeResult =
                                             BridgeScaffoldService.bridgeAndRetract(
                                                     bot, bridgeDir, 6, false,
@@ -1444,6 +1457,14 @@ public final class WoodcutSkill implements Skill {
                                             }
                                         }
                                         if (!hasTargetsInDir) continue;
+                                        if (reachSession != null && reachSession.hazardProfile != null) {
+                                            WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(bridgeDir);
+                                            if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
+                                                    || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
+                                                LOGGER.debug("Woodcut bridge: skipping {} direction (hazard={})", bridgeDir, rating);
+                                                continue;
+                                            }
+                                        }
                                         BridgeScaffoldService.BridgeResult bridgeResult =
                                                 BridgeScaffoldService.bridgeAndRetract(
                                                         bot, bridgeDir, 6, false,
@@ -1510,6 +1531,14 @@ public final class WoodcutSkill implements Skill {
                             }
                         }
                         if (!hasTargetsInDir) continue;
+                        if (reachSession != null && reachSession.hazardProfile != null) {
+                            WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(bridgeDir);
+                            if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
+                                    || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
+                                LOGGER.debug("Woodcut bridge: skipping {} direction (hazard={})", bridgeDir, rating);
+                                continue;
+                            }
+                        }
                         BridgeScaffoldService.BridgeResult bridgeResult =
                                 BridgeScaffoldService.bridgeAndRetract(
                                         bot, bridgeDir, 6, false,
@@ -3235,6 +3264,14 @@ public final class WoodcutSkill implements Skill {
                         }
                         continue;
                     }
+                    // Hazard terrain check: reject trees fully enclosed by ravines/deep water
+                    WoodcutHazardScanner.TreeHazardProfile hazard =
+                            WoodcutHazardScanner.scan(world, tree.base());
+                    if (hazard.fullyEnclosed()) {
+                        failedBaseReasons.put(tree.base().toImmutable(), "hazardous terrain on all sides");
+                        failedBases.add(tree.base().toImmutable());
+                        continue;
+                    }
                     double treeDistSq = origin.getSquaredDistance(tree.base());
                     if (treeDistSq < nearestTreeDist) {
                         nearestTreeDist = treeDistSq;
@@ -3806,6 +3843,18 @@ public final class WoodcutSkill implements Skill {
         if (!onScaffold) {
             for (Direction dir : Direction.Type.HORIZONTAL) {
                 BlockPos alt = placePos.offset(dir);
+                // Skip directions with ravine or deep water hazard
+                if (reachSession != null && reachSession.hazardProfile != null) {
+                    WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(dir);
+                    if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
+                            || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
+                        continue;
+                    }
+                }
+                // Never place scaffold over water (even shallow)
+                if (world.getFluidState(alt.down()).isIn(net.minecraft.registry.tag.FluidTags.WATER)) {
+                    continue;
+                }
                 if (!isPlaceableTarget(world, alt)) {
                     breakSoftBlock(world, bot, alt);
                 }
