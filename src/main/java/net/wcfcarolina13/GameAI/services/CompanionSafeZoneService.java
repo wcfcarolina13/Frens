@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Unified protected-zone query that aggregates three zone sources:
  * <ol>
- *   <li>Admin {@link ProtectedZoneService} zones (cubic regions)</li>
+ *   <li>Admin {@link ProtectedZoneService} zones (AABB regions)</li>
  *   <li>Saved bases with per-base configurable radius ({@link BotHomeService})</li>
  *   <li>Fortification convex hulls with configurable buffer ({@link FortificationPersistenceService})</li>
  *   <li>Mapped villages saved as shared no-go convex hulls ({@link MappedVillageService})</li>

@@ -8017,12 +8017,13 @@ public class modCommandRegistry {
         
         source.sendFeedback(() -> Text.literal("§6Protected Zones in " + world.getRegistryKey().getValue() + ":"), false);
         for (ProtectedZoneService.ProtectedZone zone : zones) {
-            BlockPos center = zone.getCenter();
+            BlockPos min = zone.getMinCorner();
+            BlockPos max = zone.getMaxCorner();
             String mode = zone.getAccessMode();
             int permits = zone.getAllowedOwnerUuids().size();
             source.sendFeedback(() -> Text.literal(
-                    "§7- §a" + zone.getLabel() + "§7: center=" + center.toShortString() + 
-                    ", radius=" + zone.getRadius() + ", owner=" + zone.getOwnerName() +
+                    "§7- §a" + zone.getLabel() + "§7: min=" + min.toShortString() +
+                    ", max=" + max.toShortString() + ", owner=" + zone.getOwnerName() +
                     ", mode=" + mode + ", permits=" + permits), false);
         }
         

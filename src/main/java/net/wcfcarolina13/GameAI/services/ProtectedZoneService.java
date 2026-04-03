@@ -22,24 +22,24 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service for managing protected zones where bots cannot break blocks.
- * Zones are cubic regions defined by center position and radius.
+ * Zones are axis-aligned bounding boxes defined by min/max corner positions.
  */
 public class ProtectedZoneService {
     private static final Logger LOGGER = LoggerFactory.getLogger(ProtectedZoneService.class);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    
+
     // Map of worldId -> Map of label -> ProtectedZone
     private static final Map<String, Map<String, ProtectedZone>> zones = new ConcurrentHashMap<>();
 
     private static final String ZONE_ROOT_DIR = "bot_zones";
     private static final String ZONE_FILE_NAME = "protected_zones.json";
-    
+
     private static Path getZoneDirectory(MinecraftServer server, String worldId) {
         return server.getRunDirectory()
                 .resolve(ZONE_ROOT_DIR)
                 .resolve(worldStorageKey(worldId));
     }
-    
+
     private static Path getZoneFile(MinecraftServer server, String worldId) {
         return getZoneDirectory(server, worldId).resolve(ZONE_FILE_NAME);
     }
@@ -55,14 +55,9 @@ public class ProtectedZoneService {
         if (sanitized.isBlank()) {
             sanitized = "world";
         }
-        // Include a stable hash so different IDs that sanitize similarly do not collide.
         return sanitized + "__" + Integer.toHexString(worldId.hashCode());
     }
 
-    /**
-     * Legacy file path used by older builds that wrote world IDs directly as path segments.
-     * This is unsafe on Windows when IDs include ':', but kept for migration on Unix/macOS.
-     */
     private static Path getLegacyZoneFile(MinecraftServer server, String worldId) {
         if (server == null || worldId == null || worldId.isBlank()) {
             return null;
@@ -76,363 +71,293 @@ public class ProtectedZoneService {
             return null;
         }
     }
-    
+
     /**
-     * Represents a protected zone in the world
+     * Represents a protected zone as an axis-aligned bounding box.
      */
     public static class ProtectedZone {
         private final String label;
         private final String worldId;
-        private final BlockPos center;
-        private final int radius;
+        private final BlockPos minCorner;
+        private final BlockPos maxCorner;
         private final UUID ownerUuid;
         private final String ownerName;
         private final long createdTime;
-        /** Access policy reserved for governance/economics expansion. */
         private final String accessMode;
-        /** Explicitly allowed owner UUID strings. */
         private final Set<String> allowedOwnerUuids;
-        
-        public ProtectedZone(String label, String worldId, BlockPos center, int radius, UUID ownerUuid, String ownerName) {
-            this(label, worldId, center, radius, ownerUuid, ownerName, "owner_only", Set.of());
+
+        public ProtectedZone(String label, String worldId, BlockPos minCorner, BlockPos maxCorner,
+                             UUID ownerUuid, String ownerName) {
+            this(label, worldId, minCorner, maxCorner, ownerUuid, ownerName,
+                 System.currentTimeMillis(), "owner_only", Set.of());
         }
 
-        public ProtectedZone(String label, String worldId, BlockPos center, int radius,
-                             UUID ownerUuid, String ownerName,
+        public ProtectedZone(String label, String worldId, BlockPos minCorner, BlockPos maxCorner,
+                             UUID ownerUuid, String ownerName, long createdTime,
                              String accessMode, Collection<String> allowedOwnerUuids) {
             this.label = label;
             this.worldId = worldId;
-            this.center = center.toImmutable();
-            this.radius = radius;
+            this.minCorner = new BlockPos(
+                    Math.min(minCorner.getX(), maxCorner.getX()),
+                    Math.min(minCorner.getY(), maxCorner.getY()),
+                    Math.min(minCorner.getZ(), maxCorner.getZ())
+            );
+            this.maxCorner = new BlockPos(
+                    Math.max(minCorner.getX(), maxCorner.getX()),
+                    Math.max(minCorner.getY(), maxCorner.getY()),
+                    Math.max(minCorner.getZ(), maxCorner.getZ())
+            );
             this.ownerUuid = ownerUuid;
             this.ownerName = ownerName;
-            this.createdTime = System.currentTimeMillis();
+            this.createdTime = createdTime;
             this.accessMode = normalizeAccessMode(accessMode);
             this.allowedOwnerUuids = normalizeOwnerUuidSet(allowedOwnerUuids);
         }
-        
-        public String getLabel() {
-            return label;
-        }
-        
-        public String getWorldId() {
-            return worldId;
-        }
-        
-        public BlockPos getCenter() {
-            return center;
-        }
-        
-        public int getRadius() {
-            return radius;
-        }
-        
-        public UUID getOwnerUuid() {
-            return ownerUuid;
-        }
-        
-        public String getOwnerName() {
-            return ownerName;
-        }
-        
-        public long getCreatedTime() {
-            return createdTime;
-        }
 
-        public String getAccessMode() {
-            return accessMode;
-        }
+        public String getLabel() { return label; }
+        public String getWorldId() { return worldId; }
+        public BlockPos getMinCorner() { return minCorner; }
+        public BlockPos getMaxCorner() { return maxCorner; }
+        public UUID getOwnerUuid() { return ownerUuid; }
+        public String getOwnerName() { return ownerName; }
+        public long getCreatedTime() { return createdTime; }
+        public String getAccessMode() { return accessMode; }
 
         public Set<String> getAllowedOwnerUuids() {
             return new HashSet<>(allowedOwnerUuids);
         }
-        
+
         public boolean contains(BlockPos pos) {
-            if (pos == null) {
-                return false;
-            }
-            // Cubic distance check
-            int dx = Math.abs(pos.getX() - center.getX());
-            int dy = Math.abs(pos.getY() - center.getY());
-            int dz = Math.abs(pos.getZ() - center.getZ());
-            return dx <= radius && dy <= radius && dz <= radius;
+            if (pos == null) return false;
+            return pos.getX() >= minCorner.getX() && pos.getX() <= maxCorner.getX()
+                && pos.getY() >= minCorner.getY() && pos.getY() <= maxCorner.getY()
+                && pos.getZ() >= minCorner.getZ() && pos.getZ() <= maxCorner.getZ();
         }
-        
+
+        public BlockPos getCentroid() {
+            return new BlockPos(
+                    (minCorner.getX() + maxCorner.getX()) / 2,
+                    (minCorner.getY() + maxCorner.getY()) / 2,
+                    (minCorner.getZ() + maxCorner.getZ()) / 2
+            );
+        }
+
         public double distanceFrom(BlockPos pos) {
-            return Math.sqrt(pos.getSquaredDistance(center));
+            return Math.sqrt(pos.getSquaredDistance(getCentroid()));
         }
     }
-    
+
     /**
      * Check if a position is protected in a specific world.
-     * Returns true if the position is inside any protected zone.
      */
     public static boolean isProtected(BlockPos pos, ServerWorld world, @Nullable UUID botOwner) {
-        if (pos == null || world == null) {
-            return false;
-        }
+        if (pos == null || world == null) return false;
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) {
-            return false;
-        }
-        
+        if (worldZones == null || worldZones.isEmpty()) return false;
+
         for (ProtectedZone zone : worldZones.values()) {
-            if (!zone.contains(pos)) {
-                continue;
-            }
-            if (!isMutationAllowed(zone, botOwner)) {
-                return true;
-            }
+            if (!zone.contains(pos)) continue;
+            if (!isMutationAllowed(zone, botOwner)) return true;
         }
         return false;
     }
 
     private static boolean isMutationAllowed(ProtectedZone zone, @Nullable UUID actorOwner) {
-        if (zone == null) {
-            return true;
-        }
+        if (zone == null) return true;
         String mode = normalizeAccessMode(zone.getAccessMode());
-        if ("public".equals(mode)) {
-            return true;
-        }
+        if ("public".equals(mode)) return true;
 
         UUID claimOwner = zone.getOwnerUuid();
-        if (claimOwner == null) {
-            return false;
-        }
-        if (actorOwner != null && claimOwner.equals(actorOwner)) {
-            return true;
-        }
-        if (actorOwner == null) {
-            return false;
-        }
-        String actorKey = actorOwner.toString();
-        return zone.allowedOwnerUuids.contains(actorKey);
+        if (claimOwner == null) return false;
+        if (actorOwner != null && claimOwner.equals(actorOwner)) return true;
+        if (actorOwner == null) return false;
+        return zone.allowedOwnerUuids.contains(actorOwner.toString());
     }
-    
-    /**
-     * Get the zone that contains a position, if any.
-     */
+
     @Nullable
     public static ProtectedZone getZoneAt(BlockPos pos, ServerWorld world) {
-        if (pos == null || world == null) {
-            return null;
-        }
+        if (pos == null || world == null) return null;
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null) {
-            return null;
-        }
-        
+        if (worldZones == null) return null;
+
         for (ProtectedZone zone : worldZones.values()) {
-            if (zone.contains(pos)) {
-                return zone;
-            }
+            if (zone.contains(pos)) return zone;
         }
         return null;
     }
-    
+
     /**
-     * Create a new protected zone.
+     * Create a new protected zone from two corner positions (AABB).
      */
-    public static boolean createZone(ServerWorld world, BlockPos center, int radius, String label, ServerPlayerEntity owner) {
-        if (world == null || center == null || owner == null || label == null || label.isBlank()) {
+    public static boolean createZone(ServerWorld world, BlockPos corner1, BlockPos corner2,
+                                     String label, ServerPlayerEntity owner) {
+        if (world == null || corner1 == null || corner2 == null || owner == null
+                || label == null || label.isBlank()) {
             return false;
         }
-        
+
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
-        
-        if (worldZones.containsKey(label)) {
-            return false;  // Zone with this label already exists
-        }
-        
-        ProtectedZone zone = new ProtectedZone(label, worldId, center, radius, owner.getUuid(), owner.getName().getString());
+
+        if (worldZones.containsKey(label)) return false;
+
+        ProtectedZone zone = new ProtectedZone(label, worldId, corner1, corner2,
+                owner.getUuid(), owner.getName().getString());
         worldZones.put(label, zone);
-        
-        // Save to disk
         save(world.getServer(), worldId);
-        
-        LOGGER.info("Created protected zone '{}' in world {} at {} radius {} by {}", 
-                    label, worldId, center, radius, owner.getName().getString());
+
+        LOGGER.info("Created protected zone '{}' in world {} ({} → {}) by {}",
+                    label, worldId, corner1.toShortString(), corner2.toShortString(),
+                    owner.getName().getString());
         return true;
     }
-    
+
     /**
-     * Remove a protected zone.
+     * Backward-compatible: create zone from center + radius (computes AABB).
      */
-    public static boolean removeZone(ServerWorld world, String label, ServerPlayerEntity player, boolean isAdmin) {
-        if (world == null || label == null || player == null) {
-            return false;
-        }
-        
+    public static boolean createZone(ServerWorld world, BlockPos center, int radius,
+                                     String label, ServerPlayerEntity owner) {
+        if (center == null) return false;
+        BlockPos min = center.add(-radius, -radius, -radius);
+        BlockPos max = center.add(radius, radius, radius);
+        return createZone(world, min, max, label, owner);
+    }
+
+    public static boolean removeZone(ServerWorld world, String label,
+                                     ServerPlayerEntity player, boolean isAdmin) {
+        if (world == null || label == null || player == null) return false;
+
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null) {
-            return false;
-        }
-        
+        if (worldZones == null) return false;
+
         ProtectedZone zone = worldZones.get(label);
-        if (zone == null) {
-            return false;
-        }
-        
-        // Permission check: owner or admin
-        if (!isAdmin && !zone.getOwnerUuid().equals(player.getUuid())) {
-            return false;
-        }
-        
+        if (zone == null) return false;
+
+        if (!isAdmin && !zone.getOwnerUuid().equals(player.getUuid())) return false;
+
         worldZones.remove(label);
         save(world.getServer(), worldId);
-        
+
         LOGGER.info("Removed protected zone '{}' from world {}", label, worldId);
         return true;
     }
-    
-    /**
-     * Remove zone by position (finds closest zone center within 5 blocks).
-     */
-    public static boolean removeZoneByPosition(ServerWorld world, BlockPos pos, ServerPlayerEntity player, boolean isAdmin) {
-        if (world == null || pos == null || player == null) {
-            return false;
-        }
-        
+
+    public static boolean removeZoneByPosition(ServerWorld world, BlockPos pos,
+                                               ServerPlayerEntity player, boolean isAdmin) {
+        if (world == null || pos == null || player == null) return false;
+
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) {
-            return false;
-        }
-        
-        // Find closest zone center
+        if (worldZones == null || worldZones.isEmpty()) return false;
+
         ProtectedZone closest = null;
-        double minDist = 5.0;  // Max 5 blocks away
-        
+        double minDist = 5.0;
+
         for (ProtectedZone zone : worldZones.values()) {
-            double dist = Math.sqrt(pos.getSquaredDistance(zone.getCenter()));
+            double dist = zone.distanceFrom(pos);
             if (dist < minDist) {
                 minDist = dist;
                 closest = zone;
             }
         }
-        
-        if (closest == null) {
-            return false;
-        }
-        
+
+        if (closest == null) return false;
         return removeZone(world, closest.getLabel(), player, isAdmin);
     }
-    
-    /**
-     * List all zones in a world.
-     */
+
     public static List<ProtectedZone> listZones(ServerWorld world) {
-        if (world == null) {
-            return Collections.emptyList();
-        }
-        
+        if (world == null) return Collections.emptyList();
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) {
-            return Collections.emptyList();
-        }
-        
+        if (worldZones == null || worldZones.isEmpty()) return Collections.emptyList();
         return new ArrayList<>(worldZones.values());
     }
 
-    /** Grants mutation access in this zone to another owner UUID. */
-    public static boolean grantZoneAccess(ServerWorld world, String label, UUID ownerUuid) {
-        if (world == null || label == null || label.isBlank() || ownerUuid == null) {
+    /** Renames a zone. Returns false if old label not found or new label already exists. */
+    public static boolean renameZone(ServerWorld world, String oldLabel, String newLabel,
+                                     ServerPlayerEntity player, boolean isAdmin) {
+        if (world == null || oldLabel == null || newLabel == null || newLabel.isBlank()
+                || player == null) {
             return false;
         }
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null) {
+        if (worldZones == null) return false;
+
+        ProtectedZone zone = worldZones.get(oldLabel);
+        if (zone == null) return false;
+        if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(player.getUuid()))) {
             return false;
         }
+        if (worldZones.containsKey(newLabel)) return false;
+
+        worldZones.remove(oldLabel);
+        ProtectedZone renamed = new ProtectedZone(
+                newLabel, zone.getWorldId(), zone.getMinCorner(), zone.getMaxCorner(),
+                zone.getOwnerUuid(), zone.getOwnerName(), zone.getCreatedTime(),
+                zone.getAccessMode(), zone.getAllowedOwnerUuids()
+        );
+        worldZones.put(newLabel, renamed);
+        save(world.getServer(), worldId);
+        LOGGER.info("Renamed protected zone '{}' → '{}' in world {}", oldLabel, newLabel, worldId);
+        return true;
+    }
+
+    public static boolean grantZoneAccess(ServerWorld world, String label, UUID ownerUuid) {
+        if (world == null || label == null || label.isBlank() || ownerUuid == null) return false;
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) return false;
         ProtectedZone zone = worldZones.get(label);
-        if (zone == null) {
-            return false;
-        }
+        if (zone == null) return false;
         Set<String> allowed = zone.getAllowedOwnerUuids();
         allowed.add(ownerUuid.toString());
         worldZones.put(label, new ProtectedZone(
-                zone.getLabel(),
-                zone.getWorldId(),
-                zone.getCenter(),
-                zone.getRadius(),
-                zone.getOwnerUuid(),
-                zone.getOwnerName(),
-                zone.getAccessMode(),
-                allowed
+                zone.getLabel(), zone.getWorldId(), zone.getMinCorner(), zone.getMaxCorner(),
+                zone.getOwnerUuid(), zone.getOwnerName(), zone.getCreatedTime(),
+                zone.getAccessMode(), allowed
         ));
         save(world.getServer(), worldId);
         return true;
     }
 
-    /** Revokes mutation access in this zone for the given owner UUID. */
     public static boolean revokeZoneAccess(ServerWorld world, String label, UUID ownerUuid) {
-        if (world == null || label == null || label.isBlank() || ownerUuid == null) {
-            return false;
-        }
+        if (world == null || label == null || label.isBlank() || ownerUuid == null) return false;
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null) {
-            return false;
-        }
+        if (worldZones == null) return false;
         ProtectedZone zone = worldZones.get(label);
-        if (zone == null) {
-            return false;
-        }
+        if (zone == null) return false;
         Set<String> allowed = zone.getAllowedOwnerUuids();
-        if (!allowed.remove(ownerUuid.toString())) {
-            return false;
-        }
+        if (!allowed.remove(ownerUuid.toString())) return false;
         worldZones.put(label, new ProtectedZone(
-                zone.getLabel(),
-                zone.getWorldId(),
-                zone.getCenter(),
-                zone.getRadius(),
-                zone.getOwnerUuid(),
-                zone.getOwnerName(),
-                zone.getAccessMode(),
-                allowed
+                zone.getLabel(), zone.getWorldId(), zone.getMinCorner(), zone.getMaxCorner(),
+                zone.getOwnerUuid(), zone.getOwnerName(), zone.getCreatedTime(),
+                zone.getAccessMode(), allowed
         ));
         save(world.getServer(), worldId);
         return true;
     }
 
-    /** Sets zone access mode: owner_only | allowlist | public. */
     public static boolean setZoneAccessMode(ServerWorld world, String label, String accessMode) {
-        if (world == null || label == null || label.isBlank()) {
-            return false;
-        }
+        if (world == null || label == null || label.isBlank()) return false;
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null) {
-            return false;
-        }
+        if (worldZones == null) return false;
         ProtectedZone zone = worldZones.get(label);
-        if (zone == null) {
-            return false;
-        }
+        if (zone == null) return false;
         worldZones.put(label, new ProtectedZone(
-                zone.getLabel(),
-                zone.getWorldId(),
-                zone.getCenter(),
-                zone.getRadius(),
-                zone.getOwnerUuid(),
-                zone.getOwnerName(),
-                accessMode,
-                zone.getAllowedOwnerUuids()
+                zone.getLabel(), zone.getWorldId(), zone.getMinCorner(), zone.getMaxCorner(),
+                zone.getOwnerUuid(), zone.getOwnerName(), zone.getCreatedTime(),
+                accessMode, zone.getAllowedOwnerUuids()
         ));
         save(world.getServer(), worldId);
         return true;
     }
-    
-    /**
-     * Load zones from disk for a specific world.
-     */
+
     public static void loadZones(MinecraftServer server, String worldId) {
         Path zoneFile = getZoneFile(server, worldId);
         Path legacyFile = getLegacyZoneFile(server, worldId);
@@ -445,159 +370,164 @@ public class ProtectedZoneService {
             LOGGER.info("Loading protected zones for world {} from legacy path {}", worldId, legacyFile);
         }
 
-        if (fileToRead == null) {
-            return;
-        }
-        
+        if (fileToRead == null) return;
+
         try {
             String json = Files.readString(fileToRead);
             List<ZoneData> zoneDataList = GSON.fromJson(json, new TypeToken<List<ZoneData>>(){}.getType());
-            
-            if (zoneDataList == null || zoneDataList.isEmpty()) {
-                return;
-            }
-            
+
+            if (zoneDataList == null || zoneDataList.isEmpty()) return;
+
             Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
             for (ZoneData data : zoneDataList) {
                 try {
-                    BlockPos center = new BlockPos(data.centerX, data.centerY, data.centerZ);
+                    BlockPos minCorner;
+                    BlockPos maxCorner;
+
+                    if (data.hasLegacyFormat()) {
+                        // Legacy center+radius → AABB migration
+                        minCorner = new BlockPos(
+                                data.centerX - data.radius,
+                                data.centerY - data.radius,
+                                data.centerZ - data.radius);
+                        maxCorner = new BlockPos(
+                                data.centerX + data.radius,
+                                data.centerY + data.radius,
+                                data.centerZ + data.radius);
+                        LOGGER.info("Migrated legacy zone '{}' from center+radius to AABB", data.label);
+                    } else {
+                        minCorner = new BlockPos(data.minX, data.minY, data.minZ);
+                        maxCorner = new BlockPos(data.maxX, data.maxY, data.maxZ);
+                    }
+
                     UUID ownerUuid = data.ownerUuid != null && !data.ownerUuid.isBlank()
-                            ? UUID.fromString(data.ownerUuid)
-                            : null;
+                            ? UUID.fromString(data.ownerUuid) : null;
+                    long created = data.createdTime > 0 ? data.createdTime : System.currentTimeMillis();
                     ProtectedZone zone = new ProtectedZone(
-                        data.label,
-                        worldId,
-                        center,
-                        data.radius,
-                        ownerUuid,
-                        data.ownerName,
-                        data.accessMode,
-                        data.allowedOwnerUuids
+                        data.label, worldId, minCorner, maxCorner,
+                        ownerUuid, data.ownerName, created,
+                        data.accessMode, data.allowedOwnerUuids
                     );
                     worldZones.put(data.label, zone);
                 } catch (Exception e) {
                     LOGGER.warn("Skipping malformed protected zone '{}' in world {}", data.label, worldId);
                 }
             }
-            
+
             LOGGER.info("Loaded {} protected zones for world {}", zoneDataList.size(), worldId);
+
+            // Re-save in new format if any legacy zones were migrated
+            boolean hadLegacy = zoneDataList.stream().anyMatch(ZoneData::hasLegacyFormat);
+            if (hadLegacy) {
+                save(server, worldId);
+                LOGGER.info("Re-saved zones for world {} in AABB format after legacy migration", worldId);
+            }
         } catch (IOException e) {
             LOGGER.error("Failed to load protected zones for world {}", worldId, e);
         }
     }
-    
-    /**
-     * Save zones to disk for a specific world.
-     */
+
     private static void save(MinecraftServer server, String worldId) {
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) {
-            return;
-        }
-        
+        if (worldZones == null || worldZones.isEmpty()) return;
+
         try {
             Path zoneDir = getZoneDirectory(server, worldId);
             Files.createDirectories(zoneDir);
-            
+
             List<ZoneData> zoneDataList = new ArrayList<>();
             for (ProtectedZone zone : worldZones.values()) {
                 zoneDataList.add(new ZoneData(zone));
             }
-            
+
             String json = GSON.toJson(zoneDataList);
             Files.writeString(getZoneFile(server, worldId), json);
-            
+
             LOGGER.debug("Saved {} protected zones for world {}", zoneDataList.size(), worldId);
         } catch (IOException e) {
             LOGGER.error("Failed to save protected zones for world {}", worldId, e);
         }
     }
-    
-    /**
-     * Generate a unique zone label for a world.
-     */
+
     public static String generateLabel(ServerWorld world) {
         String worldId = getWorldId(world);
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) {
-            return "zone-1";
-        }
-        
+        if (worldZones == null || worldZones.isEmpty()) return "zone-1";
+
         int counter = 1;
         while (worldZones.containsKey("zone-" + counter)) {
             counter++;
         }
         return "zone-" + counter;
     }
-    
-    /**
-     * Clear all zones for a world.
-     */
+
     public static void clearWorld(ServerWorld world) {
-        if (world == null) {
-            return;
-        }
+        if (world == null) return;
         String worldId = getWorldId(world);
         zones.remove(worldId);
         LOGGER.info("Cleared all protected zones for world {}", worldId);
     }
-    
+
     private static String getWorldId(ServerWorld world) {
         RegistryKey<World> key = world.getRegistryKey();
         return key.getValue().toString();
     }
-    
+
     /**
-     * Data class for JSON serialization.
+     * Data class for JSON serialization. Supports both new AABB format and legacy center+radius.
      */
     private static class ZoneData {
         String label;
+        // New AABB format
+        int minX, minY, minZ;
+        int maxX, maxY, maxZ;
+        // Legacy format (read-only, for migration)
         int centerX, centerY, centerZ;
         int radius;
+        // Common fields
         String ownerUuid;
         String ownerName;
         String accessMode;
         List<String> allowedOwnerUuids;
-        
+        long createdTime;
+
         @SuppressWarnings("unused")
         ZoneData() {}
-        
+
         ZoneData(ProtectedZone zone) {
             this.label = zone.getLabel();
-            this.centerX = zone.getCenter().getX();
-            this.centerY = zone.getCenter().getY();
-            this.centerZ = zone.getCenter().getZ();
-            this.radius = zone.getRadius();
+            this.minX = zone.getMinCorner().getX();
+            this.minY = zone.getMinCorner().getY();
+            this.minZ = zone.getMinCorner().getZ();
+            this.maxX = zone.getMaxCorner().getX();
+            this.maxY = zone.getMaxCorner().getY();
+            this.maxZ = zone.getMaxCorner().getZ();
             this.ownerUuid = zone.getOwnerUuid() != null ? zone.getOwnerUuid().toString() : null;
             this.ownerName = zone.getOwnerName();
             this.accessMode = zone.getAccessMode();
             this.allowedOwnerUuids = new ArrayList<>(zone.getAllowedOwnerUuids());
+            this.createdTime = zone.getCreatedTime();
+        }
+
+        boolean hasLegacyFormat() {
+            return radius > 0 && minX == 0 && maxX == 0 && minY == 0 && maxY == 0
+                    && minZ == 0 && maxZ == 0;
         }
     }
 
     private static String normalizeAccessMode(String mode) {
-        if (mode == null || mode.isBlank()) {
-            return "owner_only";
-        }
+        if (mode == null || mode.isBlank()) return "owner_only";
         String normalized = mode.trim().toLowerCase(Locale.ROOT);
-        if ("public".equals(normalized)) {
-            return "public";
-        }
-        if ("allowlist".equals(normalized) || "owner_only".equals(normalized)) {
-            return normalized;
-        }
+        if ("public".equals(normalized)) return "public";
+        if ("allowlist".equals(normalized) || "owner_only".equals(normalized)) return normalized;
         return "owner_only";
     }
 
     private static Set<String> normalizeOwnerUuidSet(Collection<String> values) {
         Set<String> out = new HashSet<>();
-        if (values == null || values.isEmpty()) {
-            return out;
-        }
+        if (values == null || values.isEmpty()) return out;
         for (String value : values) {
-            if (value == null || value.isBlank()) {
-                continue;
-            }
+            if (value == null || value.isBlank()) continue;
             try {
                 out.add(UUID.fromString(value.trim()).toString());
             } catch (IllegalArgumentException ignored) {
