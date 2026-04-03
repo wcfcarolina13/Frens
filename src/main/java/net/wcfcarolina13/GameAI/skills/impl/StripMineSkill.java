@@ -87,12 +87,21 @@ public final class StripMineSkill implements Skill {
         Direction finalDirection = tunnelDirection;
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(finalDirection)));
 
+        BlockPos lastPos = player.getBlockPos();
         for (int step = 0; step < length; step++) {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
-            
+
             BlockPos footTarget = player.getBlockPos().offset(tunnelDirection);
+
+            // Stall guard: if bot didn't move since last iteration, something is wrong.
+            if (step > 0 && player.getBlockPos().equals(lastPos)) {
+                LOGGER.warn("Stripmine stalled — bot {} didn't advance from {} on step {}",
+                        player.getName().getString(), lastPos.toShortString(), step);
+                return SkillExecutionResult.failure("Stripmine aborted: failed to advance tunnel.");
+            }
+            lastPos = player.getBlockPos();
 
             List<BlockPos> workVolume = buildCrossSection(footTarget);
             DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(footTarget));
@@ -211,7 +220,7 @@ public final class StripMineSkill implements Skill {
         if (destination == null) {
             return false;
         }
-        if (player.getBlockPos().equals(destination) || closeEnough(player, destination)) {
+        if (player.getBlockPos().equals(destination)) {
             return true;
         }
 
