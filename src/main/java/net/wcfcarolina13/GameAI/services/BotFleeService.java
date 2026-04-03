@@ -126,8 +126,8 @@ public final class BotFleeService {
     private static final long SHELTER_EXIT_GRACE_TICKS = 1200L;
     /** Tick when a commander-issued task last completed (post-task grace period). */
     private static final ConcurrentHashMap<UUID, Long> TASK_COMPLETED_TICK = new ConcurrentHashMap<>();
-    /** Grace period after commander task completion before surface recovery triggers (30 seconds). */
-    private static final long TASK_GRACE_TICKS = 600L;
+    /** Grace period after commander task completion before surface recovery triggers (10 minutes). */
+    private static final long TASK_GRACE_TICKS = 20L * 60L * 10L;
 
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
