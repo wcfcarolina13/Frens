@@ -395,6 +395,14 @@ public class Frens implements ModInitializer {
                     // Best effort only.
                 }
             }
+            // Zone wand: right-click to set corners (admin only, main hand only)
+            if (hand == net.minecraft.util.Hand.MAIN_HAND
+                    && net.wcfcarolina13.network.ZoneNetworkManager.isZoneWand(serverPlayer.getStackInHand(hand))
+                    && isOperator(serverPlayer.getCommandSource())) {
+                net.wcfcarolina13.network.ZoneNetworkManager.handleWandUse(serverPlayer, hitResult.getBlockPos());
+                return net.minecraft.util.ActionResult.SUCCESS;
+            }
+
             return net.wcfcarolina13.GameAI.services.CompanionResurrectionService
                     .tryHandleUseBlock(serverPlayer, serverWorld, hand, hitResult.getBlockPos());
         });
@@ -518,6 +526,16 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.GuideOpenInventoryPayload.ID, net.wcfcarolina13.network.GuideOpenInventoryPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.GuideInventoryAccessPayload.ID, net.wcfcarolina13.network.GuideInventoryAccessPayload.CODEC);
 
+        // Protected zone management
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneWandRequestPayload.ID, net.wcfcarolina13.network.ZoneWandRequestPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ZoneCornerSetPayload.ID, net.wcfcarolina13.network.ZoneCornerSetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneConfirmPayload.ID, net.wcfcarolina13.network.ZoneConfirmPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneToggleViewPayload.ID, net.wcfcarolina13.network.ZoneToggleViewPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneEditPayload.ID, net.wcfcarolina13.network.ZoneEditPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneDeletePayload.ID, net.wcfcarolina13.network.ZoneDeletePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ZoneListPayload.ID, net.wcfcarolina13.network.ZoneListPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestZoneListPayload.ID, net.wcfcarolina13.network.RequestZoneListPayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -531,6 +549,7 @@ public class Frens implements ModInitializer {
         LearningModeService.registerReceiversOnce();
         net.wcfcarolina13.network.SpellNavigationNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.GuideInventoryNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.ZoneNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -681,6 +700,8 @@ public class Frens implements ModInitializer {
             ServerPlayerEntity player = handler.player;
             LearningModeService.onPlayerDisconnect(player);
             BotPersistenceService.onBotDisconnect(player);
+            net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
+            net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }
@@ -855,6 +876,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ZoneVisualizerService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
