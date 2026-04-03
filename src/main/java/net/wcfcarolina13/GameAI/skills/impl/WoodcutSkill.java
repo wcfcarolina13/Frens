@@ -4825,6 +4825,53 @@ public final class WoodcutSkill implements Skill {
         return candidates.get(0);
     }
 
+    /**
+     * Find an escape position with relaxed safety criteria. Unlike findDryStandableNear,
+     * this allows positions near dangerous drops IF at least 2 cardinal neighbors are
+     * standable, and allows positions adjacent to shallow water. Returns the nearest
+     * standable neighbor of any dangerous-drop candidate (not the drop position itself).
+     */
+    private BlockPos findEscapeStandNear(ServerWorld world, BlockPos center, int radius) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -4, -radius), center.add(radius, 4, radius))) {
+            BlockPos foot = pos.toImmutable();
+            if (!world.isChunkLoaded(foot)) continue;
+            if (!isUsableWoodcutStand(world, foot)) continue;
+
+            // Normal safe stand — best option
+            if (isSafeWoodcutWorkStand(world, foot)) {
+                candidates.add(foot);
+                continue;
+            }
+
+            // Relaxed: dangerous drop OK if 2+ cardinal neighbors are standable
+            if (FollowMovementService.isDangerousDropCell(world, foot)) {
+                int standableNeighbors = 0;
+                BlockPos bestNeighbor = null;
+                double bestNeighborDist = Double.MAX_VALUE;
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    BlockPos neighbor = foot.offset(dir);
+                    if (isUsableWoodcutStand(world, neighbor)
+                            && !FollowMovementService.isDangerousDropCell(world, neighbor)) {
+                        standableNeighbors++;
+                        double dist = neighbor.getSquaredDistance(center);
+                        if (dist < bestNeighborDist) {
+                            bestNeighborDist = dist;
+                            bestNeighbor = neighbor;
+                        }
+                    }
+                }
+                if (standableNeighbors >= 2 && bestNeighbor != null) {
+                    // Return the safe neighbor, not the dangerous position
+                    candidates.add(bestNeighbor);
+                }
+            }
+        }
+        if (candidates.isEmpty()) return null;
+        candidates.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(center)));
+        return candidates.get(0);
+    }
+
     private boolean isUsableWoodcutStand(ServerWorld world, BlockPos foot) {
         return isDryStableWoodcutStand(world, foot) || isMinorSlopeWoodcutStand(world, foot);
     }
