@@ -1736,7 +1736,15 @@ public final class WoodcutSkill implements Skill {
             }
 
             // Step 4: Mine the column block under the bot's feet — triggers gravity drop
+            // After sweeps the bot may have drifted off the column — nudge back if needed
             if (columnBlock != null && !isAbortRequested(bot)) {
+                BlockPos aboveColumn = columnBlock.up();
+                if (!bot.getBlockPos().equals(aboveColumn)
+                        && bot.getBlockPos().getSquaredDistance(aboveColumn) > 1.5) {
+                    // Bot drifted — try to walk back to the column position
+                    MovementService.nudgeTowardUntilClose(
+                            bot, aboveColumn, 1.0, 2_000L, 0.15, "scaffold-descent-recenter");
+                }
                 if (!world.getBlockState(columnBlock).isAir() && reachSession.placedKeys.contains(columnBlock.asLong())) {
                     if (mineAdaptiveBlock(bot, columnBlock, target.base(), reachSession)) {
                         forgetScaffoldPlacement(sharedState, world, columnBlock);
