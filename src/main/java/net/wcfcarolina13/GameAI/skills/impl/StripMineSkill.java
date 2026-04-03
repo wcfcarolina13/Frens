@@ -237,8 +237,14 @@ public final class StripMineSkill implements Skill {
         // Use direct walk nudges first for 1-block advances.
         double distSq = player.getBlockPos().getSquaredDistance(destination);
         if (distSq <= 2.0) {
+            // Kill residual velocity from follow mode before nudging
+            runOnServerThread(player, () -> BotActions.stop(player));
+            try { Thread.sleep(60L); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
             // 1-block advance: nudge forward directly
-            for (int nudge = 0; nudge < 15; nudge++) {
+            for (int nudge = 0; nudge < 25; nudge++) {
                 if (player.getBlockPos().equals(destination)) return true;
                 if (SkillManager.shouldAbortSkill(player)) return false;
                 runOnServerThread(player, () -> {
@@ -249,6 +255,11 @@ public final class StripMineSkill implements Skill {
                     Thread.currentThread().interrupt();
                     return false;
                 }
+            }
+            if (!player.getBlockPos().equals(destination)) {
+                LOGGER.warn("Stripmine nudge failed: bot {} at {} could not reach {} after 25 attempts",
+                        player.getName().getString(), player.getBlockPos().toShortString(),
+                        destination.toShortString());
             }
             return player.getBlockPos().equals(destination);
         }
