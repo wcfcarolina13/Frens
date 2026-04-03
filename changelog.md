@@ -8,6 +8,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 - **Feat: Scaffold cleanup recovery.** When scaffold blocks are unreachable during cleanup (e.g., over a ravine), the bot now tries to bridge to nearby safe ground first. If bridging fails, it abandons the scaffold and escapes via `findEscapeStandNear` (allows precarious positions if 2+ cardinal neighbors are standable).
 
+- **Fix: Scaffold descent (zero-tree-felled root cause).** Phase 4 of `fellTree` iterated scaffold blocks top→bottom but never moved the bot, leaving it stranded at canopy height. Replaced with `descendScaffoldColumn()` which groups scaffold by Y-level and processes top→bottom: mine bridge blocks at each level, run elevated sweep for logs, then mine the column block under the bot's feet to trigger a gravity drop. The bot now reliably descends through its own scaffold column while harvesting logs at each height.
+
 ## 2026-04-02
 
 - **Fix: Stairs/slabs cause false-positive stuck detection.** Stairs and slabs are partial blocks the bot walks through normally, but `BotRescueService` saw them as solid collisions and triggered "stuck in blocks" rescue. Added `BlockTags.STAIRS` and `BlockTags.SLABS` to `isRescueProtectedBlock()`, which is checked in both `rescueFromBurial()` and `isLikelyStuckInBlock()`.
