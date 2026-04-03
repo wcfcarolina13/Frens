@@ -102,7 +102,13 @@ public class BaseManagerScreen extends Screen {
     }
 
     private static List<BaseDto> LAST_BASES = List.of();
+    private static String LAST_ZONE_LIST_JSON = "[]";
     private static UiPrefs CACHED_PREFS = loadUiPrefs();
+
+    /** Called from client network receiver when zone list arrives. */
+    public static void onZoneListReceived(String zonesJson) {
+        LAST_ZONE_LIST_JSON = zonesJson != null ? zonesJson : "[]";
+    }
 
     // Window + content constants
     private static final int PANEL_MARGIN = 8;

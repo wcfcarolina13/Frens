@@ -71,6 +71,7 @@ public class FrensClient implements ClientModInitializer {
     private static KeyBinding KEY_LOCK_PREVIEW;
     private static KeyBinding KEY_LEASH;
     private static KeyBinding KEY_RECRUIT_CONTACT;
+    private static KeyBinding KEY_ZONE_CONFIRM;
 
     private static final long STOP_HOLD_THRESHOLD_MS = 350L;
     private static final long HOTKEY_OVERLAY_DURATION_MS = 4500L;
@@ -94,6 +95,13 @@ public class FrensClient implements ClientModInitializer {
     private static String pendingDirectionalActionLabel = null;
     private static String pendingDirectionalCommand = null;
     private static int directionalPreviewTick = 0;
+
+    // Zone wand selection state
+    private static BlockPos pendingZonePos1 = null;
+    private static BlockPos pendingZonePos2 = null;
+    private static net.minecraft.registry.RegistryKey<net.minecraft.world.World> pendingZoneDimension = null;
+    private static boolean pendingZonePreviewActive = false;
+    private static int zonePreviewTickCounter = 0;
 
     private static boolean resumeDecisionActive = false;
     private static String resumeDecisionBotName = null;
@@ -458,6 +466,12 @@ public class FrensClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        KEY_ZONE_CONFIRM = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.frens.zone_confirm",
+            GLFW.GLFW_KEY_EQUAL,
+            KeyBinding.Category.MISC
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
                 modeSelectionRequired = false;
@@ -576,6 +590,12 @@ public class FrensClient implements ClientModInitializer {
                     }
                 }
             }
+
+            // Zone wand: confirm key and preview particles
+            if (KEY_ZONE_CONFIRM != null && KEY_ZONE_CONFIRM.wasPressed()) {
+                handleZoneConfirmKey(client);
+            }
+            tickZonePreview(client);
 
             if (CompanionHotkeyOverlayHud.isVisible() && client.player != null) {
                 int selected = client.player.getInventory().getSelectedSlot();
@@ -820,6 +840,38 @@ public class FrensClient implements ClientModInitializer {
             net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen.guideRemoteFullAccess = payload.fullAccess();
             net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen.guideRemoteAccessReason =
                     payload.fullAccess() ? payload.reason() : "";
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ZoneCornerSetPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                var player = context.client().player;
+                if (player == null) return;
+                BlockPos pos = new BlockPos(payload.posX(), payload.posY(), payload.posZ());
+                if (payload.cornerIndex() == 1) {
+                    pendingZonePos1 = pos;
+                    pendingZonePos2 = null;
+                    pendingZoneDimension = context.client().world != null
+                            ? context.client().world.getRegistryKey() : null;
+                    pendingZonePreviewActive = false;
+                    player.sendMessage(net.minecraft.text.Text.literal(
+                            "\u00A7aCorner 1 set at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
+                            + " \u2014 right-click to set Corner 2"), true);
+                } else if (payload.cornerIndex() == 2 && pendingZonePos1 != null) {
+                    pendingZonePos2 = pos;
+                    pendingZonePreviewActive = true;
+                    BlockPos p1 = pendingZonePos1;
+                    player.sendMessage(net.minecraft.text.Text.literal(
+                            "\u00A7aZone selected (" + p1.getX() + "," + p1.getY() + "," + p1.getZ()
+                            + " \u2192 " + pos.getX() + "," + pos.getY() + "," + pos.getZ()
+                            + ") \u2014 [=] confirm | right-click to re-select"), true);
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ZoneListPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                net.wcfcarolina13.GraphicalUserInterface.BaseManagerScreen.onZoneListReceived(payload.zonesJson());
+            });
         });
 
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
@@ -3078,6 +3130,121 @@ public class FrensClient implements ClientModInitializer {
                 double z = z1 + (z2 - z1) * i / Math.max(1, stepsZ);
                 double y = y1 + (y2 - y1) * j / Math.max(1, stepsY);
                 client.particleManager.addParticle(particle, x, y, z, 0.0, 0.0, 0.0);
+            }
+        }
+    }
+
+    // ===== Zone Wand Preview =====
+
+    public static void clearZoneWandState() {
+        pendingZonePos1 = null;
+        pendingZonePos2 = null;
+        pendingZoneDimension = null;
+        pendingZonePreviewActive = false;
+        zonePreviewTickCounter = 0;
+    }
+
+    public static boolean hasZonePreviewActive() {
+        return pendingZonePreviewActive && pendingZonePos1 != null && pendingZonePos2 != null;
+    }
+
+    public static BlockPos getZonePos1() { return pendingZonePos1; }
+    public static BlockPos getZonePos2() { return pendingZonePos2; }
+
+    private static void handleZoneConfirmKey(MinecraftClient client) {
+        if (!hasZonePreviewActive() || client.player == null) return;
+        // Open naming popup
+        client.setScreen(new net.wcfcarolina13.GraphicalUserInterface.ZoneNamePopupScreen());
+    }
+
+    private static void tickZonePreview(MinecraftClient client) {
+        if (client.player == null) {
+            if (pendingZonePreviewActive) clearZoneWandState();
+            return;
+        }
+
+        // Clear if dimension changed
+        if (pendingZoneDimension != null && client.world != null
+                && !pendingZoneDimension.equals(client.world.getRegistryKey())) {
+            client.player.sendMessage(net.minecraft.text.Text.literal(
+                    "\u00A77Zone selection cancelled (dimension changed)"), true);
+            clearZoneWandState();
+            return;
+        }
+
+        // Clear if player switched away from wand
+        if (pendingZonePreviewActive) {
+            net.minecraft.item.ItemStack held = client.player.getMainHandStack();
+            if (!net.wcfcarolina13.network.ZoneNetworkManager.isZoneWand(held)) {
+                client.player.sendMessage(net.minecraft.text.Text.literal(
+                        "\u00A77Zone selection cancelled"), true);
+                clearZoneWandState();
+                return;
+            }
+        }
+
+        // Render preview particles every 3 ticks
+        if (!pendingZonePreviewActive || pendingZonePos1 == null || pendingZonePos2 == null) return;
+        zonePreviewTickCounter++;
+        if (zonePreviewTickCounter < 3) return;
+        zonePreviewTickCounter = 0;
+
+        renderZoneEdgeParticles(client);
+    }
+
+    private static void renderZoneEdgeParticles(MinecraftClient client) {
+        if (client.player == null || pendingZonePos1 == null || pendingZonePos2 == null) return;
+
+        int x1 = Math.min(pendingZonePos1.getX(), pendingZonePos2.getX());
+        int y1 = Math.min(pendingZonePos1.getY(), pendingZonePos2.getY());
+        int z1 = Math.min(pendingZonePos1.getZ(), pendingZonePos2.getZ());
+        int x2 = Math.max(pendingZonePos1.getX(), pendingZonePos2.getX());
+        int y2 = Math.max(pendingZonePos1.getY(), pendingZonePos2.getY());
+        int z2 = Math.max(pendingZonePos1.getZ(), pendingZonePos2.getZ());
+
+        int viewerY = client.player.getBlockY();
+        int viewerX = client.player.getBlockX();
+        int viewerZ = client.player.getBlockZ();
+
+        int visMinY = Math.max(y1, viewerY - 64);
+        int visMaxY = Math.min(y2, viewerY + 64);
+        int visMinX = Math.max(x1, viewerX - 128);
+        int visMaxX = Math.min(x2, viewerX + 128);
+        int visMinZ = Math.max(z1, viewerZ - 128);
+        int visMaxZ = Math.min(z2, viewerZ + 128);
+
+        // Compute spacing to stay under 2000 particles
+        int dx = Math.max(0, visMaxX - visMinX + 1);
+        int dy = Math.max(0, visMaxY - visMinY + 1);
+        int dz = Math.max(0, visMaxZ - visMinZ + 1);
+        int estimated = 4 * dy + 4 * dx + 4 * dz;
+        int spacing = 1;
+        while (estimated / spacing > 2000 && spacing < 8) spacing *= 2;
+
+        DustParticleEffect particle = new DustParticleEffect(0x00CCCC, 1.0f);
+
+        // 4 vertical edges
+        int[][] vEdges = {{x1, z1}, {x1, z2}, {x2, z1}, {x2, z2}};
+        for (int[] e : vEdges) {
+            if (e[0] < visMinX || e[0] > visMaxX || e[1] < visMinZ || e[1] > visMaxZ) continue;
+            for (int y = visMinY; y <= visMaxY; y += spacing) {
+                client.particleManager.addParticle(particle, e[0] + 0.5, y + 0.5, e[1] + 0.5, 0, 0, 0);
+            }
+        }
+        // 4 X-axis edges
+        int[][] xEdges = {{y1, z1}, {y1, z2}, {y2, z1}, {y2, z2}};
+        for (int[] e : xEdges) {
+            if (e[0] < visMinY || e[0] > visMaxY || e[1] < visMinZ || e[1] > visMaxZ) continue;
+            for (int x = visMinX; x <= visMaxX; x += spacing) {
+                client.particleManager.addParticle(particle, x + 0.5, e[0] + 0.5, e[1] + 0.5, 0, 0, 0);
+            }
+        }
+        // 4 Z-axis edges
+        int[][] zEdges = {{y1, x1}, {y1, x2}, {y2, x1}, {y2, x2}};
+        for (int[] e : zEdges) {
+            if (e[0] < visMinY || e[0] > visMaxY || e[1] < visMinX || e[1] > visMaxX) continue;
+            for (int z = visMinZ; z <= visMaxZ; z += spacing) {
+                client.particleManager.addParticle(particle, e[1] + 0.5, e[0] + 0.5, z + 0.5, 0, 0, 0);
             }
         }
     }
