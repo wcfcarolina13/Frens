@@ -335,6 +335,48 @@ public final class BotAutoReturnSunsetService {
                 // Only interrupt open-ended tasks; other (commander) tasks are not eligible anyway.
                 TaskService.getActiveTaskInfo(bot.getUuid()).ifPresent(info -> {
                     if (info.openEnded()) {
+                        // Hunt has its own session system — skip generic resume
+                        boolean isHunt = "hunt".equalsIgnoreCase(info.name());
+
+                        if (!isHunt) {
+                            String rawArgs = SkillResumeService.getLastRawArgs(bot.getUuid());
+                            BlockPos interruptionPos = bot.getBlockPos().toImmutable();
+                            long tick = server.getOverworld().getTime();
+
+                            boolean hasLodestoneAnchor = false;
+                            RegistryKey<World> botDim = world.getRegistryKey();
+                            var compasses = LodestoneCompassService.findLodestoneCompasses(bot);
+                            for (var lc : compasses) {
+                                if (lc.target().dimension().equals(botDim)
+                                        && LodestoneCompassService.validateLodestone(server, lc.target())) {
+                                    hasLodestoneAnchor = true;
+                                    break;
+                                }
+                            }
+
+                            if (hasLodestoneAnchor) {
+                                // Case 1: compass → save resume, sunset system handles travel
+                                SkillResumeService.saveSunriseResume(
+                                        bot.getUuid(), info.name(), rawArgs,
+                                        interruptionPos, false, tick);
+                            } else {
+                                Optional<BotHomeService.BaseEntry> nearBase =
+                                        BotHomeService.findBaseNearPosition(server, world, interruptionPos);
+                                if (nearBase.isPresent()) {
+                                    // Case 2: at a base → save resume
+                                    SkillResumeService.saveSunriseResume(
+                                            bot.getUuid(), info.name(), rawArgs,
+                                            interruptionPos, false, tick);
+                                } else if (BotHomeService.isTacticalShelterEnabled(bot)) {
+                                    // Case 3: tactical shelter → sheltered in place
+                                    SkillResumeService.saveSunriseResume(
+                                            bot.getUuid(), info.name(), rawArgs,
+                                            interruptionPos, true, tick);
+                                }
+                                // Case 4: nothing → no resume saved
+                            }
+                        }
+
                         TaskService.forceAbort(bot.getUuid(), "§cSunset: heading home.");
                     }
                 });
