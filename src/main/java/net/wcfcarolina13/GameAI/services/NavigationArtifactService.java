@@ -216,7 +216,7 @@ public final class NavigationArtifactService {
 
     /** Determine delay multiplier based on bot/player artifact tier. 2x for Tier 1, 1x for Tier 2+. */
     public static double artifactDelayMultiplier(ServerPlayerEntity bot, ServerPlayerEntity owner) {
-        // Lodestone compass (component check only — full block validation happens at travel-commit)
+        // Lodestone compass with valid target — Tier 2 (instant-class navigation)
         if (LodestoneCompassService.hasLodestoneCompass(bot)) {
             return 1.0;
         }
@@ -231,9 +231,11 @@ public final class NavigationArtifactService {
                     && hasArtifact(owner, net.minecraft.item.Items.ENDER_PEARL))) {
             return 1.0;
         }
-        // Tier 1: Map or Map+Compass on bot → 2x slower.
+        // Tier 1: Map, Compass, or lodestone compass (lenient — even with lost target,
+        // the compass component proves it was a navigation tool).
         if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                || hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
+                || hasArtifact(bot, net.minecraft.item.Items.COMPASS)
+                || LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
             return 2.0;
         }
         // No artifacts: still allow but at 3x delay.
@@ -615,6 +617,12 @@ public final class NavigationArtifactService {
                                 && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
                             // Map + Compass on bot — allow but with 2x delay (underground is harder)
                             delayTicks = (int) (delayTicks * 2.0);
+                        } else if (LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
+                            // Lodestone compass (lenient: even if lodestone destroyed, the compass
+                            // is still a navigation tool). This catches edge cases where the strict
+                            // hasLodestoneCompass check (requires target) returns false but the bot
+                            // visually has a lodestone compass.
+                            delayTicks = (int) (delayTicks * 2.0);
                         } else {
                             // Check for smoke signal at destination base (underground: 2x radius)
                             ServerWorld destWorld = server.getWorld(dimension);
@@ -636,7 +644,7 @@ public final class NavigationArtifactService {
                                 }
                             } else {
                                 notifyOwner(server, ownerUuid,
-                                        "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
+                                        "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass, or Lodestone Compass.\u00A7r");
                                 return false;
                             }
                         }
@@ -803,7 +811,8 @@ public final class NavigationArtifactService {
                     double mult = artifactDelayMultiplier(bot, owner);
                     if (mult > 1.0
                             && !(hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                            && hasArtifact(bot, net.minecraft.item.Items.COMPASS))) {
+                            && hasArtifact(bot, net.minecraft.item.Items.COMPASS))
+                            && !LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
                         return false;
                     }
                 }

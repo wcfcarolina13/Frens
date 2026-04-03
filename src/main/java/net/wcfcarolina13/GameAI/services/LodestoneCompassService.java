@@ -72,6 +72,23 @@ public final class LodestoneCompassService {
         return !findLodestoneCompasses(bot).isEmpty();
     }
 
+    /**
+     * Lenient check: returns true if the bot has ANY compass with a LODESTONE_TRACKER
+     * component, even if the target is empty (lodestone destroyed). Used by the underground
+     * fast-travel gate to recognize lodestone compasses as navigation tools regardless of
+     * whether the specific lodestone still exists.
+     */
+    public static boolean hasAnyLodestoneCompass(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        var inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty() || !stack.isOf(Items.COMPASS)) continue;
+            if (stack.get(DataComponentTypes.LODESTONE_TRACKER) != null) return true;
+        }
+        return false;
+    }
+
     public static Optional<LodestoneCompassEntry> selectCompassByName(
             ServerPlayerEntity bot, String name) {
         if (bot == null || name == null || name.isBlank()) return Optional.empty();

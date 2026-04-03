@@ -812,6 +812,29 @@ public final class ReturnBaseStuckService {
         double deltaY = baseTarget.y - bot.getY();
         boolean underground = !world.isSkyVisible(bot.getBlockPos().up());
         if (deltaY >= 5.0 && underground) {
+            // Fast-travel shortcut: if the bot has a lodestone compass, skip the physical
+            // pillar-up entirely and fast-travel to the base destination.
+            if (LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
+                MinecraftServer server = bot.getCommandSource() != null
+                        ? bot.getCommandSource().getServer() : null;
+                if (server != null) {
+                    BlockPos dest = BlockPos.ofFloored(baseTarget.x, baseTarget.y, baseTarget.z);
+                    net.minecraft.registry.RegistryKey<net.minecraft.world.World> dim =
+                            world.getRegistryKey();
+                    UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+                    String botAlias = bot.getName().getString();
+                    boolean started = NavigationArtifactService.beginBaseBypassTravel(
+                            server, bot, botAlias, dest, dim, ownerUuid);
+                    if (started) {
+                        LOGGER.info("ReturnBaseStuck: {} fast-traveling to base via lodestone compass instead of pillar-up",
+                                botAlias);
+                        return;
+                    }
+                    LOGGER.info("ReturnBaseStuck: {} fast-travel attempt failed, falling back to pillar-up",
+                            botAlias);
+                }
+            }
+
             LOGGER.info("ReturnBaseStuck: {} is underground (deltaY={}) — using pillar-up to reach surface",
                     bot.getName().getString(), String.format("%.0f", deltaY));
             try {
@@ -1810,6 +1833,9 @@ public final class ReturnBaseStuckService {
             return false;
         }
         if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+            return false;
+        }
+        if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
             return false;
         }
         if (state.isIn(BlockTags.LEAVES)) {
