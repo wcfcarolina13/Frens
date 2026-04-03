@@ -19,6 +19,7 @@ import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
+import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,10 +99,13 @@ public class MiningTool {
         }
 
         // Line-of-sight check: bot must be able to see the target block (no mining through walls).
-        // Skip for directly adjacent blocks — a block touching the bot cannot have a wall between them.
+        // Skip for directly adjacent blocks — a block touching the bot's full height column
+        // (feet, head, above-head) cannot have a wall between them.  The up(2) case covers
+        // tunnel ceiling blocks one step ahead (stripmine 1×3 cross-section).
         BlockPos botBlock = BlockPos.ofFloored(bot.getX(), bot.getY(), bot.getZ());
         boolean adjacent = botBlock.getManhattanDistance(targetBlockPos) <= 1
-                        || botBlock.up().getManhattanDistance(targetBlockPos) <= 1;
+                        || botBlock.up().getManhattanDistance(targetBlockPos) <= 1
+                        || botBlock.up(2).getManhattanDistance(targetBlockPos) <= 1;
         if (!adjacent && bot.getEntityWorld() instanceof ServerWorld losWorld) {
             Vec3d eyePos = bot.getEyePos();
             Vec3d blockCenter = Vec3d.ofCenter(targetBlockPos);
@@ -318,6 +322,9 @@ public class MiningTool {
             return true;
         }
         if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
+            return true;
+        }
+        if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
             return true;
         }
         return false;
