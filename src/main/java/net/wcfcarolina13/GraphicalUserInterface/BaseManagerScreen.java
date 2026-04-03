@@ -164,6 +164,8 @@ public class BaseManagerScreen extends Screen {
     private ButtonWidget villagePromptConfirmButton;
     private ButtonWidget villagePromptCancelButton;
     private boolean mapVillagePromptOpen;
+    private int zoneListStartRelY;
+    private String pendingZoneDeleteLabel = null;
 
     private static final int STATUS_WARN  = 0xFFFFCC44;
     private static final int STATUS_ERROR = 0xFFFF6666;
@@ -340,6 +342,20 @@ public class BaseManagerScreen extends Screen {
         addBtn("Map Village", "Scan the nearby settlement, name it in a popup, and save it as a shared no-go zone", y, 0,
                 this::openMapVillagePrompt);
         y += BUTTON_H + SECTION_GAP;
+
+        // Section 5: Protected Zones
+        addSectionHeader("⬡ Protected Zones", y, 0xFF66CCCC);
+        y += SECTION_LABEL_H;
+
+        addBtn("New Zone", "Gives you a Zone Wand to select an area (admin only)", y, 0,
+                this::requestZoneWand);
+        addBtn("Refresh", "Refresh the zone list", y, 1,
+                this::requestZoneRefresh);
+        y += BUTTON_H + 2;
+
+        zoneListStartRelY = y;
+        y += renderZoneListHeight();
+        y += SECTION_GAP;
 
         addBtn("Close", "Close this screen and return to the inventory", y, 2,
                 this::close);
@@ -665,6 +681,9 @@ public class BaseManagerScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, drawRightInfo, rightX, rowY + 2, 0xFFB0B0B0);
         }
 
+        // Protected zone entries
+        renderZoneEntries(context, content, mouseX, mouseY);
+
         context.disableScissor();
 
         // Scrollbar track + thumb
@@ -826,6 +845,9 @@ public class BaseManagerScreen extends Screen {
                 return true;
             }
         }
+
+        // Zone entry click handling
+        if (handleZoneClick(content, mx, my)) return true;
 
         return super.mouseClicked(click, isInside);
     }
@@ -1062,6 +1084,7 @@ public class BaseManagerScreen extends Screen {
         if (ClientPlayNetworking.canSend(RequestBasesPayload.ID)) {
             ClientPlayNetworking.send(new RequestBasesPayload(botAlias));
         }
+        requestZoneRefresh();
     }
 
     private void sendSetHere() {
@@ -1395,6 +1418,147 @@ public class BaseManagerScreen extends Screen {
         closeMapVillagePrompt();
         showStatus("Mapping village...", STATUS_OK);
         requestRefresh();
+    }
+
+    // ===== Protected Zones =====
+
+    private void requestZoneWand() {
+        if (!ClientPlayNetworking.canSend(net.wcfcarolina13.network.ZoneWandRequestPayload.ID)) {
+            showStatus("Not connected to server.", STATUS_ERROR);
+            return;
+        }
+        ClientPlayNetworking.send(new net.wcfcarolina13.network.ZoneWandRequestPayload(""));
+        close();
+    }
+
+    private void requestZoneRefresh() {
+        if (!ClientPlayNetworking.canSend(net.wcfcarolina13.network.RequestZoneListPayload.ID)) return;
+        ClientPlayNetworking.send(new net.wcfcarolina13.network.RequestZoneListPayload(""));
+    }
+
+    private int renderZoneListHeight() {
+        List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto> zones = parseZoneList();
+        if (zones.isEmpty()) return 12; // "No zones" text
+        return zones.size() * 32; // Each zone entry: label line + buttons line
+    }
+
+    private boolean handleZoneClick(Rect content, double mx, double my) {
+        List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto> zones = parseZoneList();
+        if (zones.isEmpty()) return false;
+
+        int baseY = content.y + zoneListStartRelY - (int) contentScroll;
+        for (int i = 0; i < zones.size(); i++) {
+            net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto z = zones.get(i);
+            int rowY = baseY + i * 32;
+            int btnY = rowY + 14;
+            int btnH = 10;
+            if (my < btnY || my > btnY + btnH) continue;
+
+            // Check Show/Hide button
+            boolean viewing = net.wcfcarolina13.GameAI.services.ZoneVisualizerService.isViewing(
+                    z.label(), MinecraftClient.getInstance().player != null
+                            ? MinecraftClient.getInstance().player.getUuid() : java.util.UUID.randomUUID());
+            String showLabel = viewing ? "\u00A7e[Hide]" : "\u00A7a[Show]";
+            int showW = this.textRenderer.getWidth(showLabel);
+            int showX = content.x + 6;
+            if (mx >= showX && mx < showX + showW) {
+                if (ClientPlayNetworking.canSend(net.wcfcarolina13.network.ZoneToggleViewPayload.ID)) {
+                    ClientPlayNetworking.send(new net.wcfcarolina13.network.ZoneToggleViewPayload(z.label(), !viewing));
+                }
+                pendingZoneDeleteLabel = null;
+                return true;
+            }
+
+            // Check Rename button
+            String renameLabel = "\u00A77[Rename]";
+            int renameW = this.textRenderer.getWidth(renameLabel);
+            int renameX = showX + showW + 8;
+            if (mx >= renameX && mx < renameX + renameW) {
+                String input = nameField != null ? nameField.getText().trim() : "";
+                if (input.isEmpty()) {
+                    showStatus("Type new name in the text field above first.", STATUS_WARN);
+                } else if (ClientPlayNetworking.canSend(net.wcfcarolina13.network.ZoneEditPayload.ID)) {
+                    ClientPlayNetworking.send(new net.wcfcarolina13.network.ZoneEditPayload(z.label(), input));
+                }
+                pendingZoneDeleteLabel = null;
+                return true;
+            }
+
+            // Check Delete button (two-click confirm)
+            int deleteX = renameX + renameW + 8;
+            String deleteLabel = (pendingZoneDeleteLabel != null && pendingZoneDeleteLabel.equals(z.label()))
+                    ? "\u00A7c[Confirm?]" : "\u00A7c[Delete]";
+            int deleteW = this.textRenderer.getWidth(deleteLabel);
+            if (mx >= deleteX && mx < deleteX + deleteW) {
+                if (pendingZoneDeleteLabel != null && pendingZoneDeleteLabel.equals(z.label())) {
+                    if (ClientPlayNetworking.canSend(net.wcfcarolina13.network.ZoneDeletePayload.ID)) {
+                        ClientPlayNetworking.send(new net.wcfcarolina13.network.ZoneDeletePayload(z.label()));
+                    }
+                    pendingZoneDeleteLabel = null;
+                } else {
+                    pendingZoneDeleteLabel = z.label();
+                }
+                return true;
+            }
+        }
+        pendingZoneDeleteLabel = null;
+        return false;
+    }
+
+    private void renderZoneEntries(DrawContext context, Rect content, int mouseX, int mouseY) {
+        List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto> zones = parseZoneList();
+        int baseY = content.y + zoneListStartRelY - (int) contentScroll;
+
+        if (zones.isEmpty()) {
+            if (baseY >= content.y && baseY + 10 <= content.bottom()) {
+                context.drawTextWithShadow(this.textRenderer, "No protected zones.", content.x + 6, baseY + 2, 0xFF888888);
+            }
+            return;
+        }
+
+        for (int i = 0; i < zones.size(); i++) {
+            net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto z = zones.get(i);
+            int rowY = baseY + i * 32;
+            if (rowY + 30 < content.y || rowY > content.bottom()) continue;
+
+            // Background
+            context.fill(content.x + 2, rowY, content.right() - 2, rowY + 30, 0xFF1A2A2A);
+
+            // Zone label and coordinates
+            String label = "\u00A7b" + z.label() + " \u00A77(" + z.minX() + "," + z.minZ()
+                    + " \u2192 " + z.maxX() + "," + z.maxZ() + ") \u00A78Y:" + z.minY() + "\u2192" + z.maxY();
+            String drawLabel = fitRowText(label, content.w - 12);
+            context.drawTextWithShadow(this.textRenderer, drawLabel, content.x + 6, rowY + 2, 0xFFEFEFEF);
+
+            // Inline buttons as clickable text
+            int btnY = rowY + 14;
+            boolean viewing = net.wcfcarolina13.GameAI.services.ZoneVisualizerService.isViewing(
+                    z.label(), MinecraftClient.getInstance().player != null
+                            ? MinecraftClient.getInstance().player.getUuid() : java.util.UUID.randomUUID());
+            String showLabel = viewing ? "\u00A7e[Hide]" : "\u00A7a[Show]";
+            int showW = this.textRenderer.getWidth(showLabel);
+            context.drawTextWithShadow(this.textRenderer, showLabel, content.x + 6, btnY, 0xFFFFFFFF);
+
+            String renameLabel = "\u00A77[Rename]";
+            int renameX = content.x + 6 + showW + 8;
+            context.drawTextWithShadow(this.textRenderer, renameLabel, renameX, btnY, 0xFFFFFFFF);
+
+            String deleteLabel = (pendingZoneDeleteLabel != null && pendingZoneDeleteLabel.equals(z.label()))
+                    ? "\u00A7c[Confirm?]" : "\u00A7c[Delete]";
+            int deleteX = renameX + this.textRenderer.getWidth(renameLabel) + 8;
+            context.drawTextWithShadow(this.textRenderer, deleteLabel, deleteX, btnY, 0xFFFFFFFF);
+        }
+    }
+
+    private static List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto> parseZoneList() {
+        try {
+            java.lang.reflect.Type type = new TypeToken<List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto>>() {}.getType();
+            List<net.wcfcarolina13.network.ZoneNetworkManager.ZoneDto> result =
+                    new GsonBuilder().disableHtmlEscaping().create().fromJson(LAST_ZONE_LIST_JSON, type);
+            return result != null ? result : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private static void sendChatCommand(MinecraftClient client, String command) {
