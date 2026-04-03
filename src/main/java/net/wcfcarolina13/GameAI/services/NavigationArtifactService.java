@@ -956,10 +956,22 @@ public final class NavigationArtifactService {
             finalDim = travel.dimension();
             dimensionFallback = false;
         }
-        final Vec3d spawnPos = Vec3d.ofBottomCenter(finalDest);
+        // Ensure spawn position is not inside a solid block (e.g. lodestone, enchanting table).
+        // If the destination block is solid, find the nearest safe adjacent position.
+        BlockPos safeDest = finalDest;
+        if (!finalWorld.getBlockState(finalDest).getCollisionShape(finalWorld, finalDest).isEmpty()
+                || !finalWorld.getBlockState(finalDest.up()).getCollisionShape(finalWorld, finalDest.up()).isEmpty()) {
+            BlockPos adjusted = SafePositionService.findSafeNear(finalWorld, finalDest, 3);
+            if (adjusted != null) {
+                safeDest = adjusted;
+                LOGGER.info("Fast-travel destination {} is inside a solid block; adjusted to {}",
+                        finalDest.toShortString(), safeDest.toShortString());
+            }
+        }
+        final Vec3d spawnPos = Vec3d.ofBottomCenter(safeDest);
 
         LOGGER.info("Respawning bot '{}' at {} in {}",
-                travel.botAlias(), finalDest.toShortString(), finalDim.getValue());
+                travel.botAlias(), safeDest.toShortString(), finalDim.getValue());
 
         // Create the fake player at the destination.
         // createFake handles GameProfile resolution, skin, connection, and teleport.
