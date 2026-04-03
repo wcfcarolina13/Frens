@@ -178,10 +178,18 @@ public final class StripMineSkill implements Skill {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
+            BlockPos beforeMove = player.getBlockPos();
             if (!moveTo(source, player, footTarget)) {
                 if (SkillManager.shouldAbortSkill(player)) {
                     return SkillExecutionResult.failure("stripmine paused due to cancellation.");
                 }
+                return SkillExecutionResult.failure("Stripmine aborted: failed to advance tunnel.");
+            }
+            // MovementService may declare "already at destination" for 1-block distances.
+            // Verify the bot actually changed block position.
+            if (player.getBlockPos().equals(beforeMove)) {
+                LOGGER.warn("moveTo returned success but bot {} didn't move from {}",
+                        player.getName().getString(), beforeMove.toShortString());
                 return SkillExecutionResult.failure("Stripmine aborted: failed to advance tunnel.");
             }
             completed++;
@@ -224,7 +232,28 @@ public final class StripMineSkill implements Skill {
             return true;
         }
 
-        // Primary: use MovementService DIRECT mode — proven reliable with pathfinding
+        // For very short distances (1 block), MovementService's CLOSE_ENOUGH_DISTANCE_SQ
+        // (1.5 blocks) considers us "already there" and returns success without moving.
+        // Use direct walk nudges first for 1-block advances.
+        double distSq = player.getBlockPos().getSquaredDistance(destination);
+        if (distSq <= 2.0) {
+            // 1-block advance: nudge forward directly
+            for (int nudge = 0; nudge < 15; nudge++) {
+                if (player.getBlockPos().equals(destination)) return true;
+                if (SkillManager.shouldAbortSkill(player)) return false;
+                runOnServerThread(player, () -> {
+                    LookController.faceBlock(player, destination);
+                    BotActions.moveForward(player);
+                });
+                try { Thread.sleep(100L); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return player.getBlockPos().equals(destination);
+        }
+
+        // Longer distances: use MovementService DIRECT mode with pathfinding
         Direction facing = player.getHorizontalFacing();
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT, destination, destination, null, null, facing);
@@ -235,29 +264,10 @@ public final class StripMineSkill implements Skill {
             return true;
         }
 
-        // Fallback: if MovementService didn't land on the exact block but we're
-        // functionally in position (within 1.5 blocks horizontal, same Y ±1),
-        // accept it — the next column will still be reachable.
-        if (closeEnough(player, destination)) {
-            LOGGER.debug("moveTo accepted close-enough position {} for target {}",
-                    player.getBlockPos().toShortString(), destination.toShortString());
-            return true;
-        }
-
         LOGGER.warn("moveTo failed for {} → {} (arrived at {})",
                 player.getName().getString(), destination.toShortString(),
                 player.getBlockPos().toShortString());
         return false;
-    }
-
-    /** Returns true if the bot is within 1.5 blocks horizontally and ±1 Y of the destination. */
-    private boolean closeEnough(ServerPlayerEntity player, BlockPos destination) {
-        BlockPos pos = player.getBlockPos();
-        int dy = Math.abs(pos.getY() - destination.getY());
-        if (dy > 1) return false;
-        double dx = pos.getX() - destination.getX();
-        double dz = pos.getZ() - destination.getZ();
-        return (dx * dx + dz * dz) <= 1.5 * 1.5;
     }
 
     private boolean mineBlock(ServerPlayerEntity player, BlockPos blockPos) {
