@@ -1311,6 +1311,21 @@ public final class WoodcutSkill implements Skill {
                     }
 
                     // Phase 3: Ascent loop (pillar up + mine branches + bridge sweep)
+                    // If the bot couldn't enter the trunk column (upper logs blocking),
+                    // allow pillaring from an adjacent position — update column to the
+                    // bot's actual position so stance checks pass.
+                    if (!positioned && !isBotInColumn(bot, column)) {
+                        BlockPos botPos = bot.getBlockPos();
+                        // Accept adjacent positions (within 1 block of column X/Z)
+                        if (Math.abs(botPos.getX() - column.getX()) <= 1
+                                && Math.abs(botPos.getZ() - column.getZ()) <= 1
+                                && isDryWoodcutStandCell(world, botPos)) {
+                            column = new BlockPos(botPos.getX(), column.getY(), botPos.getZ());
+                            positioned = true;
+                            LOGGER.info("Woodcut pillar: using adjacent column at {} (trunk at {})",
+                                    column.toShortString(), trunkBase.toShortString());
+                        }
+                    }
                     if (positioned || isBotInColumn(bot, column)) {
                         int maxSteps = Math.min(target.height() + 4, MAX_COLUMN_PILLAR_STEPS);
                         ensurePillarStock(bot, Math.min(maxSteps, 6), source, target.top().getY(), reachSession, sharedState);
