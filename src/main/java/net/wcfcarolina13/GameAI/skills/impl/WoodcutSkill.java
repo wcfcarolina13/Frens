@@ -1735,17 +1735,36 @@ public final class WoodcutSkill implements Skill {
                 }
             }
 
-            // Step 4: Mine the column block under the bot's feet — triggers gravity drop
-            // After sweeps the bot may have drifted off the column — nudge back if needed
+            // Step 4: Mine the column block under the bot's feet — triggers gravity drop.
+            // The bot MUST be precisely on the column block so it falls straight down.
+            // After sweeps the bot may have drifted — reposition before mining.
             if (columnBlock != null && !isAbortRequested(bot)) {
                 BlockPos aboveColumn = columnBlock.up();
-                if (!bot.getBlockPos().equals(aboveColumn)
-                        && bot.getBlockPos().getSquaredDistance(aboveColumn) > 1.5) {
-                    // Bot drifted — try to walk back to the column position
+
+                // Ensure bot is standing exactly on the column block
+                if (!bot.getBlockPos().equals(aboveColumn)) {
+                    // Try nudge first
                     MovementService.nudgeTowardUntilClose(
-                            bot, aboveColumn, 1.0, 2_000L, 0.15, "scaffold-descent-recenter");
+                            bot, aboveColumn, 0.5, 2_000L, 0.15, "scaffold-descent-recenter");
+
+                    // If still not on the right block, force-position onto the column center.
+                    // This is safe: the bot is on its own scaffold, we just need it centered
+                    // so the gravity drop goes straight down.
+                    if (!bot.getBlockPos().equals(aboveColumn)) {
+                        Vec3d center = Vec3d.ofBottomCenter(aboveColumn);
+                        world.getServer().execute(() -> {
+                            bot.setPosition(center.x, center.y, center.z);
+                            bot.setVelocity(Vec3d.ZERO);
+                        });
+                        sleepQuiet(100L);
+                    }
                 }
-                if (!world.getBlockState(columnBlock).isAir() && reachSession.placedKeys.contains(columnBlock.asLong())) {
+
+                // Final check: only mine if we're actually on the column
+                if (!bot.getBlockPos().equals(aboveColumn)) {
+                    LOGGER.warn("Scaffold descent: cannot position on column at {}, skipping drop",
+                            aboveColumn.toShortString());
+                } else if (!world.getBlockState(columnBlock).isAir() && reachSession.placedKeys.contains(columnBlock.asLong())) {
                     if (mineAdaptiveBlock(bot, columnBlock, target.base(), reachSession)) {
                         forgetScaffoldPlacement(sharedState, world, columnBlock);
                         reachSession.recordRemoval(columnBlock);
