@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.network.ResumeDecisionPayload;
 
@@ -24,6 +25,19 @@ public final class SkillResumeService {
     private static final Map<UUID, Boolean> AWAITING_DECISION = new ConcurrentHashMap<>();
     private static final Set<UUID> AUTO_RESUME_PENDING = ConcurrentHashMap.newKeySet();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
+
+    // ── Sunrise resume: generic skill resume after sunset interruption ────
+    private static final long SUNRISE_RESUME_EXPIRY_TICKS = 24000L; // 1 in-game day
+    private static final Map<UUID, SunriseResumeRecord> SUNRISE_RESUME_BY_BOT = new ConcurrentHashMap<>();
+
+    public record SunriseResumeRecord(
+            UUID botUuid,
+            String skillName,
+            String rawArgs,
+            BlockPos interruptionPos,
+            boolean shelteredInPlace,
+            long savedTick
+    ) {}
 
     private SkillResumeService() {}
 
@@ -66,6 +80,7 @@ public final class SkillResumeService {
     }
 
     public static void handleDeath(ServerPlayerEntity bot) {
+        clearSunriseResume(bot.getUuid());
         PendingSkill pending = LAST_SKILL_BY_BOT.get(bot.getUuid());
         if (pending == null) {
             return;
@@ -131,6 +146,38 @@ public final class SkillResumeService {
         }
         resume(pending, true, pending.source());
         clear(uuid);
+    }
+
+    public static void saveSunriseResume(UUID botUuid, String skillName, String rawArgs,
+                                          BlockPos interruptionPos, boolean shelteredInPlace, long serverTick) {
+        if (botUuid == null || skillName == null) return;
+        SUNRISE_RESUME_BY_BOT.put(botUuid, new SunriseResumeRecord(
+                botUuid, skillName, rawArgs, interruptionPos, shelteredInPlace, serverTick));
+        LOGGER.info("Saved sunrise resume for {}: skill={} pos={} sheltered={}",
+                botUuid, skillName, interruptionPos != null ? interruptionPos.toShortString() : "null", shelteredInPlace);
+    }
+
+    public static SunriseResumeRecord getSunriseResume(UUID botUuid, long currentTick) {
+        if (botUuid == null) return null;
+        SunriseResumeRecord rec = SUNRISE_RESUME_BY_BOT.get(botUuid);
+        if (rec == null) return null;
+        if (currentTick - rec.savedTick() > SUNRISE_RESUME_EXPIRY_TICKS) {
+            SUNRISE_RESUME_BY_BOT.remove(botUuid);
+            return null;
+        }
+        return rec;
+    }
+
+    public static void clearSunriseResume(UUID botUuid) {
+        if (botUuid != null) {
+            SUNRISE_RESUME_BY_BOT.remove(botUuid);
+        }
+    }
+
+    public static String getLastRawArgs(UUID botUuid) {
+        if (botUuid == null) return null;
+        PendingSkill pending = LAST_SKILL_BY_BOT.get(botUuid);
+        return pending != null ? pending.rawArgs() : null;
     }
 
     public static void flagManualResume(ServerPlayerEntity bot) {
