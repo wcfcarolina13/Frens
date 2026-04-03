@@ -680,6 +680,10 @@ public final class BotAutoReturnSunsetService {
             return;
         }
 
+        // If underground with lodestone compass, fast-travel directly.
+        if (tryLodestoneShortcut(bot, anchor.pos())) {
+            return;
+        }
         primeReturnState(bot, anchor.pos());
         if (!refreshTravelSegment(bot, world, session)) {
             FollowPlannerService.requestPlanToGoal(LOGGER, bot, anchor.pos().toImmutable(), true, reason == null ? "sunset-route" : reason);
@@ -703,8 +707,39 @@ public final class BotAutoReturnSunsetService {
         if (bot == null || anchor == null) {
             return;
         }
+        // If underground with a lodestone compass, fast-travel directly instead of walking.
+        if (tryLodestoneShortcut(bot, anchor)) {
+            return;
+        }
         primeReturnState(bot, anchor);
         FollowPlannerService.requestPlanToGoal(LOGGER, bot, anchor.toImmutable(), true, reason == null ? "sunset-route" : reason);
+    }
+
+    /**
+     * If the bot is underground and has a lodestone compass, attempt fast-travel to the
+     * anchor destination. Returns true if fast-travel was initiated (caller should skip walking).
+     */
+    private static boolean tryLodestoneShortcut(ServerPlayerEntity bot, BlockPos anchor) {
+        if (bot == null || anchor == null) return false;
+        if (!(bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world)) return false;
+        // Only shortcut when significantly underground
+        boolean underground = !world.isSkyVisible(bot.getBlockPos().up());
+        double deltaY = anchor.getY() - bot.getY();
+        if (!underground || deltaY < 5.0) return false;
+        if (!LodestoneCompassService.hasAnyLodestoneCompass(bot)) return false;
+
+        net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null
+                ? bot.getCommandSource().getServer() : null;
+        if (server == null) return false;
+
+        java.util.UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        boolean started = NavigationArtifactService.beginBaseBypassTravel(
+                server, bot, bot.getName().getString(), anchor, world.getRegistryKey(), ownerUuid);
+        if (started) {
+            LOGGER.info("Sunset return: {} fast-traveling to base via lodestone compass (deltaY={})",
+                    bot.getName().getString(), String.format("%.0f", deltaY));
+        }
+        return started;
     }
 
     private static void primeReturnState(ServerPlayerEntity bot, BlockPos anchor) {
