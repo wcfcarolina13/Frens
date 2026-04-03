@@ -768,6 +768,13 @@ public class BotEventHandler {
         STOP_COMMAND_GRACE_UNTIL_TICK.put(botUuid, (long) server.getTicks() + 60L);
     }
 
+    /** Returns true if the bot is within the stop-command grace window (60 ticks after /bot stop). */
+    public static boolean isInStopCommandGrace(UUID botUuid) {
+        if (botUuid == null || server == null) return false;
+        Long grace = STOP_COMMAND_GRACE_UNTIL_TICK.get(botUuid);
+        return grace != null && server.getTicks() < grace;
+    }
+
     /** Called after fast-travel arrival so the teleport detector doesn't see the spawn-to-destination jump. */
     public static void notifyTravelArrival(UUID botUuid, Vec3d arrivalPos, long currentTick) {
         if (botUuid == null || arrivalPos == null) return;

@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
+- **Fix: Stop command not stopping sunset return-to-base.** The `/bot stop` command cleared movement and tasks but left the sunset session active in `BotAutoReturnSunsetService`. The tick loop detected the bot was no longer returning home and re-triggered `startOrResumeReturn` within 1 second. Fix: (1) `/bot stop` now calls `BotAutoReturnSunsetService.clearSession()` to kill the active sunset session, (2) `tickSunsetSession` checks `isInStopCommandGrace()` and clears the session if within the 60-tick grace window, (3) `isEligibleForSunsetAutomation` also checks the grace to prevent re-triggering via the initial automation path.
+
 - **Fix: Stripmine "failed to advance tunnel" after mining columns.** Replaced the primitive `moveTo` loop (20x `moveForward` nudge with exact `BlockPos.equals` check) with `MovementService.execute(DIRECT)` which has real pathfinding. Added `closeEnough` fallback accepting positions within 1.5 blocks horizontal + ±1 Y. Also fixed gravel/sand stabilization drift: the stuck-in-blocks handler pushes the bot sideways during gravel settling, so the bot now saves its position before stabilization and realigns afterward if it drifted.
 
 - **Feat: Woodcut 'Until sunset' mode.** Actions menu now defaults to "Until sunset" (like fishing). Use +/- to set a specific tree count. Updated tooltip and in-game guide. `SkillManager.isOpenEnded()` extended to treat woodcut without a count as open-ended.

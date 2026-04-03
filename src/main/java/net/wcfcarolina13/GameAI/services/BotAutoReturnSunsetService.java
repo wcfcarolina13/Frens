@@ -507,6 +507,12 @@ public final class BotAutoReturnSunsetService {
         if (session == null) {
             return;
         }
+        // Respect the stop-command grace period — the player intentionally stopped the bot;
+        // re-triggering the sunset return within seconds would undermine the stop command.
+        if (BotEventHandler.isInStopCommandGrace(bot.getUuid())) {
+            clearSession(bot.getUuid());
+            return;
+        }
         if (tod < SUNRISE_END_TICK || day > session.day) {
             clearSession(bot.getUuid());
             return;
@@ -1102,6 +1108,11 @@ public final class BotAutoReturnSunsetService {
             return false;
         }
         UUID botUuid = bot.getUuid();
+
+        // Player just issued /bot stop — don't immediately re-trigger sunset return.
+        if (BotEventHandler.isInStopCommandGrace(botUuid)) {
+            return false;
+        }
 
         // Already sleeping / already going to sleep / already going home.
         if (bot.isSleeping()) {

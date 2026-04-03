@@ -5789,6 +5789,9 @@ public class modCommandRegistry {
         // Suppress the join-enclosure check that stopFollowing→registerBot will schedule,
         // so stopping a bot underground doesn't launch an unwanted break-free.
         net.wcfcarolina13.GameAI.BotEventHandler.noteStopCommand(bot.getUuid());
+        // Kill any active sunset-return session so the auto-return doesn't re-trigger
+        // within seconds of the stop command.
+        net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
         // Ensure follow state is cleared so the bot truly stops.
         net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot);
         stopMoving(server, context.getSource(), alias);
