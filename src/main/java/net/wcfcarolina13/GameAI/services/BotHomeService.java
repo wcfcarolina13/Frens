@@ -956,6 +956,19 @@ public final class BotHomeService {
         return best != null ? Optional.of(best.pos.toBlockPos()) : Optional.empty();
     }
 
+    public static Optional<BaseEntry> findBaseNearPosition(MinecraftServer server, ServerWorld world, BlockPos pos) {
+        if (server == null || world == null || pos == null) return Optional.empty();
+        List<BaseEntry> bases = listBases(server, world);
+        for (BaseEntry base : bases) {
+            if (base == null || base.pos() == null) continue;
+            int radius = base.radius() > 0 ? base.radius() : DEFAULT_BASE_PROTECTION_RADIUS;
+            if (base.pos().isWithinDistance(pos, radius)) {
+                return Optional.of(base);
+            }
+        }
+        return Optional.empty();
+    }
+
     /**
      * Chooses the best "home" destination for the bot based on distance.
      *
