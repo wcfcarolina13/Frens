@@ -4112,9 +4112,28 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             if (!isWithinReach(bot, placed) && !moveNearScaffoldForCleanup(source, bot, world, placed, base, reachSession)) {
-                LOGGER.warn("Woodcut scaffold cleanup: unreachable {} from {}",
+                // Normal cleanup failed — try bridge-to-safety recovery
+                if (tryBridgeToSafetyForCleanup(source, bot, world, placed, sharedState, reachSession)) {
+                    LOGGER.info("Woodcut scaffold cleanup: bridged to safety, cleaned {} from new position",
+                            placed.toShortString());
+                    if (world.getBlockState(placed).isAir()) {
+                        forgetScaffoldPlacement(sharedState, world, placed);
+                        reachSession.recordRemoval(placed);
+                    }
+                    continue;
+                }
+                // Bridge failed — abandon scaffold and retreat
+                LOGGER.warn("Woodcut scaffold cleanup: abandoning unreachable {} from {}",
                         placed.toShortString(), bot.getBlockPos().toShortString());
                 reachSession.cleanupIncomplete = true;
+
+                // Try to escape to safe ground
+                BlockPos escape = findEscapeStandNear(world, bot.getBlockPos(), 8);
+                if (escape != null) {
+                    MovementService.MovementPlan escapePlan = new MovementService.MovementPlan(
+                            MovementService.Mode.DIRECT, escape, escape, null, null, bot.getHorizontalFacing());
+                    MovementService.execute(source, bot, escapePlan, false, true, true, false);
+                }
                 continue;
             }
             LookController.faceBlock(bot, placed);
@@ -4161,6 +4180,89 @@ public final class WoodcutSkill implements Skill {
         MovementService.MovementResult result = MovementService.execute(source, bot, plan, false, true, true, false);
         return isWithinReach(bot, placed)
                 || (result.success() && isWithinReach(bot, placed));
+    }
+
+    /**
+     * When scaffold is unreachable during cleanup, try to bridge to safe ground.
+     * Returns true if the bot reached safe ground (scaffold may or may not be cleaned).
+     */
+    private boolean tryBridgeToSafetyForCleanup(ServerCommandSource source,
+                                                  ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  BlockPos placed,
+                                                  Map<String, Object> sharedState,
+                                                  WoodcutReachSession reachSession) {
+        // Find nearest safe ground within 6 blocks
+        BlockPos safeGround = findDryStandableNear(world, bot.getBlockPos(), 6, 4);
+        if (safeGround == null) {
+            safeGround = findEscapeStandNear(world, bot.getBlockPos(), 8);
+        }
+        if (safeGround == null) {
+            return false;
+        }
+
+        if (countPillarBlocks(bot) < 2) {
+            return false;
+        }
+
+        // Determine bridge direction
+        double dx = safeGround.getX() - bot.getBlockPos().getX();
+        double dz = safeGround.getZ() - bot.getBlockPos().getZ();
+        Direction bridgeDir;
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            bridgeDir = dx > 0 ? Direction.EAST : Direction.WEST;
+        } else {
+            bridgeDir = dz > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+
+        int bridgeLength = Math.min(6, (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(safeGround)));
+        List<BlockPos> bridgeBlocks = new ArrayList<>();
+        BlockPos current = bot.getBlockPos();
+        for (int i = 0; i < bridgeLength; i++) {
+            if (isAbortRequested(bot)) break;
+            BlockPos bridgePos = current.offset(bridgeDir, i + 1).down();
+            if (world.getBlockState(bridgePos).getCollisionShape(world, bridgePos).isEmpty()) {
+                if (BotActions.placeBlockAt(bot, bridgePos, Direction.UP, PILLAR_BLOCKS)) {
+                    bridgeBlocks.add(bridgePos);
+                    recordScaffoldPlacement(sharedState, world, bridgePos);
+                    if (reachSession != null) reachSession.recordPlacement(bridgePos);
+                }
+            }
+            // Walk forward
+            BlockPos nextPos = current.offset(bridgeDir, i + 1);
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, nextPos, nextPos, null, null, bridgeDir);
+            MovementService.execute(source, bot, plan, false, true, true, false);
+            sleepQuiet(100L);
+
+            if (isSafeWoodcutWorkStand(world, bot.getBlockPos())) {
+                // Reached safe ground — try to clean target scaffold from here
+                if (isWithinReach(bot, placed)) {
+                    LookController.faceBlock(bot, placed);
+                    mineBlock(bot, placed, false);
+                }
+                // Clean up bridge blocks
+                for (BlockPos bp : bridgeBlocks) {
+                    if (isWithinReach(bot, bp)) {
+                        mineBlock(bot, bp, false);
+                        forgetScaffoldPlacement(sharedState, world, bp);
+                        if (reachSession != null) reachSession.recordRemoval(bp);
+                    }
+                }
+                return true;
+            }
+        }
+
+        // Bridge didn't reach safe ground — clean bridge and return false
+        for (int i = bridgeBlocks.size() - 1; i >= 0; i--) {
+            BlockPos bp = bridgeBlocks.get(i);
+            if (isWithinReach(bot, bp)) {
+                mineBlock(bot, bp, false);
+                forgetScaffoldPlacement(sharedState, world, bp);
+                if (reachSession != null) reachSession.recordRemoval(bp);
+            }
+        }
+        return false;
     }
 
     private void prepareCleanupSurfacePosition(ServerCommandSource source,
