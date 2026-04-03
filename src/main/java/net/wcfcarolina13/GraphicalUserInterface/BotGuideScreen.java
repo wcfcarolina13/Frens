@@ -933,10 +933,11 @@ public final class BotGuideScreen extends Screen {
                         "harvest",
                         "Farming",
                         "Harvest Crops",
-                        "Harvests fully mature crops without damaging the soil.",
+                        "Harvests fully mature crops, replants them, and keeps the field tidy.",
                         List.of(
                                 "Scans a 16-block radius for ripe crops on farmland and carefully breaks them.",
-                                "Sneaks to avoid trampling tilled soil and picks up drops."
+                                "Sneaks to avoid trampling tilled soil, replants matching crops, then runs a drop sweep.",
+                                "If inventory space gets tight, it offloads into nearby chests and can pull more seeds from nearby chests to finish replanting."
                         ),
                         "bot skill harvest " + target,
                         "No keybind by default",
@@ -1258,6 +1259,27 @@ public final class BotGuideScreen extends Screen {
                         "UI-only action (Actions \u2192 Utilities \u2192 Storage)",
                         "Switch between bots with the dropdown in the header",
                         "storage chest supply collect go dismiss fast travel artifacts"
+                ),
+                new GuideTopic(
+                        "zones_protected",
+                        "Utilities",
+                        "Protected Zones",
+                        "Mark areas where bots cannot break blocks.",
+                        List.of(
+                                "Admins can create protected zones using the Zone Wand.",
+                                "Get the wand: /bot zone wand or 'New Zone' in the Base Manager.",
+                                "Right-click a block to set Corner 1, right-click again for Corner 2.",
+                                "Cyan particles appear showing the zone boundary.",
+                                "Press [=] to confirm and name the zone.",
+                                "Bots will not break any blocks inside protected zones.",
+                                "Any player can view zone boundaries via Base Manager > Show.",
+                                "Admins can rename or delete zones in the Base Manager.",
+                                "Zones persist across server restarts.",
+                                "To re-do a selection, right-click again to restart from Corner 1."
+                        ),
+                        "/bot zone wand, /bot zone list, /bot zone protect <radius> [label]",
+                        "Confirm zone: = (Equals key)",
+                        "zone protect wand area region boundary admin"
                 )
         );
     }
