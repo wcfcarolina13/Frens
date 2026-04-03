@@ -191,6 +191,7 @@ public final class ReturnBaseStuckService {
     private static final Map<UUID, Boolean> SCAFFOLD_ATTEMPTED = new ConcurrentHashMap<>();
     private static final long SCAFFOLD_ESCAPE_COOLDOWN_MS = 5_000L;
     private static final Map<UUID, Long> LAST_SCAFFOLD_ESCAPE_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> HEARTBEAT_COUNTER = new ConcurrentHashMap<>();
 
     private ReturnBaseStuckService() {}
 
@@ -270,11 +271,13 @@ public final class ReturnBaseStuckService {
             BEST_BASE_DIST.put(botId, distToBase);
         }
         
-        // Log every tick to confirm this is being called
-        if (currentStagnant % 20 == 0) {
-            LOGGER.info("ReturnBaseStuck TICK: bot={} pos={} stagnant={} escapeInProgress={}", 
+        // Only log when something interesting is happening (stagnant, escaping, or periodic heartbeat)
+        int heartbeat = HEARTBEAT_COUNTER.merge(botId, 1, Integer::sum);
+        boolean escapeActive = ESCAPE_IN_PROGRESS.getOrDefault(botId, false);
+        if (currentStagnant > 0 || escapeActive || heartbeat % 100 == 0) {
+            LOGGER.info("ReturnBaseStuck TICK: bot={} pos={} stagnant={} escapeInProgress={}",
                     bot.getName().getString(), curBlock.toShortString(), currentStagnant,
-                    ESCAPE_IN_PROGRESS.getOrDefault(botId, false));
+                    escapeActive);
         }
         
         // Don't tick if an escape attempt is currently in progress (running async)
@@ -582,6 +585,7 @@ public final class ReturnBaseStuckService {
             LAST_PANIC_FLEE_MS.remove(botId);
             SCAFFOLD_ATTEMPTED.remove(botId);
             LAST_SCAFFOLD_ESCAPE_MS.remove(botId);
+            HEARTBEAT_COUNTER.remove(botId);
             MovementService.clearLocalEscapeDirective(botId);
         }
     }

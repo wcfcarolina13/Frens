@@ -114,6 +114,85 @@ public final class BotRescueService {
         return last >= 0 && (now - last) <= OBSTRUCT_WINDOW_TICKS;
     }
 
+    static boolean shouldPreferProtectedGlassSnap(BlockState... states) {
+        if (states == null) {
+            return false;
+        }
+        for (BlockState state : states) {
+            if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean shouldPreferProtectedGlassSnapKeys(String... translationKeys) {
+        if (translationKeys == null) {
+            return false;
+        }
+        for (String key : translationKeys) {
+            if (ProtectedStructureBlockHelper.isProtectedGlassLikeTranslationKey(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasProtectedGlassCollision(ServerWorld world,
+                                                      BlockPos feet,
+                                                      BlockPos head,
+                                                      BlockState feetState,
+                                                      BlockState headState) {
+        if (world == null || feet == null || head == null) {
+            return false;
+        }
+        if (shouldPreferProtectedGlassSnap(feetState, headState)) {
+            return true;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos adjacentFeet = feet.offset(dir);
+            BlockState adjacentFeetState = world.getBlockState(adjacentFeet);
+            if (!adjacentFeetState.getCollisionShape(world, adjacentFeet).isEmpty()
+                    && ProtectedStructureBlockHelper.isProtectedGlassLike(adjacentFeetState)) {
+                return true;
+            }
+
+            BlockPos adjacentHead = head.offset(dir);
+            BlockState adjacentHeadState = world.getBlockState(adjacentHead);
+            if (!adjacentHeadState.getCollisionShape(world, adjacentHead).isEmpty()
+                    && ProtectedStructureBlockHelper.isProtectedGlassLike(adjacentHeadState)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean snapOutOfProtectedGlass(ServerPlayerEntity bot, ServerWorld world, BlockPos origin, String reason) {
+        if (bot == null || world == null || origin == null) {
+            return false;
+        }
+
+        BlockPos safe = SafePositionService.findAlternativeSafeNear(world, origin, 6);
+        if (safe == null) {
+            Vec3d lastSafe = BotStuckService.getLastSafePosition(bot.getUuid());
+            if (lastSafe != null) {
+                safe = SafePositionService.findSafeNear(world, BlockPos.ofFloored(lastSafe), 4);
+            }
+        }
+        if (safe == null) {
+            return false;
+        }
+
+        BlockPos from = bot.getBlockPos();
+        SafePositionService.snapTo(bot, safe);
+        LOGGER.warn("protected-glass snap recovery [{}]: bot={} from={} to={}",
+                reason,
+                bot.getName().getString(),
+                from.toShortString(),
+                safe.toShortString());
+        return true;
+    }
+
     public static boolean rescueFromBurial(ServerPlayerEntity bot) {
         if (bot == null || bot.isRemoved()) {
             return false;
@@ -155,6 +234,7 @@ public final class BotRescueService {
 
         BlockState headState = world.getBlockState(head);
         BlockState feetState = world.getBlockState(feet);
+        boolean protectedGlassCollision = hasProtectedGlassCollision(world, feet, head, feetState, headState);
         boolean headIsDoor = headState.getBlock() instanceof DoorBlock;
         boolean feetIsDoor = feetState.getBlock() instanceof DoorBlock;
 
@@ -193,6 +273,11 @@ public final class BotRescueService {
         }
 
         boolean stuckInBlocks = (headBlocked || feetBlocked);
+
+        if ((takingSuffocationDamage || stuckInBlocks) && protectedGlassCollision
+                && snapOutOfProtectedGlass(bot, world, feet, "burial-rescue")) {
+            return true;
+        }
 
         // If taking suffocation damage but head/feet blocks are clear, the bot's
         // bounding box edge clips into an adjacent solid block. Nudge it away from
@@ -401,6 +486,10 @@ public final class BotRescueService {
         // If we're embedded in a protected block (e.g., chest/bed/fence), never mine it — just nudge away.
         BlockState feetStateInitial = world.getBlockState(feet);
         BlockState headStateInitial = world.getBlockState(head);
+        if (hasProtectedGlassCollision(world, feet, head, feetStateInitial, headStateInitial)
+                && snapOutOfProtectedGlass(bot, world, feet, "suffocation-check")) {
+            return true;
+        }
         if ((isRescueProtectedBlock(feetStateInitial) && feetStateInitial.blocksMovement() && !feetStateInitial.getCollisionShape(world, feet).isEmpty())
                 || (isRescueProtectedBlock(headStateInitial) && headStateInitial.blocksMovement() && !headStateInitial.getCollisionShape(world, head).isEmpty())) {
             return attemptEscapeMovement(bot, world, feet, head);
@@ -504,6 +593,10 @@ public final class BotRescueService {
 
         BlockState headState = world.getBlockState(head);
         BlockState feetState = world.getBlockState(feet);
+        if (hasProtectedGlassCollision(world, feet, head, feetState, headState)
+                && snapOutOfProtectedGlass(bot, world, feet, "spawn-check")) {
+            return;
+        }
 
         // Doors/trapdoors are extremely common "spawn overlap" cases (doorways, interiors) and must never be mined.
         // Prefer interaction + nudging so we don't grief player builds.
@@ -613,7 +706,10 @@ public final class BotRescueService {
                 || state.isOf(Blocks.ENDER_CHEST)
                 || state.isIn(BlockTags.BEDS)
                 || state.isIn(BlockTags.SHULKER_BOXES)
-                || state.isOf(Blocks.LECTERN);
+                || state.isOf(Blocks.LECTERN)
+                || state.isIn(BlockTags.STAIRS)
+                || state.isIn(BlockTags.SLABS)
+                || ProtectedStructureBlockHelper.isProtectedGlassLike(state);
     }
 
     private static boolean tookRecentSuffocation(ServerPlayerEntity bot) {

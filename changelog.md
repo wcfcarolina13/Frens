@@ -4,6 +4,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
+- **Fix: Stairs/slabs cause false-positive stuck detection.** Stairs and slabs are partial blocks the bot walks through normally, but `BotRescueService` saw them as solid collisions and triggered "stuck in blocks" rescue. Added `BlockTags.STAIRS` and `BlockTags.SLABS` to `isRescueProtectedBlock()`, which is checked in both `rescueFromBurial()` and `isLikelyStuckInBlock()`.
+
+- **Fix: ReturnBaseStuck log noise during normal travel.** The TICK log fired every 20 calls even when `stagnant=0` and no escape was in progress, producing hundreds of useless lines per return trip. Now only logs when stagnant > 0, escape is active, or as a heartbeat every 100 ticks.
+
 - **Fix: Stop command not stopping sunset return-to-base.** The `/bot stop` command cleared movement and tasks but left the sunset session active in `BotAutoReturnSunsetService`. The tick loop detected the bot was no longer returning home and re-triggered `startOrResumeReturn` within 1 second. Fix: (1) `/bot stop` now calls `BotAutoReturnSunsetService.clearSession()` to kill the active sunset session, (2) `tickSunsetSession` checks `isInStopCommandGrace()` and clears the session if within the 60-tick grace window, (3) `isEligibleForSunsetAutomation` also checks the grace to prevent re-triggering via the initial automation path.
 
 - **Fix: Stripmine "failed to advance tunnel" after mining columns.** Replaced the primitive `moveTo` loop (20x `moveForward` nudge with exact `BlockPos.equals` check) with `MovementService.execute(DIRECT)` which has real pathfinding. Added `closeEnough` fallback accepting positions within 1.5 blocks horizontal + ±1 Y. Also fixed gravel/sand stabilization drift: the stuck-in-blocks handler pushes the bot sideways during gravel settling, so the bot now saves its position before stabilization and realigns afterward if it drifted.
