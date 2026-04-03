@@ -621,6 +621,7 @@ public class Frens implements ModInitializer {
                 }
             }
             BotPersistenceService.saveAll(server);
+            net.wcfcarolina13.GameAI.services.NavigationArtifactService.clearSmokeSignalCache();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

@@ -65,6 +65,49 @@ public final class NavigationArtifactService {
     /** Per-bot cooldown tracker: bot UUID -> server tick of last departure. */
     private static final Map<UUID, Long> TRAVEL_COOLDOWNS = new ConcurrentHashMap<>();
 
+    // ── Smoke signal navigation beacon ───────────────────────────────────
+    private static final int SMOKE_SIGNAL_SCAN_RADIUS_H = 8;
+    private static final int SMOKE_SIGNAL_SCAN_RADIUS_V = 8;
+    private static final long SMOKE_SIGNAL_CACHE_TICKS = 1200L; // 60 seconds
+    private static final Map<BlockPos, Long> SMOKE_SIGNAL_CACHE = new ConcurrentHashMap<>();
+    private static final Map<BlockPos, Boolean> SMOKE_SIGNAL_RESULT_CACHE = new ConcurrentHashMap<>();
+
+    public static boolean hasSmokeSignal(ServerWorld world, BlockPos basePos) {
+        if (world == null || basePos == null) return false;
+        long now = world.getTime();
+        Long cachedAt = SMOKE_SIGNAL_CACHE.get(basePos);
+        if (cachedAt != null && now - cachedAt < SMOKE_SIGNAL_CACHE_TICKS) {
+            return Boolean.TRUE.equals(SMOKE_SIGNAL_RESULT_CACHE.get(basePos));
+        }
+        boolean found = scanForSmokeSignal(world, basePos);
+        SMOKE_SIGNAL_CACHE.put(basePos, now);
+        SMOKE_SIGNAL_RESULT_CACHE.put(basePos, found);
+        return found;
+    }
+
+    private static boolean scanForSmokeSignal(ServerWorld world, BlockPos center) {
+        for (int dx = -SMOKE_SIGNAL_SCAN_RADIUS_H; dx <= SMOKE_SIGNAL_SCAN_RADIUS_H; dx++) {
+            for (int dy = -SMOKE_SIGNAL_SCAN_RADIUS_V; dy <= SMOKE_SIGNAL_SCAN_RADIUS_V; dy++) {
+                for (int dz = -SMOKE_SIGNAL_SCAN_RADIUS_H; dz <= SMOKE_SIGNAL_SCAN_RADIUS_H; dz++) {
+                    BlockPos pos = center.add(dx, dy, dz);
+                    net.minecraft.block.BlockState state = world.getBlockState(pos);
+                    if ((state.isOf(net.minecraft.block.Blocks.CAMPFIRE)
+                            || state.isOf(net.minecraft.block.Blocks.SOUL_CAMPFIRE))
+                            && state.get(net.minecraft.block.CampfireBlock.LIT)
+                            && world.getBlockState(pos.down()).isOf(net.minecraft.block.Blocks.HAY_BLOCK)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static void clearSmokeSignalCache() {
+        SMOKE_SIGNAL_CACHE.clear();
+        SMOKE_SIGNAL_RESULT_CACHE.clear();
+    }
+
     private NavigationArtifactService() {}
 
     /** Gson-serializable DTO mirroring {@link PendingTravel} with primitive/String fields. */
@@ -573,10 +616,54 @@ public final class NavigationArtifactService {
                             // Map + Compass on bot — allow but with 2x delay (underground is harder)
                             delayTicks = (int) (delayTicks * 2.0);
                         } else {
-                            notifyOwner(server, ownerUuid,
-                                    "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
-                            return false;
+                            // Check for smoke signal at destination base (underground: 2x radius)
+                            ServerWorld destWorld = server.getWorld(dimension);
+                            java.util.Optional<BotHomeService.BaseEntry> destBase = destWorld != null
+                                    ? BotHomeService.findBaseNearPosition(server, destWorld, destination)
+                                    : java.util.Optional.empty();
+                            if (destBase.isPresent()
+                                    && hasSmokeSignal(destWorld, destBase.get().pos())) {
+                                int baseRadius = destBase.get().radius() > 0
+                                        ? destBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+                                double maxRange = baseRadius * 2.0;
+                                double distToBase = bot.getBlockPos().getManhattanDistance(destBase.get().pos());
+                                if (distToBase <= maxRange) {
+                                    delayTicks = (int) (delayTicks * 3.0);
+                                } else {
+                                    notifyOwner(server, ownerUuid,
+                                            "\u00A7c" + botAlias + " is too far underground to see the smoke signal.\u00A7r");
+                                    return false;
+                                }
+                            } else {
+                                notifyOwner(server, ownerUuid,
+                                        "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
+                                return false;
+                            }
                         }
+                    }
+                }
+            }
+        }
+
+        // ── Above-ground smoke signal range extension (no-artifact bots) ─
+        if (!skipGates && !skipArtifactGate) {
+            ServerPlayerEntity ownerPlayer = server.getPlayerManager().getPlayer(ownerUuid);
+            double aboveMult = artifactDelayMultiplier(bot, ownerPlayer);
+            if (aboveMult >= 3.0) {
+                ServerWorld destWorldCheck = server.getWorld(dimension);
+                java.util.Optional<BotHomeService.BaseEntry> smokeBase = destWorldCheck != null
+                        ? BotHomeService.findBaseNearPosition(server, destWorldCheck, destination)
+                        : java.util.Optional.empty();
+                if (smokeBase.isPresent()
+                        && hasSmokeSignal(destWorldCheck, smokeBase.get().pos())) {
+                    int baseRadius = smokeBase.get().radius() > 0
+                            ? smokeBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+                    double maxRange = baseRadius * 5.0;
+                    double distToBase = bot.getBlockPos().getManhattanDistance(smokeBase.get().pos());
+                    if (distToBase <= maxRange) {
+                        double dist = bot.getBlockPos().getManhattanDistance(destination);
+                        boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(dimension);
+                        delayTicks = calculateDelayTicks(dist, crossDim, 3.0);
                     }
                 }
             }
