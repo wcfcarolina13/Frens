@@ -73,6 +73,26 @@ public final class LodestoneCompassService {
     }
 
     /**
+     * Count compasses that have a LODESTONE_TRACKER component but whose target is empty
+     * (lodestone was destroyed). These compasses still look like lodestone compasses
+     * (glint, name) but point nowhere and need re-anchoring.
+     */
+    public static int countOrphanedCompasses(ServerPlayerEntity bot) {
+        if (bot == null) return 0;
+        int count = 0;
+        var inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty() || !stack.isOf(Items.COMPASS)) continue;
+            LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
+            if (tracker != null && tracker.target().isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * Lenient check: returns true if the bot has ANY compass with a LODESTONE_TRACKER
      * component, even if the target is empty (lodestone destroyed). Used by the underground
      * fast-travel gate to recognize lodestone compasses as navigation tools regardless of

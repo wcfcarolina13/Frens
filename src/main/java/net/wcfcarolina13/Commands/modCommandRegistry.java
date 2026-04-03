@@ -1607,25 +1607,34 @@ public class modCommandRegistry {
                                             return 0;
                                         }
                                         var compasses = LodestoneCompassService.findLodestoneCompasses(bot);
-                                        if (compasses.isEmpty()) {
+                                        int orphaned = LodestoneCompassService.countOrphanedCompasses(bot);
+                                        if (compasses.isEmpty() && orphaned == 0) {
                                             context.getSource().sendFeedback(() -> Text.literal(
                                                     "\u00A77" + botName + " has no lodestone compasses.\u00A7r"), false);
                                             return 0;
                                         }
                                         String homeName = LodestoneCompassService.getHomeCompassName(bot);
-                                        context.getSource().sendFeedback(() -> Text.literal(
-                                                "\u00A7e" + botName + "'s lodestone compasses:\u00A7r"), false);
-                                        for (var c : compasses) {
-                                            String dimName = c.target().dimension().getValue().toString();
-                                            boolean isHome = homeName != null
-                                                    && c.displayName().equalsIgnoreCase(homeName);
-                                            String homeTag = isHome ? " \u00A7a[HOME]\u00A7r" : "";
+                                        if (!compasses.isEmpty()) {
                                             context.getSource().sendFeedback(() -> Text.literal(
-                                                    "  \u00A7f" + c.displayName() + "\u00A77 \u2192 "
-                                                    + c.target().pos().getX() + ", "
-                                                    + c.target().pos().getY() + ", "
-                                                    + c.target().pos().getZ()
-                                                    + " (" + dimName + ")" + homeTag), false);
+                                                    "\u00A7e" + botName + "'s lodestone compasses:\u00A7r"), false);
+                                            for (var c : compasses) {
+                                                String dimName = c.target().dimension().getValue().toString();
+                                                boolean isHome = homeName != null
+                                                        && c.displayName().equalsIgnoreCase(homeName);
+                                                String homeTag = isHome ? " \u00A7a[HOME]\u00A7r" : "";
+                                                context.getSource().sendFeedback(() -> Text.literal(
+                                                        "  \u00A7f" + c.displayName() + "\u00A77 \u2192 "
+                                                        + c.target().pos().getX() + ", "
+                                                        + c.target().pos().getY() + ", "
+                                                        + c.target().pos().getZ()
+                                                        + " (" + dimName + ")" + homeTag), false);
+                                            }
+                                        }
+                                        if (orphaned > 0) {
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "\u00A7c  " + orphaned + " compass"
+                                                    + (orphaned > 1 ? "es" : "")
+                                                    + " lost their lodestone (need re-anchoring).\u00A7r"), false);
                                         }
                                         return 1;
                                     })))
