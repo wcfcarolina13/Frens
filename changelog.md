@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-03
 
+- **Feat: General Protected Zones.** Admin-friendly zone protection system with Litematica-style selection. `/bot zone wand` gives an enchanted blaze rod; right-click two blocks to define a 3D bounding box, cyan particles preview the boundary, press `=` to name and save. Bots cannot break blocks inside zones. Any player can view zone boundaries via Base Manager > Protected Zones > Show. Admins can rename/delete zones in the UI. Migrated `ProtectedZoneService` from center+radius to AABB (min/max corners) with automatic legacy migration on load. New files: `ZoneVisualizerService`, `ZoneNetworkManager`, `ZoneNamePopupScreen`, 8 network payloads. Bot Guide updated with Protected Zones topic.
+
 - **Feat: Woodcut hazard avoidance.** New `WoodcutHazardScanner` probes 6 blocks in each cardinal direction from a tree base, classifying terrain as SAFE, SHALLOW_WATER, DEEP_WATER, or RAVINE. Trees fully enclosed by hazardous terrain are rejected. Scaffold placement skips hazardous directions and never places over water. Bridge sweeps skip ravine/deep-water directions.
 
 - **Feat: Scaffold cleanup recovery.** When scaffold blocks are unreachable during cleanup (e.g., over a ravine), the bot now tries to bridge to nearby safe ground first. If bridging fails, it abandons the scaffold and escapes via `findEscapeStandNear` (allows precarious positions if 2+ cardinal neighbors are standable).
