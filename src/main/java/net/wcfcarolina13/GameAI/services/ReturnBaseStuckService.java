@@ -1901,6 +1901,11 @@ public final class ReturnBaseStuckService {
             return true;
         }
 
+        if (ProtectedStructureBlockHelper.isNeverBreakBlock(state)) {
+            LOGGER.info("Stuck pillar: skipping protected block {} at {}", state.getBlock().getName().getString(), target.toShortString());
+            return false;
+        }
+
         LOGGER.info("Stuck pillar: mining {} at {} via MiningTool",
                 state.getBlock().getName().getString(), target.toShortString());
 

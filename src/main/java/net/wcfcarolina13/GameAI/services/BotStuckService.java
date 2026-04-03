@@ -210,6 +210,62 @@ public final class BotStuckService {
         return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
     }
 
+    static boolean shouldSnapProtectedGlassDuringMineEscape(BlockState feetState,
+                                                            BlockState headState,
+                                                            BlockState wallFeetState,
+                                                            BlockState wallHeadState) {
+        return ProtectedStructureBlockHelper.isProtectedGlassLike(feetState)
+                || ProtectedStructureBlockHelper.isProtectedGlassLike(headState)
+                || ProtectedStructureBlockHelper.isProtectedGlassLike(wallFeetState)
+                || ProtectedStructureBlockHelper.isProtectedGlassLike(wallHeadState);
+    }
+
+    static boolean shouldSnapProtectedGlassDuringMineEscapeKeys(String feetKey,
+                                                                String headKey,
+                                                                String wallFeetKey,
+                                                                String wallHeadKey) {
+        return ProtectedStructureBlockHelper.isProtectedGlassLikeTranslationKey(feetKey)
+                || ProtectedStructureBlockHelper.isProtectedGlassLikeTranslationKey(headKey)
+                || ProtectedStructureBlockHelper.isProtectedGlassLikeTranslationKey(wallFeetKey)
+                || ProtectedStructureBlockHelper.isProtectedGlassLikeTranslationKey(wallHeadKey);
+    }
+
+    private static boolean tryProtectedGlassSnapRecovery(ServerPlayerEntity bot, ServerWorld world, String reason, BlockPos focus) {
+        if (bot == null || world == null) {
+            return false;
+        }
+
+        BlockPos origin = bot.getBlockPos();
+        BlockPos safe = SafePositionService.findAlternativeSafeNear(world, origin, 6);
+        if (safe == null && focus != null) {
+            safe = SafePositionService.findAlternativeSafeNear(world, focus, 6);
+        }
+        if (safe == null) {
+            Vec3d lastSafe = getLastSafePosition(bot.getUuid());
+            if (lastSafe != null) {
+                safe = SafePositionService.findSafeNear(world, BlockPos.ofFloored(lastSafe), 4);
+            }
+        }
+        if (safe == null) {
+            return false;
+        }
+
+        SafePositionService.snapTo(bot, safe);
+        UUID botId = bot.getUuid();
+        Vec3d snapped = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        LAST_KNOWN_POSITION.put(botId, snapped);
+        STATIONARY_TICKS.put(botId, 0);
+        BOUNDED_CHECK_ORIGIN.put(botId, snapped);
+        BOUNDED_CHECK_TICKS.put(botId, 0);
+
+        LOGGER.warn("protected-glass snap recovery [{}]: bot={} from={} to={}",
+                reason,
+                bot.getName().getString(),
+                origin.toShortString(),
+                safe.toShortString());
+        return true;
+    }
+
     public static void updateStuckTracker(ServerPlayerEntity bot, EnvironmentSnapshot environmentSnapshot) {
         if (bot == null || bot.isRemoved()) {
             return;
@@ -253,6 +309,14 @@ public final class BotStuckService {
         // If oscillating in a small area for 3 seconds, try mine-escape
         if (boundedTicks >= BOUNDED_STUCK_THRESHOLD && environmentSnapshot != null) {
             ServerWorld bWorld = bot.getCommandSource().getWorld();
+            if (shouldSnapProtectedGlassDuringMineEscape(
+                    bWorld.getBlockState(bot.getBlockPos()),
+                    bWorld.getBlockState(bot.getBlockPos().up()),
+                    null,
+                    null)
+                    && tryProtectedGlassSnapRecovery(bot, bWorld, "bounded-stuck", bot.getBlockPos())) {
+                return;
+            }
             boolean noSky = bWorld != null && !bWorld.isSkyVisible(bot.getBlockPos().up());
             if (noSky) {
                 long nowTick = bWorld.getServer() != null ? bWorld.getServer().getTicks() : 0;
@@ -344,6 +408,15 @@ public final class BotStuckService {
         BlockPos wallFeet = pos.offset(mineDir);
         BlockPos wallHead = wallFeet.up();
 
+        if (shouldSnapProtectedGlassDuringMineEscape(
+                world.getBlockState(pos),
+                world.getBlockState(pos.up()),
+                world.getBlockState(wallFeet),
+                world.getBlockState(wallHead))
+                && tryProtectedGlassSnapRecovery(bot, world, "mine-escape", wallFeet)) {
+            return;
+        }
+
         LOGGER.info("Mine-escape for {} toward {} (airDist={})",
                 bot.getName().getString(), mineDir.asString(),
                 bestDir != null ? bestDist : "none");
@@ -351,12 +424,13 @@ public final class BotStuckService {
         // Face the wall before mining (required for LoS check in MiningTool)
         LookController.faceBlock(bot, wallFeet);
 
-        if (world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)) {
+        if (world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)
+                && !ProtectedStructureBlockHelper.isNeverBreakBlock(world.getBlockState(wallFeet))) {
             MiningTool.mineBlock(bot, wallFeet, false);
         }
-        if (world.getBlockState(wallHead).isSolidBlock(world, wallHead)) {
+        if (world.getBlockState(wallHead).isSolidBlock(world, wallHead)
+                && !ProtectedStructureBlockHelper.isNeverBreakBlock(world.getBlockState(wallHead))) {
             MiningTool.mineBlock(bot, wallHead, false);
         }
     }
 }
-
