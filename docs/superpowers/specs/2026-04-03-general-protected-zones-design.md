@@ -98,48 +98,43 @@ Server-side: Register `UseBlockCallback.EVENT` in `Frens.java`. The callback che
 ### Selection workflow
 
 **State (client-side, in FrensClient):**
-- `pendingZonePos1: BlockPos` (null = not set)
-- `pendingZonePos2: BlockPos` (null = not set)
+- `pendingZonePos1: BlockPos` (null = not set, full 3D position)
+- `pendingZonePos2: BlockPos` (null = not set, full 3D position)
 - `pendingZoneDimension: RegistryKey<World>` (set when pos1 is placed)
-- `pendingZoneMinY: int` (default: `world.getBottomY()`, typically -64)
-- `pendingZoneMaxY: int` (default: `world.getTopYInclusive()`, typically 319)
 - `pendingZonePreviewActive: boolean`
 
 **Dimension safety:** When pos1 is set, `pendingZoneDimension` is recorded. If the player changes dimension before setting pos2, the pending selection is automatically cleared with action bar message: `§7Zone selection cancelled (dimension changed)`.
 
 **Disconnect/cleanup:** Client state is cleared on disconnect (all `pending*` fields nulled). Server-side `ZoneVisualizerService` cleans up stale preview/viewing entries on `ServerPlayerEvents.AFTER_DISCONNECT`.
 
-**Flow:**
+**Flow (Litematica-style):**
 
-1. Admin right-clicks ground with wand → **pos1 set**
-   - Action bar: `§aCorner 1 set at X, Z — right-click to set Corner 2`
+1. Admin right-clicks block with wand → **corner 1 set (full 3D position)**
+   - Action bar: `§aCorner 1 set at X, Y, Z — right-click to set Corner 2`
    - State: `pendingZonePos1 = hitPos`
 
-2. Admin right-clicks ground again → **pos2 set, preview starts**
-   - Action bar: `§aCorner 2 set at X, Z — Shift+↑/↓ adjust Y | [=] confirm | [ESC] cancel`
+2. Admin right-clicks another block → **corner 2 set, preview starts**
+   - Action bar: `§aZone selected (X1,Y1,Z1 → X2,Y2,Z2) — [=] confirm | right-click to re-select`
    - State: `pendingZonePos2 = hitPos`, `pendingZonePreviewActive = true`
-   - Particles begin rendering (see Particle Visualization section)
+   - Particles begin rendering on the AABB edges (see Particle Visualization section)
+   - The AABB is computed as `min(pos1, pos2)` / `max(pos1, pos2)` per axis
 
-3. **Y adjustment** — while holding wand and preview is active:
-   - Shift+Up arrow: raise maxY by 1 (ceiling up)
-   - Shift+Down arrow: lower minY by 1 (floor down)
-   - Ctrl+Up arrow: lower maxY by 1 (ceiling down, min: minY + 1)
-   - Ctrl+Down arrow: raise minY by 1 (floor up, max: maxY - 1)
-   - Action bar updates with current Y range: `§7Y range: §f-64 §7to §f320`
+3. **Re-select** — right-clicking again while preview is active restarts from step 1 (new corner 1)
+   - This lets the admin adjust corners without cancelling
 
 4. **Confirm** — press confirm keybind (`=`):
    - Opens `ZoneNamePopupScreen` with text field + confirm button
-   - On submit: sends `ZoneConfirmPayload(pos1, pos2, minY, maxY, name)` to server
-   - Server validates admin status, creates zone via `ProtectedZoneService.createZone()`
+   - On submit: sends `ZoneConfirmPayload(pos1, pos2, name)` to server
+   - Server computes AABB, validates admin status, creates zone via `ProtectedZoneService.createZone()`
    - Action bar: `§aZone "name" created!`
    - Client state cleared
 
-5. **Cancel** — press ESC, switch item, or right-click wand a third time:
+5. **Cancel** — switch item away from wand:
    - Client state cleared, particles stop
    - Action bar: `§7Zone selection cancelled`
 
 **Files modified:**
-- `FrensClient.java` — new state fields, wand interaction handler, keybind processing, Y adjustment logic
+- `FrensClient.java` — new state fields, wand interaction handler, keybind processing
 - `Commands/modCommandRegistry.java` — `/bot zone wand` command to give item
 
 ## Particle Visualization
@@ -182,7 +177,7 @@ Added as a new section in `BaseManagerScreen`, below existing sections (bases, f
 
 **Buttons per zone (admin):**
 - **Show/Hide** — toggles particle visualization (sends `ZoneToggleViewPayload`)
-- **Edit** — opens inline Y-level editor (two number fields: Floor Y, Ceiling Y) + Rename field
+- **Rename** — inline text field to rename the zone (sends `ZoneEditPayload`)
 - **Delete** — click once shows "§cConfirm?", click again deletes (sends `ZoneDeletePayload`)
 
 **Buttons per zone (non-admin):**
@@ -194,18 +189,10 @@ Added as a new section in `BaseManagerScreen`, below existing sections (bases, f
 **Tooltips:**
 - New Zone: "Gives you a Zone Wand to select an area"
 - Show: "Display zone boundary particles"
-- Edit: "Change zone name or Y bounds"
+- Rename: "Change zone name"
 - Delete: "Remove this protected zone"
 
-### Zone detail edit view (admin)
-
-When admin clicks Edit on a zone:
-- Two text fields appear: "Floor Y" (number), "Ceiling Y" (number)
-- One text field: "Name"
-- "Save" button → sends `ZoneEditPayload(label, newName, newMinY, newMaxY)` to server
-- "Cancel" button → returns to zone list
-
-**XZ editing is out of scope.** To change a zone's XZ footprint, the admin deletes the zone and recreates it with the wand. This keeps the edit UI simple and avoids partial-update edge cases.
+**Boundary editing is out of scope.** To change a zone's bounds (XZ or Y), the admin deletes the zone and recreates it with the wand. Two clicks is fast enough that re-creation is simpler than an edit UI.
 
 **Files modified:**
 
@@ -228,9 +215,9 @@ Small centered popup screen (200×100px) with:
 |---------|-----------|--------|---------|
 | `ZoneWandRequestPayload` | C2S | (none) | Request wand item |
 | `ZoneCornerSetPayload` | S2C | cornerIndex, pos | Confirm corner position to client |
-| `ZoneConfirmPayload` | C2S | pos1, pos2, minY, maxY, name | Create zone from wand selection |
+| `ZoneConfirmPayload` | C2S | pos1, pos2, name | Create zone from wand selection |
 | `ZoneToggleViewPayload` | C2S | label, enabled | Start/stop viewing zone particles |
-| `ZoneEditPayload` | C2S | label, newName, newMinY, newMaxY | Edit zone bounds/name |
+| `ZoneEditPayload` | C2S | label, newName | Rename zone |
 | `ZoneDeletePayload` | C2S | label | Delete zone |
 | `ZoneListPayload` | S2C | zonesJson | Zone list for Base Manager |
 | `RequestZoneListPayload` | C2S | (none) | Request zone list from server |
@@ -273,7 +260,6 @@ Context-dependent behavior:
 ### New commands
 
 - `/bot zone wand` — gives zone wand item (admin-only)
-- `/bot zone set-y <label> <minY> <maxY>` — set Y bounds for existing zone (admin-only)
 
 ### Modified commands
 
@@ -282,9 +268,8 @@ Context-dependent behavior:
 ## HUD Notifications
 
 Action bar messages during wand workflow:
-- After pos1: `§aCorner 1 set at X, Z — right-click to set Corner 2`
-- After pos2: `§aZone preview active — Shift+↑/↓ adjust Y | [=] confirm | [ESC] cancel`
-- During Y adjust: `§7Y range: §f{minY} §7to §f{maxY}`
+- After corner 1: `§aCorner 1 set at X, Y, Z — right-click to set Corner 2`
+- After corner 2: `§aZone selected (X1,Y1,Z1 → X2,Y2,Z2) — [=] confirm | right-click to re-select`
 - On confirm: `§aZone "{name}" created!`
 - On cancel: `§7Zone selection cancelled`
 
