@@ -12,6 +12,7 @@ import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
+import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.WorkDirectionService;
@@ -32,7 +33,6 @@ import net.minecraft.registry.tag.BlockTags;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -46,8 +46,6 @@ public final class StripMineSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-stripmine");
     private static final int DEFAULT_LENGTH = 8;
-    private static final long STEP_DELAY_MS = 120L;
-    private static final int STEP_ATTEMPTS = 20;
     private static final int TORCH_CHECK_INTERVAL = 8; // Check for torch placement every 8 blocks
 
     @Override
@@ -143,6 +141,7 @@ public final class StripMineSkill implements Skill {
 
             // Falling blocks (sand/gravel/etc.) can refill the corridor after mining.
             // Mirror descent safety: wait for settling, then re-clear falling refills before stepping forward.
+            BlockPos preStabilizePos = player.getBlockPos();
             if (!FallingBlockStabilizer.stabilizeAndReclear(
                     player,
                     source,
@@ -156,6 +155,15 @@ public final class StripMineSkill implements Skill {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
                 return SkillExecutionResult.failure("Stripmine paused: falling blocks won't settle. Use /bot resume.");
+            }
+
+            // Gravel/sand stabilization can trigger the stuck-in-blocks handler, which
+            // pushes the bot sideways off the tunnel axis. Realign before advancing.
+            if (!player.getBlockPos().equals(preStabilizePos)) {
+                LOGGER.warn("Bot {} drifted from {} to {} during gravel stabilization, realigning",
+                        player.getName().getString(), preStabilizePos.toShortString(),
+                        player.getBlockPos().toShortString());
+                moveTo(source, player, preStabilizePos);
             }
 
             if (SkillManager.shouldAbortSkill(player)) {
@@ -203,29 +211,44 @@ public final class StripMineSkill implements Skill {
         if (destination == null) {
             return false;
         }
-        for (int attempt = 0; attempt < STEP_ATTEMPTS; attempt++) {
-            if (SkillManager.shouldAbortSkill(player)) {
-                return false;
-            }
-            if (player.getBlockPos().equals(destination)) {
-                return true;
-            }
-            runOnServerThread(player, () -> {
-                LookController.faceBlock(player, destination);
-                if (destination.getY() > player.getBlockY()) {
-                    BotActions.jumpForward(player);
-                } else {
-                    BotActions.moveForward(player);
-                }
-            });
-            try {
-                Thread.sleep(STEP_DELAY_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+        if (player.getBlockPos().equals(destination) || closeEnough(player, destination)) {
+            return true;
         }
-        return player.getBlockPos().equals(destination);
+
+        // Primary: use MovementService DIRECT mode — proven reliable with pathfinding
+        Direction facing = player.getHorizontalFacing();
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT, destination, destination, null, null, facing);
+        MovementService.MovementResult result = MovementService.execute(
+                source, player, plan, Boolean.FALSE, true, true, true);
+
+        if (result.success() || player.getBlockPos().equals(destination)) {
+            return true;
+        }
+
+        // Fallback: if MovementService didn't land on the exact block but we're
+        // functionally in position (within 1.5 blocks horizontal, same Y ±1),
+        // accept it — the next column will still be reachable.
+        if (closeEnough(player, destination)) {
+            LOGGER.debug("moveTo accepted close-enough position {} for target {}",
+                    player.getBlockPos().toShortString(), destination.toShortString());
+            return true;
+        }
+
+        LOGGER.warn("moveTo failed for {} → {} (arrived at {})",
+                player.getName().getString(), destination.toShortString(),
+                player.getBlockPos().toShortString());
+        return false;
+    }
+
+    /** Returns true if the bot is within 1.5 blocks horizontally and ±1 Y of the destination. */
+    private boolean closeEnough(ServerPlayerEntity player, BlockPos destination) {
+        BlockPos pos = player.getBlockPos();
+        int dy = Math.abs(pos.getY() - destination.getY());
+        if (dy > 1) return false;
+        double dx = pos.getX() - destination.getX();
+        double dz = pos.getZ() - destination.getZ();
+        return (dx * dx + dz * dz) <= 1.5 * 1.5;
     }
 
     private boolean mineBlock(ServerPlayerEntity player, BlockPos blockPos) {

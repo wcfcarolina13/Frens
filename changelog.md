@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
+- **Fix: Stripmine "failed to advance tunnel" after mining columns.** Replaced the primitive `moveTo` loop (20x `moveForward` nudge with exact `BlockPos.equals` check) with `MovementService.execute(DIRECT)` which has real pathfinding. Added `closeEnough` fallback accepting positions within 1.5 blocks horizontal + ±1 Y. Also fixed gravel/sand stabilization drift: the stuck-in-blocks handler pushes the bot sideways during gravel settling, so the bot now saves its position before stabilization and realigns afterward if it drifted.
+
 - **Feat: Woodcut 'Until sunset' mode.** Actions menu now defaults to "Until sunset" (like fishing). Use +/- to set a specific tree count. Updated tooltip and in-game guide. `SkillManager.isOpenEnded()` extended to treat woodcut without a count as open-ended.
 
 - **Feat: Generic sunrise skill resume.** Any open-ended skill interrupted by sunset is saved and automatically resumed at sunrise. At sunset, the system evaluates 4 cases: (1) lodestone compass available → fast-travel home + save resume, (2) at a saved base → save resume, (3) tactical shelter ON → shelter in place + save resume, (4) nothing → no resume. At sunrise, the bot fast-travels back to the worksite via the nearest lodestone compass (within 128 blocks) and re-runs the skill via `PostArrivalAction`. Hunt keeps its own session system.
@@ -15,6 +17,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - **Infra: Base-bypass travel.** Added `beginBaseBypassTravel()` to `NavigationArtifactService` that skips the underground artifact gate for bots at known bases. `findBaseNearPosition()` added to `BotHomeService` for radius-based base lookup by position.
 
 - **Feat: Lodestone compass fast-travel.** Bots can fast-travel to lodestone compass destinations, including cross-dimension. `/bot compass list <bot>` lists all lodestone compasses a bot holds. `/bot compass home <bot> <name>` designates a named compass as the bot's home compass. `/bot compass travel <bot> [name]` fast-travels to a lodestone compass destination. Lodestone compass promotes to ENHANCED nav tier (1x delay multiplier, same as Eye of Ender). Autonomous sunset return uses the designated home compass as a fallback anchor (after HOME/BASE/BED, same-dimension only). Lodestone block is validated before travel; broken lodestones notify the owner.
+
+- **Fix: Suppress post-task return for underground mining skills.** After every stripmine or mining task, `TaskService.complete()` scheduled a post-task fast-travel that always failed underground with "cannot fast-travel underground without a Map and Compass." The bot is intentionally underground after these skills, so the return attempt is pointless and the refusal message is spam. Added `isUndergroundSkill()` gate in `complete()` that skips `schedulePostTaskReturnIfEnabled()` for `skill:stripmine` and `skill:mining`.
 
 - **Fix: Co-sleep skips bot silently when commander enters bed.** When the commander enters a bed, `triggerCoSleep` checks each bot for eligibility (idle, nearby, nighttime, etc.). All skip reasons logged at DEBUG level, making failures invisible. Upgraded all skip logs to INFO for diagnostics. Added 3-second delayed retry for bots skipped due to active tasks — handles the common case where a follow/come transition is still completing when the commander gets into bed. The retry re-checks all conditions independently.
 
