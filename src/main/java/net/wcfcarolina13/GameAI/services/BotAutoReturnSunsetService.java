@@ -716,16 +716,18 @@ public final class BotAutoReturnSunsetService {
     }
 
     /**
-     * If the bot is underground and has a lodestone compass, attempt fast-travel to the
-     * anchor destination. Returns true if fast-travel was initiated (caller should skip walking).
+     * If the bot has a lodestone compass and the base is far enough away, attempt fast-travel
+     * instead of walking. Works for both underground-to-surface and surface-to-underground
+     * returns — the lodestone compass is a universal shortcut.
      */
     private static boolean tryLodestoneShortcut(ServerPlayerEntity bot, BlockPos anchor) {
         if (bot == null || anchor == null) return false;
         if (!(bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world)) return false;
-        // Only shortcut when significantly underground
-        boolean underground = !world.isSkyVisible(bot.getBlockPos().up());
-        double deltaY = anchor.getY() - bot.getY();
-        if (!underground || deltaY < 5.0) return false;
+        // Only shortcut for significant distances — don't fast-travel if already close.
+        int manhattan = Math.abs(bot.getBlockX() - anchor.getX())
+                      + Math.abs(bot.getBlockY() - anchor.getY())
+                      + Math.abs(bot.getBlockZ() - anchor.getZ());
+        if (manhattan < 30) return false;
         if (!LodestoneCompassService.hasAnyLodestoneCompass(bot)) return false;
 
         net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null
@@ -736,8 +738,9 @@ public final class BotAutoReturnSunsetService {
         boolean started = NavigationArtifactService.beginBaseBypassTravel(
                 server, bot, bot.getName().getString(), anchor, world.getRegistryKey(), ownerUuid);
         if (started) {
-            LOGGER.info("Sunset return: {} fast-traveling to base via lodestone compass (deltaY={})",
-                    bot.getName().getString(), String.format("%.0f", deltaY));
+            LOGGER.info("Sunset return: {} fast-traveling to base via lodestone compass (manhattan={}, botPos={}, base={})",
+                    bot.getName().getString(), manhattan,
+                    bot.getBlockPos().toShortString(), anchor.toShortString());
         }
         return started;
     }
