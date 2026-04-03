@@ -67,6 +67,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -1407,82 +1408,8 @@ public final class WoodcutSkill implements Skill {
                             }
                         }
 
-                        // Phase 4: Descent loop (scaffold teardown + elevated sweep + bridge)
-                        List<BlockPos> currentPlacements = currentColumnPlacements(reachSession, column);
-                        for (BlockPos scaffold : currentPlacements) {
-                            if (TaskService.isServerStopping() || isAbortRequested(bot)) {
-                                break;
-                            }
-                            bot.setSneaking(true);
-                            totalMined += mineReachableBranches(bot, world, reachSession, target);
-                            if (!world.getBlockState(scaffold).isAir() && mineAdaptiveBlock(bot, scaffold, target.base(), reachSession)) {
-                                forgetScaffoldPlacement(sharedState, world, scaffold);
-                                reachSession.recordRemoval(scaffold);
-                                sleepQuiet(200L);
-                                bot.setSneaking(true);
-                                totalMined += mineReachableBranches(bot, world, reachSession, target);
-                                // Elevated sweep: mine any reachable log from this height
-                                for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
-                                    if (isAbortRequested(bot)) break;
-                                    BlockPos botPos = bot.getBlockPos();
-                                    BlockPos found = null;
-                                    for (BlockPos check : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 4, 4))) {
-                                        if (!world.getBlockState(check).isIn(BlockTags.LOGS)) continue;
-                                        if (!isWithinReach(bot, check)) continue;
-                                        TreeDetector.WoodcutProtectionDecision prot =
-                                                getWoodcutMutationDecision(world, check, target.base());
-                                        if (prot.blocked()) continue;
-                                        found = check.toImmutable();
-                                        break;
-                                    }
-                                    if (found == null) break;
-                                    clearPathToTarget(bot, found);
-                                    ensureAxeEquipped(bot);
-                                    if (mineBlock(bot, found, true)) {
-                                        totalMined++;
-                                    }
-                                }
-                                // Bridge sweep: try bridging in each cardinal direction
-                                if (!isAbortRequested(bot)) {
-                                    for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
-                                        if (isAbortRequested(bot)) break;
-                                        boolean hasTargetsInDir = false;
-                                        for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
-                                            BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
-                                            for (int dy = -2; dy <= 4; dy++) {
-                                                if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
-                                                    hasTargetsInDir = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if (!hasTargetsInDir) continue;
-                                        if (reachSession != null && reachSession.hazardProfile != null) {
-                                            WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(bridgeDir);
-                                            if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
-                                                    || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
-                                                LOGGER.debug("Woodcut bridge: skipping {} direction (hazard={})", bridgeDir, rating);
-                                                continue;
-                                            }
-                                        }
-                                        BridgeScaffoldService.BridgeResult bridgeResult =
-                                                BridgeScaffoldService.bridgeAndRetract(
-                                                        bot, bridgeDir, 6, false,
-                                                        state -> state.isIn(BlockTags.LOGS),
-                                                        target.base(),
-                                                        PILLAR_BLOCKS);
-                                        if (bridgeResult.targetsMined() > 0) {
-                                            totalMined += bridgeResult.targetsMined();
-                                            LOGGER.info("Woodcut bridge sweep: dir={} mined={} placed={} adopted={}",
-                                                    bridgeDir.asString(),
-                                                    bridgeResult.targetsMined(),
-                                                    bridgeResult.placedBlocks().size(),
-                                                    bridgeResult.adoptedBlocks());
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        // Phase 4: Y-level-aware scaffold descent with elevated sweeps
+                        totalMined += descendScaffoldColumn(source, bot, world, target, sharedState, reachSession);
 
                         // Phase 5: Final sweep
                         totalMined += mineReachableBranches(bot, world, reachSession, target);
@@ -1674,6 +1601,168 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return placements;
+    }
+
+    /**
+     * Descends through the scaffold column level-by-level (top to bottom), mining bridge
+     * blocks at each Y, running elevated/bridge sweeps for logs, then mining the column
+     * block under the bot's feet to trigger a gravity drop to the next level.
+     *
+     * This replaces the old Phase 4 which iterated scaffold blocks but never moved the bot,
+     * leaving it stranded at canopy height.
+     *
+     * @return total log blocks mined during descent
+     */
+    private int descendScaffoldColumn(ServerCommandSource source,
+                                       ServerPlayerEntity bot,
+                                       ServerWorld world,
+                                       TreeDetector.TreeTarget target,
+                                       Map<String, Object> sharedState,
+                                       WoodcutReachSession reachSession) {
+        int logsMined = 0;
+
+        // Group all remaining scaffold placements by Y-level (descending order)
+        TreeMap<Integer, List<BlockPos>> byLevel = new TreeMap<>(Comparator.reverseOrder());
+        for (BlockPos placed : reachSession.placementsDescending()) {
+            if (placed == null) continue;
+            if (!reachSession.placedKeys.contains(placed.asLong())) continue;
+            if (world.getBlockState(placed).isAir()) continue;
+            byLevel.computeIfAbsent(placed.getY(), k -> new ArrayList<>()).add(placed);
+        }
+
+        int botY = bot.getBlockPos().getY();
+        int botX = bot.getBlockPos().getX();
+        int botZ = bot.getBlockPos().getZ();
+
+        for (Map.Entry<Integer, List<BlockPos>> entry : byLevel.entrySet()) {
+            if (TaskService.isServerStopping() || isAbortRequested(bot)) break;
+
+            int levelY = entry.getKey();
+            List<BlockPos> blocks = entry.getValue();
+
+            // Skip levels above the bot — should have been mined during ascent
+            if (levelY > botY) continue;
+
+            // If bot has fallen below this level, stop descent
+            if (bot.getBlockPos().getY() < levelY) break;
+
+            bot.setSneaking(true);
+            logsMined += mineReachableBranches(bot, world, reachSession, target);
+
+            // Separate column block (same X/Z as bot, Y = botY - 1) from bridge blocks
+            BlockPos columnBlock = null;
+            List<BlockPos> bridgeBlocks = new ArrayList<>();
+            int currentBotX = bot.getBlockPos().getX();
+            int currentBotZ = bot.getBlockPos().getZ();
+            for (BlockPos bp : blocks) {
+                if (bp.getX() == currentBotX && bp.getZ() == currentBotZ && bp.getY() == bot.getBlockPos().getY() - 1) {
+                    columnBlock = bp;
+                } else {
+                    bridgeBlocks.add(bp);
+                }
+            }
+
+            // Step 1: Mine bridge blocks (horizontal extensions) — reachable from current pos
+            for (BlockPos bridge : bridgeBlocks) {
+                if (isAbortRequested(bot)) break;
+                if (world.getBlockState(bridge).isAir()) continue;
+                if (!reachSession.placedKeys.contains(bridge.asLong())) continue;
+                if (mineAdaptiveBlock(bot, bridge, target.base(), reachSession)) {
+                    forgetScaffoldPlacement(sharedState, world, bridge);
+                    reachSession.recordRemoval(bridge);
+                }
+            }
+
+            // Step 2: Elevated sweep — mine any reachable log from this height
+            for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
+                if (isAbortRequested(bot)) break;
+                BlockPos botPos = bot.getBlockPos();
+                BlockPos found = null;
+                for (BlockPos check : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 4, 4))) {
+                    if (!world.getBlockState(check).isIn(BlockTags.LOGS)) continue;
+                    if (!isWithinReach(bot, check)) continue;
+                    TreeDetector.WoodcutProtectionDecision prot =
+                            getWoodcutMutationDecision(world, check, target.base());
+                    if (prot.blocked()) continue;
+                    found = check.toImmutable();
+                    break;
+                }
+                if (found == null) break;
+                clearPathToTarget(bot, found);
+                ensureAxeEquipped(bot);
+                if (mineBlock(bot, found, true)) {
+                    logsMined++;
+                }
+            }
+
+            // Step 3: Bridge sweep — try bridging in each cardinal direction for logs
+            if (!isAbortRequested(bot)) {
+                for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
+                    if (isAbortRequested(bot)) break;
+                    boolean hasTargetsInDir = false;
+                    for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
+                        BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
+                        for (int dy = -2; dy <= 4; dy++) {
+                            if (world.getBlockState(probe.up(dy)).isIn(BlockTags.LOGS)) {
+                                hasTargetsInDir = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!hasTargetsInDir) continue;
+                    if (reachSession.hazardProfile != null) {
+                        WoodcutHazardScanner.TerrainRating rating = reachSession.hazardProfile.ratings().get(bridgeDir);
+                        if (rating == WoodcutHazardScanner.TerrainRating.RAVINE
+                                || rating == WoodcutHazardScanner.TerrainRating.DEEP_WATER) {
+                            LOGGER.debug("Woodcut bridge: skipping {} direction (hazard={})", bridgeDir, rating);
+                            continue;
+                        }
+                    }
+                    BridgeScaffoldService.BridgeResult bridgeResult =
+                            BridgeScaffoldService.bridgeAndRetract(
+                                    bot, bridgeDir, 6, false,
+                                    state -> state.isIn(BlockTags.LOGS),
+                                    target.base(),
+                                    PILLAR_BLOCKS);
+                    if (bridgeResult.targetsMined() > 0) {
+                        logsMined += bridgeResult.targetsMined();
+                        LOGGER.info("Woodcut descent bridge sweep: dir={} mined={} placed={} adopted={}",
+                                bridgeDir.asString(),
+                                bridgeResult.targetsMined(),
+                                bridgeResult.placedBlocks().size(),
+                                bridgeResult.adoptedBlocks());
+                    }
+                }
+            }
+
+            // Step 4: Mine the column block under the bot's feet — triggers gravity drop
+            if (columnBlock != null && !isAbortRequested(bot)) {
+                if (!world.getBlockState(columnBlock).isAir() && reachSession.placedKeys.contains(columnBlock.asLong())) {
+                    if (mineAdaptiveBlock(bot, columnBlock, target.base(), reachSession)) {
+                        forgetScaffoldPlacement(sharedState, world, columnBlock);
+                        reachSession.recordRemoval(columnBlock);
+
+                        // Wait for gravity
+                        sleepQuiet(200L);
+
+                        // Check if we landed on solid non-scaffold ground — stop descent
+                        BlockPos support = bot.getBlockPos().down();
+                        if (!world.getBlockState(support).isAir() && !reachSession.placedKeys.contains(support.asLong())) {
+                            LOGGER.debug("Woodcut descent: landed on solid ground at Y={}", bot.getBlockPos().getY());
+                            // Harvest any remaining reachable logs after landing
+                            bot.setSneaking(true);
+                            logsMined += mineReachableBranches(bot, world, reachSession, target);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Update bot position for next iteration
+            botY = bot.getBlockPos().getY();
+        }
+
+        return logsMined;
     }
 
     /** Checks if the trunk/scaffold column has any log blocks above the bot's current reach. */
