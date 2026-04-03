@@ -692,6 +692,19 @@ public class BotEventHandler {
                     // Use isAtSurface (heightmap + wide sky check) instead of raw isSkyVisible —
                     // previous mining sessions can create skylights that fool isSkyVisible.
                     if (BotFleeService.isAtSurface(candidate, sw)) return;
+                    // Suppress if commander is nearby — the bot was likely left here
+                    // intentionally (e.g., after a stripmine session). The linger
+                    // decision tree will handle surface recovery with proper context.
+                    ServerPlayerEntity cmdr = net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy
+                            .resolveController(srv, candidate);
+                    if (cmdr != null && !cmdr.isRemoved()
+                            && cmdr.getEntityWorld() == candidate.getEntityWorld()
+                            && cmdr.squaredDistanceTo(candidate) < 48.0 * 48.0) {
+                        LOGGER.info("Bot {} join enclosure check suppressed: commander {} nearby ({} blocks)",
+                                candidate.getName().getString(), cmdr.getName().getString(),
+                                String.format("%.0f", Math.sqrt(cmdr.squaredDistanceTo(candidate))));
+                        return;
+                    }
                     double movedSq = candidate.squaredDistanceTo(spawnPos);
                     if (movedSq < 4.0) { // hasn't moved more than 2 blocks
                         // At night, stay sheltered — don't break free into danger
