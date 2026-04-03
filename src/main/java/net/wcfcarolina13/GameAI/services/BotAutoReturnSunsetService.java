@@ -301,15 +301,33 @@ public final class BotAutoReturnSunsetService {
                 }
             }
 
-            // Sunrise: resume paused hunt sessions
-            if (tod < SUNRISE_END_TICK && HuntSessionService.hasSession(bot.getUuid())) {
-                long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
-                if (lastResumed < day) {
-                    LAST_RESUMED_DAY.put(bot.getUuid(), day);
-                    var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
-                    if (taskInfo.isEmpty()) {
-                        LOGGER.info("Sunrise hunt resume for {} (day={})", bot.getName().getString(), day);
-                        SkillResumeService.tryAutoResume(bot);
+            if (tod < SUNRISE_END_TICK) {
+                // Hunt-specific sunrise resume (has its own session with kill counters)
+                if (HuntSessionService.hasSession(bot.getUuid())) {
+                    long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+                    if (lastResumed < day) {
+                        LAST_RESUMED_DAY.put(bot.getUuid(), day);
+                        var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
+                        if (taskInfo.isEmpty()) {
+                            LOGGER.info("Sunrise hunt resume for {} (day={})", bot.getName().getString(), day);
+                            SkillResumeService.tryAutoResume(bot);
+                        }
+                    }
+                }
+                // Generic sunrise resume (woodcut, fish, farm, etc.)
+                else {
+                    long currentTick = server.getOverworld().getTime();
+                    SkillResumeService.SunriseResumeRecord resume =
+                            SkillResumeService.getSunriseResume(bot.getUuid(), currentTick);
+                    if (resume != null) {
+                        long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+                        if (lastResumed < day) {
+                            var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
+                            if (taskInfo.isEmpty()) {
+                                LAST_RESUMED_DAY.put(bot.getUuid(), day);
+                                executeSunriseResume(server, bot, resume);
+                            }
+                        }
                     }
                 }
             }
@@ -1163,6 +1181,84 @@ public final class BotAutoReturnSunsetService {
                 LOGGER.warn("Auto-sleep at sunset failed for {}: {}", bot.getName().getString(), e.getMessage());
             } finally {
                 TaskService.complete(ticket, success);
+            }
+        });
+    }
+
+    // ── Sunrise resume helpers ────────────────────────────────────────────
+
+    private static final int SUNRISE_RETURN_COMPASS_RANGE = 128;
+
+    private static void executeSunriseResume(MinecraftServer server, ServerPlayerEntity bot,
+                                              SkillResumeService.SunriseResumeRecord resume) {
+        String botAlias = bot.getName().getString();
+        SkillResumeService.clearSunriseResume(bot.getUuid());
+
+        // Case 1: Bot sheltered in place — just re-run the skill
+        if (resume.shelteredInPlace()) {
+            LOGGER.info("Sunrise resume (sheltered): {} re-running '{}'", botAlias, resume.skillName());
+            dispatchSkillCommand(server, bot, resume.skillName(), resume.rawArgs());
+            return;
+        }
+
+        // Case 2: Try lodestone compass near interruption position
+        if (resume.interruptionPos() != null) {
+            var compasses = LodestoneCompassService.findLodestoneCompasses(bot);
+            RegistryKey<World> botDim = bot.getEntityWorld().getRegistryKey();
+            LodestoneCompassService.LodestoneCompassEntry bestCompass = null;
+            double bestDistSq = Double.MAX_VALUE;
+
+            for (var c : compasses) {
+                if (!c.target().dimension().equals(botDim)) continue;
+                if (!LodestoneCompassService.validateLodestone(server, c.target())) continue;
+                double distSq = c.target().pos().getSquaredDistance(resume.interruptionPos());
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    bestCompass = c;
+                }
+            }
+
+            if (bestCompass != null && bestDistSq <= (double) SUNRISE_RETURN_COMPASS_RANGE * SUNRISE_RETURN_COMPASS_RANGE) {
+                BlockPos dest = bestCompass.target().pos();
+                RegistryKey<World> dim = bestCompass.target().dimension();
+                boolean crossDim = !botDim.equals(dim);
+                double distance = bot.getBlockPos().getManhattanDistance(dest);
+                int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim, 1.0);
+                UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+
+                // Fast-travel first, THEN schedule post-arrival only if it started
+                boolean started = NavigationArtifactService.beginDelayedTravel(
+                        server, bot, botAlias, dest, dim, delayTicks, ownerUuid);
+                if (started) {
+                    String command = "bot skill " + resume.skillName()
+                            + (resume.rawArgs() != null && !resume.rawArgs().isBlank() ? " " + resume.rawArgs() : "")
+                            + " " + botAlias;
+                    NavigationArtifactService.schedulePostArrival(botAlias,
+                            new NavigationArtifactService.PostArrivalAction("skill_resume:" + command, null, ownerUuid, null));
+                    LOGGER.info("Sunrise resume: {} fast-traveling to lodestone '{}' then resuming '{}'",
+                            botAlias, bestCompass.displayName(), resume.skillName());
+                    return;
+                }
+            }
+        }
+
+        // Case 3: No compass near worksite — resume at current location
+        LOGGER.info("Sunrise resume (local): {} re-running '{}' at current position", botAlias, resume.skillName());
+        dispatchSkillCommand(server, bot, resume.skillName(), resume.rawArgs());
+    }
+
+    private static void dispatchSkillCommand(MinecraftServer server, ServerPlayerEntity bot,
+                                              String skillName, String rawArgs) {
+        String botAlias = bot.getName().getString();
+        String command = "bot skill " + skillName
+                + (rawArgs != null && !rawArgs.isBlank() ? " " + rawArgs : "")
+                + " " + botAlias;
+        server.execute(() -> {
+            try {
+                server.getCommandManager().getDispatcher().execute(command,
+                        server.getCommandSource().withSilent());
+            } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
+                LOGGER.warn("Sunrise resume dispatch failed for '{}': {}", botAlias, e.getMessage());
             }
         });
     }

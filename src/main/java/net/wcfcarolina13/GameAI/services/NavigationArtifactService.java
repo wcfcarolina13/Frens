@@ -958,7 +958,21 @@ public final class NavigationArtifactService {
         // Process post-arrival action (e.g., withdraw from chest, then return).
         String key = ps.botAlias().toLowerCase(java.util.Locale.ROOT);
         PostArrivalAction action = PENDING_POST_ARRIVAL.remove(key);
-        if (action != null && action.type() != null && action.type().startsWith("withdraw")) {
+        if (action != null && action.type() != null && action.type().startsWith("skill_resume:")) {
+            String command = action.type().substring("skill_resume:".length());
+            server.execute(() -> {
+                ServerPlayerEntity arrBot = server.getPlayerManager().getPlayer(ps.botAlias());
+                if (arrBot != null && !arrBot.isRemoved()) {
+                    LOGGER.info("Post-arrival skill resume for '{}': {}", ps.botAlias(), command);
+                    try {
+                        server.getCommandManager().getDispatcher().execute(command,
+                                server.getCommandSource().withSilent());
+                    } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
+                        LOGGER.warn("Post-arrival skill resume dispatch failed for '{}': {}", ps.botAlias(), e.getMessage());
+                    }
+                }
+            });
+        } else if (action != null && action.type() != null && action.type().startsWith("withdraw")) {
             // Parse return mode: "withdraw:stay", "withdraw:player", "withdraw:home"
             String returnMode = "stay";
             if (action.type().contains(":")) {
