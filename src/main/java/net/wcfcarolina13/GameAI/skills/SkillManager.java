@@ -327,8 +327,9 @@ public final class SkillManager {
             }
         }
 
-        // Fishing is open-ended when no explicit count was provided.
-        if ("fish".equalsIgnoreCase(skillName) || "fishing".equalsIgnoreCase(skillName)) {
+        // Fishing/Woodcut is open-ended when no explicit count was provided.
+        if ("fish".equalsIgnoreCase(skillName) || "fishing".equalsIgnoreCase(skillName)
+                || "woodcut".equalsIgnoreCase(skillName)) {
             return !params.containsKey("count");
         }
 

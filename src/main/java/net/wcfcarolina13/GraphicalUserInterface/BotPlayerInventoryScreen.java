@@ -87,7 +87,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final double GUARD_RADIUS_MIN = 3.0D;
     private static final double GUARD_RADIUS_MAX = 32.0D;
     private static final double GUARD_RADIUS_DEFAULT = 6.0D;
-    private static final int WOODCUT_TREE_COUNT_MIN = 1;
+    private static final int WOODCUT_TREE_COUNT_MIN = 0;
     private static final int WOODCUT_TREE_COUNT_MAX = 64;
     private static final int WOODCUT_TREE_COUNT_DEFAULT = 4;
     private static final int SKILL_COUNT_UNSET = 0;
@@ -179,7 +179,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Spell list scroll (only used for overlay when Spell tab is selected).
     private int spellScrollIndex;
     private TopicCategory overlayCategory = TopicCategory.SKILL;
-    private int woodcutTreeCount = WOODCUT_TREE_COUNT_DEFAULT;
+    private int woodcutTreeCount = SKILL_COUNT_UNSET;
     private int fishTargetCount = SKILL_COUNT_UNSET;
     private int woolTargetCount = SKILL_COUNT_UNSET;
     private int woolSearchRange = SKILL_WOOL_RANGE_DEFAULT;
@@ -2789,7 +2789,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return 0;
         }
         int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
-        String countLabel = "Area min " + woodcutTreeCount;
+        String countLabel = woodcutTreeCount > 0 ? "Trees " + woodcutTreeCount : "Until sunset";
         int controlSize = TOPIC_ROW_HEIGHT - 2;
         int controlY = rowRect.y + 1;
         int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
@@ -3007,7 +3007,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Rect rowRect = getSkillEntryRectInOverlay(TopicAction.SKILL_WOODCUT);
             if (rowRect != null) {
                 int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
-                String countLabel = "Area min " + woodcutTreeCount;
+                String countLabel = woodcutTreeCount > 0 ? "Trees " + woodcutTreeCount : "Until sunset";
                 int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
                 int plusX = controlRight - controlSize;
                 int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
@@ -3232,7 +3232,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.SKILL_WOODCUT);
 
-        String countLabel = "Area min " + woodcutTreeCount;
+        String countLabel = woodcutTreeCount > 0 ? "Trees " + woodcutTreeCount : "Until sunset";
         int controlSize = TOPIC_ROW_HEIGHT - 2;
         int controlY = rowY + 1;
         int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(countLabel), 2);
@@ -4022,7 +4022,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOODCUT -> java.util.List.of(
                 "Woodcut",
                 "Fells natural trees and collects the wood.",
-                "Set how many trees to cut before starting; standalone runs stop at sunset."
+                "Default: runs until sunset. Use +/- to set a specific tree count instead."
             );
             case SKILL_FISH -> java.util.List.of(
                 "Fishing",
@@ -5337,7 +5337,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void runWoodcutSkillCommand() {
-        runSkillCommand("woodcut", Integer.toString(woodcutTreeCount));
+        String arg = woodcutTreeCount > 0 ? Integer.toString(woodcutTreeCount) : null;
+        runSkillCommand("woodcut", arg);
     }
 
     private void runFishSkillCommand() {

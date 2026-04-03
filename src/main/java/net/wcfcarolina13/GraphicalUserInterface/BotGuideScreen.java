@@ -866,12 +866,13 @@ public final class BotGuideScreen extends Screen {
                         "gather_woodcut",
                         "Gathering",
                         "Woodcut",
-                        "Clears nearby woodcut targets in the local area with a configurable minimum count.",
+                        "Fells nearby trees. Defaults to 'Until sunset' mode; use +/- to set a specific tree count.",
                         List.of(
-                                "Use +/- to set the minimum number of targets to clear before checking whether the area is exhausted.",
+                                "At the default (Until sunset), the bot cuts trees until dusk then stops.",
+                                "Use +/- to set a minimum tree count instead.",
                                 "Use Cleanup after large runs to gather leftovers quickly."
                         ),
-                        "bot skill woodcut <count> " + target,
+                        "bot skill woodcut [count] " + target,
                         "Actions menu count controls",
                         "tree lumber logs"
                 ),
