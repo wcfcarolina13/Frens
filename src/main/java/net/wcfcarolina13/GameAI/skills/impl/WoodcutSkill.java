@@ -1480,6 +1480,10 @@ public final class WoodcutSkill implements Skill {
                     }
                     totalMined += mineReachableBranches(bot, world, reachSession, target);
                 }
+                // Descend scaffold before cleanup — same as Phase 4
+                if (reachSession != null && reachSession.hasPlacements() && !isAbortRequested(bot)) {
+                    totalMined += descendScaffoldColumn(source, bot, world, target, sharedState, reachSession);
+                }
                 if (reachSession != null && reachSession.hasPlacements() && !isAbortRequested(bot)) {
                     cleanupReachSession(source, bot, target.base(), reachSession, sharedState);
                 }
