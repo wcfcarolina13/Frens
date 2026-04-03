@@ -419,7 +419,12 @@ public final class TaskService {
                     BotIdleHobbiesService.snoozeFor(taskBot, 600L);
                     // Post-task return: if enabled and bot is underground, schedule fast-travel
                     // to nearest bed/base/commander after a short grace period.
-                    schedulePostTaskReturnIfEnabled(srv, taskBot);
+                    // Skip for underground-centric skills (stripmine, mining) — the bot is
+                    // intentionally underground and fast-travel will just spam an artifact
+                    // refusal message.
+                    if (!isUndergroundSkill(ticket.name())) {
+                        schedulePostTaskReturnIfEnabled(srv, taskBot);
+                    }
                 }
             }
         }
@@ -597,6 +602,17 @@ public final class TaskService {
     }
 
     // ── Post-task autonomous return ──────────────────────────────────────
+
+    /**
+     * Skills that leave the bot intentionally underground.  Post-task return
+     * should not fire for these because the bot lacks the navigation artifacts
+     * to fast-travel and the resulting refusal message is pure spam.
+     */
+    private static boolean isUndergroundSkill(String taskName) {
+        if (taskName == null) return false;
+        String lower = taskName.toLowerCase(java.util.Locale.ROOT);
+        return lower.equals("skill:stripmine") || lower.equals("skill:mining");
+    }
 
     /** Grace period before post-task return triggers (5 seconds). */
     private static final long POST_TASK_RETURN_DELAY_TICKS = 100L;
