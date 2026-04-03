@@ -1218,6 +1218,10 @@ public final class BotAutoReturnSunsetService {
         ticket.setOrigin(TaskService.Origin.SYSTEM);
         ticket.setOpenEnded(false);
 
+        if (AUTO_EXECUTOR.isShutdown()) {
+            TaskService.complete(ticket, false);
+            return;
+        }
         AUTO_EXECUTOR.submit(() -> {
             boolean success = false;
             try {
