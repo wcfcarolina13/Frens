@@ -8030,6 +8030,20 @@ public class modCommandRegistry {
         return 1;
     }
 
+    static int executeZoneWand(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getPlayerOrThrow();
+
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only server operators can use the zone wand."));
+            return 0;
+        }
+
+        player.getInventory().insertStack(net.wcfcarolina13.network.ZoneNetworkManager.createZoneWand());
+        source.sendFeedback(() -> Text.literal("§aZone Wand given. Right-click blocks to set corners, then press [=] to confirm."), false);
+        return 1;
+    }
+
     private static ProtectedZoneService.ProtectedZone findZoneByLabel(ServerWorld world, String label) {
         if (world == null || label == null || label.isBlank()) {
             return null;

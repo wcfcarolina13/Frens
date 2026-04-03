@@ -68,6 +68,9 @@ final class BotUtilityCommands {
                 )
                 .then(CommandManager.literal("list")
                         .executes(modCommandRegistry::executeZoneList)
+                )
+                .then(CommandManager.literal("wand")
+                        .executes(context -> modCommandRegistry.executeZoneWand(context))
                 );
     }
 
