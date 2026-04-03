@@ -1647,15 +1647,23 @@ public final class WoodcutSkill implements Skill {
             if (bot.getBlockPos().getY() < levelY) break;
 
             bot.setSneaking(true);
-            logsMined += mineReachableBranches(bot, world, reachSession, target);
 
-            // Separate column block (same X/Z as bot, Y = botY - 1) from bridge blocks
+            // Identify the scaffold column X/Z from the blocks at this level (not the bot's
+            // position, which may have drifted). The column block is the one that was part of
+            // the pillar — look for the most common X/Z among blocks at this level.
             BlockPos columnBlock = null;
             List<BlockPos> bridgeBlocks = new ArrayList<>();
-            int currentBotX = bot.getBlockPos().getX();
-            int currentBotZ = bot.getBlockPos().getZ();
             for (BlockPos bp : blocks) {
-                if (bp.getX() == currentBotX && bp.getZ() == currentBotZ && bp.getY() == bot.getBlockPos().getY() - 1) {
+                // Column blocks are vertically aligned with the pillar — check if any block
+                // at this level shares X/Z with blocks at adjacent levels
+                boolean isColumn = false;
+                for (BlockPos other : reachSession.placementsDescending()) {
+                    if (other.getY() != bp.getY() && other.getX() == bp.getX() && other.getZ() == bp.getZ()) {
+                        isColumn = true;
+                        break;
+                    }
+                }
+                if (isColumn && columnBlock == null) {
                     columnBlock = bp;
                 } else {
                     bridgeBlocks.add(bp);
@@ -1663,18 +1671,26 @@ public final class WoodcutSkill implements Skill {
             }
 
             // Step 1: Mine bridge blocks (horizontal extensions) — reachable from current pos
+            bot.setSneaking(true);
             for (BlockPos bridge : bridgeBlocks) {
                 if (isAbortRequested(bot)) break;
                 if (world.getBlockState(bridge).isAir()) continue;
                 if (!reachSession.placedKeys.contains(bridge.asLong())) continue;
-                if (mineAdaptiveBlock(bot, bridge, target.base(), reachSession)) {
-                    forgetScaffoldPlacement(sharedState, world, bridge);
-                    reachSession.recordRemoval(bridge);
+                if (isWithinReach(bot, bridge)) {
+                    LookController.faceBlock(bot, bridge);
+                    if (mineBlock(bot, bridge, false)) {
+                        forgetScaffoldPlacement(sharedState, world, bridge);
+                        reachSession.recordRemoval(bridge);
+                    }
                 }
             }
 
-            // Step 2: Elevated sweep — mine any reachable log from this height
-            for (int sweepPass = 0; sweepPass < 5; sweepPass++) {
+            // Step 2: Elevated sweep — mine reachable logs WITHOUT moving off the scaffold.
+            // During descent, the bot must stay on the column. Only mine logs within reach
+            // from the current position — do NOT call clearPathToTarget which would walk
+            // the bot off the scaffold.
+            bot.setSneaking(true);
+            for (int sweepPass = 0; sweepPass < 3; sweepPass++) {
                 if (isAbortRequested(bot)) break;
                 BlockPos botPos = bot.getBlockPos();
                 BlockPos found = null;
@@ -1688,11 +1704,13 @@ public final class WoodcutSkill implements Skill {
                     break;
                 }
                 if (found == null) break;
-                clearPathToTarget(bot, found);
+                // Mine in place — do NOT walk toward the log
                 ensureAxeEquipped(bot);
+                LookController.faceBlock(bot, found);
                 if (mineBlock(bot, found, true)) {
                     logsMined++;
                 }
+                bot.setSneaking(true); // re-assert sneak after mining
             }
 
             // Step 3: Bridge sweep — try bridging in each cardinal direction for logs
@@ -1738,6 +1756,7 @@ public final class WoodcutSkill implements Skill {
             // Step 4: Mine the column block under the bot's feet — triggers gravity drop.
             // The bot MUST be precisely on the column block so it falls straight down.
             // After sweeps the bot may have drifted — reposition before mining.
+            bot.setSneaking(true);
             if (columnBlock != null && !isAbortRequested(bot)) {
                 BlockPos aboveColumn = columnBlock.up();
 
