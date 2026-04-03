@@ -353,8 +353,14 @@ public final class BotAutoReturnSunsetService {
                 // Only interrupt open-ended tasks; other (commander) tasks are not eligible anyway.
                 TaskService.getActiveTaskInfo(bot.getUuid()).ifPresent(info -> {
                     if (info.openEnded()) {
+                        // ActiveTaskInfo.name() returns "skill:woodcut" etc. — strip prefix
+                        String skillName = info.name();
+                        if (skillName != null && skillName.startsWith("skill:")) {
+                            skillName = skillName.substring("skill:".length());
+                        }
+
                         // Hunt has its own session system — skip generic resume
-                        boolean isHunt = "hunt".equalsIgnoreCase(info.name());
+                        boolean isHunt = "hunt".equalsIgnoreCase(skillName);
 
                         if (!isHunt) {
                             String rawArgs = SkillResumeService.getLastRawArgs(bot.getUuid());
@@ -375,7 +381,7 @@ public final class BotAutoReturnSunsetService {
                             if (hasLodestoneAnchor) {
                                 // Case 1: compass → save resume, sunset system handles travel
                                 SkillResumeService.saveSunriseResume(
-                                        bot.getUuid(), info.name(), rawArgs,
+                                        bot.getUuid(), skillName, rawArgs,
                                         interruptionPos, false, tick);
                             } else {
                                 Optional<BotHomeService.BaseEntry> nearBase =
@@ -383,12 +389,12 @@ public final class BotAutoReturnSunsetService {
                                 if (nearBase.isPresent()) {
                                     // Case 2: at a base → save resume
                                     SkillResumeService.saveSunriseResume(
-                                            bot.getUuid(), info.name(), rawArgs,
+                                            bot.getUuid(), skillName, rawArgs,
                                             interruptionPos, false, tick);
                                 } else if (BotHomeService.isTacticalShelterEnabled(bot)) {
                                     // Case 3: tactical shelter → sheltered in place
                                     SkillResumeService.saveSunriseResume(
-                                            bot.getUuid(), info.name(), rawArgs,
+                                            bot.getUuid(), skillName, rawArgs,
                                             interruptionPos, true, tick);
                                 }
                                 // Case 4: nothing → no resume saved
@@ -1278,6 +1284,10 @@ public final class BotAutoReturnSunsetService {
                 double distance = bot.getBlockPos().getManhattanDistance(dest);
                 int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim, 1.0);
                 UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+
+                // Clear travel cooldown — sunrise resume is a continuation of the
+                // sunset→sleep→sunrise cycle, not a new player-triggered trip
+                NavigationArtifactService.clearTravelCooldown(bot.getUuid());
 
                 // Fast-travel first, THEN schedule post-arrival only if it started
                 boolean started = NavigationArtifactService.beginDelayedTravel(

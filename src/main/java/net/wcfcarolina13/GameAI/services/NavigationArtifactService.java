@@ -65,6 +65,20 @@ public final class NavigationArtifactService {
     /** Per-bot cooldown tracker: bot UUID -> server tick of last departure. */
     private static final Map<UUID, Long> TRAVEL_COOLDOWNS = new ConcurrentHashMap<>();
 
+    /** Clear travel cooldown for a bot (used by sunrise resume to allow immediate return travel). */
+    public static void clearTravelCooldown(UUID botUuid) {
+        if (botUuid != null) TRAVEL_COOLDOWNS.remove(botUuid);
+    }
+
+    /** Get remaining cooldown ticks for a bot, or 0 if no cooldown active. */
+    public static long getRemainingCooldownTicks(UUID botUuid, long currentTick) {
+        if (botUuid == null) return 0;
+        Long lastDeparture = TRAVEL_COOLDOWNS.get(botUuid);
+        if (lastDeparture == null) return 0;
+        long elapsed = currentTick - lastDeparture;
+        return elapsed >= TRAVEL_COOLDOWN_TICKS ? 0 : TRAVEL_COOLDOWN_TICKS - elapsed;
+    }
+
     // ── Smoke signal navigation beacon ───────────────────────────────────
     private static final int SMOKE_SIGNAL_SCAN_RADIUS_H = 8;
     private static final int SMOKE_SIGNAL_SCAN_RADIUS_V = 8;
