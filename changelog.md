@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-04-02
 
+- **Feat: Woodcut terrain hazard scanner.** New `WoodcutHazardScanner` probes 6 blocks in each cardinal direction from a tree base, classifying terrain as SAFE, SHALLOW_WATER, DEEP_WATER, or RAVINE. Trees fully enclosed by hazardous terrain (all 4 sides ravine/deep water) are rejected during tree selection. Scaffold placement skips hazardous directions and water. Bridge sweeps skip ravine/deep-water directions. Prevents bots from falling into ravines or drowning while woodcutting near cliffs and water.
+
 - **Fix: Stairs/slabs cause false-positive stuck detection.** Stairs and slabs are partial blocks the bot walks through normally, but `BotRescueService` saw them as solid collisions and triggered "stuck in blocks" rescue. Added `BlockTags.STAIRS` and `BlockTags.SLABS` to `isRescueProtectedBlock()`, which is checked in both `rescueFromBurial()` and `isLikelyStuckInBlock()`.
 
 - **Fix: ReturnBaseStuck log noise during normal travel.** The TICK log fired every 20 calls even when `stagnant=0` and no escape was in progress, producing hundreds of useless lines per return trip. Now only logs when stagnant > 0, escape is active, or as a heartbeat every 100 ticks.
