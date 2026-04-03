@@ -63,6 +63,10 @@ public class BaseManagerScreen extends Screen {
         boolean isVillage() {
             return "village".equalsIgnoreCase(kind);
         }
+
+        boolean isLodestone() {
+            return "lodestone".equalsIgnoreCase(kind);
+        }
     }
 
     private record UiPrefs(Integer x, Integer y, Integer w, Integer h) {}
@@ -1060,6 +1064,11 @@ public class BaseManagerScreen extends Screen {
             showStatus("Enter a base name first.", STATUS_WARN);
             return;
         }
+        BaseDto selected = getSelected();
+        if (selected != null && selected.isLodestone()) {
+            showStatus("Lodestone entries are managed via compasses.", STATUS_WARN);
+            return;
+        }
         if (!ClientPlayNetworking.canSend(BaseSetPayload.ID)) {
             showStatus("Not connected to server.", STATUS_ERROR);
             return;
@@ -1075,6 +1084,10 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select an entry to remove.", STATUS_WARN);
             return;
         }
+        if (selected != null && selected.isLodestone()) {
+            showStatus("Lodestone entries are managed via compasses.", STATUS_WARN);
+            return;
+        }
         if (ClientPlayNetworking.canSend(BaseRemovePayload.ID)) {
             ClientPlayNetworking.send(new BaseRemovePayload(selected.label));
             showStatus("Removing...", STATUS_OK);
@@ -1086,6 +1099,10 @@ public class BaseManagerScreen extends Screen {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
             showStatus("Select an entry to rename.", STATUS_WARN);
+            return;
+        }
+        if (selected != null && selected.isLodestone()) {
+            showStatus("Lodestone entries are managed via compasses.", STATUS_WARN);
             return;
         }
         String newLabel = nameField != null ? nameField.getText() : "";
@@ -1104,6 +1121,10 @@ public class BaseManagerScreen extends Screen {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
             showStatus("Select a base first.", STATUS_WARN);
+            return;
+        }
+        if (selected != null && selected.isLodestone()) {
+            showStatus("Lodestone entries are managed via compasses.", STATUS_WARN);
             return;
         }
         if (!selected.isBase()) {
@@ -1139,6 +1160,13 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a base first.", STATUS_WARN);
             return;
         }
+        // Lodestone: set as home compass (must come BEFORE isBase check)
+        if (selected.isLodestone()) {
+            sendChatCommand(this.client, "bot compass home " + botAlias + " " + selected.label);
+            showStatus("Setting home compass...", STATUS_OK);
+            requestRefresh();
+            return;
+        }
         if (!selected.isBase()) {
             showStatus("Only bases can be set as home.", STATUS_WARN);
             return;
@@ -1158,6 +1186,13 @@ public class BaseManagerScreen extends Screen {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
             showStatus("Select a base first.", STATUS_WARN);
+            return;
+        }
+        // Lodestone: use compass travel (must come BEFORE isBase check)
+        if (selected.isLodestone()) {
+            sendChatCommand(this.client, "bot compass travel " + botAlias + " " + selected.label);
+            showStatus("Sending bot via compass...", STATUS_OK);
+            requestRefresh();
             return;
         }
         if (!selected.isBase()) {

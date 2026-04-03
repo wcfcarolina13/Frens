@@ -16,6 +16,7 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
+import net.wcfcarolina13.GameAI.services.LodestoneCompassService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
@@ -531,6 +532,21 @@ public final class BaseNetworkManager {
             BlockPos center = village.getCenter();
             String detail = village.getVertexCount() + " vertices";
             out.add(new BaseDto("village", village.getName(), center.getX(), center.getY(), center.getZ(), false, detail, null, 0));
+        }
+
+        // Include lodestone compass destinations
+        if (selectedBot != null) {
+            for (LodestoneCompassService.LodestoneCompassEntry lc : LodestoneCompassService.findLodestoneCompasses(selectedBot)) {
+                String compassLabel = lc.displayName();
+                BlockPos lPos = lc.target().pos();
+                String dim = lc.target().dimension().getValue().toString();
+                boolean botSameDim = world.getRegistryKey().getValue().toString().equals(dim);
+                String detail = botSameDim ? "Lodestone" : "Lodestone (" + dim + ")";
+                boolean isHome = compassLabel.equalsIgnoreCase(
+                        LodestoneCompassService.getHomeCompassName(selectedBot));
+                out.add(new BaseDto("lodestone", compassLabel, lPos.getX(), lPos.getY(), lPos.getZ(),
+                        isHome, detail, null, 0));
+            }
         }
 
         String json = GSON.toJson(out);
