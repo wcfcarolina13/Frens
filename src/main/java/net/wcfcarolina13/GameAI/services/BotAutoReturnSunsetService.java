@@ -733,8 +733,17 @@ public final class BotAutoReturnSunsetService {
         int manhattan = Math.abs(bot.getBlockX() - anchor.getX())
                       + Math.abs(bot.getBlockY() - anchor.getY())
                       + Math.abs(bot.getBlockZ() - anchor.getZ());
-        if (manhattan < 30) return false;
-        if (!LodestoneCompassService.hasAnyLodestoneCompass(bot)) return false;
+        if (manhattan < 30) {
+            LOGGER.info("Lodestone shortcut skip: {} too close (manhattan={})", bot.getName().getString(), manhattan);
+            return false;
+        }
+        boolean hasCompass = LodestoneCompassService.hasLodestoneCompass(bot);
+        boolean hasAny = LodestoneCompassService.hasAnyLodestoneCompass(bot);
+        if (!hasAny) {
+            LOGGER.info("Lodestone shortcut skip: {} has no lodestone compass (hasCompass={}, hasAny={})",
+                    bot.getName().getString(), hasCompass, hasAny);
+            return false;
+        }
 
         net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null
                 ? bot.getCommandSource().getServer() : null;
@@ -747,6 +756,9 @@ public final class BotAutoReturnSunsetService {
             LOGGER.info("Sunset return: {} fast-traveling to base via lodestone compass (manhattan={}, botPos={}, base={})",
                     bot.getName().getString(), manhattan,
                     bot.getBlockPos().toShortString(), anchor.toShortString());
+        } else {
+            LOGGER.info("Lodestone shortcut: {} beginBaseBypassTravel returned false (manhattan={}, base={})",
+                    bot.getName().getString(), manhattan, anchor.toShortString());
         }
         return started;
     }
