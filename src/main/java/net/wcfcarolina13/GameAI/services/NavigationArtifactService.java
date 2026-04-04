@@ -259,7 +259,15 @@ public final class NavigationArtifactService {
     private static boolean hasArtifact(ServerPlayerEntity player, net.minecraft.item.Item item) {
         if (player == null) return false;
         for (int i = 0; i < player.getInventory().size(); i++) {
-            if (player.getInventory().getStack(i).isOf(item)) return true;
+            net.minecraft.item.ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isOf(item)) return true;
+            // Check inside bundles
+            var bundle = stack.get(net.minecraft.component.DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                for (net.minecraft.item.ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && bundled.isOf(item)) return true;
+                }
+            }
         }
         return false;
     }

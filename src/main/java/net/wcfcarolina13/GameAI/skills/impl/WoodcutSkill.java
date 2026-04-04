@@ -1311,12 +1311,11 @@ public final class WoodcutSkill implements Skill {
                     }
 
                     // Phase 3: Ascent loop (pillar up + mine branches + bridge sweep)
-                    // If the bot couldn't enter the trunk column (upper logs blocking),
-                    // allow pillaring from an adjacent position — update column to the
-                    // bot's actual position so stance checks pass.
-                    if (!positioned && !isBotInColumn(bot, column)) {
+                    // The moveToStand distance tolerance can claim success when the bot
+                    // is 1 block off from the column. Always verify with isBotInColumn
+                    // and accept adjacent positions if exact positioning failed.
+                    if (!isBotInColumn(bot, column)) {
                         BlockPos botPos = bot.getBlockPos();
-                        // Accept adjacent positions (within 1 block of column X/Z)
                         if (Math.abs(botPos.getX() - column.getX()) <= 1
                                 && Math.abs(botPos.getZ() - column.getZ()) <= 1
                                 && isDryWoodcutStandCell(world, botPos)) {

@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.BundleContentsComponent;
 import net.minecraft.component.type.LodestoneTrackerComponent;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -37,19 +38,36 @@ public final class LodestoneCompassService {
         var inv = bot.getInventory();
         for (int i = 0; i < inv.size(); i++) {
             ItemStack stack = inv.getStack(i);
-            if (stack == null || stack.isEmpty() || !stack.isOf(Items.COMPASS)) continue;
+            if (stack == null || stack.isEmpty()) continue;
 
-            LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
-            if (tracker == null) continue;
+            // Check direct compass
+            if (stack.isOf(Items.COMPASS)) {
+                checkAndAddCompass(stack, i, results);
+                continue;
+            }
 
-            int slot = i;
-            tracker.target().ifPresent(globalPos -> {
-                Text customName = stack.get(DataComponentTypes.CUSTOM_NAME);
-                String displayName = customName != null ? customName.getString() : "Lodestone Compass";
-                results.add(new LodestoneCompassEntry(slot, displayName, globalPos));
-            });
+            // Check inside bundles
+            BundleContentsComponent bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                int slot = i;
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && !bundled.isEmpty() && bundled.isOf(Items.COMPASS)) {
+                        checkAndAddCompass(bundled, slot, results);
+                    }
+                }
+            }
         }
         return results;
+    }
+
+    private static void checkAndAddCompass(ItemStack stack, int slot, List<LodestoneCompassEntry> results) {
+        LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
+        if (tracker == null) return;
+        tracker.target().ifPresent(globalPos -> {
+            Text customName = stack.get(DataComponentTypes.CUSTOM_NAME);
+            String displayName = customName != null ? customName.getString() : "Lodestone Compass";
+            results.add(new LodestoneCompassEntry(slot, displayName, globalPos));
+        });
     }
 
     public static boolean validateLodestone(MinecraftServer server, GlobalPos target) {
@@ -83,13 +101,24 @@ public final class LodestoneCompassService {
         var inv = bot.getInventory();
         for (int i = 0; i < inv.size(); i++) {
             ItemStack stack = inv.getStack(i);
-            if (stack == null || stack.isEmpty() || !stack.isOf(Items.COMPASS)) continue;
-            LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
-            if (tracker != null && tracker.target().isEmpty()) {
-                count++;
+            if (stack == null || stack.isEmpty()) continue;
+            count += countOrphanedInStack(stack);
+            BundleContentsComponent bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && !bundled.isEmpty()) {
+                        count += countOrphanedInStack(bundled);
+                    }
+                }
             }
         }
         return count;
+    }
+
+    private static int countOrphanedInStack(ItemStack stack) {
+        if (!stack.isOf(Items.COMPASS)) return 0;
+        LodestoneTrackerComponent tracker = stack.get(DataComponentTypes.LODESTONE_TRACKER);
+        return (tracker != null && tracker.target().isEmpty()) ? 1 : 0;
     }
 
     /**
