@@ -132,8 +132,16 @@ public final class LodestoneCompassService {
         var inv = bot.getInventory();
         for (int i = 0; i < inv.size(); i++) {
             ItemStack stack = inv.getStack(i);
-            if (stack == null || stack.isEmpty() || !stack.isOf(Items.COMPASS)) continue;
-            if (stack.get(DataComponentTypes.LODESTONE_TRACKER) != null) return true;
+            if (stack == null || stack.isEmpty()) continue;
+            if (stack.isOf(Items.COMPASS) && stack.get(DataComponentTypes.LODESTONE_TRACKER) != null) return true;
+            // Check inside bundles
+            BundleContentsComponent bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && !bundled.isEmpty() && bundled.isOf(Items.COMPASS)
+                            && bundled.get(DataComponentTypes.LODESTONE_TRACKER) != null) return true;
+                }
+            }
         }
         return false;
     }
