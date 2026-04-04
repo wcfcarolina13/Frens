@@ -733,7 +733,7 @@ public final class BotAutoReturnSunsetService {
         int manhattan = Math.abs(bot.getBlockX() - anchor.getX())
                       + Math.abs(bot.getBlockY() - anchor.getY())
                       + Math.abs(bot.getBlockZ() - anchor.getZ());
-        if (manhattan < 30) {
+        if (manhattan < 16) {
             LOGGER.info("Lodestone shortcut skip: {} too close (manhattan={})", bot.getName().getString(), manhattan);
             return false;
         }
