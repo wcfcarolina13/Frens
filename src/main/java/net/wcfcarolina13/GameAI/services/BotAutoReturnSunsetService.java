@@ -1291,6 +1291,18 @@ public final class BotAutoReturnSunsetService {
 
             if (bestCompass != null && bestDistSq <= (double) SUNRISE_RETURN_COMPASS_RANGE * SUNRISE_RETURN_COMPASS_RANGE) {
                 BlockPos dest = bestCompass.target().pos();
+
+                // Don't fast-travel to a compass that points to where we already are
+                // (e.g., the "Home" compass when we're at home after sleeping)
+                if (bot.getBlockPos().getManhattanDistance(dest) < 16) {
+                    LOGGER.info("Sunrise resume: skipping compass '{}' — already near destination (dist={})",
+                            bestCompass.displayName(), bot.getBlockPos().getManhattanDistance(dest));
+                    bestCompass = null; // fall through to local resume
+                }
+            }
+
+            if (bestCompass != null && bestDistSq <= (double) SUNRISE_RETURN_COMPASS_RANGE * SUNRISE_RETURN_COMPASS_RANGE) {
+                BlockPos dest = bestCompass.target().pos();
                 RegistryKey<World> dim = bestCompass.target().dimension();
                 boolean crossDim = !botDim.equals(dim);
                 double distance = bot.getBlockPos().getManhattanDistance(dest);
