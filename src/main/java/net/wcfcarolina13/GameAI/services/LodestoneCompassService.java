@@ -137,9 +137,15 @@ public final class LodestoneCompassService {
             // Check inside bundles
             BundleContentsComponent bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
             if (bundle != null) {
+                int bundleSize = bundle.size();
+                LOGGER.info("hasAnyLodestoneCompass: slot {} is bundle with {} items", i, bundleSize);
                 for (ItemStack bundled : bundle.iterate()) {
-                    if (bundled != null && !bundled.isEmpty() && bundled.isOf(Items.COMPASS)
-                            && bundled.get(DataComponentTypes.LODESTONE_TRACKER) != null) return true;
+                    if (bundled == null || bundled.isEmpty()) continue;
+                    boolean isCompass = bundled.isOf(Items.COMPASS);
+                    boolean hasTracker = bundled.get(DataComponentTypes.LODESTONE_TRACKER) != null;
+                    LOGGER.info("  bundle item: {} isCompass={} hasTracker={}",
+                            bundled.getItem().toString(), isCompass, hasTracker);
+                    if (isCompass && hasTracker) return true;
                 }
             }
         }
