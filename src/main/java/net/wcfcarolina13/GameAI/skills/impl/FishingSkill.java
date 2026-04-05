@@ -28,6 +28,9 @@ import net.wcfcarolina13.GameAI.services.BotWaterEscapeService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
 import net.wcfcarolina13.GameAI.services.FollowPathService;
+import net.wcfcarolina13.GameAI.services.FishingSessionService;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.MovementService.Mode;
 import net.wcfcarolina13.GameAI.services.MovementService.MovementPlan;
@@ -186,6 +189,14 @@ public final class FishingSkill implements Skill {
         
         if (targetFish == -1) {
             targetFish = Integer.MAX_VALUE;
+        }
+
+        // Reconstruct rawArgs for sunrise resume
+        String rawArgs = "";
+        if (explicitSunset) {
+            rawArgs = "until_sunset";
+        } else if (targetFish != Integer.MAX_VALUE) {
+            rawArgs = String.valueOf(targetFish);
         }
 
         int maxAttempts = targetFish == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(targetFish * MAX_ATTEMPTS_PER_FISH, MAX_ATTEMPTS_PER_FISH);
