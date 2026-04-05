@@ -135,7 +135,7 @@ public final class FishingSessionService {
     public static void saveSession(ServerPlayerEntity bot, BlockPos stand, BlockPos water,
                                     BlockPos castTarget, int fishCaught, int targetFish,
                                     String rawArgs) {
-        if (bot == null) return;
+        if (bot == null || stand == null || water == null) return;
         FishingSession session = new FishingSession(
                 bot.getUuid(), stand, water, castTarget,
                 fishCaught, targetFish, rawArgs);

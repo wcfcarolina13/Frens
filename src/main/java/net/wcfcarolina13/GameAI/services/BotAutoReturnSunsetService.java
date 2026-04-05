@@ -314,7 +314,19 @@ public final class BotAutoReturnSunsetService {
                         }
                     }
                 }
-                // Generic sunrise resume (woodcut, fish, farm, etc.)
+                // Fishing-specific sunrise resume (has its own session with catch counters)
+                else if (FishingSessionService.hasSession(bot.getUuid())) {
+                    long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+                    if (lastResumed < day) {
+                        LAST_RESUMED_DAY.put(bot.getUuid(), day);
+                        var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
+                        if (taskInfo.isEmpty()) {
+                            LOGGER.info("Sunrise fishing resume for {} (day={})", bot.getName().getString(), day);
+                            SkillResumeService.tryAutoResume(bot);
+                        }
+                    }
+                }
+                // Generic sunrise resume (woodcut, farm, etc.)
                 else {
                     long currentTick = server.getOverworld().getTime();
                     SkillResumeService.SunriseResumeRecord resume =
@@ -361,8 +373,9 @@ public final class BotAutoReturnSunsetService {
 
                         // Hunt has its own session system — skip generic resume
                         boolean isHunt = "hunt".equalsIgnoreCase(skillName);
+                        boolean isFish = "fish".equalsIgnoreCase(skillName);
 
-                        if (!isHunt) {
+                        if (!isHunt && !isFish) {
                             String rawArgs = SkillResumeService.getLastRawArgs(bot.getUuid());
                             BlockPos interruptionPos = bot.getBlockPos().toImmutable();
                             long tick = server.getOverworld().getTime();
