@@ -1,15 +1,72 @@
 ---
-task: fellTree simplification refactor
+task: woodcut loop stabilization
 test_command: "./gradlew build -x test"
 ---
 
-## Next Session: fellTree Simplification Refactor
+## Next Session: Woodcut Loop Stabilization & Testing
 
-**Plan:** `docs/superpowers/plans/2026-04-01-felltree-simplification.md`  
-**Checkpoint:** commit `6a770c5` (safe revert point)  
-**Status:** Plan approved, ready to execute
+**Status:** Major infrastructure built, needs in-game validation and tuning
 
-Replace the 680-line column-entry system in `fellTree` with a simpler mine-from-outside → pillar → bridge approach. Works for all tree types including cherry blossoms and floaters. ~600 lines removed, ~50 lines added.
+### What was built this session (2026-04-03/04)
+
+**Lodestone compass fast-travel system:**
+- `LodestoneCompassService` — inventory scanning (including bundles), validation, selection, home designation
+- `/bot compass list|home|travel` commands
+- Lodestones in Bases menu, smoke signal navigation beacons
+- Sunrise skill resume loop (sunset save → sleep → sunrise fast-travel back → resume skill)
+- Protected lodestones from ALL mining paths (BotStuckService, ReturnBaseStuckService, MovementService)
+- Fast-travel spawn offset away from solid blocks
+
+**Woodcut scaffold descent:**
+- `descendScaffoldColumn()` — Y-level-grouped descent with bridge-first-then-drop
+- Hazard avoidance — `WoodcutHazardScanner` scans for ravines/water, filters scaffold directions
+- Bridge retraction fix — bot walks toward perch before mining bridge blocks behind it
+- Adjacent column pillar — bot can pillar from 1 block off trunk when entry is blocked
+- No-walk elevated sweeps during descent (bot stays on column)
+
+**Woodcut "Until sunset" GUI:**
+- Actions menu defaults to "Until sunset" like fishing
+- `SkillManager.isOpenEnded()` extended for woodcut
+
+### Known issues to validate/fix next
+
+1. **Woodcut success rate still ~10-15%.** Most trees end PATH_OR_REACH_FAILURE. The bot mines 3-5 ground logs per tree but often can't reach upper trunk. The adjacent-column fix helps but the bridge fallback still has LoS failures. Needs in-game observation to identify remaining blockers.
+
+2. **Bot gets stuck for 11k+ ticks** between tree canopies during woodcut. ReturnBaseStuck fires but can't effectively escape. May need a "give up on this area" threshold.
+
+3. **Follow mode stuck at 1-block Y differences.** Bot can see commander but `directBlocked=true` when 1 block above. Escalates to stagnant-80+ with no resolution.
+
+4. **Duplicate "Returning to base" messages** on each sunset return.
+
+5. **Suffocation during scaffold descent** — bot embeds in terrain after dropping through scaffold gaps.
+
+### Backlog items added this session
+
+- **P1:** Axe retrieval from nearby chests (wooden/stone/copper only, no enchanted)
+- **P1:** Bundle-aware inventory scanning (systemic fix for all inv methods)
+- **P1:** Idle during fast-travel cooldown (hobby/offload while waiting)
+
+### Key files changed
+
+| File | Changes |
+|---|---|
+| `LodestoneCompassService.java` | NEW — compass scanning, validation, bundle support |
+| `NavigationArtifactService.java` | Tier/multiplier, spawn offset, smoke signal, skipArtifactGate |
+| `BotAutoReturnSunsetService.java` | LODESTONE_COMPASS anchor, sunrise resume, lodestone shortcut |
+| `SkillResumeService.java` | SunriseResumeRecord, getLastRawArgs |
+| `BotHomeService.java` | homeCompassNameByBot, findBaseNearPosition |
+| `WoodcutSkill.java` | descendScaffoldColumn, hazard filtering, adjacent column, no-walk sweeps |
+| `WoodcutHazardScanner.java` | NEW — ravine/water terrain assessment |
+| `BridgeScaffoldService.java` | Retraction walks toward perch first |
+| `ProtectedStructureBlockHelper.java` | isNeverBreakBlock (lodestone, beacon, etc.) |
+| `MovementService.java` | isNeverBreakBlock guards on obstruction mining |
+| `BotStuckService.java` | isNeverBreakBlock guard on mine-escape |
+| `ReturnBaseStuckService.java` | isNeverBreakBlock guard on tryMineBlock |
+| `modCommandRegistry.java` | /bot compass commands, orphaned compass warnings |
+| `SkillManager.java` | Woodcut open-ended when no count |
+| `BotPlayerInventoryScreen.java` | Woodcut "Until sunset" GUI |
+| `BaseNetworkManager.java` | Lodestone entries in bases menu |
+| `BaseManagerScreen.java` | isLodestone, Go To/Set Home for lodestones |
 
 # Task: (No active task)
 
@@ -66,6 +123,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Elder Scrolls-style Journal**: Conversation topics, quests, important information with simple filter search
 - [ ] **Drop-sweep cobblestone loop**: During patrol, drop sweep detects full inventory → tries bundle (no leather) → tries chest (none) → drops 64x Cobblestone "to free space" → sweep picks it back up → repeats every ~7s indefinitely. Fix: skip "drop items to make room" when no reachable offload target exists. Log evidence: `"Store: no chest in inventory and couldn't craft one."` → `"Dropped 64x Cobblestone to free inventory space."` → sweep picks it up → cycle. See `ForkJoinPool.commonPool-worker-1` thread in logs 22:45:21–22:46:08 (2026-03-28).
 - [ ] **Idle during fast-travel cooldown**: When a bot wants to fast-travel but has an active cooldown, it should do useful things while waiting (idle hobbies if enabled, chest offloading to nearby existing chests if disabled), then fast-travel when cooldown expires. Currently the bot just sits idle. For sunset→home specifically, don't build new chests — only use existing ones.
+- [ ] **Axe retrieval from nearby chests**: When the bot runs out of axes during woodcut, check nearby registered chests (via BotChestRegistryService) for wooden/stone/copper axes — nothing better than copper, nothing enchanted. Take one and continue. Currently the bot just stops or mines with bare hands/wrong tool.
 - [ ] **Bundle-aware inventory scanning**: The bot ignores items inside bundles across the entire codebase. Only lodestone compass scanning was patched. Needs a systematic fix: food detection (HungerService, isFoodItem, cookAllFoodSync), tool selection (MiningTool, armorUtils, CombatInventoryManager), crafting material checks (CraftingHelper), chest offloading (ChestStoreService), and any other inventory iteration that calls `inv.getStack(i)` without checking for `BUNDLE_CONTENTS`. Consider a shared `InventoryIterator` utility that yields both direct slots and bundle contents, so every caller gets bundle support automatically.
 - [ ] **Escape-with-full-inventory**: Guard/patrol stuck escape (pillar via `ensureAtSurfaceForHobby`) fails when inventory has no room for scaffold blocks — `"pillar recovery placed no blocks"` repeated every ~12s. Bot stuck in 1-block hole with full cobblestone inventory. Consider: temporarily drop a non-essential stack, pillar out, pick it back up. Or: use cobblestone directly as scaffold material.
 
