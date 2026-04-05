@@ -1280,6 +1280,25 @@ public final class BotGuideScreen extends Screen {
                         "/bot zone wand, /bot zone list, /bot zone protect <radius> [label]",
                         "Confirm zone: = (Equals key)",
                         "zone protect wand area region boundary admin"
+                ),
+                new GuideTopic(
+                        "enchanting_overview",
+                        "Enchanting",
+                        "Bot Enchanting",
+                        "Enchant your companion's items using the bot's XP and lapis.",
+                        List.of(
+                                "Open the Spells menu while near an Enchanting Table.",
+                                "Click 'Enchant' to open the vanilla enchanting UI for your bot.",
+                                "The inventory grid shows the bot's items \u2014 drag items and lapis into the enchanting slots.",
+                                "Enchantment offers are based on the bot's XP level, not yours.",
+                                "XP and lapis are deducted from the bot. You keep your own levels.",
+                                "Bookshelves around the table affect enchantment quality as normal.",
+                                "When you close the screen, leftover items return to the bot's inventory.",
+                                "Tip: bots accumulate XP from mining, combat, and fishing. Check their level in the inventory stats area."
+                        ),
+                        "UI-only action (Spells \u2192 Enchant)",
+                        "Stand near an Enchanting Table with bookshelves for best results",
+                        "enchant enchanting table xp level lapis bot companion spells magic"
                 )
         );
     }
