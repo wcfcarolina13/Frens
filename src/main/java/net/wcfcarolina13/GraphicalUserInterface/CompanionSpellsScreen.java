@@ -4,9 +4,12 @@ import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.item.Items;
 import net.minecraft.text.Text;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.wcfcarolina13.network.BotEnchantOpenPayload;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.FrensClient;
 import net.wcfcarolina13.items.ModItems;
@@ -28,6 +31,7 @@ public class CompanionSpellsScreen extends Screen {
     private ButtonWidget summonBtn;
     private ButtonWidget homeBtn;
     private ButtonWidget openInvBtn;
+    private ButtonWidget enchantBtn;
 
     private static final class AccessState {
         final boolean full;
@@ -79,8 +83,18 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + 3 * (h + gap), w, h)
                 .build());
 
+        enchantBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Enchant"), (btn) -> openBotEnchanting())
+                .dimensions(cx - w / 2, top + 4 * (h + gap), w, h)
+                .build());
+
+        comeBtn.setTooltip(Tooltip.of(Text.literal("Call your companion to your location.\nRequires: Enchanting Table or Wizard's Tome, or Goat Horn.")));
+        summonBtn.setTooltip(Tooltip.of(Text.literal("Teleport your companion directly to you.\nRequires: Enchanting Table or Wizard's Tome, or Eye of Ender (60s cooldown).")));
+        homeBtn.setTooltip(Tooltip.of(Text.literal("Send your companion back to their home base.\nRequires: Navigation tier 1+ (Map on bot) or higher.")));
+        openInvBtn.setTooltip(Tooltip.of(Text.literal("Open your companion's inventory remotely.\nRequires: Enchanting Table or Wizard's Tome (full access).")));
+        enchantBtn.setTooltip(Tooltip.of(Text.literal("Open the enchanting table for your companion.\nUses the bot's XP, lapis, and inventory.\nRequires: nearby Enchanting Table.")));
+
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Back"), (btn) -> close())
-                .dimensions(cx - w / 2, top + 4 * (h + gap) + 10, w, h)
+                .dimensions(cx - w / 2, top + 5 * (h + gap) + 10, w, h)
                 .build());
 
         refreshEnabledState();
@@ -99,6 +113,7 @@ public class CompanionSpellsScreen extends Screen {
         if (summonBtn != null) summonBtn.active = state.full || eyeReady;
         if (homeBtn != null) homeBtn.active = state.full || state.botNavTier >= 1;
         if (openInvBtn != null) openInvBtn.active = state.full;
+        if (enchantBtn != null) enchantBtn.active = isNearEnchantingTable(this.client, 4);
     }
 
     private AccessState getAccessState() {
@@ -235,6 +250,15 @@ public class CompanionSpellsScreen extends Screen {
             FrensClient.armEyeSpellCooldown();
         }
         sendSpell(withBotAlias("bot companion summon"));
+    }
+
+    private void openBotEnchanting() {
+        MinecraftClient client = this.client;
+        if (client == null || client.getNetworkHandler() == null) {
+            return;
+        }
+        ClientPlayNetworking.send(new BotEnchantOpenPayload(botAlias));
+        close();
     }
 
     private void sendSpell(String command) {
