@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-04 — Chest tool retrieval
+
+- Added `ToolProvisionService.retrieveToolFromChests()` — general-purpose method for retrieving tools from registered chests within a configurable range
+- Axe-specific helpers: `allowedAxeSnapshotFilter()`, `allowedWoodcutAxePredicate()`, `axeTierComparator()` — wooden/stone/copper only, no enchanted, min 8 durability
+- WoodcutSkill integration: `prepareWoodcutTooling()` now tries chest retrieval after crafting fails; 4 mid-session call sites use `ensureAxeOrRetrieve()` wrapper
+- Bot sends chat message when it finds an axe in a chest
+
 ## 2026-04-03
 
 - **Feat: General Protected Zones.** Admin-friendly zone protection system with Litematica-style selection. `/bot zone wand` gives an enchanted blaze rod; right-click two blocks to define a 3D bounding box, cyan particles preview the boundary, press `=` to name and save. Bots cannot break blocks inside zones. Any player can view zone boundaries via Base Manager > Protected Zones > Show. Admins can rename/delete zones in the UI. Migrated `ProtectedZoneService` from center+radius to AABB (min/max corners) with automatic legacy migration on load. New files: `ZoneVisualizerService`, `ZoneNetworkManager`, `ZoneNamePopupScreen`, 8 network payloads. Bot Guide updated with Protected Zones topic.
