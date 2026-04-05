@@ -3551,6 +3551,9 @@ public final class MovementService {
         if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
             return false;
         }
+        if (ProtectedStructureBlockHelper.isNeverBreakBlock(state)) {
+            return false;
+        }
         if (!plannedStepTrimAllowed(bot, world, pos, state)) {
             return false;
         }
@@ -3631,6 +3634,9 @@ public final class MovementService {
             return false;
         }
         if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+            return false;
+        }
+        if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
             return false;
         }
         if (state.isOf(Blocks.DIRT_PATH)) {
@@ -3739,6 +3745,10 @@ public final class MovementService {
             if (state.isAir() || state.isReplaceable()) {
                 continue;
             }
+            // Never mine high-value infrastructure blocks (lodestone, beacon, enchanting table, etc.)
+            if (ProtectedStructureBlockHelper.isNeverBreakBlock(state)) {
+                continue;
+            }
             String protectionReason = ConstructionProtectionService.protectionReason(bot.getUuid(), pos);
             if (protectionReason != null) {
                 LOGGER.info("movement obstruction skip [{}]: bot={} pos={} state={} protection={}",
@@ -3769,6 +3779,9 @@ public final class MovementService {
                 continue;
             }
             if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+                continue;
+            }
+            if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
                 continue;
             }
             // Avoid ripping up common build materials during generic movement.

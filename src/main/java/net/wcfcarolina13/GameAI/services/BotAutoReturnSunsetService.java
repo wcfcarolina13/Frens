@@ -1302,7 +1302,12 @@ public final class BotAutoReturnSunsetService {
             }
 
             if (bestCompass != null && bestDistSq <= (double) SUNRISE_RETURN_COMPASS_RANGE * SUNRISE_RETURN_COMPASS_RANGE) {
-                BlockPos dest = bestCompass.target().pos();
+                // Offset destination to adjacent safe position — the lodestone block itself
+                // is solid and spawning there causes movement issues
+                BlockPos lodestonePos = bestCompass.target().pos();
+                BlockPos dest = SafePositionService.findSafeNear(
+                        (ServerWorld) bot.getEntityWorld(), lodestonePos, 3);
+                if (dest == null) dest = lodestonePos.up(); // fallback: above lodestone
                 RegistryKey<World> dim = bestCompass.target().dimension();
                 boolean crossDim = !botDim.equals(dim);
                 double distance = bot.getBlockPos().getManhattanDistance(dest);
