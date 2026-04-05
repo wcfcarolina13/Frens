@@ -16,6 +16,29 @@ Chest offload already works via `handleFullInventory()` and needs no changes.
 
 ## Feature 1: FishingSessionService + Sunrise Resume
 
+### Architecture: How Sunset/Sunrise Works
+
+Understanding the existing pattern is critical to getting the integration right.
+
+**Sunset abort flow (BotAutoReturnSunsetService):**
+1. `onServerTick()` runs every tick for registered bots
+2. At tick 12000 (`SUNSET_START_TICK`), detects sunset
+3. For hunt: `isHunt` check (line 363) skips generic resume save
+4. For all other skills: saves generic `SunriseResumeRecord` via `SkillResumeService.saveSunriseResume()`
+5. Calls `TaskService.forceAbort()` (line 404) -- sets ABORT_LATCH, kills the running skill
+
+**Hunt's approach:** HuntSkill has its own `isSunset()` check at tick 13000 inside its loop (line 288). This fires on the worker thread. There is a 1000-tick window (12000-13000) where the abort latch might propagate before the skill's own check fires. In practice, the worker thread may be mid-iteration when the latch is set and completes the current iteration (including the sunset check) before seeing the latch on the next iteration. This is the same timing FishingSkill will use.
+
+**Sunrise resume flow (BotAutoReturnSunsetService):**
+1. At sunrise (tick < 1000), checks `HuntSessionService.hasSession()` (line 306)
+2. If hunt session found: calls `SkillResumeService.tryAutoResume()` (line 313)
+3. Otherwise: falls through to generic sunrise resume for other skills (line 318)
+
+**Fishing must mirror hunt exactly:**
+1. FishingSkill saves its own session internally (has access to state variables)
+2. BotAutoReturnSunsetService skips generic resume for fish (like it does for hunt)
+3. BotAutoReturnSunsetService handles fish-specific sunrise resume (like it does for hunt)
+
 ### New File: `GameAI/services/FishingSessionService.java`
 
 Mirrors `HuntSessionService` pattern exactly.
@@ -36,7 +59,7 @@ public record FishingSession(
 
 **Persistence:** `config/frens/fishing_sessions.json`
 
-Uses Gson with a `SessionData` wrapper class that serializes each `BlockPos` as individual x/y/z int fields (same pattern as `HuntSessionService.SessionData`). Lazy-loaded on first access.
+Uses Gson with a `SessionData` wrapper class that serializes each `BlockPos` as individual x/y/z int fields (same pattern as `HuntSessionService.SessionData`). The `SessionData` wrapper includes a `savedAtMs` field for expiry tracking. Lazy-loaded on first access.
 
 **Methods:**
 
@@ -52,6 +75,43 @@ Uses Gson with a `SessionData` wrapper class that serializes each `BlockPos` as 
 
 **Thread safety:** All methods synchronized on a static lock object.
 
+### BotAutoReturnSunsetService Changes
+
+**Sunset exclusion (near line 363):**
+
+```java
+boolean isHunt = "hunt".equalsIgnoreCase(skillName);
+boolean isFish = "fish".equalsIgnoreCase(skillName);
+
+if (!isHunt && !isFish) {
+    // existing generic sunrise resume save...
+}
+```
+
+Fish gets excluded from the generic resume path, just like hunt. The FishingSkill saves its own session internally.
+
+**Sunrise resume (near line 304-316):**
+
+Add fish session check alongside hunt:
+
+```java
+if (HuntSessionService.hasSession(bot.getUuid())) {
+    // existing hunt resume...
+} else if (FishingSessionService.hasSession(bot.getUuid())) {
+    long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+    if (lastResumed < day) {
+        LAST_RESUMED_DAY.put(bot.getUuid(), day);
+        var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
+        if (taskInfo.isEmpty()) {
+            LOGGER.info("Sunrise fishing resume for {} (day={})", bot.getName().getString(), day);
+            SkillResumeService.tryAutoResume(bot);
+        }
+    }
+} else {
+    // existing generic sunrise resume...
+}
+```
+
 ### FishingSkill Changes: Sunset Save
 
 **Location:** The sunset check block (~line 244-250).
@@ -64,28 +124,48 @@ if (timeOfDay >= 13000 && timeOfDay < 23000) {
 }
 ```
 
+**Loop reordering:** Move the sunset check BEFORE the `shouldAbortSkill` check in the main while-loop. This ensures the session is saved before the abort latch (set at tick 12000 by BotAutoReturnSunsetService) can kill the loop on the next iteration. HuntSkill has the same latent race but it can be fixed separately.
+
 New behavior:
 ```java
-if (timeOfDay >= 13000 && timeOfDay < 23000) {
-    retractBobberIfPresent(bot);
-    if (caught < targetFish && BotHomeService.isAutoReturnAtSunset(bot)) {
-        FishingSessionService.saveSession(bot, stand, spot.water(),
-                castTarget, caught, targetFish, rawArgs);
-        SkillResumeService.recordExecution(bot, "fish", rawArgs, source);
-        SkillResumeService.requestAutoResume(bot);
-        ChatUtils.sendSystemMessage(source,
-                "Sun's setting. Heading home. I'll resume fishing tomorrow. ("
-                + caught + " catch" + (caught != 1 ? "es" : "") + " so far)");
-    } else {
-        ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
+// SUNSET CHECK -- must come before abort check to save session
+// before the abort latch (set at tick 12000) fires.
+if (checkSunset) {
+    long timeOfDay = world.getTimeOfDay() % 24000;
+    if (timeOfDay >= 13000 && timeOfDay < 23000) {
+        retractBobberIfPresent(bot);
+        if (!hobby && caught < targetFish && BotHomeService.isAutoReturnAtSunset(bot)) {
+            FishingSessionService.saveSession(bot, stand, spot.water(),
+                    castTarget, caught, targetFish, rawArgs);
+            SkillResumeService.recordExecution(bot, "fish", rawArgs, source);
+            SkillResumeService.requestAutoResume(bot);
+            ChatUtils.sendSystemMessage(source,
+                    "Sun's setting. Heading home. I'll resume fishing tomorrow. ("
+                    + caught + " catch" + (caught != 1 ? "es" : "") + " so far)");
+        } else {
+            ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
+        }
+        break;
     }
-    break;
+}
+
+// ABORT CHECK -- after sunset check
+if (SkillManager.shouldAbortSkill(bot)) {
+    return SkillExecutionResult.failure("Fishing paused by another task.");
 }
 ```
 
-**Gate:** Only saves session + requests resume when `BotHomeService.isAutoReturnAtSunset(bot)` is true. Otherwise falls through to the existing stop behavior.
+**Gates:**
+- `!hobby` -- hobby fishing (ambient idle) should NOT save sessions; it's short-lived leisure
+- `caught < targetFish` -- don't resume if target already met
+- `BotHomeService.isAutoReturnAtSunset(bot)` -- only if auto-return is enabled
 
-**rawArgs:** Captured early in `execute()` from context parameters, reconstructed as the skill argument string (e.g., `"5"`, `"until_sunset"`, or empty for open-ended).
+**rawArgs reconstruction:** Built from context parameters early in `execute()`. Examples:
+- `/bot skill fish 5 BotName` -> rawArgs = `"5"`
+- `/bot skill fish BotName` (open-ended) -> rawArgs = `""`
+- `/bot skill fish until_sunset BotName` -> rawArgs = `"until_sunset"`
+
+Reconstructed from the `count` and `options` parameters, not stored as a raw input string.
 
 ### FishingSkill Changes: Sunrise Resume
 
@@ -100,6 +180,9 @@ if (timeOfDay >= 13000 && timeOfDay < 23000) {
       - Stand block still standable (solid below, not water)
    c. If valid:
       - Use saved FishingSpot (stand, water, castTarget)
+      - Re-evaluate castTarget via chooseCastTargetAlongLine() (cast target
+        is volatile -- lily pads, water changes overnight. The saved stand
+        and water anchor are stable; the cast target should be re-derived.)
       - Set caught = session.fishCaught (preserve progress)
       - Skip findFishingSpot()
    d. If invalid:
@@ -108,6 +191,14 @@ if (timeOfDay >= 13000 && timeOfDay < 23000) {
       - Set caught = session.fishCaught (progress still preserved)
    e. Carry over targetFish from session
 ```
+
+### Session Cleanup on Completion
+
+When the fishing loop ends normally (target reached or no more attempts), call `FishingSessionService.clearSession(botId)` after the while-loop. This prevents a stale session from triggering a spurious sunrise resume. The 24h expiry is a safety net, not the primary cleanup mechanism.
+
+### Death Behavior
+
+Fishing sessions survive death (same as hunt sessions). `SkillResumeService.handleDeath()` clears the generic `SunriseResumeRecord` but does NOT clear `HuntSessionService` or `FishingSessionService` sessions. This is intentional -- the bot can resume at sunrise even after dying, via the yes/no prompt flow.
 
 ## Feature 2: Vanilla Open Water Positioning
 
@@ -122,7 +213,9 @@ For a bobber to qualify for treasure catches, Minecraft checks a 5x4x5 area cent
 | Y+1 (above surface) | All 5x5 blocks must be non-opaque and not lily pads |
 | Y+2 (two above) | All 5x5 blocks must be non-opaque and not lily pads |
 
-Additionally: no opaque block directly above the bobber column (sky access for rain).
+Additionally: no opaque block directly above the bobber column (sky access).
+
+Note: Vanilla also allows `Blocks.BUBBLE_COLUMN` in the water layers. We omit this -- bubble columns near fishing spots are extremely rare and excluding them just means one fewer valid spot might get the bonus.
 
 ### New Method: `isVanillaOpenWater(ServerWorld, BlockPos)`
 
@@ -153,18 +246,14 @@ private static boolean isVanillaOpenWater(ServerWorld world, BlockPos waterSurfa
             }
         }
     }
-    // Sky access: no opaque block above bobber column
-    for (int dy = 1; dy <= 10; dy++) {
-        BlockPos above = waterSurface.up(dy);
-        if (world.getBlockState(above).isOpaque()) {
-            return false;
-        }
-    }
-    return true;
+    // Sky access: use heightmap for O(1) check instead of looping
+    return world.isSkyVisible(waterSurface.up());
 }
 ```
 
 **Cost:** ~100 block state reads per call. Only applied to cast target candidates (not every water block in the scan).
+
+**Sky access:** Uses `world.isSkyVisible()` (heightmap O(1) lookup) instead of a capped Y-loop. This correctly handles all heights without missing tall structures.
 
 ### Integration into Cast Target Scoring
 
@@ -194,6 +283,7 @@ The `-3.0` bonus dominates scoring (existing scores range roughly -2 to +2), so 
 |------|--------|
 | `GameAI/services/FishingSessionService.java` | **New.** Session persistence, mirrors HuntSessionService |
 | `GameAI/skills/impl/FishingSkill.java` | Sunset save + sunrise resume + `isVanillaOpenWater()` + scoring integration |
+| `GameAI/services/BotAutoReturnSunsetService.java` | Add `isFish` exclusion from generic resume; add fish-specific sunrise resume path |
 
 ## Testing
 
@@ -203,3 +293,5 @@ Manual in-game verification:
 3. Break the saved fishing spot (fill water with blocks) before sunrise -- bot should re-scan
 4. Fish near a lake with lily pads vs open ocean -- verify bot prefers open water cast targets
 5. Fish in a small pond with no open water -- verify silent fallback, no crash or hang
+6. Hobby fishing at sunset -- should NOT save session (just stops normally)
+7. Bot dies during fishing session -- session survives; bot can resume at sunrise
