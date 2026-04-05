@@ -9,12 +9,15 @@ import net.minecraft.item.Items;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.GameAI.services.BotChestRegistryService.ItemSnapshot;
 import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +26,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 public final class ToolProvisionService {
     private static final Logger LOGGER = LoggerFactory.getLogger("tool-provision");
@@ -1586,5 +1593,163 @@ public final class ToolProvisionService {
             LOGGER.info("Crafted {} for {}", craftName, bot.getName().getString());
         }
         return crafted;
+    }
+
+    // ── Server-thread dispatch ─────────────────────────────────────────
+
+    private static <T> T callOnServer(MinecraftServer server,
+                                       java.util.function.Supplier<T> task,
+                                       long timeoutMs,
+                                       T fallback) {
+        if (server == null || task == null) return fallback;
+        if (server.isOnThread()) {
+            try {
+                return task.get();
+            } catch (Throwable t) {
+                return fallback;
+            }
+        }
+        CompletableFuture<T> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.complete(fallback);
+            }
+        });
+        try {
+            return future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    // ── Chest tool retrieval: axe helpers ────────────���─────────────────
+
+    private static final Set<String> ALLOWED_AXE_IDS = Set.of(
+            "minecraft:wooden_axe", "minecraft:stone_axe", "minecraft:copper_axe");
+
+    private static final Map<String, Integer> AXE_TIER_RANK = Map.of(
+            "minecraft:copper_axe", 3,
+            "minecraft:stone_axe", 2,
+            "minecraft:wooden_axe", 1);
+
+    public static Predicate<ItemSnapshot> allowedAxeSnapshotFilter() {
+        return snap -> snap != null && ALLOWED_AXE_IDS.contains(snap.itemId);
+    }
+
+    public static Predicate<ItemStack> allowedWoodcutAxePredicate() {
+        return stack -> {
+            if (stack == null || stack.isEmpty()) return false;
+            String id = Registries.ITEM.getId(stack.getItem()).toString();
+            if (!ALLOWED_AXE_IDS.contains(id)) return false;
+            if (stack.hasEnchantments()) return false;
+            if (stack.isDamageable()) {
+                int remaining = stack.getMaxDamage() - stack.getDamage();
+                if (remaining < 8) return false;
+            }
+            return true;
+        };
+    }
+
+    public static Comparator<ItemSnapshot> axeTierComparator() {
+        return Comparator.comparingInt(
+                snap -> -AXE_TIER_RANK.getOrDefault(snap.itemId, 0));
+    }
+
+    // ── Chest tool retrieval: general API ─────────��────────────────────
+
+    /**
+     * Walk to a registered chest and retrieve one tool matching the given criteria.
+     * Runs on a worker thread. Uses callOnServer for snapshot refresh.
+     *
+     * @return true if a tool was withdrawn into the bot's inventory
+     */
+    public static boolean retrieveToolFromChests(ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  ServerCommandSource source,
+                                                  Predicate<ItemSnapshot> snapshotFilter,
+                                                  Predicate<ItemStack> stackPredicate,
+                                                  Comparator<ItemSnapshot> snapshotComparator,
+                                                  int maxRange) {
+        if (bot == null || world == null || source == null) return false;
+        MinecraftServer server = world.getServer();
+        if (server == null) return false;
+
+        // Refresh snapshots on server thread (block entities must be read there)
+        Boolean refreshed = callOnServer(server, () -> {
+            BotChestRegistryService.refreshAllSnapshots(bot, world);
+            return Boolean.TRUE;
+        }, 3000L, Boolean.FALSE);
+        if (!Boolean.TRUE.equals(refreshed)) {
+            LOGGER.debug("Chest tool retrieval: snapshot refresh failed/timed out for {}",
+                    bot.getName().getString());
+            return false;
+        }
+
+        // Get all registered chests for this bot/owner
+        List<BotChestRegistryService.ChestRecord> allChests =
+                BotChestRegistryService.listChestsForOwner(bot, world);
+        if (allChests.isEmpty()) return false;
+
+        double maxDistSq = (double) maxRange * maxRange;
+        BlockPos botPos = bot.getBlockPos();
+
+        // Build candidate list: chests within range whose snapshots contain matching items
+        record ChestCandidate(BlockPos pos, ItemSnapshot bestMatch, double distSq) {}
+        List<ChestCandidate> candidates = new ArrayList<>();
+
+        for (var record : allChests) {
+            if (record.destroyed) continue;
+            BlockPos pos = record.toBlockPos();
+            if (pos == null) continue;
+            double distSq = botPos.getSquaredDistance(pos);
+            if (distSq > maxDistSq) continue;
+            if (record.contentsSnapshot == null) continue;
+
+            // Find the best matching snapshot item in this chest
+            ItemSnapshot bestMatch = null;
+            for (ItemSnapshot snap : record.contentsSnapshot) {
+                if (snap != null && snapshotFilter.test(snap)) {
+                    if (bestMatch == null || snapshotComparator.compare(snap, bestMatch) < 0) {
+                        bestMatch = snap;
+                    }
+                }
+            }
+            if (bestMatch != null) {
+                candidates.add(new ChestCandidate(pos.toImmutable(), bestMatch, distSq));
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            LOGGER.debug("Chest tool retrieval: no matching chests within {} blocks for {}",
+                    maxRange, bot.getName().getString());
+            return false;
+        }
+
+        // Sort: best tool tier first, then nearest
+        candidates.sort(Comparator
+                .<ChestCandidate, ItemSnapshot>comparing(c -> c.bestMatch, snapshotComparator)
+                .thenComparingDouble(c -> c.distSq));
+
+        LOGGER.info("Chest tool retrieval: {} candidate chest(s) for {} within {} blocks",
+                candidates.size(), bot.getName().getString(), maxRange);
+
+        // Try each candidate
+        for (ChestCandidate candidate : candidates) {
+            int withdrawn = ChestStoreService.withdrawMatchingWalkOnly(
+                    source, bot, candidate.pos, 1, stackPredicate);
+            if (withdrawn > 0) {
+                LOGGER.info("Chest tool retrieval: withdrew tool from chest at {} for {}",
+                        candidate.pos.toShortString(), bot.getName().getString());
+                return true;
+            }
+            LOGGER.debug("Chest tool retrieval: chest at {} had no valid match for {}",
+                    candidate.pos.toShortString(), bot.getName().getString());
+        }
+
+        LOGGER.debug("Chest tool retrieval: all {} candidates exhausted for {}",
+                candidates.size(), bot.getName().getString());
+        return false;
     }
 }
