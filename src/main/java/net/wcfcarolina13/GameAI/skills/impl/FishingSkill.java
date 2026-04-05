@@ -156,8 +156,10 @@ public final class FishingSkill implements Skill {
                 boolean groundSolid = !validateWorld.getBlockState(standBelow).isReplaceable()
                         && !validateWorld.getFluidState(standBelow).isIn(FluidTags.WATER);
                 if (waterValid && standNotWater && groundSolid) {
+                    // Pass null castTarget to force re-derivation via chooseCastTargetAlongLine
+                    // (cast target is volatile -- lily pads, water changes overnight)
                     spot = new FishingSpot(savedSession.waterPos(), savedSession.standPos(),
-                            savedSession.castTarget(), List.of(savedSession.standPos()));
+                            null, List.of(savedSession.standPos()));
                     LOGGER.info("Resumed fishing at saved spot: stand={} water={}",
                             savedSession.standPos().toShortString(), savedSession.waterPos().toShortString());
                 } else {
@@ -233,12 +235,11 @@ public final class FishingSkill implements Skill {
             rawArgs = String.valueOf(targetFish);
         }
 
-        int maxAttempts = targetFish == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(targetFish * MAX_ATTEMPTS_PER_FISH, MAX_ATTEMPTS_PER_FISH);
         int caught = 0;
         int attempts = 0;
         int baseline = countFish(bot);
 
-        // Apply resumed session state
+        // Apply resumed session state before computing maxAttempts
         if (resumedCaught > 0) {
             caught = resumedCaught;
             LOGGER.info("Resumed with {} prior catches", caught);
@@ -246,6 +247,8 @@ public final class FishingSkill implements Skill {
         if (resumedTarget > 0 && resumedTarget != Integer.MAX_VALUE) {
             targetFish = resumedTarget;
         }
+
+        int maxAttempts = targetFish == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(targetFish * MAX_ATTEMPTS_PER_FISH, MAX_ATTEMPTS_PER_FISH);
 
         long lastSweepTime = System.currentTimeMillis();
         long lastReactiveSweepTime = 0L;
