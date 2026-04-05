@@ -135,14 +135,51 @@ public final class FishingSkill implements Skill {
             }
         }
 
-        long spotStart = System.nanoTime();
-        FishingSpot spot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
-        long spotElapsedMs = (System.nanoTime() - spotStart) / 1_000_000L;
-        if (spot == null) {
-            if (hasNearbyWater(bot, WATER_SEARCH_RADIUS)) {
-                return SkillExecutionResult.failure("No safe shoreline block to stand on.");
+        // Sunrise resume: restore saved session if available
+        FishingSpot spot = null;
+        int resumedCaught = 0;
+        int resumedTarget = -1;
+        FishingSessionService.FishingSession savedSession =
+                FishingSessionService.consumeSession(bot.getUuid());
+        if (savedSession != null) {
+            LOGGER.info("Found saved fishing session: caught={}/{} stand={}",
+                    savedSession.fishCaught(), savedSession.targetFish(),
+                    savedSession.standPos() != null ? savedSession.standPos().toShortString() : "null");
+            resumedCaught = savedSession.fishCaught();
+            resumedTarget = savedSession.targetFish();
+            // Validate saved spot
+            ServerWorld validateWorld = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+            if (validateWorld != null && savedSession.standPos() != null && savedSession.waterPos() != null) {
+                boolean waterValid = validateWorld.getFluidState(savedSession.waterPos()).isIn(FluidTags.WATER);
+                boolean standNotWater = !validateWorld.getFluidState(savedSession.standPos()).isIn(FluidTags.WATER);
+                BlockPos standBelow = savedSession.standPos().down();
+                boolean groundSolid = !validateWorld.getBlockState(standBelow).isReplaceable()
+                        && !validateWorld.getFluidState(standBelow).isIn(FluidTags.WATER);
+                if (waterValid && standNotWater && groundSolid) {
+                    spot = new FishingSpot(savedSession.waterPos(), savedSession.standPos(),
+                            savedSession.castTarget(), List.of(savedSession.standPos()));
+                    LOGGER.info("Resumed fishing at saved spot: stand={} water={}",
+                            savedSession.standPos().toShortString(), savedSession.waterPos().toShortString());
+                } else {
+                    LOGGER.info("Saved fishing spot no longer valid (water={} stand={} ground={}), scanning for new spot",
+                            waterValid, standNotWater, groundSolid);
+                }
             }
-            return SkillExecutionResult.failure("I need to be standing near open water to fish.");
+        }
+
+        if (spot == null) {
+            long spotStart = System.nanoTime();
+            spot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+            long spotElapsedMs = (System.nanoTime() - spotStart) / 1_000_000L;
+            if (spot == null) {
+                if (hasNearbyWater(bot, WATER_SEARCH_RADIUS)) {
+                    return SkillExecutionResult.failure("No safe shoreline block to stand on.");
+                }
+                return SkillExecutionResult.failure("I need to be standing near open water to fish.");
+            }
+            if (spotElapsedMs > 250L) {
+                LOGGER.info("Fishing spot search took {}ms", spotElapsedMs);
+            }
         }
 
         BlockPos stand = spot.stand();
@@ -172,9 +209,6 @@ public final class FishingSkill implements Skill {
                 spot.water().toShortString(),
                 castTarget != null ? castTarget.toShortString() : "none",
                 spot.standOptions().size());
-        if (spotElapsedMs > 250L) {
-            LOGGER.info("Fishing spot search took {}ms", spotElapsedMs);
-        }
         
         // Initial positioning adjustment
         adjustPositionToWaterEdge(bot, spot.water());
@@ -203,6 +237,16 @@ public final class FishingSkill implements Skill {
         int caught = 0;
         int attempts = 0;
         int baseline = countFish(bot);
+
+        // Apply resumed session state
+        if (resumedCaught > 0) {
+            caught = resumedCaught;
+            LOGGER.info("Resumed with {} prior catches", caught);
+        }
+        if (resumedTarget > 0 && resumedTarget != Integer.MAX_VALUE) {
+            targetFish = resumedTarget;
+        }
+
         long lastSweepTime = System.currentTimeMillis();
         long lastReactiveSweepTime = 0L;
 
