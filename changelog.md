@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-05 — Bot Enchanting Screen
+
+- **Feat: Bot enchanting via Spells menu.** Players can enchant bot items using the vanilla enchanting UI. Open the Spells menu near an enchanting table, click "Enchant" — the standard enchanting screen opens backed by the bot's inventory, XP, and enchantment seed. XP and lapis are deducted from the bot, not the player. Leftover items return to the bot's inventory on close.
+- **BotEnchantmentScreenHandler**: Extends `EnchantmentScreenHandler` with full `onButtonClick`/`onClosed` reimplementation to redirect all player references to the bot entity. Private vanilla fields accessed via parallel references and slot delegation.
+- **BotEnchantOpenPayload + BotEnchantNetworkManager**: C2S payload + server-side handler validates proximity, finds nearest table, opens the screen for the real player.
+- **CompanionSpellsScreen**: New "Enchant" button (enabled only near enchanting table). Tooltips added to all 5 spell buttons.
+- **BotGuideScreen**: New "Enchanting" guide section with step-by-step instructions.
+- **EnchantingAmbientDialogueService**: Bots near enchanting tables with 20+ levels comment about their XP. Two dialogue tiers (20+ and 30+), 2-minute per-bot cooldown with global overhead suppression.
+- **modCommandRegistry**: Added `findNearestEnchantingTable()` returning `BlockPos`.
+
 ## 2026-04-05 — Fishing Sunrise Resume + Open Water Positioning
 
 - **FishingSessionService**: New persistence service for multi-day fishing sessions (mirrors HuntSessionService). Saves stand, water, cast target, catch count. 24h expiry.
