@@ -1124,7 +1124,8 @@ public final class FishingSkill implements Skill {
                     double distPenalty = Math.abs(distSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
                     int openness = countOpenWaterSurface(world, surface, 1);
                     int depth = estimateWaterDepth(world, surface, 6);
-                    double score = distPenalty - openness * 0.35 - depth * 0.55;
+                    double openWaterBonus = isVanillaOpenWater(world, surface) ? -3.0 : 0.0;
+                    double score = distPenalty - openness * 0.35 - depth * 0.55 + openWaterBonus;
 
                     if (score < bestScore) {
                         bestScore = score;
