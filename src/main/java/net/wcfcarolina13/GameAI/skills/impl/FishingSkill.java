@@ -1206,6 +1206,43 @@ public final class FishingSkill implements Skill {
         return isSpaceClear(world, pos.up());
     }
 
+    /**
+     * Vanilla Minecraft open water check for treasure-quality catches.
+     * Checks a 5x4x5 area centered on the bobber position:
+     * - Water surface (Y) and below (Y-1): all 5x5 must be Blocks.WATER
+     * - Above (Y+1, Y+2): all 5x5 must be non-opaque, no lily pads
+     * - Sky access above the bobber column
+     * Cost: ~100 block reads. Only use on cast target candidates.
+     */
+    private static boolean isVanillaOpenWater(ServerWorld world, BlockPos waterSurface) {
+        if (world == null || waterSurface == null) return false;
+        // Water layers: surface and one below must be water source blocks
+        for (int dy = -1; dy <= 0; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    BlockPos check = waterSurface.add(dx, dy, dz);
+                    if (!world.getBlockState(check).isOf(Blocks.WATER)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        // Air layers: Y+1 and Y+2 must be non-opaque, no lily pads
+        for (int dy = 1; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    BlockPos check = waterSurface.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(check);
+                    if (state.isOpaque() || state.isOf(Blocks.LILY_PAD)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        // Sky access: heightmap O(1) check
+        return world.isSkyVisible(waterSurface.up());
+    }
+
     private static int countOpenWaterSurface(ServerWorld world, BlockPos center, int radius) {
         int count = 0;
         for (BlockPos pos : BlockPos.iterate(center.add(-radius, 0, -radius), center.add(radius, 0, radius))) {
