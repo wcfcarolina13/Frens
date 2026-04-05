@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-05 — Fishing Sunrise Resume + Open Water Positioning
+
+- **FishingSessionService**: New persistence service for multi-day fishing sessions (mirrors HuntSessionService). Saves stand, water, cast target, catch count. 24h expiry.
+- **Sunrise resume**: FishingSkill saves session at sunset, resumes at the same spot next morning. Cast target re-evaluated on resume. Progress (catch count) preserved.
+- **BotAutoReturnSunsetService**: Fish-specific sunrise resume path alongside existing hunt path.
+- **Vanilla open water**: `isVanillaOpenWater()` checks 5x4x5 area per Minecraft spec (water layers, air layers, sky access). Cast targets passing the check get -3.0 scoring bonus for treasure-quality catches. Silent fallback if no open water available.
+- **Loop reorder**: Sunset check moved before abort check to prevent session loss from abort latch race.
+
+## 2026-04-05 — Travel respawn ghost entity fix
+
+- **Fix: Bot stuck at old position after fast travel.** When the travel system respawned a bot via `createFakePlayer.createFake()`, the vanilla `PlayerManager.onPlayerConnect()` tried to disconnect the existing entity (same UUID) via `networkHandler.disconnect()`. But `FakeClientConnection.handleDisconnection()` is a no-op, so `onDisconnected()` never fired and `PlayerManager.remove()` was never called — the old entity stayed in the player list. This left two entities with the same name: UUID-keyed lookups returned the new (correct) entity, but list iteration (`BotTargetingService.collectActiveBots()`) returned the old (stale) entity first. Skills and commands targeted the underground ghost entity instead of the real one on the surface. Fix: `respawnBotAtDestination()` now explicitly finds and removes the old entity before creating the new one.
+
 ## 2026-04-04 — Chest tool retrieval
 
 - Added `ToolProvisionService.retrieveToolFromChests()` — general-purpose method for retrieving tools from registered chests within a configurable range
