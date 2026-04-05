@@ -254,6 +254,27 @@ public final class FishingSkill implements Skill {
         LOGGER.info("Starting fishing session for {} (mode: {})", bot.getName().getString(), modeDesc);
 
         while (caught < targetFish && attempts < maxAttempts) {
+            // Sunset check BEFORE abort check -- ensures session is saved before
+            // the abort latch (set at tick 12000 by BotAutoReturnSunsetService) fires.
+            if (checkSunset) {
+                long timeOfDay = world.getTimeOfDay() % 24000;
+                if (timeOfDay >= 13000 && timeOfDay < 23000) {
+                    retractBobberIfPresent(bot);
+                    if (!hobby && caught < targetFish && BotHomeService.isAutoReturnAtSunset(bot)) {
+                        FishingSessionService.saveSession(bot, stand, spot.water(),
+                                castTarget, caught, targetFish, rawArgs);
+                        SkillResumeService.recordExecution(bot, "fish", rawArgs, source);
+                        SkillResumeService.requestAutoResume(bot);
+                        ChatUtils.sendSystemMessage(source,
+                                "Sun's setting. Heading home. I'll resume fishing tomorrow. ("
+                                + caught + " catch" + (caught != 1 ? "es" : "") + " so far)");
+                    } else {
+                        ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
+                    }
+                    break;
+                }
+            }
+
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("Fishing paused by another task.");
             }
@@ -293,14 +314,6 @@ public final class FishingSkill implements Skill {
                     }
                     adjustPositionToWaterEdge(bot, spot.water());
                     continue;
-                }
-            }
-
-            if (checkSunset) {
-                long timeOfDay = world.getTimeOfDay() % 24000;
-                if (timeOfDay >= 13000 && timeOfDay < 23000) {
-                    ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
-                    break;
                 }
             }
 
@@ -449,6 +462,9 @@ public final class FishingSkill implements Skill {
             
             BotActions.stop(bot); // Ensure we don't drift
         }
+
+        // Clear any stale session on normal completion
+        FishingSessionService.clearSession(bot.getUuid());
 
         // Final Sweep
         performSweep(source, bot, stand);
