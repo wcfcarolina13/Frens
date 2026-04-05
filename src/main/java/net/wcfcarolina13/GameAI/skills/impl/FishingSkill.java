@@ -70,7 +70,7 @@ public final class FishingSkill implements Skill {
 
     // Reactive sweep: if loot is piling up (usually because we're standing a touch too far from shore),
     // pause and do a quick local pickup run.
-    private static final int DROP_SWEEP_TRIGGER_COUNT = 3; // "more than 2"
+    private static final int DROP_SWEEP_TRIGGER_COUNT = 2; // trigger after 2 drops instead of 3
     private static final double DROP_SWEEP_TRIGGER_RADIUS = 6.5D;
     private static final long DROP_SWEEP_TRIGGER_COOLDOWN_MS = 12_000L;
     
@@ -267,6 +267,8 @@ public final class FishingSkill implements Skill {
                         FishingSessionService.saveSession(bot, stand, spot.water(),
                                 castTarget, caught, targetFish, rawArgs);
                         SkillResumeService.recordExecution(bot, "fish", rawArgs, source);
+                        SkillResumeService.saveSunriseResume(bot.getUuid(), "fish", rawArgs,
+                                stand, false, world.getServer().getOverworld().getTime());
                         SkillResumeService.requestAutoResume(bot);
                         ChatUtils.sendSystemMessage(source,
                                 "Sun's setting. Heading home. I'll resume fishing tomorrow. ("
@@ -734,7 +736,7 @@ public final class FishingSkill implements Skill {
         }
 
         // Only do small, local adjustments; don't wander off from the spot.
-        double maxScan = 5.5D;
+        double maxScan = 8.0D;
         List<ItemEntity> items = world.getEntitiesByClass(
                 ItemEntity.class,
                 bot.getBoundingBox().expand(maxScan, 2.0D, maxScan),
@@ -758,7 +760,7 @@ public final class FishingSkill implements Skill {
             if (e == null) {
                 return true;
             }
-            if (e.getBlockPos().getSquaredDistance(stand) > 4.0D * 4.0D) {
+            if (e.getBlockPos().getSquaredDistance(stand) > 7.0D * 7.0D) {
                 return true;
             }
             if (fwd.lengthSquared() < 1.0E-6) {
@@ -794,7 +796,7 @@ public final class FishingSkill implements Skill {
         }
 
         // Don't chase drops too far away from the fishing stand.
-        if (best.getSquaredDistance(stand) > 5.0D * 5.0D) {
+        if (best.getSquaredDistance(stand) > 7.0D * 7.0D) {
             return;
         }
 

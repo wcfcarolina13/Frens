@@ -321,8 +321,17 @@ public final class BotAutoReturnSunsetService {
                         LAST_RESUMED_DAY.put(bot.getUuid(), day);
                         var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
                         if (taskInfo.isEmpty()) {
-                            LOGGER.info("Sunrise fishing resume for {} (day={})", bot.getName().getString(), day);
-                            SkillResumeService.tryAutoResume(bot);
+                            long currentTick = server.getOverworld().getTime();
+                            SkillResumeService.SunriseResumeRecord resume =
+                                    SkillResumeService.getSunriseResume(bot.getUuid(), currentTick);
+                            if (resume != null) {
+                                LOGGER.info("Sunrise fishing resume for {} (day={})", bot.getName().getString(), day);
+                                executeSunriseResume(server, bot, resume);
+                            } else {
+                                // Fallback: no sunrise record (e.g., server restarted) — resume locally
+                                LOGGER.info("Sunrise fishing resume (no travel record) for {} (day={})", bot.getName().getString(), day);
+                                SkillResumeService.tryAutoResume(bot);
+                            }
                         }
                     }
                 }
