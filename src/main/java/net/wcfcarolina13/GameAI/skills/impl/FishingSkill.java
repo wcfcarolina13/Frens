@@ -259,9 +259,11 @@ public final class FishingSkill implements Skill {
         while (caught < targetFish && attempts < maxAttempts) {
             // Sunset check BEFORE abort check -- ensures session is saved before
             // the abort latch (set at tick 12000 by BotAutoReturnSunsetService) fires.
+            // Must use 12000 (not 13000) to match the abort timing — otherwise the abort
+            // kills the skill before our save can run.
             if (checkSunset) {
                 long timeOfDay = world.getTimeOfDay() % 24000;
-                if (timeOfDay >= 13000 && timeOfDay < 23000) {
+                if (timeOfDay >= 12000 && timeOfDay < 23000) {
                     retractBobberIfPresent(bot);
                     if (!hobby && caught < targetFish && BotHomeService.isAutoReturnAtSunset(bot)) {
                         FishingSessionService.saveSession(bot, stand, spot.water(),
