@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-06 — Dialogue tuning & unused voiced lines
+
+- **Overplayed line tuning:** Reduced frequency of "I can't believe this is my job" and "If we die I'm blaming the terrain" (WEIGHT_COMMON → WEIGHT_RARE). Reduced "I am Steve" trigger probability by 75%. Increased wolf proximity cooldown from 90s to 6min to reduce "Guard dog on duty" / "Who's a menace" spam.
+- **New weather triggers:** Bots now react to weather transitions (rain, snow, thunder, clearing) when sky-visible. 5-minute cooldown, biome-aware (snow vs rain in cold biomes).
+- **Cooking proximity:** Bots comment when near a lit campfire or furnace (8 lines, 3-minute cooldown).
+- **Voiced wake-up:** BotWakeUpDialogueService now plays voiced audio instead of text-only overhead lines.
+- **Mount dialogue variety:** 19 alternate phrasings wired across 9 mount situations in RideSyncService (horse hurt, no lead, lost horse, lead snapped, etc.). Each trigger randomly picks from 2-6 phrasings instead of repeating the same line.
+- **Combat orphan lines wired:** 4 previously unused combat lines added to active pools — "Engaging!" (engagement alternate), "Enemy down." (generic kill), "All clear." (post-combat), "Hey! Watch it!" (friendly fire).
+
 ## 2026-04-06 — Lockable Blocks
 
 - **Lockable block system:** Players can now mark individual doors, fence gates, and trapdoors as "locked" so bots treat them as solid walls. Toggle lock mode via the "Lock Blocks" button in Bot Controls (admin only). While in lock mode: right-click a lockable block to toggle its lock state; crosshair shows lock status; blue soul flame particles highlight all locked blocks within 32 blocks.
