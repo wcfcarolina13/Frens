@@ -4,6 +4,8 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.registry.tag.BlockTags;
@@ -540,6 +542,15 @@ public class PathFinder {
             // Plan through closed wooden doors (we can open them on approach).
             // Iron doors remain blocked unless already open (redstone).
             if (blockState.isOf(Blocks.IRON_DOOR)) {
+                return blockState.getCollisionShape(world, pos).isEmpty();
+            }
+            return true;
+        }
+        if (blockState.getBlock() instanceof FenceGateBlock) {
+            return true;
+        }
+        if (blockState.getBlock() instanceof TrapdoorBlock) {
+            if (blockState.isOf(Blocks.IRON_TRAPDOOR)) {
                 return blockState.getCollisionShape(world, pos).isEmpty();
             }
             return true;
