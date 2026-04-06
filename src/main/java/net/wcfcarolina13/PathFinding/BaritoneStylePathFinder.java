@@ -4,6 +4,8 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.CampfireBlock;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.registry.tag.BlockTags;
@@ -461,6 +463,19 @@ public class BaritoneStylePathFinder {
             return true; // wooden doors can be opened by bot
         }
 
+        if (state.getBlock() instanceof FenceGateBlock) {
+            return true; // all fence gates are player-openable
+        }
+
+        if (state.getBlock() instanceof TrapdoorBlock) {
+            // Open trapdoors are passable. Closed wooden trapdoors = bot can open.
+            // Iron trapdoors = only passable if already open.
+            if (state.isOf(Blocks.IRON_TRAPDOOR)) {
+                return state.getCollisionShape(cache.world, cache.mutablePos.set(x, y, z)).isEmpty();
+            }
+            return true;
+        }
+
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) return false;
 
@@ -598,6 +613,15 @@ public class BaritoneStylePathFinder {
         if (state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)) return false;
         if (state.getBlock() instanceof DoorBlock) {
             if (state.isOf(Blocks.IRON_DOOR)) {
+                return state.getCollisionShape(world, pos).isEmpty();
+            }
+            return true;
+        }
+        if (state.getBlock() instanceof FenceGateBlock) {
+            return true;
+        }
+        if (state.getBlock() instanceof TrapdoorBlock) {
+            if (state.isOf(Blocks.IRON_TRAPDOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
             }
             return true;
