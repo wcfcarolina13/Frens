@@ -202,6 +202,7 @@ public final class SkillManager {
                         && !abortRequested
                         && !isInventoryFull(botPlayer)
                         && !"woodcut".equalsIgnoreCase(name)
+                        && !"harvest".equalsIgnoreCase(name)
                         && !"shelter".equalsIgnoreCase(name)
                         && !"wool".equalsIgnoreCase(name)) {
                     DropSweeper.sweep(

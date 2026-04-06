@@ -981,6 +981,24 @@ public final class NavigationArtifactService {
         LOGGER.info("Respawning bot '{}' at {} in {}",
                 travel.botAlias(), safeDest.toShortString(), finalDim.getValue());
 
+        // Explicitly remove any existing entity with the same name before creating the
+        // new one.  FakeClientConnection.handleDisconnection() is a no-op, so the vanilla
+        // duplicate-login disconnect inside PlayerManager.onPlayerConnect() never fires
+        // the onDisconnected() callback → the old entity stays in the player list.
+        // Without this cleanup, two entities coexist: commands that iterate getPlayerList()
+        // (BotTargetingService) pick the stale first entry while UUID-keyed lookups
+        // (getRegisteredBots) return the correct newer entity — causing position desync.
+        for (ServerPlayerEntity existing : server.getPlayerManager().getPlayerList()) {
+            if (existing instanceof createFakePlayer
+                    && travel.botAlias().equalsIgnoreCase(existing.getName().getString())) {
+                LOGGER.info("Removing stale entity for '{}' (pos={}) before travel respawn",
+                        travel.botAlias(), existing.getBlockPos().toShortString());
+                BotPersistenceService.removeFromPlayerManager(server, existing);
+                existing.discard();
+                break;
+            }
+        }
+
         // Create the fake player at the destination.
         // createFake handles GameProfile resolution, skin, connection, and teleport.
         createFakePlayer.createFake(

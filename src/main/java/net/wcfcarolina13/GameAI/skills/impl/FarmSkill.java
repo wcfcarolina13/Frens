@@ -42,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -69,6 +70,12 @@ public class FarmSkill implements Skill {
     private static final double MAX_INTERACTION_RANGE = 4.5;
     private static final int IRRIGATION_ATTEMPTS = 4;
     private static final int TREE_CLEAR_RADIUS = 6;
+    private static final int FARM_WOODCUT_BUFFER = 2;
+    private static final int FARM_WOODCUT_VERTICAL_RANGE = 9;
+    private static final int FARM_LOCAL_TREE_CLEAR_LIMIT = 32;
+    private static final int AUTO_MAX_CUT_DEPTH = 2;
+    private static final int MANUAL_MAX_CUT_DEPTH = 4;
+    private static final int MAX_FILL_DEPTH = 3;
     private static final int PRECIPICE_DEPTH = 4;
     private static final int PILLAR_STEP_DELAY_MS = 120;
     private static final Set<Item> PILLAR_BLOCKS = Set.of(
@@ -132,6 +139,139 @@ public class FarmSkill implements Skill {
         }
     }
 
+    private record FarmFootprint(BlockPos irrigationAnchor) {
+        private static FarmFootprint fromIrrigationAnchor(BlockPos irrigationAnchor) {
+            return new FarmFootprint(irrigationAnchor.toImmutable());
+        }
+
+        private static FarmFootprint fromCenterTarget(BlockPos centerTarget) {
+            return fromIrrigationAnchor(centerTarget.add(-1, 0, -1));
+        }
+
+        private BlockPos centerTarget() {
+            return irrigationAnchor.add(1, 0, 1);
+        }
+
+        private int minX() {
+            return irrigationAnchor.getX() - HYDRATION_RADIUS;
+        }
+
+        private int maxX() {
+            return irrigationAnchor.getX() + 1 + HYDRATION_RADIUS;
+        }
+
+        private int minZ() {
+            return irrigationAnchor.getZ() - HYDRATION_RADIUS;
+        }
+
+        private int maxZ() {
+            return irrigationAnchor.getZ() + 1 + HYDRATION_RADIUS;
+        }
+
+        private boolean isIrrigationColumn(int x, int z) {
+            return x >= irrigationAnchor.getX() && x <= irrigationAnchor.getX() + 1
+                && z >= irrigationAnchor.getZ() && z <= irrigationAnchor.getZ() + 1;
+        }
+
+        private boolean isIrrigationPos(BlockPos pos) {
+            return pos != null && isIrrigationColumn(pos.getX(), pos.getZ());
+        }
+
+        private List<BlockPos> irrigationCells() {
+            return List.of(
+                irrigationAnchor,
+                irrigationAnchor.add(1, 0, 0),
+                irrigationAnchor.add(0, 0, 1),
+                irrigationAnchor.add(1, 0, 1)
+            );
+        }
+
+        private List<BlockPos> plotPositions() {
+            List<BlockPos> plots = new ArrayList<>();
+            for (int x = minX(); x <= maxX(); x++) {
+                for (int z = minZ(); z <= maxZ(); z++) {
+                    if (isIrrigationColumn(x, z)) {
+                        continue;
+                    }
+                    plots.add(new BlockPos(x, irrigationAnchor.getY(), z));
+                }
+            }
+            return plots;
+        }
+    }
+
+    private record FarmTerrainPrepPlan(BlockPos stagingGround,
+                                       List<BlockPos> accessPath,
+                                       int estimatedFillDeficit,
+                                       boolean requiresTerraforming,
+                                       String hardRejectReason) {
+        private static FarmTerrainPrepPlan unsupported(String hardRejectReason) {
+            return new FarmTerrainPrepPlan(null, List.of(), 0, false, hardRejectReason);
+        }
+
+        private static FarmTerrainPrepPlan ready(BlockPos stagingGround,
+                                                 List<BlockPos> accessPath,
+                                                 int estimatedFillDeficit,
+                                                 boolean requiresTerraforming) {
+            return new FarmTerrainPrepPlan(
+                stagingGround == null ? null : stagingGround.toImmutable(),
+                accessPath == null ? List.of() : List.copyOf(accessPath),
+                Math.max(0, estimatedFillDeficit),
+                requiresTerraforming,
+                null
+            );
+        }
+    }
+
+    private record FarmWorkingGroundAssessment(boolean acceptable,
+                                               int fillBlocks,
+                                               boolean requiresTerraforming,
+                                               String rejectReason) {
+        private static FarmWorkingGroundAssessment accept(int fillBlocks, boolean requiresTerraforming) {
+            return new FarmWorkingGroundAssessment(true, Math.max(0, fillBlocks), requiresTerraforming, null);
+        }
+
+        private static FarmWorkingGroundAssessment reject(String rejectReason) {
+            return new FarmWorkingGroundAssessment(false, 0, false, rejectReason);
+        }
+    }
+
+    private record FarmStagingCandidate(BlockPos ground,
+                                        List<BlockPos> accessPath,
+                                        int requiredFill,
+                                        boolean requiresTerraforming,
+                                        String rejectReason) {
+        private static FarmStagingCandidate ready(BlockPos ground,
+                                                  List<BlockPos> accessPath,
+                                                  int requiredFill,
+                                                  boolean requiresTerraforming) {
+            return new FarmStagingCandidate(
+                ground == null ? null : ground.toImmutable(),
+                accessPath == null ? List.of() : List.copyOf(accessPath),
+                Math.max(0, requiredFill),
+                requiresTerraforming,
+                null
+            );
+        }
+
+        private static FarmStagingCandidate reject(String rejectReason) {
+            return new FarmStagingCandidate(null, List.of(), 0, false, rejectReason);
+        }
+    }
+
+    private record FarmSiteAssessment(boolean acceptable,
+                                      Integer targetY,
+                                      String rejectReason,
+                                      FarmTerrainPrepPlan prepPlan) {
+        private static FarmSiteAssessment accept(Integer targetY, FarmTerrainPrepPlan prepPlan) {
+            return new FarmSiteAssessment(true, targetY, null, prepPlan);
+        }
+
+        private static FarmSiteAssessment reject(Integer targetY, String rejectReason, FarmTerrainPrepPlan prepPlan) {
+            return new FarmSiteAssessment(false, targetY, rejectReason, prepPlan);
+        }
+    }
+
     @Override
     public String name() {
         return "farm";
@@ -171,10 +311,16 @@ public class FarmSkill implements Skill {
             logPos("postSafeMove", bot);
             abortIfRequested(bot);
 
+            boolean hasExplicitTarget = hasExplicitFarmTarget(context);
+            boolean manualPlacement = hasExplicitTarget || getBooleanParameter(context, "manual", false);
             boolean reuseExistingIrrigation = false;
+            FarmSiteAssessment siteAssessment = null;
+            Set<BlockPos> temporaryFarmAccess = new HashSet<>();
 
             // Prefer an existing enclosed 2x2 still-water basin as the farm center.
-            BlockPos existingIrrigation = findNearbyEnclosedIrrigation2x2(world, bot.getBlockPos(), WATER_SEARCH_RADIUS);
+            BlockPos existingIrrigation = manualPlacement
+                    ? null
+                    : findNearbyEnclosedIrrigation2x2(world, bot.getBlockPos(), WATER_SEARCH_RADIUS);
 
             BlockPos farmCenter;
             BlockPos refillSource;
@@ -184,13 +330,29 @@ public class FarmSkill implements Skill {
                 refillSource = farmCenter;
                 LOGGER.info("Using existing enclosed 2x2 still-water basin as farm center at {}", farmCenter);
             } else {
-                BlockPos rough = findFarmCenter(world, bot.getBlockPos());
-                rough = clampCenterToGroundNear(world, rough, bot.getBlockPos().getY());
+                BlockPos rough = hasExplicitTarget
+                        ? getExplicitFarmCenterTarget(context, bot)
+                        : findFarmCenter(world, bot.getBlockPos()).add(1, 0, 1);
+                if (!hasExplicitTarget) {
+                    BlockPos roughAnchor = clampCenterToGroundNear(world, rough.add(-1, 0, -1), bot.getBlockPos().getY());
+                    rough = FarmFootprint.fromIrrigationAnchor(roughAnchor).centerTarget();
+                }
 
-                BlockPos chosen = selectReachableNewFarmCenterOnGrid(bot, world, source, rough);
+                BlockPos chosen = hasExplicitTarget
+                        ? FarmFootprint.fromCenterTarget(rough).irrigationAnchor()
+                        : selectReachableNewFarmCenterOnGrid(bot, world, source, rough.add(-1, 0, -1));
                 if (chosen == null) {
                     ChatUtils.sendSystemMessage(source, "No suitable reachable spot on the farm grid (avoid oceans/doors/cliffs). Try a flatter / more open spot.");
                     return SkillExecutionResult.failure("No clear reachable grid cell available.");
+                }
+                if (!manualPlacement) {
+                    chosen = offsetAwayFromNearbyFarmland(world, chosen, HYDRATION_RADIUS + 3);
+                    chosen = clampCenterToGroundNear(world, chosen, bot.getBlockPos().getY());
+                }
+                siteAssessment = assessFarmSite(world, FarmFootprint.fromIrrigationAnchor(chosen), manualPlacement);
+                if (!siteAssessment.acceptable()) {
+                    ChatUtils.sendSystemMessage(source, "Farm site rejected: " + siteAssessment.rejectReason());
+                    return SkillExecutionResult.failure("Rejected farm site: " + siteAssessment.rejectReason());
                 }
                 farmCenter = chosen;
 
@@ -202,14 +364,20 @@ public class FarmSkill implements Skill {
                 } else {
                     LOGGER.warn("No viable still water found within {} blocks of {}", WATER_SEARCH_RADIUS, farmCenter);
                 }
-
-                farmCenter = offsetAwayFromNearbyFarmland(world, farmCenter, HYDRATION_RADIUS + 3);
-                farmCenter = clampCenterToGroundNear(world, farmCenter, bot.getBlockPos().getY());
             }
 
-            // Preserve nearby still-water tiles inside the farm footprint (integrate them rather than bulldozing).
-            Set<BlockPos> protectedStillWater = findProtectedStillWaterInFarmArea(world, farmCenter);
-            for (BlockPos p : new BlockPos[]{farmCenter, farmCenter.add(1, 0, 0), farmCenter.add(0, 0, 1), farmCenter.add(1, 0, 1)}) {
+            if (!reuseExistingIrrigation && isLikelyIrrigationCenter(world, farmCenter) && isEnclosed2x2Water(world, farmCenter)) {
+                reuseExistingIrrigation = true;
+                refillSource = farmCenter;
+                LOGGER.info("Reusing existing enclosed basin at manually selected farm center {}", farmCenter);
+            }
+
+            FarmFootprint footprint = FarmFootprint.fromIrrigationAnchor(farmCenter);
+
+            Set<BlockPos> protectedStillWater = (reuseExistingIrrigation || !manualPlacement)
+                    ? findProtectedStillWaterInFarmArea(world, footprint)
+                    : new HashSet<>();
+            for (BlockPos p : footprint.irrigationCells()) {
                 if (isStillWater(world, p)) {
                     protectedStillWater.add(p.toImmutable());
                 }
@@ -217,24 +385,41 @@ public class FarmSkill implements Skill {
 
             // Check for dangerous terrain BEFORE tree clearing to avoid false positives
             // from temporary height changes during woodcut operations
-            if (hasSimplePrecipice(world, farmCenter)) {
+            if (siteAssessment == null && hasSimplePrecipice(world, farmCenter)) {
                 ChatUtils.sendSystemMessage(source, "Unsafe drop near farm site; find flatter ground.");
                 return SkillExecutionResult.failure("Unsafe terrain near farm site.");
             }
 
-            escapeTreeAndWoodcut(bot, world, source, context, farmCenter);
-            clearBlockingTrees(bot, world, source, context, farmCenter);
+            escapeTreeAndWoodcut(bot, world, source, context, footprint);
+            clearBlockingTrees(bot, world, source, context, footprint);
             abortIfRequested(bot);
 
-            if (!ensureWaterSupply(bot, world, source, farmCenter, refillSource)) {
-                return SkillExecutionResult.failure("No water available for irrigation.");
-            }
-            abortIfRequested(bot);
-
-            Integer targetFarmY = computeFarmTargetY(world, farmCenter, protectedStillWater);
+            Integer targetFarmY = siteAssessment != null && siteAssessment.targetY() != null
+                    ? siteAssessment.targetY()
+                    : computeFarmTargetY(world, footprint, protectedStillWater);
             if (targetFarmY != null) {
+                if (manualPlacement && !reuseExistingIrrigation) {
+                    String manualPrepFailure = prepareManualFarmSite(bot, world, source, context, footprint, siteAssessment, temporaryFarmAccess);
+                    if (manualPrepFailure != null) {
+                        ChatUtils.sendSystemMessage(source, "Farm site rejected: " + manualPrepFailure);
+                        return SkillExecutionResult.failure("Rejected farm site: " + manualPrepFailure);
+                    }
+                    siteAssessment = assessFarmSite(world, footprint, true);
+                    if (!siteAssessment.acceptable()) {
+                        ChatUtils.sendSystemMessage(source, "Farm site rejected: " + siteAssessment.rejectReason());
+                        return SkillExecutionResult.failure("Rejected farm site: " + siteAssessment.rejectReason());
+                    }
+                    targetFarmY = siteAssessment.targetY();
+                }
+                if (!ensureWaterSupply(bot, world, source, farmCenter, refillSource)) {
+                    return SkillExecutionResult.failure("No water available for irrigation.");
+                }
+                abortIfRequested(bot);
                 LOGGER.info("[FarmIrrigation] targetY={} centerBefore={}", targetFarmY, farmCenter);
-                levelGround(bot, world, source, farmCenter, targetFarmY, context, protectedStillWater);
+                levelGround(bot, world, source, footprint, targetFarmY, context, protectedStillWater,
+                    manualPlacement ? MANUAL_MAX_CUT_DEPTH : AUTO_MAX_CUT_DEPTH,
+                    siteAssessment != null && siteAssessment.prepPlan() != null ? siteAssessment.prepPlan().stagingGround() : null,
+                    temporaryFarmAccess);
                 if (targetFarmY != farmCenter.getY()) {
                     BlockPos normalizedCenter = new BlockPos(farmCenter.getX(), targetFarmY, farmCenter.getZ());
                     // If we are reusing an existing enclosed basin, keep Y aligned with actual water if normalization misses it.
@@ -245,10 +430,22 @@ public class FarmSkill implements Skill {
                         LOGGER.info("[FarmIrrigation] center-normalized oldY={} newY={} center={}",
                                 farmCenter.getY(), targetFarmY, farmCenter);
                         farmCenter = normalizedCenter;
+                        footprint = FarmFootprint.fromIrrigationAnchor(farmCenter);
+                        protectedStillWater = (reuseExistingIrrigation || !manualPlacement)
+                                ? findProtectedStillWaterInFarmArea(world, footprint)
+                                : new HashSet<>();
+                        for (BlockPos irrigationCell : footprint.irrigationCells()) {
+                            if (isStillWater(world, irrigationCell)) {
+                                protectedStillWater.add(irrigationCell.toImmutable());
+                            }
+                        }
                     }
                 }
             } else {
                 LOGGER.warn("[FarmIrrigation] no targetY samples available at center={}, skipping leveling", farmCenter);
+                if (!ensureWaterSupply(bot, world, source, farmCenter, refillSource)) {
+                    return SkillExecutionResult.failure("No water available for irrigation.");
+                }
             }
             abortIfRequested(bot);
 
@@ -286,9 +483,10 @@ public class FarmSkill implements Skill {
             }
 
             // One more tree sweep before final water fetch to ensure sunlight is clear
-            clearBlockingTrees(bot, world, source, context, farmCenter);
+            clearBlockingTrees(bot, world, source, context, footprint);
 
             finalTopOffBuckets(bot, world, source, farmCenter, refillSource);
+            cleanupTemporaryFarmAccess(bot, world, source, footprint, temporaryFarmAccess);
 
             return SkillExecutionResult.success(
                     "Prepared a hydrated farm and planted " + planted + " seeds (tilled " + tilled + ")."
@@ -551,6 +749,10 @@ public class FarmSkill implements Skill {
     }
 
     private static SkillExecutionResult runWoodcutInline(ServerCommandSource source, SkillContext ctx) {
+        return runWoodcutInline(source, ctx, null);
+    }
+
+    private static SkillExecutionResult runWoodcutInline(ServerCommandSource source, SkillContext ctx, FarmFootprint footprint) {
         ServerPlayerEntity bot = source.getPlayer();
         abortIfRequested(bot);
         try {
@@ -560,6 +762,14 @@ public class FarmSkill implements Skill {
             params.put("count", 1);
             params.put("searchRadius", TREE_CLEAR_RADIUS + 2);
             params.put("verticalRange", 8);
+            if (footprint != null) {
+                params.put("minX", footprint.minX() - FARM_WOODCUT_BUFFER);
+                params.put("maxX", footprint.maxX() + FARM_WOODCUT_BUFFER);
+                params.put("minY", footprint.irrigationAnchor().getY());
+                params.put("maxY", footprint.irrigationAnchor().getY() + FARM_WOODCUT_VERTICAL_RANGE);
+                params.put("minZ", footprint.minZ() - FARM_WOODCUT_BUFFER);
+                params.put("maxZ", footprint.maxZ() + FARM_WOODCUT_BUFFER);
+            }
             return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState(), params));
         } catch (SkillAbortException abort) {
             throw abort;
@@ -730,18 +940,18 @@ public class FarmSkill implements Skill {
      * Collects still-water tiles inside the farm footprint that we should keep (integrate into the site).
      */
     private static Set<BlockPos> findProtectedStillWaterInFarmArea(ServerWorld world, BlockPos center) {
+        return findProtectedStillWaterInFarmArea(world, FarmFootprint.fromIrrigationAnchor(center));
+    }
+
+    private static Set<BlockPos> findProtectedStillWaterInFarmArea(ServerWorld world, FarmFootprint footprint) {
         Set<BlockPos> set = new HashSet<>();
-        if (world == null || center == null) {
+        if (world == null || footprint == null) {
             return set;
         }
-        int minX = center.getX() - HYDRATION_RADIUS;
-        int maxX = center.getX() + 1 + HYDRATION_RADIUS;
-        int minZ = center.getZ() - HYDRATION_RADIUS;
-        int maxZ = center.getZ() + 1 + HYDRATION_RADIUS;
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
                 for (int dy = -1; dy <= 1; dy++) {
-                    BlockPos p = new BlockPos(x, center.getY() + dy, z);
+                    BlockPos p = new BlockPos(x, footprint.irrigationAnchor().getY() + dy, z);
                     if (isStillWater(world, p)) {
                         set.add(p.toImmutable());
                     }
@@ -749,6 +959,470 @@ public class FarmSkill implements Skill {
             }
         }
         return set;
+    }
+
+    private static boolean hasExplicitFarmTarget(SkillContext context) {
+        return context != null
+            && context.parameters().containsKey("targetX")
+            && context.parameters().containsKey("targetY")
+            && context.parameters().containsKey("targetZ");
+    }
+
+    private static BlockPos getExplicitFarmCenterTarget(SkillContext context, ServerPlayerEntity bot) {
+        BlockPos fallback = bot == null ? BlockPos.ORIGIN : bot.getBlockPos().add(1, 0, 1);
+        return new BlockPos(
+            getIntParameter(context, "targetX", fallback.getX()),
+            getIntParameter(context, "targetY", fallback.getY()),
+            getIntParameter(context, "targetZ", fallback.getZ())
+        );
+    }
+
+    private static int getIntParameter(SkillContext context, String key, int defaultValue) {
+        if (context == null || key == null || !context.parameters().containsKey(key)) {
+            return defaultValue;
+        }
+        Object value = context.parameters().get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private static boolean getBooleanParameter(SkillContext context, String key, boolean defaultValue) {
+        if (context == null || key == null || !context.parameters().containsKey(key)) {
+            return defaultValue;
+        }
+        Object value = context.parameters().get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private static boolean hasSupportWithinTwoBelowGrade(ServerWorld world, int x, int z, int targetY) {
+        for (int y = targetY; y >= targetY - 2; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            BlockState state = world.getBlockState(pos);
+            if (!state.getFluidState().isEmpty()) {
+                continue;
+            }
+            if (!state.getCollisionShape(world, pos).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static FarmSiteAssessment assessFarmSite(ServerWorld world, FarmFootprint footprint, boolean manualPlacement) {
+        if (world == null || footprint == null) {
+            return FarmSiteAssessment.reject(null, "invalid-footprint", FarmTerrainPrepPlan.unsupported("invalid-footprint"));
+        }
+
+        int minY = footprint.irrigationAnchor().getY() - 1;
+        int maxY = footprint.irrigationAnchor().getY() + 3;
+        String tetherHazard = findFenceOrTetherHazard(world, footprint.irrigationAnchor(),
+            footprint.minX(), footprint.maxX(), footprint.minZ(), footprint.maxZ(), minY, maxY);
+        if (tetherHazard != null) {
+            return FarmSiteAssessment.reject(null, tetherHazard, FarmTerrainPrepPlan.unsupported(tetherHazard));
+        }
+
+        List<Integer> dryHeights = new ArrayList<>();
+        List<BlockPos> waterSurfaces = new ArrayList<>();
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
+                if (topY <= world.getBottomY()) {
+                    String rejectReason = "no-surface x=" + x + " z=" + z;
+                    return FarmSiteAssessment.reject(null, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                BlockPos surface = new BlockPos(x, topY - 1, z);
+                BlockState surfaceState = world.getBlockState(surface);
+                if (surfaceState.isOf(Blocks.FARMLAND)) {
+                    String rejectReason = "existing-farmland pos=" + surface.toShortString();
+                    return FarmSiteAssessment.reject(null, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                if (surfaceState.isOf(Blocks.WATER)) {
+                    waterSurfaces.add(surface);
+                    continue;
+                }
+                dryHeights.add(surface.getY());
+            }
+        }
+
+        if (dryHeights.isEmpty()) {
+            return FarmSiteAssessment.reject(null, "no-solid-surface-samples", FarmTerrainPrepPlan.unsupported("no-solid-surface-samples"));
+        }
+
+        List<Integer> sortedY = new ArrayList<>(dryHeights);
+        sortedY.sort(Integer::compareTo);
+        int targetY = selectFarmTargetY(sortedY, manualPlacement);
+        BlockPos centerGround = new BlockPos(footprint.centerTarget().getX(), targetY, footprint.centerTarget().getZ());
+        if (hasSimplePrecipice(world, centerGround)) {
+            String rejectReason = "precipice-near-center pos=" + centerGround.toShortString();
+            return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+        }
+
+        if (!manualPlacement && !waterSurfaces.isEmpty()) {
+            String rejectReason = "water-surface pos=" + waterSurfaces.get(0).toShortString();
+            return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+        }
+
+        int maxCutDepth = manualPlacement ? MANUAL_MAX_CUT_DEPTH : AUTO_MAX_CUT_DEPTH;
+        int moderateOutliers = 0;
+        int severeOutliers = 0;
+        int worstDelta = 0;
+        BlockPos worstPos = centerGround;
+        int sampledColumns = 0;
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                BlockPos columnBase = new BlockPos(x, targetY, z);
+                Integer surfaceY = findSurfaceY(world, columnBase);
+                if (surfaceY == null) {
+                    String rejectReason = "no-solid-support pos=" + columnBase.toShortString();
+                    return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                int diff = surfaceY - targetY;
+                BlockState topState = world.getBlockState(new BlockPos(x, world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z) - 1, z));
+                boolean waterSurface = topState.isOf(Blocks.WATER);
+                if (diff > maxCutDepth) {
+                    String rejectReason = "grade-cut-too-deep pos=" + columnBase.toShortString() + " diff=" + diff + " targetY=" + targetY;
+                    return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                if (diff < -MAX_FILL_DEPTH) {
+                    String rejectReason = "fill-too-deep pos=" + columnBase.toShortString() + " diff=" + diff + " targetY=" + targetY;
+                    return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                if (manualPlacement && waterSurface && !footprint.isIrrigationColumn(x, z)
+                        && !hasSupportWithinTwoBelowGrade(world, x, z, targetY)) {
+                    String rejectReason = "unsupported-shoreline pos=" + columnBase.toShortString() + " targetY=" + targetY;
+                    return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+                }
+                if (!waterSurface) {
+                    int delta = Math.abs(surfaceY - targetY);
+                    if (delta > 2) {
+                        moderateOutliers++;
+                    }
+                    if (delta > 4) {
+                        severeOutliers++;
+                    }
+                    if (delta > worstDelta) {
+                        worstDelta = delta;
+                        worstPos = new BlockPos(x, surfaceY, z);
+                    }
+                    sampledColumns++;
+                }
+            }
+        }
+
+        if (!manualPlacement && sampledColumns > 0) {
+            int maxModerateOutliers = Math.max(8, sampledColumns / 3);
+            int maxSevereOutliers = Math.max(2, sampledColumns / 12);
+            if (severeOutliers > maxSevereOutliers || moderateOutliers > maxModerateOutliers) {
+                String rejectReason = "steep-terrain medianY=" + targetY
+                        + " worstDelta=" + worstDelta
+                        + " worstPos=" + worstPos.toShortString()
+                        + " moderate=" + moderateOutliers + "/" + sampledColumns
+                        + " severe=" + severeOutliers + "/" + sampledColumns;
+                return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
+            }
+        }
+
+        if (manualPlacement) {
+            FarmTerrainPrepPlan prepPlan = buildFarmTerrainPrepPlan(world, footprint, targetY);
+            if (prepPlan.hardRejectReason() != null) {
+                return FarmSiteAssessment.reject(targetY, prepPlan.hardRejectReason(), prepPlan);
+            }
+            return FarmSiteAssessment.accept(targetY, prepPlan);
+        }
+
+        return FarmSiteAssessment.accept(targetY, FarmTerrainPrepPlan.ready(findStandingSpot(world, centerGround), List.of(), 0, moderateOutliers > 0));
+    }
+
+    private static FarmTerrainPrepPlan buildFarmTerrainPrepPlan(ServerWorld world, FarmFootprint footprint, int targetY) {
+        if (world == null || footprint == null) {
+            return FarmTerrainPrepPlan.unsupported("invalid-footprint");
+        }
+
+        String fallbackReason = null;
+        for (BlockPos candidate : enumerateFarmStagingCandidates(footprint, targetY)) {
+            FarmStagingCandidate staging = assessFarmStagingCandidate(world, footprint, candidate, targetY, MANUAL_MAX_CUT_DEPTH);
+            if (staging.rejectReason() != null) {
+                if (fallbackReason == null) {
+                    fallbackReason = staging.rejectReason();
+                }
+                continue;
+            }
+            int fillDeficit = staging.requiredFill() + estimateFarmFillDeficit(world, footprint, targetY);
+            return FarmTerrainPrepPlan.ready(
+                staging.ground(),
+                staging.accessPath(),
+                fillDeficit,
+                staging.requiresTerraforming()
+            );
+        }
+
+        if (fallbackReason == null) {
+            fallbackReason = "no-reachable-staging-pad pos=" + footprint.centerTarget().toShortString();
+        }
+        return FarmTerrainPrepPlan.unsupported(fallbackReason);
+    }
+
+    private static String prepareManualFarmSite(ServerPlayerEntity bot,
+                                                ServerWorld world,
+                                                ServerCommandSource source,
+                                                SkillContext ctx,
+                                                FarmFootprint footprint,
+                                                FarmSiteAssessment siteAssessment,
+                                                Set<BlockPos> temporaryFarmAccess) {
+        if (bot == null || world == null || source == null || footprint == null || siteAssessment == null) {
+            return "manual-site-prep-failed";
+        }
+        FarmTerrainPrepPlan prepPlan = siteAssessment.prepPlan();
+        if (prepPlan == null || prepPlan.hardRejectReason() != null || siteAssessment.targetY() == null) {
+            return prepPlan != null && prepPlan.hardRejectReason() != null ? prepPlan.hardRejectReason() : "manual-site-prep-failed";
+        }
+        if (!ensureFarmFillMaterials(bot, source, prepPlan.estimatedFillDeficit())) {
+            return "insufficient-fill-material need=" + prepPlan.estimatedFillDeficit() + " have=" + countAvailableFillBlocks(bot.getInventory());
+        }
+        if (!prepareFarmWorkPad(bot, world, source, footprint, prepPlan, siteAssessment.targetY(), temporaryFarmAccess)) {
+            return "no-reachable-staging-pad pos=" + footprint.centerTarget().toShortString();
+        }
+        terraformFarmFootprint(bot, world, source, ctx, footprint, siteAssessment.targetY(), prepPlan.stagingGround(), temporaryFarmAccess, MANUAL_MAX_CUT_DEPTH);
+        return null;
+    }
+
+    private static int selectFarmTargetY(List<Integer> sortedY, boolean manualPlacement) {
+        if (sortedY == null || sortedY.isEmpty()) {
+            return 0;
+        }
+        int targetY = sortedY.get(sortedY.size() / 2);
+        if (!manualPlacement) {
+            return targetY;
+        }
+        int minSurfaceY = sortedY.get(0);
+        int maxSurfaceY = sortedY.get(sortedY.size() - 1);
+        int minRecoverableY = maxSurfaceY - MANUAL_MAX_CUT_DEPTH;
+        int maxRecoverableY = minSurfaceY + MAX_FILL_DEPTH;
+        if (minRecoverableY > maxRecoverableY) {
+            return targetY;
+        }
+        return Math.max(minRecoverableY, Math.min(maxRecoverableY, targetY));
+    }
+
+    private static List<BlockPos> enumerateFarmStagingCandidates(FarmFootprint footprint, int targetY) {
+        List<BlockPos> ordered = new ArrayList<>();
+        Set<BlockPos> seen = new HashSet<>();
+        BlockPos centerTarget = footprint.centerTarget();
+        addOrderedStagingCandidate(ordered, seen, new BlockPos(centerTarget.getX(), targetY, centerTarget.getZ()));
+
+        List<BlockPos> perimeter = new ArrayList<>();
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            perimeter.add(new BlockPos(x, targetY, footprint.minZ()));
+            perimeter.add(new BlockPos(x, targetY, footprint.maxZ()));
+        }
+        for (int z = footprint.minZ() + 1; z <= footprint.maxZ() - 1; z++) {
+            perimeter.add(new BlockPos(footprint.minX(), targetY, z));
+            perimeter.add(new BlockPos(footprint.maxX(), targetY, z));
+        }
+        perimeter.sort((a, b) -> Integer.compare(
+            squaredHorizontalDistance(a, footprint.centerTarget()),
+            squaredHorizontalDistance(b, footprint.centerTarget())
+        ));
+        for (BlockPos pos : perimeter) {
+            addOrderedStagingCandidate(ordered, seen, pos);
+        }
+
+        for (int ring = 1; ring <= 2; ring++) {
+            List<BlockPos> spillover = new ArrayList<>();
+            int minX = footprint.minX() - ring;
+            int maxX = footprint.maxX() + ring;
+            int minZ = footprint.minZ() - ring;
+            int maxZ = footprint.maxZ() + ring;
+            for (int x = minX; x <= maxX; x++) {
+                spillover.add(new BlockPos(x, targetY, minZ));
+                spillover.add(new BlockPos(x, targetY, maxZ));
+            }
+            for (int z = minZ + 1; z <= maxZ - 1; z++) {
+                spillover.add(new BlockPos(minX, targetY, z));
+                spillover.add(new BlockPos(maxX, targetY, z));
+            }
+            spillover.sort((a, b) -> Integer.compare(
+                squaredHorizontalDistance(a, footprint.centerTarget()),
+                squaredHorizontalDistance(b, footprint.centerTarget())
+            ));
+            for (BlockPos pos : spillover) {
+                addOrderedStagingCandidate(ordered, seen, pos);
+            }
+        }
+
+        return ordered;
+    }
+
+    private static void addOrderedStagingCandidate(List<BlockPos> ordered, Set<BlockPos> seen, BlockPos candidate) {
+        if (candidate == null) {
+            return;
+        }
+        BlockPos immutable = candidate.toImmutable();
+        if (seen.add(immutable)) {
+            ordered.add(immutable);
+        }
+    }
+
+    private static FarmStagingCandidate assessFarmStagingCandidate(ServerWorld world,
+                                                                   FarmFootprint footprint,
+                                                                   BlockPos candidate,
+                                                                   int targetY,
+                                                                   int maxCutDepth) {
+        if (world == null || footprint == null || candidate == null) {
+            return FarmStagingCandidate.reject("no-reachable-staging-pad");
+        }
+        if (footprint.isIrrigationPos(candidate)) {
+            return FarmStagingCandidate.reject("no-reachable-staging-pad pos=" + candidate.toShortString());
+        }
+        List<BlockPos> accessPath = buildStagingAccessPath(footprint, candidate, targetY);
+        int requiredFill = 0;
+        boolean requiresTerraforming = false;
+
+        FarmWorkingGroundAssessment candidateGround = assessFarmWorkingGround(world, candidate, targetY, true, maxCutDepth);
+        if (!candidateGround.acceptable()) {
+            return FarmStagingCandidate.reject(candidateGround.rejectReason());
+        }
+        requiredFill += candidateGround.fillBlocks();
+        requiresTerraforming |= candidateGround.requiresTerraforming();
+
+        for (BlockPos pathPos : accessPath) {
+            if (footprint.isIrrigationPos(pathPos)) {
+                return FarmStagingCandidate.reject("unbridgeable-access-gap pos=" + pathPos.toShortString());
+            }
+            FarmWorkingGroundAssessment pathGround = assessFarmWorkingGround(world, pathPos, targetY, false, maxCutDepth);
+            if (!pathGround.acceptable()) {
+                return FarmStagingCandidate.reject(pathGround.rejectReason());
+            }
+            requiredFill += pathGround.fillBlocks();
+            requiresTerraforming |= pathGround.requiresTerraforming();
+        }
+        return FarmStagingCandidate.ready(candidate, accessPath, requiredFill, requiresTerraforming);
+    }
+
+    private static FarmWorkingGroundAssessment assessFarmWorkingGround(ServerWorld world,
+                                                                       BlockPos ground,
+                                                                       int targetY,
+                                                                       boolean stagingPad,
+                                                                       int maxCutDepth) {
+        if (world == null || ground == null) {
+            return FarmWorkingGroundAssessment.reject(stagingPad ? "no-reachable-staging-pad" : "unbridgeable-access-gap");
+        }
+        if (hasSimplePrecipice(world, ground)) {
+            return FarmWorkingGroundAssessment.reject("precipice-near-work-path pos=" + ground.toShortString());
+        }
+
+        Integer surfaceY = findSurfaceY(world, ground);
+        if (surfaceY != null && surfaceY - targetY > maxCutDepth) {
+            return FarmWorkingGroundAssessment.reject("grade-cut-too-deep pos=" + ground.toShortString() + " diff=" + (surfaceY - targetY));
+        }
+
+        Integer supportY = findSolidSupportWithinDepth(world, ground, targetY, 3);
+        if (supportY == null) {
+            String reason = stagingPad
+                ? "staging-pad-fill-too-deep pos=" + ground.toShortString()
+                : "unbridgeable-access-gap pos=" + ground.toShortString();
+            return FarmWorkingGroundAssessment.reject(reason);
+        }
+
+        boolean requiresTerraforming = false;
+        int fillBlocks = Math.max(0, targetY - supportY);
+        BlockState topState = world.getBlockState(ground);
+        if (topState.isOf(Blocks.WATER) && !hasSupportWithinTwoBelowGrade(world, ground.getX(), ground.getZ(), targetY)) {
+            String reason = stagingPad
+                ? "staging-pad-fill-too-deep pos=" + ground.toShortString()
+                : "unbridgeable-access-gap pos=" + ground.toShortString();
+            return FarmWorkingGroundAssessment.reject(reason);
+        }
+        if (!isSafeStandingGround(world, ground)) {
+            requiresTerraforming = true;
+        }
+        for (int y = targetY + 1; y <= targetY + 2; y++) {
+            BlockPos headPos = new BlockPos(ground.getX(), y, ground.getZ());
+            if (!canClearForStanding(world, headPos)) {
+                return FarmWorkingGroundAssessment.reject("no-reachable-staging-pad pos=" + ground.toShortString());
+            }
+            if (!isPassableStandingSpace(world, headPos)) {
+                requiresTerraforming = true;
+            }
+        }
+        return FarmWorkingGroundAssessment.accept(fillBlocks, requiresTerraforming);
+    }
+
+    private static Integer findSolidSupportWithinDepth(ServerWorld world, BlockPos ground, int targetY, int maxDepth) {
+        for (int y = targetY; y >= targetY - maxDepth; y--) {
+            BlockPos check = new BlockPos(ground.getX(), y, ground.getZ());
+            BlockState state = world.getBlockState(check);
+            if (!state.getFluidState().isEmpty()) {
+                continue;
+            }
+            if (!state.getCollisionShape(world, check).isEmpty()) {
+                return y;
+            }
+        }
+        return null;
+    }
+
+    private static boolean canClearForStanding(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (isPassableStandingSpace(world, pos)) {
+            return true;
+        }
+        if (state.getHardness(world, pos) < 0.0f) {
+            return false;
+        }
+        return state.isReplaceable()
+            || state.isIn(BlockTags.LOGS)
+            || state.isIn(BlockTags.LEAVES)
+            || SHOVEL_DIG_BLOCKS.contains(state.getBlock())
+            || state.isOf(Blocks.STONE)
+            || state.isOf(Blocks.COBBLESTONE)
+            || state.isOf(Blocks.MOSS_BLOCK);
+    }
+
+    private static List<BlockPos> buildStagingAccessPath(FarmFootprint footprint, BlockPos candidate, int targetY) {
+        if (footprint == null || candidate == null) {
+            return List.of();
+        }
+        int targetX = Math.max(footprint.minX(), Math.min(footprint.maxX(), candidate.getX()));
+        int targetZ = Math.max(footprint.minZ(), Math.min(footprint.maxZ(), candidate.getZ()));
+        List<BlockPos> path = new ArrayList<>();
+        int x = candidate.getX();
+        int z = candidate.getZ();
+        while (x != targetX) {
+            x += Integer.signum(targetX - x);
+            path.add(new BlockPos(x, targetY, z));
+        }
+        while (z != targetZ) {
+            z += Integer.signum(targetZ - z);
+            path.add(new BlockPos(x, targetY, z));
+        }
+        return path;
+    }
+
+    private static int estimateFarmFillDeficit(ServerWorld world, FarmFootprint footprint, int targetY) {
+        int deficit = 0;
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                if (footprint.isIrrigationColumn(x, z)) {
+                    continue;
+                }
+                BlockPos columnBase = new BlockPos(x, targetY, z);
+                Integer supportY = findSolidSupportWithinDepth(world, columnBase, targetY, MAX_FILL_DEPTH);
+                if (supportY != null && supportY < targetY) {
+                    deficit += targetY - supportY;
+                }
+            }
+        }
+        return deficit;
     }
 
     /**
@@ -898,11 +1572,12 @@ public class FarmSkill implements Skill {
         }
     }
 
-    private static void escapeTreeAndWoodcut(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, BlockPos center) {
+    private static void escapeTreeAndWoodcut(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, FarmFootprint footprint) {
         abortIfRequested(bot);
+        BlockPos center = footprint == null ? null : footprint.irrigationAnchor();
         boolean insideTree = isInsideTree(bot, world);
         boolean skyBlocked = !world.isSkyVisible(bot.getBlockPos().up(3));
-        int nearbyTreeBlocks = countBlockingTreeBlocks(world, center);
+        int nearbyTreeBlocks = countBlockingTreeBlocks(world, footprint);
         boolean nearbyTree = nearbyTreeBlocks > 0;
         if (!insideTree && !skyBlocked && !nearbyTree) {
             return;
@@ -914,12 +1589,16 @@ public class FarmSkill implements Skill {
             LOGGER.info("escapeTree attempt {} insideTree={} skyBlocked={} nearbyTree={} blockingTreeBlocks={}",
                     attempt, insideTree, skyBlocked, nearbyTree, nearbyTreeBlocks);
             int before = nearbyTreeBlocks;
-            SkillExecutionResult result = runWoodcutInline(source, new SkillContext(source, ctx.sharedState()));
+            SkillExecutionResult result = runWoodcutInline(source, new SkillContext(source, ctx.sharedState()), footprint);
             LOGGER.info("escapeTree woodcut result success={} msg={}", result.success(), result.message());
+            int locallyCleared = nearbyTreeBlocks > 0 ? clearBlockingTreeBlocksLocally(bot, world, source, footprint) : 0;
+            if (locallyCleared > 0) {
+                LOGGER.info("escapeTree local bounded clear removed {} in-bounds blocker(s)", locallyCleared);
+            }
             net.wcfcarolina13.GameAI.BotEventHandler.rescueFromBurial(bot);
             insideTree = isInsideTree(bot, world);
             skyBlocked = !world.isSkyVisible(bot.getBlockPos().up(3));
-            nearbyTreeBlocks = countBlockingTreeBlocks(world, center);
+            nearbyTreeBlocks = countBlockingTreeBlocks(world, footprint);
             nearbyTree = nearbyTreeBlocks > 0;
             if (!insideTree && !nearbyTree) {
                 break;
@@ -960,19 +1639,23 @@ public class FarmSkill implements Skill {
         return false;
     }
 
-    private static void clearBlockingTrees(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, BlockPos center) {
+    private static void clearBlockingTrees(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, FarmFootprint footprint) {
         abortIfRequested(bot);
         int attempts = 0;
-        int blockingTreeBlocks = countBlockingTreeBlocks(world, center);
+        int blockingTreeBlocks = countBlockingTreeBlocks(world, footprint);
         while (attempts < 3 && blockingTreeBlocks > 0) {
             abortIfRequested(bot);
             attempts++;
             ChatUtils.sendSystemMessage(source, "Clearing trees near the farm area (pass " + attempts + ").");
             SkillContext woodcutCtx = new SkillContext(source, ctx.sharedState());
-            SkillExecutionResult woodcutResult = runWoodcutInline(source, woodcutCtx);
-            int nextBlockingTreeBlocks = countBlockingTreeBlocks(world, center);
+            SkillExecutionResult woodcutResult = runWoodcutInline(source, woodcutCtx, footprint);
+            int locallyCleared = clearBlockingTreeBlocksLocally(bot, world, source, footprint);
+            int nextBlockingTreeBlocks = countBlockingTreeBlocks(world, footprint);
             LOGGER.info("clearBlockingTrees pass={} result={} before={} after={}",
                     attempts, woodcutResult.success(), blockingTreeBlocks, nextBlockingTreeBlocks);
+            if (locallyCleared > 0) {
+                LOGGER.info("clearBlockingTrees pass={} local bounded clear removed {} blocker(s)", attempts, locallyCleared);
+            }
             if (!woodcutResult.success()) {
                 ChatUtils.sendSystemMessage(source, "Tree clearing attempt " + attempts + " failed; trying again if needed.");
             } else if (nextBlockingTreeBlocks <= 0) {
@@ -988,25 +1671,175 @@ public class FarmSkill implements Skill {
     }
 
     private static int countBlockingTreeBlocks(ServerWorld world, BlockPos center) {
-        int minX = center.getX() - HYDRATION_RADIUS - 1;
-        int maxX = center.getX() + HYDRATION_RADIUS + 2;
-        int minZ = center.getZ() - HYDRATION_RADIUS - 1;
-        int maxZ = center.getZ() + HYDRATION_RADIUS + 2;
-        int minY = center.getY();
-        int maxY = center.getY() + 9;
-        int count = 0;
+        return countBlockingTreeBlocks(world, FarmFootprint.fromIrrigationAnchor(center));
+    }
+
+    private static boolean isWithinFarmWoodcutBounds(FarmFootprint footprint, BlockPos pos) {
+        if (footprint == null || pos == null) {
+            return false;
+        }
+        return pos.getX() >= footprint.minX() - FARM_WOODCUT_BUFFER
+                && pos.getX() <= footprint.maxX() + FARM_WOODCUT_BUFFER
+                && pos.getY() >= footprint.irrigationAnchor().getY()
+                && pos.getY() <= footprint.irrigationAnchor().getY() + FARM_WOODCUT_VERTICAL_RANGE
+                && pos.getZ() >= footprint.minZ() - FARM_WOODCUT_BUFFER
+                && pos.getZ() <= footprint.maxZ() + FARM_WOODCUT_BUFFER;
+    }
+
+    private static List<BlockPos> collectBlockingTreeBlocks(ServerWorld world, FarmFootprint footprint) {
+        if (world == null || footprint == null) {
+            return List.of();
+        }
+        List<BlockPos> blockers = new ArrayList<>();
+        int minX = footprint.minX() - FARM_WOODCUT_BUFFER;
+        int maxX = footprint.maxX() + FARM_WOODCUT_BUFFER;
+        int minZ = footprint.minZ() - FARM_WOODCUT_BUFFER;
+        int maxZ = footprint.maxZ() + FARM_WOODCUT_BUFFER;
+        int minY = footprint.irrigationAnchor().getY();
+        int maxY = footprint.irrigationAnchor().getY() + FARM_WOODCUT_VERTICAL_RANGE;
         for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
                 for (int y = minY; y <= maxY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = world.getBlockState(pos);
                     if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES)) {
-                        count++;
+                        blockers.add(pos);
                     }
                 }
             }
         }
-        return count;
+        return blockers;
+    }
+
+    private static BlockPos findLocalTreeClearStand(ServerWorld world, FarmFootprint footprint, BlockPos target) {
+        if (world == null || footprint == null || target == null) {
+            return null;
+        }
+        BlockPos direct = findStandingSpot(world, target);
+        if (direct != null && isWithinFarmWoodcutBounds(footprint, direct) && isLocalTreeClearStandGround(world, direct)) {
+            return direct;
+        }
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                candidates.add(target.add(dx, 0, dz));
+                candidates.add(target.add(dx, -1, dz));
+                candidates.add(target.add(dx, 1, dz));
+            }
+        }
+        return candidates.stream()
+                .filter(candidate -> isWithinFarmWoodcutBounds(footprint, candidate))
+                .filter(candidate -> isLocalTreeClearStandGround(world, candidate))
+                .min(Comparator.comparingDouble(candidate -> candidate.getSquaredDistance(target)))
+                .orElse(null);
+    }
+
+    private static boolean isLocalTreeClearStandGround(ServerWorld world, BlockPos ground) {
+        if (world == null || ground == null || !isSafeStandingGround(world, ground)) {
+            return false;
+        }
+        BlockState state = world.getBlockState(ground);
+        return !state.isIn(BlockTags.LOGS) && !state.isIn(BlockTags.LEAVES);
+    }
+
+    private static Comparator<BlockPos> localTreeBlockerComparator(ServerWorld world,
+                                                                   ServerPlayerEntity bot,
+                                                                   FarmFootprint footprint,
+                                                                   BlockPos clusterAnchor) {
+        return Comparator
+                .comparingInt((BlockPos pos) -> world.getBlockState(pos).isIn(BlockTags.LOGS) ? 0 : 1)
+                .thenComparingInt(pos -> clusterAnchor != null && pos.getSquaredDistance(clusterAnchor) <= 9.0D ? 0 : 1)
+                .thenComparingDouble(pos -> bot.getBlockPos().getSquaredDistance(pos))
+                .thenComparingDouble(pos -> pos.getSquaredDistance(footprint.centerTarget()));
+    }
+
+    private static int clearBlockingTreeBlocksLocally(ServerPlayerEntity bot,
+                                                      ServerWorld world,
+                                                      ServerCommandSource source,
+                                                      FarmFootprint footprint) {
+        if (bot == null || world == null || source == null || footprint == null) {
+            return 0;
+        }
+        int cleared = 0;
+        int stalled = 0;
+        Set<Long> skipped = new HashSet<>();
+        BlockPos clusterAnchor = null;
+        while (cleared < FARM_LOCAL_TREE_CLEAR_LIMIT && stalled < 8) {
+            abortIfRequested(bot);
+            List<BlockPos> blockers = collectBlockingTreeBlocks(world, footprint).stream()
+                    .filter(pos -> !skipped.contains(pos.asLong()))
+                    .filter(pos -> isMutationAuthorized(bot, world, pos))
+                    .sorted(localTreeBlockerComparator(world, bot, footprint, clusterAnchor))
+                    .toList();
+            if (blockers.isEmpty()) {
+                break;
+            }
+            BlockPos blocker = blockers.get(0);
+            if (!isWithinFarmWoodcutBounds(footprint, blocker)) {
+                skipped.add(blocker.asLong());
+                continue;
+            }
+            BlockState state = world.getBlockState(blocker);
+            if (!state.isIn(BlockTags.LOGS) && !state.isIn(BlockTags.LEAVES)) {
+                skipped.add(blocker.asLong());
+                continue;
+            }
+            if (!isWithinReach(bot, blocker)) {
+                BlockPos stand = findLocalTreeClearStand(world, footprint, blocker);
+                if (stand == null) {
+                    skipped.add(blocker.asLong());
+                    stalled++;
+                    continue;
+                }
+                moveTo(source, bot, stand.up(), false);
+                waitUntilClose(bot, stand, 2.5, 18, false);
+            }
+            if (!isWithinReach(bot, blocker)) {
+                skipped.add(blocker.asLong());
+                stalled++;
+                continue;
+            }
+            int clearedThisCluster = 0;
+            List<BlockPos> reachableCluster = collectBlockingTreeBlocks(world, footprint).stream()
+                    .filter(pos -> isWithinReach(bot, pos))
+                    .sorted(localTreeBlockerComparator(world, bot, footprint, blocker))
+                    .limit(8)
+                    .toList();
+            for (BlockPos target : reachableCluster) {
+                abortIfRequested(bot);
+                BlockState targetState = world.getBlockState(target);
+                if (!targetState.isIn(BlockTags.LOGS) && !targetState.isIn(BlockTags.LEAVES)) {
+                    continue;
+                }
+                mineBlock(bot, target, world);
+                if (!world.getBlockState(target).isIn(BlockTags.LOGS) && !world.getBlockState(target).isIn(BlockTags.LEAVES)) {
+                    cleared++;
+                    clearedThisCluster++;
+                    clusterAnchor = target.toImmutable();
+                    skipped.remove(target.asLong());
+                    if (cleared >= FARM_LOCAL_TREE_CLEAR_LIMIT) {
+                        break;
+                    }
+                }
+            }
+            if (clearedThisCluster == 0) {
+                skipped.add(blocker.asLong());
+                stalled++;
+            } else {
+                stalled = 0;
+            }
+        }
+        return cleared;
+    }
+
+    private static int countBlockingTreeBlocks(ServerWorld world, FarmFootprint footprint) {
+        if (world == null || footprint == null) {
+            return 0;
+        }
+        return collectBlockingTreeBlocks(world, footprint).size();
     }
 
     private static BlockPos snapToFarmGrid(ServerWorld world, BlockPos center) {
@@ -1040,77 +1873,7 @@ public class FarmSkill implements Skill {
     }
 
     private static String farmAreaRejectReason(ServerWorld world, BlockPos center) {
-        int minX = center.getX() - HYDRATION_RADIUS;
-        int maxX = center.getX() + 1 + HYDRATION_RADIUS;
-        int minZ = center.getZ() - HYDRATION_RADIUS;
-        int maxZ = center.getZ() + 1 + HYDRATION_RADIUS;
-        int minY = center.getY() - 1;
-        int maxY = center.getY() + 3;
-
-        String tetherHazard = findFenceOrTetherHazard(world, center, minX, maxX, minZ, maxZ, minY, maxY);
-        if (tetherHazard != null) {
-            return tetherHazard;
-        }
-
-        List<Integer> sampledY = new ArrayList<>();
-        List<BlockPos> sampledPos = new ArrayList<>();
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
-                if (topY <= world.getBottomY()) {
-                    return "no-surface x=" + x + " z=" + z;
-                }
-                BlockPos surface = new BlockPos(x, topY - 1, z);
-                BlockState surfaceState = world.getBlockState(surface);
-
-                // Reject underwater / liquid surface cells (prevents ocean-floor farming).
-                if (surfaceState.isOf(Blocks.WATER)) {
-                    return "water-surface pos=" + surface.toShortString();
-                }
-                // Avoid building a new farm on top of an existing farm.
-                if (surfaceState.isOf(Blocks.FARMLAND)) {
-                    return "existing-farmland pos=" + surface.toShortString();
-                }
-                sampledY.add(surface.getY());
-                sampledPos.add(surface);
-            }
-        }
-
-        if (sampledY.isEmpty()) {
-            return "no-surface-samples";
-        }
-
-        List<Integer> sortedY = new ArrayList<>(sampledY);
-        sortedY.sort(Integer::compareTo);
-        int medianY = sortedY.get(sortedY.size() / 2);
-        int moderateOutliers = 0;
-        int severeOutliers = 0;
-        int worstDelta = 0;
-        BlockPos worstPos = center;
-        for (int i = 0; i < sampledY.size(); i++) {
-            int delta = Math.abs(sampledY.get(i) - medianY);
-            if (delta > 2) {
-                moderateOutliers++;
-            }
-            if (delta > 4) {
-                severeOutliers++;
-            }
-            if (delta > worstDelta) {
-                worstDelta = delta;
-                worstPos = sampledPos.get(i);
-            }
-        }
-        int total = sampledY.size();
-        int maxModerateOutliers = Math.max(8, total / 3);
-        int maxSevereOutliers = Math.max(2, total / 12);
-        if (severeOutliers > maxSevereOutliers || moderateOutliers > maxModerateOutliers) {
-            return "steep-terrain medianY=" + medianY
-                    + " worstDelta=" + worstDelta
-                    + " worstPos=" + worstPos.toShortString()
-                    + " moderate=" + moderateOutliers + "/" + total
-                    + " severe=" + severeOutliers + "/" + total;
-        }
-        return null;
+        return assessFarmSite(world, FarmFootprint.fromIrrigationAnchor(center), false).rejectReason();
     }
 
     private static Integer estimateFarmAreaMedianSurfaceY(ServerWorld world, BlockPos center) {
@@ -1867,22 +2630,11 @@ public class FarmSkill implements Skill {
     }
 
     private static List<BlockPos> farmPlots(BlockPos center) {
-        List<BlockPos> plots = new ArrayList<>();
-        int minX = center.getX() - HYDRATION_RADIUS;
-        int maxX = center.getX() + 1 + HYDRATION_RADIUS;
-        int minZ = center.getZ() - HYDRATION_RADIUS;
-        int maxZ = center.getZ() + 1 + HYDRATION_RADIUS;
+        return farmPlots(FarmFootprint.fromIrrigationAnchor(center));
+    }
 
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                if (x >= center.getX() && x <= center.getX() + 1 &&
-                        z >= center.getZ() && z <= center.getZ() + 1) {
-                    continue; // skip 2x2 water
-                }
-                plots.add(new BlockPos(x, center.getY(), z));
-            }
-        }
-        return plots;
+    private static List<BlockPos> farmPlots(FarmFootprint footprint) {
+        return footprint.plotPositions();
     }
 
     private static boolean isStillWater(ServerWorld world, BlockPos pos) {
@@ -2495,7 +3247,12 @@ public class FarmSkill implements Skill {
             return;
         }
         Block block = world.getBlockState(pos).getBlock();
-        if (SHOVEL_DIG_BLOCKS.contains(block)) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.AXE_MINEABLE)) {
+            BotActions.selectBestTool(bot, "axe", "pickaxe");
+        } else if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW)) {
+            BotActions.selectBestTool(bot, "axe", "shovel");
+        } else if (SHOVEL_DIG_BLOCKS.contains(block)) {
             BotActions.selectBestTool(bot, "shovel", "pickaxe");
         } else if (block.getHardness() >= 1.5f) {
             BotActions.selectBestTool(bot, "pickaxe", "shovel");
@@ -2535,6 +3292,303 @@ public class FarmSkill implements Skill {
             return true;
         }
         return BotActions.placeBlockAt(bot, pos, Direction.UP, DIRT_BLOCK_PREFERENCE);
+    }
+
+    private static int countAvailableFillBlocks(PlayerInventory inventory) {
+        int available = 0;
+        for (Item item : DIRT_BLOCK_PREFERENCE) {
+            available += countItem(inventory, item);
+        }
+        return available;
+    }
+
+    private static boolean ensureFarmFillMaterials(ServerPlayerEntity bot, ServerCommandSource source, int requiredBlocks) {
+        if (bot == null || source == null || requiredBlocks <= 0) {
+            return true;
+        }
+        int available = countAvailableFillBlocks(bot.getInventory());
+        if (available >= requiredBlocks) {
+            return true;
+        }
+
+        int needed = Math.max(4, requiredBlocks - available);
+        LOGGER.info("Farm terraform collecting fill blocks need={} available={}", requiredBlocks, available);
+        ChatUtils.sendSystemMessage(source, "Collecting dirt for farm terraforming (" + needed + ").");
+        Map<String, Object> params = new HashMap<>();
+        params.put("count", needed);
+        params.put("searchRadius", 8);
+        params.put("verticalRange", 4);
+        params.put("allowChestStore", false);
+        SkillExecutionResult result = new CollectDirtSkill().execute(new SkillContext(source, new HashMap<>(), params));
+        if (!result.success()) {
+            LOGGER.warn("Farm terraform dirt collection failed: {}", result.message());
+        }
+        return countAvailableFillBlocks(bot.getInventory()) >= requiredBlocks;
+    }
+
+    private static boolean prepareFarmWorkPad(ServerPlayerEntity bot,
+                                              ServerWorld world,
+                                              ServerCommandSource source,
+                                              FarmFootprint footprint,
+                                              FarmTerrainPrepPlan prepPlan,
+                                              int targetY,
+                                              Set<BlockPos> temporaryFarmAccess) {
+        if (bot == null || world == null || source == null || footprint == null || prepPlan == null || prepPlan.stagingGround() == null) {
+            return false;
+        }
+        for (BlockPos pathPos : prepPlan.accessPath()) {
+            if (!prepareFarmStandingCell(bot, world, source, footprint, pathPos, targetY, temporaryFarmAccess)) {
+                return false;
+            }
+        }
+        if (!prepareFarmStandingCell(bot, world, source, footprint, prepPlan.stagingGround(), targetY, temporaryFarmAccess)) {
+            return false;
+        }
+        moveTo(source, bot, prepPlan.stagingGround().up(), false);
+        waitUntilClose(bot, prepPlan.stagingGround(), 2.5, 24, false);
+        return bot.getEyePos().distanceTo(Vec3d.ofCenter(prepPlan.stagingGround())) <= 3.0D;
+    }
+
+    private static void terraformFarmFootprint(ServerPlayerEntity bot,
+                                               ServerWorld world,
+                                               ServerCommandSource source,
+                                               SkillContext ctx,
+                                               FarmFootprint footprint,
+                                               int targetY,
+                                               BlockPos stagingGround,
+                                               Set<BlockPos> temporaryFarmAccess,
+                                               int maxCutDepth) {
+        if (bot == null || world == null || source == null || footprint == null) {
+            return;
+        }
+        List<int[]> columns = new ArrayList<>();
+        BlockPos orderingCenter = stagingGround != null ? stagingGround : footprint.centerTarget();
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                if (footprint.isIrrigationColumn(x, z)) {
+                    continue;
+                }
+                columns.add(new int[]{x, z});
+            }
+        }
+        columns.sort((a, b) -> Integer.compare(
+            (a[0] - orderingCenter.getX()) * (a[0] - orderingCenter.getX()) + (a[1] - orderingCenter.getZ()) * (a[1] - orderingCenter.getZ()),
+            (b[0] - orderingCenter.getX()) * (b[0] - orderingCenter.getX()) + (b[1] - orderingCenter.getZ()) * (b[1] - orderingCenter.getZ())
+        ));
+
+        for (int[] column : columns) {
+            abortIfRequested(bot);
+            BlockPos targetPos = new BlockPos(column[0], targetY, column[1]);
+            Integer surfaceY = findSurfaceY(world, targetPos);
+            if (surfaceY != null) {
+                BlockPos topCheck = new BlockPos(targetPos.getX(), surfaceY, targetPos.getZ());
+                BlockState topState = world.getBlockState(topCheck);
+                if ((topState.isIn(BlockTags.LOGS) || topState.isIn(BlockTags.LEAVES)) && ctx != null) {
+                    runWoodcutInline(source, new SkillContext(source, ctx.sharedState()), footprint);
+                    surfaceY = findSurfaceY(world, targetPos);
+                }
+            }
+            if (surfaceY == null) {
+                continue;
+            }
+            int diff = surfaceY - targetY;
+            if (diff > maxCutDepth || diff < -MAX_FILL_DEPTH) {
+                LOGGER.debug("terraformFarmFootprint: skipping unrecoverable column at {} diff={}", targetPos, diff);
+                continue;
+            }
+
+            BlockPos stand = findOrCreateFarmWorkingStand(bot, world, source, footprint, targetPos, targetY, temporaryFarmAccess);
+            if (stand != null) {
+                moveTo(source, bot, stand.up(), false);
+                waitUntilClose(bot, targetPos, 4.6, 16, false);
+            }
+
+            if (surfaceY > targetY) {
+                for (int y = surfaceY; y > targetY; y--) {
+                    BlockPos cutPos = new BlockPos(targetPos.getX(), y, targetPos.getZ());
+                    if (isWithinReach(bot, cutPos) && !world.getBlockState(cutPos).isOf(Blocks.WATER)) {
+                        mineBlock(bot, cutPos, world);
+                    }
+                }
+            }
+
+            clearStandingHeadroom(bot, world, targetPos, targetY);
+            Integer supportY = findSolidSupportWithinDepth(world, targetPos, targetY, 3);
+            if (supportY != null && supportY < targetY) {
+                for (int y = supportY + 1; y <= targetY; y++) {
+                    BlockPos fillPos = new BlockPos(targetPos.getX(), y, targetPos.getZ());
+                    if (isWithinReach(bot, fillPos)) {
+                        fillWithDirt(bot, world, fillPos);
+                    }
+                }
+            }
+        }
+    }
+
+    private static BlockPos findOrCreateFarmWorkingStand(ServerPlayerEntity bot,
+                                                         ServerWorld world,
+                                                         ServerCommandSource source,
+                                                         FarmFootprint footprint,
+                                                         BlockPos target,
+                                                         int targetY,
+                                                         Set<BlockPos> temporaryFarmAccess) {
+        if (bot == null || world == null || source == null || footprint == null || target == null) {
+            return null;
+        }
+        BlockPos currentGround = bot.getBlockPos().down();
+        if (isUsableFarmStandingGround(world, footprint, currentGround)
+                && bot.getEyePos().distanceTo(Vec3d.ofCenter(target)) <= 4.6D) {
+            return currentGround;
+        }
+
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int radius = 1; radius <= 2; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) != radius) {
+                        continue;
+                    }
+                    BlockPos candidate = new BlockPos(target.getX() + dx, targetY, target.getZ() + dz);
+                    if (!isWithinFarmWorkBounds(footprint, candidate, 2)) {
+                        continue;
+                    }
+                    candidates.add(candidate);
+                }
+            }
+        }
+        candidates.sort((a, b) -> Integer.compare(
+            squaredHorizontalDistance(a, bot.getBlockPos()),
+            squaredHorizontalDistance(b, bot.getBlockPos())
+        ));
+
+        for (BlockPos candidate : candidates) {
+            if (isUsableFarmStandingGround(world, footprint, candidate)) {
+                return candidate;
+            }
+            if (prepareFarmStandingCell(bot, world, source, footprint, candidate, targetY, temporaryFarmAccess)
+                    && isUsableFarmStandingGround(world, footprint, candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static boolean prepareFarmStandingCell(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   ServerCommandSource source,
+                                                   FarmFootprint footprint,
+                                                   BlockPos ground,
+                                                   int targetY,
+                                                   Set<BlockPos> temporaryFarmAccess) {
+        if (bot == null || world == null || source == null || footprint == null || ground == null) {
+            return false;
+        }
+
+        BlockPos approach = findStandingSpot(world, ground);
+        if (approach != null) {
+            moveTo(source, bot, approach.up(), false);
+            waitUntilClose(bot, ground, 4.6, 16, false);
+        } else if (bot.getEyePos().distanceTo(Vec3d.ofCenter(ground)) > 4.6D) {
+            moveTo(source, bot, ground.up(), false);
+            waitUntilClose(bot, ground, 4.6, 20, false);
+        }
+
+        Integer supportY = findSolidSupportWithinDepth(world, ground, targetY, 3);
+        if (supportY == null) {
+            return false;
+        }
+        clearStandingHeadroom(bot, world, ground, targetY);
+        for (int y = supportY + 1; y <= targetY; y++) {
+            BlockPos fillPos = new BlockPos(ground.getX(), y, ground.getZ());
+            if (!isWithinReach(bot, fillPos)) {
+                continue;
+            }
+            if (fillWithDirt(bot, world, fillPos) && !isInsideFarmFootprint(footprint, fillPos)) {
+                temporaryFarmAccess.add(fillPos.toImmutable());
+            }
+        }
+        return isUsableFarmStandingGround(world, footprint, ground);
+    }
+
+    private static void clearStandingHeadroom(ServerPlayerEntity bot, ServerWorld world, BlockPos ground, int targetY) {
+        for (int y = targetY + 1; y <= targetY + 2; y++) {
+            BlockPos clearPos = new BlockPos(ground.getX(), y, ground.getZ());
+            if (isWithinReach(bot, clearPos) && !isPassableStandingSpace(world, clearPos) && canClearForStanding(world, clearPos)) {
+                mineBlock(bot, clearPos, world);
+            }
+        }
+    }
+
+    private static boolean isUsableFarmStandingGround(ServerWorld world, FarmFootprint footprint, BlockPos ground) {
+        return ground != null
+            && !footprint.isIrrigationPos(ground)
+            && isSafeStandingGround(world, ground)
+            && !hasSimplePrecipice(world, ground);
+    }
+
+    private static boolean isWithinFarmWorkBounds(FarmFootprint footprint, BlockPos pos, int spillover) {
+        if (footprint == null || pos == null) {
+            return false;
+        }
+        return pos.getX() >= footprint.minX() - spillover
+            && pos.getX() <= footprint.maxX() + spillover
+            && pos.getZ() >= footprint.minZ() - spillover
+            && pos.getZ() <= footprint.maxZ() + spillover;
+    }
+
+    private static boolean isInsideFarmFootprint(FarmFootprint footprint, BlockPos pos) {
+        if (footprint == null || pos == null) {
+            return false;
+        }
+        return pos.getX() >= footprint.minX()
+            && pos.getX() <= footprint.maxX()
+            && pos.getZ() >= footprint.minZ()
+            && pos.getZ() <= footprint.maxZ();
+    }
+
+    private static int squaredHorizontalDistance(BlockPos a, BlockPos b) {
+        if (a == null || b == null) {
+            return Integer.MAX_VALUE;
+        }
+        int dx = a.getX() - b.getX();
+        int dz = a.getZ() - b.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private static void cleanupTemporaryFarmAccess(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   ServerCommandSource source,
+                                                   FarmFootprint footprint,
+                                                   Set<BlockPos> temporaryFarmAccess) {
+        if (bot == null || world == null || source == null || footprint == null || temporaryFarmAccess == null || temporaryFarmAccess.isEmpty()) {
+            return;
+        }
+
+        BlockPos retreat = findStandingSpot(world, footprint.centerTarget());
+        if (retreat != null) {
+            moveTo(source, bot, retreat.up(), false);
+            waitUntilClose(bot, retreat, 3.0, 16, false);
+        }
+
+        for (BlockPos pos : new ArrayList<>(temporaryFarmAccess)) {
+            if (isInsideFarmFootprint(footprint, pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (!state.isOf(Blocks.DIRT) && !state.isOf(Blocks.GRASS_BLOCK) && !state.isOf(Blocks.COARSE_DIRT) && !state.isOf(Blocks.ROOTED_DIRT)) {
+                continue;
+            }
+            if (!world.getBlockState(pos.up()).isAir() && !world.getBlockState(pos.up()).isReplaceable()) {
+                continue;
+            }
+            if (bot.getEyePos().distanceTo(Vec3d.ofCenter(pos)) > 4.6D) {
+                moveTo(source, bot, pos.up(), false);
+                waitUntilClose(bot, pos, 4.6, 16, false);
+            }
+            if (isWithinReach(bot, pos)) {
+                mineBlock(bot, pos, world);
+            }
+        }
     }
 
     private static void finalTopOffBuckets(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, BlockPos refillSource) {
@@ -2709,11 +3763,14 @@ public class FarmSkill implements Skill {
     }
 
     private static Integer computeFarmTargetY(ServerWorld world, BlockPos center, Set<BlockPos> protectedStillWater) {
-        int radius = HYDRATION_RADIUS;
+        return computeFarmTargetY(world, FarmFootprint.fromIrrigationAnchor(center), protectedStillWater);
+    }
+
+    private static Integer computeFarmTargetY(ServerWorld world, FarmFootprint footprint, Set<BlockPos> protectedStillWater) {
         List<Integer> heights = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos base = center.add(dx, 0, dz);
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                BlockPos base = new BlockPos(x, footprint.irrigationAnchor().getY(), z);
                 if (protectedStillWater != null && protectedStillWater.contains(base)) {
                     continue;
                 }
@@ -2751,26 +3808,35 @@ public class FarmSkill implements Skill {
                                     int targetY,
                                     SkillContext ctx,
                                     Set<BlockPos> protectedStillWater) {
-        abortIfRequested(bot);
-        // Keep leveling limited to the actual farm footprint to avoid destructive landscaping.
-        int radius = HYDRATION_RADIUS; // 4 blocks: covers the full 10x10 farm area
+        levelGround(bot, world, source, FarmFootprint.fromIrrigationAnchor(center), targetY, ctx, protectedStillWater, AUTO_MAX_CUT_DEPTH, null, new HashSet<>());
+    }
 
-        // Second pass: process each column systematically
-        // Process in order from center outward in a spiral-like pattern for more consistent results
+    private static void levelGround(ServerPlayerEntity bot,
+                                    ServerWorld world,
+                                    ServerCommandSource source,
+                                    FarmFootprint footprint,
+                                    int targetY,
+                                    SkillContext ctx,
+                                    Set<BlockPos> protectedStillWater,
+                                    int maxCutDepth,
+                                    BlockPos stagingGround,
+                                    Set<BlockPos> temporaryFarmAccess) {
+        abortIfRequested(bot);
         List<int[]> columns = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                columns.add(new int[]{dx, dz});
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                columns.add(new int[]{x, z});
             }
         }
-        // Sort by distance from center for more consistent leveling
-        columns.sort((a, b) -> Integer.compare(a[0] * a[0] + a[1] * a[1], b[0] * b[0] + b[1] * b[1]));
+        BlockPos centerTarget = stagingGround != null ? stagingGround : footprint.centerTarget();
+        columns.sort((a, b) -> Integer.compare(
+            (a[0] - centerTarget.getX()) * (a[0] - centerTarget.getX()) + (a[1] - centerTarget.getZ()) * (a[1] - centerTarget.getZ()),
+            (b[0] - centerTarget.getX()) * (b[0] - centerTarget.getX()) + (b[1] - centerTarget.getZ()) * (b[1] - centerTarget.getZ())
+        ));
 
         for (int[] col : columns) {
             abortIfRequested(bot);
-            int dx = col[0];
-            int dz = col[1];
-            BlockPos columnBase = center.add(dx, 0, dz);
+            BlockPos columnBase = new BlockPos(col[0], footprint.irrigationAnchor().getY(), col[1]);
 
             if (protectedStillWater != null && protectedStillWater.contains(columnBase)) {
                 continue;
@@ -2782,7 +3848,7 @@ public class FarmSkill implements Skill {
             int diff = surfaceY - targetY;
             
             // Skip steep columns to avoid carving into hillsides / creating ugly cliffs.
-            if (Math.abs(diff) > 2) {
+            if (diff > maxCutDepth || diff < -MAX_FILL_DEPTH) {
                 LOGGER.debug("levelGround: skipping steep column at {} (diff={})", columnBase, diff);
                 continue;
             }
@@ -2791,11 +3857,15 @@ public class FarmSkill implements Skill {
             BlockState topCheckState = world.getBlockState(topCheck);
             if (topCheckState.isIn(BlockTags.LOGS) || topCheckState.isIn(BlockTags.LEAVES)) {
                 LOGGER.info("levelGround encountered tree block at {}, invoking woodcut", topCheck);
-                runWoodcutInline(source, new SkillContext(source, ctx.sharedState()));
+                runWoodcutInline(source, new SkillContext(source, ctx.sharedState()), footprint);
                 // Re-sample after woodcut
                 surfaceY = findSurfaceY(world, columnBase);
                 if (surfaceY == null) continue;
                 diff = surfaceY - targetY;
+                if (diff > maxCutDepth || diff < -MAX_FILL_DEPTH) {
+                    LOGGER.debug("levelGround: column still exceeds grading budget at {} (diff={})", columnBase, diff);
+                    continue;
+                }
             }
 
             BlockPos top = new BlockPos(columnBase.getX(), targetY, columnBase.getZ());
@@ -2814,7 +3884,8 @@ public class FarmSkill implements Skill {
 
             double distToColumn = bot.getEyePos().distanceTo(Vec3d.ofCenter(columnBase));
             if (distToColumn > 4.6D) {
-                BlockPos stand = findStandingSpot(world, columnBase);
+                BlockPos stand = findOrCreateFarmWorkingStand(bot, world, source, footprint, columnBase, targetY,
+                    temporaryFarmAccess == null ? new HashSet<>() : temporaryFarmAccess);
                 if (stand == null) {
                     LOGGER.debug("levelGround: no safe stand near {}, skipping work for this column", columnBase);
                     continue;
@@ -2862,10 +3933,10 @@ public class FarmSkill implements Skill {
         
         // Third pass: verify and fix any remaining gaps
         LOGGER.info("levelGround: verification pass");
-        for (int dx = -radius; dx <= radius; dx++) {
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
             abortIfRequested(bot);
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos columnBase = center.add(dx, 0, dz);
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                BlockPos columnBase = new BlockPos(x, footprint.irrigationAnchor().getY(), z);
                 BlockPos targetPos = new BlockPos(columnBase.getX(), targetY, columnBase.getZ());
                 if (protectedStillWater != null && protectedStillWater.contains(targetPos)) {
                     continue;
@@ -2891,10 +3962,10 @@ public class FarmSkill implements Skill {
         // Fourth pass: deep-fill any small pits up to 3 blocks deep relative to targetY
         LOGGER.info("levelGround: deep-fill pass (up to 3 blocks)");
         int maxDeepFill = 3;
-        for (int dx = -radius; dx <= radius; dx++) {
+        for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
             abortIfRequested(bot);
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos columnBase = center.add(dx, 0, dz);
+            for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
+                BlockPos columnBase = new BlockPos(x, footprint.irrigationAnchor().getY(), z);
                 if (protectedStillWater != null && protectedStillWater.contains(columnBase)) continue;
                 for (int d = 0; d < maxDeepFill; d++) {
                     int y = targetY - d;

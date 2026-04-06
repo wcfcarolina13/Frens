@@ -261,11 +261,12 @@ public final class WoodcutCleanupSkill implements Skill {
         Integer maxY = getNullableIntParameter(params, "maxY");
         Integer minZ = getNullableIntParameter(params, "minZ");
         Integer maxZ = getNullableIntParameter(params, "maxZ");
+        boolean constrainedRegion = minX != null && maxX != null && minY != null && maxY != null && minZ != null && maxZ != null;
 
         BlockPos origin = bot.getBlockPos();
         BlockPos scanMin;
         BlockPos scanMax;
-        if (minX != null && maxX != null && minY != null && maxY != null && minZ != null && maxZ != null) {
+        if (constrainedRegion) {
             // Expand slightly to catch canopy scraps.
             scanMin = new BlockPos(minX - 3, minY - 2, minZ - 3);
             scanMax = new BlockPos(maxX + 3, maxY + 12, maxZ + 3);
@@ -390,8 +391,20 @@ public final class WoodcutCleanupSkill implements Skill {
                         }
                         continue; // re-enter loop to merge results at top
                     }
+                    if (constrainedRegion
+                            && lastScanStats != null
+                            && lastScanStats.actionableTargets() == 0) {
+                        LOGGER.info("woodcut_cleanup bounded: no actionable targets remain inside constrained region [{} -> {}]; skipping roam",
+                                scanMin.toShortString(),
+                                scanMax.toShortString());
+                        break;
+                    }
                     emptyVisibleLogPasses++;
                     if (emptyVisibleLogPasses >= 2) {
+                        if (constrainedRegion) {
+                            LOGGER.info("woodcut_cleanup bounded: empty target scan streak reached inside constrained region; stopping without roam");
+                            break;
+                        }
                         // Nothing in this area. Walk to a new spot and rescan from there.
                         BlockPos newSpot = findRoamTarget(bot, world, scanMin, scanMax, radius);
                         if (newSpot == null || System.currentTimeMillis() >= deadline) {

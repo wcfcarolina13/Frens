@@ -103,6 +103,27 @@ public final class SafePositionService {
         return null;
     }
 
+    public static BlockPos findAlternativeSafeNear(ServerWorld world, BlockPos base, int horizRadius) {
+        if (world == null || base == null || horizRadius <= 0) {
+            return null;
+        }
+
+        for (int r = 1; r <= horizRadius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) {
+                        continue;
+                    }
+                    BlockPos safe = findSafeColumn(world, base.add(dx, 0, dz));
+                    if (safe != null && !safe.equals(base)) {
+                        return safe;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     public static SurfaceCandidateAssessment analyzeSurfaceCandidate(ServerWorld world, BlockPos feet) {
         return analyzeSurfaceCandidate(world, feet, feet);
     }
@@ -375,6 +396,7 @@ public final class SafePositionService {
         bot.setVelocity(Vec3d.ZERO);
         bot.velocityDirty = true;
         bot.fallDistance = 0.0F;
+        BotStuckService.setLastSafePosition(bot.getUuid(), center);
     }
 
     // ════════════════════════════════════════════════════════════════════

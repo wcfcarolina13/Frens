@@ -51,6 +51,7 @@ import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
+import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 
 
 
@@ -1299,6 +1300,9 @@ public final class BotActions {
         }
         // Avoid griefing player-built enclosures/rails: never break fences/walls/gates as part of generic "unstuck".
         if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+            return false;
+        }
+        if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
             return false;
         }
         // Never destroy player-built roads.

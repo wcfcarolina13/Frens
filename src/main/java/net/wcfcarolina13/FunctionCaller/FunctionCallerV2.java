@@ -171,6 +171,9 @@ public class FunctionCallerV2 {
     private static final Set<String> KNOWN_SKILLS = Set.of(
             "collect_dirt",
             "dirt_shovel",
+            "farm",
+            "plant",
+            "harvest",
             "mining",
             "stripmine",
             "drop_sweep"

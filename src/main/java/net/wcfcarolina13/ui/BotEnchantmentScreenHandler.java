@@ -18,6 +18,7 @@ import net.minecraft.registry.entry.RegistryEntryList;
 import net.minecraft.registry.tag.EnchantmentTags;
 import net.minecraft.screen.EnchantmentScreenHandler;
 import net.minecraft.screen.ScreenHandlerContext;
+import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
@@ -35,6 +36,29 @@ import net.minecraft.util.math.random.Random;
  * are inaccessible, so we keep parallel references.</p>
  */
 public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
+
+    /**
+     * Client-side factory for the custom screen handler type. On the client,
+     * we create a vanilla {@link EnchantmentScreenHandler} that overrides
+     * {@link #onButtonClick} to skip the local player level check — the server
+     * does all real validation via the server-side handler.
+     */
+    public static BotEnchantmentScreenHandler clientFactory(int syncId, PlayerInventory playerInventory) {
+        return new BotEnchantmentScreenHandler(syncId, playerInventory);
+    }
+
+    /** Client-only constructor — no bot reference, no table context. */
+    private BotEnchantmentScreenHandler(int syncId, PlayerInventory playerInventory) {
+        super(syncId, playerInventory);
+        this.bot = null;
+        this.tableContext = ScreenHandlerContext.EMPTY;
+        this.enchantSlots = null; // unused on client
+    }
+
+    @Override
+    public ScreenHandlerType<?> getType() {
+        return net.wcfcarolina13.Frens.BOT_ENCHANT_HANDLER;
+    }
 
     private final ServerPlayerEntity bot;
     private final ScreenHandlerContext tableContext;
@@ -97,8 +121,15 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
     @Override
     public boolean onButtonClick(PlayerEntity player, int id) {
         if (id < 0 || id >= this.enchantmentPower.length) {
-            Util.logErrorOrPause(player.getStringifiedName() + " pressed invalid button id: " + id);
             return false;
+        }
+
+        // Client side: skip player-level checks entirely. The server handler
+        // validates the bot's XP. We just need to confirm there's a valid
+        // enchantment power so the click packet gets sent.
+        if (bot == null) {
+            return this.enchantmentPower[id] > 0
+                    && !this.slots.get(0).getStack().isEmpty();
         }
 
         ItemStack itemStack = this.slots.get(0).getStack();

@@ -491,6 +491,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_HOVEL,
         SKILL_BURROW,
         SKILL_FARM,
+        SKILL_HARVEST,
         SKILL_COLLECT_DIRT,
         SKILL_MINING,
         SKILL_STRIPMINE,
@@ -608,6 +609,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             TopicEntry.skill("Wool", TopicAction.SKILL_WOOL, false, 0),
             TopicEntry.skill("Farming", TopicAction.SKILL_FARM, false, 0),
+            TopicEntry.skill("Harvest", TopicAction.SKILL_HARVEST, false, 1),
             TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 0),
             TopicEntry.skill("Leaf Litter", TopicAction.SKILL_LEAF_LITTER, false, 0),
             TopicEntry.skill("Mining", TopicAction.SKILL_MINING, false, 0),
@@ -3511,6 +3513,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOODCUT_CLEANUP -> "•";
             case SKILL_WOOL -> "✂";
             case SKILL_FARM -> "❀";
+            case SKILL_HARVEST -> "🌾";
             case SKILL_COLLECT_DIRT -> "";
             case SKILL_LEAF_LITTER -> "🍂";
             case SKILL_MINING -> "⛏";
@@ -4042,6 +4045,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_FARM -> java.util.List.of(
                 "Farming",
                 "Runs the bot's general farm work routine for planting and harvesting."
+            );
+            case SKILL_HARVEST -> java.util.List.of(
+                "Harvest",
+                "Harvests nearby ripe crops, replants them, then sweeps the drops.",
+                "If inventory space gets tight, the bot offloads to nearby chests and can pull extra seeds from nearby chests to finish replanting."
             );
             case SKILL_COLLECT_DIRT -> java.util.List.of(
                 "Collect Dirt",
@@ -4740,7 +4748,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOOL -> runWoolSkillCommand();
             case SKILL_HOVEL -> runShelterWithLook("hovel");
             case SKILL_BURROW -> runShelterWithLook("burrow");
-            case SKILL_FARM -> runSkillCommand("farm", null);
+            case SKILL_FARM -> runFarmWithPreview();
+            case SKILL_HARVEST -> runSkillCommand("harvest", null);
             case SKILL_COLLECT_DIRT -> runSkillCommand("collect_dirt", null);
             case SKILL_LEAF_LITTER -> runSkillCommand("leaf_litter", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
@@ -6224,6 +6233,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Set the pending shelter type - will be used when player presses go_to_look keybind
         net.wcfcarolina13.FrensClient.setPendingShelter(shelterType, botTarget);
         // Close the screen first so player can see where they're looking
+        this.close();
+    }
+
+    private void runFarmWithPreview() {
+        if (this.client == null) {
+            return;
+        }
+        net.wcfcarolina13.FrensClient.setPendingFarm(formatBotTarget());
         this.close();
     }
 

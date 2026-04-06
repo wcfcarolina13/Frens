@@ -665,6 +665,30 @@ public final class ChestStoreService {
         return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, withScaffoldReserve(bot, matcher), true, WALK_ONLY);
     }
 
+    public static int withdrawMatchingWalkOnly(ServerCommandSource source,
+                                               ServerPlayerEntity bot,
+                                               BlockPos chestPos,
+                                               int amount,
+                                               Predicate<ItemStack> matcher) {
+        if (bot == null || chestPos == null || source == null || matcher == null) {
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        int effectiveAmount = amount <= 0 ? Integer.MAX_VALUE : amount;
+        debugChest("Withdraw walk-only: chest=" + chestPos.toShortString()
+                + " botPos=" + bot.getBlockPos().toShortString()
+                + " thread=" + Thread.currentThread().getName()
+                + " serverThread=" + server.isOnThread()
+                + " sourceWorld=" + worldKeyName(source.getWorld())
+                + " botWorld=" + worldKeyName(bot.getEntityWorld())
+                + " amount=" + effectiveAmount);
+        return performStoreTransferWithBot(source, bot, chestPos, effectiveAmount, matcher, false, WALK_ONLY);
+    }
+
     public static DepositProbeResult probeDepositMatchingWalkOnly(ServerCommandSource source,
                                                                  ServerPlayerEntity bot,
                                                                  BlockPos chestPos,
