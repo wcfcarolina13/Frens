@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-06 — Bot Anvil Screen
+
+- **Feat: Bot anvil via Spells menu.** Players can use anvils on behalf of bots — repair, rename, or combine items using the bot's XP. Same Spells-menu pattern as enchanting. Vanilla anvil UI, bot's inventory in the grid.
+- **BotAnvilScreenHandler**: Extends `AnvilScreenHandler`. Overrides `canTakeOutput` (bot XP check), `onTakeOutput` (bot XP deduction via save/restore trick), and `onClosed` (items return to bot). Rename via `RenameItemC2SPacket` works automatically. "Too Expensive" (>=40 levels) still enforced.
+- **BotAnvilOpenPayload + BotAnvilNetworkManager**: C2S payload + server-side handler validates proximity, finds nearest anvil (BlockTags.ANVIL), opens screen.
+- **CompanionSpellsScreen**: New "Anvil" button (enabled near any anvil). Tooltip added.
+- **BotGuideScreen**: New "Bot Anvil" guide topic under Enchanting section.
+- **modCommandRegistry**: Added `findNearestAnvil()` returning `BlockPos`.
+
 ## 2026-04-05 — Bot Enchanting Screen
 
 - **Feat: Bot enchanting via Spells menu.** Players can enchant bot items using the vanilla enchanting UI. Open the Spells menu near an enchanting table, click "Enchant" — the standard enchanting screen opens backed by the bot's inventory, XP, and enchantment seed. XP and lapis are deducted from the bot, not the player. Leftover items return to the bot's inventory on close.
