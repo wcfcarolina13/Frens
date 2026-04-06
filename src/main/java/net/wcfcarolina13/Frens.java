@@ -252,6 +252,7 @@ public class Frens implements ModInitializer {
 
     public static ScreenHandlerType<net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler> BOT_PLAYER_INV_HANDLER;
     public static ScreenHandlerType<net.wcfcarolina13.ui.BotEnchantmentScreenHandler> BOT_ENCHANT_HANDLER;
+    public static ScreenHandlerType<net.wcfcarolina13.ui.BotAnvilScreenHandler> BOT_ANVIL_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
     public static BertModelManager modelManager;
@@ -301,6 +302,11 @@ public class Frens implements ModInitializer {
                 Registries.SCREEN_HANDLER,
                 Identifier.of(MOD_ID, "bot_enchanting"),
                 new ScreenHandlerType<>(net.wcfcarolina13.ui.BotEnchantmentScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
+        );
+        BOT_ANVIL_HANDLER = Registry.register(
+                Registries.SCREEN_HANDLER,
+                Identifier.of(MOD_ID, "bot_anvil"),
+                new ScreenHandlerType<>(net.wcfcarolina13.ui.BotAnvilScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
         );
 
         // Register bot dialogue sound events

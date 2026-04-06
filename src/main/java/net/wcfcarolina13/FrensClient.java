@@ -445,6 +445,7 @@ public class FrensClient implements ClientModInitializer {
     public void onInitializeClient() {
         HandledScreens.register(Frens.BOT_PLAYER_INV_HANDLER, BotPlayerInventoryScreen::new);
         HandledScreens.register(Frens.BOT_ENCHANT_HANDLER, net.minecraft.client.gui.screen.ingame.EnchantmentScreen::new);
+        HandledScreens.register(Frens.BOT_ANVIL_HANDLER, net.minecraft.client.gui.screen.ingame.AnvilScreen::new);
 
         // Keybind fallback for Shift+F1 / Shift+F2.
         // Notes:
