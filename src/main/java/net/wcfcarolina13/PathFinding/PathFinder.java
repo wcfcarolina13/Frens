@@ -538,16 +538,20 @@ public class PathFinder {
             return false;
         }
         if (blockState.getBlock() instanceof DoorBlock) {
-            // Plan through closed wooden doors (we can open them on approach).
-            // Iron doors remain blocked unless already open (redstone).
             if (blockState.isOf(Blocks.IRON_DOOR)) {
                 return blockState.getCollisionShape(world, pos).isEmpty();
+            }
+            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
+                return false;
             }
             return true;
         }
         if (blockState.getBlock() instanceof TrapdoorBlock) {
             if (blockState.isOf(Blocks.IRON_TRAPDOOR)) {
                 return blockState.getCollisionShape(world, pos).isEmpty();
+            }
+            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
+                return false;
             }
             return true;
         }

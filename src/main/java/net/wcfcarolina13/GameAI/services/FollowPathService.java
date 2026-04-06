@@ -244,18 +244,24 @@ public final class FollowPathService {
             return true;
         }
         if (state.getBlock() instanceof DoorBlock) {
-            // Plan through wooden doors (we can open them on approach). Treat iron doors as blocked unless open.
             if (state.isOf(Blocks.IRON_DOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
+            }
+            if (LockableBlockService.isLocked(world, pos)) {
+                return false;
             }
             return true;
         }
         if (state.getBlock() instanceof FenceGateBlock) {
-            // Plan through gates; follow logic can open them when approached.
+            if (LockableBlockService.isLocked(world, pos)) {
+                return false;
+            }
             return true;
         }
         if (state.getBlock() instanceof TrapdoorBlock) {
-            // Treat open trapdoors as passable; closed trapdoors can be walls/floors.
+            if (LockableBlockService.isLocked(world, pos)) {
+                return false;
+            }
             return state.getCollisionShape(world, pos).isEmpty();
         }
         if (state.isOf(Blocks.WATER)) {

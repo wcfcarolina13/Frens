@@ -455,9 +455,11 @@ public class BaritoneStylePathFinder {
         if (state.getBlock() instanceof DoorBlock) {
             // Iron doors: only passable if already open
             if (state.isOf(Blocks.IRON_DOOR)) {
-                // Can't use getCollisionShape without a BlockPos, but iron doors
-                // that are open have empty collision. Use the OPEN property directly.
                 return state.get(DoorBlock.OPEN);
+            }
+            if (cache.world instanceof net.minecraft.server.world.ServerWorld sw
+                    && net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(sw, cache.mutablePos.set(x, y, z))) {
+                return false;
             }
             return true; // wooden doors can be opened by bot
         }
@@ -467,10 +469,12 @@ public class BaritoneStylePathFinder {
         // FollowPathService (bounded planner) and BotEventHandler (door-escape system).
 
         if (state.getBlock() instanceof TrapdoorBlock) {
-            // Open trapdoors are passable. Closed wooden trapdoors = bot can open.
-            // Iron trapdoors = only passable if already open.
             if (state.isOf(Blocks.IRON_TRAPDOOR)) {
                 return state.getCollisionShape(cache.world, cache.mutablePos.set(x, y, z)).isEmpty();
+            }
+            if (cache.world instanceof net.minecraft.server.world.ServerWorld sw
+                    && net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(sw, cache.mutablePos.set(x, y, z))) {
+                return false;
             }
             return true;
         }
@@ -614,11 +618,17 @@ public class BaritoneStylePathFinder {
             if (state.isOf(Blocks.IRON_DOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
             }
+            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
+                return false;
+            }
             return true;
         }
         if (state.getBlock() instanceof TrapdoorBlock) {
             if (state.isOf(Blocks.IRON_TRAPDOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
+            }
+            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
+                return false;
             }
             return true;
         }

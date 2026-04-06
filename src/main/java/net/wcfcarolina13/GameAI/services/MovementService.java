@@ -2004,6 +2004,12 @@ public final class MovementService {
             maybeWarnIronDoor(player, openablePos);
             return false;
         }
+        // Locked blocks cannot be opened by bots
+        if (world instanceof net.minecraft.server.world.ServerWorld sw
+                && LockableBlockService.isLocked(sw, openablePos)) {
+            LockableBlockService.maybeShowBotReaction(player, openablePos);
+            return false;
+        }
 
         Direction toward = approximateToward(player.getBlockPos(), openablePos);
         if (!toward.getAxis().isHorizontal()) {
