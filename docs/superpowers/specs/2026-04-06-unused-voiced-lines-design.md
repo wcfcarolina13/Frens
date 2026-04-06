@@ -28,15 +28,19 @@ An audit of all 516 `LINE_*` constants in `BotDialogueSounds.java` against the 7
 | No lead (ensure) | "I don't have a lead to secure this horse." | "I'm missing a lead for the horse." |
 | No lead (grab) | "I can't grab a lead to secure this horse." | "I couldn't get the lead." / "My lead isn't accessible right now." |
 | No fence | "I don't have a fence to tie this horse to yet. I'll keep it on a lead." | "No fence nearby to tie it off." / "I'll hold the lead until I can tie it off." |
-| Lost horse (3 call sites share a pool) | "I lost track of the horse I was holding." / "The horse I was holding is gone." | "I lost the horse I was leading." / "I can't find the horse." / "My mount is gone." / "I lost the animal I was leading." |
+| Lost horse (2 call sites share a pool) | "I lost track of the horse I was holding." / "The horse I was holding is gone." | "I lost the horse I was leading." / "I can't find the horse." / "My mount is gone." / "I lost the animal I was leading." |
 | Lead snapped | "The lead snapped after a sudden drop." | "The lead broke after that fall." / "The lead snapped on that drop." |
 | No lead to reattach | "I don't have a lead to reattach." | "I'm out of leads to reattach." / "No spare leads to reattach." |
+
+**Note:** Line ~3104 ("I couldn't secure the lead on the horse." → `LINE_MOUNT_CANT_SECURE`) is already wired with its own sound and has no recorded alternates — left as-is.
 
 #### Implementation detail
 
 A `pickRandom(String... options)` helper using `ThreadLocalRandom` in `RideSyncService`. Each hardcoded string call site changes to `pickRandom("original", "alt1", ...)`.
 
-For the "lost horse" group (3 call sites at lines ~3518, ~3523, ~3531 plus the 2 existing texts), all share one combined pool of 6 phrasings.
+For the "lost horse" group, the 2 call sites at lines ~3518 and ~3523 share one combined pool of 6 phrasings. Line ~3531 ("lead snapped") is a separate situation with its own pool of 3 phrasings — it's a physics event (distance snap), not an entity-lost event.
+
+Randomization granularity: per-occurrence. Each time a cooldown expires and the situation re-triggers, a fresh random pick is made.
 
 ### Combat orphans (4 lines)
 
@@ -44,8 +48,8 @@ For the "lost horse" group (3 call sites at lines ~3518, ~3523, ~3531 plus the 2
 
 | Line | Subtitle | Where to add |
 |---|---|---|
-| `LINE_COMBAT_KILL` | "Enemy down." | Generic kill fallback in `pickKillCallout()` — add as 4th option alongside `TARGET_DOWN` / `GOT_IT` / `ONE_LESS` |
-| `LINE_COMBAT_ATTACKING` | "Engaging!" | `onEngagement()` — random alternate to existing `LINE_COMBAT_ENGAGING` |
+| `LINE_COMBAT_KILL` | "Enemy down." | Default fallback branch in `pickKillCallout()` — add as 4th option. Rebalance probability splits to ~25% each. Only touches the final default branch (lines ~865-872), not entity-specific branches. |
+| `LINE_COMBAT_ATTACKING` | "Engaging!" | `onEngagement()` — 50/50 random pick: either `sayWithSound(bot, "Engaging!", LINE_COMBAT_ATTACKING)` or the existing `sayWithSound(bot, "Engaging threats against allies.", LINE_COMBAT_ENGAGING)`. Must pick text AND sound together since `sayWithSound` bypasses the mapper. |
 | `LINE_COMBAT_CLEAR` | "All clear." | Combat-end in `checkCombatEnd()` — add to the post-combat pool alongside `STILL_ALIVE` / `ADEQUATE` |
 | `LINE_COMBAT_PLAYER_HIT` | "Hey! Watch it!" | Friendly-fire received in `onPlayerHit()` — add alongside `FF_RECEIVED_OW_THAT_WAS_YOU` / `FF_RECEIVED_ON_YOUR_TEAM` |
 
@@ -55,7 +59,7 @@ For the "lost horse" group (3 call sites at lines ~3518, ~3523, ~3531 plus the 2
 
 ## Files touched
 
-1. **`RideSyncService.java`** — ~9 call sites + `pickRandom` helper
+1. **`RideSyncService.java`** — ~10 call sites + `pickRandom` helper
 2. **`BotCombatCalloutService.java`** — 4 spots add extra options to existing random pools
 3. **`DialogueTextMapper.java`** — 19 new `EXACT_MAP.put()` entries
 
