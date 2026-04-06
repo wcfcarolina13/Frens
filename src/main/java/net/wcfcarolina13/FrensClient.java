@@ -913,6 +913,10 @@ public class FrensClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.LockModeStatePayload.ID, (payload, context) -> {
+            net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.setLockModeActive(payload.active());
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ZoneListPayload.ID, (payload, context) -> {
             context.client().execute(() -> {
                 net.wcfcarolina13.GraphicalUserInterface.BaseManagerScreen.onZoneListReceived(payload.zonesJson());

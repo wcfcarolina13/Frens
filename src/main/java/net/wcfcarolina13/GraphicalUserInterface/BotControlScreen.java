@@ -119,9 +119,17 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
     private Rect permissionsActionRect;
+    private Rect lockBlocksRect;
     private Rect saveRect;
     private Rect closeRect;
     private final LinkedHashMap<CyclingButtonWidget<?>, Rect> settingChipRects = new LinkedHashMap<>();
+
+    // Lock mode state (client-side, synced from server)
+    private static boolean lockModeActive = false;
+
+    public static void setLockModeActive(boolean active) {
+        lockModeActive = active;
+    }
 
     // Tooltip state — computed each frame, rendered last
     private String tooltipText = null;
@@ -242,6 +250,7 @@ public class BotControlScreen extends Screen {
         closeRect = new Rect(outerPanelX + outerPanelW - 10 - footerBtnW, footerY, footerBtnW, BUTTON_H);
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 160, BUTTON_H);
+        lockBlocksRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 100, BUTTON_H);
     }
 
     private List<String> buildAliasList() {
@@ -509,6 +518,11 @@ public class BotControlScreen extends Screen {
                 "Permissions Editor",
                 false,
                 this.client != null && selectedAlias != null && !selectedAlias.isBlank(),
+                mouseX, mouseY);
+        drawActionButton(context, lockBlocksRect,
+                lockModeActive ? "Lock Mode ON" : "Lock Blocks",
+                lockModeActive,
+                true,
                 mouseX, mouseY);
         drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
         drawActionButton(context, closeRect, "Close", false, true, mouseX, mouseY);
@@ -929,6 +943,14 @@ public class BotControlScreen extends Screen {
             if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
                 this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
             }
+            return true;
+        }
+
+        // Footer: Lock Blocks
+        if (lockBlocksRect != null && lockBlocksRect.contains(mx, my)) {
+            lockModeActive = !lockModeActive;
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                    new net.wcfcarolina13.network.LockModeTogglePayload(lockModeActive));
             return true;
         }
 
