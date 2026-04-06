@@ -36,15 +36,6 @@ public final class BotWakeUpDialogueService {
     /** Delay after wake-up before showing the line (ticks). Lets the screen transition finish. */
     private static final int DISPLAY_DELAY_TICKS = 40; // 2 seconds
 
-    private static final int DISPLAY_DURATION_MS = 3_500;
-
-    private static final String[] WAKE_LINES = {
-            "You know you snore like a piglin?",
-            "I had the strangest dream that I was an NPC in a video game.",
-            "A good night's rest.",
-            "Seize the day!"
-    };
-
     /** Tracks whether each bot was sleeping on the previous tick. */
     private static final ConcurrentHashMap<UUID, Boolean> WAS_SLEEPING = new ConcurrentHashMap<>();
 
@@ -148,28 +139,18 @@ public final class BotWakeUpDialogueService {
                 continue;
             }
 
-            // Pick a random line and schedule it after a short delay.
-            String line = WAKE_LINES[ThreadLocalRandom.current().nextInt(WAKE_LINES.length)];
             LAST_WAKE_LINE_TICK.put(botId, nowTick);
 
-            // Schedule the display a couple seconds later so the player sees it after the
+            // Schedule the voiced line a couple seconds later so the player hears it after the
             // sleep screen fades out.
             long dueTick = nowTick + DISPLAY_DELAY_TICKS;
-            server.execute(() -> {
-                // Use server.send with a delayed task if available, otherwise just run on next tick.
-                scheduleDelayed(server, bot, line, dueTick);
-            });
+            server.send(new net.minecraft.server.ServerTask((int) dueTick, () -> {
+                if (bot == null || bot.isRemoved()) return;
+                CompanionContextReactionService.playWakeUp(bot);
+            }));
 
-            LOGGER.debug("Scheduled wake-up line for bot {} in {} ticks: \"{}\"", bot.getName().getString(), DISPLAY_DELAY_TICKS, line);
+            LOGGER.debug("Scheduled voiced wake-up line for bot {} in {} ticks", bot.getName().getString(), DISPLAY_DELAY_TICKS);
         }
-    }
-
-    private static void scheduleDelayed(MinecraftServer server, ServerPlayerEntity bot, String line, long dueTick) {
-        server.send(new net.minecraft.server.ServerTask((int) dueTick, () -> {
-            if (bot == null || bot.isRemoved()) return;
-            CompanionOverheadDialogueService.showOverheadLine(
-                    bot, line, DISPLAY_DURATION_MS, 48.0, "wake-up", null);
-        }));
     }
 
     // ── Co-sleep: when commander goes to sleep, nearby idle bots sleep too ──

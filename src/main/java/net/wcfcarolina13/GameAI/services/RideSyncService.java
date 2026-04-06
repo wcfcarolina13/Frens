@@ -48,6 +48,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class RideSyncService {
     // Use the mod's main logger so these diagnostics reliably appear in Minecraft's log output.
@@ -3090,11 +3091,11 @@ public final class RideSyncService {
             return;
         }
         if (!ToolProvisionService.ensureLead(bot, bot.getCommandSource(), resolveCommander(world.getServer(), bot), 1)) {
-            maybeAnnounceLeashIssue(bot, "I don't have a lead to secure this horse.");
+            maybeAnnounceLeashIssue(bot, pickRandom("I don't have a lead to secure this horse.", "I'm missing a lead for the horse."));
             return;
         }
         if (!BotActions.ensureHotbarItem(bot, Items.LEAD)) {
-            maybeAnnounceLeashIssue(bot, "I can't grab a lead to secure this horse.");
+            maybeAnnounceLeashIssue(bot, pickRandom("I can't grab a lead to secure this horse.", "I couldn't get the lead.", "My lead isn't accessible right now."));
             return;
         }
         if (!mob.isLeashed()) {
@@ -3109,7 +3110,7 @@ public final class RideSyncService {
             fencePos = tryPlaceFenceNear(bot, vehicle.getBlockPos());
         }
         if (fencePos == null) {
-            maybeAnnounceLeashIssue(bot, "I don't have a fence to tie this horse to yet. I'll keep it on a lead.");
+            maybeAnnounceLeashIssue(bot, pickRandom("I don't have a fence to tie this horse to yet. I'll keep it on a lead.", "No fence nearby to tie it off.", "I'll hold the lead until I can tie it off."));
             if (vehicle instanceof MobEntity leashed && leashed.isLeashed() && leashed.getLeashHolder() == bot) {
                 LEASH_TARGET.put(bot.getUuid(), leashed.getUuid());
             }
@@ -3370,14 +3371,14 @@ public final class RideSyncService {
         }
         LAST_MOUNT_NOTICE_TICK.put(bot.getUuid(), now);
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(Frens.OPERATOR_PERMISSIONS),
-                "This horse looks hurt.", true);
+                pickRandom("This horse looks hurt.", "Mount's looking banged up.", "My horse is hurt."), true);
         if (!hasItem(bot, Items.APPLE)) {
             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(Frens.OPERATOR_PERMISSIONS),
-                    "I don't have any apples to heal it.", true);
+                    pickRandom("I don't have any apples to heal it.", "I'm out of apples for the horse.", "No apples on me for this horse."), true);
         }
         if (!AnimalFeedingService.hasFoodFor(bot, mount)) {
             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(Frens.OPERATOR_PERMISSIONS),
-                    "I don't have any suitable food to heal it.", true);
+                    pickRandom("I don't have any suitable food to heal it.", "I can't find food for it.", "I don't have feed for this horse."), true);
         }
     }
 
@@ -3405,6 +3406,10 @@ public final class RideSyncService {
         LAST_LEASH_NOTICE_TICK.put(bot.getUuid(), now);
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(Frens.OPERATOR_PERMISSIONS),
                 message, true);
+    }
+
+    private static String pickRandom(String... options) {
+        return options[ThreadLocalRandom.current().nextInt(options.length)];
     }
 
     private static boolean hasItem(ServerPlayerEntity bot, Item item) {
@@ -3515,12 +3520,18 @@ public final class RideSyncService {
         Entity entity = world.getEntity(mountId);
         if (!(entity instanceof MobEntity mob)) {
             LEASH_TARGET.remove(bot.getUuid());
-            maybeAnnounceLeashIssue(bot, "I lost track of the horse I was holding.");
+            maybeAnnounceLeashIssue(bot, pickRandom(
+                    "I lost track of the horse I was holding.", "I lost the horse I was leading.",
+                    "I can't find the horse.", "My mount is gone.", "The horse I was holding is gone.",
+                    "I lost the animal I was leading."));
             return;
         }
         if (!mob.isAlive()) {
             LEASH_TARGET.remove(bot.getUuid());
-            maybeAnnounceLeashIssue(bot, "The horse I was holding is gone.");
+            maybeAnnounceLeashIssue(bot, pickRandom(
+                    "The horse I was holding is gone.", "I lost track of the horse I was holding.",
+                    "I lost the horse I was leading.", "I can't find the horse.",
+                    "My mount is gone.", "I lost the animal I was leading."));
             return;
         }
         double distSq = bot.squaredDistanceTo(mob);
@@ -3528,7 +3539,9 @@ public final class RideSyncService {
         LAST_LEASH_DIST.put(bot.getUuid(), distSq);
         if (Math.abs(distSq - lastDist) > 64.0D) {
             LEASH_TARGET.remove(bot.getUuid());
-            maybeAnnounceLeashIssue(bot, "The lead snapped after a sudden drop.");
+            maybeAnnounceLeashIssue(bot, pickRandom(
+                    "The lead snapped after a sudden drop.", "The lead broke after that fall.",
+                    "The lead snapped on that drop."));
             return;
         }
         if (mob.isLeashed() && mob.getLeashHolder() == bot) {
@@ -3544,7 +3557,7 @@ public final class RideSyncService {
         }
         LAST_LEASH_ATTEMPT_TICK.put(bot.getUuid(), now);
         if (!ToolProvisionService.ensureLead(bot, bot.getCommandSource(), resolveCommander(server, bot), 1)) {
-            maybeAnnounceLeashIssue(bot, "I don't have a lead to reattach.");
+            maybeAnnounceLeashIssue(bot, pickRandom("I don't have a lead to reattach.", "I'm out of leads to reattach.", "No spare leads to reattach."));
             return;
         }
         if (!BotActions.ensureHotbarItem(bot, Items.LEAD)) {

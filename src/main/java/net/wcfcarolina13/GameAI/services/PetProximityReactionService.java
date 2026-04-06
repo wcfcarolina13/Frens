@@ -26,7 +26,7 @@ public final class PetProximityReactionService {
 
     private static final double PET_RADIUS = 10.0D;
 
-    private static final long WOLF_NEARBY_COOLDOWN_MS = 90_000L;
+    private static final long WOLF_NEARBY_COOLDOWN_MS = 6L * 60_000L;
     private static final long WOLF_HURT_COOLDOWN_MS = 8_000L;
     private static final long ANIMAL_NEARBY_COOLDOWN_MS = 90_000L;
 

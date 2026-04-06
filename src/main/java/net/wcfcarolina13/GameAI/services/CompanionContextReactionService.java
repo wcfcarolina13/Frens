@@ -80,6 +80,7 @@ public final class CompanionContextReactionService {
         boolean wasLowHealth = false;
         boolean wasCommanderLowHealth = false;
         boolean wasCommanderHungry = false;
+        int lastWeatherKind = -1;
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -91,8 +92,8 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] AMBIENT_LINES = new WeightedLine[] {
             new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_RARE),
-            new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_COMMON),
-            new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_UNCOMMON),
+            new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_RARE),
+            new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_RARE),
             new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON)
     };
 
@@ -208,6 +209,40 @@ public final class CompanionContextReactionService {
             new WeightedLine("shelter_some_problems", "This will keep out... some of the problems.", BotDialogueSounds.LINE_SHELTER_SOME_PROBLEMS, WEIGHT_UNCOMMON)
     };
 
+    private static final WeightedLine[] WEATHER_RAIN_LINES = new WeightedLine[] {
+            new WeightedLine("weather_rain", "Rain's coming down.", BotDialogueSounds.LINE_WEATHER_RAIN, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] WEATHER_SNOW_LINES = new WeightedLine[] {
+            new WeightedLine("weather_snow", "Snow's coming down.", BotDialogueSounds.LINE_WEATHER_SNOW, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] WEATHER_THUNDER_LINES = new WeightedLine[] {
+            new WeightedLine("weather_thunder", "Thunderstorm.", BotDialogueSounds.LINE_WEATHER_THUNDER, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] WEATHER_SUNNY_LINES = new WeightedLine[] {
+            new WeightedLine("weather_sunny", "Nice clear day.", BotDialogueSounds.LINE_WEATHER_SUNNY, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] WAKE_LINES = new WeightedLine[] {
+            new WeightedLine("wake_snore_piglin", "You know you snore like a piglin?", BotDialogueSounds.LINE_WAKE_SNORE_PIGLIN, WEIGHT_COMMON),
+            new WeightedLine("wake_dream_npc", "I had the strangest dream...", BotDialogueSounds.LINE_WAKE_DREAM_NPC, WEIGHT_COMMON),
+            new WeightedLine("wake_good_rest", "A good night's rest.", BotDialogueSounds.LINE_WAKE_GOOD_REST, WEIGHT_COMMON),
+            new WeightedLine("wake_seize_day", "Seize the day!", BotDialogueSounds.LINE_WAKE_SEIZE_DAY, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] COOK_LINES = new WeightedLine[] {
+            new WeightedLine("cook_smells_good", "Something smells good.", BotDialogueSounds.LINE_COOK_SMELLS_GOOD, WEIGHT_COMMON),
+            new WeightedLine("cook_dinner", "Is that dinner?", BotDialogueSounds.LINE_COOK_DINNER, WEIGHT_COMMON),
+            new WeightedLine("cook_getting_hungry", "Now I'm getting hungry.", BotDialogueSounds.LINE_COOK_GETTING_HUNGRY, WEIGHT_COMMON),
+            new WeightedLine("cook_like_home", "Smells like home.", BotDialogueSounds.LINE_COOK_LIKE_HOME, WEIGHT_UNCOMMON),
+            new WeightedLine("cook_hot_meal", "Nothing beats a hot meal.", BotDialogueSounds.LINE_COOK_HOT_MEAL, WEIGHT_UNCOMMON),
+            new WeightedLine("cook_save_some", "Save me some, will you?", BotDialogueSounds.LINE_COOK_SAVE_SOME, WEIGHT_UNCOMMON),
+            new WeightedLine("cook_amazing", "That smells amazing.", BotDialogueSounds.LINE_COOK_AMAZING, WEIGHT_COMMON),
+            new WeightedLine("cook_could_eat", "I could eat.", BotDialogueSounds.LINE_COOK_COULD_EAT, WEIGHT_COMMON)
+    };
+
     static {
         TRIGGER_COOLDOWN_MS.put("random_idle_not_combat", COOLDOWN_90S_MS);
         TRIGGER_COOLDOWN_MS.put("in_high_threat_location", COOLDOWN_90S_MS);
@@ -229,6 +264,9 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("combat_phase_hint", COOLDOWN_COMBATISH_MS);
         TRIGGER_COOLDOWN_MS.put("player_hurt", 60_000L);
         TRIGGER_COOLDOWN_MS.put("player_hungry", COOLDOWN_90S_MS);
+        TRIGGER_COOLDOWN_MS.put("weather_change", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("wake_up", COOLDOWN_MEME_MS);
+        TRIGGER_COOLDOWN_MS.put("cooking_nearby", COOLDOWN_180S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -282,6 +320,12 @@ public final class CompanionContextReactionService {
             if (tryScary(bot, world, state)) {
                 continue;
             }
+            if (tryWeather(bot, world, state)) {
+                continue;
+            }
+            if (tryCookingNearby(bot, world, state, inCombat)) {
+                continue;
+            }
             if (tryAmbient(bot, state, inCombat)) {
                 continue;
             }
@@ -302,6 +346,11 @@ public final class CompanionContextReactionService {
 
     public static boolean playShelterCompletion(ServerPlayerEntity bot, String forcedLineId) {
         return tryTrigger(bot, "shelter_completion", SHELTER_LINES, forcedLineId, false);
+    }
+
+    /** Call from sleep/wake-up code when the bot wakes up from a bed. */
+    public static boolean playWakeUp(ServerPlayerEntity bot) {
+        return tryTrigger(bot, "wake_up", WAKE_LINES, null, false);
     }
 
     public static boolean debugTrigger(ServerPlayerEntity bot, String triggerKey, String lineId) {
@@ -329,6 +378,13 @@ public final class CompanionContextReactionService {
             case "shelter_completion", "shelter" -> playShelterCompletion(bot, lineId);
             case "player_hurt", "care_hurt" -> tryTrigger(bot, "player_hurt", PLAYER_HURT_LINES, lineId, true);
             case "player_hungry", "care_hungry" -> tryTrigger(bot, "player_hungry", PLAYER_HUNGRY_LINES, lineId, true);
+            case "weather_change", "weather" -> tryTrigger(bot, "weather_change", WEATHER_RAIN_LINES, lineId, true);
+            case "weather_rain" -> tryTrigger(bot, "weather_change", WEATHER_RAIN_LINES, lineId, true);
+            case "weather_snow" -> tryTrigger(bot, "weather_change", WEATHER_SNOW_LINES, lineId, true);
+            case "weather_thunder" -> tryTrigger(bot, "weather_change", WEATHER_THUNDER_LINES, lineId, true);
+            case "weather_sunny" -> tryTrigger(bot, "weather_change", WEATHER_SUNNY_LINES, lineId, true);
+            case "wake_up", "wake" -> tryTrigger(bot, "wake_up", WAKE_LINES, lineId, true);
+            case "cooking_nearby", "cook" -> tryTrigger(bot, "cooking_nearby", COOK_LINES, lineId, true);
             default -> false;
         };
     }
@@ -456,6 +512,85 @@ public final class CompanionContextReactionService {
         return tryTrigger(bot, "random_idle_not_combat", AMBIENT_LINES, null, false);
     }
 
+    private static boolean tryWeather(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (!world.getDimension().hasSkyLight()) {
+            return false;
+        }
+        if (!world.isSkyVisible(bot.getBlockPos().up())) {
+            return false;
+        }
+
+        int kindNow = computeWeatherKind(world, bot.getBlockPos());
+        int kindPrev = state.lastWeatherKind;
+
+        if (kindPrev == -1) {
+            state.lastWeatherKind = kindNow;
+            return false;
+        }
+        if (kindNow == kindPrev) {
+            return false;
+        }
+        state.lastWeatherKind = kindNow;
+
+        WeightedLine[] pool = switch (kindNow) {
+            case 3 -> WEATHER_THUNDER_LINES;
+            case 2 -> WEATHER_SNOW_LINES;
+            case 1 -> WEATHER_RAIN_LINES;
+            default -> (kindPrev != 0 && RNG.nextFloat() < 0.70f) ? WEATHER_SUNNY_LINES : null;
+        };
+        if (pool == null) {
+            return false;
+        }
+        return tryTrigger(bot, "weather_change", pool, null, false);
+    }
+
+    private static int computeWeatherKind(ServerWorld world, BlockPos pos) {
+        if (world.isThundering()) {
+            return 3;
+        }
+        if (!world.isRaining()) {
+            return 0;
+        }
+        try {
+            if (pos != null && world.getBiome(pos).value().getTemperature() < 0.15f) {
+                return 2;
+            }
+        } catch (Exception ignored) {
+        }
+        return 1;
+    }
+
+    private static boolean tryCookingNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state, boolean inCombat) {
+        if (inCombat) {
+            return false;
+        }
+        BlockPos botPos = bot.getBlockPos();
+        boolean nearCooking = false;
+        for (int dx = -4; dx <= 4 && !nearCooking; dx++) {
+            for (int dy = -2; dy <= 2 && !nearCooking; dy++) {
+                for (int dz = -4; dz <= 4 && !nearCooking; dz++) {
+                    BlockPos check = botPos.add(dx, dy, dz);
+                    var blockState = world.getBlockState(check);
+                    var block = blockState.getBlock();
+                    if (block instanceof net.minecraft.block.CampfireBlock
+                            && blockState.get(net.minecraft.block.CampfireBlock.LIT)) {
+                        nearCooking = true;
+                    } else if (block instanceof net.minecraft.block.AbstractFurnaceBlock
+                            && blockState.get(net.minecraft.block.AbstractFurnaceBlock.LIT)) {
+                        nearCooking = true;
+                    }
+                }
+            }
+        }
+        if (!nearCooking) {
+            return false;
+        }
+        if (RNG.nextDouble() > 0.10D) {
+            return false;
+        }
+        return tryTrigger(bot, "cooking_nearby", COOK_LINES, null, false);
+    }
+
     private static boolean tryMetaAndMemes(ServerPlayerEntity bot,
                                            ServerWorld world,
                                            TriggerState state,
@@ -485,7 +620,7 @@ public final class CompanionContextReactionService {
             return true;
         }
 
-        if (!inCombat && RNG.nextDouble() < 0.003D
+        if (!inCombat && RNG.nextDouble() < 0.00075D
                 && tryTrigger(bot, "world_start_or_milestone", MEME_STEVE_LINES, null, false)) {
             state.wasLowHealth = lowHealth;
             return true;

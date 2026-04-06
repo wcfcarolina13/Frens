@@ -116,7 +116,8 @@ public final class BotCombatCalloutService {
 
     private static final WeightedLine[] POST_COMBAT_GENERAL_LINES = new WeightedLine[] {
             new WeightedLine("post_combat_still_alive", "We're still alive. Good.", BotDialogueSounds.LINE_POST_COMBAT_STILL_ALIVE, WEIGHT_COMMON),
-            new WeightedLine("post_combat_adequate", "That was... adequate.", BotDialogueSounds.LINE_POST_COMBAT_ADEQUATE, WEIGHT_COMMON)
+            new WeightedLine("post_combat_adequate", "That was... adequate.", BotDialogueSounds.LINE_POST_COMBAT_ADEQUATE, WEIGHT_COMMON),
+            new WeightedLine("combat_clear", "All clear.", BotDialogueSounds.LINE_COMBAT_CLEAR, WEIGHT_COMMON)
     };
 
     private static final WeightedLine[] POST_COMBAT_MULTI_LINES = new WeightedLine[] {
@@ -138,7 +139,8 @@ public final class BotCombatCalloutService {
 
     private static final WeightedLine[] FF_RECEIVED_LINES = new WeightedLine[] {
             new WeightedLine("ff_received_ow_that_was_you", "Ow. That was you.", BotDialogueSounds.LINE_FF_RECEIVED_OW_THAT_WAS_YOU, WEIGHT_UNCOMMON),
-            new WeightedLine("ff_received_on_your_team", "I'm on your team!", BotDialogueSounds.LINE_FF_RECEIVED_ON_YOUR_TEAM, WEIGHT_UNCOMMON)
+            new WeightedLine("ff_received_on_your_team", "I'm on your team!", BotDialogueSounds.LINE_FF_RECEIVED_ON_YOUR_TEAM, WEIGHT_UNCOMMON),
+            new WeightedLine("combat_player_hit", "Hey! Watch it!", BotDialogueSounds.LINE_COMBAT_PLAYER_HIT, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] FF_DEALT_LINES = new WeightedLine[] {
@@ -306,9 +308,11 @@ public final class BotCombatCalloutService {
             meta.maxDangerousMobCount = 1;
         }
         
-        // Use existing voiced audio
-        String line = "Engaging threats against allies.";
-        sayWithSound(bot, line, BotDialogueSounds.LINE_COMBAT_ENGAGING);
+        if (RNG.nextBoolean()) {
+            sayWithSound(bot, "Engaging!", BotDialogueSounds.LINE_COMBAT_ATTACKING);
+        } else {
+            sayWithSound(bot, "Engaging threats against allies.", BotDialogueSounds.LINE_COMBAT_ENGAGING);
+        }
     }
     
     /**
@@ -863,13 +867,16 @@ public final class BotCombatCalloutService {
 
         // Default: roughly even split.
         double r = RNG.nextDouble();
-        if (r < 0.34) {
+        if (r < 0.25) {
             return new KillCallout("Got it!", BotDialogueSounds.LINE_COMBAT_KILL_GOT_IT);
         }
-        if (r < 0.67) {
+        if (r < 0.50) {
             return new KillCallout("Target down!", BotDialogueSounds.LINE_COMBAT_KILL_TARGET_DOWN);
         }
-        return new KillCallout("One less to worry about.", BotDialogueSounds.LINE_COMBAT_KILL_ONE_LESS);
+        if (r < 0.75) {
+            return new KillCallout("One less to worry about.", BotDialogueSounds.LINE_COMBAT_KILL_ONE_LESS);
+        }
+        return new KillCallout("Enemy down.", BotDialogueSounds.LINE_COMBAT_KILL);
     }
     
     @SuppressWarnings("unused")

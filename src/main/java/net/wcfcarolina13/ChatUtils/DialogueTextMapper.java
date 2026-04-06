@@ -523,6 +523,36 @@ public final class DialogueTextMapper {
 
         // Best-effort mapping (no exact recorded line in the pack)
         EXACT_MAP.put("I couldn't secure the lead on the horse.", BotDialogueSounds.LINE_MOUNT_CANT_SECURE);
+
+        // Alternate phrasings — recorded but previously unused
+        // Horse hurt alternates
+        EXACT_MAP.put("Mount's looking banged up.", BotDialogueSounds.LINE_MOUNT_BANGED_UP);
+        EXACT_MAP.put("My horse is hurt.", BotDialogueSounds.LINE_MOUNT_MY_HORSE_HURT);
+        // No apples alternates
+        EXACT_MAP.put("I'm out of apples for the horse.", BotDialogueSounds.LINE_MOUNT_OUT_OF_APPLES);
+        EXACT_MAP.put("No apples on me for this horse.", BotDialogueSounds.LINE_MOUNT_NO_APPLES_ON_ME);
+        // No food alternates
+        EXACT_MAP.put("I can't find food for it.", BotDialogueSounds.LINE_MOUNT_CANT_FIND_FOOD);
+        EXACT_MAP.put("I don't have feed for this horse.", BotDialogueSounds.LINE_MOUNT_NO_FEED);
+        // No lead (ensure) alternate
+        EXACT_MAP.put("I'm missing a lead for the horse.", BotDialogueSounds.LINE_MOUNT_MISSING_LEAD);
+        // No lead (grab) alternates
+        EXACT_MAP.put("I couldn't get the lead.", BotDialogueSounds.LINE_MOUNT_COULDNT_GET_LEAD);
+        EXACT_MAP.put("My lead isn't accessible right now.", BotDialogueSounds.LINE_MOUNT_LEAD_NOT_ACCESSIBLE);
+        // No fence alternates
+        EXACT_MAP.put("No fence nearby to tie it off.", BotDialogueSounds.LINE_MOUNT_NO_FENCE_NEARBY);
+        EXACT_MAP.put("I'll hold the lead until I can tie it off.", BotDialogueSounds.LINE_MOUNT_HOLD_LEAD_UNTIL_TIE);
+        // Lost horse alternates
+        EXACT_MAP.put("I lost the horse I was leading.", BotDialogueSounds.LINE_MOUNT_LOST_HORSE_LEAD);
+        EXACT_MAP.put("I can't find the horse.", BotDialogueSounds.LINE_MOUNT_CANT_FIND_HORSE);
+        EXACT_MAP.put("My mount is gone.", BotDialogueSounds.LINE_MOUNT_MOUNT_GONE);
+        EXACT_MAP.put("I lost the animal I was leading.", BotDialogueSounds.LINE_MOUNT_LOST_LEADING);
+        // Lead snapped alternates
+        EXACT_MAP.put("The lead broke after that fall.", BotDialogueSounds.LINE_MOUNT_LEAD_BROKE_FALL);
+        EXACT_MAP.put("The lead snapped on that drop.", BotDialogueSounds.LINE_MOUNT_LEAD_SNAPPED_ON_DROP);
+        // No lead to reattach alternates
+        EXACT_MAP.put("I'm out of leads to reattach.", BotDialogueSounds.LINE_MOUNT_OUT_OF_LEADS);
+        EXACT_MAP.put("No spare leads to reattach.", BotDialogueSounds.LINE_MOUNT_NO_SPARE_LEADS);
         // ============ JANUARY 2026 BATCH 3 (MANIFEST-GENERATED) ============
         // Generated from tools/audio manifests
         EXACT_MAP.put("I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING);
