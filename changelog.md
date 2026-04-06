@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-06 — Pathfinding: narrow passage & gate traversal
+
+- **Pathfinder passability: fence gates + trapdoors:** `BaritoneStylePathFinder` and classic `PathFinder` now treat `FenceGateBlock` as passable (bot can open on approach) and `TrapdoorBlock` as passable (wooden = openable, iron = collision check). Previously fence gates were treated as impassable walls, causing the pathfinder to route around or fail entirely.
+- **Narrow passage alignment:** When the bot is stagnant near a 1-wide gap (doorway, archway, narrow opening), `FollowMovementService` now detects the chokepoint and steers the bot toward the gap center instead of approaching diagonally and clipping wall corners. Applies to both waypoint following and direct pursuit. Cardinal-direction gaps only for now; diagonal gaps flagged for future work.
+
 ## 2026-04-06 — Bot Anvil Screen
 
 - **Feat: Bot anvil via Spells menu.** Players can use anvils on behalf of bots — repair, rename, or combine items using the bot's XP. Same Spells-menu pattern as enchanting. Vanilla anvil UI, bot's inventory in the grid.
