@@ -463,9 +463,9 @@ public class BaritoneStylePathFinder {
             return true; // wooden doors can be opened by bot
         }
 
-        if (state.getBlock() instanceof FenceGateBlock) {
-            return true; // all fence gates are player-openable
-        }
+        // FenceGateBlock intentionally NOT treated as passable here — the pathfinder
+        // would shortcut through animal pens. Fence gates are handled reactively by
+        // FollowPathService (bounded planner) and BotEventHandler (door-escape system).
 
         if (state.getBlock() instanceof TrapdoorBlock) {
             // Open trapdoors are passable. Closed wooden trapdoors = bot can open.
@@ -615,9 +615,6 @@ public class BaritoneStylePathFinder {
             if (state.isOf(Blocks.IRON_DOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
             }
-            return true;
-        }
-        if (state.getBlock() instanceof FenceGateBlock) {
             return true;
         }
         if (state.getBlock() instanceof TrapdoorBlock) {

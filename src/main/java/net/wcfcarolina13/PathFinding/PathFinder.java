@@ -546,9 +546,6 @@ public class PathFinder {
             }
             return true;
         }
-        if (blockState.getBlock() instanceof FenceGateBlock) {
-            return true;
-        }
         if (blockState.getBlock() instanceof TrapdoorBlock) {
             if (blockState.isOf(Blocks.IRON_TRAPDOOR)) {
                 return blockState.getCollisionShape(world, pos).isEmpty();
