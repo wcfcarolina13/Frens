@@ -2,9 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-06 — Lockable Blocks
+
+- **Lockable block system:** Players can now mark individual doors, fence gates, and trapdoors as "locked" so bots treat them as solid walls. Toggle lock mode via the "Lock Blocks" button in Bot Controls (admin only). While in lock mode: right-click a lockable block to toggle its lock state; crosshair shows lock status; blue soul flame particles highlight all locked blocks within 32 blocks.
+- **Bot enforcement:** Locked blocks are treated as impassable by both pathfinders (`BaritoneStylePathFinder`, classic `PathFinder`), the follow bounded planner (`FollowPathService`), and the door-opening system (`MovementService.tryOpenDoorAt`). Bots show a brief overhead reaction line when first encountering a locked block.
+- **Persistence:** Lock state persists across server restarts in `bot_zones/[world]/locked_blocks.json`. Global to all bots owned by the locking player.
+
 ## 2026-04-06 — Pathfinding: narrow passage & gate traversal
 
-- **Pathfinder passability: fence gates + trapdoors:** `BaritoneStylePathFinder` and classic `PathFinder` now treat `FenceGateBlock` as passable (bot can open on approach) and `TrapdoorBlock` as passable (wooden = openable, iron = collision check). Previously fence gates were treated as impassable walls, causing the pathfinder to route around or fail entirely.
+- **Pathfinder passability: trapdoors:** `BaritoneStylePathFinder` and classic `PathFinder` now treat `TrapdoorBlock` as passable (wooden = openable, iron = collision check). FenceGateBlock intentionally excluded from pathfinder passability to prevent routing through animal pens — fence gates are handled reactively by FollowPathService and the door-escape system.
 - **Narrow passage alignment:** When the bot is stagnant near a 1-wide gap (doorway, archway, narrow opening), `FollowMovementService` now detects the chokepoint and steers the bot toward the gap center instead of approaching diagonally and clipping wall corners. Applies to both waypoint following and direct pursuit. Cardinal-direction gaps only for now; diagonal gaps flagged for future work.
 
 ## 2026-04-06 — Bot Anvil Screen
