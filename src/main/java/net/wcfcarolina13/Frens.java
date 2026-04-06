@@ -566,6 +566,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.SpellNavigationNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.GuideInventoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotEnchantNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.BotAnvilNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.ZoneNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
