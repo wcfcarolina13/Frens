@@ -407,6 +407,18 @@ public class Frens implements ModInitializer {
                     // Best effort only.
                 }
             }
+            // Lock mode: right-click to toggle lock on doors/gates/trapdoors (admin only, main hand only)
+            if (hand == net.minecraft.util.Hand.MAIN_HAND
+                    && isOperator(serverPlayer.getCommandSource())
+                    && net.wcfcarolina13.GameAI.services.LockableBlockService.isLockModeActive(serverPlayer.getUuid())) {
+                var lockPos = hitResult.getBlockPos();
+                var lockState = serverWorld.getBlockState(lockPos);
+                if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLockableBlock(lockState)) {
+                    net.wcfcarolina13.GameAI.services.LockableBlockService.toggleLock(serverWorld, lockPos, serverPlayer);
+                    return net.minecraft.util.ActionResult.SUCCESS;
+                }
+            }
+
             // Zone wand: right-click to set corners (admin only, main hand only)
             if (hand == net.minecraft.util.Hand.MAIN_HAND
                     && net.wcfcarolina13.network.ZoneNetworkManager.isZoneWand(serverPlayer.getStackInHand(hand))
@@ -552,6 +564,10 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ZoneListPayload.ID, net.wcfcarolina13.network.ZoneListPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestZoneListPayload.ID, net.wcfcarolina13.network.RequestZoneListPayload.CODEC);
 
+        // Lockable blocks
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.LockModeTogglePayload.ID, net.wcfcarolina13.network.LockModeTogglePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.LockModeStatePayload.ID, net.wcfcarolina13.network.LockModeStatePayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -568,6 +584,18 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.BotEnchantNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotAnvilNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.ZoneNetworkManager.registerReceiversOnce();
+
+        // Lock mode C2S receiver
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
+                net.wcfcarolina13.network.LockModeTogglePayload.ID, (payload, context) ->
+                        context.server().execute(() -> {
+                            ServerPlayerEntity player = context.player();
+                            if (player == null || !isOperator(player.getCommandSource())) return;
+                            boolean active = payload.active();
+                            net.wcfcarolina13.GameAI.services.LockableBlockService.setLockMode(player.getUuid(), active);
+                            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
+                                    new net.wcfcarolina13.network.LockModeStatePayload(active));
+                        }));
 
         modCommandRegistry.register();
         configCommand.register();
@@ -621,6 +649,7 @@ public class Frens implements ModInitializer {
             server.getWorlds().forEach(world -> {
                 String worldId = world.getRegistryKey().getValue().toString();
                 net.wcfcarolina13.GameAI.services.ProtectedZoneService.loadZones(server, worldId);
+                net.wcfcarolina13.GameAI.services.LockableBlockService.loadForWorld(server, worldId);
             });
 
             // Restore in-flight bot travels that were persisted before shutdown.
@@ -642,6 +671,7 @@ public class Frens implements ModInitializer {
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
+            net.wcfcarolina13.GameAI.services.LockableBlockService.saveAllWorlds(server);
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
                 if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
@@ -720,6 +750,7 @@ public class Frens implements ModInitializer {
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
+            net.wcfcarolina13.GameAI.services.LockableBlockService.clearLockMode(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }
@@ -896,6 +927,22 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ZoneVisualizerService::onServerTick);
+
+        // Lock mode: crosshair feedback + particle visualization for admin players
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            int tick = server.getTicks();
+            for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+                if (player instanceof net.wcfcarolina13.Entity.createFakePlayer) continue;
+                if (!net.wcfcarolina13.GameAI.services.LockableBlockService.isLockModeActive(player.getUuid())) continue;
+                if (!(player.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) continue;
+                if (tick % 10 == 0) {
+                    net.wcfcarolina13.GameAI.services.LockableBlockService.tickCrosshairFeedback(player, sw);
+                }
+                if (tick % 20 == 0) {
+                    net.wcfcarolina13.GameAI.services.LockableBlockService.tickParticles(player, sw);
+                }
+            }
+        });
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
