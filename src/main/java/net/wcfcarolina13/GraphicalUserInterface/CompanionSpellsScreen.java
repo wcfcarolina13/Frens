@@ -9,6 +9,7 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.wcfcarolina13.network.BotAnvilOpenPayload;
 import net.wcfcarolina13.network.BotEnchantOpenPayload;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.FrensClient;
@@ -32,6 +33,7 @@ public class CompanionSpellsScreen extends Screen {
     private ButtonWidget homeBtn;
     private ButtonWidget openInvBtn;
     private ButtonWidget enchantBtn;
+    private ButtonWidget anvilBtn;
 
     private static final class AccessState {
         final boolean full;
@@ -87,14 +89,19 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + 4 * (h + gap), w, h)
                 .build());
 
+        anvilBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Anvil"), (btn) -> openBotAnvil())
+                .dimensions(cx - w / 2, top + 5 * (h + gap), w, h)
+                .build());
+
         comeBtn.setTooltip(Tooltip.of(Text.literal("Call your companion to your location.\nRequires: Enchanting Table or Wizard's Tome, or Goat Horn.")));
         summonBtn.setTooltip(Tooltip.of(Text.literal("Teleport your companion directly to you.\nRequires: Enchanting Table or Wizard's Tome, or Eye of Ender (60s cooldown).")));
         homeBtn.setTooltip(Tooltip.of(Text.literal("Send your companion back to their home base.\nRequires: Navigation tier 1+ (Map on bot) or higher.")));
         openInvBtn.setTooltip(Tooltip.of(Text.literal("Open your companion's inventory remotely.\nRequires: Enchanting Table or Wizard's Tome (full access).")));
         enchantBtn.setTooltip(Tooltip.of(Text.literal("Open the enchanting table for your companion.\nUses the bot's XP, lapis, and inventory.\nRequires: nearby Enchanting Table.")));
+        anvilBtn.setTooltip(Tooltip.of(Text.literal("Open an anvil for your companion.\nRepair, rename, or combine items using the bot's XP.\nRequires: nearby Anvil.")));
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Back"), (btn) -> close())
-                .dimensions(cx - w / 2, top + 5 * (h + gap) + 10, w, h)
+                .dimensions(cx - w / 2, top + 6 * (h + gap) + 10, w, h)
                 .build());
 
         refreshEnabledState();
@@ -114,6 +121,7 @@ public class CompanionSpellsScreen extends Screen {
         if (homeBtn != null) homeBtn.active = state.full || state.botNavTier >= 1;
         if (openInvBtn != null) openInvBtn.active = state.full;
         if (enchantBtn != null) enchantBtn.active = isNearEnchantingTable(this.client, 4);
+        if (anvilBtn != null) anvilBtn.active = isNearAnvil(this.client, 4);
     }
 
     private AccessState getAccessState() {
@@ -143,6 +151,23 @@ public class CompanionSpellsScreen extends Screen {
             }
             var state = client.world.getBlockState(pos);
             if (state.isOf(Blocks.ENCHANTING_TABLE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isNearAnvil(MinecraftClient client, int radius) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        net.minecraft.util.math.BlockPos origin = client.player.getBlockPos();
+        int r = Math.max(1, radius);
+        for (net.minecraft.util.math.BlockPos pos : net.minecraft.util.math.BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!client.world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (client.world.getBlockState(pos).isIn(net.minecraft.registry.tag.BlockTags.ANVIL)) {
                 return true;
             }
         }
@@ -258,6 +283,15 @@ public class CompanionSpellsScreen extends Screen {
             return;
         }
         ClientPlayNetworking.send(new BotEnchantOpenPayload(botAlias));
+        close();
+    }
+
+    private void openBotAnvil() {
+        MinecraftClient client = this.client;
+        if (client == null || client.getNetworkHandler() == null) {
+            return;
+        }
+        ClientPlayNetworking.send(new BotAnvilOpenPayload(botAlias));
         close();
     }
 
