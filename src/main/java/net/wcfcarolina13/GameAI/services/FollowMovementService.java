@@ -21,12 +21,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Stage-2 refactor: follow movement primitives extracted out of {@code BotEventHandler}.
  *
  * <p>Intended to be behavior-neutral. Higher-level follow/come decision logic remains in BotEventHandler.</p>
  */
 public final class FollowMovementService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("frens");
 
     private static final double MIN_FOLLOW_DISTANCE = 1.0D;
     private static final double MIN_FOLLOW_DISTANCE_SQ = MIN_FOLLOW_DISTANCE * MIN_FOLLOW_DISTANCE;
@@ -150,6 +155,21 @@ public final class FollowMovementService {
             return;
         }
         LookController.faceBlock(bot, waypoint);
+        // Narrow passage alignment: when stagnant near a 1-wide gap, steer toward the gap center.
+        if (bot.getVelocity().horizontalLengthSquared() < 0.0025D
+                && bot.getEntityWorld() instanceof ServerWorld sw) {
+            BlockPos gap = findNarrowPassageAlignmentTarget(sw, bot.getBlockPos(), waypoint);
+            if (gap != null) {
+                FollowDebugService.maybeLogDecision(LOGGER, bot,
+                        "narrow-passage-align: gap=" + gap.toShortString() + " waypoint=" + waypoint.toShortString());
+                Vec3d gapCenter = Vec3d.ofCenter(gap);
+                LookController.faceBlock(bot, gap);
+                BotActions.sprint(bot, false);
+                BotActions.autoJumpIfNeeded(bot);
+                BotActions.applyMovementInput(bot, gapCenter, 0.18D);
+                return;
+            }
+        }
         if (tryLocalObstacleNudge(bot, waypointCenter)) {
             return;
         }
@@ -307,6 +327,23 @@ public final class FollowMovementService {
             return;
         }
         LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
+
+        // Narrow passage alignment: when stagnant near a 1-wide gap, steer toward the gap center.
+        if (bot.getVelocity().horizontalLengthSquared() < 0.0025D
+                && bot.getEntityWorld() instanceof ServerWorld sw) {
+            BlockPos targetBlock = BlockPos.ofFloored(targetPos);
+            BlockPos gap = findNarrowPassageAlignmentTarget(sw, bot.getBlockPos(), targetBlock);
+            if (gap != null) {
+                FollowDebugService.maybeLogDecision(LOGGER, bot,
+                        "narrow-passage-align: gap=" + gap.toShortString() + " target=" + targetBlock.toShortString());
+                Vec3d gapCenter = Vec3d.ofCenter(gap);
+                LookController.faceBlock(bot, gap);
+                BotActions.sprint(bot, false);
+                BotActions.autoJumpIfNeeded(bot);
+                BotActions.applyMovementInput(bot, gapCenter, 0.18D);
+                return;
+            }
+        }
 
         // If we are pressed against a too-tall obstacle, do a small sidestep to try a new lane.
         // This is intentionally lightweight and non-destructive.
@@ -716,6 +753,66 @@ public final class FollowMovementService {
             return dx >= 0 ? Direction.EAST : Direction.WEST;
         }
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    /**
+     * Scans the line between the bot and its waypoint for a "chokepoint" — a 1-wide gap
+     * in a wall. Returns the gap center as a movement target, or null if no chokepoint found.
+     *
+     * Only activates within 3 blocks of a gap.
+     * Cardinal-only scan for now; diagonal gaps may need handling later.
+     */
+    static BlockPos findNarrowPassageAlignmentTarget(ServerWorld world, BlockPos botPos, BlockPos waypoint) {
+        if (world == null || botPos == null || waypoint == null) {
+            return null;
+        }
+        int dx = waypoint.getX() - botPos.getX();
+        int dz = waypoint.getZ() - botPos.getZ();
+        int dist = Math.max(Math.abs(dx), Math.abs(dz));
+        if (dist < 1 || dist > 4) {
+            return null;
+        }
+
+        int stepX = Integer.signum(dx);
+        int stepZ = Integer.signum(dz);
+        int steps = Math.max(Math.abs(dx), Math.abs(dz));
+
+        for (int i = 1; i <= Math.min(steps, 3); i++) {
+            int probeX, probeZ;
+            if (Math.abs(dx) >= Math.abs(dz)) {
+                probeX = botPos.getX() + stepX * i;
+                probeZ = botPos.getZ() + (dz != 0 ? (int) Math.round((double) dz * i / Math.abs(dx)) : 0);
+            } else {
+                probeZ = botPos.getZ() + stepZ * i;
+                probeX = botPos.getX() + (dx != 0 ? (int) Math.round((double) dx * i / Math.abs(dz)) : 0);
+            }
+            BlockPos probe = new BlockPos(probeX, botPos.getY(), probeZ);
+            if (!hasTwoHighClearance(world, probe)) {
+                continue;
+            }
+            if (isChokepoint(world, probe)) {
+                return probe;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns true if the given position is a 1-wide gap: has 2-high clearance but both
+     * perpendicular wall pairs are solid.
+     *
+     * Checks both axes. A chokepoint on the X-axis means walls to the north and south;
+     * on the Z-axis, walls to the east and west.
+     */
+    private static boolean isChokepoint(ServerWorld world, BlockPos pos) {
+        boolean wallNorth = !hasTwoHighClearance(world, pos.north());
+        boolean wallSouth = !hasTwoHighClearance(world, pos.south());
+        if (wallNorth && wallSouth) {
+            return true;
+        }
+        boolean wallEast = !hasTwoHighClearance(world, pos.east());
+        boolean wallWest = !hasTwoHighClearance(world, pos.west());
+        return wallEast && wallWest;
     }
 
     private static void maybeShowDropWarning(ServerPlayerEntity bot) {
