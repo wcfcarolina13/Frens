@@ -5280,6 +5280,33 @@ public class modCommandRegistry {
         return nearest;
     }
 
+    /** Find the nearest anvil BlockPos within radius, or null if none found. */
+    public static BlockPos findNearestAnvil(ServerPlayerEntity player, int radius) {
+        if (player == null) {
+            return null;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        BlockPos origin = player.getBlockPos();
+        int r = Math.max(1, radius);
+        BlockPos nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (world.getBlockState(pos).isIn(net.minecraft.registry.tag.BlockTags.ANVIL)) {
+                double dist = origin.getSquaredDistance(pos);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = pos.toImmutable();
+                }
+            }
+        }
+        return nearest;
+    }
+
     public static boolean hasSpellbookToken(ServerPlayerEntity commander) {
         if (commander == null) {
             return false;

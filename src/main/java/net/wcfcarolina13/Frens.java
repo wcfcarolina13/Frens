@@ -534,6 +534,7 @@ public class Frens implements ModInitializer {
 
         // Bot enchanting screen
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotEnchantOpenPayload.ID, net.wcfcarolina13.network.BotEnchantOpenPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotAnvilOpenPayload.ID, net.wcfcarolina13.network.BotAnvilOpenPayload.CODEC);
 
         // Protected zone management
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ZoneWandRequestPayload.ID, net.wcfcarolina13.network.ZoneWandRequestPayload.CODEC);
