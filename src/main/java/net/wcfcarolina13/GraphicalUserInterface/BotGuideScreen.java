@@ -1299,6 +1299,26 @@ public final class BotGuideScreen extends Screen {
                         "UI-only action (Spells \u2192 Enchant)",
                         "Stand near an Enchanting Table with bookshelves for best results",
                         "enchant enchanting table xp level lapis bot companion spells magic"
+                ),
+                new GuideTopic(
+                        "anvil_overview",
+                        "Enchanting",
+                        "Bot Anvil",
+                        "Repair, rename, or combine your companion's items using the bot's XP.",
+                        List.of(
+                                "Open the Spells menu while near an Anvil.",
+                                "Click 'Anvil' to open the vanilla anvil UI for your bot.",
+                                "The inventory grid shows the bot's items \u2014 place items in the input slots as normal.",
+                                "Repair: combine a damaged tool with its repair material or another copy.",
+                                "Enchant: combine an item with an Enchanted Book to add enchantments.",
+                                "Rename: type a new name in the text field (costs 1 level).",
+                                "XP cost is deducted from the bot, not you.",
+                                "Operations costing 40+ levels are blocked (vanilla 'Too Expensive' limit).",
+                                "When you close the screen, leftover items return to the bot's inventory."
+                        ),
+                        "UI-only action (Spells \u2192 Anvil)",
+                        "Stand near an Anvil",
+                        "anvil repair rename combine enchanted book xp bot companion spells"
                 )
         );
     }
