@@ -49,7 +49,11 @@ Items without a material tier — bow, crossbow, fishing rod, shield, shears, fl
 - `threshold = 0.03` if `BotCombatCalloutService.isInCombat(bot.getUuid())` is true
 - `threshold = 0.11` otherwise
 
-The combat threshold applies to **every** durability item the bot holds or wears during combat, not just combat-relevant items. If a bot happens to be holding a diamond pickaxe when combat starts, the 3% rule applies to that pickaxe too. This is intentional — combat is the danger phase, and the rule is "push harder when the stakes are higher."
+The combat threshold applies to **every** durability item the bot *newly selects* during combat, not just combat-relevant items. If a bot happens to pick up a diamond pickaxe mid-combat (rare but possible during a forced swap), the 3% rule applies to that pickaxe too.
+
+**Important clarification — the threshold is evaluated at selection time, not continuously.** A tool already equipped when combat starts is not re-selected; the bot keeps using it until it's retired for another reason (slot swap, skill transition, fallback trigger). The combat threshold therefore only affects *new* selection decisions made while `isInCombat()` is true. Conversely, when combat ends mid-skill, a previously-filtered item becomes eligible again on the next selection call — the bot does not auto-swap.
+
+**Armor corollary.** Because armor is equip-time only (see Hook Sites section), the combat threshold has no practical effect on armor. A diamond chestplate equipped at 80% before combat stays on through combat even if it drops below 3%; it is never re-evaluated. This is intentional — mid-combat armor stripping is worse than taking the hit.
 
 ### Durability ratio
 
@@ -64,14 +68,24 @@ An item is "below threshold" when `ratio < threshold` (strict less-than).
 ```text
 shouldAvoid(bot, stack) := stack is non-empty
                         && stack is damageable
-                        && isPolicyEnabled(bot.owner)
+                        && isPolicyEnabled(bot)
                         && isPreserved(stack)
                         && durabilityRatio(stack) < currentThreshold(bot)
 ```
 
 Where `isPreserved(stack) := isPreservedMaterial(stack) || isEnchanted(stack)`.
 
+The `stack is damageable` check comes first, which naturally eliminates enchanted books, enchanted golden apples, potions, and other enchanted-but-non-damageable items — the toggle does not interfere with those. The `stack is non-empty` check is a convenience guard for callers that pass raw hotbar slots.
+
 When `shouldAvoid` returns true, selection sites skip the stack as if it didn't exist.
+
+### Mending enchantment interaction
+
+Mending is treated as any other enchantment — an item with Mending is preserved. This is a deliberate choice: if the player wants a Mending item used continuously to benefit from XP self-repair, they should disable the toggle (it's a per-player preference, flipping it takes one click). The guide entry explicitly calls this out so players aren't surprised when a Mending diamond sword gets filtered at 10%.
+
+### Offhand coverage
+
+Both main hand and offhand selection sites are filtered. The shield selection in `CombatInventoryManager` is the primary offhand hook; totem-of-undying is non-damageable so it is unaffected.
 
 ## Data Model
 
@@ -83,16 +97,16 @@ New field in `FilingSystem/ManualConfig.java`:
 private final Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
 ```
 
-- Keyed by player UUID string
+- Keyed by player UUID `.toString()` (not raw `UUID`; matches the existing `botOwnership` map convention in the same file)
 - Default value (absent key) = `false` (toggle OFF)
 - Persists to the same JSON as the rest of ManualConfig
 - No migration needed — absent keys just default to OFF
 
-Accessors:
+Accessors convert `UUID` to string internally:
 
 ```java
-public boolean getPreserveExpensiveGear(UUID playerUuid)
-public void setPreserveExpensiveGear(UUID playerUuid, boolean value)
+public boolean getPreserveExpensiveGear(UUID playerUuid)  // internally: playerPreserveExpensiveGear.getOrDefault(playerUuid.toString(), false)
+public void setPreserveExpensiveGear(UUID playerUuid, boolean value)  // internally: playerPreserveExpensiveGear.put(playerUuid.toString(), value)
 ```
 
 ### Fallback cooldown state (transient, in-memory)
@@ -105,7 +119,13 @@ private static final Map<UUID, EnumMap<GearCategory, Long>> LAST_ATTEMPT = new C
 private static final long COOLDOWN_MS = 20_000L;
 ```
 
-Cleared on server stop and on bot removal. Not persisted — fresh start on reload is fine.
+**Lifecycle rules:**
+
+- Cleared on server stop (SERVER_STOPPING handler)
+- Cleared on bot removal from the world (despawn, kick, world unload)
+- **Cleared on bot death.** A respawned bot drops its inventory and starts empty; it should be allowed to immediately re-attempt gear refresh without sitting out a stale 20s cooldown.
+- **Cleared on toggle-on.** When a player flips their preference from OFF → ON, any stale cooldowns for bots owned by that player are cleared so the first selection after the flip gets a fresh attempt. (Flipping OFF → ON is the user-visible event; no clearing needed on ON → OFF because the policy is simply disabled.)
+- Not persisted across server restart — fresh start on reload is fine.
 
 ## Services
 
@@ -141,10 +161,13 @@ Orchestrates the chest/craft/stand-down chain when a selection site finds no com
 **Gear categories (enum):**
 
 ```text
-PICKAXE, AXE, SHOVEL, HOE, SWORD, SHIELD, BOW, CROSSBOW,
-FISHING_ROD, HELMET, CHESTPLATE, LEGGINGS, BOOTS,
-FLINT_STEEL, SHEARS, TRIDENT
+PICKAXE, AXE, SHOVEL, HOE, SWORD, MACE, SHIELD,
+BOW, CROSSBOW, TRIDENT, FISHING_ROD,
+HELMET, CHESTPLATE, LEGGINGS, BOOTS, ELYTRA,
+SHEARS
 ```
+
+Items not in the enum (carrot-on-stick, warped-fungus-on-stick, brush, flint & steel) are still filtered at their selection sites via `DurabilityPolicyService.shouldAvoid`, but they do not trigger the fallback chain when filtered. For those items, the selection site simply returns "no tool" and the calling code handles it via its existing no-tool path. These items are either niche (brush, carrot stick) or absent from the codebase (flint & steel — confirmed via grep at design time).
 
 **Entry point:**
 
@@ -161,11 +184,15 @@ public static void requestRefresh(ServerPlayerEntity bot, GearCategory category,
 1. **Inventory re-scan** — sweep all 36 inventory slots for any stack matching the category that passes `!shouldAvoid(bot, stack)`. If found, schedule a hotbar swap (or `equipStack` for armor) via `server.execute(...)`. Done.
 2. **Chest retrieval** — call `ToolProvisionService.retrieveToolFromChests(bot, world, source, snapshotFilter, stackPredicate, comparator, maxRange)` with:
    - `stackPredicate` = matches category AND `!DurabilityPolicyService.shouldAvoid(bot, stack)` AND `durabilityRatio(stack) >= 0.25`
-   - The 25% floor ensures we don't swap a 10% diamond for a 15% diamond; the replacement must have real headroom.
-3. **Crafting fallback** — for categories with an `ensureX` helper in `ToolProvisionService` (pickaxe, axe, shovel, sword), call it with `allowWoodenFallback=true`. Shield, bow, crossbow, fishing rod, etc. have no `ensureX` helper — skip straight to step 4.
+   - The 25% floor prevents swap-thrashing between two near-threshold items: without it, a 10% diamond pickaxe could be "replaced" by a 15% diamond pickaxe which itself would be filtered on the next skill tick. The 25% floor ensures the replacement has enough headroom to matter.
+3. **Crafting fallback** — for tool categories with an `ensureX` helper in `ToolProvisionService` (pickaxe, axe, shovel, sword), call it with `allowWoodenFallback=true`. **Armor categories (helmet, chestplate, leggings, boots, elytra) and non-tool categories (shield, bow, crossbow, trident, fishing rod, mace, shears) have no `ensureX` helper — skip the crafting step entirely and proceed to step 4.**
 4. **Stand down** — log the reason, fire `CompanionOverheadDialogueService.tryShowGearNoReplacement(bot)`, and return. The calling skill will see `null` from its selector, bail via its existing no-tool path, and `SkillResumeService` will re-attempt naturally.
 
+**Race conditions across bots.** Two bots owned by the same (or different) players can simultaneously hit `shouldAvoid` and race to retrieve the last matching item from the same chest. This is accepted as designed: `ToolProvisionService.retrieveToolFromChests` is independently invoked per bot; whichever arrives first wins. The loser walks to the chest, finds nothing matching, and stands down with the 20s cooldown applied — preventing a thrash loop. No reservation or locking is added.
+
 **Threading:** all chest-walks, crafting calls, and inventory mutations that must run on the server thread are dispatched via `server.execute(...)`. The worker thread does I/O-free scanning and decision logic only.
+
+**Executor.** `DurabilityFallbackService` uses a dedicated single-thread `ExecutorService fallbackExecutor` (created via `Executors.newSingleThreadExecutor` with a named thread factory `"frens-durability-fallback"`). Work is queued unbounded; fallback tasks are infrequent due to the 20s cooldown so the queue cannot realistically grow. A static `shutdownExecutors()` method is called from the `SERVER_STOPPING` handler in `Frens.java`, matching the existing pattern for the 8 other mod executors listed in the CLAUDE.md memory note on executor shutdown.
 
 ### CompanionOverheadDialogueService additions
 
@@ -232,19 +259,30 @@ if (DurabilityPolicyService.shouldAvoid(bot, candidate)) continue;
 
 If the loop completes with zero compliant candidates, the hook calls `DurabilityFallbackService.requestRefresh(bot, category, source)` and returns `null` (or equivalent "no tool" sentinel) for this tick.
 
-### Confirmed sites (Phase 2)
+### Core selection sites (Phase 2)
 
 - **Mining tool** — `PlayerUtils/ToolSelector.java`, inside `selectBestToolForBlock` (filter during hotbar + inventory scan).
 - **Armor** — `PlayerUtils/armorUtils.java`, inside `isBetterArmor` / `findBestArmorSlot` (equip-time filter only, no continuous re-check).
-- **Combat sword/shield** — `PlayerUtils/CombatInventoryManager.java`, inside `ensureCombatLoadout` weapon/shield selection.
+- **Combat sword/shield/mace** — `PlayerUtils/CombatInventoryManager.java`, inside `ensureCombatLoadout` weapon/shield selection. Also covers offhand shield via the same helper.
 
-### Remaining sites (Phase 3)
+### Ranged and utility selection sites (Phase 3)
 
+Hook count confirmed by design-time grep for `Items.BOW|CROSSBOW|TRIDENT|SHEARS|ELYTRA|MACE|FLINT_AND_STEEL`. Files that need a filter:
+
+- **Bow / crossbow / trident** — `GameAI/BotActions.java` at the ranged-weapon selection sites around lines 1386, 1475, 1489, 1517, 2168 (all part of the central ranged/combat dispatch). Filter during the "pick ranged weapon" loop.
 - **Fishing rod** — `GameAI/skills/impl/FishingSkill.java`, rod selection before `cast()`.
-- **Bow/crossbow** — whichever hunt/ranged skill fires projectiles; filter before equip.
-- **Flint & steel** — wherever used (likely campfire lighting); filter before use.
-- **Shears** — wool/leaves/vine sites; filter before use.
-- **Trident** — if used at all; filter before equip.
+- **Shears for wool harvesting** — `GameAI/skills/impl/WoolSkill.java`, shears selection at lines 312, 333, 790.
+- **Elytra for flight** — `GameAI/services/ElytraFlightService.java`, chest-slot equip sites at lines 320, 335, 686, 877, 933, 1033. This is intentional flight equip, not emergency use.
+
+**Intentionally NOT hooked** (safety / escape contexts — preservation must not trap a bot in danger):
+
+- `GameAI/services/MountedLeafClearingService.java` — emergency leaf clearing on stuck mount.
+- `GameAI/services/TreeStuckEscapeService.java` — emergency escape from a tree.
+- `GameAI/services/BotArrowRecoveryService.java` — arrow/trident pickup, no use.
+- `GameAI/services/CraftingHelper.java` — creates new items, does not consume existing durability.
+- Shears site in `PlayerUtils/ToolSelector.java` lines 122–128 — already covered by the Phase 2 ToolSelector hook (the same filter applies).
+
+**Not present in codebase:** `Items.FLINT_AND_STEEL`, `Items.MACE`, `Items.BRUSH`, carrot-on-stick, warped-fungus-on-stick. Confirmed absent via grep. No hook needed.
 
 Phase 3 includes a discovery step: grep for `flint_and_steel`, `shears`, `trident`, `bow`, `crossbow` usages in the skill tree to confirm hook count.
 
@@ -347,12 +385,19 @@ tags: "durability tools gear preserve diamond netherite gold enchanted
 - **Diamond sword at 4% in combat** — ratio 4% ≥ 3% threshold → still used.
 - **Diamond sword at 2% in combat** — ratio 2% < 3% threshold → filtered, `tryShowGearCombatEdge` fires.
 - **Turtle helmet at 10%** — preserved (special material) → filtered.
-- **Mending fishing rod at 5%** — preserved (any enchantment) → filtered.
+- **Mending fishing rod at 5%** — preserved (any enchantment) → filtered. The player is expected to disable the toggle if they want XP-based self-repair; this is documented in the guide.
+- **Diamond chestplate equipped at 80% enters combat, drops to 2%** — still worn (armor is equip-time only, never re-evaluated).
+- **Diamond pickaxe equipped at 80% when combat starts** — still used (already-equipped items are not re-selected; the 3% combat threshold only affects new selection calls).
+- **Enchanted book, enchanted golden apple, potion** — non-damageable; predicate short-circuits at the `damageable` check; unaffected by the policy.
+- **Bot dies with a preserved tool in inventory** — inventory drops per vanilla; respawned bot is empty. The fallback cooldown map is cleared on death, so the respawned bot's first selection call can immediately trigger a fresh fallback attempt.
+- **Player flips toggle OFF → ON mid-session** — all cooldowns for bots owned by that player are cleared so the first post-flip selection gets a fresh attempt.
 - **Player has no chests registered** — chest step is a no-op, proceeds to craft step.
 - **Bot mid-skill with no alternative anywhere** — fallback fires once, stands down, 20s cooldown prevents retry loop, skill bails via no-tool path.
-- **Toggle flipped OFF mid-skill** — next selection call uses the full set again, bot resumes normally.
+- **Two bots race the same last iron pickaxe in a chest** — accepted as designed. Loser walks to the chest, finds nothing, stands down, 20s cooldown applies. No reservation or locking is added.
+- **Toggle flipped ON → OFF mid-skill** — policy is disabled immediately; next selection call uses the full set again, bot resumes normally.
 - **Two bots of two different owners in same area** — each resolves its own owner's preference independently.
 - **Owner logs out** — preference persists (stored in ManualConfig), applies on next login.
+- **Combat ends mid-skill** — the 11% threshold returns on the next selection call. A previously-filtered 5% diamond sword becomes eligible again; the bot does not auto-swap back to it, but the next natural re-selection will pick it up.
 
 ## File Changes Summary
 
@@ -372,20 +417,20 @@ tags: "durability tools gear preserve diamond netherite gold enchanted
 - `Frens.java` (payload registration + handler)
 - `GraphicalUserInterface/AdminPlayerSettingsScreen.java`
 
-**Phase 2 (5 files):**
+**Phase 2 — Core selection sites (4 files):**
 
-- `PlayerUtils/ToolSelector.java`
-- `PlayerUtils/armorUtils.java`
-- `PlayerUtils/CombatInventoryManager.java`
-- `GameAI/services/DurabilityFallbackService.java` (new, stub with inventory-rescan only)
-- One hook-site wire-up file (whichever)
+- `PlayerUtils/ToolSelector.java` — filter in `selectBestToolForBlock`
+- `PlayerUtils/armorUtils.java` — filter in `isBetterArmor` / `findBestArmorSlot`
+- `PlayerUtils/CombatInventoryManager.java` — filter in `ensureCombatLoadout` weapon/shield selection
+- `GameAI/services/DurabilityFallbackService.java` (new, stub with inventory-rescan step only; full chest+craft chain deferred to Phase 3)
 
-**Phase 3 (4–5 files):**
+**Phase 3 — Ranged/utility sites + full fallback chain (5 files):**
 
-- `GameAI/services/DurabilityFallbackService.java` (fill in chest + craft steps + cooldown)
-- `GameAI/skills/impl/FishingSkill.java`
-- Hunt/bow/crossbow skill file(s)
-- Flint & steel / shears / trident sites if any
+- `GameAI/services/DurabilityFallbackService.java` (fill in chest retrieval, crafting fallback, cooldown, race handling, executor + shutdown hook)
+- `GameAI/BotActions.java` — filter at ranged-weapon selection sites (bow/crossbow/trident lines 1386, 1475, 1489, 1517, 2168)
+- `GameAI/skills/impl/FishingSkill.java` — filter rod selection before `cast()`
+- `GameAI/skills/impl/WoolSkill.java` — filter shears selection (lines 312, 333, 790)
+- `GameAI/services/ElytraFlightService.java` — filter elytra equip (lines 320, 335, 686, 877, 933, 1033)
 
 **Phase 4 (3 files):**
 
@@ -393,7 +438,7 @@ tags: "durability tools gear preserve diamond netherite gold enchanted
 - `GraphicalUserInterface/BotGuideScreen.java`
 - `changelog.md`
 
-Total: **3 new files, 9–11 modified files**, split across 4 phases each fitting within the 5-files-per-phase limit from CLAUDE.md.
+Total: **3 new files, 11 modified files**, split across 4 phases each fitting within the 5-files-per-phase limit from CLAUDE.md.
 
 ## Verification Plan
 
@@ -416,6 +461,10 @@ No automated tests exist in this project (per CLAUDE.md). Verification is in-gam
 11. **Persistence** — Toggle ON, `/reload` or restart server → toggle still ON.
 12. **Tooltip** — Hover toggle in admin screen → tooltip appears after 1.7s with the wrapped text.
 13. **Guide searchability** — Open guide, search "durability" or "preserve" → topic appears under Settings.
+14. **Death/respawn cooldown clear** — Trigger fallback, wait 5s, kill bot, respawn → next selection immediately attempts a fresh fallback (no stale 20s cooldown).
+15. **Toggle ON clears stale cooldown** — Trigger fallback (cooldown set), toggle OFF, toggle back ON → next selection immediately attempts fresh fallback.
+16. **Mending item lockout** — Mending diamond pickaxe at 10% with toggle ON → filtered. Document as expected behavior in guide.
+17. **Race between two bots** — Two bots same owner, single iron pickaxe in one chest, both trigger fallback simultaneously → one swaps, the other stands down with cooldown. No crash, no thrash.
 
 ## Open Items (none at design time)
 
