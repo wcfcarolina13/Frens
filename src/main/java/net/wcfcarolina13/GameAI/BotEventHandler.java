@@ -734,6 +734,7 @@ public class BotEventHandler {
         UUID uuid = bot.getUuid();
         net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(uuid);
         BotRegistry.unregister(uuid);
+        net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldowns(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);

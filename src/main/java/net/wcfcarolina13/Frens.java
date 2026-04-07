@@ -620,6 +620,11 @@ public class Frens implements ModInitializer {
                     Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
                     Frens.CONFIG.save();
                 }
+                // If the player just flipped OFF → ON, clear any stale cooldowns for their bots
+                // so the next selection call gets a fresh fallback attempt.
+                if (payload.enabled()) {
+                    net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldownsForOwner(senderUuid);
+                }
             });
         });
 
@@ -731,6 +736,7 @@ public class Frens implements ModInitializer {
             }
             BotPersistenceService.saveAll(server);
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.clearSmokeSignalCache();
+            net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearAllCooldowns();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
