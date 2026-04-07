@@ -3231,9 +3231,21 @@ public class modCommandRegistry {
             diamondSword.setDamage(1530); // ~2% remaining of 1561
             giveStack(bot, diamondSword, commander);
 
+            ItemStack diamondHelmet = Items.DIAMOND_HELMET.getDefaultStack();
+            diamondHelmet.setDamage(353); // ~2.7% remaining of 363
+            giveStack(bot, diamondHelmet, commander);
+
             ItemStack diamondChest = Items.DIAMOND_CHESTPLATE.getDefaultStack();
             diamondChest.setDamage(518); // ~2% remaining of 528
             giveStack(bot, diamondChest, commander);
+
+            ItemStack diamondLeggings = Items.DIAMOND_LEGGINGS.getDefaultStack();
+            diamondLeggings.setDamage(475); // ~2% remaining of 495
+            giveStack(bot, diamondLeggings, commander);
+
+            ItemStack diamondBoots = Items.DIAMOND_BOOTS.getDefaultStack();
+            diamondBoots.setDamage(411); // ~2% remaining of 429
+            giveStack(bot, diamondBoots, commander);
 
             // Enchanted iron pickaxe (preserved by enchantment, below threshold)
             ItemStack enchantedIronPick = withEnchantments(registryManager,
@@ -3252,9 +3264,21 @@ public class modCommandRegistry {
             ironSword.setDamage(50); // ~80% remaining of 250
             giveStack(bot, ironSword, commander);
 
+            ItemStack ironHelmet = Items.IRON_HELMET.getDefaultStack();
+            ironHelmet.setDamage(33); // ~80% remaining of 165
+            giveStack(bot, ironHelmet, commander);
+
             ItemStack ironChest = Items.IRON_CHESTPLATE.getDefaultStack();
             ironChest.setDamage(48); // ~80% remaining of 240
             giveStack(bot, ironChest, commander);
+
+            ItemStack ironLeggings = Items.IRON_LEGGINGS.getDefaultStack();
+            ironLeggings.setDamage(45); // ~80% remaining of 225
+            giveStack(bot, ironLeggings, commander);
+
+            ItemStack ironBoots = Items.IRON_BOOTS.getDefaultStack();
+            ironBoots.setDamage(39); // ~80% remaining of 195
+            giveStack(bot, ironBoots, commander);
 
             // --- Supporting items ---
             giveStack(bot, new ItemStack(Items.COBBLESTONE, 64), commander);
@@ -5734,8 +5758,8 @@ public class modCommandRegistry {
         executeTestGear(context.getSource().getServer(), bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Gave durability test gear to " + bot.getName().getString()
-                        + " (preserved: diamond pick/sword/chest 2%, enchanted iron pick 5%; "
-                        + "alternatives: iron pick/sword/chest 80%).");
+                        + " (preserved: diamond pick/sword/full armor at 2%, enchanted iron pick 5%; "
+                        + "alternatives: iron pick/sword/full armor at 80%).");
         return 1;
     }
 

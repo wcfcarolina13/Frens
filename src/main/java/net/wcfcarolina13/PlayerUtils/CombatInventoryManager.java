@@ -185,6 +185,7 @@ public final class CombatInventoryManager {
     }
 
     private static OptionalInt findBestWeaponSlot(ServerPlayerEntity bot, PlayerInventory inventory) {
+        // First pass: find the best compliant weapon (swords, axes, tridents, etc.)
         int bestIndex = -1;
         double bestScore = Double.NEGATIVE_INFINITY;
 
@@ -198,7 +199,44 @@ public final class CombatInventoryManager {
             }
         }
 
-        return bestIndex >= 0 ? OptionalInt.of(bestIndex) : OptionalInt.empty();
+        if (bestIndex >= 0) {
+            return OptionalInt.of(bestIndex);
+        }
+
+        // Second pass: no compliant "real" weapon found. This happens when the only
+        // sword/axe is filtered by the durability preservation policy. Fall back to
+        // any compliant mining tool (pickaxe/shovel/hoe) that can still deal melee
+        // damage. Axes are already scored by evaluateWeapon, so only need to cover
+        // item types it doesn't recognize.
+        int fallbackIndex = -1;
+        double fallbackScore = Double.NEGATIVE_INFINITY;
+
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+
+            double score = evaluateWeapon(stack);
+            if (score == Double.NEGATIVE_INFINITY) {
+                // evaluateWeapon doesn't recognize this item — check if it's a
+                // mining tool we can use as a fallback melee option.
+                String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+                if (key.endsWith("_pickaxe")) {
+                    score = 55 + materialWeight(key); // iron pickaxe ~58, diamond ~59
+                } else if (key.endsWith("_shovel") || key.endsWith("_hoe")) {
+                    score = 40 + materialWeight(key);
+                } else {
+                    continue;
+                }
+            }
+
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallbackIndex = i;
+            }
+        }
+
+        return fallbackIndex >= 0 ? OptionalInt.of(fallbackIndex) : OptionalInt.empty();
     }
 
     private static double evaluateWeapon(ItemStack stack) {
