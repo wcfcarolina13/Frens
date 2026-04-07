@@ -119,6 +119,7 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
     private Rect permissionsActionRect;
+    private Rect personalPrefsActionRect;
     private Rect lockBlocksRect;
     private Rect saveRect;
     private Rect closeRect;
@@ -251,6 +252,7 @@ public class BotControlScreen extends Screen {
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 160, BUTTON_H);
         lockBlocksRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 100, BUTTON_H);
+        personalPrefsActionRect = new Rect(lockBlocksRect.right() + footerGap, footerY, 130, BUTTON_H);
     }
 
     private List<String> buildAliasList() {
@@ -522,6 +524,11 @@ public class BotControlScreen extends Screen {
         drawActionButton(context, lockBlocksRect,
                 lockModeActive ? "Lock Mode ON" : "Lock Blocks",
                 lockModeActive,
+                true,
+                mouseX, mouseY);
+        drawActionButton(context, personalPrefsActionRect,
+                "Personal Preferences",
+                false,
                 true,
                 mouseX, mouseY);
         drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
@@ -906,6 +913,12 @@ public class BotControlScreen extends Screen {
                 close();
                 return true;
             }
+            if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new BotPlayerPreferencesScreen(this));
+                }
+                return true;
+            }
             if (permissionsActionRect.contains(mx, my)) {
                 aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
                 if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
@@ -936,6 +949,14 @@ public class BotControlScreen extends Screen {
             }
 
             return true;  // consume click inside panel even if no row matched
+        }
+
+        // Footer: Personal Preferences
+        if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
+            if (this.client != null) {
+                this.client.setScreen(new BotPlayerPreferencesScreen(this));
+            }
+            return true;
         }
 
         // Footer: Permissions editor
