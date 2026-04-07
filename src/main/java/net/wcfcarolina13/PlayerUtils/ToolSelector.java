@@ -31,7 +31,7 @@ public class ToolSelector {
                 return shears;
             }
             if (!shears.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, shears)) {
-                // Enchanted shears below threshold — request fallback refresh, then fall through.
+                // Preserved shears below threshold — request fallback refresh, then fall through.
                 DurabilityFallbackService.requestRefresh(
                         bot, DurabilityFallbackService.GearCategory.SHEARS);
             }
@@ -157,11 +157,6 @@ public class ToolSelector {
         if (key.endsWith("_shovel"))  return DurabilityFallbackService.GearCategory.SHOVEL;
         if (key.endsWith("_hoe"))     return DurabilityFallbackService.GearCategory.HOE;
         if (key.endsWith("_axe"))     return DurabilityFallbackService.GearCategory.AXE;
-        if (key.endsWith("_sword"))   return DurabilityFallbackService.GearCategory.SWORD;
-        if (key.endsWith("_helmet"))  return DurabilityFallbackService.GearCategory.HELMET;
-        if (key.endsWith("_chestplate"))  return DurabilityFallbackService.GearCategory.CHESTPLATE;
-        if (key.endsWith("_leggings"))    return DurabilityFallbackService.GearCategory.LEGGINGS;
-        if (key.endsWith("_boots"))       return DurabilityFallbackService.GearCategory.BOOTS;
         return null;
     }
 }
