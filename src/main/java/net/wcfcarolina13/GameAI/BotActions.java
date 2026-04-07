@@ -2190,25 +2190,35 @@ public final class BotActions {
     }
 
     private static Selection selectBestRangedWeapon(ServerPlayerEntity bot) {
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty()
+                && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
+
         Selection best = null;
         int bestScore = Integer.MIN_VALUE;
         ItemStack main = bot.getMainHandStack();
-        int mainScore = rangedWeaponScore(bot, main);
-        if (mainScore > bestScore) {
-            best = new Selection(Hand.MAIN_HAND, main);
-            bestScore = mainScore;
+        if (!DurabilityPolicyService.shouldAvoid(bot, main)) {
+            int mainScore = rangedWeaponScore(bot, main);
+            if (mainScore > bestScore) {
+                best = new Selection(Hand.MAIN_HAND, main);
+                bestScore = mainScore;
+            }
         }
 
         ItemStack off = bot.getOffHandStack();
-        int offScore = rangedWeaponScore(bot, off);
-        if (offScore > bestScore) {
-            best = new Selection(Hand.OFF_HAND, off);
-            bestScore = offScore;
+        if (!DurabilityPolicyService.shouldAvoid(bot, off)) {
+            int offScore = rangedWeaponScore(bot, off);
+            if (offScore > bestScore) {
+                best = new Selection(Hand.OFF_HAND, off);
+                bestScore = offScore;
+            }
         }
 
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
             int score = rangedWeaponScore(bot, stack);
             if (score > bestScore) {
                 int hotbarSlot = ensureHotbarAccess(bot, inventory, i);
@@ -2217,15 +2227,36 @@ public final class BotActions {
                 bestScore = rangedWeaponScore(bot, moved);
             }
         }
+
         if (best == null || bestScore <= 0) {
+            // No compliant ranged weapon found — request fallback refresh if prior was preserved-below
+            if (priorWasFiltered && isRangedWeapon(bot, priorHeld)) {
+                DurabilityFallbackService.GearCategory cat;
+                if (priorHeld.getItem() instanceof net.minecraft.item.CrossbowItem) {
+                    cat = DurabilityFallbackService.GearCategory.CROSSBOW;
+                } else if (priorHeld.getItem() instanceof net.minecraft.item.TridentItem) {
+                    cat = DurabilityFallbackService.GearCategory.TRIDENT;
+                } else {
+                    cat = DurabilityFallbackService.GearCategory.BOW;
+                }
+                DurabilityFallbackService.requestRefresh(bot, cat);
+            }
             return null;
         }
+
         if (best.hand == Hand.MAIN_HAND) {
             int desiredSlot = hotbarSlotOf(bot.getInventory(), best.stack);
             if (desiredSlot >= 0) {
                 selectHotbarSlot(bot, desiredSlot);
-                return new Selection(Hand.MAIN_HAND, bot.getInventory().getStack(desiredSlot));
+                ItemStack equipped = bot.getInventory().getStack(desiredSlot);
+                if (priorWasFiltered && isRangedWeapon(bot, equipped)) {
+                    CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+                }
+                return new Selection(Hand.MAIN_HAND, equipped);
             }
+        }
+        if (priorWasFiltered && isRangedWeapon(bot, best.stack)) {
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
         }
         return best;
     }

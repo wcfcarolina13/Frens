@@ -160,44 +160,19 @@ public final class DurabilityFallbackService {
      * the player flips their preserve preference from OFF → ON so the next
      * selection call gets a fresh fallback attempt.
      *
-     * <p>Phase 2 implementation: resolves ownership via the CONFIG ownership
-     * map. Because the map is keyed by alias (not bot UUID), we scan all
-     * registered bot UUIDs and match via the CONFIG's getBotOwnership entries.
-     * If the lookup path is unavailable, degrades to clearing ALL cooldowns
-     * (conservative but safe — 20s natural expiry would have cleaned them anyway).
+     * <p>Resolves ownership by scanning the CONFIG ownership map (alias → BotOwnership).
+     * Since alias→UUID mapping is not cheaply available, clears the entire LAST_ATTEMPT
+     * map when any alias matches the owner — acceptable because cooldowns are short (20s)
+     * and this fires at most once per toggle.
      */
     public static void clearCooldownsForOwner(UUID ownerUuid) {
         if (ownerUuid == null) return;
+        net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+        if (cfg == null) return;
         String ownerStr = ownerUuid.toString();
-        try {
-            net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-            if (cfg == null) {
-                LAST_ATTEMPT.clear();
-                return;
-            }
-            // Build a set of bot UUIDs whose ownership entry matches ownerUuid.
-            // CONFIG maps alias → BotOwnership; we need the reverse mapping.
-            // We also cross-reference against registered bot UUIDs so we only
-            // clear entries that are actually in LAST_ATTEMPT.
-            java.util.Set<UUID> owned = new java.util.HashSet<>();
-            for (var entry : cfg.getBotOwnership().entrySet()) {
-                net.wcfcarolina13.FilingSystem.ManualConfig.BotOwnership o = entry.getValue();
-                if (o != null && ownerStr.equals(o.ownerUuid())) {
-                    // The key is the bot alias; try to match it against registered bot UUIDs
-                    // by checking if any registered UUID's cached entry exists.
-                    // Since alias→UUID mapping isn't directly available here,
-                    // conservatively clear all cooldowns for registered bots where any
-                    // ownership entry matches — if only one player is toggling, this is fine.
-                    owned.add(null); // sentinel: means "at least one alias matched"
-                }
-            }
-            if (!owned.isEmpty()) {
-                // We confirmed ownerUuid has at least one bot; clear all their LAST_ATTEMPT
-                // entries that match any registered bot (can't resolve alias→UUID cheaply).
-                LAST_ATTEMPT.clear();
-            }
-        } catch (Throwable t) {
-            LOGGER.debug("clearCooldownsForOwner: lookup failed, clearing all: {}", t.getMessage());
+        boolean anyOwned = cfg.getBotOwnership().values().stream()
+                .anyMatch(o -> o != null && ownerStr.equals(o.ownerUuid()));
+        if (anyOwned) {
             LAST_ATTEMPT.clear();
         }
     }

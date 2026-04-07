@@ -6,17 +6,17 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 - **Feat: Durability preservation toggle.** Players can now configure bots to refuse low-durability gear as a trade-off between preservation and performance. Toggle via Admin → Behavior section of the bot control menu (visible to all players). When enabled, bots avoid equipping or using enchanted/expensive gear below 11% durability (3% in combat). Mending-enchanted items count as "preserved" and are always safe to use.
 
-- **DurabilityPolicyService:** Core rule engine with per-player policy storage (`ManualConfig.playerPreserveExpensiveGear`). Three methods: `shouldAvoidItem()` (11% or 3% durability threshold based on context), `isExpensiveOrEnchanted()` (inventory filtering), `isPreservedItem()` (mending check). Policies sync C2S via `UpdatePlayerPreservePayload` and S2C via `PlayerPreserveStatePayload`.
+- **DurabilityPolicyService:** Core rule engine with per-player policy storage (`ManualConfig.playerPreserveExpensiveGear`). Three methods: `shouldAvoid(bot, stack)` (11% or 3% durability threshold based on context), `isPreserved(stack)` (preserved-material or enchanted check), `isPreservedMaterial(stack)` (gold/diamond/netherite/turtle-shell item set). Policies sync C2S via `UpdatePlayerPreservePayload` and S2C via `PlayerPreserveStatePayload`.
 
 - **DurabilityFallbackService:** Automated fallback chain on a dedicated executor. When a tool/armor is filtered, the bot tries: (1) alternate tool in inventory, (2) matching tool from registered chests, (3) craft a replacement, (4) stand down the task if no compliant option exists. Per-bot per-category fallback cooldown (20 seconds) prevents thrash. Bot death and toggle OFF/ON flip clear cooldowns.
 
 - **Hook sites and tool/armor enforcement:**
-  - `ToolSelector.selectTool()` — gates tool selection before every action
-  - `armorUtils.selectArmor()` — gates armor equipping; `BotEventHandler.tickDurabilityArmorAudit` (3-second tick per bot, out-of-combat only) actively equips compliant replacements
+  - `ToolSelector.selectBestToolForBlock()` — gates tool selection before every action
+  - `armorUtils.autoEquipArmor()` — gates armor equipping; `BotEventHandler.tickDurabilityArmorAudit` (3-second tick per bot, out-of-combat only) actively equips compliant replacements
   - `MiningTool.mineBlock()` — mid-task re-poll every 20 ticks allows freshly-added tools to be adopted mid-mine
-  - `CombatInventoryManager.findBestWeaponSlot()` and `BotActions.selectBestWeapon()`/`selectBestMeleeWeapon()` — two-pass filter chains; if only low-durability "real" weapons exist, bot falls back to iron pickaxe/axe/shovel/hoe as melee alternative
+  - `CombatInventoryManager.findBestWeaponSlot()` (returns `OptionalInt` slot index) and `BotActions.selectBestWeapon()`/`selectBestMeleeWeapon()`/`selectBestRangedWeapon()` — two-pass filter chains; if only low-durability "real" weapons exist, bot falls back to iron pickaxe/axe/shovel/hoe as melee alternative
   - `FishingSkill.execute()` — rod durability checked at cast time
-  - `WoolSkill.execute()` — shears durability checked at cutTime
+  - `WoolSkill.execute()` — shears durability checked via `ensureShearsEquipped()` before each shear attempt
   - `ElytraFlightService.tick()` — elytra durability checked before launch
 
 - **Dialogue system integration:** Three new overhead line pools added to `CompanionOverheadDialogueService`: `GEAR_PRESERVE_SWAP_LINES` (gear swap triggers), `GEAR_COMBAT_EDGE_LINES` (low durability in combat), `GEAR_NO_REPLACEMENT_LINES` (no compliant fallback). Wired to 7+ hook sites. All three pools on separate 2-minute per-bot cooldowns with global overhead suppression.

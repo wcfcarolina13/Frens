@@ -949,6 +949,8 @@ public final class FishingSkill implements Skill {
     }
 
     private static boolean ensureFishingRod(ServerCommandSource source, ServerPlayerEntity bot) {
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
         ItemStack currentRod = bot.getMainHandStack();
         if (currentRod.isOf(Items.FISHING_ROD)) {
             // Check if this rod is preserved below threshold; if so, request refresh
@@ -966,8 +968,11 @@ public final class FishingSkill implements Skill {
                 DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.FISHING_ROD);
                 return false;
             }
-            // Found a compliant replacement in inventory — announce the switch.
-            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            // Found a compliant replacement in inventory — announce the switch only if
+            // the prior rod was being preserved below threshold.
+            if (priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
             return true;
         }
 

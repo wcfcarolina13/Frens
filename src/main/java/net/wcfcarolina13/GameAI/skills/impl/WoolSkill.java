@@ -311,6 +311,8 @@ public class WoolSkill implements Skill {
      * Returns true if shears are now equipped, false otherwise.
      */
     private boolean ensureShearsEquipped(ServerPlayerEntity bot) {
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
         ItemStack hand = bot.getMainHandStack();
         if (hand.isOf(Items.SHEARS)) {
             if (DurabilityPolicyService.shouldAvoid(bot, hand)) {
@@ -342,7 +344,7 @@ public class WoolSkill implements Skill {
         }
         BotActions.selectHotbarSlot(bot, slot);
         boolean equipped = bot.getMainHandStack().isOf(Items.SHEARS);
-        if (equipped) {
+        if (equipped && priorWasFiltered) {
             CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
         }
         return equipped;

@@ -25,6 +25,8 @@ public class ToolSelector {
         ItemStack bestTool = ItemStack.EMPTY;
         float highestSpeed = 0.0f;
         int bestHotbarSlot = -1;
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
         if (blockState != null && blockState.isIn(BlockTags.LEAVES)) {
             ItemStack shears = findShears(bot);
@@ -84,7 +86,9 @@ public class ToolSelector {
             
             // Swap the items (main inventory slot -> hotbar slot)
             bot.currentScreenHandler.onSlotClick(bestMainSlot, targetHotbarSlot, SlotActionType.SWAP, bot);
-            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            if (priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
 
             // Get the swapped item which is now in hotbar
             bestTool = bot.getInventory().getStack(targetHotbarSlot);
