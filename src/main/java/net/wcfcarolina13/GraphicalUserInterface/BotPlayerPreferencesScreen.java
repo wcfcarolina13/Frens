@@ -20,12 +20,22 @@ import net.wcfcarolina13.network.UpdatePlayerPreservePayload;
  * which writes into {@link #SERVER_VALUE}. The render loop polls this field.
  * When the player flips the toggle, we update {@link #SERVER_VALUE}
  * optimistically and send {@link UpdatePlayerPreservePayload} to the server.
+ *
+ * <p><strong>Currently unused</strong> as of 2026-04-07. The "Preserve
+ * Expensive Gear" toggle moved to BotPlayerInventoryScreen Admin →
+ * Behavior. This class is kept alive only because its
+ * {@link #SERVER_VALUE} static field is still the canonical client-side
+ * cache for the toggle state, written by the S2C
+ * {@code PlayerPreserveStatePayload} receiver in FrensClient. To revive
+ * this screen, uncomment the BotControlScreen footer button block (look
+ * for the "Personal Preferences footer button — commented out" marker).
  */
 public class BotPlayerPreferencesScreen extends Screen {
 
     // Server-authoritative value, written by the S2C handler on the client.
     // Volatile because the network thread writes and the client thread reads.
-    private static volatile Boolean SERVER_VALUE = null;
+    // Public so BotPlayerInventoryScreen can read/write it directly.
+    public static volatile Boolean SERVER_VALUE = null;
 
     /** Called from the client payload receiver. */
     public static void setServerValue(boolean value) {

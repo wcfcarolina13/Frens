@@ -119,7 +119,11 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
     private Rect permissionsActionRect;
-    private Rect personalPrefsActionRect;
+    // Personal Preferences footer button — commented out 2026-04-07. Toggle
+    // moved to BotPlayerInventoryScreen Admin → Behavior. Restore this block
+    // (and the matching layout/render/click sites below) if you want the
+    // dedicated screen back.
+    // private Rect personalPrefsActionRect;
     private Rect saveRect;
     private Rect closeRect;
     private final LinkedHashMap<CyclingButtonWidget<?>, Rect> settingChipRects = new LinkedHashMap<>();
@@ -254,7 +258,7 @@ public class BotControlScreen extends Screen {
         closeRect = new Rect(outerPanelX + outerPanelW - 10 - footerBtnW, footerY, footerBtnW, BUTTON_H);
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 160, BUTTON_H);
-        personalPrefsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 110, BUTTON_H);
+        // personalPrefsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 110, BUTTON_H);
     }
 
     private List<String> buildAliasList() {
@@ -523,11 +527,11 @@ public class BotControlScreen extends Screen {
                 false,
                 this.client != null && selectedAlias != null && !selectedAlias.isBlank(),
                 mouseX, mouseY);
-        drawActionButton(context, personalPrefsActionRect,
-                "Personal Preferences",
-                false,
-                true,
-                mouseX, mouseY);
+        // drawActionButton(context, personalPrefsActionRect,
+        //         "Personal Preferences",
+        //         false,
+        //         true,
+        //         mouseX, mouseY);
         drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
         drawActionButton(context, closeRect, "Close", false, true, mouseX, mouseY);
 
@@ -910,12 +914,12 @@ public class BotControlScreen extends Screen {
                 close();
                 return true;
             }
-            if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
-                if (this.client != null) {
-                    this.client.setScreen(new BotPlayerPreferencesScreen(this));
-                }
-                return true;
-            }
+            // if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
+            //     if (this.client != null) {
+            //         this.client.setScreen(new BotPlayerPreferencesScreen(this));
+            //     }
+            //     return true;
+            // }
             if (permissionsActionRect.contains(mx, my)) {
                 aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
                 if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
@@ -948,13 +952,13 @@ public class BotControlScreen extends Screen {
             return true;  // consume click inside panel even if no row matched
         }
 
-        // Footer: Personal Preferences
-        if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
-            if (this.client != null) {
-                this.client.setScreen(new BotPlayerPreferencesScreen(this));
-            }
-            return true;
-        }
+        // Footer: Personal Preferences (commented out 2026-04-07 — toggle moved to BotPlayerInventoryScreen)
+        // if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
+        //     if (this.client != null) {
+        //         this.client.setScreen(new BotPlayerPreferencesScreen(this));
+        //     }
+        //     return true;
+        // }
 
         // Footer: Permissions editor
         if (permissionsActionRect.contains(mx, my)) {
