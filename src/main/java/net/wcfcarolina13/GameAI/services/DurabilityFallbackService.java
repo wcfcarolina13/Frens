@@ -137,17 +137,10 @@ public final class DurabilityFallbackService {
 
     /**
      * Convenience overload for callers that don't have a {@link ServerCommandSource} handy.
-     * Derives a silent source from the bot and forwards to the 3-param version.
+     * Forwards to the 3-param version with null; derivation happens on the executor thread.
      */
     public static void requestRefresh(ServerPlayerEntity bot, GearCategory category) {
-        if (bot == null) return;
-        ServerCommandSource src;
-        try {
-            src = bot.getCommandSource().withSilent();
-        } catch (Throwable t) {
-            src = null;
-        }
-        requestRefresh(bot, category, src);
+        requestRefresh(bot, category, null);
     }
 
     /** Clears the cooldown for a single bot (call on bot death or removal). */
@@ -218,6 +211,19 @@ public final class DurabilityFallbackService {
                                          ServerCommandSource source) {
         if (bot == null || bot.isRemoved()) return;
 
+        // Derive source on the executor thread if the caller didn't provide one.
+        // This is the single source of truth for source derivation — both the
+        // 2-param and 3-param entry points funnel through this point.
+        ServerCommandSource effectiveSource = source;
+        if (effectiveSource == null) {
+            try {
+                effectiveSource = bot.getCommandSource().withSilent();
+            } catch (Throwable t) {
+                LOGGER.debug("runFallbackChain: could not derive ServerCommandSource for {}: {}",
+                        bot.getName().getString(), t.getMessage());
+            }
+        }
+
         // Step 1: inventory re-scan
         if (tryInventoryRescan(bot, category)) {
             LOGGER.debug("Fallback: swapped from inventory for {} category={}",
@@ -226,14 +232,14 @@ public final class DurabilityFallbackService {
         }
 
         // Step 2: chest retrieval
-        if (tryChestRetrieval(bot, category, source)) {
+        if (tryChestRetrieval(bot, category, effectiveSource)) {
             LOGGER.debug("Fallback: retrieved from chest for {} category={}",
                     bot.getName().getString(), category);
             return;
         }
 
         // Step 3: crafting fallback (tool categories only)
-        if (tryCraftingFallback(bot, category, source)) {
+        if (tryCraftingFallback(bot, category, effectiveSource)) {
             LOGGER.debug("Fallback: crafted replacement for {} category={}",
                     bot.getName().getString(), category);
             return;
@@ -318,7 +324,7 @@ public final class DurabilityFallbackService {
     }
 
     // ------------------------------------------------------------------
-    // Phase 2: inventory re-scan step
+    // Fallback chain step 1: inventory re-scan
     // ------------------------------------------------------------------
 
     /**
