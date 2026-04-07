@@ -24,6 +24,8 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.MovementService;
@@ -310,7 +312,15 @@ public class WoolSkill implements Skill {
     private boolean ensureShearsEquipped(ServerPlayerEntity bot) {
         ItemStack hand = bot.getMainHandStack();
         if (hand.isOf(Items.SHEARS)) {
-            return true;
+            if (DurabilityPolicyService.shouldAvoid(bot, hand)) {
+                // Held shears are preserved-below-threshold — request fallback refresh,
+                // then fall through so the inventory scan can find a compliant pair.
+                DurabilityFallbackService.requestRefresh(
+                        bot, DurabilityFallbackService.GearCategory.SHEARS);
+                // Don't return yet — fall through to look for a better pair in inventory.
+            } else {
+                return true;
+            }
         }
         // Shears not in hand - find and re-select
         int slot = findShearsSlot(bot);
@@ -787,9 +797,10 @@ public class WoolSkill implements Skill {
 
     private int findShearsSlot(ServerPlayerEntity bot) {
         for (int i = 0; i < bot.getInventory().size(); i++) {
-            if (bot.getInventory().getStack(i).isOf(Items.SHEARS)) {
-                return i;
-            }
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isOf(Items.SHEARS)) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            return i;
         }
         return -1;
     }
