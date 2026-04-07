@@ -1,26 +1,38 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+
+import net.wcfcarolina13.GameAI.services.BotChestRegistryService.ItemSnapshot;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Orchestrates the fallback chain when a selection site is blocked by
- * {@link DurabilityPolicyService}. Phase 2 implements only the inventory
- * re-scan step; chest retrieval, crafting, and the dedicated executor
- * arrive in Phase 3.
+ * {@link DurabilityPolicyService}. Runs on a dedicated single-thread executor.
  *
- * <p>Call {@link #requestRefresh(ServerPlayerEntity, GearCategory)} from
- * any selection site that found zero compliant candidates.
+ * <p>Fallback chain (in order):
+ * <ol>
+ *   <li>Inventory re-scan — swap a compliant stack from the bot's own inventory</li>
+ *   <li>Chest retrieval — walk to a registered chest and withdraw a matching tool</li>
+ *   <li>Crafting fallback — craft a replacement (tool categories only)</li>
+ *   <li>Stand down — log and show overhead dialogue</li>
+ * </ol>
  *
  * <p>Per-bot, per-category cooldown of 20s prevents thrash loops. Cleared
  * on bot death, bot removal, server stop, and on toggle-on-flip.
@@ -30,6 +42,30 @@ public final class DurabilityFallbackService {
     private static final Logger LOGGER = LoggerFactory.getLogger("durability-fallback");
 
     private DurabilityFallbackService() {}
+
+    // ------------------------------------------------------------------
+    // Dedicated executor
+    // ------------------------------------------------------------------
+
+    private static final ExecutorService fallbackExecutor =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "frens-durability-fallback");
+                t.setDaemon(true);
+                return t;
+            });
+
+    public static void shutdownExecutors() {
+        try {
+            fallbackExecutor.shutdown();
+            if (!fallbackExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                fallbackExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            fallbackExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        clearAllCooldowns();
+    }
 
     // ------------------------------------------------------------------
     // Categories
@@ -72,8 +108,11 @@ public final class DurabilityFallbackService {
     /**
      * Main entry point. Selection sites call this when their filter leaves
      * no compliant candidates. Fast return if the cooldown hasn't expired.
+     * Dispatches the full fallback chain to the dedicated executor.
      */
-    public static void requestRefresh(ServerPlayerEntity bot, GearCategory category) {
+    public static void requestRefresh(ServerPlayerEntity bot,
+                                      GearCategory category,
+                                      ServerCommandSource source) {
         if (bot == null || category == null || bot.isRemoved()) {
             return;
         }
@@ -85,21 +124,30 @@ public final class DurabilityFallbackService {
         long now = System.currentTimeMillis();
         EnumMap<GearCategory, Long> perCat = LAST_ATTEMPT.computeIfAbsent(
                 botId, k -> new EnumMap<>(GearCategory.class));
-
         synchronized (perCat) {
             Long last = perCat.get(category);
             if (last != null && now - last < COOLDOWN_MS) {
-                return; // still in cooldown
+                return;
             }
             perCat.put(category, now);
         }
 
-        // Phase 2: inventory re-scan only. Phase 3 adds chest + craft steps.
-        boolean swapped = tryInventoryRescan(bot, category);
-        if (!swapped) {
-            LOGGER.debug("Fallback stub: no inventory alternative for {} category={}",
-                    bot.getName().getString(), category);
+        fallbackExecutor.submit(() -> runFallbackChain(bot, category, source));
+    }
+
+    /**
+     * Convenience overload for callers that don't have a {@link ServerCommandSource} handy.
+     * Derives a silent source from the bot and forwards to the 3-param version.
+     */
+    public static void requestRefresh(ServerPlayerEntity bot, GearCategory category) {
+        if (bot == null) return;
+        ServerCommandSource src;
+        try {
+            src = bot.getCommandSource().withSilent();
+        } catch (Throwable t) {
+            src = null;
         }
+        requestRefresh(bot, category, src);
     }
 
     /** Clears the cooldown for a single bot (call on bot death or removal). */
@@ -158,6 +206,114 @@ public final class DurabilityFallbackService {
         } catch (Throwable t) {
             LOGGER.debug("clearCooldownsForOwner: lookup failed, clearing all: {}", t.getMessage());
             LAST_ATTEMPT.clear();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Fallback chain orchestration
+    // ------------------------------------------------------------------
+
+    private static void runFallbackChain(ServerPlayerEntity bot,
+                                         GearCategory category,
+                                         ServerCommandSource source) {
+        if (bot == null || bot.isRemoved()) return;
+
+        // Step 1: inventory re-scan
+        if (tryInventoryRescan(bot, category)) {
+            LOGGER.debug("Fallback: swapped from inventory for {} category={}",
+                    bot.getName().getString(), category);
+            return;
+        }
+
+        // Step 2: chest retrieval
+        if (tryChestRetrieval(bot, category, source)) {
+            LOGGER.debug("Fallback: retrieved from chest for {} category={}",
+                    bot.getName().getString(), category);
+            return;
+        }
+
+        // Step 3: crafting fallback (tool categories only)
+        if (tryCraftingFallback(bot, category, source)) {
+            LOGGER.debug("Fallback: crafted replacement for {} category={}",
+                    bot.getName().getString(), category);
+            return;
+        }
+
+        // Step 4: stand down
+        LOGGER.info("Fallback: no replacement found for {} category={} — standing down",
+                bot.getName().getString(), category);
+        CompanionOverheadDialogueService.tryShowGearNoReplacement(bot);
+    }
+
+    private static boolean tryChestRetrieval(ServerPlayerEntity bot,
+                                              GearCategory category,
+                                              ServerCommandSource source) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (source == null) {
+            return false;
+        }
+
+        Predicate<ItemSnapshot> snapshotFilter = snap -> {
+            // Loose pre-filter on snapshot item ID: accept any snap whose id contains
+            // a category-relevant keyword. The real gate is the stackPredicate below.
+            if (snap == null || snap.itemId == null) return false;
+            String id = snap.itemId.toLowerCase(java.util.Locale.ROOT);
+            return switch (category) {
+                case PICKAXE     -> id.contains("pickaxe");
+                case AXE         -> id.contains("_axe") && !id.contains("pickaxe");
+                case SHOVEL      -> id.contains("shovel");
+                case HOE         -> id.contains("_hoe");
+                case SWORD       -> id.contains("sword");
+                case MACE        -> id.contains("mace");
+                case SHIELD      -> id.contains("shield");
+                case BOW         -> id.endsWith("_bow") || id.equals("minecraft:bow");
+                case CROSSBOW    -> id.contains("crossbow");
+                case TRIDENT     -> id.contains("trident");
+                case FISHING_ROD -> id.contains("fishing_rod");
+                case HELMET      -> id.contains("helmet");
+                case CHESTPLATE  -> id.contains("chestplate");
+                case LEGGINGS    -> id.contains("leggings");
+                case BOOTS       -> id.contains("boots");
+                case ELYTRA      -> id.contains("elytra");
+                case SHEARS      -> id.contains("shears");
+            };
+        };
+
+        Predicate<ItemStack> stackPredicate = stack -> {
+            if (!matchesCategory(stack, category)) return false;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) return false;
+            return DurabilityPolicyService.durabilityRatio(stack) >= 0.25;
+        };
+
+        // Neutral comparator: no tier preference, let distance sort handle it
+        Comparator<ItemSnapshot> comparator = (a, b) -> 0;
+
+        try {
+            return ToolProvisionService.retrieveToolFromChests(
+                    bot, world, source, snapshotFilter, stackPredicate, comparator, 48);
+        } catch (Throwable t) {
+            LOGGER.debug("tryChestRetrieval failed: {}", t.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean tryCraftingFallback(ServerPlayerEntity bot,
+                                                GearCategory category,
+                                                ServerCommandSource source) {
+        if (source == null) return false;
+        try {
+            return switch (category) {
+                case PICKAXE -> ToolProvisionService.ensurePickaxe(bot, source, null, true);
+                case AXE     -> ToolProvisionService.ensureAxe(bot, source, null, true);
+                case SHOVEL  -> ToolProvisionService.ensureShovel(bot, source, null, true);
+                case SWORD   -> ToolProvisionService.ensureSword(bot, source, null, true);
+                default      -> false;
+            };
+        } catch (Throwable t) {
+            LOGGER.debug("tryCraftingFallback failed for {}: {}", category, t.getMessage());
+            return false;
         }
     }
 

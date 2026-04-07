@@ -229,4 +229,9 @@ public final class CompanionOverheadDialogueService {
             // Best-effort only.
         }
     }
+
+    /** Stub — full implementation with dialogue lines lands in Task 16. */
+    public static boolean tryShowGearNoReplacement(ServerPlayerEntity bot) {
+        return false;
+    }
 }
