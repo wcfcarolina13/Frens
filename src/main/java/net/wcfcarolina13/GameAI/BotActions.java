@@ -50,6 +50,8 @@ import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
 import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 
@@ -327,11 +329,13 @@ public final class BotActions {
             return false;
         }
         PlayerInventory inventory = bot.getInventory();
+
+        // First pass: compliant weapon
         int bestSlot = -1;
         int bestScore = Integer.MIN_VALUE;
-
         for (int slot = 0; slot < inventory.size(); slot++) {
             ItemStack stack = inventory.getStack(slot);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
             int score = combatWeaponScore(stack);
             if (score > bestScore) {
                 bestScore = score;
@@ -345,7 +349,33 @@ public final class BotActions {
             return combatWeaponScore(bot.getMainHandStack()) > 0;
         }
 
-        // No weapon found — fall back to fists rather than swinging food/blocks.
+        // Second pass: compliant mining tool as melee fallback
+        int fallbackSlot = -1;
+        int fallbackScore = Integer.MIN_VALUE;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            int score = meleeFallbackToolScore(stack);
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallbackSlot = slot;
+            }
+        }
+
+        if (fallbackSlot != -1 && fallbackScore > 0) {
+            int hotbarSlot = ensureHotbarAccess(bot, inventory, fallbackSlot);
+            selectHotbarSlot(bot, hotbarSlot);
+            // Request fallback refresh so the fallback service tries to get a real weapon
+            DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
+            return true;
+        }
+
+        // No weapon or fallback tool found — fall back to fists rather than swinging food/blocks.
+        // Request refresh if the bot was holding a preserved weapon that got filtered.
+        ItemStack held = bot.getMainHandStack();
+        if (!held.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, held)) {
+            DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
+        }
         selectBareHandsForCombat(bot, "no-combat-weapon");
         return false;
     }
@@ -355,11 +385,13 @@ public final class BotActions {
             return false;
         }
         PlayerInventory inventory = bot.getInventory();
+
+        // First pass: compliant melee weapon
         int bestSlot = -1;
         int bestScore = Integer.MIN_VALUE;
-
         for (int slot = 0; slot < inventory.size(); slot++) {
             ItemStack stack = inventory.getStack(slot);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
             int score = meleeWeaponScore(stack);
             if (score > bestScore) {
                 bestScore = score;
@@ -367,17 +399,40 @@ public final class BotActions {
             }
         }
 
-        if (bestSlot == -1 || bestScore <= 0) {
-            selectBareHandsForCombat(bot, "no-melee-weapon");
-            return false;
+        if (bestSlot != -1 && bestScore > 0) {
+            int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
+            selectHotbarSlot(bot, hotbarSlot);
+            if (meleeWeaponScore(bot.getMainHandStack()) > 0) {
+                return true;
+            }
         }
 
-        int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
-        selectHotbarSlot(bot, hotbarSlot);
-        if (meleeWeaponScore(bot.getMainHandStack()) > 0) {
+        // Second pass: compliant mining tool as melee fallback
+        int fallbackSlot = -1;
+        int fallbackScore = Integer.MIN_VALUE;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            int score = meleeFallbackToolScore(stack);
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallbackSlot = slot;
+            }
+        }
+
+        if (fallbackSlot != -1 && fallbackScore > 0) {
+            int hotbarSlot = ensureHotbarAccess(bot, inventory, fallbackSlot);
+            selectHotbarSlot(bot, hotbarSlot);
+            DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
             return true;
         }
-        selectBareHandsForCombat(bot, "melee-selection-failed");
+
+        // Request refresh if held is filtered
+        ItemStack held = bot.getMainHandStack();
+        if (!held.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, held)) {
+            DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
+        }
+        selectBareHandsForCombat(bot, "no-melee-weapon");
         return false;
     }
 
@@ -1411,6 +1466,20 @@ public final class BotActions {
         if (stack.getItem() instanceof CrossbowItem) {
             return 60;
         }
+        return 0;
+    }
+
+    /**
+     * Scores a stack as a "melee fallback tool" for use when no compliant weapon
+     * is available. Axes already return positive values from {@link #meleeWeaponScore}
+     * and are handled by the first pass; this covers pickaxe/shovel/hoe only.
+     */
+    private static int meleeFallbackToolScore(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        if (key.endsWith("_pickaxe")) return 55;
+        if (key.endsWith("_shovel"))  return 40;
+        if (key.endsWith("_hoe"))     return 35;
         return 0;
     }
 
