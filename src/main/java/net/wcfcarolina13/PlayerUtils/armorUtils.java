@@ -13,6 +13,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import com.mojang.datafixers.util.Pair; // Import the correct Pair class
 import net.minecraft.registry.entry.RegistryEntry;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +43,7 @@ public class armorUtils {
             ItemStack equippedArmor = bot.getEquippedStack(slot);
 
             // Find the best armor piece in the inventory for this slot
-            int bestArmorSlot = findBestArmorSlot(inventory, slot);
+            int bestArmorSlot = findBestArmorSlot(bot, inventory, slot);
             ItemStack bestArmor = bestArmorSlot >= 0 ? inventory.getStack(bestArmorSlot) : ItemStack.EMPTY;
 
             // Equip the armor if it's better than what's currently equipped
@@ -68,6 +70,21 @@ public class armorUtils {
 
                 // Add this update to the list for notifying clients
                 equipmentUpdates.add(new Pair<>(slot, stackToEquip)); // Use com.mojang.datafixers.util.Pair
+            } else if (bestArmor.isEmpty()
+                    && !equippedArmor.isEmpty()
+                    && DurabilityPolicyService.shouldAvoid(bot, equippedArmor)) {
+                // If the filter is the reason nothing was equipped AND the currently equipped armor
+                // is preserved-below-threshold, request a fallback refresh.
+                DurabilityFallbackService.GearCategory cat = switch (slot) {
+                    case HEAD -> DurabilityFallbackService.GearCategory.HELMET;
+                    case CHEST -> DurabilityFallbackService.GearCategory.CHESTPLATE;
+                    case LEGS -> DurabilityFallbackService.GearCategory.LEGGINGS;
+                    case FEET -> DurabilityFallbackService.GearCategory.BOOTS;
+                    default -> null;
+                };
+                if (cat != null) {
+                    DurabilityFallbackService.requestRefresh(bot, cat);
+                }
             }
         }
 
@@ -104,13 +121,16 @@ public class armorUtils {
     }
 
     // Helper method to find the best armor for a specific slot
-    private static int findBestArmorSlot(PlayerInventory inventory, EquipmentSlot slot) {
+    private static int findBestArmorSlot(ServerPlayerEntity bot, PlayerInventory inventory, EquipmentSlot slot) {
         int bestArmorSlot = -1;
         double bestScore = 0.0;
 
         for (int slotIndex = 0; slotIndex < PlayerInventory.MAIN_SIZE; slotIndex++) {
             ItemStack item = inventory.getStack(slotIndex);
             if (!item.isEmpty() && isArmorForSlot(item, slot)) {
+                if (DurabilityPolicyService.shouldAvoid(bot, item)) {
+                    continue; // filtered: preserved material or enchant below threshold
+                }
                 double score = getArmorScore(item, slot);
                 if (score > bestScore) {
                     bestScore = score;
