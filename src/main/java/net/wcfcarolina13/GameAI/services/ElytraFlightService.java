@@ -20,6 +20,8 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -335,6 +337,17 @@ public final class ElytraFlightService {
         int elytraSlot = findItemSlot(bot, Items.ELYTRA);
         if (elytraSlot < 0) {
             LOGGER.info("ElytraFlight: {} has no elytra, aborting", bot.getName().getString());
+            setPhase(botId, FlightPhase.NONE, now);
+            clearState(botId);
+            return;
+        }
+
+        // Filter: check if elytra is preserved below threshold
+        ItemStack elytraCandidate = bot.getInventory().getStack(elytraSlot);
+        if (DurabilityPolicyService.shouldAvoid(bot, elytraCandidate)) {
+            LOGGER.info("ElytraFlight: {} refusing to equip preserved elytra below threshold",
+                    bot.getName().getString());
+            DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.ELYTRA);
             setPhase(botId, FlightPhase.NONE, now);
             clearState(botId);
             return;
