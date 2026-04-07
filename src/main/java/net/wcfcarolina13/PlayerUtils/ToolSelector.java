@@ -8,6 +8,7 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import org.slf4j.Logger;
@@ -83,7 +84,8 @@ public class ToolSelector {
             
             // Swap the items (main inventory slot -> hotbar slot)
             bot.currentScreenHandler.onSlotClick(bestMainSlot, targetHotbarSlot, SlotActionType.SWAP, bot);
-            
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+
             // Get the swapped item which is now in hotbar
             bestTool = bot.getInventory().getStack(targetHotbarSlot);
             bestHotbarSlot = targetHotbarSlot;

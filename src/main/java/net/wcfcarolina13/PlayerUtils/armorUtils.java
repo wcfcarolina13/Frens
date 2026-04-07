@@ -12,6 +12,7 @@ import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
 import com.mojang.datafixers.util.Pair; // Import the correct Pair class
 import net.minecraft.registry.entry.RegistryEntry;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
@@ -50,7 +51,13 @@ public class armorUtils {
             if (!bestArmor.isEmpty() && (equippedArmor.isEmpty() || isBetterArmor(bestArmor, equippedArmor, slot))) {
                 ItemStack stackToEquip = bestArmor.copy();
                 ItemStack displacedArmor = equippedArmor.copy();
+                boolean replacedPreservedBelow =
+                        !equippedArmor.isEmpty()
+                        && DurabilityPolicyService.shouldAvoid(bot, equippedArmor);
                 bot.equipStack(slot, stackToEquip);
+                if (replacedPreservedBelow) {
+                    CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+                }
                 if (displacedArmor.isEmpty()) {
                     inventory.setStack(bestArmorSlot, ItemStack.EMPTY);
                 } else {

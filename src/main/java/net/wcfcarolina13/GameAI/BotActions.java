@@ -50,6 +50,7 @@ import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
@@ -329,6 +330,9 @@ public final class BotActions {
             return false;
         }
         PlayerInventory inventory = bot.getInventory();
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty()
+                && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
         // First pass: compliant weapon
         int bestSlot = -1;
@@ -346,7 +350,11 @@ public final class BotActions {
         if (bestSlot != -1 && bestScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
             selectHotbarSlot(bot, hotbarSlot);
-            return combatWeaponScore(bot.getMainHandStack()) > 0;
+            boolean swapped = combatWeaponScore(bot.getMainHandStack()) > 0;
+            if (swapped && priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
+            return swapped;
         }
 
         // Second pass: compliant mining tool as melee fallback
@@ -367,6 +375,9 @@ public final class BotActions {
             selectHotbarSlot(bot, hotbarSlot);
             // Request fallback refresh so the fallback service tries to get a real weapon
             DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
+            if (priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
             return true;
         }
 
@@ -385,6 +396,9 @@ public final class BotActions {
             return false;
         }
         PlayerInventory inventory = bot.getInventory();
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty()
+                && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
         // First pass: compliant melee weapon
         int bestSlot = -1;
@@ -403,6 +417,9 @@ public final class BotActions {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
             selectHotbarSlot(bot, hotbarSlot);
             if (meleeWeaponScore(bot.getMainHandStack()) > 0) {
+                if (priorWasFiltered) {
+                    CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+                }
                 return true;
             }
         }
@@ -424,6 +441,9 @@ public final class BotActions {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, fallbackSlot);
             selectHotbarSlot(bot, hotbarSlot);
             DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
+            if (priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
             return true;
         }
 

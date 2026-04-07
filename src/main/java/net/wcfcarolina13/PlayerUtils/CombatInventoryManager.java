@@ -12,6 +12,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
@@ -115,6 +117,9 @@ public final class CombatInventoryManager {
         if (!offhand.isEmpty()
                 && isShieldStack(offhand)
                 && DurabilityPolicyService.shouldAvoid(bot, offhand)) {
+            if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                CompanionOverheadDialogueService.tryShowGearCombatEdge(bot);
+            }
             DurabilityFallbackService.requestRefresh(
                     bot, DurabilityFallbackService.GearCategory.SHIELD);
             return;
@@ -138,11 +143,17 @@ public final class CombatInventoryManager {
 
     private static void ensureBestWeaponAccessible(ServerPlayerEntity bot) {
         PlayerInventory inventory = bot.getInventory();
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty()
+                && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
+
         OptionalInt bestWeaponSlot = findBestWeaponSlot(bot, inventory);
         if (bestWeaponSlot.isEmpty()) {
             // If the currently-held weapon is preserved-below-threshold, request fallback for SWORD category.
-            ItemStack held = bot.getMainHandStack();
-            if (!held.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, held)) {
+            if (!priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld)) {
+                if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                    CompanionOverheadDialogueService.tryShowGearCombatEdge(bot);
+                }
                 DurabilityFallbackService.requestRefresh(
                         bot, DurabilityFallbackService.GearCategory.SWORD);
             }
@@ -158,6 +169,10 @@ public final class CombatInventoryManager {
 
         inventory.setSelectedSlot(hotbarTarget);
         inventory.markDirty();
+
+        if (priorWasFiltered) {
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+        }
     }
 
     private static void ensureFoodAccessible(ServerPlayerEntity bot) {

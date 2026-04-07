@@ -345,8 +345,8 @@ public final class ElytraFlightService {
         // Filter: check if elytra is preserved below threshold
         ItemStack elytraCandidate = bot.getInventory().getStack(elytraSlot);
         if (DurabilityPolicyService.shouldAvoid(bot, elytraCandidate)) {
-            LOGGER.info("ElytraFlight: {} refusing to equip preserved elytra below threshold",
-                    bot.getName().getString());
+            LOGGER.info("ElytraFlight: {} refusing to equip preserved elytra below threshold", bot.getName().getString());
+            CompanionOverheadDialogueService.tryShowGearNoReplacement(bot);
             DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.ELYTRA);
             setPhase(botId, FlightPhase.NONE, now);
             clearState(botId);

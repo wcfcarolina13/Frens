@@ -24,6 +24,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
@@ -340,7 +341,11 @@ public class WoolSkill implements Skill {
             slot = empty;
         }
         BotActions.selectHotbarSlot(bot, slot);
-        return bot.getMainHandStack().isOf(Items.SHEARS);
+        boolean equipped = bot.getMainHandStack().isOf(Items.SHEARS);
+        if (equipped) {
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+        }
+        return equipped;
     }
 
     /**

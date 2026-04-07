@@ -32,6 +32,7 @@ import net.wcfcarolina13.GameAI.services.FishingSessionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.MovementService.Mode;
@@ -965,6 +966,8 @@ public final class FishingSkill implements Skill {
                 DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.FISHING_ROD);
                 return false;
             }
+            // Found a compliant replacement in inventory — announce the switch.
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
             return true;
         }
 
