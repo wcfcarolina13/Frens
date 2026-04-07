@@ -223,6 +223,8 @@ public class BotEventHandler {
     private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, CommanderLadderHint> FOLLOW_COMMANDER_LADDER_HINT = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_JOIN_ENCLOSURE_CHECK_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_ARMOR_AUDIT_TICK = new ConcurrentHashMap<>();
+    private static final long ARMOR_AUDIT_COOLDOWN_TICKS = 60L; // 3 seconds at 20 tps
     /** Per-bot current combat target UUID for threat-scoring stickiness. */
     private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
     /** Teleport detection: last known position per bot, updated each tick. */
@@ -739,6 +741,7 @@ public class BotEventHandler {
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
+        LAST_ARMOR_AUDIT_TICK.remove(uuid);
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (primaryUuid != null && primaryUuid.equals(uuid)) {
             BotLifecycleService.setPrimaryBotUuid(null);
@@ -1014,6 +1017,29 @@ public class BotEventHandler {
                     .filter(EntityUtil::isHostile)
                     .toList();
             HealingService.autoEat(player, nearbyHostiles);
+        }
+    }
+
+    public static void tickDurabilityArmorAudit(MinecraftServer server) {
+        if (server == null) return;
+        long nowTick = server.getTicks();
+        for (ServerPlayerEntity player : getRegisteredBots(server)) {
+            if (player.isRemoved() || !player.isAlive()) continue;
+
+            // Skip during combat — spec forbids mid-combat armor mutation
+            if (BotCombatCalloutService.isInCombat(player.getUuid())) continue;
+
+            // Per-bot throttle: audit at most once every 3 seconds
+            long last = LAST_ARMOR_AUDIT_TICK.getOrDefault(player.getUuid(), 0L);
+            if (nowTick - last < ARMOR_AUDIT_COOLDOWN_TICKS) continue;
+            LAST_ARMOR_AUDIT_TICK.put(player.getUuid(), nowTick);
+
+            try {
+                armorUtils.autoEquipArmor(player);
+            } catch (Throwable t) {
+                LOGGER.debug("tickDurabilityArmorAudit: autoEquipArmor failed for {}: {}",
+                        player.getName().getString(), t.getMessage());
+            }
         }
     }
 

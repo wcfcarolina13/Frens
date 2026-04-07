@@ -942,6 +942,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDrowningRescue);
+        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDurabilityArmorAudit);
         ServerTickEvents.END_SERVER_TICK.register(Frens::processSpawnEscapeChecks);
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
