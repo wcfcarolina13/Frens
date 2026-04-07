@@ -2,6 +2,39 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-07 — Durability Preservation Toggle
+
+- **Feat: Durability preservation toggle.** Players can now configure bots to refuse low-durability gear as a trade-off between preservation and performance. Toggle via Admin → Behavior section of the bot control menu (visible to all players). When enabled, bots avoid equipping or using enchanted/expensive gear below 11% durability (3% in combat). Mending-enchanted items count as "preserved" and are always safe to use.
+
+- **DurabilityPolicyService:** Core rule engine with per-player policy storage (`ManualConfig.playerPreserveExpensiveGear`). Three methods: `shouldAvoidItem()` (11% or 3% durability threshold based on context), `isExpensiveOrEnchanted()` (inventory filtering), `isPreservedItem()` (mending check). Policies sync C2S via `UpdatePlayerPreservePayload` and S2C via `PlayerPreserveStatePayload`.
+
+- **DurabilityFallbackService:** Automated fallback chain on a dedicated executor. When a tool/armor is filtered, the bot tries: (1) alternate tool in inventory, (2) matching tool from registered chests, (3) craft a replacement, (4) stand down the task if no compliant option exists. Per-bot per-category fallback cooldown (20 seconds) prevents thrash. Bot death and toggle OFF/ON flip clear cooldowns.
+
+- **Hook sites and tool/armor enforcement:**
+  - `ToolSelector.selectTool()` — gates tool selection before every action
+  - `armorUtils.selectArmor()` — gates armor equipping; `BotEventHandler.tickDurabilityArmorAudit` (3-second tick per bot, out-of-combat only) actively equips compliant replacements
+  - `MiningTool.mineBlock()` — mid-task re-poll every 20 ticks allows freshly-added tools to be adopted mid-mine
+  - `CombatInventoryManager.findBestWeaponSlot()` and `BotActions.selectBestWeapon()`/`selectBestMeleeWeapon()` — two-pass filter chains; if only low-durability "real" weapons exist, bot falls back to iron pickaxe/axe/shovel/hoe as melee alternative
+  - `FishingSkill.execute()` — rod durability checked at cast time
+  - `WoolSkill.execute()` — shears durability checked at cutTime
+  - `ElytraFlightService.tick()` — elytra durability checked before launch
+
+- **Dialogue system integration:** Three new overhead line pools added to `CompanionOverheadDialogueService`: `GEAR_PRESERVE_SWAP_LINES` (gear swap triggers), `GEAR_COMBAT_EDGE_LINES` (low durability in combat), `GEAR_NO_REPLACEMENT_LINES` (no compliant fallback). Wired to 7+ hook sites. All three pools on separate 2-minute per-bot cooldowns with global overhead suppression.
+
+- **UI updates:**
+  - `BotPlayerInventoryScreen`: Admin → Behavior section now includes `PRESERVE_EXPENSIVE_GEAR` toggle alongside `LOCK_BLOCKS_MODE`. Both visible to non-admin players (can view/toggle settings for their own bots).
+  - `BotControlScreen`: Removed "Lock Blocks" footer button; functionality moved to Admin → Behavior.
+  - `BotPlayerPreferencesScreen`: Created but currently unused — the screen-based approach was abandoned in favor of Admin → Behavior integration. File kept alive as `SERVER_VALUE` static cache.
+  - `BotGuideScreen`: New guide topic `settings_preserve_expensive_gear` with full explanation, examples, and trade-offs.
+
+- **Network payloads:** Three C2S/S2C messages: `UpdatePlayerPreservePayload` (toggle action), `RequestPlayerPreservePayload` (refresh request), `PlayerPreserveStatePayload` (broadcast sync).
+
+- **Command-line verification:** `/bot testgear <bot>` gives a preset inventory showing: preserved-below items, compliant alternatives per category, and notes on shortages. Useful for manual auditing.
+
+- **Behavioral notes:** Armor strip only at equip time — no mid-combat armor removal. 3-second out-of-combat audit ensures bots actively swap into compliant gear when it becomes available. 20-second per-category fallback cooldown prevents fallback thrashing while tool sources are being located. Default toggle state: OFF (no behavior change until opted in). Bot death auto-clears fallback cooldowns; toggle flip (OFF→ON or ON→OFF) auto-clears all stale cooldowns for that player’s bots.
+
+- **Spec and plan:** Implemented against `docs/superpowers/specs/2026-04-07-durability-preservation-toggle-design.md` and `docs/superpowers/plans/2026-04-07-durability-preservation-toggle.md`. Design trade-offs, architecture, and scope documented there.
+
 ## 2026-04-06 — Dialogue tuning & unused voiced lines
 
 - **Overplayed line tuning:** Reduced frequency of "I can't believe this is my job" and "If we die I'm blaming the terrain" (WEIGHT_COMMON → WEIGHT_RARE). Reduced "I am Steve" trigger probability by 75%. Increased wolf proximity cooldown from 90s to 6min to reduce "Guard dog on duty" / "Who's a menace" spam.
