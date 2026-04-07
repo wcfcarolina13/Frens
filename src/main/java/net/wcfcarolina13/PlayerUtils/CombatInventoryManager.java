@@ -13,6 +13,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -109,11 +111,21 @@ public final class CombatInventoryManager {
         PlayerInventory inventory = bot.getInventory();
         ItemStack offhand = bot.getOffHandStack();
 
+        // Check if current offhand is a preserved-below-threshold shield and request fallback
+        if (!offhand.isEmpty()
+                && isShieldStack(offhand)
+                && DurabilityPolicyService.shouldAvoid(bot, offhand)) {
+            DurabilityFallbackService.requestRefresh(
+                    bot, DurabilityFallbackService.GearCategory.SHIELD);
+            return;
+        }
+
         if (isShieldStack(offhand)) {
             return; // Already holding a shield
         }
 
-        OptionalInt shieldSlot = findItemSlot(inventory, CombatInventoryManager::isShieldStack);
+        OptionalInt shieldSlot = findItemSlot(inventory, stack ->
+                isShieldStack(stack) && !DurabilityPolicyService.shouldAvoid(bot, stack));
         if (shieldSlot.isEmpty()) {
             return;
         }
@@ -126,8 +138,14 @@ public final class CombatInventoryManager {
 
     private static void ensureBestWeaponAccessible(ServerPlayerEntity bot) {
         PlayerInventory inventory = bot.getInventory();
-        OptionalInt bestWeaponSlot = findBestWeaponSlot(inventory);
+        OptionalInt bestWeaponSlot = findBestWeaponSlot(bot, inventory);
         if (bestWeaponSlot.isEmpty()) {
+            // If the currently-held weapon is preserved-below-threshold, request fallback for SWORD category.
+            ItemStack held = bot.getMainHandStack();
+            if (!held.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, held)) {
+                DurabilityFallbackService.requestRefresh(
+                        bot, DurabilityFallbackService.GearCategory.SWORD);
+            }
             return;
         }
 
@@ -166,12 +184,13 @@ public final class CombatInventoryManager {
         });
     }
 
-    private static OptionalInt findBestWeaponSlot(PlayerInventory inventory) {
+    private static OptionalInt findBestWeaponSlot(ServerPlayerEntity bot, PlayerInventory inventory) {
         int bestIndex = -1;
         double bestScore = Double.NEGATIVE_INFINITY;
 
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
             double score = evaluateWeapon(stack);
             if (score > bestScore) {
                 bestScore = score;
