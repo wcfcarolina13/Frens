@@ -12,6 +12,9 @@ import net.minecraft.util.Identifier;
  */
 public record RequestPlayerPreservePayload() implements CustomPayload {
 
+    public static final RequestPlayerPreservePayload INSTANCE =
+            new RequestPlayerPreservePayload();
+
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "request_player_preserve");
     public static final CustomPayload.Id<RequestPlayerPreservePayload> ID =
             new CustomPayload.Id<>(ID_IDENTIFIER);
@@ -24,7 +27,7 @@ public record RequestPlayerPreservePayload() implements CustomPayload {
 
         @Override
         public RequestPlayerPreservePayload decode(PacketByteBuf buf) {
-            return new RequestPlayerPreservePayload();
+            return INSTANCE;
         }
     };
 
