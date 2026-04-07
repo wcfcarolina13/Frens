@@ -55,6 +55,7 @@ import net.wcfcarolina13.network.BotTaskPeekRequestPayload;
 import net.wcfcarolina13.network.BotTaskPeekStatusPayload;
 import net.wcfcarolina13.network.LearningInputSamplePayload;
 import net.wcfcarolina13.network.LearningSessionStatusPayload;
+import net.wcfcarolina13.network.PlayerPreserveStatePayload;
 import net.wcfcarolina13.items.ModItems;
 import org.lwjgl.glfw.GLFW;
 
@@ -921,6 +922,10 @@ public class FrensClient implements ClientModInitializer {
             context.client().execute(() -> {
                 net.wcfcarolina13.GraphicalUserInterface.BaseManagerScreen.onZoneListReceived(payload.zonesJson());
             });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(PlayerPreserveStatePayload.ID, (payload, context) -> {
+            net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.setServerValue(payload.enabled());
         });
 
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
