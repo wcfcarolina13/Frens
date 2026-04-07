@@ -38,7 +38,7 @@ Leather, chainmail, copper, stone, wood, iron tools/armor are **not** preserved 
 
 ### Enchantment detection
 
-Any `ItemStack` where `stack.getEnchantments().getSize() > 0` is considered enchanted. Curse enchantments count. The rule is literal: any enchantment flags the item as preserved.
+An `ItemStack` is considered enchanted when `stack.hasEnchantments()` returns true. This is the canonical form already used elsewhere in the codebase (`ToolProvisionService.java:1646`, `BotMutualAidService.java:1253`). Curse enchantments count. The rule is literal: any enchantment flags the item as preserved.
 
 ### Non-material-tiered items
 
@@ -94,10 +94,11 @@ Both main hand and offhand selection sites are filtered. The shield selection in
 New field in `FilingSystem/ManualConfig.java`:
 
 ```java
-private final Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
+private Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
 ```
 
 - Keyed by player UUID `.toString()` (not raw `UUID`; matches the existing `botOwnership` map convention in the same file)
+- **Not `final`** — Gson can leave the field null after deserialization of an older config file, so the setter lazily re-initializes. The getter treats null as "policy off".
 - Default value (absent key) = `false` (toggle OFF)
 - Persists to the same JSON as the rest of ManualConfig
 - No migration needed — absent keys just default to OFF
@@ -290,48 +291,71 @@ Phase 3 includes a discovery step: grep for `flint_and_steel`, `shears`, `triden
 
 Armor is checked **only at equip time**. Once the bot puts on a diamond chestplate, that chestplate stays on through combat even if it drops below 3%. Yanking armor off mid-fight is worse than taking the hit. This is a deliberate simplification agreed during design.
 
-## UI — AdminPlayerSettingsScreen
+## UI — New BotPlayerPreferencesScreen
 
-Add a new **Personal Preferences** section rendered above the existing permission matrix in `GraphicalUserInterface/AdminPlayerSettingsScreen.java`.
+The existing `AdminPlayerSettingsScreen` is admin-only on the server side (the `RecruitmentAdminNetworkManager` snapshot handler rejects non-OP requests with "Not authorized"). Regular players currently have no player-facing preferences UI. This feature introduces a new lightweight **`BotPlayerPreferencesScreen`** owned by the player, with a new entry-point button on `BotControlScreen` visible to all players.
 
-### Layout
+### New screen: `BotPlayerPreferencesScreen`
+
+- Location: `GraphicalUserInterface/BotPlayerPreferencesScreen.java`
+- Small, single-purpose screen with a centered panel
+- Contains **only** the "Preserve Expensive Gear" toggle for Phase 1 (future player preferences can land here)
+- Rendered consistently with existing bot screens: centered panel, titled header, close button, back-to-parent arrow
+- Layout:
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
-│ Personal Preferences                                      │
+│              Personal Preferences                         │
 │ ──────────────────────────────────────────────────────── │
-│ Preserve Expensive Gear                         [ OFF ]  │
 │                                                           │
-│ Admin Permissions                                         │
-│ (existing permission matrix, unchanged)                   │
+│  Preserve Expensive Gear                        [ OFF ]  │
+│  (hint text below the row describing the rule)          │
+│                                                           │
+│                                              [ Close ]   │
 └──────────────────────────────────────────────────────────┘
 ```
 
+### New entry point: button on `BotControlScreen`
+
+Add a "Personal Preferences" button to the footer of `BotControlScreen`, visible to **all** players (not OP-gated). Clicking opens `BotPlayerPreferencesScreen` with `BotControlScreen` as the parent. Pattern-match the existing footer button rendering (e.g., the Permissions Editor button at BotControlScreen lines 517–520).
+
 ### Behavior
 
-- The section is scoped to **the viewing player only** — no bot scope, no cross-player editing.
-- The toggle is marked as **player-visible** using the existing screen's player-visible-vs-admin-only flag on permission definitions, so regular players (not just OPs) see and can flip it.
-- Tooltip (1.7s hover delay, wrapped text box — matches existing tooltip system):
+- The screen is scoped to **the viewing player only** — it only reads and writes the viewer's own preference.
+- Tooltip (matches existing tooltip system's hover delay):
 
   > Your bots will refuse to use enchanted gear or items made of gold, diamond, netherite, or turtle shell once durability drops below 11% — or 3% in combat. They'll try to switch to a cheaper alternative, check a nearby chest, or craft a new one. Applies to every bot you own. Default: OFF.
 
-### Network payload
+- **Initial value on open:** the screen sends a one-shot read request to the server. The server replies with the viewer's current preference. This avoids the need to extend any existing snapshot system, and the read is targeted (only the requester's own value).
+- **On toggle flip:** client sends `UpdatePlayerPreservePayload(enabled)` to the server. The server validates the sender and updates `ManualConfig`. No broadcast is needed — the setting only affects the owner's own bots and the owner's own client.
 
-New payload: `network/payloads/UpdatePlayerPreservePayload.java`
+### Network payloads
+
+Two small payloads, both in `src/main/java/net/wcfcarolina13/network/` (same directory as the existing 71 payloads — there is no `payloads/` subfolder):
+
+**C2S: `UpdatePlayerPreservePayload`** — player asks the server to write their preference.
 
 ```java
-public record UpdatePlayerPreservePayload(boolean enabled) implements CustomPayload {
-    // codec + id
-}
+public record UpdatePlayerPreservePayload(boolean enabled) implements CustomPayload { /* codec + id */ }
 ```
 
-C2S only. Server handler:
+Server handler: resolves sender UUID, calls `Frens.CONFIG.setPreserveExpensiveGear(sender.getUuid(), enabled)`, saves config. No cross-player editing possible — the payload has no target UUID field, the sender is always the subject.
 
-1. Gets sender's UUID from the server player.
-2. Calls `Frens.CONFIG.setPreserveExpensiveGear(sender.getUuid(), enabled)`.
-3. Saves config.
+**C2S: `RequestPlayerPreservePayload`** — player asks the server to send the current value.
 
-No cross-player editing possible — the payload has no target UUID field, the sender is always the subject. No broadcast needed because the setting only affects the owner's own bots.
+```java
+public record RequestPlayerPreservePayload() implements CustomPayload { /* codec + id */ }
+```
+
+Server handler: resolves sender UUID, reads `Frens.CONFIG.getPreserveExpensiveGear(sender.getUuid())`, sends back the S2C reply.
+
+**S2C: `PlayerPreserveStatePayload`** — server tells the client the current value.
+
+```java
+public record PlayerPreserveStatePayload(boolean enabled) implements CustomPayload { /* codec + id */ }
+```
+
+Client handler: sets a static field on the screen class that the open screen instance reads on next frame. Simple fire-and-forget; no reply tracking needed.
 
 ## Guide Entry
 
@@ -401,21 +425,32 @@ tags: "durability tools gear preserve diamond netherite gold enchanted
 
 ## File Changes Summary
 
-### New files (3)
+### New files (6)
 
 - `GameAI/services/DurabilityPolicyService.java`
 - `GameAI/services/DurabilityFallbackService.java`
-- `network/payloads/UpdatePlayerPreservePayload.java`
+- `network/UpdatePlayerPreservePayload.java`
+- `network/RequestPlayerPreservePayload.java`
+- `network/PlayerPreserveStatePayload.java`
+- `GraphicalUserInterface/BotPlayerPreferencesScreen.java`
 
 ### Modified files (by phase)
 
-**Phase 1 (5 files):**
+**Phase 1 (8 files, split across 2 sub-phases):**
+
+*Phase 1a — Storage, policy, payloads (5 files):*
 
 - `FilingSystem/ManualConfig.java`
 - `GameAI/services/DurabilityPolicyService.java` (new)
-- `network/payloads/UpdatePlayerPreservePayload.java` (new)
-- `Frens.java` (payload registration + handler)
-- `GraphicalUserInterface/AdminPlayerSettingsScreen.java`
+- `network/UpdatePlayerPreservePayload.java` (new)
+- `network/RequestPlayerPreservePayload.java` (new)
+- `network/PlayerPreserveStatePayload.java` (new)
+
+*Phase 1b — UI + registration (3 files):*
+
+- `Frens.java` (register 3 payloads + both C2S handlers + S2C client handler)
+- `GraphicalUserInterface/BotPlayerPreferencesScreen.java` (new)
+- `GraphicalUserInterface/BotControlScreen.java` (add footer button)
 
 **Phase 2 — Core selection sites (4 files):**
 
@@ -438,7 +473,7 @@ tags: "durability tools gear preserve diamond netherite gold enchanted
 - `GraphicalUserInterface/BotGuideScreen.java`
 - `changelog.md`
 
-Total: **3 new files, 11 modified files**, split across 4 phases each fitting within the 5-files-per-phase limit from CLAUDE.md.
+Total: **6 new files, 11 modified files**, split across 5 sub-phases (Phase 1a, 1b, 2, 3, 4) each fitting within the 5-files-per-phase limit from CLAUDE.md.
 
 ## Verification Plan
 
