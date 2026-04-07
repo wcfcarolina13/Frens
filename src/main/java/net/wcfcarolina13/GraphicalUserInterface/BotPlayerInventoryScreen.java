@@ -503,6 +503,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         ADMIN_PREVIEW_NON_ADMIN,
         AUTONOMOUS_RESCUES,
         OWNED_SUNSET_SS,
+        LOCK_BLOCKS_MODE,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
@@ -679,6 +680,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
                 new TopicEntry("Allow Autonomous Rescues", TopicCategory.ADMIN, TopicAction.AUTONOMOUS_RESCUES, true, 0, null),
                 new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
+                new TopicEntry("Lock Blocks Mode", TopicCategory.ADMIN, TopicAction.LOCK_BLOCKS_MODE, true, 0, null),
 
                 TopicEntry.adminHeader("🎓 Learning"),
                 TopicEntry.admin("Learning Status", "learning_status"),
@@ -4705,6 +4707,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case ADMIN_PREVIEW_NON_ADMIN -> toggleAdminPreviewAsNonAdmin();
             case AUTONOMOUS_RESCUES -> toggleAutonomousRescues();
             case OWNED_SUNSET_SS -> toggleOwnedSunsetSelfSufficientBulk();
+            case LOCK_BLOCKS_MODE -> toggleLockBlocksMode();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
@@ -5179,6 +5182,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
             case AUTONOMOUS_RESCUES -> isAutonomousRescuesActive();
             case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
+            case LOCK_BLOCKS_MODE -> isLockBlocksModeActive();
             case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
@@ -6060,6 +6064,17 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Frens.CONFIG.setBaritonePathfinderEnabled(newValue);
         Frens.CONFIG.save();
         net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = newValue;
+    }
+
+    private boolean isLockBlocksModeActive() {
+        return net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.isLockModeActive();
+    }
+
+    private void toggleLockBlocksMode() {
+        boolean newState = !net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.isLockModeActive();
+        net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.setLockModeActive(newState);
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                new net.wcfcarolina13.network.LockModeTogglePayload(newState));
     }
 
     private boolean isUnleashTetheredActive() {
