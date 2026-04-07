@@ -8,6 +8,8 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,8 +27,13 @@ public class ToolSelector {
 
         if (blockState != null && blockState.isIn(BlockTags.LEAVES)) {
             ItemStack shears = findShears(bot);
-            if (!shears.isEmpty()) {
+            if (!shears.isEmpty() && !DurabilityPolicyService.shouldAvoid(bot, shears)) {
                 return shears;
+            }
+            if (!shears.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, shears)) {
+                // Enchanted shears below threshold — request fallback refresh, then fall through.
+                DurabilityFallbackService.requestRefresh(
+                        bot, DurabilityFallbackService.GearCategory.SHEARS);
             }
             return hotBarUtils.getSelectedHotbarItemStack(bot);
         }
@@ -35,6 +42,7 @@ public class ToolSelector {
         for (int i = 0; i < hotbarItems.size(); i++) {
             ItemStack item = hotbarItems.get(i);
             if (item.isEmpty() || isWeaponOnlyItem(item)) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, item)) continue;
 
             float speed = item.getMiningSpeedMultiplier(blockState);
             if (speed > highestSpeed) {
@@ -49,6 +57,7 @@ public class ToolSelector {
         for (int i = 9; i < 36; i++) {
             ItemStack item = bot.getInventory().getStack(i);
             if (item.isEmpty() || isWeaponOnlyItem(item)) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, item)) continue;
 
             float speed = item.getMiningSpeedMultiplier(blockState);
             if (speed > highestSpeed) {
@@ -82,6 +91,16 @@ public class ToolSelector {
 
         // If no tool with speed > 1.0 was found, use current selection
         if (highestSpeed <= 1.0f) {
+            // If the reason nothing was found is that a preserved tool is below threshold,
+            // request fallback refresh for the appropriate category.
+            ItemStack held = hotBarUtils.getSelectedHotbarItemStack(bot);
+            if (!held.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, held)) {
+                DurabilityFallbackService.GearCategory cat = heldCategoryGuess(held);
+                if (cat != null) {
+                    DurabilityFallbackService.requestRefresh(bot, cat);
+                }
+            }
+
             ItemStack selected = hotBarUtils.getSelectedHotbarItemStack(bot);
             if (!selected.isEmpty() && !isWeaponOnlyItem(selected)) {
                 return selected;
@@ -130,5 +149,19 @@ public class ToolSelector {
             }
         }
         return ItemStack.EMPTY;
+    }
+
+    private static DurabilityFallbackService.GearCategory heldCategoryGuess(ItemStack stack) {
+        String key = stack.getItem().getTranslationKey().toLowerCase(java.util.Locale.ROOT);
+        if (key.endsWith("_pickaxe")) return DurabilityFallbackService.GearCategory.PICKAXE;
+        if (key.endsWith("_shovel"))  return DurabilityFallbackService.GearCategory.SHOVEL;
+        if (key.endsWith("_hoe"))     return DurabilityFallbackService.GearCategory.HOE;
+        if (key.endsWith("_axe"))     return DurabilityFallbackService.GearCategory.AXE;
+        if (key.endsWith("_sword"))   return DurabilityFallbackService.GearCategory.SWORD;
+        if (key.endsWith("_helmet"))  return DurabilityFallbackService.GearCategory.HELMET;
+        if (key.endsWith("_chestplate"))  return DurabilityFallbackService.GearCategory.CHESTPLATE;
+        if (key.endsWith("_leggings"))    return DurabilityFallbackService.GearCategory.LEGGINGS;
+        if (key.endsWith("_boots"))       return DurabilityFallbackService.GearCategory.BOOTS;
+        return null;
     }
 }
