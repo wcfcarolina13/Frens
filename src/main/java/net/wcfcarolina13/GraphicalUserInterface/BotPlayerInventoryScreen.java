@@ -3819,6 +3819,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Current: " + ownedSunsetSelfSufficientStatusLabel()
                 );
             }
+            if (entry.action == TopicAction.PRESERVE_EXPENSIVE_GEAR) {
+                return java.util.List.of(
+                        "Preserve Expensive Gear",
+                        "Bots refuse to use enchanted gear or items made of gold,",
+                        "diamond, netherite, or turtle shell when durability drops",
+                        "below 11% — or 3% in combat. They swap to a cheaper",
+                        "alternative, check a chest, or craft a new one.",
+                        "Applies to every bot you own. See the in-game guide for details.",
+                        "Current: " + (isPreserveExpensiveGearActive() ? "ON" : "OFF")
+                );
+            }
+            if (entry.action == TopicAction.LOCK_BLOCKS_MODE) {
+                return java.util.List.of(
+                        "Lock Blocks Mode",
+                        "Toggle on, then click doors, gates, or trapdoors to mark",
+                        "them as locked — bots will treat them as solid walls and",
+                        "route around them. Toggle off to stop marking.",
+                        "Current: " + (isLockBlocksModeActive() ? "ON" : "OFF")
+                );
+            }
             if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
                 return java.util.List.of(
                         "Allow Skin Changes for Everyone",
@@ -5461,6 +5481,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Map.entry("gameplay_tips", true),
             Map.entry("idle_hobbies_anywhere", true),
             Map.entry("baritone_pathfinder", true),
+            Map.entry("lock_blocks_mode", true),
+            Map.entry("preserve_expensive_gear", true),
             Map.entry("skin_policy_everyone", false),
             Map.entry("skin_policy_custom", false),
             Map.entry("wizard_tome", false),
@@ -5508,6 +5530,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case BARITONE_PATHFINDER -> "baritone_pathfinder";
                 case AUTONOMOUS_RESCUES -> "rescue_manage";
                 case OWNED_SUNSET_SS -> "recruit_manage";
+                case LOCK_BLOCKS_MODE -> "lock_blocks_mode";
+                case PRESERVE_EXPENSIVE_GEAR -> "preserve_expensive_gear";
                 case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
                 case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
                 default -> null;
