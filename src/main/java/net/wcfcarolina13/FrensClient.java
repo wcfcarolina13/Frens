@@ -141,7 +141,11 @@ public class FrensClient implements ClientModInitializer {
     // Leash button state - shows when looking at a bot that has leashed animals
     private static boolean leashButtonVisible = false;
     private static String leashButtonBotName = null;
-    // Mounted leash hint - shows when player is mounted and a nearby bot is also mounted
+    // Mounted leash hint - shows when there's a mounted bot the player might want to
+    // dismount and tether. Populated in two cases:
+    //   (a) player is mounted AND a nearby bot is also mounted (classic "ride-along")
+    //   (b) player is looking at a mounted bot (works whether player is mounted or not)
+    // Both cases fire the same action: /bot stop <name> + /bot leash <name>.
     private static boolean mountedLeashHintVisible = false;
     private static String mountedLeashBotName = null;
 
@@ -2875,27 +2879,27 @@ public class FrensClient implements ClientModInitializer {
         mountedLeashBotName = null;
 
         // Case 1: Looking at a bot with leashed animals.
-        String botName = findLookedAtBotName(client);
-        if (botName != null && !botName.isBlank()) {
-            PlayerEntity botEntity = null;
+        String lookAtBotName = findLookedAtBotName(client);
+        PlayerEntity lookAtBotEntity = null;
+        if (lookAtBotName != null && !lookAtBotName.isBlank()) {
             for (Entity entity : client.world.getEntities()) {
                 if (entity instanceof PlayerEntity player && player != client.player) {
-                    if (botName.equals(player.getName().getString())) {
-                        botEntity = player;
+                    if (lookAtBotName.equals(player.getName().getString())) {
+                        lookAtBotEntity = player;
                         break;
                     }
                 }
             }
-            if (botEntity != null) {
+            if (lookAtBotEntity != null) {
                 for (Entity entity : client.world.getEntities()) {
                     if (entity instanceof MobEntity mob) {
                         if (!mob.isAlive()) continue;
                         if (!mob.isLeashed()) continue;
-                        if (mob.squaredDistanceTo(botEntity) > 256.0) continue;
+                        if (mob.squaredDistanceTo(lookAtBotEntity) > 256.0) continue;
                         Entity holder = mob.getLeashHolder();
-                        if (holder != null && holder == botEntity) {
+                        if (holder != null && holder == lookAtBotEntity) {
                             leashButtonVisible = true;
-                            leashButtonBotName = botName;
+                            leashButtonBotName = lookAtBotName;
                             return; // Prefer this hint when we're looking at a bot with leashed animals.
                         }
                     }
@@ -2903,60 +2907,65 @@ public class FrensClient implements ClientModInitializer {
             }
         }
 
-        // Case 2: Player is mounted and there's a nearby mounted bot.
+        // Case 2: Looking at a mounted bot. Works whether the player is
+        // mounted or on foot — covers the edge case where a reload leaves
+        // only the bot's horse remaining and the player wants to reclaim it.
+        if (lookAtBotEntity != null && lookAtBotEntity.hasVehicle()) {
+            mountedLeashHintVisible = true;
+            mountedLeashBotName = lookAtBotName;
+            return;
+        }
+
+        // Case 3: Player is mounted and there's a nearby mounted bot (classic
+        // ride-along case — commander and bot riding side-by-side).
         if (client.player.hasVehicle()) {
-            String mountedBotName = findNearbyMountedBotName(client);
-            if (mountedBotName != null) {
+            String nearbyBotName = findNearbyMountedBotName(client);
+            if (nearbyBotName != null) {
                 mountedLeashHintVisible = true;
-                mountedLeashBotName = mountedBotName;
+                mountedLeashBotName = nearbyBotName;
             }
         }
     }
 
     /**
-     * Handle the leash keybind press.
-     * - If we're looking at a bot with leashed animals: send /bot leash to tie them to a fence.
-     * - If the player is mounted: find a nearby mounted bot and tell it to dismount and tether.
+     * Handle the leash keybind press. Drives the HUD hint action directly:
+     * - If the "leashed animals" hint is showing: send /bot leash to tie them to a fence.
+     * - If the "mounted bot" hint is showing (look-at or ride-along): tell the bot to
+     *   dismount and tether the horse.
+     * - Otherwise: show a guidance message.
      */
     private static void handleLeashKey(MinecraftClient client) {
-        System.out.println("[AI-Player] handleLeashKey called");
         if (client == null || client.player == null || client.world == null) {
-            System.out.println("[AI-Player] handleLeashKey: client/player/world is null");
             return;
         }
 
-        // Case 1: Looking at a bot with leashed animals - use existing behavior.
+        // Case 1: Looking at a bot with leashed animals.
         if (leashButtonVisible && leashButtonBotName != null) {
-            System.out.println("[AI-Player] handleLeashKey: Case 1 - leashing " + leashButtonBotName);
             sendChatCommand(client, "bot leash " + leashButtonBotName);
             return;
         }
 
-        // Case 2: Player is mounted - find a nearby mounted bot and tell it to dismount and tether.
-        if (client.player.hasVehicle()) {
-            String mountedBotName = findNearbyMountedBotName(client);
-            System.out.println("[AI-Player] handleLeashKey: Case 2 - player mounted, nearby bot: " + mountedBotName);
-            if (mountedBotName != null) {
-                // First stop/dismount the bot, then run leash skill to tether the horse.
-                sendChatCommand(client, "bot stop " + mountedBotName);
-                // Small delay before leash command - we send it immediately, the server will handle sequencing.
-                sendChatCommand(client, "bot leash " + mountedBotName);
-                if (isGameplayTipsEnabled()) {
-                    client.player.sendMessage(Text.literal("Telling " + mountedBotName + " to dismount and tether."), true);
-                }
-                return;
-            } else {
-                if (isGameplayTipsEnabled()) {
-                    client.player.sendMessage(Text.literal("No nearby mounted bot found."), true);
-                }
-                return;
+        // Case 2/3: There's a mounted bot the player wants dismounted + tethered.
+        // updateLeashButtonVisibility already distinguished "looking at mounted
+        // bot" vs "riding alongside a mounted bot" and chose mountedLeashBotName
+        // accordingly, so we can act on the cached name directly without
+        // re-scanning.
+        if (mountedLeashHintVisible && mountedLeashBotName != null) {
+            String name = mountedLeashBotName;
+            // /bot stop cancels follow (prevents the bot from immediately
+            // re-mounting via RideSync), then /bot leash runs the secure
+            // fallback chain (lead -> fence -> hold).
+            sendChatCommand(client, "bot stop " + name);
+            sendChatCommand(client, "bot leash " + name);
+            if (isGameplayTipsEnabled()) {
+                client.player.sendMessage(Text.literal("Telling " + name + " to dismount and tether."), true);
             }
+            return;
         }
 
-        // Case 3: Not looking at a bot with leashed animals, not mounted.
-        System.out.println("[AI-Player] handleLeashKey: Case 3 - showing hint message");
+        // No hint active — surface guidance.
         if (isGameplayTipsEnabled()) {
-            client.player.sendMessage(Text.literal("Look at a bot with leashed animals, or be mounted near a mounted bot."), true);
+            client.player.sendMessage(Text.literal("Look at a bot with leashed animals or a mounted bot, or be mounted near a mounted bot."), true);
         }
     }
 
@@ -3014,7 +3023,9 @@ public class FrensClient implements ClientModInitializer {
             line1 = "🐴 " + leashButtonBotName + " is leading animals";
             line2 = "Press ['] to tie to nearby fence";
         } else if (mountedLeashHintVisible && mountedLeashBotName != null) {
-            line1 = "🐴 " + mountedLeashBotName + " is riding alongside";
+            // Wording works whether player is on foot or mounted: bot is on
+            // a horse, and the keybind tells it to dismount and tether.
+            line1 = "🐴 " + mountedLeashBotName + " is riding a horse";
             line2 = "Press ['] to dismount & tether";
         }
 
