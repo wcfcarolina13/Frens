@@ -278,8 +278,23 @@ public final class BotInventoryStorageService {
     /**
      * Returns true when loading a custom inventory snapshot is safe at join time.
      *
-     * <p>When vanilla PlayerManager restoration already succeeded, an older custom snapshot
-     * should not overwrite newer vanilla data. We compare file mtimes with a small grace window.
+     * <p>Decision tree (in priority order):
+     * <ol>
+     *   <li>No snapshot file → don't load.</li>
+     *   <li>Vanilla restoration didn't happen → load the snapshot (it's the only source of truth).</li>
+     *   <li>Vanilla restoration produced an empty inventory but the snapshot has substantial
+     *       content → load the snapshot. This catches the post-crash recovery case where the
+     *       vanilla {@code .dat} was rewritten by world load but contains no items.</li>
+     *   <li>Snapshot mtime is well behind vanilla mtime → skip as stale.</li>
+     *   <li>Otherwise → load the snapshot.</li>
+     * </ol>
+     *
+     * <p>The empty-bot override (rule 3) is critical: after a server crash, vanilla MC may
+     * recreate the fake player's {@code .dat} on the next world load with default state. The
+     * fresh mtime would otherwise cause our (older but valid) snapshot to be discarded as
+     * "stale", losing all of the bot's inventory and XP. We trust the in-memory inventory
+     * state because it has already been populated by vanilla restoration before this method
+     * is called from {@code BotPersistenceService}'s next-tick join handler.
      */
     public static boolean shouldRestoreOnJoin(MinecraftServer server,
                                               ServerPlayerEntity bot,
@@ -294,6 +309,25 @@ public final class BotInventoryStorageService {
 
         if (!managerRestored) {
             return true;
+        }
+
+        // Empty-bot override: if vanilla restoration produced no items but the snapshot has
+        // substantial content, prefer the snapshot regardless of mtime. This is the post-crash
+        // recovery path — without this, a fresh empty .dat written during world load would
+        // make our older-but-valid snapshot look "stale" and silently wipe the bot.
+        try {
+            long snapshotSize = Files.size(snapshotPath);
+            if (snapshotSize >= MIN_VALID_SAVE_BYTES && isInventoryEffectivelyEmpty(bot)) {
+                LOGGER.warn("Empty-bot override for '{}': vanilla restoration produced no items"
+                                + " but snapshot {} ({} bytes) is substantial — loading snapshot.",
+                        bot.getName().getString(),
+                        snapshotPath.getFileName(),
+                        snapshotSize);
+                return true;
+            }
+        } catch (IOException e) {
+            LOGGER.debug("Snapshot size check failed for '{}': {}",
+                    bot.getName().getString(), e.getMessage());
         }
 
         Path playerDataPath = server.getSavePath(WorldSavePath.PLAYERDATA)
@@ -318,6 +352,21 @@ public final class BotInventoryStorageService {
             LOGGER.warn("Unable to compare snapshot age for '{}': {}",
                     bot.getName().getString(),
                     e.getMessage());
+        }
+        return true;
+    }
+
+    /**
+     * True if the bot has zero items in its main inventory, armor, and offhand. Used by the
+     * empty-bot override in {@link #shouldRestoreOnJoin} to detect a post-crash wipe by vanilla
+     * restoration.
+     */
+    private static boolean isInventoryEffectivelyEmpty(ServerPlayerEntity bot) {
+        PlayerInventory inv = bot.getInventory();
+        for (int slot = 0; slot < inv.size(); slot++) {
+            if (!inv.getStack(slot).isEmpty()) {
+                return false;
+            }
         }
         return true;
     }
