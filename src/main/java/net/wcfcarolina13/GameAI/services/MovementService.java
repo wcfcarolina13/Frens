@@ -70,14 +70,26 @@ public final class MovementService {
     // Hard anti-stuck tuning: stop pushing into walls; try local "turn the corner" probes before giving up.
     private static final int STUCK_SAME_BLOCK_STEPS_TRIGGER = 10; // ~350ms at 35ms sleeps
     private static final int STUCK_STAGNANT_STEPS_TRIGGER = 4;
-    private static final ScheduledExecutorService DOOR_CLOSE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "bot-door-close");
-        t.setDaemon(true);
-        return t;
-    });
+    private static volatile ScheduledExecutorService DOOR_CLOSE_SCHEDULER = createDoorCloseScheduler();
+
+    private static ScheduledExecutorService createDoorCloseScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "bot-door-close");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
     /** Interrupt door-close scheduler. Called during server shutdown. */
     public static void shutdownExecutors() {
         DOOR_CLOSE_SCHEDULER.shutdownNow();
+    }
+
+    /** Re-create the door-close scheduler if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (DOOR_CLOSE_SCHEDULER.isShutdown()) {
+            DOOR_CLOSE_SCHEDULER = createDoorCloseScheduler();
+        }
     }
 
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_CLOSE_COOLDOWN = new ConcurrentHashMap<>();

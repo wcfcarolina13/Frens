@@ -139,20 +139,44 @@ public class modCommandRegistry {
 
     private static final AtomicInteger SCHEDULER_THREAD_ID = new AtomicInteger(0);
     private static final AtomicInteger SKILL_THREAD_ID = new AtomicInteger(0);
-    private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, runnable -> {
-        Thread t = new Thread(runnable, "mod-command-scheduler-" + SCHEDULER_THREAD_ID.incrementAndGet());
-        t.setDaemon(true);
-        return t;
-    });
-    private static final ExecutorService skillExecutor = Executors.newCachedThreadPool(runnable -> {
-        Thread t = new Thread(runnable, "mod-command-skill-" + SKILL_THREAD_ID.incrementAndGet());
-        t.setDaemon(true);
-        return t;
-    });
+    private static volatile ScheduledExecutorService scheduler = createScheduler();
+    private static volatile ExecutorService skillExecutor = createSkillExecutor();
+
+    private static ScheduledExecutorService createScheduler() {
+        return Executors.newScheduledThreadPool(1, runnable -> {
+            Thread t = new Thread(runnable, "mod-command-scheduler-" + SCHEDULER_THREAD_ID.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    private static ExecutorService createSkillExecutor() {
+        return Executors.newCachedThreadPool(runnable -> {
+            Thread t = new Thread(runnable, "mod-command-skill-" + SKILL_THREAD_ID.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
     /** Interrupt all in-flight command/skill tasks. Called during server shutdown. */
     public static void shutdownExecutors() {
         scheduler.shutdownNow();
         skillExecutor.shutdownNow();
+    }
+
+    /**
+     * Re-create executors that were shut down by {@link #shutdownExecutors()}. Called from
+     * {@code SERVER_STARTED} so that exit-to-title + reload within the same Minecraft session
+     * does not leave the command executors permanently dead. Safe to call multiple times — if
+     * the existing executors are still alive (no shutdown happened), this is a no-op.
+     */
+    public static void restartExecutors() {
+        if (scheduler.isShutdown()) {
+            scheduler = createScheduler();
+        }
+        if (skillExecutor.isShutdown()) {
+            skillExecutor = createSkillExecutor();
+        }
     }
 
     static final double DEFAULT_GUARD_RADIUS = 6.0D;
@@ -7616,10 +7640,26 @@ public class modCommandRegistry {
                 }
             });
         } catch (RuntimeException e) {
-            LOGGER.error("Failed to queue skill '{}' for bot {} (fallback to direct run)", skillName, bot.getGameProfile().name(), e);
-            SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params, source);
-            SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-            source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+            // skillExecutor.submit() rejected the task. The most common cause is that the executor
+            // was shut down by SERVER_STOPPING and a new world was loaded within the same JVM
+            // without re-initializing it (see shutdownExecutors / SERVER_STARTED).
+            //
+            // We MUST NOT fall back to running the skill synchronously here:
+            //   1. We're on the server tick thread — long skills would freeze the server.
+            //   2. Constructing SkillContext eagerly via FunctionCallerV2.getSharedState() can
+            //      trigger that class's static initializer, which constructs OllamaAPI, which
+            //      transitively requires the (compile-only) ollama4j classes — producing a
+            //      NoClassDefFoundError that escapes catch (Exception) and crashes the server.
+            // Surface a clear error to the user instead.
+            LOGGER.error("Failed to queue skill '{}' for bot {} — executor rejected the task. "
+                            + "The skill executor is likely shut down (this can happen after exit-to-title "
+                            + "+ reload within the same Minecraft session). A full Minecraft restart is required.",
+                    skillName, bot.getGameProfile().name(), e);
+            net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill submit-rejected name="
+                    + skillName + " bot=" + bot.getGameProfile().name()
+                    + " err=" + e.getClass().getSimpleName());
+            ChatUtils.sendSystemMessage(source,
+                    "§cSkill executor unavailable — please fully restart Minecraft. (Skill commands break after exit-to-title + reload in the same session.)");
         }
 
         return 1;

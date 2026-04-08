@@ -100,18 +100,29 @@ public final class BotAutoReturnSunsetService {
     }
 
     private static final AtomicInteger AUTO_THREAD_ID = new AtomicInteger(0);
-    private static final ExecutorService AUTO_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "auto-sunset-" + AUTO_THREAD_ID.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        }
-    });
+    private static volatile ExecutorService AUTO_EXECUTOR = createAutoExecutor();
+
+    private static ExecutorService createAutoExecutor() {
+        return Executors.newCachedThreadPool(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "auto-sunset-" + AUTO_THREAD_ID.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+    }
 
     /** Interrupt all in-flight sunset return tasks. Called during server shutdown. */
     public static void shutdownExecutors() {
         AUTO_EXECUTOR.shutdownNow();
+    }
+
+    /** Re-create the sunset return executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (AUTO_EXECUTOR.isShutdown()) {
+            AUTO_EXECUTOR = createAutoExecutor();
+        }
     }
 
     private BotAutoReturnSunsetService() {}

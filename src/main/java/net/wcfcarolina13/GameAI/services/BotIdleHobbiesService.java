@@ -196,18 +196,29 @@ public final class BotIdleHobbiesService {
     }
 
     private static final AtomicInteger AMBIENT_THREAD_ID = new AtomicInteger(0);
-    private static final ExecutorService AMBIENT_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "ambient-hobby-" + AMBIENT_THREAD_ID.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        }
-    });
+    private static volatile ExecutorService AMBIENT_EXECUTOR = createAmbientExecutor();
+
+    private static ExecutorService createAmbientExecutor() {
+        return Executors.newCachedThreadPool(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "ambient-hobby-" + AMBIENT_THREAD_ID.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+    }
 
     /** Interrupt all in-flight ambient hobby tasks. Called during server shutdown. */
     public static void shutdownExecutors() {
         AMBIENT_EXECUTOR.shutdownNow();
+    }
+
+    /** Re-create the ambient hobby executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (AMBIENT_EXECUTOR.isShutdown()) {
+            AMBIENT_EXECUTOR = createAmbientExecutor();
+        }
     }
 
     private BotIdleHobbiesService() {

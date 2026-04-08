@@ -36,16 +36,27 @@ public final class BotUndergroundSurvivalService {
     private static final Map<UUID, Long> NEXT_CHECK_TICK = new ConcurrentHashMap<>();
 
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);
-    private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "underground-survival-" + THREAD_ID.incrementAndGet());
-        t.setDaemon(true);
-        return t;
-    });
+    private static volatile ExecutorService EXECUTOR = createExecutor();
+
+    private static ExecutorService createExecutor() {
+        return Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "underground-survival-" + THREAD_ID.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     private BotUndergroundSurvivalService() {}
 
     public static void shutdownExecutors() {
         EXECUTOR.shutdownNow();
+    }
+
+    /** Re-create the underground survival executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (EXECUTOR.isShutdown()) {
+            EXECUTOR = createExecutor();
+        }
     }
 
     public static void onServerTick(MinecraftServer server) {

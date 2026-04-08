@@ -162,18 +162,29 @@ public class BotEventHandler {
     private static final long COME_RECOVERY_STALE_TICKS = 200L; // 10s @20tps
     private static final Map<UUID, Long> FOLLOW_BACKOFF_LOG_TICK = new ConcurrentHashMap<>();
     private static final AtomicInteger COME_RECOVERY_THREAD_ID = new AtomicInteger(0);
-    private static final ExecutorService COME_RECOVERY_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "come-recovery-" + COME_RECOVERY_THREAD_ID.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        }
-    });
+    private static volatile ExecutorService COME_RECOVERY_EXECUTOR = createComeRecoveryExecutor();
+
+    private static ExecutorService createComeRecoveryExecutor() {
+        return Executors.newCachedThreadPool(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "come-recovery-" + COME_RECOVERY_THREAD_ID.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+    }
 
     /** Interrupt all in-flight come-recovery tasks. Called during server shutdown. */
     public static void shutdownExecutors() {
         COME_RECOVERY_EXECUTOR.shutdownNow();
+    }
+
+    /** Re-create the come-recovery executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (COME_RECOVERY_EXECUTOR.isShutdown()) {
+            COME_RECOVERY_EXECUTOR = createComeRecoveryExecutor();
+        }
     }
 
     private static BlockPos currentAvoidDoor(UUID botId) {

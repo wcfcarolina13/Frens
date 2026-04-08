@@ -43,15 +43,26 @@ public class MiningTool {
      * Shared executor to avoid spawning a brand-new thread/executor per mined block (which can cause huge lag spikes
      * and thread churn in heavily modded servers/worlds).
      */
-    private static final ScheduledExecutorService MINING_EXECUTOR = Executors.newScheduledThreadPool(2, runnable -> {
-        Thread thread = new Thread(runnable, "mining-tool-" + MINING_THREAD_ID.incrementAndGet());
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static volatile ScheduledExecutorService MINING_EXECUTOR = createMiningExecutor();
+
+    private static ScheduledExecutorService createMiningExecutor() {
+        return Executors.newScheduledThreadPool(2, runnable -> {
+            Thread thread = new Thread(runnable, "mining-tool-" + MINING_THREAD_ID.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     /** Interrupt all in-flight mining operations. Called during server shutdown. */
     public static void shutdownExecutors() {
         MINING_EXECUTOR.shutdownNow();
+    }
+
+    /** Re-create the mining executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (MINING_EXECUTOR.isShutdown()) {
+            MINING_EXECUTOR = createMiningExecutor();
+        }
     }
 
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos) {

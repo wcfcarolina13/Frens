@@ -627,6 +627,19 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             net.wcfcarolina13.GameAI.services.TaskService.clearServerStopping();
+            // Re-create any executors that SERVER_STOPPING shut down. Without this,
+            // exit-to-title + reload within the same Minecraft session leaves every
+            // mod executor permanently dead and breaks /bot skill, mining, hunting,
+            // hobbies, etc. Each restartExecutors() is a no-op if the executor is
+            // still alive (server starting fresh inside a new JVM).
+            net.wcfcarolina13.PlayerUtils.MiningTool.restartExecutors();
+            net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.restartExecutors();
+            net.wcfcarolina13.GameAI.BotEventHandler.restartExecutors();
+            net.wcfcarolina13.Commands.modCommandRegistry.restartExecutors();
+            net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.BotAutoHuntService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.MovementService.restartExecutors();
             configNetworkManager.registerServerModelNameSaveReceiver(server);
             configNetworkManager.registerServerAPIKeySaveReceiver(server);
             configNetworkManager.registerServerCustomProviderSaveReceiver(server);
