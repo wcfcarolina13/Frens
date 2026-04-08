@@ -70,8 +70,19 @@ public class FarmSkill implements Skill {
     private static final double MAX_INTERACTION_RANGE = 4.5;
     private static final int IRRIGATION_ATTEMPTS = 4;
     private static final int TREE_CLEAR_RADIUS = 6;
+    // FARM_WOODCUT_BUFFER / FARM_WOODCUT_VERTICAL_RANGE define the farm's "in the
+    // way" query region (what counts as a blocker to the farm footprint). They
+    // are intentionally tight so we only detect real obstructions.
     private static final int FARM_WOODCUT_BUFFER = 2;
     private static final int FARM_WOODCUT_VERTICAL_RANGE = 9;
+    // FARM_WOODCUT_WORK_BUFFER / FARM_WOODCUT_WORK_VERTICAL_RANGE define the
+    // larger bounds passed to the inline WoodcutSkill so it has enough elbow
+    // room to approach trees, scaffold, and prune canopies whose leaves may
+    // overhang the tight "blocker" query region above. Without this, every
+    // trunk the detector finds gets rejected as out-of-bounds and the farm
+    // falls back to a brute block-by-block clear that leaves floaters.
+    private static final int FARM_WOODCUT_WORK_BUFFER = 6;
+    private static final int FARM_WOODCUT_WORK_VERTICAL_RANGE = 20;
     private static final int FARM_LOCAL_TREE_CLEAR_LIMIT = 32;
     private static final int AUTO_MAX_CUT_DEPTH = 2;
     private static final int MANUAL_MAX_CUT_DEPTH = 4;
@@ -763,12 +774,17 @@ public class FarmSkill implements Skill {
             params.put("searchRadius", TREE_CLEAR_RADIUS + 2);
             params.put("verticalRange", 8);
             if (footprint != null) {
-                params.put("minX", footprint.minX() - FARM_WOODCUT_BUFFER);
-                params.put("maxX", footprint.maxX() + FARM_WOODCUT_BUFFER);
-                params.put("minY", footprint.irrigationAnchor().getY());
-                params.put("maxY", footprint.irrigationAnchor().getY() + FARM_WOODCUT_VERTICAL_RANGE);
-                params.put("minZ", footprint.minZ() - FARM_WOODCUT_BUFFER);
-                params.put("maxZ", footprint.maxZ() + FARM_WOODCUT_BUFFER);
+                // NOTE: pass the *wider* work bounds, not the query bounds used
+                // by isWithinFarmWoodcutBounds / collectBlockingTreeBlocks. The
+                // wider box gives WoodcutSkill room to approach, scaffold, and
+                // prune the canopy of trees whose trunks root inside the farm.
+                int anchorY = footprint.irrigationAnchor().getY();
+                params.put("minX", footprint.minX() - FARM_WOODCUT_WORK_BUFFER);
+                params.put("maxX", footprint.maxX() + FARM_WOODCUT_WORK_BUFFER);
+                params.put("minY", anchorY - 2);
+                params.put("maxY", anchorY + FARM_WOODCUT_WORK_VERTICAL_RANGE);
+                params.put("minZ", footprint.minZ() - FARM_WOODCUT_WORK_BUFFER);
+                params.put("maxZ", footprint.maxZ() + FARM_WOODCUT_WORK_BUFFER);
             }
             return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState(), params));
         } catch (SkillAbortException abort) {
@@ -1591,7 +1607,16 @@ public class FarmSkill implements Skill {
             int before = nearbyTreeBlocks;
             SkillExecutionResult result = runWoodcutInline(source, new SkillContext(source, ctx.sharedState()), footprint);
             LOGGER.info("escapeTree woodcut result success={} msg={}", result.success(), result.message());
-            int locallyCleared = nearbyTreeBlocks > 0 ? clearBlockingTreeBlocksLocally(bot, world, source, footprint) : 0;
+            // Only fall back to the brute per-block clear when WoodcutSkill
+            // couldn't reduce the blocker count. When woodcut IS making
+            // progress, running the brute clear in parallel is what used to
+            // leave floaters (no topology awareness, arbitrary block order).
+            int afterWoodcut = countBlockingTreeBlocks(world, footprint);
+            int locallyCleared = 0;
+            if (afterWoodcut > 0 && afterWoodcut >= before) {
+                LOGGER.info("escapeTree: woodcut made no progress ({} -> {}); falling back to local brute clear", before, afterWoodcut);
+                locallyCleared = clearBlockingTreeBlocksLocally(bot, world, source, footprint);
+            }
             if (locallyCleared > 0) {
                 LOGGER.info("escapeTree local bounded clear removed {} in-bounds blocker(s)", locallyCleared);
             }
@@ -1649,7 +1674,16 @@ public class FarmSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Clearing trees near the farm area (pass " + attempts + ").");
             SkillContext woodcutCtx = new SkillContext(source, ctx.sharedState());
             SkillExecutionResult woodcutResult = runWoodcutInline(source, woodcutCtx, footprint);
-            int locallyCleared = clearBlockingTreeBlocksLocally(bot, world, source, footprint);
+            // Last-ditch brute clear: only fires when the inline WoodcutSkill
+            // failed to reduce the blocker count on this pass. Prevents the
+            // floater-producing parallel run of brute-clear + woodcut.
+            int afterWoodcut = countBlockingTreeBlocks(world, footprint);
+            int locallyCleared = 0;
+            if (afterWoodcut > 0 && afterWoodcut >= blockingTreeBlocks) {
+                LOGGER.info("clearBlockingTrees pass={}: woodcut made no progress ({} -> {}); falling back to local brute clear",
+                        attempts, blockingTreeBlocks, afterWoodcut);
+                locallyCleared = clearBlockingTreeBlocksLocally(bot, world, source, footprint);
+            }
             int nextBlockingTreeBlocks = countBlockingTreeBlocks(world, footprint);
             LOGGER.info("clearBlockingTrees pass={} result={} before={} after={}",
                     attempts, woodcutResult.success(), blockingTreeBlocks, nextBlockingTreeBlocks);

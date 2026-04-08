@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-08 — Farm Tree Clearing Uses Real Woodcut
+
+- **Root cause (from 1.21.10 log 08:45–08:48):** `/bot skill farm` spent 3+ minutes clearing trees without ever actually felling one. WoodcutSkill's `isTreeWorkEnvelopeWithinBounds` required the tree's leaf envelope, expanded by `WOODCUT_LOG_SCAN_EXPANSION=4` in every direction, to fit entirely inside the caller's bounds. For a farm with a 13×10×13 AABB that rejected every oak found (16 of 16 logs → `out-of-bounds-tree-envelope`), so the farm fell back to `clearBlockingTreeBlocksLocally` — an arbitrary-order "mine any log/leaf in the box" loop with no tree topology awareness. That's where the floaters came from. Each pass also wasted ~35s in a full-region `WoodcutCleanupSkill` that had no targets to find.
+
+- **WoodcutSkill.isTreeWorkEnvelopeWithinBounds (Fix A):** Relaxed to require only that the trunk (`base` → `top`) fit inside the caller's bounds. The canopy/leaves may legitimately overhang — authority to mine them for the tree currently being felled is granted via the new per-tree work envelope overlay (below).
+
+- **WoodcutSkill per-tree work envelope overlay (Fix B):** Added transient fields `activeTreeWorkEnvelopeMin/Max`, set just before `approachBase`/`fellTree` are called for a selected target and cleared in a `finally` at the end of that tree's iteration (and in the outer `finally` for belt-and-suspenders). `isWithinRequestedBounds(pos)` now returns true if the pos is either inside `activeRequestedBounds` OR inside the active tree's expanded envelope (`envelopeMin/Max ± WOODCUT_LOG_SCAN_EXPANSION`). This lets `mineBlockDetailed` prune canopy and leaves that overhang caller bounds, but only for the tree the bot is actively felling.
+
+- **WoodcutSkill skip redundant cleanup (Fix D):** The outer `finally` block normally calls `runWoodcutCleanup` with a hardcoded 35s budget. In bounded mode with at least one tree felled, per-tree `runPerTreeMaintenance` → `runLocalTreeCleanup` has already cleaned each tree. Skipping the full-region pass saves ~30s per farm tree-clear pass while preserving cleanup for open-ended runs and for bounded runs that felled zero trees.
+
+- **FarmSkill work buffer vs. query buffer (Fix C):** Split the two concerns that previously shared `FARM_WOODCUT_BUFFER=2` / `FARM_WOODCUT_VERTICAL_RANGE=9`. The tight values are retained for `isWithinFarmWoodcutBounds` and `collectBlockingTreeBlocks` (detecting real obstructions to the footprint). A new wider pair — `FARM_WOODCUT_WORK_BUFFER=6` / `FARM_WOODCUT_WORK_VERTICAL_RANGE=20`, plus `anchorY-2` for the lower Y — is passed to `runWoodcutInline` so WoodcutSkill has elbow room to approach, scaffold, and prune canopies. Without this, even Fix A would still reject most target trees.
+
+- **FarmSkill retires brute-clear as primary (Fix E):** `escapeTreeAndWoodcut` and `clearBlockingTrees` previously ran `clearBlockingTreeBlocksLocally` in parallel with the inline woodcut on every pass, producing floaters. Both call sites now re-count blockers after the woodcut call and only fall back to the local brute clear when the woodcut failed to reduce the count (last-ditch only). When Woodcut is succeeding, it owns the clear.
+
+- **Expected improvements:** Tree-clearing passes for `/bot skill farm` in forested areas should actually fell trees via real woodcut (top-down, scaffolded, canopy-aware). Per-pass wall-clock time drops from ~40–80s of wasted rejection loops to ~10–20s of real felling per tree. Floaters should be ~zero because fellTree does the mining instead of the brute per-block loop.
+
+- **Files:** `src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java` (Fix A/B/D), `src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java` (Fix C/E). `./gradlew build -x test` ✅ after each commit.
+
 ## 2026-04-07 — Durability Preservation Toggle
 
 - **Feat: Durability preservation toggle.** Players can now configure bots to refuse low-durability gear as a trade-off between preservation and performance. Toggle via Admin → Behavior section of the bot control menu (visible to all players). When enabled, bots avoid equipping or using enchanted/expensive gear below 11% durability (3% in combat). Mending-enchanted items count as "preserved" and are always safe to use.
