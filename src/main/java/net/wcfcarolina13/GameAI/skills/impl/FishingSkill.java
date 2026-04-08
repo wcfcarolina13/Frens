@@ -32,6 +32,9 @@ import net.wcfcarolina13.GameAI.services.FishingSessionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.MovementService.Mode;
 import net.wcfcarolina13.GameAI.services.MovementService.MovementPlan;
 import net.wcfcarolina13.GameAI.services.MovementService.MovementResult;
@@ -946,11 +949,46 @@ public final class FishingSkill implements Skill {
     }
 
     private static boolean ensureFishingRod(ServerCommandSource source, ServerPlayerEntity bot) {
-        if (hasItem(bot, Items.FISHING_ROD)) {
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
+        ItemStack currentRod = bot.getMainHandStack();
+        if (currentRod.isOf(Items.FISHING_ROD)) {
+            // Check if this rod is preserved below threshold; if so, request refresh
+            if (DurabilityPolicyService.shouldAvoid(bot, currentRod)) {
+                DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.FISHING_ROD);
+                return false;
+            }
             return true;
         }
+
+        // Rod not in hand; check inventory and equipment
+        if (hasItem(bot, Items.FISHING_ROD)) {
+            ItemStack rodInInventory = findRodInInventory(bot);
+            if (rodInInventory != null && DurabilityPolicyService.shouldAvoid(bot, rodInInventory)) {
+                DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.FISHING_ROD);
+                return false;
+            }
+            // Found a compliant replacement in inventory — announce the switch only if
+            // the prior rod was being preserved below threshold.
+            if (priorWasFiltered) {
+                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+            }
+            return true;
+        }
+
+        // No rod; try to provision
         boolean crafted = ToolProvisionService.ensureFishingRod(bot, source, source.getPlayer());
         return crafted && hasItem(bot, Items.FISHING_ROD);
+    }
+
+    private static ItemStack findRodInInventory(ServerPlayerEntity bot) {
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isOf(Items.FISHING_ROD)) {
+                return stack;
+            }
+        }
+        return null;
     }
 
     private static FishingSpot findFishingSpot(ServerPlayerEntity bot, int radius) {

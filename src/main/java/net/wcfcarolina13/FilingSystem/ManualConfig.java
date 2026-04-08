@@ -47,6 +47,7 @@ public class ManualConfig {
     private String ollamaBaseUrl = System.getProperty("frens.ollamaHost", System.getProperty("aiplayer.ollamaHost", "http://127.0.0.1:11434"));
     private Map<String, String> botGameProfile = new HashMap<>();
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
+    private Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     // Per-world bot spawn points: alias → worldKey → BotSpawn.
     private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
@@ -466,6 +467,26 @@ public class ManualConfig {
     public BotOwnership getOwner(String alias) {
         String key = resolveAliasKey(getBotOwnership(), alias);
         return key != null ? getBotOwnership().get(key) : null;
+    }
+
+    public boolean getPreserveExpensiveGear(UUID playerUuid) {
+        if (playerUuid == null) {
+            return false;
+        }
+        if (playerPreserveExpensiveGear == null) {
+            return false;
+        }
+        return playerPreserveExpensiveGear.getOrDefault(playerUuid.toString(), Boolean.FALSE);
+    }
+
+    public void setPreserveExpensiveGear(UUID playerUuid, boolean value) {
+        if (playerUuid == null) {
+            return;
+        }
+        if (playerPreserveExpensiveGear == null) {
+            playerPreserveExpensiveGear = new HashMap<>();
+        }
+        playerPreserveExpensiveGear.put(playerUuid.toString(), value);
     }
 
     /** @deprecated Legacy accessor. Use {@link #getBotSpawnPointsByWorld()} instead. */

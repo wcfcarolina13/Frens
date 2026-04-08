@@ -46,6 +46,9 @@ import net.wcfcarolina13.network.OpenConfigPayload;
 import net.wcfcarolina13.network.SaveAPIKeyPayload;
 import net.wcfcarolina13.network.SaveConfigPayload;
 import net.wcfcarolina13.network.SaveCustomProviderPayload;
+import net.wcfcarolina13.network.UpdatePlayerPreservePayload;
+import net.wcfcarolina13.network.RequestPlayerPreservePayload;
+import net.wcfcarolina13.network.PlayerPreserveStatePayload;
 import net.wcfcarolina13.network.configNetworkManager;
 import net.wcfcarolina13.network.ConfirmRecruitmentPayload;
 import net.wcfcarolina13.network.OpenRecruitmentDialoguePayload;
@@ -568,6 +571,11 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.LockModeTogglePayload.ID, net.wcfcarolina13.network.LockModeTogglePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.LockModeStatePayload.ID, net.wcfcarolina13.network.LockModeStatePayload.CODEC);
 
+        // Player durability preservation preference
+        PayloadTypeRegistry.playC2S().register(UpdatePlayerPreservePayload.ID, UpdatePlayerPreservePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RequestPlayerPreservePayload.ID, RequestPlayerPreservePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(PlayerPreserveStatePayload.ID, PlayerPreserveStatePayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -596,6 +604,45 @@ public class Frens implements ModInitializer {
                             net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
                                     new net.wcfcarolina13.network.LockModeStatePayload(active));
                         }));
+
+        // Player preserve expensive gear C2S receivers
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(UpdatePlayerPreservePayload.ID, (payload, context) -> {
+            ServerPlayerEntity sender = context.player();
+            if (sender == null) {
+                return;
+            }
+            java.util.UUID senderUuid = sender.getUuid();
+            if (senderUuid == null) {
+                return;
+            }
+            context.server().execute(() -> {
+                if (Frens.CONFIG != null) {
+                    Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
+                    Frens.CONFIG.save();
+                }
+                // If the player just flipped OFF → ON, clear any stale cooldowns for their bots
+                // so the next selection call gets a fresh fallback attempt.
+                if (payload.enabled()) {
+                    net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldownsForOwner(senderUuid);
+                }
+            });
+        });
+
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(RequestPlayerPreservePayload.ID, (payload, context) -> {
+            ServerPlayerEntity sender = context.player();
+            if (sender == null) {
+                return;
+            }
+            java.util.UUID senderUuid = sender.getUuid();
+            if (senderUuid == null) {
+                return;
+            }
+            context.server().execute(() -> {
+                boolean current = Frens.CONFIG != null
+                        && Frens.CONFIG.getPreserveExpensiveGear(senderUuid);
+                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
+            });
+        });
 
         modCommandRegistry.register();
         configCommand.register();
@@ -702,6 +749,7 @@ public class Frens implements ModInitializer {
             }
             BotPersistenceService.saveAll(server);
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.clearSmokeSignalCache();
+            net.wcfcarolina13.GameAI.services.DurabilityFallbackService.shutdownExecutors();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -907,6 +955,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDrowningRescue);
+        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDurabilityArmorAudit);
         ServerTickEvents.END_SERVER_TICK.register(Frens::processSpawnEscapeChecks);
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);

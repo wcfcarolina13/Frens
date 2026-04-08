@@ -265,6 +265,32 @@ public class MiningTool {
                         return;
                     }
 
+                    // Periodically re-poll for a better tool in case one was added to inventory mid-task
+                    if (!preserveSelectedHotbarItem && ticksElapsed.get() > 0 && ticksElapsed.get() % 20 == 0) {
+                        ItemStack current = bot.getMainHandStack();
+                        ItemStack repolled = ToolSelector.selectBestToolForBlock(bot, currentState);
+                        if (!ItemStack.areItemsAndComponentsEqual(current, repolled)) {
+                            LOGGER.info("Mining re-poll: swapping from {} to {} for {}",
+                                    current.isEmpty() ? "empty-hand" : current.getItem().toString(),
+                                    repolled.isEmpty() ? "empty-hand" : repolled.getItem().toString(),
+                                    targetBlockPos);
+                            boolean swapped = switchToTool(bot, repolled);
+                            if (!swapped) {
+                                switchToHarmlessFallback(bot);
+                            }
+                            // Recalculate required ticks from the new tool
+                            float newDelta = currentState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
+                            if (newDelta > 0.0f) {
+                                int newRequired = Math.max(1, (int) Math.ceil(1.0f / newDelta));
+                                requiredTicksHolder.set(newRequired);
+                                ticksElapsed.set(0);
+                                postThresholdAttempts.set(0);
+                                LOGGER.info("Mining re-poll: recalculated required ticks to {} (delta {}) for {}",
+                                        newRequired, String.format("%.4f", newDelta), targetBlockPos);
+                            }
+                        }
+                    }
+
                     // Re-face the target block every mining tick to maintain facing
                     LookController.faceBlock(bot, targetBlockPos);
 

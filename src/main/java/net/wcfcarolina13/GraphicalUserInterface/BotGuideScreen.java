@@ -1206,6 +1206,23 @@ public final class BotGuideScreen extends Screen {
                         "navigation mode fast travel tier map compass eye ender artifact speed"
                 ),
                 new GuideTopic(
+                        "settings_preserve_expensive_gear",
+                        "Settings",
+                        "Preserve Expensive Gear",
+                        "Keep your bots from wearing out your best tools.",
+                        List.of(
+                                "When enabled, your bots refuse to use enchanted items and gear made of gold, diamond, netherite, or turtle shell once durability drops below 11%.",
+                                "In combat, the threshold drops to 3% \u2014 the bot will push a risky item harder when lives are on the line.",
+                                "When a tool is locked out, the bot tries to swap to a cheaper alternative from its inventory, walks to a registered chest for a replacement, or crafts a new one at a nearby crafting table.",
+                                "If nothing is available, the bot pauses and speaks up \u2014 check its inventory and give it a refill.",
+                                "Note on Mending: items with the Mending enchantment are also preserved. If you want a Mending item used continuously for XP self-repair, disable this toggle.",
+                                "Toggle this under the bot's Admin tab \u2192 Behavior section. The setting is per player and applies to every bot you own. Default: OFF."
+                        ),
+                        "",
+                        "",
+                        "durability tools gear preserve diamond netherite gold enchanted expensive shield armor mending"
+                ),
+                new GuideTopic(
                         "items_spell_ingredients",
                         "Items",
                         "Spell Ingredients",

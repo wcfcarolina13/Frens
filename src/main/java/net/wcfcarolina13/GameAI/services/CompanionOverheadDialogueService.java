@@ -37,6 +37,12 @@ public final class CompanionOverheadDialogueService {
     private static final ConcurrentHashMap<UUID, Long> LAST_ANY_OVERHEAD_MS = new ConcurrentHashMap<>();
     private static final long OVERHEAD_GLOBAL_SUPPRESSION_MS = 4_000L;
 
+    private static final ConcurrentHashMap<UUID, Long> LAST_GEAR_PRESERVE_SWAP_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_GEAR_COMBAT_EDGE_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_GEAR_NO_REPLACEMENT_MS = new ConcurrentHashMap<>();
+
+    private static final long GEAR_DIALOGUE_COOLDOWN_MS = 30_000L; // 30s per-bot, per-category
+
     private static final String[] LEAF_STUCK_LINES = new String[] {
             "These branches are thick!",
             "Hold on — stuck in some branches.",
@@ -53,6 +59,39 @@ public final class CompanionOverheadDialogueService {
 
     private static final String[] BERRY_EDIBLE_LINES = new String[] {
             "These are edible...I think."
+    };
+
+    private static final String[] GEAR_PRESERVE_SWAP_LINES = new String[] {
+            "Been using this one a while. Gonna hang it up.",
+            "Not risking the good stuff on this.",
+            "This blade's getting thin — grabbing something else.",
+            "Yeah no, too nice to wreck out here.",
+            "Saving the shiny for when it matters.",
+            "I'll spare this one. Held up well.",
+            "Don't want to snap it doing grunt work.",
+            "Shelving the fancy kit. Back to basics.",
+            "This one's earned a break.",
+            "Swapping — rather not push my luck."
+    };
+
+    private static final String[] GEAR_COMBAT_EDGE_LINES = new String[] {
+            "One more hit and she's gone!",
+            "Careful — gear's on the edge!",
+            "This thing's about to snap!",
+            "Running on fumes over here!",
+            "Almost spent — pull back!",
+            "Hang on, I'm out of good stuff!"
+    };
+
+    private static final String[] GEAR_NO_REPLACEMENT_LINES = new String[] {
+            "Got nothing else. Give me a minute.",
+            "Can't find a spare anywhere.",
+            "Need to restock — this was my last one.",
+            "I'm out. Someone grab me a new one?",
+            "Tried the chests, no luck.",
+            "No replacements around. I'm stuck.",
+            "Looked everywhere. Nothing.",
+            "Hands are empty. I'll wait."
     };
 
     private static final java.util.Random RNG = new java.util.Random();
@@ -228,5 +267,38 @@ public final class CompanionOverheadDialogueService {
         } catch (Throwable ignored) {
             // Best-effort only.
         }
+    }
+
+    public static boolean tryShowGearPreserveSwap(ServerPlayerEntity bot) {
+        tryShowGeneric(
+                bot,
+                LAST_GEAR_PRESERVE_SWAP_MS,
+                GEAR_DIALOGUE_COOLDOWN_MS,
+                GEAR_PRESERVE_SWAP_LINES,
+                "gear-preserve-swap",
+                null);
+        return true;
+    }
+
+    public static boolean tryShowGearCombatEdge(ServerPlayerEntity bot) {
+        tryShowGeneric(
+                bot,
+                LAST_GEAR_COMBAT_EDGE_MS,
+                GEAR_DIALOGUE_COOLDOWN_MS,
+                GEAR_COMBAT_EDGE_LINES,
+                "gear-combat-edge",
+                null);
+        return true;
+    }
+
+    public static boolean tryShowGearNoReplacement(ServerPlayerEntity bot) {
+        tryShowGeneric(
+                bot,
+                LAST_GEAR_NO_REPLACEMENT_MS,
+                GEAR_DIALOGUE_COOLDOWN_MS,
+                GEAR_NO_REPLACEMENT_LINES,
+                "gear-no-replacement",
+                null);
+        return true;
     }
 }

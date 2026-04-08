@@ -12,7 +12,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
+import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
+import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -109,11 +113,24 @@ public final class CombatInventoryManager {
         PlayerInventory inventory = bot.getInventory();
         ItemStack offhand = bot.getOffHandStack();
 
+        // Check if current offhand is a preserved-below-threshold shield and request fallback
+        if (!offhand.isEmpty()
+                && isShieldStack(offhand)
+                && DurabilityPolicyService.shouldAvoid(bot, offhand)) {
+            if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                CompanionOverheadDialogueService.tryShowGearCombatEdge(bot);
+            }
+            DurabilityFallbackService.requestRefresh(
+                    bot, DurabilityFallbackService.GearCategory.SHIELD);
+            return;
+        }
+
         if (isShieldStack(offhand)) {
             return; // Already holding a shield
         }
 
-        OptionalInt shieldSlot = findItemSlot(inventory, CombatInventoryManager::isShieldStack);
+        OptionalInt shieldSlot = findItemSlot(inventory, stack ->
+                isShieldStack(stack) && !DurabilityPolicyService.shouldAvoid(bot, stack));
         if (shieldSlot.isEmpty()) {
             return;
         }
@@ -126,8 +143,20 @@ public final class CombatInventoryManager {
 
     private static void ensureBestWeaponAccessible(ServerPlayerEntity bot) {
         PlayerInventory inventory = bot.getInventory();
-        OptionalInt bestWeaponSlot = findBestWeaponSlot(inventory);
+        ItemStack priorHeld = bot.getMainHandStack();
+        boolean priorWasFiltered = !priorHeld.isEmpty()
+                && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
+
+        OptionalInt bestWeaponSlot = findBestWeaponSlot(bot, inventory);
         if (bestWeaponSlot.isEmpty()) {
+            // If the currently-held weapon is preserved-below-threshold, request fallback for SWORD category.
+            if (!priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld)) {
+                if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                    CompanionOverheadDialogueService.tryShowGearCombatEdge(bot);
+                }
+                DurabilityFallbackService.requestRefresh(
+                        bot, DurabilityFallbackService.GearCategory.SWORD);
+            }
             return;
         }
 
@@ -140,6 +169,10 @@ public final class CombatInventoryManager {
 
         inventory.setSelectedSlot(hotbarTarget);
         inventory.markDirty();
+
+        if (priorWasFiltered) {
+            CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+        }
     }
 
     private static void ensureFoodAccessible(ServerPlayerEntity bot) {
@@ -166,12 +199,14 @@ public final class CombatInventoryManager {
         });
     }
 
-    private static OptionalInt findBestWeaponSlot(PlayerInventory inventory) {
+    private static OptionalInt findBestWeaponSlot(ServerPlayerEntity bot, PlayerInventory inventory) {
+        // First pass: find the best compliant weapon (swords, axes, tridents, etc.)
         int bestIndex = -1;
         double bestScore = Double.NEGATIVE_INFINITY;
 
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
             double score = evaluateWeapon(stack);
             if (score > bestScore) {
                 bestScore = score;
@@ -179,7 +214,44 @@ public final class CombatInventoryManager {
             }
         }
 
-        return bestIndex >= 0 ? OptionalInt.of(bestIndex) : OptionalInt.empty();
+        if (bestIndex >= 0) {
+            return OptionalInt.of(bestIndex);
+        }
+
+        // Second pass: no compliant "real" weapon found. This happens when the only
+        // sword/axe is filtered by the durability preservation policy. Fall back to
+        // any compliant mining tool (pickaxe/shovel/hoe) that can still deal melee
+        // damage. Axes are already scored by evaluateWeapon, so only need to cover
+        // item types it doesn't recognize.
+        int fallbackIndex = -1;
+        double fallbackScore = Double.NEGATIVE_INFINITY;
+
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+
+            double score = evaluateWeapon(stack);
+            if (score == Double.NEGATIVE_INFINITY) {
+                // evaluateWeapon doesn't recognize this item — check if it's a
+                // mining tool we can use as a fallback melee option.
+                String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+                if (key.endsWith("_pickaxe")) {
+                    score = 55 + materialWeight(key); // iron pickaxe ~58, diamond ~59
+                } else if (key.endsWith("_shovel") || key.endsWith("_hoe")) {
+                    score = 40 + materialWeight(key);
+                } else {
+                    continue;
+                }
+            }
+
+            if (score > fallbackScore) {
+                fallbackScore = score;
+                fallbackIndex = i;
+            }
+        }
+
+        return fallbackIndex >= 0 ? OptionalInt.of(fallbackIndex) : OptionalInt.empty();
     }
 
     private static double evaluateWeapon(ItemStack stack) {

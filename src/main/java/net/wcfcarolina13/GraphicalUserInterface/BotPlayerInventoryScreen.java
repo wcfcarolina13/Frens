@@ -160,6 +160,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     // Guards guide-flag init so resize re-inits don't reset guideRemoteOpen.
     private boolean guideStateInitialized = false;
+    private boolean preserveRequestSent = false;
 
     // Browse state for scrolling past blocked bots in the switcher.
     private int switchBrowseOffset = 0;
@@ -505,6 +506,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         ADMIN_PREVIEW_NON_ADMIN,
         AUTONOMOUS_RESCUES,
         OWNED_SUNSET_SS,
+        LOCK_BLOCKS_MODE,
+        PRESERVE_EXPENSIVE_GEAR,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
@@ -681,6 +684,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
                 new TopicEntry("Allow Autonomous Rescues", TopicCategory.ADMIN, TopicAction.AUTONOMOUS_RESCUES, true, 0, null),
                 new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
+                new TopicEntry("Lock Blocks Mode", TopicCategory.ADMIN, TopicAction.LOCK_BLOCKS_MODE, true, 0, null),
+                new TopicEntry("Preserve Expensive Gear", TopicCategory.ADMIN, TopicAction.PRESERVE_EXPENSIVE_GEAR, true, 0, null),
 
                 TopicEntry.adminHeader("🎓 Learning"),
                 TopicEntry.admin("Learning Status", "learning_status"),
@@ -742,6 +747,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         if (isAdminUser()) {
             requestAdminPermissionsSnapshot(this.botAlias);
+        }
+
+        // Fetch the current Preserve Expensive Gear preference from the server.
+        // Guarded so resize re-inits don't re-send on the same screen instance.
+        if (!preserveRequestSent) {
+            preserveRequestSent = true;
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                    net.wcfcarolina13.network.RequestPlayerPreservePayload.INSTANCE);
         }
 
         // Guide requested opening directly to Admin tab (via ] hotkey remote open).
@@ -3838,6 +3851,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Current: " + ownedSunsetSelfSufficientStatusLabel()
                 );
             }
+            if (entry.action == TopicAction.PRESERVE_EXPENSIVE_GEAR) {
+                return java.util.List.of(
+                        "Preserve Expensive Gear",
+                        "Bots refuse to use enchanted gear or items made of gold,",
+                        "diamond, netherite, or turtle shell when durability drops",
+                        "below 11% — or 3% in combat. They swap to a cheaper",
+                        "alternative, check a chest, or craft a new one.",
+                        "Applies to every bot you own. See the in-game guide for details.",
+                        "Current: " + (isPreserveExpensiveGearActive() ? "ON" : "OFF")
+                );
+            }
+            if (entry.action == TopicAction.LOCK_BLOCKS_MODE) {
+                return java.util.List.of(
+                        "Lock Blocks Mode",
+                        "Toggle on, then click doors, gates, or trapdoors to mark",
+                        "them as locked — bots will treat them as solid walls and",
+                        "route around them. Toggle off to stop marking.",
+                        "Current: " + (isLockBlocksModeActive() ? "ON" : "OFF")
+                );
+            }
             if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
                 return java.util.List.of(
                         "Allow Skin Changes for Everyone",
@@ -4737,6 +4770,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case ADMIN_PREVIEW_NON_ADMIN -> toggleAdminPreviewAsNonAdmin();
             case AUTONOMOUS_RESCUES -> toggleAutonomousRescues();
             case OWNED_SUNSET_SS -> toggleOwnedSunsetSelfSufficientBulk();
+            case LOCK_BLOCKS_MODE -> toggleLockBlocksMode();
+            case PRESERVE_EXPENSIVE_GEAR -> togglePreserveExpensiveGear();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
@@ -5211,6 +5246,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
             case AUTONOMOUS_RESCUES -> isAutonomousRescuesActive();
             case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
+            case LOCK_BLOCKS_MODE -> isLockBlocksModeActive();
+            case PRESERVE_EXPENSIVE_GEAR -> isPreserveExpensiveGearActive();
             case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
@@ -5476,6 +5513,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Map.entry("gameplay_tips", true),
             Map.entry("idle_hobbies_anywhere", true),
             Map.entry("baritone_pathfinder", true),
+            Map.entry("lock_blocks_mode", true),
+            Map.entry("preserve_expensive_gear", true),
             Map.entry("skin_policy_everyone", false),
             Map.entry("skin_policy_custom", false),
             Map.entry("wizard_tome", false),
@@ -5523,6 +5562,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case BARITONE_PATHFINDER -> "baritone_pathfinder";
                 case AUTONOMOUS_RESCUES -> "rescue_manage";
                 case OWNED_SUNSET_SS -> "recruit_manage";
+                case LOCK_BLOCKS_MODE -> "lock_blocks_mode";
+                case PRESERVE_EXPENSIVE_GEAR -> "preserve_expensive_gear";
                 case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
                 case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
                 default -> null;
@@ -6092,6 +6133,29 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Frens.CONFIG.setBaritonePathfinderEnabled(newValue);
         Frens.CONFIG.save();
         net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = newValue;
+    }
+
+    private boolean isLockBlocksModeActive() {
+        return net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.isLockModeActive();
+    }
+
+    private void toggleLockBlocksMode() {
+        boolean newState = !net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.isLockModeActive();
+        net.wcfcarolina13.GraphicalUserInterface.BotControlScreen.setLockModeActive(newState);
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                new net.wcfcarolina13.network.LockModeTogglePayload(newState));
+    }
+
+    private boolean isPreserveExpensiveGearActive() {
+        Boolean v = net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.SERVER_VALUE;
+        return v != null && v;
+    }
+
+    private void togglePreserveExpensiveGear() {
+        boolean next = !isPreserveExpensiveGearActive();
+        net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.setServerValue(next);
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                new net.wcfcarolina13.network.UpdatePlayerPreservePayload(next));
     }
 
     private boolean isUnleashTetheredActive() {
