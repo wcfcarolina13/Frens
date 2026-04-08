@@ -2628,34 +2628,45 @@ public final class RideSyncService {
     }
 
     private static boolean prepareVehicle(ServerPlayerEntity bot, ServerPlayerEntity commander, Entity target) {
-        if (bot == null || commander == null) {
+        String reason = prepareVehicleOrReason(bot, commander, target);
+        if (reason != null) {
+            logPrepareVehicleReject(bot, target, reason);
             return false;
+        }
+        return true;
+    }
+
+    /**
+     * Returns null if the vehicle is ready for mounting, otherwise a short
+     * string explaining why it was rejected. Used to get specific diagnostics
+     * instead of an opaque "prepare-vehicle-failed".
+     */
+    private static String prepareVehicleOrReason(ServerPlayerEntity bot, ServerPlayerEntity commander, Entity target) {
+        if (bot == null || commander == null) {
+            return "null-bot-or-commander";
         }
         if (target == null) {
-            return false;
+            return "null-target";
         }
-        if (bot != null && shouldWaitForLeadPickup(bot, target)) {
-            return false;
+        if (shouldWaitForLeadPickup(bot, target)) {
+            return "waiting-for-lead-pickup";
         }
         if (target instanceof MobEntity mob && mob.isLeashed()) {
-            // Check if the bot is allowed to take fence-tethered mounts.
             BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
             boolean allowUnleash = state != null && state.unleashTetheredMounts;
             Entity holder = mob.getLeashHolder();
 
-            // If the animal is tied to a fence (LeashKnotEntity), respect the toggle.
             if (holder instanceof LeashKnotEntity knot) {
                 if (!allowUnleash) {
-                    return false;
+                    return "leashed-to-fence unleash-toggle-off";
                 }
-                // Allowed to unleash: interact with the knot to take the lead.
                 BotActions.interactEntity(bot, knot, Hand.MAIN_HAND);
                 startLeadPickup(bot, target);
-                return false;
+                return "leashed-to-fence started-pickup";
             }
-            // If someone else (not a fence, not this bot) is holding the leash, don't take it.
             if (holder != null && holder != bot) {
-                return false;
+                String holderName = holder instanceof LivingEntity liv ? liv.getName().getString() : holder.getType().toString();
+                return "leashed-held-by=" + holderName;
             }
         }
         if (target instanceof MobEntity mob && !mob.isPersistent()) {
@@ -2669,13 +2680,13 @@ public final class RideSyncService {
         }
         if (target instanceof MobEntity mob && !mob.hasSaddleEquipped()) {
             if (!ToolProvisionService.ensureSaddle(bot, bot.getCommandSource(), commander, 1)) {
-                return false;
+                return "no-saddle provisioning-failed";
             }
             if (!BotActions.ensureHotbarItem(bot, Items.SADDLE)) {
-                return false;
+                return "no-saddle hotbar-failed";
             }
             if (!BotActions.interactEntity(bot, target, Hand.MAIN_HAND)) {
-                return false;
+                return "no-saddle interact-failed";
             }
         }
         if (target.getType() == EntityType.PIG) {
@@ -2686,7 +2697,30 @@ public final class RideSyncService {
             ToolProvisionService.ensureWarpedFungusOnStick(bot, bot.getCommandSource(), commander);
             BotActions.ensureHotbarItem(bot, Items.WARPED_FUNGUS_ON_A_STICK);
         }
-        return true;
+        return null;
+    }
+
+    private static final Map<UUID, Long> LAST_PREPARE_REJECT_LOG_TICK = new HashMap<>();
+
+    private static void logPrepareVehicleReject(ServerPlayerEntity bot, Entity target, String reason) {
+        if (bot == null || target == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        long now = server.getTicks();
+        long last = LAST_PREPARE_REJECT_LOG_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (now - last < PREFERRED_REJECT_LOG_INTERVAL_TICKS) {
+            return;
+        }
+        LAST_PREPARE_REJECT_LOG_TICK.put(bot.getUuid(), now);
+        LOGGER.info("prepareVehicle reject: bot={} target={} type={} reason={}",
+                bot.getName().getString(),
+                target.getUuid(),
+                target.getType().toString(),
+                reason);
     }
 
     private static void startLeadPickup(ServerPlayerEntity bot, Entity target) {

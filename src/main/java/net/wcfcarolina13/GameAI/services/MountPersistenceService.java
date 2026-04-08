@@ -386,15 +386,26 @@ public final class MountPersistenceService {
         if (bot == null || mount == null || state == null) {
             return;
         }
-        RideSyncService.secureMountAfterRejoin(bot, mount);
-        // Always attempt remount when a recorded mount exists. The earlier
-        // behavior gated on state.wasMounted() == true, but legacy state
-        // files written by the old restore path (which always flipped
-        // wasMounted to false after locating the mount) would permanently
-        // skip the remount even after a real ride session. The guards
-        // inside tryRemountAfterRejoin (bot already has a vehicle, mount has
-        // passengers, bot/mount in different worlds) prevent bad outcomes.
+        // NOTE: Do NOT call RideSyncService.secureMountAfterRejoin(bot, mount)
+        // here. Despite its name, that method is actually the on-dismount
+        // handler (handleDismountCare -> secureMountIfPossible), which leashes
+        // the mount to a fence when leashMountsOnDismount is true (default).
+        // Running it during rejoin would anchor the horse to a fence right
+        // before we remount, and then prepareVehicle would reject the horse
+        // next time RideSync evaluates it because a bot can't mount a
+        // fence-leashed animal unless the unleashTetheredMounts toggle is set.
+        //
+        // On rejoin we ONLY want the remount — any tether cleanup happens on
+        // the next real dismount.
         boolean remounted = tryRemountAfterRejoin(bot, mount);
+        // If the remount succeeded but the horse is still tethered to a fence
+        // from a previous disconnect session, drop that tether so the bot can
+        // ride normally. Leash bookkeeping will resume on the next dismount.
+        if (remounted && mount instanceof MobEntity mob && mob.isLeashed()
+                && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
+            LOGGER.info("Mount rejoin: dropping fence tether on remounted mount {}", mount.getUuid());
+            mob.detachLeash();
+        }
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
                 state.mountType(), state.saddled(), state.health(), remounted);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
