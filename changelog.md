@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-08 — Bounded Woodcut Stillness Fixes
+
+- **Root cause (1.21.10 log 12:23–12:24):** After the farm phantom-precipice fix the bot finally selected a tree and entered `fellTree` — and **immediately crashed** with `UnsupportedOperationException` in [WoodcutSkill.collectRemainingEnvelopeLogs:1885](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L1885). The crash propagated up to `execute()`'s outer `finally`, which ran `runWoodcutCleanup` for **42 seconds** in the bounded region, producing the "bot standing still" symptom before the exception finally surfaced as "Inline woodcut failed: null".
+
+- **Fix G — UOE in `collectRemainingEnvelopeLogs`:** Latent bug, pre-existing. The bounded-mode branch filtered `remaining` via `.stream().filter(this::isWithinRequestedBounds).toList()` — `Stream.toList()` returns an **unmodifiable** list (since Java 16). The very next line called `remaining.sort(...)`, which throws `UnsupportedOperationException` on an unmodifiable list. This never fired before because the old `isTreeWorkEnvelopeWithinBounds` rejected every bounded-mode target before reaching `fellTree`. Fix A (relaxed envelope check) finally let a tree through, which instantly tripped this latent bug. Replaced `.toList()` with `.collect(Collectors.toCollection(ArrayList::new))` and added the `java.util.stream.Collectors` import.
+
+- **Fix D-broader — unconditional bounded-mode cleanup skip:** Previously Fix D only skipped the outer-finally `runWoodcutCleanup` when `felled > 0`. But on the exception path `felled == 0`, so the 42s cleanup still ran. Broadened the condition: in bounded mode we **always** skip the full-region cleanup in the outer `finally`, because either (a) per-tree maintenance already cleaned each felled tree, or (b) fellTree crashed/exhausted and the bounded-region scan will find zero actionable targets (the trees are still intact) no matter how long it runs. The bounded caller (FarmSkill) owns cleanup responsibility; WoodcutSkill should not spend 35+ seconds on a region it already knows is full of intact trees.
+
+- **Other `.toList()` usages audited:** Five other `.stream()...toList()` sites in WoodcutSkill were reviewed. All are either return statements, read-only iteration, or one-shot `.get(0)` / `.isEmpty()` reads. None feed into mutation operations. No other fixes needed.
+
+- **Expected behavior:** Farm tree clearing in a forest should actually fell trees instead of standing still for 42s then falling back to the brute clear. If fellTree crashes for any other reason, the bot should immediately fall back to the local brute clear instead of burning cleanup budget first.
+
+- **Files:** `src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java`. `./gradlew build -x test` ✅.
+
 ## 2026-04-08 — Farm Phantom Precipice Fix
 
 - **Root cause:** `FarmSkill.assessFarmSite` used `Heightmap.Type.WORLD_SURFACE` to measure per-column surface heights. WORLD_SURFACE includes every non-air block, so in a forest it returns canopy tops (y=78–85), not walkable ground (y=65–68). The median became a mid-canopy Y, then `hasSimplePrecipice` sampled a 7×7 area at that inflated Y, found 4+ air blocks below each sample (the real ground was far below), and rejected with `precipice-near-center` — even though the actual terrain was fine and the user just wanted the bot to landscape. Same bug in `estimateFarmAreaMedianSurfaceY`.

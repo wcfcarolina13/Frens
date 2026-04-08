@@ -71,6 +71,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 /**
  * Fell natural trees while avoiding player-built structures. Uses an axe for logs and
@@ -1080,11 +1081,17 @@ public final class WoodcutSkill implements Skill {
                 double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
 
                 if (!abortRequested) {
-                    if (requestedBounds != null && felled > 0) {
-                        // In bounded mode (e.g. farm clearing trees) per-tree maintenance
-                        // already ran runLocalTreeCleanup for each felled tree. The full
-                        // 35s region cleanup burns time without finding new targets.
-                        LOGGER.info("Woodcut bounded: skipping full-region cleanup pass (felled={}); per-tree maintenance already ran.", felled);
+                    if (requestedBounds != null) {
+                        // In bounded mode (e.g. farm clearing trees) this finally
+                        // block runs in two cases:
+                        //   (a) all trees felled cleanly -> per-tree maintenance
+                        //       (runLocalTreeCleanup) already handled them.
+                        //   (b) fellTree threw / bounded work area exhausted ->
+                        //       scanning the bounded region for floaters will
+                        //       produce zero actionable targets (the trees are
+                        //       still intact) and waste ~35 seconds.
+                        // Either way the full-region cleanup adds nothing here.
+                        LOGGER.info("Woodcut bounded: skipping full-region cleanup pass (felled={}); bounded caller owns cleanup responsibility.", felled);
                     } else {
                         // Cleanup pass first (break floating logs/scaffolds).
                         runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
@@ -1878,9 +1885,12 @@ public final class WoodcutSkill implements Skill {
                 ? WoodcutKnowledgeService.mergeRememberedLogs(bot, world, target, remaining)
                 : remaining;
         if (activeRequestedBounds != null) {
+            // NOTE: Stream.toList() returns an unmodifiable list. The
+            // subsequent sort() call below would throw UOE. Wrap in a
+            // mutable ArrayList.
             remaining = remaining.stream()
                     .filter(this::isWithinRequestedBounds)
-                    .toList();
+                    .collect(Collectors.toCollection(ArrayList::new));
         }
         remaining.sort(Comparator
                 .comparingInt(BlockPos::getY)
