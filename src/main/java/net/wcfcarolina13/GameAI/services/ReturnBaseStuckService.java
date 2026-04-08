@@ -1954,11 +1954,37 @@ public final class ReturnBaseStuckService {
 
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState at = world.getBlockState(pos);
-        BlockState above = world.getBlockState(pos.up());
-        BlockState below = world.getBlockState(pos.down());
-        return (at.isAir() || at.isReplaceable()) 
-                && (above.isAir() || above.isReplaceable())
-                && below.isSolidBlock(world, pos.down());
+        BlockPos abovePos = pos.up();
+        BlockState above = world.getBlockState(abovePos);
+        BlockPos belowPos = pos.down();
+        BlockState below = world.getBlockState(belowPos);
+        // Feet and head cells: the authoritative "can the player occupy this cell" check is
+        // whether the collision shape is empty. This is what vanilla pathfinding uses. It
+        // correctly handles:
+        //   - air, tall grass, water, pressure plates, buttons, rails, carpets, flowers,
+        //     saplings, tripwire → empty collision → pass
+        //   - closed doors, closed fence gates, walls, full cubes → non-empty → reject
+        //   - OPEN doors, OPEN fence gates → empty collision → pass (critical for return-to-base)
+        //   - stairs, slabs, fences (blocks to the SIDE of standing cell) → non-empty → reject
+        //
+        // Do NOT use blocksMovement() here — that is a static, state-agnostic block-settings
+        // flag set at registration time and does not reflect open/closed state. An open fence
+        // gate reports blocksMovement()=true but getCollisionShape()=empty. The collision
+        // shape is the authoritative signal for traversability.
+        //
+        // See logs 16:27:45 (pressure plate bug) and 18:46:31 (open fence gate rejection).
+        if (!at.getCollisionShape(world, pos).isEmpty()) return false;
+        if (!above.getCollisionShape(world, abovePos).isEmpty()) return false;
+        // Footing: any block with a non-empty collision shape supports standing.
+        // The previous check used isSolidBlock(), which returns FALSE for stairs,
+        // slabs, fences, fence gates and other partial-cube blocks — even though
+        // the player can stand on top of them. This caused the bot to misidentify
+        // the top of any staircase descent as "no footing", report all 4 cardinal
+        // directions as BLOCKED(Air), and trigger the scaffold-escape that places
+        // dirt blocks all over a player's base entrance. (See logs 09:45:32 — bot
+        // stuck at the top of a stair descent next to a fence gate, scaffold-escape
+        // placed dirt at 267,66,1284.)
+        return !below.getCollisionShape(world, belowPos).isEmpty();
     }
     
     private static int countPillarBlocks(ServerPlayerEntity bot) {
