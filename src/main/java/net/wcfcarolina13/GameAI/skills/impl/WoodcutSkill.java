@@ -119,6 +119,12 @@ public final class WoodcutSkill implements Skill {
     private static final int WOODCUT_OFFLOAD_LOCAL_CHEST_YSPAN = 8;
     private static final double WOODCUT_NEARBY_REMEMBERED_PROBE_DIST_SQ = 56.0D * 56.0D;
     private RequestedWorkBounds activeRequestedBounds;
+    // Per-tree work envelope overlay. While a tree is being felled, positions inside
+    // this box are treated as within the requested bounds so the bot may prune
+    // canopy/leaves that overhang the caller's bounds (e.g. farm AABB) for the
+    // currently-targeted tree. Cleared when the tree's iteration ends.
+    private BlockPos activeTreeWorkEnvelopeMin;
+    private BlockPos activeTreeWorkEnvelopeMax;
     private static final int LOCAL_TREE_CLEANUP_RADIUS = 6;
     private static final int LOCAL_TREE_CLEANUP_VERTICAL_RANGE = 8;
     private static final long LOCAL_TREE_CLEANUP_DURATION_MS = 6_000L;
@@ -557,7 +563,30 @@ public final class WoodcutSkill implements Skill {
     }
 
     private boolean isWithinRequestedBounds(BlockPos pos) {
-        return activeRequestedBounds == null || activeRequestedBounds.contains(pos);
+        if (activeRequestedBounds == null) {
+            return true;
+        }
+        if (pos == null) {
+            return false;
+        }
+        if (activeRequestedBounds.contains(pos)) {
+            return true;
+        }
+        // Per-tree overlay: let the bot prune canopy/leaves of the tree it's
+        // actively felling even if they overhang the caller's bounds.
+        return isWithinActiveTreeWorkEnvelope(pos);
+    }
+
+    private boolean isWithinActiveTreeWorkEnvelope(BlockPos pos) {
+        if (activeTreeWorkEnvelopeMin == null || activeTreeWorkEnvelopeMax == null || pos == null) {
+            return false;
+        }
+        return pos.getX() >= activeTreeWorkEnvelopeMin.getX()
+                && pos.getX() <= activeTreeWorkEnvelopeMax.getX()
+                && pos.getY() >= activeTreeWorkEnvelopeMin.getY()
+                && pos.getY() <= activeTreeWorkEnvelopeMax.getY()
+                && pos.getZ() >= activeTreeWorkEnvelopeMin.getZ()
+                && pos.getZ() <= activeTreeWorkEnvelopeMax.getZ();
     }
 
     private boolean isWithinRequestedBoundsXZ(BlockPos pos) {
@@ -568,11 +597,12 @@ public final class WoodcutSkill implements Skill {
         if (activeRequestedBounds == null || target == null) {
             return true;
         }
-        BlockPos expandedMin = target.envelopeMin().add(-WOODCUT_LOG_SCAN_EXPANSION, -1, -WOODCUT_LOG_SCAN_EXPANSION);
-        BlockPos expandedMax = target.envelopeMax().add(WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION);
+        // Only the trunk (base → top) must be inside the caller's bounds. The
+        // leaf envelope may overhang — once selected, mining authority for the
+        // canopy is granted via the per-tree work envelope overlay (see
+        // isWithinRequestedBounds / activeTreeWorkEnvelope*).
         return activeRequestedBounds.contains(target.base())
-                && activeRequestedBounds.contains(target.top())
-                && activeRequestedBounds.containsBox(expandedMin, expandedMax);
+                && activeRequestedBounds.contains(target.top());
     }
 
     private RequestedWorkBounds.CleanupBounds clampCleanupBounds(int minX,
@@ -876,6 +906,14 @@ public final class WoodcutSkill implements Skill {
                     reachSession.hazardProfile = WoodcutHazardScanner.scan(hazardWorld, target.base());
                 }
 
+                // Activate per-tree work envelope so the felling phase may prune
+                // canopy/leaves overhanging the caller's bounds for this tree.
+                activeTreeWorkEnvelopeMin = target.envelopeMin().add(
+                        -WOODCUT_LOG_SCAN_EXPANSION, -1, -WOODCUT_LOG_SCAN_EXPANSION);
+                activeTreeWorkEnvelopeMax = target.envelopeMax().add(
+                        WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION);
+                try {
+
                 // Track footprint to size post-run drop sweep.
                 BlockPos posNow = bot.getBlockPos();
                 if (requestedBounds == null) {
@@ -965,6 +1003,10 @@ public final class WoodcutSkill implements Skill {
                             false);
                     sinceCleanup = 0;
                 }
+                } finally {
+                    activeTreeWorkEnvelopeMin = null;
+                    activeTreeWorkEnvelopeMax = null;
+                }
             }
 
             // Second-pass cleanup: attempt unreachable logs from partial harvests from a fresh position
@@ -1038,10 +1080,17 @@ public final class WoodcutSkill implements Skill {
                 double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
 
                 if (!abortRequested) {
-                    // Cleanup pass first (break floating logs/scaffolds).
-                    runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
-                            (int) Math.ceil(horizRadius), (int) Math.ceil(vertRange),
-                            false);
+                    if (requestedBounds != null && felled > 0) {
+                        // In bounded mode (e.g. farm clearing trees) per-tree maintenance
+                        // already ran runLocalTreeCleanup for each felled tree. The full
+                        // 35s region cleanup burns time without finding new targets.
+                        LOGGER.info("Woodcut bounded: skipping full-region cleanup pass (felled={}); per-tree maintenance already ran.", felled);
+                    } else {
+                        // Cleanup pass first (break floating logs/scaffolds).
+                        runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
+                                (int) Math.ceil(horizRadius), (int) Math.ceil(vertRange),
+                                false);
+                    }
                 } else {
                     LOGGER.info("Woodcut: abort requested; skipping cleanup pass and performing final sweep.");
                 }
@@ -1065,6 +1114,8 @@ public final class WoodcutSkill implements Skill {
         return finalResult;
         } finally {
             activeRequestedBounds = null;
+            activeTreeWorkEnvelopeMin = null;
+            activeTreeWorkEnvelopeMax = null;
         }
     }
 
