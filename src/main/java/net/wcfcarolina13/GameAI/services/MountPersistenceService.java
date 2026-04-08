@@ -383,47 +383,82 @@ public final class MountPersistenceService {
                              boolean wasMounted) {}
 
     private static void maybeSecureOnRejoin(ServerPlayerEntity bot, Entity mount, String alias, String saveWorldKey, MountState state) {
-        if (bot == null || mount == null || state == null || !state.wasMounted()) {
+        if (bot == null || mount == null || state == null) {
             return;
         }
         RideSyncService.secureMountAfterRejoin(bot, mount);
-        // Actually remount the bot on its saved vehicle. Without this, the
-        // restore path only handled leash bookkeeping and relied on RideSync's
-        // normal tick logic — which requires the commander to already be
-        // mounted on a matching-category vehicle (RideSyncService
-        // resolvePreferredMount). On a fresh world load the commander is
-        // briefly on foot while their own vehicle state is syncing, so the
-        // bot's saved horse was rejected and the bot never remounted.
+        // Always attempt remount when a recorded mount exists. The earlier
+        // behavior gated on state.wasMounted() == true, but legacy state
+        // files written by the old restore path (which always flipped
+        // wasMounted to false after locating the mount) would permanently
+        // skip the remount even after a real ride session. The guards
+        // inside tryRemountAfterRejoin (bot already has a vehicle, mount has
+        // passengers, bot/mount in different worlds) prevent bad outcomes.
         boolean remounted = tryRemountAfterRejoin(bot, mount);
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
-                state.mountType(), state.saddled(), state.health(), false);
+                state.mountType(), state.saddled(), state.health(), remounted);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
         flush();
-        LOGGER.info("Mount rejoin restore: bot={} mount={} type={} remounted={}",
-                alias, mount.getUuid(), state.mountType(), remounted);
+        LOGGER.info("Mount rejoin restore: bot={} mount={} type={} wasMounted={} remounted={}",
+                alias, mount.getUuid(), state.mountType(), state.wasMounted(), remounted);
     }
 
     private static boolean tryRemountAfterRejoin(ServerPlayerEntity bot, Entity mount) {
-        if (bot == null || mount == null || mount.isRemoved()) {
+        if (bot == null || mount == null) {
+            LOGGER.info("Mount rejoin skip: null bot or mount");
+            return false;
+        }
+        if (mount.isRemoved()) {
+            LOGGER.info("Mount rejoin skip: mount {} is removed", mount.getUuid());
             return false;
         }
         // Skip if the bot or mount is already part of another vehicle stack
         // (e.g. a player grabbed the horse before the restore tick landed).
         if (bot.hasVehicle()) {
-            return bot.getVehicle() == mount;
+            boolean sameMount = bot.getVehicle() == mount;
+            LOGGER.info("Mount rejoin skip: bot={} already has vehicle sameMount={}",
+                    bot.getName().getString(), sameMount);
+            return sameMount;
         }
         if (mount.hasPassengers()) {
+            // Log WHO is riding the mount — a phantom passenger from stale
+            // save state is a known failure mode and shows up here.
+            String passengerInfo = mount.getPassengerList().stream()
+                    .map(p -> p.getName().getString() + "(" + p.getUuid() + ")")
+                    .reduce((a, b) -> a + "," + b)
+                    .orElse("<none>");
+            LOGGER.info("Mount rejoin skip: mount {} already has passengers: {}",
+                    mount.getUuid(), passengerInfo);
             return false;
         }
         // Mount must be in the bot's current world. Restore across worlds is
         // intentionally skipped — bot would teleport unexpectedly.
         if (bot.getEntityWorld() != mount.getEntityWorld()) {
+            LOGGER.info("Mount rejoin skip: bot={} and mount={} in different worlds",
+                    bot.getName().getString(), mount.getUuid());
             return false;
         }
+        // Teleport the bot onto the mount before calling startRiding so a
+        // large bot-mount distance doesn't cause the mount to snap toward the
+        // bot (or vice versa) when attaching the passenger relationship.
+        double distSq = bot.squaredDistanceTo(mount);
+        if (distSq > 9.0D) {
+            LOGGER.info("Mount rejoin: bot={} mount={} distance={} — teleporting bot to mount for clean remount",
+                    bot.getName().getString(), mount.getUuid(),
+                    String.format(java.util.Locale.ROOT, "%.2f", Math.sqrt(distSq)));
+            bot.refreshPositionAndAngles(mount.getX(), mount.getY(), mount.getZ(),
+                    bot.getYaw(), bot.getPitch());
+        }
         try {
-            return bot.startRiding(mount, true, true);
+            boolean ok = bot.startRiding(mount, true, true);
+            if (!ok) {
+                LOGGER.warn("Mount rejoin: startRiding returned false bot={} mount={} (distSq={})",
+                        bot.getName().getString(), mount.getUuid(),
+                        String.format(java.util.Locale.ROOT, "%.2f", distSq));
+            }
+            return ok;
         } catch (Throwable t) {
-            LOGGER.warn("Mount rejoin startRiding failed: bot={} mount={}: {}",
+            LOGGER.warn("Mount rejoin startRiding threw bot={} mount={}: {}",
                     bot.getName().getString(), mount.getUuid(), t.toString());
             return false;
         }

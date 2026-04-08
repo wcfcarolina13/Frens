@@ -1548,38 +1548,79 @@ public final class RideSyncService {
         }
         String worldId = world.getRegistryKey().getValue().toString();
         if (!worldId.equals(state.worldId())) {
+            logPreferredReject(bot, state, "world-mismatch");
             return null;
         }
         double distSq = bot.squaredDistanceTo(state.x(), state.y(), state.z());
         if (distSq > SEARCH_RADIUS_SQ * 4.0D) {
+            logPreferredReject(bot, state, "state-too-far distSq=" + String.format(Locale.ROOT, "%.1f", distSq));
             return null;
         }
         Entity preferred = MountPersistenceService.findRecordedMount(world, state);
         if (preferred == null || preferred.isRemoved()) {
+            logPreferredReject(bot, state, "mount-not-found-in-world");
             return null;
         }
         if (preferred == commanderVehicle) {
+            logPreferredReject(bot, state, "mount-is-commander-vehicle");
             return null;
         }
         if (claimed.contains(preferred.getId())) {
+            logPreferredReject(bot, state, "mount-already-claimed-this-tick");
             return null;
         }
         if (preferred.hasPassengers()) {
+            String passengerInfo = preferred.getPassengerList().stream()
+                    .map(p -> p.getName().getString())
+                    .reduce((a, b) -> a + "," + b)
+                    .orElse("<none>");
+            logPreferredReject(bot, state, "mount-has-passengers=" + passengerInfo);
             return null;
         }
         if (categorize(preferred) != commanderCategory) {
+            logPreferredReject(bot, state,
+                    "category-mismatch preferred=" + categorize(preferred) + " commander=" + commanderCategory);
             return null;
         }
         if (!matchesVehicleRules(preferred)) {
+            logPreferredReject(bot, state, "vehicle-rules-rejected");
             return null;
         }
         if (!isWithinCombinedRadius(bot, commander, preferred)) {
+            logPreferredReject(bot, state, "outside-combined-radius");
             return null;
         }
         if (!prepareVehicle(bot, commander, preferred)) {
+            logPreferredReject(bot, state, "prepare-vehicle-failed");
             return null;
         }
         return preferred;
+    }
+
+    private static final Map<UUID, Long> LAST_PREFERRED_REJECT_LOG_TICK = new HashMap<>();
+    private static final long PREFERRED_REJECT_LOG_INTERVAL_TICKS = 60L; // ~3s
+
+    private static void logPreferredReject(ServerPlayerEntity bot,
+                                           MountPersistenceService.MountState state,
+                                           String reason) {
+        if (bot == null || state == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        long now = server.getTicks();
+        long last = LAST_PREFERRED_REJECT_LOG_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (now - last < PREFERRED_REJECT_LOG_INTERVAL_TICKS) {
+            return;
+        }
+        LAST_PREFERRED_REJECT_LOG_TICK.put(bot.getUuid(), now);
+        LOGGER.info("resolvePreferredMount reject: bot={} savedMount={} savedPos=({},{},{}) reason={}",
+                bot.getName().getString(),
+                state.mountUuid(),
+                (int) state.x(), (int) state.y(), (int) state.z(),
+                reason);
     }
 
     private static void maybeApproachMount(ServerPlayerEntity bot, Entity mount, ServerPlayerEntity commander) {
