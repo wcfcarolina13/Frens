@@ -78,6 +78,38 @@ public final class RideSyncService {
     private static final Map<UUID, UUID> LEASH_TARGET = new HashMap<>();
     private static final Map<UUID, Double> LAST_LEASH_DIST = new HashMap<>();
     private static final Map<UUID, Long> LAST_LEASH_ATTEMPT_TICK = new HashMap<>();
+
+    /**
+     * Returns the UUID of the mount a bot is currently holding on a lead, or
+     * null if none. Exposed for persistence (MountPersistenceService) so the
+     * "bot is holding a lead" state survives disconnect/reconnect.
+     */
+    public static UUID getLeashTarget(java.util.UUID botId) {
+        return botId == null ? null : LEASH_TARGET.get(botId);
+    }
+
+    /**
+     * Restore a previously-persisted lead-holding relationship. Does NOT
+     * perform any world mutations — the actual interactEntity to reattach the
+     * lead happens on the next {@link #maybeMaintainLeash} tick once the
+     * mount entity is loaded.
+     */
+    public static void setLeashTarget(java.util.UUID botId, java.util.UUID mountId) {
+        if (botId == null || mountId == null) {
+            return;
+        }
+        LEASH_TARGET.put(botId, mountId);
+    }
+
+    /** Clear any LEASH_TARGET for the given bot (used on bot removal / death). */
+    public static void clearLeashTarget(java.util.UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        LEASH_TARGET.remove(botId);
+        LAST_LEASH_DIST.remove(botId);
+        LAST_LEASH_ATTEMPT_TICK.remove(botId);
+    }
     private static final long LEASH_ATTEMPT_COOLDOWN_TICKS = 20L;
     private static final double MOUNT_REACH_SQ = 4.5D * 4.5D;
     private static final double LEASH_KEEP_RANGE_SQ = 10.0D * 10.0D;
@@ -442,6 +474,15 @@ public final class RideSyncService {
                         Double.isFinite(distToCommander) ? String.format(Locale.ROOT, "%.2f", distToCommander) : "NaN");
             }
         } catch (Throwable ignored) {
+        }
+
+        // Maintain LEASH_TARGET state for any bot that's holding a lead on a
+        // mount (HELD_BY_BOT outcome of secureMountIfPossible). This was
+        // dead code previously — the method existed but nothing called it.
+        for (ServerPlayerEntity bot : bots) {
+            if (LEASH_TARGET.containsKey(bot.getUuid())) {
+                maybeMaintainLeash(bot);
+            }
         }
 
         Map<ServerPlayerEntity, List<ServerPlayerEntity>> commanderMap = new HashMap<>();

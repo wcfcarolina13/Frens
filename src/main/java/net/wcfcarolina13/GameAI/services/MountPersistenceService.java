@@ -66,16 +66,22 @@ public final class MountPersistenceService {
         String mountType = EntityType.getId(mount.getType()).toString();
         boolean saddled = mount instanceof MobEntity mob && mob.hasSaddleEquipped();
         float health = mount instanceof LivingEntity living ? living.getHealth() : -1.0f;
+        // Is the bot currently holding a lead on this mob? The RideSyncService
+        // LEASH_TARGET map tracks this — capture it so we can restore the
+        // relationship on rejoin.
+        UUID leashTargetId = RideSyncService.getLeashTarget(bot.getUuid());
+        boolean heldByBot = leashTargetId != null && leashTargetId.equals(mount.getUuid());
         MountState state = new MountState(mount.getUuid(), worldId, mount.getX(), mount.getY(), mount.getZ(),
-                mountType, saddled, health, wasMounted);
+                mountType, saddled, health, wasMounted, heldByBot);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
         flush();
-        LOGGER.info("Mount record: bot={} mount={} type={} pos={} wasMounted={} saddled={} health={}",
+        LOGGER.info("Mount record: bot={} mount={} type={} pos={} wasMounted={} heldByBot={} saddled={} health={}",
                 alias,
                 mount.getUuid(),
                 mountType,
                 BlockPos.ofFloored(mount.getX(), mount.getY(), mount.getZ()).toShortString(),
                 wasMounted,
+                heldByBot,
                 saddled,
                 health);
     }
@@ -98,12 +104,14 @@ public final class MountPersistenceService {
         String mountType = EntityType.getId(mount.getType()).toString();
         boolean saddled = mount instanceof MobEntity mob && mob.hasSaddleEquipped();
         float health = mount instanceof LivingEntity living ? living.getHealth() : -1.0f;
+        UUID leashTargetId = RideSyncService.getLeashTarget(bot.getUuid());
+        boolean heldByBot = leashTargetId != null && leashTargetId.equals(mount.getUuid());
         MountState state = new MountState(mount.getUuid(), worldId, x, y, z,
-                mountType, saddled, health, wasMounted);
+                mountType, saddled, health, wasMounted, heldByBot);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
         flush();
-        LOGGER.info("Mount record (manual pos): bot={} mount={} type={} pos=({},{},{}) wasMounted={}",
-                alias, mount.getUuid(), mountType, (int)x, (int)y, (int)z, wasMounted);
+        LOGGER.info("Mount record (manual pos): bot={} mount={} type={} pos=({},{},{}) wasMounted={} heldByBot={}",
+                alias, mount.getUuid(), mountType, (int)x, (int)y, (int)z, wasMounted, heldByBot);
     }
 
     public static void onBotJoin(ServerPlayerEntity bot) {
@@ -266,7 +274,7 @@ public final class MountPersistenceService {
         if (nearby instanceof MobEntity mob) {
             mob.setPersistent();
             MountState updated = new MountState(nearby.getUuid(), state.worldId(), nearby.getX(), nearby.getY(),
-                    nearby.getZ(), state.mountType(), state.saddled(), state.health(), state.wasMounted());
+                    nearby.getZ(), state.mountType(), state.saddled(), state.health(), state.wasMounted(), state.heldByBot());
             STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
             flush();
             LOGGER.warn("Mount restore: matched existing {} near {}", state.mountType(), pos.toShortString());
@@ -380,34 +388,55 @@ public final class MountPersistenceService {
                              String mountType,
                              boolean saddled,
                              float health,
-                             boolean wasMounted) {}
+                             boolean wasMounted,
+                             boolean heldByBot) {
+        /** Legacy constructor — older save files had no heldByBot field. */
+        public MountState(UUID mountUuid, String worldId, double x, double y, double z,
+                          String mountType, boolean saddled, float health, boolean wasMounted) {
+            this(mountUuid, worldId, x, y, z, mountType, saddled, health, wasMounted, false);
+        }
+    }
 
     private static void maybeSecureOnRejoin(ServerPlayerEntity bot, Entity mount, String alias, String saveWorldKey, MountState state) {
         if (bot == null || mount == null || state == null) {
             return;
         }
-        // On rejoin we ONLY want the remount. Historically this code also
-        // called RideSyncService.secureMountAfterRejoin(bot, mount), which
-        // turned out to be the on-dismount handler in disguise — it would
-        // re-leash the horse to a fence moments before we remounted, causing
-        // prepareVehicle to later reject the saved horse as fence-tethered.
-        // That method has since been deleted; any real tether cleanup happens
-        // on the next genuine dismount.
-        boolean remounted = tryRemountAfterRejoin(bot, mount);
-        // If the remount succeeded but the horse is still tethered to a fence
-        // from a previous disconnect session, drop that tether so the bot can
-        // ride normally. Leash bookkeeping will resume on the next dismount.
-        if (remounted && mount instanceof MobEntity mob && mob.isLeashed()
-                && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
-            LOGGER.info("Mount rejoin: dropping fence tether on remounted mount {}", mount.getUuid());
-            mob.detachLeash();
+
+        // If the bot was holding a lead on this mount at save time, restore
+        // that relationship first. Don't try to remount — the bot was
+        // walking alongside the horse, not riding it. The RideSyncService
+        // maybeMaintainLeash tick hook will physically re-attach the lead
+        // on the next server tick using the items the bot has available.
+        boolean remounted = false;
+        boolean heldRestored = false;
+        if (state.heldByBot() && !state.wasMounted()) {
+            RideSyncService.setLeashTarget(bot.getUuid(), mount.getUuid());
+            heldRestored = true;
+            LOGGER.info("Mount rejoin: restoring held-by-bot state for bot={} mount={}",
+                    alias, mount.getUuid());
+        } else {
+            // Normal rejoin path: try to put the bot back on the saved mount.
+            remounted = tryRemountAfterRejoin(bot, mount);
+            // If the remount succeeded but the horse is still tethered to a
+            // fence from a previous disconnect session (e.g. save files that
+            // pre-date the stay-mounted fallback), drop that tether so the
+            // bot can ride normally. Leash bookkeeping resumes on the next
+            // dismount.
+            if (remounted && mount instanceof MobEntity mob && mob.isLeashed()
+                    && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
+                LOGGER.info("Mount rejoin: dropping fence tether on remounted mount {}", mount.getUuid());
+                mob.detachLeash();
+            }
         }
+
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
-                state.mountType(), state.saddled(), state.health(), remounted);
+                state.mountType(), state.saddled(), state.health(), remounted, heldRestored);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
         flush();
-        LOGGER.info("Mount rejoin restore: bot={} mount={} type={} wasMounted={} remounted={}",
-                alias, mount.getUuid(), state.mountType(), state.wasMounted(), remounted);
+        LOGGER.info("Mount rejoin restore: bot={} mount={} type={} wasMounted={} heldByBot={} remounted={} heldRestored={}",
+                alias, mount.getUuid(), state.mountType(),
+                state.wasMounted(), state.heldByBot(),
+                remounted, heldRestored);
     }
 
     private static boolean tryRemountAfterRejoin(ServerPlayerEntity bot, Entity mount) {
