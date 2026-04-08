@@ -177,7 +177,12 @@ public final class ChestStoreService {
 
     private record MovementFlags(Boolean allowTeleportOverride, boolean fastReplan, boolean allowPursuit, boolean allowSnap) {}
     private record WorldPos(RegistryKey<World> worldKey, BlockPos pos) {}
-    private record TransferAttemptResult(int moved, boolean chestPresent, boolean reachedStand, boolean interacted) {}
+    private record TransferAttemptResult(int moved, boolean chestPresent, boolean reachedStand, boolean interacted, String failureReason) {
+        // Convenience constructor that defaults the reason. Used in success paths and legacy abort paths.
+        TransferAttemptResult(int moved, boolean chestPresent, boolean reachedStand, boolean interacted) {
+            this(moved, chestPresent, reachedStand, interacted, null);
+        }
+    }
     private record ChestStandCandidate(BlockPos pos, boolean directInteract, boolean staging, int score) {}
     private record ChestApproachResult(boolean reached, boolean interacted, BlockPos finalStand, String failureReason) {}
     public record StorageChestCandidate(BlockPos pos,
@@ -209,6 +214,13 @@ public final class ChestStoreService {
         BlockPos lookedAt = resolveChestPos(source);
 
         UUID botId = bot.getUuid();
+        // This is a fresh user-initiated command; clear any stale ABORT_LATCH left over by
+        // a previous /bot come or /bot follow that called forceAbort and didn't go through
+        // beginSkill (which would have cleared the latch). Without this, the very first
+        // isAbortRequested() check inside reachChestInteractionStand returns true and the
+        // deposit aborts before trying any stand candidate. Mid-walk /bot stop still works
+        // because it will set the latch fresh after this clear.
+        TaskService.clearAbortLatch(botId);
         CompletableFuture.runAsync(() -> {
             BlockPos chestPos = lookedAt;
             if (chestPos == null) {
@@ -244,13 +256,49 @@ public final class ChestStoreService {
                     "Heading to the chest to " + (deposit ? "deposit" : "withdraw") + " items..."));
 
             Predicate<ItemStack> filter = buildFilterForTransfer(source, chestPos, itemName, deposit);
-            int moved = performStoreTransfer(source, botId, chestPos, amount, filter, deposit, DEFAULT_MOVEMENT);
+            BlockPos chestPosFinal = chestPos;
+            TransferAttemptResult result = performStoreTransferDetailed(source, botId, chestPosFinal, amount, filter, deposit, DEFAULT_MOVEMENT);
             String action = deposit ? "Deposited" : "Withdrew";
             String fail = deposit ? "deposit" : "withdraw";
-            server.execute(() -> ChatUtils.sendSystemMessage(source,
-                    moved > 0 ? action + " " + moved + " items." : "Couldn't " + fail + " (unreachable, blocked, or no matching items)."));
+            server.execute(() -> {
+                if (result.moved() > 0) {
+                    ChatUtils.sendSystemMessage(source, action + " " + result.moved() + " items.");
+                } else {
+                    String reason = result.failureReason() != null ? result.failureReason() : "unknown";
+                    ChatUtils.sendSystemMessage(source,
+                            "Couldn't " + fail + " at chest " + chestPosFinal.toShortString() + " (" + reason + ").");
+                }
+            });
         });
         return 1;
+    }
+
+    /**
+     * User-facing detailed variant of {@link #performStoreTransfer}. Returns the full
+     * {@link TransferAttemptResult} so {@link #handleTransfer} can build a specific
+     * failure message instead of the unhelpful generic "unreachable, blocked, or no
+     * matching items" string. Mirrors {@link #performStoreTransfer}'s precondition
+     * checks but threads a {@code failureReason} through every abort path.
+     */
+    private static TransferAttemptResult performStoreTransferDetailed(ServerCommandSource source,
+                                                                       UUID botId,
+                                                                       BlockPos chestPos,
+                                                                       int amount,
+                                                                       Predicate<ItemStack> filter,
+                                                                       boolean deposit,
+                                                                       MovementFlags movement) {
+        if (source == null || botId == null || chestPos == null) {
+            return new TransferAttemptResult(0, false, false, false, "invalid-arguments");
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return new TransferAttemptResult(0, false, false, false, "server-null");
+        }
+        ServerPlayerEntity bot = callOnServer(server, () -> server.getPlayerManager().getPlayer(botId), 800, null);
+        if (bot == null || bot.isRemoved()) {
+            return new TransferAttemptResult(0, false, false, false, "bot-missing");
+        }
+        return performStoreTransferWithBotDetailed(source, bot, chestPos, amount, filter, deposit, movement);
     }
 
     private static Predicate<ItemStack> buildFilterForTransfer(ServerCommandSource source, BlockPos chestPos, String itemName, boolean deposit) {
@@ -317,6 +365,13 @@ public final class ChestStoreService {
             return true;
         }
         if (stack.isDamageable()) {
+            return true;
+        }
+        // Bundles are user-managed containers — never offload them. Their contents may
+        // include lodestone compasses, fast-travel artifacts, or other irreplaceable
+        // tools that the OFFLOAD_PROTECTED_ITEMS check cannot see through the bundle wrapper.
+        // Covers vanilla Items.BUNDLE plus all 16 dyed bundle variants via the tag.
+        if (stack.isIn(net.minecraft.registry.tag.ItemTags.BUNDLES)) {
             return true;
         }
         Item item = stack.getItem();
@@ -775,11 +830,13 @@ public final class ChestStoreService {
                                                                              boolean deposit,
                                                                              MovementFlags movement) {
         if (source == null || bot == null || chestPos == null || filter == null) {
-            return new TransferAttemptResult(0, false, false, false);
+            LOGGER.info("Store transfer abort: invalid arguments (source/bot/chestPos/filter null)");
+            return new TransferAttemptResult(0, false, false, false, "invalid-arguments");
         }
         MinecraftServer server = source.getServer();
         if (server == null) {
-            return new TransferAttemptResult(0, false, false, false);
+            LOGGER.info("Store transfer abort: server null");
+            return new TransferAttemptResult(0, false, false, false, "server-null");
         }
 
         debugChest("Store transfer start: deposit=" + deposit
@@ -792,15 +849,18 @@ public final class ChestStoreService {
                 + " botWorld=" + worldKeyName(bot.getEntityWorld()));
         Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof Inventory, 800, Boolean.FALSE);
         if (!Boolean.TRUE.equals(chestOk)) {
-            debugChest("Store transfer abort: chest missing at " + chestPos.toShortString());
-            return new TransferAttemptResult(0, false, false, false);
+            LOGGER.info("Store transfer abort: chest missing at {} (bot={})",
+                    chestPos.toShortString(), bot.getName().getString());
+            return new TransferAttemptResult(0, false, false, false, "chest-missing");
         }
 
         if (deposit) {
             int have = callOnServer(server, () -> countMatching(bot.getInventory(), filter), 800, 0);
             debugChest("Store transfer matching count=" + have);
             if (have <= 0) {
-                return new TransferAttemptResult(0, true, false, false);
+                LOGGER.info("Store transfer abort: no matching items in inventory chest={} bot={}",
+                        chestPos.toShortString(), bot.getName().getString());
+                return new TransferAttemptResult(0, true, false, false, "no-matching-items");
             }
         }
 
@@ -810,7 +870,9 @@ public final class ChestStoreService {
                 java.util.List.of());
         debugChest("Store transfer stand candidates=" + stands.size() + " stands=" + formatPositions(stands, 4));
         if (stands.isEmpty()) {
-            return new TransferAttemptResult(0, true, false, false);
+            LOGGER.info("Store transfer abort: no stand candidates from findStandCandidatesNearChest at {} (bot={})",
+                    chestPos.toShortString(), bot.getName().getString());
+            return new TransferAttemptResult(0, true, false, false, "no-stand-candidates");
         }
 
         MovementFlags flags = movement != null ? movement : DEFAULT_MOVEMENT;
@@ -821,10 +883,10 @@ public final class ChestStoreService {
                 + " allowSnap=" + flags.allowSnap());
         ChestApproachResult approach = reachChestInteractionStand(source, bot, source.getWorld(), chestPos, flags);
         if (!approach.reached()) {
-            debugChest("Store transfer abort: failed to reach stand near chest "
-                    + chestPos.toShortString()
-                    + " reason=" + approach.failureReason());
-            return new TransferAttemptResult(0, true, false, false);
+            LOGGER.info("Store transfer abort: failed to reach chest stand at {} (bot={} reason={} botPos={})",
+                    chestPos.toShortString(), bot.getName().getString(),
+                    approach.failureReason(), bot.getBlockPos().toShortString());
+            return new TransferAttemptResult(0, true, false, false, "approach:" + approach.failureReason());
         }
         if (approach.finalStand() != null) {
             debugChest("Store transfer reached stand=" + approach.finalStand().toShortString()
@@ -832,8 +894,11 @@ public final class ChestStoreService {
                     + " reason=" + approach.failureReason());
         }
         if (!approach.interacted() && !BlockInteractionService.canInteract(bot, chestPos)) {
-            debugChest("Store transfer abort: failed to reach stand near chest " + chestPos.toShortString());
-            return new TransferAttemptResult(0, true, true, false);
+            LOGGER.info("Store transfer abort: reached stand but cannot interact chest={} bot={} botPos={} stand={}",
+                    chestPos.toShortString(), bot.getName().getString(),
+                    bot.getBlockPos().toShortString(),
+                    approach.finalStand() != null ? approach.finalStand().toShortString() : "null");
+            return new TransferAttemptResult(0, true, true, false, "stand-out-of-reach");
         }
 
         LookController.faceBlock(bot, chestPos);
@@ -845,9 +910,9 @@ public final class ChestStoreService {
             }
         }
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
-            LOGGER.info("Store interact blocked: botPos={} chestPos={}", bot.getBlockPos().toShortString(), chestPos.toShortString());
-            debugChest("Store transfer abort: cannot interact with chest " + chestPos.toShortString());
-            return new TransferAttemptResult(0, true, true, false);
+            LOGGER.info("Store interact blocked after door retry: chest={} bot={} botPos={}",
+                    chestPos.toShortString(), bot.getName().getString(), bot.getBlockPos().toShortString());
+            return new TransferAttemptResult(0, true, true, false, "interact-blocked");
         }
 
         Integer moved = callOnServer(server, () -> {

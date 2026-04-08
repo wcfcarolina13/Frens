@@ -502,6 +502,29 @@ public final class TaskService {
     }
 
     /**
+     * Clear any latched abort flag for this bot. Use this from user-initiated entry points
+     * that do NOT acquire a TaskService ticket via {@link #beginSkill} or
+     * {@link #beginSystemTask} (which clear the latch implicitly), to ensure a stale latch
+     * from a prior failed task does not poison the new operation.
+     *
+     * <p>Specifically: commands like {@code /bot store} and the Quick Deposit/Withdraw UI
+     * buttons run their own bespoke movement loop that periodically checks
+     * {@link #isAbortRequested(UUID)} so they can be interrupted by {@code /bot stop}. If a
+     * previous {@code /bot come} or {@code /bot follow} called {@link #forceAbort} and the
+     * subsequent task didn't go through {@code beginSkill}, the latch persists and the very
+     * first abort check inside the new operation falsely returns {@code true}, immediately
+     * cancelling the fresh user request.
+     *
+     * <p>Do NOT call this from autonomous skill code paths (e.g. {@code FishingSkill}'s chest
+     * offload) — those run inside an existing skill ticket and SHOULD honor abort
+     * propagation if the parent skill is being cancelled.
+     */
+    public static void clearAbortLatch(UUID botUuid) {
+        if (botUuid == null) return;
+        ABORT_LATCH.remove(key(botUuid));
+    }
+
+    /**
      * Interrupts an ambient task immediately to make room for a command-issued skill.
      */
     public static boolean interruptAmbientTask(UUID botUuid, String reason) {
