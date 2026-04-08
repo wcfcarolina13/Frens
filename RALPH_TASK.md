@@ -1,13 +1,52 @@
 ---
-task: woodcut loop stabilization
+task: farm tree-clear + irrigation pipeline stabilization
 test_command: "./gradlew build -x test"
 ---
 
-## Next Session: Woodcut Loop Stabilization & Testing
+## Next Session: Farm Pipeline Validation & Follow-Ups
 
-**Status:** Major infrastructure built, needs in-game validation and tuning
+**Status:** Farm tree-clear + irrigation pipeline fixed end-to-end (2026-04-08). In-game validation confirmed all four user-reported failures are fixed. Ready for deeper farm playtesting + known follow-ups below.
 
-### What was built this session (2026-04-03/04)
+### What was fixed this session (2026-04-08, commits 6458e9d..085d2a5)
+
+User reported four distinct failures during `/bot skill farm ... manual=true` in a forested area. Each traced from Prism log evidence in `1.21.10/minecraft/logs/latest.log`.
+
+- **WoodcutSkill bounded-mode envelope check** (`6458e9d`) — `isTreeWorkEnvelopeWithinBounds` required the whole leaf envelope expanded by `WOODCUT_LOG_SCAN_EXPANSION=4` to fit inside caller bounds. For a 13×10×13 farm AABB it rejected every tree (16/16). Relaxed to require only the trunk (`base` → `top`). Added per-tree `activeTreeWorkEnvelopeMin/Max` overlay so `mineBlockDetailed` can prune canopy that overhangs caller bounds for the currently-felling tree only. Also skipped the outer-finally full-region cleanup in bounded mode (saves ~30s per pass).
+- **FarmSkill work buffer + brute-clear demotion** (`f5cee16`) — Split "is in the way" query buffer from woodcut's work buffer. Added `FARM_WOODCUT_WORK_BUFFER=6` / `FARM_WOODCUT_WORK_VERTICAL_RANGE=20` (used only by `runWoodcutInline`). `clearBlockingTreeBlocksLocally` no longer runs in parallel with woodcut — only as last-resort fallback when woodcut failed to reduce the blocker count. Eliminates floaters.
+- **Farm phantom precipice** (`4a73129`) — `assessFarmSite` used `Heightmap.Type.WORLD_SURFACE` which counts logs/leaves, returning canopy tops (y=78–85) instead of walkable ground (y=65–68) in a forest. Median landed mid-canopy; `hasSimplePrecipice` sampled at y=72 and saw air below → phantom rejection. Replaced with `SafePositionService.getWalkableGroundY` in `assessFarmSite`'s column loop + `estimateFarmAreaMedianSurfaceY`. Removed two redundant hard-reject `hasSimplePrecipice` call sites.
+- **WoodcutSkill UOE + unconditional bounded cleanup skip** (`14f1fa0`) — After the envelope check relaxation, `collectRemainingEnvelopeLogs` crashed with `UnsupportedOperationException`: `Stream.toList()` is unmodifiable, next line called `.sort()`. Latent bug that never fired before. Fix: `Collectors.toCollection(ArrayList::new)`. The UOE then burned 42 seconds in the outer finally's cleanup (user-visible stillness) because `felled == 0` on the exception path. Broadened the bounded-mode cleanup skip to unconditional.
+- **Irrigation 2x2 infinite source** (`085d2a5`) — `placeWaterOnServerThread` used `world.getBlockState(waterPos).isOf(Blocks.WATER)` as a success check. After placing NW, flowing water spreads into SE within ticks. On the SE placement: `useOnBlock` returned `Pass` (bucket NOT consumed), but the world check saw pre-existing flowing water and falsely reported success. Result: only 1 real source, 3 flowing cells. Fix: use **bucket consumption** (`WATER_BUCKET` → `BUCKET`) as proof of placement. Removed the `still >= 1 && water >= 4` fallback in `isAcceptableIrrigation` (it was labeled "snow/cold-biome" but only ever fired in exactly this bug case).
+
+All five commits pushed to `origin/main`. User in-game validation: **"Good, that fixed it"**.
+
+### Known issues to watch next session
+
+1. **The `ensureAtSurface` / `nudgeToward failed` loop at session start** (~74 seconds in the 12:23 log). Not fixed this session — secondary symptom. Triggered when bot starts with `leavesTrap=true` under canopy. Worth investigating if it recurs.
+2. **WoodcutSkill still reports `soilFail=29` out of 31 logs** in dense forest — most logs fail `hazardous terrain on all sides` before even reaching the envelope check. The one tree that does get through is felled correctly now, but most of the forest is invisible to detection. May need to revisit the soil/hazard heuristic for bounded-mode farm clearing.
+3. **Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites** outside `assessFarmSite`. They weren't fixed in this session because they receive upstream-chosen positions. If they misbehave in forests, apply the same walkable-ground-Y treatment.
+
+### Previously outstanding from last session (2026-04-03/04)
+
+**Lodestone compass fast-travel system:**
+- `LodestoneCompassService` — inventory scanning (including bundles), validation, selection, home designation
+- `/bot compass list|home|travel` commands
+- Lodestones in Bases menu, smoke signal navigation beacons
+- Sunrise skill resume loop (sunset save → sleep → sunrise fast-travel back → resume skill)
+- Protected lodestones from ALL mining paths (BotStuckService, ReturnBaseStuckService, MovementService)
+- Fast-travel spawn offset away from solid blocks
+
+**Woodcut scaffold descent:**
+- `descendScaffoldColumn()` — Y-level-grouped descent with bridge-first-then-drop
+- Hazard avoidance — `WoodcutHazardScanner` scans for ravines/water, filters scaffold directions
+- Bridge retraction fix — bot walks toward perch before mining bridge blocks behind it
+- Adjacent column pillar — bot can pillar from 1 block off trunk when entry is blocked
+- No-walk elevated sweeps during descent (bot stays on column)
+
+**Woodcut "Until sunset" GUI:**
+- Actions menu defaults to "Until sunset" like fishing
+- `SkillManager.isOpenEnded()` extended for woodcut
+
+### Legacy follow-ups (not addressed this session)
 
 **Lodestone compass fast-travel system:**
 - `LodestoneCompassService` — inventory scanning (including bundles), validation, selection, home designation
