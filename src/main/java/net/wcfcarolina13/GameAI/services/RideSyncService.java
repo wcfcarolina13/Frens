@@ -2694,7 +2694,20 @@ public final class RideSyncService {
         }
         if (target instanceof MobEntity mob && mob.isLeashed()) {
             BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
-            boolean allowUnleash = state != null && state.unleashTetheredMounts;
+            boolean toggleAllowed = state != null && state.unleashTetheredMounts;
+            // Commander-mounted override: if the commander is currently
+            // riding a same-category vehicle, treat the follow-while-mounted
+            // command as explicit consent to unleash a tethered mount. The
+            // player has clearly already unleashed their own horse to ride
+            // it, so expecting them to also toggle a setting before the bot
+            // can do the same is friction without purpose.
+            boolean commanderMountedOverride = false;
+            Entity commanderVehicle = commander.getVehicle();
+            if (commanderVehicle != null
+                    && categorize(commanderVehicle) == categorize(target)) {
+                commanderMountedOverride = true;
+            }
+            boolean allowUnleash = toggleAllowed || commanderMountedOverride;
             Entity holder = mob.getLeashHolder();
 
             if (holder instanceof LeashKnotEntity knot) {
@@ -2703,7 +2716,7 @@ public final class RideSyncService {
                 }
                 BotActions.interactEntity(bot, knot, Hand.MAIN_HAND);
                 startLeadPickup(bot, target);
-                return "leashed-to-fence started-pickup";
+                return "leashed-to-fence started-pickup override=" + commanderMountedOverride;
             }
             if (holder != null && holder != bot) {
                 String holderName = holder instanceof LivingEntity liv ? liv.getName().getString() : holder.getType().toString();
