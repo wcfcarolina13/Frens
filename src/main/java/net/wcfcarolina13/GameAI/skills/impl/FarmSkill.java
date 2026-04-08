@@ -2524,15 +2524,21 @@ public class FarmSkill implements Skill {
                         return;
                     }
                     ItemStack handStack = bot.getMainHandStack();
+                    boolean hadWaterBucket = handStack.isOf(Items.WATER_BUCKET);
                     ActionResult result = handStack.useOnBlock(new ItemUsageContext(bot, Hand.MAIN_HAND, hit));
-                    LOGGER.info("[FarmIrrigation] placeWater useOnBlock at {} via {} face={} result={} hand={}",
-                            waterPos.toShortString(), hit.getBlockPos().toShortString(), hit.getSide(), result, bot.getMainHandStack().getItem());
-                    if (result.isAccepted() || world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                    ItemStack handAfter = bot.getMainHandStack();
+                    boolean bucketConsumed = hadWaterBucket && !handAfter.isOf(Items.WATER_BUCKET);
+                    LOGGER.info("[FarmIrrigation] placeWater useOnBlock at {} via {} face={} result={} hand={} consumed={}",
+                            waterPos.toShortString(), hit.getBlockPos().toShortString(), hit.getSide(), result, handAfter.getItem(), bucketConsumed);
+                    // Bucket consumption is the only reliable proof of placement.
+                    // World state (isOf(Blocks.WATER)) would false-positive on
+                    // pre-existing flowing water from a neighboring source that
+                    // has already spread into waterPos (e.g. during the 2nd
+                    // corner placement of a 2x2 infinite-source build).
+                    if (bucketConsumed) {
                         bot.swingHand(Hand.MAIN_HAND, true);
-                        if (world.getBlockState(waterPos).isOf(Blocks.WATER)) {
-                            future.complete(true);
-                            return;
-                        }
+                        future.complete(true);
+                        return;
                     }
                 }
 
@@ -2541,23 +2547,25 @@ public class FarmSkill implements Skill {
                     return;
                 }
                 LookController.faceBlock(bot, waterPos);
+                ItemStack fallbackBefore = bot.getMainHandStack();
+                boolean hadWaterBucketFallback = fallbackBefore.isOf(Items.WATER_BUCKET);
                 ActionResult itemResult = bot.interactionManager.interactItem(
                         bot,
                         world,
                         bot.getMainHandStack(),
                         Hand.MAIN_HAND
                 );
-                LOGGER.info("[FarmIrrigation] placeWater interactItem fallback at {} result={} hand={}",
-                        waterPos.toShortString(), itemResult, bot.getMainHandStack().getItem());
-                if (itemResult.isAccepted() || world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                ItemStack fallbackAfter = bot.getMainHandStack();
+                boolean fallbackBucketConsumed = hadWaterBucketFallback && !fallbackAfter.isOf(Items.WATER_BUCKET);
+                LOGGER.info("[FarmIrrigation] placeWater interactItem fallback at {} result={} hand={} consumed={}",
+                        waterPos.toShortString(), itemResult, fallbackAfter.getItem(), fallbackBucketConsumed);
+                if (fallbackBucketConsumed) {
                     bot.swingHand(Hand.MAIN_HAND, true);
-                    if (world.getBlockState(waterPos).isOf(Blocks.WATER)) {
-                        future.complete(true);
-                        return;
-                    }
+                    future.complete(true);
+                    return;
                 }
 
-                future.complete(world.getBlockState(waterPos).isOf(Blocks.WATER));
+                future.complete(false);
             } catch (Throwable t) {
                 LOGGER.warn("[FarmIrrigation] placeWater server-thread failure at {}: {}", waterPos.toShortString(), t.toString());
                 future.complete(false);
@@ -2740,19 +2748,22 @@ public class FarmSkill implements Skill {
     private static boolean isAcceptableIrrigation(int[] counts) {
         int water = counts[0];
         int still = counts[1];
-        // Ideal: full still basin.
+        // Ideal: full still basin (2 diagonal sources propagate to 4).
         if (still >= 4) {
             return true;
         }
-        // Good-enough: two source corners with near-full coverage while updates settle.
+        // Good-enough: two source corners with near-full coverage while block
+        // updates settle to turn the remaining cells into sources.
         if (still >= 2 && water >= 3) {
             return true;
         }
-        // Snow/cold-biome fallback: if one source fills all 4 cells, keep going.
-        // This still hydrates nearby farmland and avoids false hard-fail loops.
-        if (still >= 1 && water >= 4) {
-            return true;
-        }
+        // NOTE: historically there was a "still >= 1 && water >= 4" fallback
+        // here. It was removed because it accepted irrigation holes that had
+        // only ONE actual source and 3 flowing cells — NOT an infinite supply.
+        // The fallback only ever fired when placeWaterOnServerThread falsely
+        // reported success for the 2nd corner (false positive on pre-existing
+        // flowing water). The placeWater check now uses bucket consumption as
+        // the proof of placement, so this fallback is no longer needed.
         return false;
     }
 

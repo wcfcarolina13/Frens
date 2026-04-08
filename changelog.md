@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-08 — Irrigation Infinite Source Fix
+
+- **User report:** bot dug the 2x2 irrigation hole but only created ONE water source (in a single corner), not an infinite 2-source diagonal pair. Log at 1.21.10 12:48:59 showed `Irrigation hole filled on attempt 1 (still=1, water=4, flow=3, dry=0)` — only 1 source, but code said "filled".
+
+- **Root cause — placeWater success check false-positives on pre-existing flowing water:** [FarmSkill.placeWaterOnServerThread:2530-2536](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L2530) used `world.getBlockState(waterPos).isOf(Blocks.WATER)` as a fallback success check. In a 2x2 hole, after placing the 1st source at NW, flowing water spreads into SE before the 2nd placement runs. When the bot tries to place at SE:
+  1. `useOnBlock` via floor (face=up) returns `ActionResult.Pass` — the bucket is **not consumed**, hand stays `minecraft:water_bucket`.
+  2. The `isOf(Blocks.WATER)` check sees the SE cell already contains flowing water and reports success.
+  3. Function returns `true` without running the `interactItem` fallback.
+  4. Bot moves on thinking both corners are done. Only 1 actual source exists.
+
+- **Fix H1 — bucket consumption as proof of placement:** Replaced `isOf(Blocks.WATER)` with a comparison of the main-hand item before and after the interaction. A `WATER_BUCKET` that became a plain `BUCKET` is the only reliable proof that a water source was placed by the bot's action. Pre-existing flowing water no longer confuses the check. Added `consumed=true|false` to the log lines for future diagnostics. Applied to both the per-`BlockHitResult` loop and the `interactItem` fallback.
+
+- **Why this is correct even with the "flowing → still" propagation the user pointed out:** Vanilla water bucket `use` either places a source block (and consumes the bucket) or does nothing (Pass result, no consumption). When you place a source adjacent to another source via bucket, the call **does** place a source at waterPos (which may immediately look like flowing water due to neighboring sources, or propagate into a source over the next few ticks). The bucket is consumed either way. So checking consumption captures all valid placements — including ones where the cell is already "water" because a neighbor was spreading in.
+
+- **Fix H2 — remove dangerous 1-source acceptability fallback:** `isAcceptableIrrigation` had a `still >= 1 && water >= 4` fallback commented as "snow/cold-biome fallback". This only ever fired when `placeWaterOnServerThread` falsely reported success for the 2nd corner (producing exactly `still=1, water=4`). A single source in a 2x2 hole isn't an infinite supply — `finalTopOffBuckets` can't refill from it (1.21.10 log 12:53:01 confirmed: `finalTopOffBuckets: could not fill all buckets (left empty=1)`). The fallback is removed; `awaitAcceptableIrrigation` now correctly waits for either 4 sources or 2+ sources with 3+ water cells.
+
+- **Expected behavior:** The 2x2 hole should now actually get 2 diagonal source placements, propagate to 4 sources, and serve as a true infinite refill source for subsequent bucket top-offs.
+
+- **Files:** `src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java`. `./gradlew build -x test` ✅.
+
 ## 2026-04-08 — Bounded Woodcut Stillness Fixes
 
 - **Root cause (1.21.10 log 12:23–12:24):** After the farm phantom-precipice fix the bot finally selected a tree and entered `fellTree` — and **immediately crashed** with `UnsupportedOperationException` in [WoodcutSkill.collectRemainingEnvelopeLogs:1885](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L1885). The crash propagated up to `execute()`'s outer `finally`, which ran `runWoodcutCleanup` for **42 seconds** in the bounded region, producing the "bot standing still" symptom before the exception finally surfaced as "Inline woodcut failed: null".
