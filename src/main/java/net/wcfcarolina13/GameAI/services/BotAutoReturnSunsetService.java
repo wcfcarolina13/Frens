@@ -783,6 +783,16 @@ public final class BotAutoReturnSunsetService {
         if (server == null) return false;
 
         java.util.UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+
+        // Clear travel cooldown — sunset auto-return is an automated safety mechanism
+        // (night is coming, mobs will spawn, bed is at base). Honoring the 3-minute travel
+        // cooldown here means a bot that fast-traveled recently (e.g. via /bot stop post-task
+        // return, or a prior sunrise resume) is forced to WALK home for hours of real time,
+        // which often gets the bot stuck on terrain and produces exactly the kind of
+        // "bot tried to manually go home instead of fast-travel" failure we want to avoid.
+        // Sunrise resume at line 1352 already clears the cooldown for the same reason.
+        NavigationArtifactService.clearTravelCooldown(bot.getUuid());
+
         boolean started = NavigationArtifactService.beginBaseBypassTravel(
                 server, bot, bot.getName().getString(), anchor, world.getRegistryKey(), ownerUuid);
         if (started) {
@@ -800,6 +810,18 @@ public final class BotAutoReturnSunsetService {
         if (bot == null || anchor == null) {
             return;
         }
+        // Clear any ABORT_LATCH left over from the skill we just aborted to trigger this return.
+        // The sunset auto-return caller invoked TaskService.forceAbort(...) to stop the active
+        // skill (fish, mine, etc.), which SETS the latch. But now we're driving a NEW flow —
+        // the walking / fast-travel return to base — and ANY code that checks isAbortRequested
+        // (e.g. MovementService.nudgeTowardUntilClose, ReturnBaseStuckService stuck-escape)
+        // will immediately bail with the stale latch. Symptom in logs: bot reaches a gate,
+        // stuck escape identifies 3 OPEN cardinal directions, but every nudge call fails
+        // instantly because the very first loop check is `abortRequested(bot)`. Without this
+        // clear, the return-to-base inherits the skill's cancellation signal and is dead on
+        // arrival. Same class of bug as ChestStoreService.handleTransfer's latch poisoning.
+        net.wcfcarolina13.GameAI.services.TaskService.clearAbortLatch(bot.getUuid());
+
         if (!isReturningHome(bot)) {
             BotEventHandler.setReturnToBaseSegmented(bot, Vec3d.ofCenter(anchor));
         }
