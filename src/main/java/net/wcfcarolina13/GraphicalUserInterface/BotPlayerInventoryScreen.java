@@ -1334,26 +1334,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         boolean headerHover = isMouseOverTopicsHeader(mouseX, mouseY);
         int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
-        // Left-side label matches the panel title ("Actions"). The right-side
-        // label used to say "Open" but clicking either label — and the whole
-        // header row between them — toggled the same overlay, so the separate
-        // "Open" text was redundant UI noise. Both sides now say "Actions";
-        // the hover tooltip explains what the panel actually opens.
+        // Single "Actions" label on the left. The right-side label (previously
+        // "Open", then a duplicate "Actions") was redundant — clicking anywhere
+        // on the header row toggles the same overlay, and the hover tooltip
+        // explains what the panel opens. The Guide/Spells icon buttons are
+        // now anchored to the right edge directly via getHeaderSpellsBtnX().
         context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
-        String openLabel = TOPIC_PANEL_TITLE;
-        int openLabelW = this.textRenderer.getWidth(openLabel);
-        int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
-        context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
 
         // Header label-and-icon pairs laid out right-to-left:
-        //   [Actions........... Guide [📘]  Spells [✦]  Open]
+        //   [Actions ...................  Guide [📘]  Spells [✦]]
         int btnY = panelY + 1;
         String guideLabel = headerEntryLabel(HEADER_GUIDE_ENTRY);
         String spellsLabel = headerEntryLabel(HEADER_SPELLS_ENTRY);
         int guideLabelW = this.textRenderer.getWidth(guideLabel);
         int spellsLabelW = this.textRenderer.getWidth(spellsLabel);
 
-        int spellsBtnX = openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        // Spells icon now anchors directly to the right edge (no right-side
+        // label to align against).
+        int rightEdge = panelX + panelWidth - TOPIC_PADDING;
+        int spellsBtnX = rightEdge - HEADER_ICON_BTN_SIZE;
         int spellsLabelX = spellsBtnX - HEADER_ICON_LABEL_GAP - spellsLabelW;
         int guideBtnX = spellsLabelX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
         int guideLabelX = guideBtnX - HEADER_ICON_LABEL_GAP - guideLabelW;
@@ -1616,12 +1615,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int getHeaderSpellsBtnX() {
         int panelX = getTopicPanelX();
         int panelWidth = getTopicPanelWidth();
-        // Must match the label drawn in drawTopicPanel so the Spells icon
-        // button is positioned correctly relative to the right-side label.
-        String openLabel = TOPIC_PANEL_TITLE;
-        int openLabelW = this.textRenderer.getWidth(openLabel);
-        int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
-        return openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        // Spells icon anchors to the right edge of the header panel, matching
+        // the layout computed in drawTopicPanel().
+        int rightEdge = panelX + panelWidth - TOPIC_PADDING;
+        return rightEdge - HEADER_ICON_BTN_SIZE;
     }
 
     private int getHeaderBtnY() {
