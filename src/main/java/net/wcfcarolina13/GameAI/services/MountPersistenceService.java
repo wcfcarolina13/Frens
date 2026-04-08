@@ -387,10 +387,46 @@ public final class MountPersistenceService {
             return;
         }
         RideSyncService.secureMountAfterRejoin(bot, mount);
+        // Actually remount the bot on its saved vehicle. Without this, the
+        // restore path only handled leash bookkeeping and relied on RideSync's
+        // normal tick logic — which requires the commander to already be
+        // mounted on a matching-category vehicle (RideSyncService
+        // resolvePreferredMount). On a fresh world load the commander is
+        // briefly on foot while their own vehicle state is syncing, so the
+        // bot's saved horse was rejected and the bot never remounted.
+        boolean remounted = tryRemountAfterRejoin(bot, mount);
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
                 state.mountType(), state.saddled(), state.health(), false);
         STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
         flush();
+        LOGGER.info("Mount rejoin restore: bot={} mount={} type={} remounted={}",
+                alias, mount.getUuid(), state.mountType(), remounted);
+    }
+
+    private static boolean tryRemountAfterRejoin(ServerPlayerEntity bot, Entity mount) {
+        if (bot == null || mount == null || mount.isRemoved()) {
+            return false;
+        }
+        // Skip if the bot or mount is already part of another vehicle stack
+        // (e.g. a player grabbed the horse before the restore tick landed).
+        if (bot.hasVehicle()) {
+            return bot.getVehicle() == mount;
+        }
+        if (mount.hasPassengers()) {
+            return false;
+        }
+        // Mount must be in the bot's current world. Restore across worlds is
+        // intentionally skipped — bot would teleport unexpectedly.
+        if (bot.getEntityWorld() != mount.getEntityWorld()) {
+            return false;
+        }
+        try {
+            return bot.startRiding(mount, true, true);
+        } catch (Throwable t) {
+            LOGGER.warn("Mount rejoin startRiding failed: bot={} mount={}: {}",
+                    bot.getName().getString(), mount.getUuid(), t.toString());
+            return false;
+        }
     }
 
     private static final class PendingRestore {
