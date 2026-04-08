@@ -148,6 +148,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int HEADER_ICON_LABEL_GAP = 2;
     private TopicEntry headerHoveredEntry = null;
     private long headerHoverStartedAtMs = 0L;
+    // Header (topic panel) hover tooltip — tracks dwell time for "Open the
+    // actions/dialogue/admin menus" hint shown when hovering the empty header
+    // area (i.e. anywhere not on the Guide/Spells icon buttons).
+    private boolean topicHeaderHovering = false;
+    private long topicHeaderHoverStartedAtMs = 0L;
+    // Dialogue-tab development disclaimer dismiss state. Session-static so
+    // dismissal persists across screen reopens within a game session without
+    // requiring a client-side config file. A new game session will show the
+    // banner again (intentional — reinforces the warning periodically).
+    private static boolean dialogueDisclaimerDismissed = false;
+    // Rect of the disclaimer's [x] close button, updated each frame while the
+    // banner is visible and consumed by clickTopicsOverlay.
+    private Rect disclaimerCloseRect = null;
     private String overlayHoveredControlKey = null;
     private long overlayControlHoverStartedAtMs = 0L;
     private long lastBotSwitchHintAtMs = 0L;
@@ -1321,8 +1334,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         boolean headerHover = isMouseOverTopicsHeader(mouseX, mouseY);
         int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
+        // Left-side label matches the panel title ("Actions"). The right-side
+        // label used to say "Open" but clicking either label — and the whole
+        // header row between them — toggled the same overlay, so the separate
+        // "Open" text was redundant UI noise. Both sides now say "Actions";
+        // the hover tooltip explains what the panel actually opens.
         context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
-        String openLabel = "Open";
+        String openLabel = TOPIC_PANEL_TITLE;
         int openLabelW = this.textRenderer.getWidth(openLabel);
         int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
         context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
@@ -1357,6 +1375,33 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Tooltip drawn LAST so it overlays the quick action grid that sits below the header row.
         drawHeaderIconHoverTooltip(context, mouseX, mouseY);
+        drawTopicHeaderHoverTooltip(context, mouseX, mouseY);
+    }
+
+    private void drawTopicHeaderHoverTooltip(DrawContext context, int mouseX, int mouseY) {
+        // Only show when the panel is collapsed; once it's open the overlay
+        // has its own tooltip system.
+        if (topicsExpanded) {
+            topicHeaderHovering = false;
+            topicHeaderHoverStartedAtMs = 0L;
+            return;
+        }
+        boolean over = isMouseOverTopicsHeader(mouseX, mouseY);
+        if (!over) {
+            topicHeaderHovering = false;
+            topicHeaderHoverStartedAtMs = 0L;
+            return;
+        }
+        if (!topicHeaderHovering) {
+            topicHeaderHovering = true;
+            topicHeaderHoverStartedAtMs = System.currentTimeMillis();
+            return;
+        }
+        if (System.currentTimeMillis() - topicHeaderHoverStartedAtMs < QUICK_HOVER_TOOLTIP_DELAY_MS) {
+            return;
+        }
+        drawTooltipBox(context, mouseX, mouseY,
+                java.util.List.of("Open the actions / dialogue / admin menus"));
     }
 
     private static String headerEntryLabel(TopicEntry entry) {
@@ -1571,7 +1616,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int getHeaderSpellsBtnX() {
         int panelX = getTopicPanelX();
         int panelWidth = getTopicPanelWidth();
-        String openLabel = "Open";
+        // Must match the label drawn in drawTopicPanel so the Spells icon
+        // button is positioned correctly relative to the right-side label.
+        String openLabel = TOPIC_PANEL_TITLE;
         int openLabelW = this.textRenderer.getWidth(openLabel);
         int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
         return openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
@@ -2260,14 +2307,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x, y, x + 1, y + h, 0xFF000000);
         context.fill(x + w - 1, y, x + w, y + h, 0xFF000000);
 
+        int contentTopY = y + 2;
+        // Development disclaimer banner (dialogue tab only, dismissable).
+        if (overlayCategory == TopicCategory.DIALOGUE && !dialogueDisclaimerDismissed) {
+            int bannerH = drawDialogueDisclaimer(context, x, contentTopY, w);
+            contentTopY += bannerH + 2;
+        } else {
+            disclaimerCloseRect = null;
+        }
+
         // Topic header (Morrowind-style).
         String topicHeader = (lastDialogueTopicLabel != null && !lastDialogueTopicLabel.isBlank())
             ? lastDialogueTopicLabel
             : "Select a topic";
-        context.drawText(this.textRenderer, topicHeader, x + 4, y + 2, COLOR_TEXT_TOPIC, false);
+        context.drawText(this.textRenderer, topicHeader, x + 4, contentTopY, COLOR_TEXT_TOPIC, false);
 
         int textX = x + 4;
-        int textY = y + 2 + this.textRenderer.fontHeight + 4;
+        int textY = contentTopY + this.textRenderer.fontHeight + 4;
         int textW = Math.max(40, w - 8);
 
         // Player response prompts (in red), pinned to the bottom of the dialogue column.
@@ -2346,6 +2402,62 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 ry += respLineH;
             }
         }
+    }
+
+    /**
+     * Draws the dismissable "Questing is in development" banner at the top
+     * of the dialogue column. Updates {@link #disclaimerCloseRect} with the
+     * hitbox of the [x] close button (consumed by clickTopicsOverlay).
+     *
+     * @return pixel height of the banner including its border.
+     */
+    private int drawDialogueDisclaimer(DrawContext context, int x, int y, int w) {
+        int pad = 3;
+        int closeSize = 9;
+        int fontH = this.textRenderer.fontHeight;
+        int innerW = Math.max(20, w - pad * 2 - closeSize - 4);
+
+        String warnMark = "\u26A0"; // ⚠
+        String message = warnMark + " Dialogue requires Questing mode (in development — expect bugs)";
+        java.util.List<net.minecraft.text.OrderedText> wrapped = this.textRenderer.wrapLines(
+                net.minecraft.text.Text.literal(message), innerW);
+        if (wrapped.isEmpty()) {
+            wrapped = java.util.List.of(net.minecraft.text.Text.literal(message).asOrderedText());
+        }
+        int textH = wrapped.size() * fontH;
+        int bannerH = Math.max(closeSize + 2, textH + pad * 2);
+
+        // Panel background — amber-tinted to distinguish from dialogue area.
+        int fill = 0xC0332A14;
+        int border = 0xFFB08C40;
+        context.fill(x + 1, y, x + w - 1, y + bannerH, fill);
+        context.fill(x + 1, y, x + w - 1, y + 1, border);
+        context.fill(x + 1, y + bannerH - 1, x + w - 1, y + bannerH, border);
+        context.fill(x + 1, y, x + 2, y + bannerH, border);
+        context.fill(x + w - 2, y, x + w - 1, y + bannerH, border);
+
+        int textX = x + pad + 1;
+        int textY = y + pad;
+        for (net.minecraft.text.OrderedText line : wrapped) {
+            context.drawText(this.textRenderer, line, textX, textY, 0xFFFFE08A, false);
+            textY += fontH;
+        }
+
+        // [x] close button (top-right of banner).
+        int closeX = x + w - pad - closeSize - 1;
+        int closeY = y + (bannerH - closeSize) / 2;
+        disclaimerCloseRect = new Rect(closeX, closeY, closeSize, closeSize);
+        context.fill(closeX, closeY, closeX + closeSize, closeY + closeSize, 0xFF1A1A1A);
+        context.fill(closeX, closeY, closeX + closeSize, closeY + 1, border);
+        context.fill(closeX, closeY + closeSize - 1, closeX + closeSize, closeY + closeSize, border);
+        context.fill(closeX, closeY, closeX + 1, closeY + closeSize, border);
+        context.fill(closeX + closeSize - 1, closeY, closeX + closeSize, closeY + closeSize, border);
+        String closeLabel = "x";
+        int closeTextX = closeX + (closeSize - this.textRenderer.getWidth(closeLabel)) / 2;
+        int closeTextY = closeY + (closeSize - fontH) / 2 + 1;
+        context.drawText(this.textRenderer, closeLabel, closeTextX, closeTextY, 0xFFEFEFEF, false);
+
+        return bannerH;
     }
 
     private record StyledLine(net.minecraft.text.OrderedText text, int color) {}
@@ -2436,6 +2548,17 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             } else {
                 toggleTopicsExpanded(false);
             }
+            return true;
+        }
+
+        // Dialogue disclaimer dismiss button. Hit-test is only valid on the
+        // dialogue tab while the banner is being drawn.
+        if (overlayCategory == TopicCategory.DIALOGUE
+                && !dialogueDisclaimerDismissed
+                && disclaimerCloseRect != null
+                && disclaimerCloseRect.contains(mouseX, mouseY)) {
+            dialogueDisclaimerDismissed = true;
+            disclaimerCloseRect = null;
             return true;
         }
 

@@ -32,7 +32,7 @@ public class WorldModeSelectionScreen extends Screen {
     protected void init() {
         int cx = this.width / 2;
         int panelY = Math.max(12, this.height / 2 - 120);
-        int panelH = 96;
+        int panelH = 140; // taller to fit the in-development disclaimer
         // Place buttons below the info panel with a small gap
         int top = panelY + panelH + 10;
         int w = Math.min(320, this.width - 40);
@@ -92,7 +92,7 @@ public class WorldModeSelectionScreen extends Screen {
         int panelW = Math.min(360, this.width - 30);
         int panelX = cx - panelW / 2;
         int panelY = Math.max(12, this.height / 2 - 120);
-        int panelH = 96;
+        int panelH = 140;
 
         context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xC0181818);
         context.fill(panelX, panelY, panelX + panelW, panelY + 1, 0xFF4A4A4A);
@@ -112,6 +112,31 @@ public class WorldModeSelectionScreen extends Screen {
         for (OrderedText line : lines) {
             context.drawText(this.textRenderer, line, panelX + 7, textY, 0xFFD5D5D5, false);
             textY += this.textRenderer.fontHeight + 1;
+        }
+
+        // In-development disclaimer for Questing mode. Rendered as a boxed
+        // warning banner inside the info panel so it's impossible to miss
+        // when the player is about to pick a mode.
+        textY += 4;
+        int warnBoxX = panelX + 5;
+        int warnBoxY = textY;
+        int warnBoxW = panelW - 10;
+        String warnMark = "\u26A0"; // ⚠
+        List<OrderedText> warnLines = this.textRenderer.wrapLines(
+                Text.literal(warnMark + " Heads up: Questing mode is still in development and more buggy than Admin. Pick Admin if you want the most stable experience."),
+                warnBoxW - 8);
+        int warnBoxH = warnLines.size() * (this.textRenderer.fontHeight + 1) + 6;
+        int warnFill = 0xC0332A14;
+        int warnBorder = 0xFFB08C40;
+        context.fill(warnBoxX, warnBoxY, warnBoxX + warnBoxW, warnBoxY + warnBoxH, warnFill);
+        context.fill(warnBoxX, warnBoxY, warnBoxX + warnBoxW, warnBoxY + 1, warnBorder);
+        context.fill(warnBoxX, warnBoxY + warnBoxH - 1, warnBoxX + warnBoxW, warnBoxY + warnBoxH, warnBorder);
+        context.fill(warnBoxX, warnBoxY, warnBoxX + 1, warnBoxY + warnBoxH, warnBorder);
+        context.fill(warnBoxX + warnBoxW - 1, warnBoxY, warnBoxX + warnBoxW, warnBoxY + warnBoxH, warnBorder);
+        int warnTextY = warnBoxY + 3;
+        for (OrderedText line : warnLines) {
+            context.drawText(this.textRenderer, line, warnBoxX + 4, warnTextY, 0xFFFFE08A, false);
+            warnTextY += this.textRenderer.fontHeight + 1;
         }
 
         if (!canChoose) {
