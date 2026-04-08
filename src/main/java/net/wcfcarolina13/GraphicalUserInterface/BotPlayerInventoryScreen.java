@@ -144,6 +144,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final TopicEntry HEADER_SPELLS_ENTRY = TopicEntry.skill("Spells", TopicAction.OPEN_SPELLS, false, 0);
     private static final int HEADER_ICON_BTN_SIZE = 11;
     private static final int HEADER_ICON_BTN_GAP = 2;
+    // Gap between a header label text and its accompanying icon button (label sits left of icon).
+    private static final int HEADER_ICON_LABEL_GAP = 2;
     private TopicEntry headerHoveredEntry = null;
     private long headerHoverStartedAtMs = 0L;
     private String overlayHoveredControlKey = null;
@@ -1312,19 +1314,40 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int openX = panelX + panelWidth - TOPIC_PADDING - openLabelW;
         context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
 
-        // Header icon buttons: [Guide] [Spells] just left of "Open"
+        // Header label-and-icon pairs laid out right-to-left:
+        //   [Actions........... Guide [📘]  Spells [✦]  Open]
         int btnY = panelY + 1;
+        String guideLabel = headerEntryLabel(HEADER_GUIDE_ENTRY);
+        String spellsLabel = headerEntryLabel(HEADER_SPELLS_ENTRY);
+        int guideLabelW = this.textRenderer.getWidth(guideLabel);
+        int spellsLabelW = this.textRenderer.getWidth(spellsLabel);
+
         int spellsBtnX = openX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
-        int guideBtnX = spellsBtnX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        int spellsLabelX = spellsBtnX - HEADER_ICON_LABEL_GAP - spellsLabelW;
+        int guideBtnX = spellsLabelX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        int guideLabelX = guideBtnX - HEADER_ICON_LABEL_GAP - guideLabelW;
+
+        TopicEntry hoveredHeaderEntry = getHeaderIconEntryAt(mouseX, mouseY);
+        int guideLabelColor = hoveredHeaderEntry == HEADER_GUIDE_ENTRY ? 0xFFFFE08A : 0xFFE6D7A3;
+        int spellsLabelColor = hoveredHeaderEntry == HEADER_SPELLS_ENTRY ? 0xFFFFE08A : 0xFFE6D7A3;
+
+        context.drawText(this.textRenderer, guideLabel, guideLabelX, panelY + 2, guideLabelColor, false);
         drawHeaderIconButton(context, guideBtnX, btnY, HEADER_GUIDE_ENTRY, mouseX, mouseY);
+        context.drawText(this.textRenderer, spellsLabel, spellsLabelX, panelY + 2, spellsLabelColor, false);
         drawHeaderIconButton(context, spellsBtnX, btnY, HEADER_SPELLS_ENTRY, mouseX, mouseY);
-        drawHeaderIconHoverTooltip(context, mouseX, mouseY);
 
         int rowX = panelX + TOPIC_PADDING;
         int rowY = panelY + 2 + this.textRenderer.fontHeight + 1;
         int rowW = panelWidth - TOPIC_PADDING * 2;
         int listHeight = panelHeight - (rowY - panelY);
         drawQuickTopicGrid(context, rowX, rowY, rowW, listHeight, mouseX, mouseY);
+
+        // Tooltip drawn LAST so it overlays the quick action grid that sits below the header row.
+        drawHeaderIconHoverTooltip(context, mouseX, mouseY);
+    }
+
+    private static String headerEntryLabel(TopicEntry entry) {
+        return entry != null && entry.label != null ? entry.label : "";
     }
 
     private record QuickGridLayout(int cols, int rows, int buttonW, int buttonH, int gap) {}
@@ -1505,7 +1528,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void drawHeaderIconButton(DrawContext context, int x, int y, TopicEntry entry, int mouseX, int mouseY) {
         int s = HEADER_ICON_BTN_SIZE;
-        boolean hover = mouseX >= x && mouseX < x + s && mouseY >= y && mouseY < y + s;
+        // Hover is driven by the shared label+icon hit-test so label and icon light up in sync.
+        boolean hover = getHeaderIconEntryAt(mouseX, mouseY) == entry;
 
         int fill = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
         context.fill(x, y, x + s, y + s, fill);
@@ -1525,7 +1549,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private int getHeaderGuideBtnX() {
-        return getHeaderSpellsBtnX() - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
+        int spellsBtnX = getHeaderSpellsBtnX();
+        int spellsLabelW = this.textRenderer.getWidth(headerEntryLabel(HEADER_SPELLS_ENTRY));
+        int spellsLabelX = spellsBtnX - HEADER_ICON_LABEL_GAP - spellsLabelW;
+        return spellsLabelX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
     }
 
     private int getHeaderSpellsBtnX() {
@@ -1546,11 +1573,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int s = HEADER_ICON_BTN_SIZE;
         if (mouseY < btnY || mouseY >= btnY + s) return null;
 
-        int guideX = getHeaderGuideBtnX();
-        if (mouseX >= guideX && mouseX < guideX + s) return HEADER_GUIDE_ENTRY;
+        // Click targets span the label text + the icon button so users can click either.
+        int spellsBtnX = getHeaderSpellsBtnX();
+        int spellsLabelW = this.textRenderer.getWidth(headerEntryLabel(HEADER_SPELLS_ENTRY));
+        int spellsLeft = spellsBtnX - HEADER_ICON_LABEL_GAP - spellsLabelW;
+        if (mouseX >= spellsLeft && mouseX < spellsBtnX + s) return HEADER_SPELLS_ENTRY;
 
-        int spellsX = getHeaderSpellsBtnX();
-        if (mouseX >= spellsX && mouseX < spellsX + s) return HEADER_SPELLS_ENTRY;
+        int guideBtnX = getHeaderGuideBtnX();
+        int guideLabelW = this.textRenderer.getWidth(headerEntryLabel(HEADER_GUIDE_ENTRY));
+        int guideLeft = guideBtnX - HEADER_ICON_LABEL_GAP - guideLabelW;
+        if (mouseX >= guideLeft && mouseX < guideBtnX + s) return HEADER_GUIDE_ENTRY;
 
         return null;
     }
