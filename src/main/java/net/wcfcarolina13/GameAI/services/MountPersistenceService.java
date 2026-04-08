@@ -386,17 +386,13 @@ public final class MountPersistenceService {
         if (bot == null || mount == null || state == null) {
             return;
         }
-        // NOTE: Do NOT call RideSyncService.secureMountAfterRejoin(bot, mount)
-        // here. Despite its name, that method is actually the on-dismount
-        // handler (handleDismountCare -> secureMountIfPossible), which leashes
-        // the mount to a fence when leashMountsOnDismount is true (default).
-        // Running it during rejoin would anchor the horse to a fence right
-        // before we remount, and then prepareVehicle would reject the horse
-        // next time RideSync evaluates it because a bot can't mount a
-        // fence-leashed animal unless the unleashTetheredMounts toggle is set.
-        //
-        // On rejoin we ONLY want the remount — any tether cleanup happens on
-        // the next real dismount.
+        // On rejoin we ONLY want the remount. Historically this code also
+        // called RideSyncService.secureMountAfterRejoin(bot, mount), which
+        // turned out to be the on-dismount handler in disguise — it would
+        // re-leash the horse to a fence moments before we remounted, causing
+        // prepareVehicle to later reject the saved horse as fence-tethered.
+        // That method has since been deleted; any real tether cleanup happens
+        // on the next genuine dismount.
         boolean remounted = tryRemountAfterRejoin(bot, mount);
         // If the remount succeeded but the horse is still tethered to a fence
         // from a previous disconnect session, drop that tether so the bot can

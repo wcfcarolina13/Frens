@@ -739,10 +739,16 @@ public class Frens implements ModInitializer {
                 }
                 if (bot.hasVehicle()) {
                     net.minecraft.entity.Entity vehicle = bot.getVehicle();
-                    boolean wasMounted = true;
-                    bot.stopRiding();
-                    net.wcfcarolina13.GameAI.services.RideSyncService.secureMountAfterRejoin(bot, vehicle);
-                    net.wcfcarolina13.GameAI.services.MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+                    // Same secure-before-dismount pattern as BotPersistenceService
+                    // — stay mounted if we can't leash or fence-tether, so the
+                    // horse survives the server shutdown.
+                    net.wcfcarolina13.GameAI.services.RideSyncService.SecureResult secureResult =
+                            net.wcfcarolina13.GameAI.services.RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
+                    boolean staysMounted = secureResult == net.wcfcarolina13.GameAI.services.RideSyncService.SecureResult.CANNOT_SECURE;
+                    if (!staysMounted) {
+                        bot.stopRiding();
+                    }
+                    net.wcfcarolina13.GameAI.services.MountPersistenceService.recordMount(bot, vehicle, staysMounted);
                 } else {
                     net.wcfcarolina13.GameAI.services.RideSyncService.secureLeashedMountOnDisconnect(bot);
                 }

@@ -214,10 +214,16 @@ public final class BotPersistenceService {
         }
         if (bot.hasVehicle()) {
             Entity vehicle = bot.getVehicle();
-            boolean wasMounted = true;
-            bot.stopRiding();
-            RideSyncService.secureMountAfterRejoin(bot, vehicle);
-            MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+            // Try to secure BEFORE dismounting. If securing fails (no lead, no
+            // fence, no craftable materials), keep the bot mounted so the
+            // horse doesn't wander off during the disconnect. Rejoin remount
+            // (MountPersistenceService.tryRemountAfterRejoin) picks it back up.
+            RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
+            boolean staysMounted = secureResult == RideSyncService.SecureResult.CANNOT_SECURE;
+            if (!staysMounted) {
+                bot.stopRiding();
+            }
+            MountPersistenceService.recordMount(bot, vehicle, staysMounted);
         } else {
             RideSyncService.secureLeashedMountOnDisconnect(bot);
         }
@@ -391,10 +397,13 @@ public final class BotPersistenceService {
             }
             if (player.hasVehicle()) {
                 Entity vehicle = player.getVehicle();
-                boolean wasMounted = true;
-                player.stopRiding();
-                RideSyncService.secureMountAfterRejoin(player, vehicle);
-                MountPersistenceService.recordMount(player, vehicle, wasMounted);
+                // Same secure-before-dismount pattern as onBotDisconnect.
+                RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(player, vehicle);
+                boolean staysMounted = secureResult == RideSyncService.SecureResult.CANNOT_SECURE;
+                if (!staysMounted) {
+                    player.stopRiding();
+                }
+                MountPersistenceService.recordMount(player, vehicle, staysMounted);
             } else {
                 RideSyncService.secureLeashedMountOnDisconnect(player);
             }
@@ -621,10 +630,12 @@ public final class BotPersistenceService {
 
         if (bot.hasVehicle()) {
             Entity vehicle = bot.getVehicle();
-            boolean wasMounted = true;
+            // Despawn path — bot is going away permanently. Try to secure the
+            // mount so the horse doesn't wander, then dismount unconditionally
+            // (there's no "stay mounted" option — the bot ceases to exist).
+            RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
             bot.stopRiding();
-            RideSyncService.secureMountAfterRejoin(bot, vehicle);
-            MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+            MountPersistenceService.recordMount(bot, vehicle, false);
         } else {
             RideSyncService.secureLeashedMountOnDisconnect(bot);
         }

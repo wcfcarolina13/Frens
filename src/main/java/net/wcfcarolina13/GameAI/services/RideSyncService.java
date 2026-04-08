@@ -3155,30 +3155,52 @@ public final class RideSyncService {
         return null;
     }
 
-    private static void secureMountIfPossible(ServerPlayerEntity bot, Entity vehicle) {
+    /**
+     * Outcome of a mount-securing attempt. Used by disconnect/shutdown paths to
+     * decide whether the bot may safely dismount or should stay mounted to avoid
+     * losing the horse. The order (best → worst) is:
+     *   TETHERED_TO_FENCE → HELD_BY_BOT → CANNOT_SECURE
+     */
+    public enum SecureResult {
+        /** Horse leashed to a fence block (persistent across disconnect). */
+        TETHERED_TO_FENCE,
+        /** Bot is holding the lead; state must be persisted via LEASH_TARGET. */
+        HELD_BY_BOT,
+        /** No lead available and no fence option — horse would wander if dismounted. */
+        CANNOT_SECURE,
+        /** Vehicle is not a leashable mob (boat, minecart, etc.) — caller may dismount freely. */
+        NOT_APPLICABLE
+    }
+
+    /**
+     * Try to secure a bot's mount so it won't wander after dismount. Returns the
+     * specific outcome so callers on the disconnect/shutdown path can decide
+     * whether it's safe to dismount the bot or if it should stay mounted.
+     */
+    private static SecureResult secureMountIfPossible(ServerPlayerEntity bot, Entity vehicle) {
         if (bot == null || vehicle == null) {
-            return;
+            return SecureResult.CANNOT_SECURE;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
+            return SecureResult.CANNOT_SECURE;
         }
         if (!(vehicle instanceof MobEntity mob) || !mob.canBeLeashed()) {
-            return;
+            return SecureResult.NOT_APPLICABLE;
         }
         if (!ToolProvisionService.ensureLead(bot, bot.getCommandSource(), resolveCommander(world.getServer(), bot), 1)) {
             maybeAnnounceLeashIssue(bot, pickRandom("I don't have a lead to secure this horse.", "I'm missing a lead for the horse."));
-            return;
+            return SecureResult.CANNOT_SECURE;
         }
         if (!BotActions.ensureHotbarItem(bot, Items.LEAD)) {
             maybeAnnounceLeashIssue(bot, pickRandom("I can't grab a lead to secure this horse.", "I couldn't get the lead.", "My lead isn't accessible right now."));
-            return;
+            return SecureResult.CANNOT_SECURE;
         }
         if (!mob.isLeashed()) {
             BotActions.interactEntity(bot, vehicle, Hand.MAIN_HAND);
         }
         if (!mob.isLeashed() || mob.getLeashHolder() != bot) {
             maybeAnnounceLeashIssue(bot, "I couldn't secure the lead on the horse.");
-            return;
+            return SecureResult.CANNOT_SECURE;
         }
         BlockPos fencePos = findNearbyFence(world, vehicle.getBlockPos(), 5);
         if (fencePos == null) {
@@ -3186,13 +3208,39 @@ public final class RideSyncService {
         }
         if (fencePos == null) {
             maybeAnnounceLeashIssue(bot, pickRandom("I don't have a fence to tie this horse to yet. I'll keep it on a lead.", "No fence nearby to tie it off.", "I'll hold the lead until I can tie it off."));
-            if (vehicle instanceof MobEntity leashed && leashed.isLeashed() && leashed.getLeashHolder() == bot) {
-                LEASH_TARGET.put(bot.getUuid(), leashed.getUuid());
-            }
-            return;
+            LEASH_TARGET.put(bot.getUuid(), mob.getUuid());
+            return SecureResult.HELD_BY_BOT;
         }
         interactFence(bot, fencePos);
         LEASH_TARGET.remove(bot.getUuid());
+        return SecureResult.TETHERED_TO_FENCE;
+    }
+
+    /**
+     * Disconnect/shutdown entry point: try to secure the bot's mount so we know
+     * whether dismounting is safe. Does NOT call handleDismountCare (low-health
+     * announce + auto-feed) because the player is about to leave the world.
+     *
+     * @return the securing outcome. Callers should NOT dismount the bot if this
+     *         returns {@link SecureResult#CANNOT_SECURE} — instead save the
+     *         mount state with {@code wasMounted=true} so the rejoin remount
+     *         picks the horse back up.
+     */
+    public static SecureResult trySecureMountBeforeDismount(ServerPlayerEntity bot, Entity vehicle) {
+        if (bot == null || vehicle == null) {
+            return SecureResult.CANNOT_SECURE;
+        }
+        // Non-leashable vehicles (boats, minecarts) don't need securing and the
+        // bot can always dismount them without losing them.
+        if (!(vehicle instanceof MobEntity mob) || !mob.canBeLeashed()) {
+            return SecureResult.NOT_APPLICABLE;
+        }
+        SecureResult result = secureMountIfPossible(bot, vehicle);
+        LOGGER.info("trySecureMountBeforeDismount: bot={} vehicle={} result={}",
+                bot.getName().getString(),
+                vehicle.getType().toString(),
+                result);
+        return result;
     }
 
     private static BlockPos findNearbyFence(ServerWorld world, BlockPos origin, int radius) {
@@ -3382,13 +3430,6 @@ public final class RideSyncService {
         }
     }
 
-    public static void secureMountAfterRejoin(ServerPlayerEntity bot, Entity vehicle) {
-        if (bot == null || vehicle == null) {
-            return;
-        }
-        handleDismountCare(bot, vehicle);
-    }
-
     /**
      * Unconditionally leash a mount and tether it to a nearby fence for travel departure.
      * Bypasses the leashMountsOnDismount toggle — used when the bot must leave an animal
@@ -3398,12 +3439,7 @@ public final class RideSyncService {
      */
     public static boolean secureMountForTravel(ServerPlayerEntity bot, Entity vehicle) {
         if (bot == null || vehicle == null) return false;
-        secureMountIfPossible(bot, vehicle);
-        if (vehicle instanceof MobEntity mob && mob.isLeashed()
-                && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
-            return true;
-        }
-        return false;
+        return secureMountIfPossible(bot, vehicle) == SecureResult.TETHERED_TO_FENCE;
     }
 
     public static void secureLeashedMountOnDisconnect(ServerPlayerEntity bot) {
