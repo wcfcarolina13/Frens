@@ -29,6 +29,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
@@ -394,12 +395,11 @@ public class FarmSkill implements Skill {
                 }
             }
 
-            // Check for dangerous terrain BEFORE tree clearing to avoid false positives
-            // from temporary height changes during woodcut operations
-            if (siteAssessment == null && hasSimplePrecipice(world, farmCenter)) {
-                ChatUtils.sendSystemMessage(source, "Unsafe drop near farm site; find flatter ground.");
-                return SkillExecutionResult.failure("Unsafe terrain near farm site.");
-            }
+            // Note: previously ran hasSimplePrecipice here as a pre-assessment
+            // terrain guard. Removed — the check operated on WORLD_SURFACE Y
+            // which pointed at forest canopies and produced phantom precipice
+            // rejections. assessFarmSite's per-column grade-cut / fill-too-deep
+            // loop (run after tree clearing) is the authoritative terrain gate.
 
             escapeTreeAndWoodcut(bot, world, source, context, footprint);
             clearBlockingTrees(bot, world, source, context, footprint);
@@ -1050,18 +1050,25 @@ public class FarmSkill implements Skill {
         List<BlockPos> waterSurfaces = new ArrayList<>();
         for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
             for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
-                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
-                if (topY <= world.getBottomY()) {
+                // Use walkable ground Y (skips logs/leaves) instead of WORLD_SURFACE,
+                // which would return canopy tops inside forests and inflate the
+                // median farm Y into phantom-precipice territory.
+                int walkableY = SafePositionService.getWalkableGroundY(world, x, z);
+                if (walkableY <= world.getBottomY()) {
                     String rejectReason = "no-surface x=" + x + " z=" + z;
                     return FarmSiteAssessment.reject(null, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
                 }
-                BlockPos surface = new BlockPos(x, topY - 1, z);
+                BlockPos surface = new BlockPos(x, walkableY - 1, z);
                 BlockState surfaceState = world.getBlockState(surface);
                 if (surfaceState.isOf(Blocks.FARMLAND)) {
                     String rejectReason = "existing-farmland pos=" + surface.toShortString();
                     return FarmSiteAssessment.reject(null, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
                 }
-                if (surfaceState.isOf(Blocks.WATER)) {
+                // Water check: getWalkableGroundY skips water (no collision),
+                // so the block AT walkableY is what sits directly above the
+                // first solid block — water there means submerged column.
+                BlockState aboveSurface = world.getBlockState(new BlockPos(x, walkableY, z));
+                if (aboveSurface.isOf(Blocks.WATER) || surfaceState.isOf(Blocks.WATER)) {
                     waterSurfaces.add(surface);
                     continue;
                 }
@@ -1077,10 +1084,14 @@ public class FarmSkill implements Skill {
         sortedY.sort(Integer::compareTo);
         int targetY = selectFarmTargetY(sortedY, manualPlacement);
         BlockPos centerGround = new BlockPos(footprint.centerTarget().getX(), targetY, footprint.centerTarget().getZ());
-        if (hasSimplePrecipice(world, centerGround)) {
-            String rejectReason = "precipice-near-center pos=" + centerGround.toShortString();
-            return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
-        }
+        // Note: the hasSimplePrecipice guard was removed here. The per-column
+        // grade-cut-too-deep / fill-too-deep loop below is strictly better:
+        // it examines every footprint column explicitly, whereas the precipice
+        // check sampled a 7x7 area around center at centerGround.y and
+        // false-positived whenever center Y was inflated by upstream canopy
+        // detection (fixed by the walkable-ground-Y change above). The two
+        // checks were redundant for footprint-sized farms; the per-column
+        // check is the authoritative one.
 
         if (!manualPlacement && !waterSurfaces.isEmpty()) {
             String rejectReason = "water-surface pos=" + waterSurfaces.get(0).toShortString();
@@ -1102,7 +1113,13 @@ public class FarmSkill implements Skill {
                     return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
                 }
                 int diff = surfaceY - targetY;
-                BlockState topState = world.getBlockState(new BlockPos(x, world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z) - 1, z));
+                // Check what's sitting on top of the walkable ground: WORLD_SURFACE
+                // would see canopy tops in a forest. getWalkableGroundY skips
+                // logs/leaves, so the block at walkableY is what sits directly
+                // above the first solid column block — water there means the
+                // column is underwater.
+                int columnWalkableY = SafePositionService.getWalkableGroundY(world, x, z);
+                BlockState topState = world.getBlockState(new BlockPos(x, columnWalkableY, z));
                 boolean waterSurface = topState.isOf(Blocks.WATER);
                 if (diff > maxCutDepth) {
                     String rejectReason = "grade-cut-too-deep pos=" + columnBase.toShortString() + " diff=" + diff + " targetY=" + targetY;
@@ -1921,13 +1938,18 @@ public class FarmSkill implements Skill {
         int maxZ = center.getZ() + 1 + HYDRATION_RADIUS;
         for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
-                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
-                if (topY <= world.getBottomY()) {
+                // Walkable ground Y — see assessFarmSite for the rationale.
+                int walkableY = SafePositionService.getWalkableGroundY(world, x, z);
+                if (walkableY <= world.getBottomY()) {
                     continue;
                 }
-                BlockPos surface = new BlockPos(x, topY - 1, z);
+                BlockPos surface = new BlockPos(x, walkableY - 1, z);
                 BlockState state = world.getBlockState(surface);
                 if (state.isAir() || state.isOf(Blocks.WATER)) {
+                    continue;
+                }
+                BlockState aboveSurface = world.getBlockState(new BlockPos(x, walkableY, z));
+                if (aboveSurface.isOf(Blocks.WATER)) {
                     continue;
                 }
                 heights.add(surface.getY());

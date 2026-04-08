@@ -2,6 +2,25 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-08 — Farm Phantom Precipice Fix
+
+- **Root cause:** `FarmSkill.assessFarmSite` used `Heightmap.Type.WORLD_SURFACE` to measure per-column surface heights. WORLD_SURFACE includes every non-air block, so in a forest it returns canopy tops (y=78–85), not walkable ground (y=65–68). The median became a mid-canopy Y, then `hasSimplePrecipice` sampled a 7×7 area at that inflated Y, found 4+ air blocks below each sample (the real ground was far below), and rejected with `precipice-near-center` — even though the actual terrain was fine and the user just wanted the bot to landscape. Same bug in `estimateFarmAreaMedianSurfaceY`.
+
+- **Fix F1 — walkable ground Y:** Replaced `world.getTopY(WORLD_SURFACE, …)` with `SafePositionService.getWalkableGroundY(world, x, z)` in `assessFarmSite`'s main column loop, its inline water-surface check, and `estimateFarmAreaMedianSurfaceY`. `getWalkableGroundY` scans down from `MOTION_BLOCKING_NO_LEAVES`, skipping logs and leaves, and returns the Y where feet stand on the first solid block. Median farm Y now reflects real ground, not canopy.
+
+- **Water detection correctness:** After Fix F1, `walkableY - 1` is the solid block (never water, since `getCollisionShape().isEmpty()` skips water). Water surface is now detected by checking the block AT `walkableY` (what sits directly above the first solid block). Both the dry/water classification at the top of `assessFarmSite` and the in-loop `waterSurface` flag were updated.
+
+- **Fix F2 — removed two redundant `hasSimplePrecipice` rejections:**
+  - Pre-assessment guard (in `execute()`) that bailed with "Unsafe drop near farm site" before any tree clearing happened.
+  - `assessFarmSite` `precipice-near-center` guard run right after `selectFarmTargetY`.
+  Both were strictly redundant with the per-column `grade-cut-too-deep` / `fill-too-deep` loop: the precipice check sampled a 3-block radius around center, which for a 10×10+ footprint lives entirely inside the footprint and is therefore already covered by the per-column loop. The per-column loop is also more honest about WHY it rejects ("I'd need to fill 6 blocks here, max is 3") vs the opaque "precipice-near-center".
+
+- **Kept:** `hasSimplePrecipice` function itself plus its use in `assessFarmWorkingGround` (staging pad / access path check) and `isUsableFarmStandingGround` (live standing-spot check). Those call sites receive specific upstream-chosen positions — after Fix F1 they operate on real-ground Ys, so they should no longer false-positive. If they still do, a follow-up can relax or remove them.
+
+- **Expected behavior:** `/bot skill farm targetX=… targetY=… targetZ=… manual=true` in a forested area should now accept the site and proceed to tree clearing + terrain prep, rather than rejecting with a phantom precipice. The bot will landscape (cut and fill up to `MANUAL_MAX_CUT_DEPTH=4` / `MAX_FILL_DEPTH=3`) and only reject if the real terrain variance actually exceeds those limits — with an honest reason string.
+
+- **Files:** `src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java`. `./gradlew build -x test` ✅.
+
 ## 2026-04-08 — Farm Tree Clearing Uses Real Woodcut
 
 - **Root cause (from 1.21.10 log 08:45–08:48):** `/bot skill farm` spent 3+ minutes clearing trees without ever actually felling one. WoodcutSkill's `isTreeWorkEnvelopeWithinBounds` required the tree's leaf envelope, expanded by `WOODCUT_LOG_SCAN_EXPANSION=4` in every direction, to fit entirely inside the caller's bounds. For a farm with a 13×10×13 AABB that rejected every oak found (16 of 16 logs → `out-of-bounds-tree-envelope`), so the farm fell back to `clearBlockingTreeBlocksLocally` — an arbitrary-order "mine any log/leaf in the box" loop with no tree topology awareness. That's where the floaters came from. Each pass also wasted ~35s in a full-region `WoodcutCleanupSkill` that had no targets to find.
