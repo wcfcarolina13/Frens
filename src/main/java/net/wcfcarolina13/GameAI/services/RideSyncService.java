@@ -284,6 +284,61 @@ public final class RideSyncService {
         clearFollowOverride(botId);
     }
 
+    /**
+     * Clear all session-scoped state. Must be called from SERVER_STOPPED so
+     * integrated-server world reloads don't carry stale tick counters across
+     * sessions. Without this, {@code cooldownReady} sees a
+     * {@code LAST_SYNC_TICK} saved at (say) tick 15000 while the new session's
+     * {@code server.getTicks()} starts at 0 — the cooldown check returns
+     * false forever (for ~12 minutes) and RideSync silently skips every
+     * mount attempt. That's the root cause of "bot won't mount on /follow
+     * after reload".
+     *
+     * The same ghost-tick bug affects every LAST_*_TICK, PENDING_*_TICK, and
+     * SUPPRESS_UNTIL_TICK map in this service, so clear them all.
+     */
+    public static void resetSession() {
+        SYNC_COMMANDER.clear();
+        SYNC_VEHICLE.clear();
+        LAST_SYNC_TICK.clear();
+        LAST_MOUNT_NOTICE_TICK.clear();
+        LAST_LEASH_NOTICE_TICK.clear();
+        LAST_LEASH_ATTEMPT_TICK.clear();
+        LEASH_TARGET.clear();
+        LAST_LEASH_DIST.clear();
+        LEASH_PICKUP_START_TICK.clear();
+        LEASH_PICKUP_TARGET.clear();
+        LAST_PREFERRED_REJECT_LOG_TICK.clear();
+        LAST_PREPARE_REJECT_LOG_TICK.clear();
+        LAST_DEBUG_TICK.clear();
+        LAST_ACTION_DEBUG_TICK.clear();
+        LAST_COMMANDER_BOAT_LOST_TICK.clear();
+        LAST_COMMANDER_MINECART_LOST_TICK.clear();
+        LAST_BOT_BOAT.clear();
+        LAST_BOT_MINECART.clear();
+        PENDING_BOAT_BREAK.clear();
+        PENDING_BOAT_BREAK_START.clear();
+        PENDING_BOAT_BREAK_LAST_POS.clear();
+        PENDING_BOAT_BREAK_REMOVED_TICK.clear();
+        LAST_BOAT_BREAK_TICK.clear();
+        LAST_BOAT_BREAK_COLLECT_TICK.clear();
+        PENDING_BOAT_PLACE_POS.clear();
+        PENDING_BOAT_PLACE_TICK.clear();
+        PENDING_MINECART_BREAK.clear();
+        PENDING_MINECART_BREAK_START.clear();
+        LAST_MINECART_BREAK_TICK.clear();
+        PENDING_MINECART_PLACE_POS.clear();
+        PENDING_MINECART_PLACE_TICK.clear();
+        LAST_RIDE_VEHICLE_POS.clear();
+        RIDE_STAGNANT_TICKS.clear();
+        LAST_RIDE_ESCAPE_LOG_TICK.clear();
+        LAST_RIDE_MOUNT_TICK.clear();
+        LAST_RIDE_DISMOUNT_TICK.clear();
+        BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.clear();
+        FOLLOW_OVERRIDE_TARGET.clear();
+        FOLLOW_OVERRIDE_UNTIL_TICK.clear();
+    }
+
     private static void setFollowOverride(ServerPlayerEntity bot, MinecraftServer server, Vec3d targetPos) {
         if (bot == null || server == null || targetPos == null) {
             return;

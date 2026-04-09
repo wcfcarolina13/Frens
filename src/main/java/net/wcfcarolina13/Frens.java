@@ -792,6 +792,13 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.resetSession();
             // Clear Soul of Ender timed buffs.
             net.wcfcarolina13.GameAI.services.SoulOfEnderService.resetSession();
+            // Clear RideSync tick-based state. Integrated-server world reloads
+            // reset server.getTicks() to 0, but static tick-based cooldown
+            // maps in RideSyncService would otherwise retain huge tick values
+            // from the previous session — causing cooldownReady() to return
+            // false for ~12 minutes and silently blocking every /follow
+            // mount attempt after reload.
+            net.wcfcarolina13.GameAI.services.RideSyncService.resetSession();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
