@@ -1820,6 +1820,21 @@ public final class RideSyncService {
 
         Entity vehicle = bot.getVehicle();
         if (!isFollowingCommander(bot, commander)) {
+            // Only force-dismount if RideSync was the one that put the bot on
+            // this vehicle in the first place. SYNC_COMMANDER is populated by
+            // RideSync's own mount logic (tryMount success paths) and cleared
+            // on server stop — so after a rejoin where the bot was restored
+            // to its saved mount, this map is empty and we MUST leave the bot
+            // alone. Previously this branch aggressively dismounted any
+            // vehicle-holding bot whose mode != FOLLOW, which dismounted
+            // just-rejoined bots one tick after their mount was restored
+            // (because bot.mode defaults to IDLE on fresh State entries).
+            UUID syncOwner = SYNC_COMMANDER.get(bot.getUuid());
+            if (syncOwner == null) {
+                // Not owned by RideSync — leave the bot mounted. Let the user
+                // issue /bot stop or /bot come if they want manual dismount.
+                return;
+            }
             bot.stopRiding();
             if (vehicle != null) {
                 maybeQueueBoatBreak(bot, vehicle, commander);

@@ -474,16 +474,19 @@ public final class MountPersistenceService {
                     bot.getName().getString(), mount.getUuid());
             return false;
         }
-        // Teleport the bot onto the mount before calling startRiding so a
-        // large bot-mount distance doesn't cause the mount to snap toward the
-        // bot (or vice versa) when attaching the passenger relationship.
+        // Only remount if the bot is within normal mount-reach distance of
+        // the horse (5 blocks, roughly the vanilla interact reach). When the
+        // saved bot position is further — e.g. an older save that recorded
+        // wasMounted=false with the bot and horse separated — teleporting the
+        // bot across the map to the horse is jarring for the player. Instead,
+        // skip the remount and let RideSync handle it via the normal mount
+        // logic when the user next issues /follow (or commander mounts).
         double distSq = bot.squaredDistanceTo(mount);
-        if (distSq > 9.0D) {
-            LOGGER.info("Mount rejoin: bot={} mount={} distance={} — teleporting bot to mount for clean remount",
+        if (distSq > 25.0D) {
+            LOGGER.info("Mount rejoin skip: bot={} mount={} distance={} — too far, RideSync will handle remount on /follow",
                     bot.getName().getString(), mount.getUuid(),
                     String.format(java.util.Locale.ROOT, "%.2f", Math.sqrt(distSq)));
-            bot.refreshPositionAndAngles(mount.getX(), mount.getY(), mount.getZ(),
-                    bot.getYaw(), bot.getPitch());
+            return false;
         }
         try {
             boolean ok = bot.startRiding(mount, true, true);
