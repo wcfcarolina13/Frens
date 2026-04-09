@@ -75,6 +75,21 @@ public final class LeashToFenceSkill implements Skill {
             return SkillExecutionResult.failure("No world available.");
         }
 
+        // If the bot is currently mounted, the user is asking it to dismount.
+        // The /bot leash command (invoked by the ' keybind's dismount-and-
+        // tether HUD path) runs through a dismount-first flow that tries to
+        // fence-tether or hold-lead the horse, but ALWAYS dismounts the bot
+        // regardless of whether securing succeeded. The user's explicit
+        // command overrides the stay-mounted safety net: they may be inside
+        // a fenced pen, without a lead, and don't care about wandering.
+        if (bot.hasVehicle()) {
+            String message = net.wcfcarolina13.GameAI.services.RideSyncService.forceDismountAndSecure(bot);
+            if (message != null) {
+                ChatUtils.sendChatMessages(source, message);
+                return SkillExecutionResult.success(message);
+            }
+        }
+
         // Find all animals the bot is currently leashing
         List<MobEntity> leashedAnimals = findLeashedAnimals(bot, world);
         

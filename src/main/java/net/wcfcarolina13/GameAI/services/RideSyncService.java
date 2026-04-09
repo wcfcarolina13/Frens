@@ -3367,6 +3367,58 @@ public final class RideSyncService {
         return result;
     }
 
+    /**
+     * User-commanded dismount (from the leash keybind / HUD hint when the bot
+     * is mounted). Unlike {@link #trySecureMountBeforeDismount} — which leaves
+     * the bot mounted when securing fails so the disconnect flow can preserve
+     * the horse — this path ALWAYS dismounts. The user's explicit command
+     * overrides the "stay mounted safety net": they may be inside a fenced
+     * pen, don't have a lead, and don't care about wandering.
+     *
+     * Also clears RideSync's SYNC_COMMANDER/VEHICLE tracking so the very next
+     * RideSync tick doesn't immediately re-mount the bot on the same horse
+     * just because the commander is still riding a horse of the same category.
+     *
+     * @return a user-facing sentence describing what happened, or null if the
+     *         bot wasn't actually mounted on anything.
+     */
+    public static String forceDismountAndSecure(ServerPlayerEntity bot) {
+        if (bot == null || !bot.hasVehicle()) {
+            return null;
+        }
+        Entity vehicle = bot.getVehicle();
+        String botName = bot.getName().getString();
+
+        SecureResult result = SecureResult.NOT_APPLICABLE;
+        if (vehicle instanceof MobEntity mob && mob.canBeLeashed()) {
+            result = secureMountIfPossible(bot, vehicle);
+        }
+
+        bot.stopRiding();
+
+        // Prevent RideSync's very next tick from re-mounting the bot just
+        // because the commander happens to be riding a same-category vehicle.
+        SYNC_COMMANDER.remove(bot.getUuid());
+        SYNC_VEHICLE.remove(bot.getUuid());
+        clearRideStuck(bot);
+
+        if (vehicle != null) {
+            MountPersistenceService.recordMount(bot, vehicle, false);
+        }
+
+        LOGGER.info("forceDismountAndSecure: bot={} vehicle={} result={}",
+                botName,
+                vehicle != null ? vehicle.getType().toString() : "<null>",
+                result);
+
+        return switch (result) {
+            case TETHERED_TO_FENCE -> botName + " dismounted and tied the horse to a fence.";
+            case HELD_BY_BOT       -> botName + " dismounted and is holding the lead on the horse.";
+            case NOT_APPLICABLE    -> botName + " dismounted.";
+            case CANNOT_SECURE     -> botName + " dismounted (no lead available to tether the horse).";
+        };
+    }
+
     private static BlockPos findNearbyFence(ServerWorld world, BlockPos origin, int radius) {
         if (world == null || origin == null) {
             return null;
