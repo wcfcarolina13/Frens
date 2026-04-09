@@ -739,16 +739,18 @@ public class Frens implements ModInitializer {
                 }
                 if (bot.hasVehicle()) {
                     net.minecraft.entity.Entity vehicle = bot.getVehicle();
-                    // Same secure-before-dismount pattern as BotPersistenceService
-                    // — stay mounted if we can't leash or fence-tether, so the
-                    // horse survives the server shutdown.
+                    // See BotPersistenceService.onBotDisconnect for rationale.
+                    // Vanilla RootVehicle isn't written for fake players —
+                    // always dismount + mark persistent so the horse lives in
+                    // chunk data, and record wasMounted for rejoin remount.
+                    if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
+                        mob.setPersistent();
+                    }
                     net.wcfcarolina13.GameAI.services.RideSyncService.SecureResult secureResult =
                             net.wcfcarolina13.GameAI.services.RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
-                    boolean staysMounted = secureResult == net.wcfcarolina13.GameAI.services.RideSyncService.SecureResult.CANNOT_SECURE;
-                    if (!staysMounted) {
-                        bot.stopRiding();
-                    }
-                    net.wcfcarolina13.GameAI.services.MountPersistenceService.recordMount(bot, vehicle, staysMounted);
+                    boolean shouldRemountOnRejoin = secureResult == net.wcfcarolina13.GameAI.services.RideSyncService.SecureResult.CANNOT_SECURE;
+                    bot.stopRiding();
+                    net.wcfcarolina13.GameAI.services.MountPersistenceService.recordMount(bot, vehicle, shouldRemountOnRejoin);
                 } else {
                     net.wcfcarolina13.GameAI.services.RideSyncService.secureLeashedMountOnDisconnect(bot);
                 }

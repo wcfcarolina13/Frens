@@ -214,16 +214,28 @@ public final class BotPersistenceService {
         }
         if (bot.hasVehicle()) {
             Entity vehicle = bot.getVehicle();
-            // Try to secure BEFORE dismounting. If securing fails (no lead, no
-            // fence, no craftable materials), keep the bot mounted so the
-            // horse doesn't wander off during the disconnect. Rejoin remount
-            // (MountPersistenceService.tryRemountAfterRejoin) picks it back up.
-            RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
-            boolean staysMounted = secureResult == RideSyncService.SecureResult.CANNOT_SECURE;
-            if (!staysMounted) {
-                bot.stopRiding();
+            // IMPORTANT: always dismount before save. The previous design kept
+            // the bot mounted on CANNOT_SECURE, relying on vanilla's
+            // RootVehicle NBT tag to restore the mount relationship. That tag
+            // is NOT written for fake players by vanilla's savePlayerData —
+            // verified by scanning the saved .dat file: no RootVehicle key is
+            // present even when the bot is still mounted at save time.
+            // Result: the horse falls through both save paths (chunk data
+            // skips entities with player passengers; player NBT doesn't write
+            // the vehicle) and DISAPPEARS on reload.
+            //
+            // Correct approach: mark the mount persistent so chunks keep it,
+            // dismount the bot so the horse becomes a normal world entity
+            // saved to chunk data, and record wasMounted=true when we
+            // couldn't secure so MountPersistenceService.tryRemountAfterRejoin
+            // puts the bot back on the horse on next join.
+            if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
+                mob.setPersistent();
             }
-            MountPersistenceService.recordMount(bot, vehicle, staysMounted);
+            RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
+            boolean shouldRemountOnRejoin = (secureResult == RideSyncService.SecureResult.CANNOT_SECURE);
+            bot.stopRiding();
+            MountPersistenceService.recordMount(bot, vehicle, shouldRemountOnRejoin);
         } else {
             RideSyncService.secureLeashedMountOnDisconnect(bot);
         }
@@ -397,13 +409,15 @@ public final class BotPersistenceService {
             }
             if (player.hasVehicle()) {
                 Entity vehicle = player.getVehicle();
-                // Same secure-before-dismount pattern as onBotDisconnect.
-                RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(player, vehicle);
-                boolean staysMounted = secureResult == RideSyncService.SecureResult.CANNOT_SECURE;
-                if (!staysMounted) {
-                    player.stopRiding();
+                // See onBotDisconnect for rationale — always dismount, mark
+                // persistent, record wasMounted for rejoin remount.
+                if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
+                    mob.setPersistent();
                 }
-                MountPersistenceService.recordMount(player, vehicle, staysMounted);
+                RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(player, vehicle);
+                boolean shouldRemountOnRejoin = (secureResult == RideSyncService.SecureResult.CANNOT_SECURE);
+                player.stopRiding();
+                MountPersistenceService.recordMount(player, vehicle, shouldRemountOnRejoin);
             } else {
                 RideSyncService.secureLeashedMountOnDisconnect(player);
             }
