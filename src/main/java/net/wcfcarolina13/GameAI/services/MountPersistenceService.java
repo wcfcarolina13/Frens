@@ -414,19 +414,23 @@ public final class MountPersistenceService {
             heldRestored = true;
             LOGGER.info("Mount rejoin: restoring held-by-bot state for bot={} mount={}",
                     alias, mount.getUuid());
+        } else if (mount instanceof MobEntity mob && mob.isLeashed()
+                && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
+            // Horse is already tied to a fence — it's not going anywhere,
+            // so the bot has no reason to re-mount it on rejoin. The
+            // stay-mounted fallback from the previous session's disconnect
+            // was the "no lead, no fence, stay mounted" branch, but by the
+            // time we rejoin the horse may already be fence-tethered by
+            // vanilla leash persistence (e.g. an older save that predates
+            // the current disconnect flow, or a fence that was placed
+            // nearby while the session was offline). In that case skip
+            // the remount entirely; the bot stays on foot next to its
+            // already-secured horse.
+            LOGGER.info("Mount rejoin skip: bot={} mount={} already fence-tethered — no remount needed",
+                    alias, mount.getUuid());
         } else {
-            // Normal rejoin path: try to put the bot back on the saved mount.
+            // Normal rejoin path: put the bot back on the saved mount.
             remounted = tryRemountAfterRejoin(bot, mount);
-            // If the remount succeeded but the horse is still tethered to a
-            // fence from a previous disconnect session (e.g. save files that
-            // pre-date the stay-mounted fallback), drop that tether so the
-            // bot can ride normally. Leash bookkeeping resumes on the next
-            // dismount.
-            if (remounted && mount instanceof MobEntity mob && mob.isLeashed()
-                    && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
-                LOGGER.info("Mount rejoin: dropping fence tether on remounted mount {}", mount.getUuid());
-                mob.detachLeash();
-            }
         }
 
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
