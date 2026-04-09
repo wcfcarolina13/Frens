@@ -3033,15 +3033,15 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        // Don't overlap with resume decision hint
-        int yOffset = resumeDecisionActive ? 60 : 10;
-
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
         int maxW = Math.max(w1, w2);
         int x = (context.getScaledWindowWidth() - maxW) / 2;
-        int y = yOffset;
         int boxHeight = client.textRenderer.fontHeight * 2 + 6;
+        // Participate in the top-tip lane reservation system so the leash
+        // HUD stacks cleanly below other CENTER hints ("Jake is following",
+        // "Looking at Jake", etc.) instead of overlapping them at y=10.
+        int y = reserveTopTipY(TopTipLane.CENTER, boxHeight + 12);
 
         // Draw a semi-transparent dark background
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxHeight, 0xAA2a4a2a);

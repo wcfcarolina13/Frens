@@ -3326,7 +3326,9 @@ public final class RideSyncService {
             maybeAnnounceLeashIssue(bot, "I couldn't secure the lead on the horse.");
             return SecureResult.CANNOT_SECURE;
         }
-        BlockPos fencePos = findNearbyFence(world, vehicle.getBlockPos(), 5);
+        // 10-block radius: wide enough to catch fences just outside a small
+        // pen corner but still close enough to be "walking distance".
+        BlockPos fencePos = findNearbyFence(world, vehicle.getBlockPos(), 10);
         if (fencePos == null) {
             fencePos = tryPlaceFenceNear(bot, vehicle.getBlockPos());
         }
@@ -3832,6 +3834,14 @@ public final class RideSyncService {
             return;
         }
         if (mob.isLeashed() && mob.getLeashHolder() == bot) {
+            // Lead is attached. Opportunistically look for a nearby fence to
+            // tether the animal to, so walking past a fence while holding a
+            // lead drops the animal there instead of dragging it forever.
+            // Only fires when LEASH_TARGET is set (the bot is in the
+            // HELD_BY_BOT fallback state from a prior dismount that failed
+            // to find a fence); that's the exact scenario where the user
+            // wants opportunistic tethering.
+            maybeOpportunisticallyTether(bot, mob);
             return;
         }
         if (distSq > LEASH_KEEP_RANGE_SQ) {
@@ -3851,6 +3861,57 @@ public final class RideSyncService {
             return;
         }
         BotActions.interactEntity(bot, mob, Hand.MAIN_HAND);
+    }
+
+    /**
+     * When the bot is holding a lead on {@code mob} and walks within reach of
+     * a fence block, tie the lead off to it. Fires once per ~20 ticks per bot
+     * (shares the LAST_LEASH_ATTEMPT_TICK throttle) so a quick walk-by has
+     * time to catch at least one tick where the fence is in range.
+     *
+     * Leaves the animal at the fence; the bot continues whatever it was
+     * doing (typically following the commander).
+     */
+    private static void maybeOpportunisticallyTether(ServerPlayerEntity bot, MobEntity mob) {
+        if (bot == null || mob == null) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return;
+        }
+        long now = server.getTicks();
+        long lastAttempt = LAST_LEASH_ATTEMPT_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (now - lastAttempt < LEASH_ATTEMPT_COOLDOWN_TICKS) {
+            return;
+        }
+        // Scan around the bot's current position, not the mob's — the bot is
+        // the one doing the fence interact, so "walking past a fence" means
+        // "there's a fence near the bot". 5 blocks = vanilla interact reach.
+        BlockPos fencePos = findNearbyFence(world, bot.getBlockPos(), 5);
+        if (fencePos == null) {
+            return;
+        }
+        LAST_LEASH_ATTEMPT_TICK.put(bot.getUuid(), now);
+        selectLeadOrSafeHand(bot);
+        interactFence(bot, fencePos);
+        // Verify the lead transferred to the fence. If so, clear LEASH_TARGET;
+        // the bot no longer considers itself holding this mob on a lead.
+        if (!mob.isLeashed() || mob.getLeashHolder() != bot) {
+            LEASH_TARGET.remove(bot.getUuid());
+            LAST_LEASH_DIST.remove(bot.getUuid());
+            maybeAnnounceLeashIssue(bot, pickRandom(
+                    "Tied the horse to a fence.",
+                    "Tethered the animal to a nearby fence.",
+                    "Left the horse tied up here."));
+            LOGGER.info("Opportunistic tether: bot={} tied {} to fence at {}",
+                    bot.getName().getString(),
+                    mob.getUuid(),
+                    fencePos.toShortString());
+        }
     }
 
     private static void maybeAnchorLeashedMount(ServerPlayerEntity bot, ServerPlayerEntity commander) {
