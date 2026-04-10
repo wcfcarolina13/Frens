@@ -135,6 +135,7 @@ public final class NavigationArtifactService {
         public String ownerUuid;
         public String mountEntityTypeId;
         public double travelDistance;
+        public boolean magicTravel;
     }
 
     private static Path travelFile() {
@@ -410,7 +411,8 @@ public final class NavigationArtifactService {
     /** Tracks a bot that is currently in transit (removed from world, awaiting respawn). */
     public record PendingTravel(UUID botUuid, String botAlias, BlockPos destination,
                                 RegistryKey<World> dimension, long departureTick, long arrivalTick,
-                                UUID ownerUuid, String mountEntityTypeId, double travelDistance) {}
+                                UUID ownerUuid, String mountEntityTypeId, double travelDistance,
+                                boolean magicTravel) {}
 
     /** Bots currently in transit, keyed by bot UUID. */
     private static final Map<UUID, PendingTravel> PENDING_TRAVELS = new ConcurrentHashMap<>();
@@ -496,7 +498,7 @@ public final class NavigationArtifactService {
                                              String botAlias, BlockPos destination,
                                              RegistryKey<World> dimension, int delayTicks,
                                              UUID ownerUuid) {
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false, false);
     }
 
     /**
@@ -507,7 +509,7 @@ public final class NavigationArtifactService {
                                                String botAlias, BlockPos destination,
                                                RegistryKey<World> dimension, int delayTicks,
                                                UUID ownerUuid) {
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, true, true, false);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, true, true, false, false);
     }
 
     /**
@@ -521,7 +523,19 @@ public final class NavigationArtifactService {
         double distance = bot.getBlockPos().getManhattanDistance(destination);
         boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(dimension);
         int delayTicks = calculateDelayTicks(distance, crossDim, 3.0);
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, true);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, true, false);
+    }
+
+    /**
+     * Magic travel path: spells that consume reagents (ender pearls, chorus fruit)
+     * bypass food requirements entirely. The reagent cost IS the price.
+     * Hunger drain on arrival is also skipped.
+     */
+    public static boolean beginMagicTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                           String botAlias, BlockPos destination,
+                                           RegistryKey<World> dimension, int delayTicks,
+                                           UUID ownerUuid) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false, true);
     }
 
     /**
@@ -552,12 +566,12 @@ public final class NavigationArtifactService {
             return false;
         }
         boolean primaryStarted = beginDelayedTravel(server, primaryBot, primaryAlias, primaryDestination, primaryDimension,
-                delayTicks, ownerUuid, true, true, false);
+                delayTicks, ownerUuid, true, true, false, false);
         if (!primaryStarted) {
             return false;
         }
         boolean secondaryStarted = beginDelayedTravel(server, secondaryBot, secondaryAlias, secondaryDestination, secondaryDimension,
-                delayTicks, ownerUuid, true, true, false);
+                delayTicks, ownerUuid, true, true, false, false);
         return secondaryStarted;
     }
 
@@ -565,7 +579,7 @@ public final class NavigationArtifactService {
                                               String botAlias, BlockPos destination,
                                               RegistryKey<World> dimension, int delayTicks,
                                               UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
-                                              boolean skipArtifactGate) {
+                                              boolean skipArtifactGate, boolean magicTravel) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return false;
@@ -599,26 +613,31 @@ public final class NavigationArtifactService {
             }
 
             // ── Food safety gate ─────────────────────────────────────────
-            // Budget = current food level + nutrition from all food items in inventory.
-            // The bot could eat before/during travel, so inventory food counts toward the budget.
-            double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
-            int currentFood = bot.getHungerManager().getFoodLevel();
-            int inventoryNutrition = 0;
-            for (int i = 0; i < bot.getInventory().size(); i++) {
-                ItemStack stack = bot.getInventory().getStack(i);
-                if (stack != null && !stack.isEmpty()) {
-                    FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
-                    if (food != null) {
+            // Magic travel (spells with reagent cost) bypasses food requirements entirely.
+            if (!magicTravel) {
+                // Budget = current food level + nutrition from all usable food items in inventory.
+                // The bot could eat before/during travel, so inventory food counts toward the budget.
+                double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
+                int currentFood = bot.getHungerManager().getFoodLevel();
+                int inventoryNutrition = 0;
+                for (int i = 0; i < bot.getInventory().size(); i++) {
+                    ItemStack stack = bot.getInventory().getStack(i);
+                    if (HealingService.isTravelUsableFood(stack)) {
+                        FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
                         inventoryNutrition += food.nutrition() * stack.getCount();
                     }
                 }
-            }
-            int totalBudget = currentFood + inventoryNutrition;
-            int projectedFood = totalBudget - (int) Math.ceil(hungerCost);
-            if (projectedFood < MIN_POST_TRAVEL_FOOD) {
-                notifyOwner(server, ownerUuid,
-                        "\u00A7c" + botAlias + " doesn't have enough energy to travel that far. Feed them first.\u00A7r");
-                return false;
+                int totalBudget = currentFood + inventoryNutrition;
+                int projectedFood = totalBudget - (int) Math.ceil(hungerCost);
+                if (projectedFood < MIN_POST_TRAVEL_FOOD) {
+                    int shortfall = (int) Math.ceil(hungerCost) + MIN_POST_TRAVEL_FOOD - totalBudget;
+                    int steakEstimate = (int) Math.ceil(shortfall / 8.0);
+                    notifyOwner(server, ownerUuid,
+                            "\u00A7e" + botAlias + " needs provisions for this journey \u2014 roughly "
+                            + steakEstimate + " cooked steak worth of food (~"
+                            + shortfall + " hunger points). Pack extra before sending them off.\u00A7r");
+                    return false;
+                }
             }
 
             // ── Underground gate (requires Map+Compass or Tier 2+) ──────
@@ -735,7 +754,7 @@ public final class NavigationArtifactService {
         long arrival = now + delayTicks;
 
         PendingTravel travel = new PendingTravel(botUuid, botAlias, destination, dimension,
-                now, arrival, ownerUuid, mountEntityTypeId, travelDistance);
+                now, arrival, ownerUuid, mountEntityTypeId, travelDistance, magicTravel);
         PENDING_TRAVELS.put(botUuid, travel);
 
         // Record cooldown timestamp for this bot.
@@ -1031,8 +1050,9 @@ public final class NavigationArtifactService {
         // ── Hunger drain proportional to travel distance ─────────────
         // Direct food/saturation set — drain food level FIRST (visible on HUD), then saturation.
         // This ensures the player sees the hunger bar drop on arrival.
+        // Magic travel (spell-based) skips hunger drain — reagent cost is the price.
         double dist = ps.travel().travelDistance();
-        if (dist > 0) {
+        if (dist > 0 && !ps.travel().magicTravel()) {
             double hungerCost = dist / HUNGER_DISTANCE_DIVISOR;
             int foodBefore = bot.getHungerManager().getFoodLevel();
             float satBefore = bot.getHungerManager().getSaturationLevel();
@@ -1204,7 +1224,7 @@ public final class NavigationArtifactService {
                     botAlias, returnDest.toShortString(), returnLabel, (int) dist, delayTicks / 20);
             beginDelayedTravel(server, bot, botAlias, returnDest,
                     ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid(),
-                    true /* skipGates: return trip after collection */, false, false);
+                    true /* skipGates: return trip after collection */, false, false, false);
             notifyOwner(server, action.ownerUuid(),
                     "\u00A7e" + botAlias + " is returning to " + returnLabel + " (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
         }
@@ -1253,6 +1273,7 @@ public final class NavigationArtifactService {
                     s.ownerUuid = t.ownerUuid() != null ? t.ownerUuid().toString() : null;
                     s.mountEntityTypeId = t.mountEntityTypeId();
                     s.travelDistance = t.travelDistance();
+                    s.magicTravel = t.magicTravel();
                     list.add(s);
                 }
 
@@ -1301,7 +1322,8 @@ public final class NavigationArtifactService {
                         long newArrival = now + remainingTicks;
 
                         PendingTravel travel = new PendingTravel(botUuid, s.botAlias, dest, dim,
-                                now, newArrival, ownerUuid, s.mountEntityTypeId, s.travelDistance);
+                                now, newArrival, ownerUuid, s.mountEntityTypeId, s.travelDistance,
+                                s.magicTravel);
                         PENDING_TRAVELS.put(botUuid, travel);
 
                         LOGGER.info("Restored pending travel for '{}': destination {} in {}, ETA {} ticks",
