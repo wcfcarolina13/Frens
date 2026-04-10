@@ -21,6 +21,7 @@ import net.wcfcarolina13.GameAI.skills.impl.FortifyMoatSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FortifyVillageSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FlowerPickSkill;
 import net.wcfcarolina13.GameAI.skills.impl.GrassSeedSkill;
+import net.wcfcarolina13.GameAI.skills.impl.HoneyCollectSkill;
 import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
 import net.wcfcarolina13.GameAI.skills.impl.LeafLitterSkill;
 import net.wcfcarolina13.GameAI.skills.impl.MiningSkill;
@@ -78,6 +79,7 @@ public final class SkillManager {
         register(new MushroomForageSkill());
         register(new FortifyVillageSkill());
         register(new FortifyMoatSkill());
+        register(new HoneyCollectSkill());
         DebugFileLogger.log("SkillManager.staticInit end");
     }
 

@@ -526,6 +526,8 @@ public final class BotIdleHobbiesService {
         boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
         boolean inLeafLitterBiome = canCollectLeafLitter && isLeafLitterFriendlyBiome(world, bot.getBlockPos());
         boolean leafLitterSurvival = canCollectLeafLitter && needsLeafLitterForSurvival(bot, world);
+        boolean canCollectHoney = (hasItem(bot, Items.SHEARS) || hasItem(bot, Items.GLASS_BOTTLE))
+                && hasNearbyHarvestableBeehive(world, bot.getBlockPos(), 16);
 
         // Build weighted options so available hobbies actually trigger instead of idling on random misses.
         ArrayList<String> weighted = new ArrayList<>();
@@ -584,6 +586,9 @@ public final class BotIdleHobbiesService {
             weighted.add("leaf_litter");
         } else if (inLeafLitterBiome) {
             weighted.add("leaf_litter");
+        }
+        if (canCollectHoney) {
+            weighted.add("honey_collect");
         }
         if (weighted.isEmpty()) {
             return null;
@@ -683,6 +688,22 @@ public final class BotIdleHobbiesService {
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (!stack.isEmpty() && stack.isOf(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNearbyHarvestableBeehive(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) return false;
+        int r = Math.max(6, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -4, -r), origin.add(r, 4, r))) {
+            if (!world.isChunkLoaded(pos)) continue;
+            var state = world.getBlockState(pos);
+            if (!BotBeehiveRegistryService.isBeehiveBlock(state)) continue;
+            if (state.get(net.minecraft.state.property.Properties.HONEY_LEVEL) != 5) continue;
+            net.minecraft.block.entity.BlockEntity be = world.getBlockEntity(pos);
+            if (be instanceof net.minecraft.block.entity.BeehiveBlockEntity hive && hive.isSmoked()) {
                 return true;
             }
         }
@@ -928,6 +949,11 @@ public final class BotIdleHobbiesService {
             if (forestBiome) {
                 params.put("forest_biome", true);
             }
+        }
+
+        if ("honey_collect".equalsIgnoreCase(runSkillName)) {
+            params.put("count", 1 + RNG.nextInt(3)); // 1-3 hives
+            params.put("radius", 16);
         }
 
         if ("mushrooms".equalsIgnoreCase(runSkillName)) {
