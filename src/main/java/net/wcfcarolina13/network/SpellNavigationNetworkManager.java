@@ -145,7 +145,7 @@ public final class SpellNavigationNetworkManager {
         boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(targetDim);
         int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
 
-        NavigationArtifactService.beginDelayedTravel(
+        NavigationArtifactService.beginMagicTravel(
                 server, bot, bot.getName().getString(), goal, targetDim, delayTicks, commander.getUuid());
 
         int sec = Math.max(1, delayTicks / 20);
