@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-10 — Idle honey collection hobby
+
+- New idle hobby: `honey_collect`. Bot harvests honey from nearby beehives/bee nests when idle.
+- Only harvests when `honey_level == 5` (full hive) AND `BeehiveBlockEntity.isSmoked()` is true (campfire within 5 blocks below, handles carpet/slabs between).
+- Prefers glass bottles (-> honey bottle food item) over shears (-> 3 honeycombs crafting material).
+- Never breaks the hive. Never harvests an unsmoked hive.
+- Low hobby weight — doesn't compete heavily with fishing/woodcutting/etc.
+- Deposits honeycombs and honey bottles in nearby chests after collection.
+
 ## 2026-04-10 — Fast-travel food quality & magic bypass
 
 - **PRECIOUS_FOODS classification:** Golden apple, enchanted golden apple, and golden carrot are now classified as "precious" in HealingService. They are skipped by `findCheapestSafeFood()` (normal eating) and excluded from the fast-travel food budget. At starvation emergency, the bot will eat rotten flesh first, then precious foods as a last resort (expanded `findDesperateFood()`).
