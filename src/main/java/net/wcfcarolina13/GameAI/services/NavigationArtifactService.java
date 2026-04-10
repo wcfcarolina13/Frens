@@ -575,6 +575,125 @@ public final class NavigationArtifactService {
         return secondaryStarted;
     }
 
+    /**
+     * Extract usable food from containers (bundles, shulker boxes) into the bot's
+     * main inventory so the fast-travel food budget can account for it.
+     * Only extracts what is needed for the journey. Must be called on the server thread.
+     */
+    private static void extractFoodFromContainers(ServerPlayerEntity bot, int neededNutrition) {
+        if (neededNutrition <= 0) return;
+
+        record FoodCandidate(int invSlot, int containerIndex, double score, int nutrition,
+                             boolean isBundle) {}
+
+        List<FoodCandidate> candidates = new java.util.ArrayList<>();
+
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+
+            // Scan bundles
+            var bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                int idx = 0;
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (HealingService.isTravelUsableFood(bundled)) {
+                        FoodComponent food = bundled.getComponents().get(DataComponentTypes.FOOD);
+                        if (food != null) {
+                            double score = food.nutrition() + (food.saturation() * 2.0);
+                            candidates.add(new FoodCandidate(slot, idx, score,
+                                    food.nutrition() * bundled.getCount(), true));
+                        }
+                    }
+                    idx++;
+                }
+            }
+
+            // Scan shulker boxes (items with CONTAINER component on a ShulkerBoxBlock item)
+            var container = stack.get(DataComponentTypes.CONTAINER);
+            if (container != null && stack.getItem() instanceof net.minecraft.item.BlockItem blockItem
+                    && blockItem.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) {
+                int idx = 0;
+                for (ItemStack contained : container.iterateNonEmpty()) {
+                    if (HealingService.isTravelUsableFood(contained)) {
+                        FoodComponent food = contained.getComponents().get(DataComponentTypes.FOOD);
+                        if (food != null) {
+                            double score = food.nutrition() + (food.saturation() * 2.0);
+                            candidates.add(new FoodCandidate(slot, idx, score,
+                                    food.nutrition() * contained.getCount(), false));
+                        }
+                    }
+                    idx++;
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) return;
+
+        // Sort cheapest first
+        candidates.sort(java.util.Comparator.comparingDouble(FoodCandidate::score));
+
+        int extracted = 0;
+        for (FoodCandidate c : candidates) {
+            if (extracted >= neededNutrition) break;
+
+            ItemStack containerStack = bot.getInventory().getStack(c.invSlot);
+            if (containerStack.isEmpty()) continue;
+
+            ItemStack foodToMove;
+            if (c.isBundle) {
+                var bundle = containerStack.get(DataComponentTypes.BUNDLE_CONTENTS);
+                if (bundle == null) continue;
+
+                // Collect bundle contents, remove the target item
+                java.util.List<ItemStack> remaining = new java.util.ArrayList<>();
+                int idx = 0;
+                ItemStack target = ItemStack.EMPTY;
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (idx == c.containerIndex && target.isEmpty()) {
+                        target = bundled.copy();
+                    } else {
+                        remaining.add(bundled.copy());
+                    }
+                    idx++;
+                }
+                if (target.isEmpty()) continue;
+
+                // Rebuild bundle without the extracted item
+                var builder = new net.minecraft.component.type.BundleContentsComponent.Builder(
+                        net.minecraft.component.type.BundleContentsComponent.DEFAULT);
+                for (ItemStack item : remaining) {
+                    builder.add(item);
+                }
+                containerStack.set(DataComponentTypes.BUNDLE_CONTENTS, builder.build());
+                foodToMove = target;
+            } else {
+                // Shulker box extraction
+                var container = containerStack.get(DataComponentTypes.CONTAINER);
+                if (container == null) continue;
+
+                java.util.List<ItemStack> slots = new java.util.ArrayList<>();
+                container.streamNonEmpty().forEach(s -> slots.add(s.copy()));
+                if (c.containerIndex >= slots.size()) continue;
+
+                foodToMove = slots.remove(c.containerIndex);
+
+                // Rebuild container component
+                containerStack.set(DataComponentTypes.CONTAINER,
+                        net.minecraft.component.type.ContainerComponent.fromStacks(slots));
+            }
+
+            // Place in main inventory
+            if (!bot.getInventory().insertStack(foodToMove)) {
+                LOGGER.debug("Cannot extract food from container: inventory full");
+                break;
+            }
+
+            extracted += c.nutrition;
+            LOGGER.info("Extracted food from container in slot {} for fast-travel provisioning", c.invSlot);
+        }
+    }
+
     private static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
                                               String botAlias, BlockPos destination,
                                               RegistryKey<World> dimension, int delayTicks,
@@ -615,6 +734,22 @@ public final class NavigationArtifactService {
             // ── Food safety gate ─────────────────────────────────────────
             // Magic travel (spells with reagent cost) bypasses food requirements entirely.
             if (!magicTravel) {
+                // Extract food from containers (bundles, shulker boxes) if main inventory
+                // doesn't have enough for the journey.
+                double estHungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
+                int estNeeded = (int) Math.ceil(estHungerCost) + MIN_POST_TRAVEL_FOOD;
+                int mainFood = bot.getHungerManager().getFoodLevel();
+                for (int i = 0; i < bot.getInventory().size(); i++) {
+                    ItemStack s = bot.getInventory().getStack(i);
+                    if (HealingService.isTravelUsableFood(s)) {
+                        FoodComponent f = s.getComponents().get(DataComponentTypes.FOOD);
+                        if (f != null) mainFood += f.nutrition() * s.getCount();
+                    }
+                }
+                if (mainFood < estNeeded) {
+                    extractFoodFromContainers(bot, estNeeded - mainFood);
+                }
+
                 // Budget = current food level + nutrition from all usable food items in inventory.
                 // The bot could eat before/during travel, so inventory food counts toward the budget.
                 double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
