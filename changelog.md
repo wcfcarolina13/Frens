@@ -2,6 +2,37 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-10 — Fast-travel food quality & magic bypass
+
+- **PRECIOUS_FOODS classification:** Golden apple, enchanted golden apple, and golden carrot are now classified as "precious" in HealingService. They are skipped by `findCheapestSafeFood()` (normal eating) and excluded from the fast-travel food budget. At starvation emergency, the bot will eat rotten flesh first, then precious foods as a last resort (expanded `findDesperateFood()`).
+
+- **Food budget filtering:** The fast-travel food safety gate in NavigationArtifactService now uses `HealingService.isTravelUsableFood()` to exclude both forbidden (rotten flesh, poisonous potato, spider eye, pufferfish, suspicious stew) and precious foods from the nutrition budget. If a bot only has rotten flesh and golden apples, it correctly sees 0 usable travel food.
+
+- **Container food extraction:** Before the food budget is calculated, the bot now scans bundles and shulker boxes in its inventory for usable food. If the main inventory doesn't have enough, cheapest food is extracted from containers first (bundles via `BundleContentsComponent`, shulker boxes via `ContainerComponent`). Handles full inventory gracefully by skipping extraction.
+
+- **Provisions message:** The insufficient-food rejection message was rephrased from "doesn't have enough energy to travel that far. Feed them first." to a provisions-themed message with a rounded-up cooked steak estimate and hunger point shortfall (e.g., "needs provisions for this journey — roughly 3 cooked steak worth of food (~22 hunger points)").
+
+- **Magic travel bypass:** Remote Guidance spell now uses `beginMagicTravel()` which skips the food safety gate entirely and applies no hunger drain on arrival. The reagent cost (ender pearls) is the price. Cooldown and other gates remain enforced. The `magicTravel` flag is threaded through `PendingTravel` record and `SavedTravel` DTO for persistence across server restarts.
+
+## 2026-04-09 — Rejoin remount only fires when bot was actually riding
+
+- **User report:** A bot on foot, near a horse that's safely tethered to a fence, mounts the horse on world load. The user never told it to mount; it wasn't mounted at the previous session close; the horse is already safe. The bot shouldn't be interacting with the horse at all. Intent: rejoin-remount exists solely so that a bot that *was* riding at disconnect (with no way to secure the horse) stays on the horse to prevent it wandering off. Nothing else should trigger a rejoin mount.
+
+- **Log evidence (1.21.10 latest.log:566-567):**
+
+  ```text
+  Mount restore: found minecraft:horse at -1236, 69, -51
+  Mount rejoin restore: bot=jake mount=... wasMounted=false heldByBot=false remounted=true heldRestored=false
+  ```
+
+  `wasMounted=false heldByBot=false` but `remounted=true`. No "already fence-tethered" skip log was emitted between the find and the remount.
+
+- **Root cause:** [MountPersistenceService.maybeSecureOnRejoin](src/main/java/net/wcfcarolina13/GameAI/services/MountPersistenceService.java#L400) had three branches: restore-held-lead, skip-if-fence-tethered, else remount. There was no guard for `wasMounted=false && heldByBot=false` — that case fell straight through to `tryRemountAfterRejoin`. Historically (commit 6942d74, 2026-04-08) the `!wasMounted` guard was intentionally *removed* because an older save-path bug produced stale `wasMounted=false` even after rides. That bug is no longer present: the disconnect path at [Frens.java:751](src/main/java/net/wcfcarolina13/Frens.java#L751) and [BotPersistenceService.java:238](src/main/java/net/wcfcarolina13/GameAI/services/BotPersistenceService.java#L238) now deliberately writes `wasMounted=(secureResult==CANNOT_SECURE)`, so `wasMounted=true` is a reliable "must remount to keep horse from wandering" signal and `wasMounted=false` is a reliable "horse is safe or bot wasn't riding" signal. Re-gating on it is correct.
+
+- **Fix:** Added a top-level branch at the start of `maybeSecureOnRejoin`: if `!state.wasMounted() && !state.heldByBot()`, log a no-op and leave the horse completely untouched. The other branches keep their semantics unchanged — `heldByBot` still restores the leash-target relationship, fence-tether still skips the remount (for `wasMounted=true` cases where the horse got secured between save and load), and the normal remount path only fires when `wasMounted=true` and the horse isn't fence-tethered.
+
+- **Follow-up (not fixed in this commit):** The fence-tether skip inside the `wasMounted=true` branch still uses `mob.getLeashHolder() instanceof LeashKnotEntity`. When a mob is freshly loaded via chunk force-load on the same tick, its `leashData` stores an unresolved `BlockPos` and `getLeashHolder()` returns null until the mob's next `tickLeash()` runs. So a `wasMounted=true` bot next to a now-fence-tethered horse would incorrectly fall through to remount. The top-level guard added here sidesteps the issue for the user's reported case, but the latent timing bug remains for the narrow `wasMounted=true` path. Worth a follow-up with either tick-deferral or direct leash NBT inspection via a mixin accessor.
+
 ## 2026-04-08 — Irrigation Infinite Source Fix
 
 - **User report:** bot dug the 2x2 irrigation hole but only created ONE water source (in a single corner), not an infinite 2-source diagonal pair. Log at 1.21.10 12:48:59 showed `Irrigation hole filled on attempt 1 (still=1, water=4, flow=3, dry=0)` — only 1 source, but code said "filled".
