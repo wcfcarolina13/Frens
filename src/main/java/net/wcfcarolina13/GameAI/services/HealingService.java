@@ -55,7 +55,28 @@ public final class HealingService {
         "pufferfish",
         "suspicious_stew" // Can have random effects
     );
+
+    // Valuable foods the bot should preserve — only eaten at starvation emergency.
+    private static final Set<String> PRECIOUS_FOODS = Set.of(
+        "golden_apple",
+        "enchanted_golden_apple",
+        "golden_carrot"
+    );
     
+    /**
+     * Returns true if the item is edible and suitable for fast-travel provisioning
+     * (i.e., not toxic and not too precious to consume casually).
+     */
+    public static boolean isTravelUsableFood(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        FoodComponent food = getFoodComponent(stack);
+        if (food == null) return false;
+        String itemId = stack.getItem().getTranslationKey().toLowerCase(java.util.Locale.ROOT);
+        if (FORBIDDEN_FOODS.stream().anyMatch(itemId::contains)) return false;
+        if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) return false;
+        return true;
+    }
+
     private HealingService() {
     }
 
@@ -286,7 +307,12 @@ public final class HealingService {
             if (forbidden) {
                 continue;
             }
-            
+
+            // Skip precious foods (too valuable to eat casually)
+            if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) {
+                continue;
+            }
+
             // Calculate nutrition value (lower = cheaper/less valuable)
             double score = food.nutrition() + (food.saturation() * 2.0);
             
@@ -300,12 +326,12 @@ public final class HealingService {
     }
 
     /**
-     * Last-resort food search: includes rotten flesh (hunger debuff) but still
-     * excludes truly dangerous items (spider eye = poison, pufferfish = nausea+poison).
+     * Last-resort food search: first tries rotten flesh (hunger debuff), then
+     * precious foods (golden apple, golden carrot — valuable but edible).
+     * Still excludes truly dangerous items (spider eye, pufferfish, poisonous potato).
      */
     private static OptionalInt findDesperateFood(PlayerInventory inventory) {
-        // Only rotten flesh is acceptable as desperate food.
-        // Spider eye, pufferfish, poisonous potato are still too dangerous.
+        // First pass: rotten flesh (cheap, acceptable in desperation)
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) continue;
@@ -314,6 +340,18 @@ public final class HealingService {
             String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
             if (itemId.contains("rotten_flesh")) {
                 LOGGER.info("Desperate food: eating rotten flesh (slot {})", i);
+                return OptionalInt.of(i);
+            }
+        }
+        // Second pass: precious foods (golden apple, golden carrot — last resort)
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) continue;
+            FoodComponent food = getFoodComponent(stack);
+            if (food == null) continue;
+            String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) {
+                LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, i);
                 return OptionalInt.of(i);
             }
         }
