@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.skills.impl;
 
 import net.minecraft.block.entity.BeehiveBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.command.ServerCommandSource;
@@ -66,9 +67,10 @@ public final class HoneyCollectSkill implements Skill {
         int count = getIntParameter(context.parameters(), "count", DEFAULT_COUNT);
         int radius = getIntParameter(context.parameters(), "radius", DEFAULT_RADIUS);
 
-        // Determine harvest tool: prefer glass bottles (food), fall back to shears (crafting)
-        boolean hasBottles = hasItem(bot, Items.GLASS_BOTTLE);
-        boolean hasShears = hasItem(bot, Items.SHEARS);
+        // Determine harvest tool: prefer glass bottles (food), fall back to shears (crafting).
+        // Check inside bundles and shulker boxes too.
+        boolean hasBottles = hasItemIncludingContainers(bot, Items.GLASS_BOTTLE);
+        boolean hasShears = hasItemIncludingContainers(bot, Items.SHEARS);
         if (!hasBottles && !hasShears) {
             return SkillExecutionResult.failure("No glass bottles or shears available.");
         }
@@ -102,15 +104,32 @@ public final class HoneyCollectSkill implements Skill {
             // Re-validate after walking (bees may have left, honey may have been taken)
             if (!isHarvestable(world, hivePos)) continue;
 
-            // Equip the right tool and harvest
-            boolean used;
-            if (hasBottles && equipItem(bot, Items.GLASS_BOTTLE)) {
-                used = useOnHive(bot, hivePos);
-            } else if (hasShears && equipItem(bot, Items.SHEARS)) {
-                used = useOnHive(bot, hivePos);
-            } else {
+            // Determine which tool to use for this hive.
+            // Bottles do a 1:1 swap (glass bottle -> honey bottle) so no free slot needed.
+            // Shears drop 3 honeycombs on the ground — need inventory space.
+            boolean useBottle = hasBottles;
+            if (!useBottle && hasShears) {
+                // Shears path: ensure at least 1 free slot for honeycomb pickup
+                if (!hasEmptySlot(bot)) {
+                    // Try offloading to chests first
+                    depositHoneyItems(source, bot, world);
+                    if (!hasEmptySlot(bot)) {
+                        LOGGER.debug("Skipping honey harvest at {}: inventory full", hivePos.toShortString());
+                        continue;
+                    }
+                }
+            }
+
+            // Extract tool from containers if not already in flat inventory
+            net.minecraft.item.Item tool = useBottle ? Items.GLASS_BOTTLE : Items.SHEARS;
+            if (!hasItem(bot, tool)) {
+                extractItemFromContainer(bot, tool);
+            }
+            if (!equipItem(bot, tool)) {
                 continue;
             }
+
+            boolean used = useOnHive(bot, hivePos);
 
             if (used) {
                 harvested++;
@@ -127,9 +146,9 @@ public final class HoneyCollectSkill implements Skill {
                 sleepQuietly(300L);
             }
 
-            // Refresh tool availability for next iteration
-            hasBottles = hasItem(bot, Items.GLASS_BOTTLE);
-            hasShears = hasItem(bot, Items.SHEARS);
+            // Refresh tool availability for next iteration (check containers too)
+            hasBottles = hasItemIncludingContainers(bot, Items.GLASS_BOTTLE);
+            hasShears = hasItemIncludingContainers(bot, Items.SHEARS);
             if (!hasBottles && !hasShears) break;
         }
 
@@ -204,6 +223,104 @@ public final class HoneyCollectSkill implements Skill {
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (!stack.isEmpty() && stack.isOf(item)) return true;
+        }
+        return false;
+    }
+
+    /** Check flat inventory + inside bundles and shulker boxes. */
+    private static boolean hasItemIncludingContainers(ServerPlayerEntity bot, net.minecraft.item.Item item) {
+        if (hasItem(bot, item)) return true;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            // Bundles
+            var bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && bundled.isOf(item)) return true;
+                }
+            }
+            // Shulker boxes
+            var container = stack.get(DataComponentTypes.CONTAINER);
+            if (container != null && stack.getItem() instanceof net.minecraft.item.BlockItem blockItem
+                    && blockItem.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) {
+                for (ItemStack contained : container.iterateNonEmpty()) {
+                    if (contained.isOf(item)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Extract a single item from the first bundle or shulker box that contains it,
+     * placing it into the bot's main inventory.
+     */
+    private static boolean extractItemFromContainer(ServerPlayerEntity bot, net.minecraft.item.Item item) {
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+
+            // Try bundles
+            var bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                int idx = 0;
+                for (ItemStack bundled : bundle.iterate()) {
+                    if (bundled != null && bundled.isOf(item)) {
+                        // Remove from bundle, rebuild
+                        List<ItemStack> remaining = new ArrayList<>();
+                        int ri = 0;
+                        ItemStack target = ItemStack.EMPTY;
+                        for (ItemStack b : bundle.iterate()) {
+                            if (ri == idx && target.isEmpty()) {
+                                target = b.copy();
+                            } else {
+                                remaining.add(b.copy());
+                            }
+                            ri++;
+                        }
+                        if (target.isEmpty()) { idx++; continue; }
+                        var builder = new net.minecraft.component.type.BundleContentsComponent.Builder(
+                                net.minecraft.component.type.BundleContentsComponent.DEFAULT);
+                        for (ItemStack r : remaining) builder.add(r);
+                        stack.set(DataComponentTypes.BUNDLE_CONTENTS, builder.build());
+                        if (bot.getInventory().insertStack(target)) {
+                            LOGGER.debug("Extracted {} from bundle in slot {}", item, slot);
+                            return true;
+                        }
+                        return false; // inventory full
+                    }
+                    idx++;
+                }
+            }
+
+            // Try shulker boxes
+            var container = stack.get(DataComponentTypes.CONTAINER);
+            if (container != null && stack.getItem() instanceof net.minecraft.item.BlockItem blockItem
+                    && blockItem.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) {
+                List<ItemStack> slots = new ArrayList<>();
+                container.streamNonEmpty().forEach(s -> slots.add(s.copy()));
+                for (int ci = 0; ci < slots.size(); ci++) {
+                    if (slots.get(ci).isOf(item)) {
+                        ItemStack target = slots.remove(ci);
+                        stack.set(DataComponentTypes.CONTAINER,
+                                net.minecraft.component.type.ContainerComponent.fromStacks(slots));
+                        if (bot.getInventory().insertStack(target)) {
+                            LOGGER.debug("Extracted {} from shulker box in slot {}", item, slot);
+                            return true;
+                        }
+                        return false; // inventory full
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEmptySlot(ServerPlayerEntity bot) {
+        // Main inventory slots 0-35 (hotbar 0-8 + main 9-35)
+        for (int i = 0; i < 36; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) return true;
         }
         return false;
     }
