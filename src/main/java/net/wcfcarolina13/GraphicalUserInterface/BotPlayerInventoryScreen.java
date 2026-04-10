@@ -1334,33 +1334,28 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         boolean headerHover = isMouseOverTopicsHeader(mouseX, mouseY);
         int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
-        // Single "Actions" label on the left. The right-side label (previously
-        // "Open", then a duplicate "Actions") was redundant — clicking anywhere
-        // on the header row toggles the same overlay, and the hover tooltip
-        // explains what the panel opens. The Guide/Spells icon buttons are
-        // now anchored to the right edge directly via getHeaderSpellsBtnX().
-        context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
-
-        // Header label-and-icon pairs laid out right-to-left:
-        //   [Actions ...................  Guide [📘]  Spells [✦]]
+        // Header labels laid out right-to-left, all right-aligned:
+        //   [....................  Actions  Guide [📘]  Spells [✦]]
+        // Clicking anywhere on the header row (outside Guide/Spells buttons)
+        // toggles the full overlay.
         int btnY = panelY + 1;
         String guideLabel = headerEntryLabel(HEADER_GUIDE_ENTRY);
         String spellsLabel = headerEntryLabel(HEADER_SPELLS_ENTRY);
         int guideLabelW = this.textRenderer.getWidth(guideLabel);
         int spellsLabelW = this.textRenderer.getWidth(spellsLabel);
 
-        // Spells icon now anchors directly to the right edge (no right-side
-        // label to align against).
         int rightEdge = panelX + panelWidth - TOPIC_PADDING;
         int spellsBtnX = rightEdge - HEADER_ICON_BTN_SIZE;
         int spellsLabelX = spellsBtnX - HEADER_ICON_LABEL_GAP - spellsLabelW;
         int guideBtnX = spellsLabelX - HEADER_ICON_BTN_GAP - HEADER_ICON_BTN_SIZE;
         int guideLabelX = guideBtnX - HEADER_ICON_LABEL_GAP - guideLabelW;
+        int actionsLabelX = guideLabelX - HEADER_ICON_BTN_GAP - this.textRenderer.getWidth(TOPIC_PANEL_TITLE);
 
         TopicEntry hoveredHeaderEntry = getHeaderIconEntryAt(mouseX, mouseY);
         int guideLabelColor = hoveredHeaderEntry == HEADER_GUIDE_ENTRY ? 0xFFFFE08A : 0xFFE6D7A3;
         int spellsLabelColor = hoveredHeaderEntry == HEADER_SPELLS_ENTRY ? 0xFFFFE08A : 0xFFE6D7A3;
 
+        context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, actionsLabelX, panelY + 2, headerColor, false);
         context.drawText(this.textRenderer, guideLabel, guideLabelX, panelY + 2, guideLabelColor, false);
         drawHeaderIconButton(context, guideBtnX, btnY, HEADER_GUIDE_ENTRY, mouseX, mouseY);
         context.drawText(this.textRenderer, spellsLabel, spellsLabelX, panelY + 2, spellsLabelColor, false);
