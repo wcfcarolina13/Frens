@@ -109,14 +109,17 @@ public final class HoneyCollectSkill implements Skill {
             // Shears drop 3 honeycombs on the ground — need inventory space.
             boolean useBottle = hasBottles;
             if (!useBottle && hasShears) {
-                // Shears path: ensure at least 1 free slot for honeycomb pickup
+                // Shears path: ensure at least 1 free slot for honeycomb pickup.
+                // Try packing into containers first, then chest offload.
                 if (!hasEmptySlot(bot)) {
-                    // Try offloading to chests first
+                    packHoneyIntoContainers(bot);
+                }
+                if (!hasEmptySlot(bot)) {
                     depositHoneyItems(source, bot, world);
-                    if (!hasEmptySlot(bot)) {
-                        LOGGER.debug("Skipping honey harvest at {}: inventory full", hivePos.toShortString());
-                        continue;
-                    }
+                }
+                if (!hasEmptySlot(bot)) {
+                    LOGGER.debug("Skipping honey harvest at {}: inventory full", hivePos.toShortString());
+                    continue;
                 }
             }
 
@@ -156,7 +159,8 @@ public final class HoneyCollectSkill implements Skill {
             return SkillExecutionResult.failure("Couldn't harvest any beehives.");
         }
 
-        // Deposit honeycombs and honey bottles in nearby chests
+        // Pack overflow into bundles/shulker boxes, then deposit remainder in nearby chests
+        packHoneyIntoContainers(bot);
         depositHoneyItems(source, bot, world);
 
         return SkillExecutionResult.success("Collected honey from " + harvested
@@ -315,6 +319,68 @@ public final class HoneyCollectSkill implements Skill {
             }
         }
         return false;
+    }
+
+    /**
+     * Pack loose honeycombs and honey bottles into bundles and shulker boxes
+     * in the bot's inventory to free up main inventory slots.
+     */
+    private static void packHoneyIntoContainers(ServerPlayerEntity bot) {
+        // First, use the existing BundleService to pack any bundlable items
+        net.wcfcarolina13.GameAI.services.BundleService.packExistingBundles(bot);
+
+        // Then try packing honey items specifically into shulker boxes
+        for (int slot = 0; slot < 36; slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+            if (!stack.isOf(Items.HONEYCOMB) && !stack.isOf(Items.HONEY_BOTTLE)) continue;
+
+            // Find a shulker box with space for this item
+            for (int shulkerSlot = 0; shulkerSlot < 36; shulkerSlot++) {
+                if (shulkerSlot == slot) continue;
+                ItemStack shulkerStack = bot.getInventory().getStack(shulkerSlot);
+                if (shulkerStack.isEmpty()) continue;
+                var container = shulkerStack.get(DataComponentTypes.CONTAINER);
+                if (container == null) continue;
+                if (!(shulkerStack.getItem() instanceof net.minecraft.item.BlockItem blockItem
+                        && blockItem.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock)) continue;
+
+                // Collect current shulker contents into a mutable list (27 slots)
+                List<ItemStack> slots = new ArrayList<>();
+                for (ItemStack s : container.iterateNonEmpty()) {
+                    slots.add(s.copy());
+                }
+
+                // Try stacking into an existing matching partial stack first
+                boolean packed = false;
+                for (ItemStack existing : slots) {
+                    if (existing.isOf(stack.getItem()) && existing.getCount() < existing.getMaxCount()) {
+                        int space = existing.getMaxCount() - existing.getCount();
+                        int toMove = Math.min(space, stack.getCount());
+                        existing.increment(toMove);
+                        stack.decrement(toMove);
+                        packed = true;
+                        if (stack.isEmpty()) break;
+                    }
+                }
+
+                // If still items left and shulker has room for a new slot (max 27)
+                if (!stack.isEmpty() && slots.size() < 27) {
+                    slots.add(stack.copy());
+                    stack.setCount(0);
+                    packed = true;
+                }
+
+                if (packed) {
+                    shulkerStack.set(DataComponentTypes.CONTAINER,
+                            net.minecraft.component.type.ContainerComponent.fromStacks(slots));
+                    if (stack.isEmpty()) {
+                        bot.getInventory().setStack(slot, ItemStack.EMPTY);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     private static boolean hasEmptySlot(ServerPlayerEntity bot) {
