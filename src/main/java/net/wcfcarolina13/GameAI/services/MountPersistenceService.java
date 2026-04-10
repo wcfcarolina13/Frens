@@ -402,34 +402,45 @@ public final class MountPersistenceService {
             return;
         }
 
-        // If the bot was holding a lead on this mount at save time, restore
-        // that relationship first. Don't try to remount — the bot was
-        // walking alongside the horse, not riding it. The RideSyncService
-        // maybeMaintainLeash tick hook will physically re-attach the lead
-        // on the next server tick using the items the bot has available.
+        // Rejoin-remount exists for exactly one reason: when the bot was
+        // riding a horse at disconnect and we couldn't secure the horse
+        // (no lead, no fence nearby), we remount on rejoin so the horse
+        // doesn't wander off. The disconnect path records wasMounted=true
+        // only in that "CANNOT_SECURE" case (see Frens.java onServerStopping
+        // and BotPersistenceService.onBotDisconnect). Any other save state
+        // — bot on foot, horse already fence-tethered, or simply holding
+        // a lead without riding — records wasMounted=false.
+        //
+        // Therefore: if wasMounted=false and the bot wasn't holding this
+        // mount as a lead target, do nothing on rejoin. The horse is either
+        // already safe or was never being ridden in the first place, and
+        // the bot has no business interacting with it just because it
+        // happens to be nearby.
         boolean remounted = false;
         boolean heldRestored = false;
-        if (state.heldByBot() && !state.wasMounted()) {
+        if (!state.wasMounted() && !state.heldByBot()) {
+            LOGGER.info("Mount rejoin no-op: bot={} mount={} — wasMounted=false heldByBot=false, leaving horse untouched",
+                    alias, mount.getUuid());
+        } else if (state.heldByBot() && !state.wasMounted()) {
+            // Bot was walking alongside the horse holding a lead, not
+            // riding it. Restore the leash-target relationship; the
+            // RideSyncService maybeMaintainLeash tick hook will physically
+            // re-attach the lead on the next server tick.
             RideSyncService.setLeashTarget(bot.getUuid(), mount.getUuid());
             heldRestored = true;
             LOGGER.info("Mount rejoin: restoring held-by-bot state for bot={} mount={}",
                     alias, mount.getUuid());
         } else if (mount instanceof MobEntity mob && mob.isLeashed()
                 && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
-            // Horse is already tied to a fence — it's not going anywhere,
-            // so the bot has no reason to re-mount it on rejoin. The
-            // stay-mounted fallback from the previous session's disconnect
-            // was the "no lead, no fence, stay mounted" branch, but by the
-            // time we rejoin the horse may already be fence-tethered by
-            // vanilla leash persistence (e.g. an older save that predates
-            // the current disconnect flow, or a fence that was placed
-            // nearby while the session was offline). In that case skip
-            // the remount entirely; the bot stays on foot next to its
-            // already-secured horse.
+            // wasMounted=true but the horse got fence-tethered in the
+            // meantime (e.g. vanilla leash persistence resolved a fence
+            // knot from an older save). No need to remount — the horse
+            // can't wander.
             LOGGER.info("Mount rejoin skip: bot={} mount={} already fence-tethered — no remount needed",
                     alias, mount.getUuid());
         } else {
-            // Normal rejoin path: put the bot back on the saved mount.
+            // wasMounted=true and horse isn't secured: put the bot back on
+            // the saved mount to prevent it wandering off.
             remounted = tryRemountAfterRejoin(bot, mount);
         }
 
