@@ -576,6 +576,11 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(RequestPlayerPreservePayload.ID, RequestPlayerPreservePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(PlayerPreserveStatePayload.ID, PlayerPreserveStatePayload.CODEC);
 
+        // Rescue teleport (player-pressed keybind to un-stick a nearby following bot)
+        PayloadTypeRegistry.playC2S().register(
+                net.wcfcarolina13.network.RescueTeleportRequestPayload.ID,
+                net.wcfcarolina13.network.RescueTeleportRequestPayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -592,6 +597,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.BotEnchantNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotAnvilNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.ZoneNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.RescueTeleportNetworkManager.registerReceiversOnce();
 
         // Lock mode C2S receiver
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(

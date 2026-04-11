@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-10 — Walkable-partial-block stuck loop fix + rescue teleport keybind
+
+- **Fix: bot permanently stuck on walkable partial blocks near doorways.** `BotRescueService` was computing `feetBlocked = !feetState.getCollisionShape().isEmpty()`, and **every walkable partial block has a non-empty collision shape** — carpets (1/16), pressure plates (1/16), bottom slabs (1/2), stairs, layered snow, rails, tripwire, lily pad. A bot standing normally on any of these had its feet blockpos == the partial block (because `Entity.getBlockPos()` floors the entity Y), so the rescue service classified it as `stuckInBlocks=true`. This fired `attemptEscapeMovement` every ~1.2s, yanking the bot off its planned door-traversal path. Combined with the follow system's door-recovery logic, the bot wedged itself at the doorway indefinitely — see log 17:22–17:39: `feetState=White Carpet` → repeated `door-close wait: bot too close` + `door-corner: stagnant`.
+- Added `BotRescueService.isThinWalkablePartialBlock(state, world, pos)` helper with a class-based whitelist mirroring `FollowPathService`'s planner-layer whitelist so the rescue service and path planner agree on passable terrain:
+  - `CarpetBlock` (white, colored, moss, dyed — all)
+  - `AbstractPressurePlateBlock` (wood, stone, polished, weighted — all)
+  - `SlabBlock` (bottom slabs — top slabs put feet Y at 1.0, so feet blockpos is air)
+  - `StairsBlock` (any orientation)
+  - `SnowBlock` (layered snow, layers 1–7)
+  - `AbstractRailBlock` (rail, powered, detector, activator)
+  - Explicit: `PALE_MOSS_CARPET` (not a `CarpetBlock` subclass), `MOSS_CARPET` (defensive), `TRIPWIRE`, `LILY_PAD`
+  - Fallback: any remaining block with collision shape max Y ≤ 0.125 (catches floor candles, skulls, sculk vein, turtle eggs, pink petals, amethyst small buds, frogspawn, etc.)
+- Called in both `feetBlocked` sites: `rescueFromBurial()` and `isBotCurrentlyStuck()`. Half-block threshold (0.5) is deliberately not used as a blanket fallback to avoid accidentally whitelisting cakes, composters, hoppers and similar full-collision blocks.
+- **Known latent issue (not fixed):** `ReturnBaseStuckService.isPassable()` has a misleading comment claiming pressure plates/carpets have empty collision shapes. They don't. The same category of false-positive can reject carpeted path cells during return-to-base escape routing. Flagged for follow-up if the bot starts getting stuck on carpets in return-to-base flow.
+
+- **New feature: rescue teleport keybind.** A player-pressed "un-stick the bot" hotkey (`key.frens.rescue_teleport`, unbound by default). Server checks that the closest follower satisfies all of: same world, follow-mode with this player, horizontal distance ≤ 5 blocks, at most 3 blocks above, at most 1 block below, and unobstructed line of sight — then teleports the bot to the player's exact block with the player's yaw/pitch and zeroed velocity. Tight constraints so the feature can't be used to yank a bot across the map or phase through walls; purely for wedge-geometry escapes where wolf-teleport isn't triggering.
+- Files: `network/RescueTeleportRequestPayload.java` (empty C2S record), `network/RescueTeleportNetworkManager.java` (receiver + constraint checks + actionbar feedback like "Rescue: bot is too far" / "Rescue: bot is out of sight"). Wired into `Frens.registerPayloadsAndReceivers` and `FrensClient.onInitializeClient` + tick handler.
+
 ## 2026-04-10 — Idle honey collection hobby
 
 - New idle hobby: `honey_collect`. Bot harvests honey from nearby beehives/bee nests when idle.

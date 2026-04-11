@@ -3,6 +3,13 @@ task: farm tree-clear + irrigation pipeline stabilization
 test_command: "./gradlew build -x test"
 ---
 
+## Session Notes 2026-04-10 — Walkable-partial stuck fix + rescue teleport
+
+- **Fixed:** Bot permanently stuck on walkable partial blocks (carpets, pressure plates, slabs, stairs, snow layers, rails, tripwire, lily pad) when near doorways. Root cause was `BotRescueService.rescueFromBurial` / `isBotCurrentlyStuck` computing `feetBlocked = !getCollisionShape().isEmpty()` — every walkable partial has a non-empty thin shape, so a bot standing normally on one had its feet blockpos == the partial block and was classified `stuckInBlocks=true`. That kicked `attemptEscapeMovement` every ~1.2s, yanking the bot off its planned door-traversal path and producing doorway wedge loops visible in `latest.log` 17:22–17:39 (`feetState=White Carpet` → repeated `door-close wait: bot too close` + `door-corner: stagnant`). Fix: added `isThinWalkablePartialBlock` class-based whitelist (mirrors `FollowPathService`) plus a ≤0.125 max-Y fallback for floor candles/skulls/etc. Called in both feetBlocked sites.
+- **New feature:** Rescue teleport keybind (`key.frens.rescue_teleport`, unbound by default). Player-pressed un-stick hotkey. Server finds closest follower within 5 blocks horizontal / ≤3 above / ≤1 below / line of sight / actually following the player, then teleports it to the player's exact block with zeroed velocity. Tight constraints so it can't yank a bot across the map or phase through walls — purely for wedge-geometry escapes when wolf-teleport can't fire.
+- **Known latent issue flagged but NOT fixed:** `ReturnBaseStuckService.isPassable()` has a misleading comment claiming pressure plates/carpets have empty collision shapes. It doesn't. Same false-positive category can reject carpeted path cells during return-to-base escape. Fix if it surfaces.
+- Deployed JAR to all three Prism instances (1.21.11, 1.21.10, 1.21.10 TEST) after confirming game was not running. Verified deployed class contains `isThinWalkablePartialBlock` via `javap`.
+
 ## Next Session: Farm Pipeline Validation & Follow-Ups
 
 **Status:** Farm tree-clear + irrigation pipeline fixed end-to-end (2026-04-08). In-game validation confirmed all four user-reported failures are fixed. Ready for deeper farm playtesting + known follow-ups below.

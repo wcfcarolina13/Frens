@@ -1,8 +1,15 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.AbstractPressurePlateBlock;
+import net.minecraft.block.AbstractRailBlock;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.CarpetBlock;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.SlabBlock;
+import net.minecraft.block.SnowBlock;
+import net.minecraft.block.StairsBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
@@ -71,6 +78,69 @@ public final class BotRescueService {
                 || state.isOf(Blocks.WEEPING_VINES_PLANT)
                 || state.isOf(Blocks.TWISTING_VINES)
                 || state.isOf(Blocks.TWISTING_VINES_PLANT);
+    }
+
+    /**
+     * Returns true for blocks that the bot can legitimately have as its feet blockpos while
+     * standing or walking normally. These blocks must never trigger the burial-rescue "stuck
+     * in blocks" path — treating them as feet-blocked causes rescueFromBurial and
+     * attemptEscapeMovement to fight follow/path walking, producing doorway stalls and
+     * oscillations around ordinary village geometry.
+     *
+     * <p>Why the bot's feet blockpos coincides with these blocks: {@link
+     * net.minecraft.entity.Entity#getBlockPos()} uses {@code Math.floor} on the entity Y.
+     * When the bot stands on a partial block whose top surface is less than 1.0 blocks
+     * above the cell's bottom (e.g., bottom slab top = 0.5, carpet top = 0.0625), the
+     * floored Y lands inside the partial block's cell. That's normal standing, not stuck.</p>
+     *
+     * <p>The whitelist mirrors and extends {@code FollowPathService}'s planner-layer
+     * whitelist so the rescue service and the path planner agree on what counts as
+     * passable terrain. Covered categories:
+     * <ul>
+     *   <li>{@link CarpetBlock} — white/colored wool, moss, and dyed carpets (max Y = 1/16)</li>
+     *   <li>{@link AbstractPressurePlateBlock} — wood, stone, polished, weighted (max Y = 1/16)</li>
+     *   <li>{@link SlabBlock} — bottom slabs (top slabs put the bot's Y = 1.0, so feet blockpos is air)</li>
+     *   <li>{@link StairsBlock} — stairs at any orientation; bot's feet blockpos coincides with the stair cell on the lower half</li>
+     *   <li>{@link SnowBlock} — layered snow ({@code Blocks.SNOW}, layers 1–7), not the solid snow block</li>
+     *   <li>{@link AbstractRailBlock} — rail, powered, detector, activator (max Y = 1/8)</li>
+     *   <li>Explicit: pale moss carpet (not a {@link CarpetBlock} subclass in 1.21), moss carpet (defensive), tripwire, lily pad</li>
+     * </ul></p>
+     *
+     * <p>Fallback: any remaining block whose collision shape max Y ≤ 0.125 (2 pixels) is
+     * treated as walkable. This catches anything I missed — floor candles, skulls, turtle
+     * eggs, sculk vein, pink petals, etc. — without risk of hiding genuine obstructions,
+     * because 0.125 stays strictly below half-block height.</p>
+     */
+    private static boolean isThinWalkablePartialBlock(BlockState state, ServerWorld world, BlockPos pos) {
+        if (state == null || world == null || pos == null) {
+            return false;
+        }
+
+        Block block = state.getBlock();
+
+        // Class-based whitelist — all walkable partial blocks a bot can legitimately stand on
+        // such that its feet blockpos coincides with the block cell during normal locomotion.
+        if (block instanceof CarpetBlock) return true;
+        if (block instanceof AbstractPressurePlateBlock) return true;
+        if (block instanceof SlabBlock) return true;
+        if (block instanceof StairsBlock) return true;
+        if (block instanceof SnowBlock) return true;
+        if (block instanceof AbstractRailBlock) return true;
+
+        // Explicit blocks not covered by the class hierarchy in 1.21.
+        if (state.isOf(Blocks.PALE_MOSS_CARPET)) return true;
+        if (state.isOf(Blocks.MOSS_CARPET)) return true;
+        if (state.isOf(Blocks.TRIPWIRE)) return true;
+        if (state.isOf(Blocks.LILY_PAD)) return true;
+
+        // Fallback: any block with collision shape max Y ≤ 0.125 (2 pixels) is trivially walkable.
+        // Catches floor candles, skulls, sculk vein, turtle eggs, pink petals, amethyst small
+        // buds, frogspawn, lightning rods, and future thin walkable blocks I haven't enumerated.
+        var shape = state.getCollisionShape(world, pos);
+        if (shape.isEmpty()) {
+            return true;
+        }
+        return shape.getMax(Direction.Axis.Y) <= 0.125D;
     }
 
     public static void reset() {
@@ -256,6 +326,7 @@ public final class BotRescueService {
                 && !feetState.isOf(Blocks.HONEY_BLOCK)
                 && !feetState.getCollisionShape(world, feet).isEmpty()
                 && !isClimbableNonBlocking(feetState)
+                && !isThinWalkablePartialBlock(feetState, world, feet)
                 && !isRescueProtectedBlock(feetState);
 
         // Debug: show initial rescue decision state
@@ -983,6 +1054,7 @@ public final class BotRescueService {
                 && !feetState.isOf(Blocks.HONEY_BLOCK)
                 && !feetState.getCollisionShape(world, feet).isEmpty()
                 && !isClimbableNonBlocking(feetState)
+                && !isThinWalkablePartialBlock(feetState, world, feet)
                 && !isRescueProtectedBlock(feetState);
 
         boolean stuckInBlocks = headBlocked || feetBlocked;

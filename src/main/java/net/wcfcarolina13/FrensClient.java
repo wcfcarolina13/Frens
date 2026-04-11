@@ -73,6 +73,7 @@ public class FrensClient implements ClientModInitializer {
     private static KeyBinding KEY_LEASH;
     private static KeyBinding KEY_RECRUIT_CONTACT;
     private static KeyBinding KEY_ZONE_CONFIRM;
+    private static KeyBinding KEY_RESCUE_TELEPORT;
 
     private static final long STOP_HOLD_THRESHOLD_MS = 350L;
     private static final long HOTKEY_OVERLAY_DURATION_MS = 4500L;
@@ -522,6 +523,14 @@ public class FrensClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        // Unbound by default — rescue teleport is an emergency un-stick. User binds it in Controls
+        // so it's a deliberate opt-in and never conflicts with other keybinds.
+        KEY_RESCUE_TELEPORT = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.frens.rescue_teleport",
+            GLFW.GLFW_KEY_UNKNOWN,
+            KeyBinding.Category.MISC
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
                 modeSelectionRequired = false;
@@ -646,6 +655,13 @@ public class FrensClient implements ClientModInitializer {
                 handleZoneConfirmKey(client);
             }
             tickZonePreview(client);
+
+            // Rescue teleport: pull a nearby following bot to your feet when it's wedged.
+            // All gating (distance, sight, vertical offset, follow state) happens server-side
+            // in RescueTeleportNetworkManager — client just signals the intent.
+            if (KEY_RESCUE_TELEPORT != null && KEY_RESCUE_TELEPORT.wasPressed()) {
+                ClientPlayNetworking.send(new net.wcfcarolina13.network.RescueTeleportRequestPayload());
+            }
 
             if (CompanionHotkeyOverlayHud.isVisible() && client.player != null) {
                 int selected = client.player.getInventory().getSelectedSlot();
