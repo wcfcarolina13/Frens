@@ -910,14 +910,18 @@ public final class FollowMovementService {
     }
 
     /**
-     * Returns true if the given position has lava, magma, or fire that would harm the bot.
+     * Returns true if the given position has a hazard that would harm the bot.
+     * Consolidates to {@link BotHazardService#isDeadlyBlock(BlockState)} so follow-mode,
+     * pathfinders, and the per-tick escape scan agree on what counts as dangerous ground.
+     * Covers: fire, soul fire, lava, magma block, campfires, cactus, sweet berry bush,
+     * wither rose, powder snow, pointed dripstone, plus non-water fluids.
      */
     private static boolean isDangerousGround(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) return false;
         BlockState floor = world.getBlockState(pos.down());
-        if (floor.isOf(Blocks.MAGMA_BLOCK)) return true;
+        if (BotHazardService.isDeadlyBlock(floor)) return true;
         BlockState atFeet = world.getBlockState(pos);
-        if (atFeet.isOf(Blocks.FIRE) || atFeet.isOf(Blocks.SOUL_FIRE)) return true;
+        if (BotHazardService.isDeadlyBlock(atFeet)) return true;
         FluidState fluid = world.getFluidState(pos);
         if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) return true;
         return false;

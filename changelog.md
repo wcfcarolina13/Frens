@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-10 — Hazard avoidance sweep + pathfinder pressure-plate regression fix + sign protection + ai-player conflict detection
+
+- **Pathfinder regression fix: bot avoided/jumped over pressure plates.** Both `BaritoneStylePathFinder.isPassable` / `isPassableWorld` and the legacy `PathFinder.isPassable` used `!getCollisionShape().isEmpty()` as the final passability check, which rejected every carpet, pressure plate, rail, tripwire, and lily pad as impassable. The bot was routing around them (and the tagBlocks step-up logic occasionally tried to climb over them as if they were step-up targets). Previously this behavior was masked by the `BotRescueService` false-positive that fired `attemptEscapeMovement` and displaced the bot off the cell. After the rescue-service fix landed, the underlying pathfinder avoidance became visible.
+- Extracted a shared classifier `WalkablePartialBlocks` in `GameAI.services` with two views:
+  - `isPathable(state, world, pos)` — narrow set: carpets, pressure plates, rails, tripwire, lily pads, pale-moss/moss carpet, plus a ≤ 0.125 max-Y fallback. Does NOT include slabs/stairs/snow layers (those are handled by the pathfinder's step-up logic, not passability).
+  - `isStandable(state, world, pos)` — broad set: everything from `isPathable` plus slabs, stairs, snow layers. Used for the bot's current-tile standability question.
+- Wired the shared helper into: `BaritoneStylePathFinder.isPassable` / `isPassableWorld`, legacy `PathFinder.isPassable`, `FollowPathService.isPassable`, `BotRescueService.isThinWalkablePartialBlock`, `ReturnBaseStuckService.isPassable`. All five now agree on what counts as walkable partial terrain.
+
+- **Signs protected from bot mining.** Reports of the bot thinking it was spawning inside signs and breaking them. Added `AbstractSignBlock` (covers every variant — standing, wall, hanging, ceiling hanging, wall hanging, all wood types — via class hierarchy) to `ProtectedStructureBlockHelper.isNeverBreakBlock`. Stuck-escape and burial-rescue mining will now skip signs entirely.
+
+- **New hazard avoidance sweep.** New `BotHazardService` consolidates "blocks that hurt the bot" classification and adds per-tick runtime escape for bots standing on hazardous terrain plus pufferfish proximity flee.
+  - `isDeadlyBlock(state)` covers: fire, soul fire, lava, magma block, campfires (both variants), cactus, sweet berry bush, wither rose, powder snow, pointed dripstone. Consumed by both pathfinders, `FollowMovementService.isDangerousGround`, and the per-tick scan.
+  - Per-tick runtime escape: if a bot's feet blockpos lands on any of those blocks (teleport, unloaded-chunk load-in, griefed terrain), the service nudges it toward a nearby safe tile. Campfires are intentionally skipped because `BotCampfireAvoidanceService` owns their escape path.
+  - Per-tick pufferfish flee: any live `PufferfishEntity` within 4 blocks triggers a velocity kick directly away from the fish centroid. No line-of-sight gate, matching the "sting through fences and walls" behaviour the user reported.
+  - All deadly blocks also added to `ProtectedStructureBlockHelper.isNeverBreakBlock` via delegation, so escape-mining code will route around them instead of breaking through them and taking damage mid-mine.
+  - Extended pathfinder passability to reject deadly blocks directly (previously only fire/soul fire were hardcoded; magma, cactus, sweet berry, powder snow, etc. relied on incidental collision rejection that didn't cover all cases).
+  - Service registered in `Frens.java` alongside `BotCampfireAvoidanceService::onServerTick`.
+
+- **ai-player conflict detection.** Root cause of the "duplicate keybinds in controls menu" and "follow go-to key doesn't work" report: the user had BOTH the upstream `ai-player` mod by shasankp000 AND this Frens fork installed. Both mods register their own keybinds with `"Frens: ..."` display strings, and both register `/bot` command roots — key presses and commands were dispatched non-deterministically between the two. Added a startup-time `FabricLoader.isModLoaded("ai-player")` check in `FrensClient.onInitializeClient` that latches `aiPlayerConflictDetected = true` and posts a red chat warning once the player joins, pointing them at the fix (close game, delete `ai-player-*.jar` from mods folder). The log also emits a loud ERROR-level message so users checking logs see it immediately.
+
 ## 2026-04-10 — ReturnBaseStuck isPassable walkable-partial fix
 
 - **Fix: `ReturnBaseStuckService.isPassable()` rejected carpeted/plated path cells.** Flagged earlier today as a latent bug after the `BotRescueService` fix — same category, different site. The function had a comment claiming "pressure plates, buttons, rails, carpets → empty collision → pass", but none of those blocks have empty collision shapes. So during return-to-base stuck-escape routing, any path step containing a carpet, pressure plate, rail, tripwire, lily pad, bottom slab, stair, layered snow, or similar walkable partial was silently rejected as non-passable. In villages that's ~every doorway tile.

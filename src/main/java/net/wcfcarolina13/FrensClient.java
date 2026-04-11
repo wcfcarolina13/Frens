@@ -75,6 +75,11 @@ public class FrensClient implements ClientModInitializer {
     private static KeyBinding KEY_ZONE_CONFIRM;
     private static KeyBinding KEY_RESCUE_TELEPORT;
 
+    /** Set at mod init if the upstream "ai-player" mod is also installed. Triggers a
+     *  one-shot chat warning once the player joins — see onInitializeClient for details. */
+    private static volatile boolean aiPlayerConflictDetected = false;
+    private static volatile boolean aiPlayerConflictWarned = false;
+
     private static final long STOP_HOLD_THRESHOLD_MS = 350L;
     private static final long HOTKEY_OVERLAY_DURATION_MS = 4500L;
     private static boolean stopKeyDown = false;
@@ -453,6 +458,25 @@ public class FrensClient implements ClientModInitializer {
         HandledScreens.register(Frens.BOT_ENCHANT_HANDLER, net.minecraft.client.gui.screen.ingame.EnchantmentScreen::new);
         HandledScreens.register(Frens.BOT_ANVIL_HANDLER, net.minecraft.client.gui.screen.ingame.AnvilScreen::new);
 
+        // Conflict check: this is a fork of the upstream "ai-player" mod. If both are installed
+        // simultaneously, every keybind shows up twice in the controls menu (both mods register
+        // "Frens: ..." display strings), the /bot command tree collides, and key presses are
+        // dispatched non-deterministically between the two mods — which is how "follow go-to"
+        // silently stops working. Detect it at init and flag a chat warning after the player
+        // joins. See {@link #aiPlayerConflictWarned} for the one-shot guard.
+        try {
+            if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("ai-player")) {
+                aiPlayerConflictDetected = true;
+                org.slf4j.LoggerFactory.getLogger("frens").error(
+                        "[Frens] CONFLICT: The upstream 'ai-player' mod is installed alongside Frens. "
+                                + "Close the game and delete 'ai-player-*.jar' from your mods folder. "
+                                + "Frens is a drop-in replacement — keeping both causes duplicate keybinds "
+                                + "and breaks commands like follow go-to.");
+            }
+        } catch (Throwable ignored) {
+            // FabricLoader lookup is best-effort; never block mod init on the check.
+        }
+
         // Keybind fallback for Shift+F1 / Shift+F2.
         // Notes:
         // - The mixin-based shortcut (Shift+F1/Shift+F2) still exists and suppresses vanilla F1/F2 side effects.
@@ -551,6 +575,7 @@ public class FrensClient implements ClientModInitializer {
             migrateLegacyPreviewLockBinding(client);
             tickLearningInputTelemetry(client);
             tickNoBotsRestoreState(client);
+            maybeWarnAboutAiPlayerConflict(client);
             if (client.currentScreen != null) {
                 return;
             }
@@ -1888,6 +1913,25 @@ public class FrensClient implements ClientModInitializer {
             }
         }
         return false;
+    }
+
+    /**
+     * One-shot chat warning when both Frens and the upstream {@code ai-player} mod are
+     * installed simultaneously. Fires after the player joins a world (so the message
+     * is actually visible in chat) and latches via {@link #aiPlayerConflictWarned} so
+     * it only shows once per session.
+     */
+    private static void maybeWarnAboutAiPlayerConflict(MinecraftClient client) {
+        if (!aiPlayerConflictDetected || aiPlayerConflictWarned) {
+            return;
+        }
+        if (client == null || client.player == null) {
+            return;
+        }
+        aiPlayerConflictWarned = true;
+        client.player.sendMessage(Text.literal("§c[Frens] CONFLICT: 'ai-player' mod is installed alongside Frens."), false);
+        client.player.sendMessage(Text.literal("§cClose the game and delete 'ai-player-*.jar' from your mods folder."), false);
+        client.player.sendMessage(Text.literal("§cKeybinds will appear duplicated and commands like 'follow go-to' break until you remove it."), false);
     }
 
     private static void migrateLegacyPreviewLockBinding(MinecraftClient client) {

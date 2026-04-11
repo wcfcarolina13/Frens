@@ -2,12 +2,8 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.CarpetBlock;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
-import net.minecraft.block.SlabBlock;
-import net.minecraft.block.SnowBlock;
-import net.minecraft.block.StairsBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -270,19 +266,19 @@ public final class FollowPathService {
 
         // Important: our bounded planner operates in a simplified “standable tile” grid based on
         // block positions (i.e., {@link net.minecraft.entity.Entity#getBlockPos()}). In that coordinate
-        // system, common walkable partial blocks (carpet, slabs, stairs, snow layers) may appear in the
-        // bot's current block position even though the entity is standing on top of their collision shape.
+        // system, common walkable partial blocks (carpet, slabs, stairs, snow layers, pressure plates,
+        // rails, tripwire, lily pads, ...) may appear in the bot's current block position even though
+        // the entity is standing on top of their collision shape.
         //
         // If we treat these as non-passable, the snapshot can end up with *no standable tiles* in
         // carpeted/interior areas, producing repeated “no path found” and follow stalls.
-        if (state.getBlock() instanceof CarpetBlock
-                || state.getBlock() instanceof SlabBlock
-                || state.getBlock() instanceof StairsBlock
-                || state.getBlock() instanceof SnowBlock) {
-            return true;
-        }
-
-        return state.getCollisionShape(world, pos).isEmpty();
+        //
+        // Delegates to the shared WalkablePartialBlocks.isStandable classification so this planner,
+        // the pathfinders, and the rescue service all agree on what counts as walkable partial
+        // terrain. isStandable returns true for the full set (carpets/plates/rails/slabs/stairs/snow/
+        // tripwire/lily/pale-moss/moss plus a thin-shape fallback), which matches the "bot might be
+        // standing here" semantics the bounded planner needs.
+        return WalkablePartialBlocks.isStandable(state, world, pos);
     }
 
     public static List<BlockPos> planWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase) {

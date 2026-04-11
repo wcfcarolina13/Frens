@@ -533,8 +533,11 @@ public class PathFinder {
 
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState blockState = world.getBlockState(pos);
-        // Fire blocks have empty collision shapes but are deadly.
-        if (blockState.isOf(Blocks.FIRE) || blockState.isOf(Blocks.SOUL_FIRE)) {
+        // Deadly blocks (fire, soul fire, lava, magma, campfires, cactus, sweet berry
+        // bush, wither rose, powder snow, pointed dripstone) — reject as path cells so
+        // the bot routes around them. Some have empty collision shapes (fire) and
+        // would otherwise be walked into.
+        if (net.wcfcarolina13.GameAI.services.BotHazardService.isDeadlyBlock(blockState)) {
             return false;
         }
         if (blockState.getBlock() instanceof DoorBlock) {
@@ -560,7 +563,12 @@ public class PathFinder {
         if (!fluid.isEmpty()) {
             return false;
         }
-        return blockState.isAir() || blockState.getCollisionShape(world, pos).isEmpty();
+        // Air OR thin walkable partial (carpets, pressure plates, rails, tripwire, lily pad, ...).
+        // Slabs/stairs/snow layers are NOT whitelisted here — those are handled separately by the
+        // step-up logic in tagBlocks (the bot walks onto their top surface, it doesn't walk through
+        // the cell laterally). See WalkablePartialBlocks for the rationale.
+        return blockState.isAir()
+                || net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(blockState, world, pos);
     }
 
 

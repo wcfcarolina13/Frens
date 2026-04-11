@@ -450,7 +450,11 @@ public class BaritoneStylePathFinder {
         // Fast-path: air is always passable (most common case)
         if (state.isAir()) return true;
 
-        if (state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)) return false;
+        // Deadly blocks — fire, soul fire, lava, magma, campfires, cactus, sweet
+        // berry bush, wither rose, powder snow, pointed dripstone. Some have empty
+        // collision shapes (fire) and would otherwise slip through the walkable-
+        // partial fallback below.
+        if (net.wcfcarolina13.GameAI.services.BotHazardService.isDeadlyBlock(state)) return false;
 
         if (state.getBlock() instanceof DoorBlock) {
             // Iron doors: only passable if already open
@@ -482,9 +486,14 @@ public class BaritoneStylePathFinder {
         FluidState fluid = state.getFluidState();
         if (!fluid.isEmpty()) return false;
 
-        // For remaining blocks, check collision shape. This requires a BlockPos
-        // but is only reached for non-air, non-door, non-fluid blocks.
-        return state.getCollisionShape(cache.world, cache.mutablePos.set(x, y, z)).isEmpty();
+        // For remaining blocks, accept empty collision OR thin walkable partials
+        // (carpets, pressure plates, rails, tripwire, lily pad, floor candles, etc.).
+        // Before this check was `getCollisionShape().isEmpty()` alone, which rejected
+        // every pressure plate and carpet as "impassable" — the pathfinder then
+        // routed around every doorway rug and tried to step-up over plates, producing
+        // visible avoidance jitter in villages. See 2026-04-10 walkable-partial autopsy.
+        return net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(
+                state, cache.world, cache.mutablePos.set(x, y, z));
     }
 
     private static boolean isSolidBlock(ChunkCache cache, int x, int y, int z) {
@@ -613,7 +622,7 @@ public class BaritoneStylePathFinder {
     // World-based checks (for tagBlocks, which operates on BlockPos)
     private static boolean isPassableWorld(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
-        if (state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)) return false;
+        if (net.wcfcarolina13.GameAI.services.BotHazardService.isDeadlyBlock(state)) return false;
         if (state.getBlock() instanceof DoorBlock) {
             if (state.isOf(Blocks.IRON_DOOR)) {
                 return state.getCollisionShape(world, pos).isEmpty();
@@ -634,7 +643,9 @@ public class BaritoneStylePathFinder {
         }
         FluidState fluid = world.getFluidState(pos);
         if (!fluid.isEmpty()) return false;
-        return state.isAir() || state.getCollisionShape(world, pos).isEmpty();
+        // Air OR thin walkable partial (carpets, pressure plates, rails, tripwire, ...).
+        return state.isAir()
+                || net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(state, world, pos);
     }
 
     private static boolean isSolidBlockWorld(ServerWorld world, BlockPos pos) {
