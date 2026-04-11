@@ -1958,23 +1958,35 @@ public final class ReturnBaseStuckService {
         BlockState above = world.getBlockState(abovePos);
         BlockPos belowPos = pos.down();
         BlockState below = world.getBlockState(belowPos);
-        // Feet and head cells: the authoritative "can the player occupy this cell" check is
-        // whether the collision shape is empty. This is what vanilla pathfinding uses. It
-        // correctly handles:
-        //   - air, tall grass, water, pressure plates, buttons, rails, carpets, flowers,
-        //     saplings, tripwire → empty collision → pass
-        //   - closed doors, closed fence gates, walls, full cubes → non-empty → reject
-        //   - OPEN doors, OPEN fence gates → empty collision → pass (critical for return-to-base)
-        //   - stairs, slabs, fences (blocks to the SIDE of standing cell) → non-empty → reject
+        // Feet and head cells: a cell is passable for standing/walking if EITHER
+        //   (a) its collision shape is empty, OR
+        //   (b) it is a thin walkable partial block (carpet, pressure plate, bottom slab,
+        //       stair, layered snow, rail, tripwire, lily pad, etc.).
+        //
+        // An earlier version of this check used `!getCollisionShape().isEmpty()` alone and
+        // had an incorrect comment claiming pressure plates/buttons/rails/carpets have empty
+        // collision shapes. They do not — every walkable partial has a non-empty thin shape.
+        // That caused the check to reject any path cell containing a carpet or pressure
+        // plate, which in villages was almost every doorway tile. The bot's feet blockpos
+        // coincides with the partial block during normal standing (because Entity.getBlockPos
+        // floors the entity Y), so for passability those cells MUST count as passable.
+        // See BotRescueService.isThinWalkablePartialBlock for the full whitelist rationale,
+        // and the 2026-04-10 doorway-stall bug fix for the original observation.
         //
         // Do NOT use blocksMovement() here — that is a static, state-agnostic block-settings
         // flag set at registration time and does not reflect open/closed state. An open fence
         // gate reports blocksMovement()=true but getCollisionShape()=empty. The collision
-        // shape is the authoritative signal for traversability.
+        // shape is the authoritative signal for traversability; the walkable-partial whitelist
+        // layered on top handles the "non-empty but still walkable" case. Correct coverage:
+        //   - air, tall grass, water, flowers, saplings → empty collision → pass
+        //   - OPEN doors, OPEN fence gates → empty collision → pass
+        //   - carpets, pressure plates, rails, tripwire, lily pads → whitelisted → pass
+        //   - bottom slabs, stairs, layered snow → whitelisted → pass
+        //   - closed doors, closed fence gates, walls, full cubes → non-empty, non-whitelisted → reject
         //
         // See logs 16:27:45 (pressure plate bug) and 18:46:31 (open fence gate rejection).
-        if (!at.getCollisionShape(world, pos).isEmpty()) return false;
-        if (!above.getCollisionShape(world, abovePos).isEmpty()) return false;
+        if (!BotRescueService.isThinWalkablePartialBlock(at, world, pos)) return false;
+        if (!BotRescueService.isThinWalkablePartialBlock(above, world, abovePos)) return false;
         // Footing: any block with a non-empty collision shape supports standing.
         // The previous check used isSolidBlock(), which returns FALSE for stairs,
         // slabs, fences, fence gates and other partial-cube blocks — even though

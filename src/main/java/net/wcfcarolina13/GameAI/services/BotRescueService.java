@@ -87,6 +87,12 @@ public final class BotRescueService {
      * attemptEscapeMovement to fight follow/path walking, producing doorway stalls and
      * oscillations around ordinary village geometry.
      *
+     * <p>Package-private so other {@code GameAI.services} classes (notably
+     * {@code ReturnBaseStuckService.isPassable}) can share a single source of truth for
+     * "is this cell passable while standing". The helper returns {@code true} for both
+     * air-equivalent empty-collision cells AND thin walkable partial blocks, which is
+     * exactly what a passability check needs.</p>
+     *
      * <p>Why the bot's feet blockpos coincides with these blocks: {@link
      * net.minecraft.entity.Entity#getBlockPos()} uses {@code Math.floor} on the entity Y.
      * When the bot stands on a partial block whose top surface is less than 1.0 blocks
@@ -111,7 +117,7 @@ public final class BotRescueService {
      * eggs, sculk vein, pink petals, etc. — without risk of hiding genuine obstructions,
      * because 0.125 stays strictly below half-block height.</p>
      */
-    private static boolean isThinWalkablePartialBlock(BlockState state, ServerWorld world, BlockPos pos) {
+    static boolean isThinWalkablePartialBlock(BlockState state, ServerWorld world, BlockPos pos) {
         if (state == null || world == null || pos == null) {
             return false;
         }

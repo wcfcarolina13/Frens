@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-10 — ReturnBaseStuck isPassable walkable-partial fix
+
+- **Fix: `ReturnBaseStuckService.isPassable()` rejected carpeted/plated path cells.** Flagged earlier today as a latent bug after the `BotRescueService` fix — same category, different site. The function had a comment claiming "pressure plates, buttons, rails, carpets → empty collision → pass", but none of those blocks have empty collision shapes. So during return-to-base stuck-escape routing, any path step containing a carpet, pressure plate, rail, tripwire, lily pad, bottom slab, stair, layered snow, or similar walkable partial was silently rejected as non-passable. In villages that's ~every doorway tile.
+- Promoted `BotRescueService.isThinWalkablePartialBlock` from `private` to package-private so both services share a single source of truth for "is this cell passable while standing". `isPassable()` now delegates both the feet-cell and head-cell checks to it: a cell is passable if EITHER its collision shape is empty OR it's on the walkable-partial whitelist (or ≤ 0.125 max-Y fallback).
+- Rewrote the misleading comment inside `isPassable` to reflect reality and pointed future readers at the shared helper + the 2026-04-10 doorway-stall autopsy.
+- `isPassableForMining` (falling-block stabilizer predicate) and `isPassableForStanding` (step-up target detection) intentionally NOT touched — they have different semantics ("strict empty cell for mining" and "no step-up material here") that the whitelist would break.
+
 ## 2026-04-10 — Walkable-partial-block stuck loop fix + rescue teleport keybind
 
 - **Fix: bot permanently stuck on walkable partial blocks near doorways.** `BotRescueService` was computing `feetBlocked = !feetState.getCollisionShape().isEmpty()`, and **every walkable partial block has a non-empty collision shape** — carpets (1/16), pressure plates (1/16), bottom slabs (1/2), stairs, layered snow, rails, tripwire, lily pad. A bot standing normally on any of these had its feet blockpos == the partial block (because `Entity.getBlockPos()` floors the entity Y), so the rescue service classified it as `stuckInBlocks=true`. This fired `attemptEscapeMovement` every ~1.2s, yanking the bot off its planned door-traversal path. Combined with the follow system's door-recovery logic, the bot wedged itself at the doorway indefinitely — see log 17:22–17:39: `feetState=White Carpet` → repeated `door-close wait: bot too close` + `door-corner: stagnant`.
