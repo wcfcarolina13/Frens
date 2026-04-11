@@ -1,8 +1,18 @@
 # Tamed-Animal Defense Design
 
 **Date:** 2026-04-11
-**Status:** Design approved, pending spec review
+**Status:** Design approved, post-review revision 1
 **Author:** collaborative brainstorming session
+
+> **Revision 1 (2026-04-11):** Incorporated spec-review feedback — fixed Yarn
+> API names (`AbstractHorseEntity.isTame()` not `isTamed()`, owner access via
+> `getOwnerReference().getUuid()`), added explicit commander-resolution
+> section, consolidated the `engageHostiles` hook into a single call site,
+> tightened rule-5 (named-entity override) to exclude hostile victims,
+> replaced hardcoded `BASE_HOME_RADIUS_FOR_FUZZY = 32` with
+> `BotHomeService.findBaseNearPosition` (honors per-base radius), corrected
+> helper name `BotThreatService.findHostilesAround`, added cleanup-on-stop,
+> and added commander-offline / cross-dimension edge cases.
 
 ## Overview
 
@@ -50,43 +60,121 @@ and other intentional mob-grinders.
 - Bot-vs-bot accidental defense (another bot hitting an owned animal is treated
   as a non-engagement event; handled ad-hoc later)
 
+## Commander Resolution
+
+Defense categories 1–3 require knowing "who is this bot's commander". The mod
+already has a canonical resolver in
+[CompanionCommunicationPolicy.java:122](../../src/main/java/net/wcfcarolina13/GameAI/services/CompanionCommunicationPolicy.java#L122),
+currently `private`:
+
+```java
+private static UUID resolveOwnerUuid(ServerPlayerEntity bot) {
+    String alias = bot.getName().getString();
+    ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(alias);
+    if (o == null) return null;
+    String uuid = o.ownerUuid();
+    if (uuid == null || uuid.isBlank()) return null;
+    return UUID.fromString(uuid);
+}
+```
+
+**The implementation must promote this helper (or its exact copy) to a public
+static method** — either on `CompanionCommunicationPolicy` itself or mirrored
+verbatim inside `BotAnimalDefenseService`. The commander UUID is the durable
+`ManualConfig.BotOwnership` identity, **not** the transient
+`BotCommandStateService.followTargetUuid` (which is only set during FOLLOW
+mode and clears on `/bot stop`).
+
+The returned `UUID` is a **handle, not an entity**. It works even when the
+commander is logged out or in a different dimension — ownership checks are
+UUID-comparisons that don't need the commander entity to be present. The only
+rule that needs the live commander entity is rule 3 (leashed-to-commander),
+which compares `mob.getLeashHolder() == commanderEntity` — if the commander
+is offline, that comparison silently fails and rule 3 skips.
+
+When the bot has no registered owner at all (guard/patrol bots,
+never-recruited bots), `resolveOwnerUuid` returns `null`. In that case:
+
+- Rules 1–3 silently skip (no owner to compare against).
+- Rule 4 also skips (base-proximity uses the bot's own `BotHomeService` base,
+  which typically requires a commander to have registered it — but in the
+  future an ally-bot with its own base would still work).
+- Rules 5–6 still fire (name-tag and mapped-village rules don't require a
+  commander).
+
+This is the intended behaviour: ownerless bots defend name-tagged entities
+and mapped villages but don't invent an owner for ownership-only rules.
+
 ## Defended Categories
 
 An attacker triggers defense only if the victim entity passes at least one of
-the following gates:
+the following gates. Victims must additionally satisfy **Victim Sanity
+Gates** (below) before defense is considered — a named creeper is not a
+defended entity.
 
-1. **Commander-owned tameable.** `target instanceof TameableEntity &&
-   tameable.isTamed() && tameable.getOwnerUuid() == commanderUuid`. Covers cat,
-   wolf, parrot. Effective within the bot's ~16-block scan range.
+1. **Commander-owned tameable.** Victim `instanceof TameableEntity` AND
+   `tameable.isTamed()` AND one of:
+   - If the commander is online in the same world: `tameable.isOwner(commander)`.
+   - Otherwise: `tameable.getOwnerReference() != null &&
+     tameable.getOwnerReference().getUuid().equals(commanderUuid)`.
+   Covers cat, wolf, parrot. Effective within ~16 blocks.
 
-2. **Commander-owned horse family.** `target instanceof AbstractHorseEntity &&
-   horseOwner == commanderUuid`. Covers horse, donkey, mule, llama, camel.
-   Effective within ~16 blocks.
+2. **Commander-owned horse family.** Victim `instanceof AbstractHorseEntity`
+   AND `horse.isTame()` (**note: `isTame()` — no `d` — for horses in
+   1.21.11 Yarn, distinct from `TameableEntity.isTamed()`**) AND
+   `horse.getOwnerReference() != null &&
+   horse.getOwnerReference().getUuid().equals(commanderUuid)`. Covers
+   horse, donkey, mule, llama, skeleton horse, zombie horse, camel. Effective
+   within ~16 blocks.
 
 3. **Leashed-to-commander.** `mob.isLeashed() && mob.getLeashHolder() ==
-   commander`. Leashed to a fence or to another player does NOT count — the
-   lead must be physically held by the commander entity at detection time.
-   Effective within ~16 blocks.
+   commanderEntity`. Requires the commander to be a live `LivingEntity` in
+   the same world. Leashed to a fence post, to another player, or to a
+   different bot does NOT count. If commander is offline or cross-dimension,
+   this rule silently skips. Effective within ~16 blocks.
 
-4. **Base-proximity farm animal.** `target instanceof AnimalEntity && target
-   is within 32 blocks of a commander-registered base (via BotHomeService) &&
-   target is within 8 blocks of a HAY_BLOCK that is itself within the base
-   radius`. Covers unnamed farm animals (cow, sheep, pig, chicken, goat, etc.)
-   only when both the hay bale and the animal are on the commander's
-   registered-base footprint. Requires an active registered base — bots without
-   a base simply don't defend fuzzy-category farm animals.
+4. **Base-proximity farm animal.** Victim `instanceof AnimalEntity` AND
+   `BotHomeService.findBaseNearPosition(server, botWorld, target.getBlockPos())`
+   returns a present `BaseEntry` whose owner is the commander AND the victim
+   is within `HAY_BALE_RADIUS` (8 blocks) of a `Blocks.HAY_BLOCK` that is
+   **also** inside that same `BaseEntry`. Using `findBaseNearPosition` means
+   the per-base `radius` field is honored — not a hardcoded 32. Covers
+   unnamed farm animals (cow, sheep, pig, chicken, goat, etc.) only when
+   both animal and hay bale are on a commander-registered base. Requires a
+   registered base — bots without a base simply don't defend farm animals.
 
-5. **Named entity override.** Any entity with a name tag (`hasCustomName()`)
-   within the bot's ~16-block scan range is defended, regardless of class.
-   Includes villagers, iron golems, cows, foxes, axolotls — anything the
-   commander explicitly named. Bounded by scan range; does not chase
-   across the map.
+5. **Named entity override.** Victim has a name tag (`entity.hasCustomName()`)
+   AND is within the bot's ~16-block scan range AND passes the **Victim
+   Sanity Gates** (so a name-tagged hostile is NOT eligible as a victim —
+   see below). A named iron golem, named villager, named cow, named axolotl
+   all qualify. Bounded by scan range; does not chase across dimensions.
 
-6. **Named-village villager.** `target instanceof VillagerEntity &&
-   MappedVillageService.isInsideMappedVillage(world, target.blockPos) && bot is
-   inside or adjacent to the same mapped village`. Protects villagers only in
-   villages the commander has explicitly mapped — unnamed/unmapped villages
-   are unprotected, which keeps iron farms in random wild villages safe.
+6. **Named-village villager.** Victim `instanceof VillagerEntity` AND
+   `MappedVillageService.isInsideMappedVillage(botWorld, target.getBlockPos())`
+   is true AND the bot itself is also inside or adjacent to the same mapped
+   village (same `MappedVillage` instance via
+   `MappedVillageService.getVillageAt(world, botPos)`). Unnamed/unmapped
+   villages are unprotected — keeps iron farms in random wild villages safe.
+
+### Victim Sanity Gates
+
+A candidate victim must pass **all** of the following before any defense
+rule can fire:
+
+- `victim != null && victim.isAlive() && !victim.isRemoved()`
+- `victim.getEntityWorld() == bot.getEntityWorld()` (same dimension)
+- `!(victim instanceof HostileEntity)` — no defending zombies, skeletons, etc.
+- `!(victim instanceof net.minecraft.entity.raid.RaiderEntity)` — no
+  defending illagers/pillagers/ravagers (raiders do not all extend
+  `HostileEntity`, so the explicit class check is required)
+- `!(victim instanceof SlimeEntity || victim instanceof MagmaCubeEntity)` —
+  no defending slimes/magma cubes
+- `!(victim instanceof EnderDragonEntity || victim instanceof WitherEntity)` —
+  defensive sanity
+
+These gates apply **before** any of rules 1–6 are checked, which
+specifically closes rule 5's "named hostile" loophole — a commander who
+name-tags a zombie still won't get that zombie defended.
 
 ## Excluded Categories
 
@@ -188,15 +276,23 @@ detection is **hostile-forward**:
 
 ### Step 1: hostile-forward scan (primary path)
 
-```
-hostiles = getHostilesNear(bot, HOSTILE_SCAN_RADIUS)       // typically 0–5
+```text
+hostiles = BotThreatService.findHostilesAround(bot, HOSTILE_SCAN_RADIUS)
+         // returns List<Entity>; typically 0–5 entities in normal play
 for each hostile:
-    target = hostile.getTarget()                            // vanilla AI target
-    if target != null && isDefendedEntity(target, bot):
+    if !(hostile instanceof MobEntity): continue
+    target = ((MobEntity) hostile).getTarget()              // live vanilla AI target
+    if target != null && isDefendedEntity(target, commanderUuid, bot):
         if !isExcludedByFarmHeuristic(hostile):
-            if !isTamedVsTamedCase(hostile, target):
+            if !isTamedVsTamedCase(hostile, target, commanderUuid):
                 markAttackerForDefense(bot, hostile, DEFEND_EXPIRE_TICKS)
 ```
+
+Note on scan sharing: `BotThreatService.findHostilesAround` is already called
+once per combat tick by `BotEventHandler` and `BotMutualAidService`. Our
+service runs on a **separate** 10-tick cadence and makes an independent
+query. Cost is negligible (single AABB entity fetch) and simpler than
+trying to share a cached snapshot across unrelated services.
 
 Properties:
 - **Bounded by hostile count, not farm size.** The 100-animal farm is never
@@ -212,28 +308,39 @@ Properties:
 
 ### Step 2: watch-list reverse scan (for edge cases)
 
-Players don't have AI targets (`getTarget()` on a PlayerEntity returns null),
-so Step 1 can't detect player-on-animal attacks. A few other edge cases also
-slip through:
+Players are not `MobEntity` and therefore don't have an AI `getTarget()`,
+so Step 1 can't detect player-on-animal attacks. A few other edge cases
+also slip through:
 
-```
-watchList = [
-    commander's tameables within ~16 blocks,             // typically 0–5
-    commander's horses within ~16 blocks,                // typically 0–3
-    mobs leashed to commander within ~16 blocks,         // typically 0–5
-    named entities within ~16 blocks,                    // typically 0–3
-]
-// Cap: WATCH_LIST_HARD_CAP = 12 (first-12 belt-and-suspenders)
+```text
+watchList = collectWatchList(bot, commanderUuid)
+  = [
+      commander's tameables within ~16 blocks,             // typically 0–5
+      commander's horses within ~16 blocks,                // typically 0–3
+      mobs leashed to commander within ~16 blocks,         // typically 0–5
+      name-tagged entities within ~16 blocks,              // typically 0–3
+    ]
+  capped at WATCH_LIST_HARD_CAP (12) entries total
 
 for each watched in watchList:
-    attacker = watched.getAttacker()
-    if attacker == null || attacker == commander: continue
-    if !recentlyAttacked(watched): continue
+    if watched doesn't pass Victim Sanity Gates: continue
+    attacker = watched.getAttacker()                // vanilla LivingEntity field
+    if attacker == null: continue
+    if commander != null && attacker == commander: continue      // commander
+                                                                  // butchering own pet
+    if !recentlyAttacked(watched): continue         // HURT_TIMER check below
     if attacker instanceof PlayerEntity:
         emitPlayerAttackerWarning(bot, watched, attacker)
     else:
-        markAttackerForDefense(bot, attacker, DEFEND_EXPIRE_TICKS)
+        if !isTamedVsTamedCase(attacker, watched, commanderUuid):
+            markAttackerForDefense(bot, attacker, DEFEND_EXPIRE_TICKS)
 ```
+
+`recentlyAttacked(victim)` uses `victim.getHurtTime()` (vanilla field,
+positive immediately after damage, decays over ~10 ticks) to avoid
+re-triggering on stale `getAttacker()` values that vanilla keeps for
+~100 ticks after the last hit. Without this gate, the bot would keep
+reacting to an attacker who stopped attacking 5 seconds ago.
 
 The watch list is **always small** because it only contains the commander's
 personal pets and named entities — not the farm. Even with a very invested
@@ -262,50 +369,91 @@ New service: `BotAnimalDefenseService` in
 
 ```java
 public final class BotAnimalDefenseService {
-    // per-bot defense tracking
-    private static final Map<UUID, Map<UUID, Long>> DEFEND_TARGETS;
+    // botUuid -> (attackerUuid -> expireGameTick), values are server-ticks,
+    // NOT milliseconds. Cleaned lazily on read inside defenseBoost().
+    private static final Map<UUID, Map<UUID, Long>> DEFEND_TARGETS =
+        new ConcurrentHashMap<>();
 
-    // per-bot overhead warn throttle
-    private static final Map<UUID, Long> LAST_OVERHEAD_WARN_MS;
+    // (botUuid, victimUuid, attackerUuid) -> lastWarnEpochMillis, used to
+    // throttle overhead warnings for out-of-range and player attackers.
+    // Key is a small tuple wrapper; value is System.currentTimeMillis().
+    private static final Map<WarnKey, Long> LAST_OVERHEAD_WARN_MS =
+        new ConcurrentHashMap<>();
+
+    private BotAnimalDefenseService() {}
 
     public static void onServerTick(MinecraftServer server) { ... }
 
-    // Hook for BotEventHandler.scoreThreat (one line added there)
+    // Hook for BotEventHandler.scoreThreat (one line added there).
+    // Returns 0 if the candidate is not a defended attacker; returns
+    // DEFENSE_SCORE_BOOST if it is. Lazy expiry sweep on read.
     public static double defenseBoost(ServerPlayerEntity bot, Entity candidate);
 
-    // Hook for hostile-list augmentation (called from engageHostiles path)
+    // Hook for hostile-list augmentation, called from inside engageHostiles.
+    // Appends any in-map attackers not already in hostileList (dedupes by UUID).
     public static void augmentHostilesWithDefenseTargets(
         ServerPlayerEntity bot,
         List<Entity> hostileList);
 
+    // Cleanup hook called from Frens.SERVER_STOPPING handler.
+    public static void reset();
+
     // Internal classification
-    private static boolean isDefendedEntity(Entity target, UUID commanderUuid);
+    private static boolean isDefendedEntity(Entity target, UUID commanderUuid,
+                                            ServerPlayerEntity bot);
     private static boolean isExcludedByFarmHeuristic(Entity attacker);
-    private static boolean isTamedVsTamedCase(Entity attacker, Entity target);
+    private static boolean isTamedVsTamedCase(Entity attacker, Entity target,
+                                               UUID commanderUuid);
+    private static boolean passesVictimSanityGates(Entity victim,
+                                                    ServerPlayerEntity bot);
+    private static UUID resolveCommanderUuid(ServerPlayerEntity bot);
+    private static ServerPlayerEntity resolveCommanderEntity(
+        MinecraftServer server, UUID commanderUuid, ServerWorld botWorld);
 }
 ```
 
 Registration: alongside existing `END_SERVER_TICK` registrations in
 `Frens.java`. Throttle: 10 ticks (`server.getTicks() % SCAN_INTERVAL_TICKS == 0`).
+Cleanup: `reset()` called from the `SERVER_STOPPING` handler.
 
 ### Integration points
 
 Three touchpoints in existing code:
 
 1. **`BotEventHandler.scoreThreat`** — one line added at the bottom of the
-   scoring function: `return baseScore +
+   scoring function (currently around
+   [BotEventHandler.java:3541](../../src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3541)):
+   `return baseScore +
    BotAnimalDefenseService.defenseBoost(bot, entity);`. Lazy map cleanup
-   happens inside `defenseBoost` (expired entries dropped on read).
+   happens inside `defenseBoost` (expired entries dropped on read). The boost
+   is **additive**, consistent with the existing `stickinessBonus` term. With
+   `DEFENSE_SCORE_BOOST = 50.0`, a defended attacker at 16 blocks gets roughly
+   `(6.0 + 1.0) * 1.0 + 50 = 57.0`, while an ignited creeper at 3 blocks gets
+   `8 * (1 + 3.5) * 2 = 72.0`. Close-range creepers still take priority (the
+   explicit intent from the Q2 discussion), but any routine hostile attacker
+   jumps above normal wolves/zombies.
 
-2. **`BotEventHandler.engageHostiles`** (and its upstream hostile-list
-   builders) — one line added just before the hostile list is filtered:
+2. **`BotEventHandler.engageHostiles`** — **one line added at the top of
+   `engageHostiles`** (currently around
+   [BotEventHandler.java:3586](../../src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3586)),
+   before the `actionable = ...` filter:
    `BotAnimalDefenseService.augmentHostilesWithDefenseTargets(bot,
-   augmentedHostiles);`. Ensures non-`HostileEntity` attackers (tameable
-   gone wild, another bot's pet) are visible to the combat system.
+   hostileEntities);`. This is a **single hook inside the funnel**, not at
+   the multiple upstream list-builders (`1559`, `2322`, `3208`, `3280`) —
+   all paths flow through `engageHostiles` eventually, so hooking inside the
+   funnel catches every caller for one edit. The augmentation dedupes by
+   UUID before appending, so existing `HostileEntity` instances already in
+   the list are not duplicated. Ensures non-`HostileEntity` attackers
+   (tameable wolf gone wild, another bot's pet, ranged-weapon-wielding
+   goats if that's ever a thing) are visible to the combat system.
 
 3. **`Frens.java`** — one line added to the `END_SERVER_TICK` registration
    block: `ServerTickEvents.END_SERVER_TICK.register(
-   BotAnimalDefenseService::onServerTick);`.
+   BotAnimalDefenseService::onServerTick);`. Additionally, one line in the
+   existing `SERVER_STOPPING` cleanup handler:
+   `BotAnimalDefenseService.reset();` — clears `DEFEND_TARGETS` and
+   `LAST_OVERHEAD_WARN_MS` on shutdown, mirroring the pattern the other
+   8 services documented in CLAUDE.md use.
 
 No mixins. No new event listeners. No modifications to vanilla classes.
 
@@ -313,17 +461,28 @@ No mixins. No new event listeners. No modifications to vanilla classes.
 
 | Constant | Value | Notes |
 |---|---|---|
-| `SCAN_INTERVAL_TICKS` | 10 | 0.5s cadence, cheap at new cost |
-| `HOSTILE_SCAN_RADIUS` | 16.0 blocks | matches existing hostile-scan range |
-| `WATCH_LIST_SCAN_RADIUS` | 16.0 blocks | matches `HOSTILE_SCAN_RADIUS` |
-| `WATCH_LIST_HARD_CAP` | 12 | safety cap on reverse-scan |
-| `DEFENSE_ENGAGE_RADIUS` | 16.0 blocks | within this = engage; outside = overhead warn |
-| `BASE_HOME_RADIUS_FOR_FUZZY` | 32 blocks | hay-bale / fuzzy-category filter |
-| `HAY_BALE_RADIUS` | 8 blocks | original spec from user |
-| `DEFEND_EXPIRE_TICKS` | 100 (5s) | threat-boost lifetime |
-| `OVERHEAD_WARN_COOLDOWN_MS` | 60_000 | one warning per (attacker,animal) pair per minute |
-| `SELF_PRESERVATION_HP_FRACTION` | 0.30 | flee instead of defending below 30% HP |
-| `DEFENSE_SCORE_BOOST` | 50.0 | threat boost value (creepers at close range still win via proximity term) |
+| `SCAN_INTERVAL_TICKS` | `10` | 0.5s cadence, cheap at revised hostile-forward cost |
+| `HOSTILE_SCAN_RADIUS` | `16.0D` | matches existing hostile-scan range used by `BotThreatService.findHostilesAround` |
+| `WATCH_LIST_SCAN_RADIUS` | `16.0D` | matches `HOSTILE_SCAN_RADIUS` |
+| `WATCH_LIST_HARD_CAP` | `12` | safety cap on reverse-scan even if commander has 50 named cats |
+| `DEFENSE_ENGAGE_RADIUS` | `16.0D` | within this = engage; outside = overhead warn (Step 1 hostile) |
+| `HAY_BALE_RADIUS` | `8` blocks | original user spec |
+| `DEFEND_EXPIRE_TICKS` | `100` (5s in ticks, **not ms**) | threat-boost lifetime, stored in `DEFEND_TARGETS` as `server.getTicks() + DEFEND_EXPIRE_TICKS` |
+| `OVERHEAD_WARN_COOLDOWN_MS` | `60_000` (**ms, not ticks**) | one warning per `(bot,victim,attacker)` tuple per minute, stored in `LAST_OVERHEAD_WARN_MS` as `System.currentTimeMillis()` |
+| `SELF_PRESERVATION_HP_FRACTION` | `0.30` | flee instead of defending below 30% HP |
+| `DEFENSE_SCORE_BOOST` | `50.0` | additive term in `scoreThreat`, alongside existing `stickinessBonus` |
+
+**Base radius:** intentionally **NOT** a tunable constant. Use
+`BotHomeService.findBaseNearPosition(server, world, pos)` to obtain the
+`BaseEntry` (if any) covering the victim's position; the per-base `radius`
+field is authoritative. If the returned base's owner UUID does not match
+the bot's commander UUID, reject — the animal is on someone else's base.
+
+**Units discipline:** any field ending in `_MS` is wall-clock milliseconds
+(`System.currentTimeMillis()`); any field ending in `_TICKS` or `_TICK` is
+server game-ticks (`server.getTicks()`). The `DEFEND_TARGETS` inner-map
+`Long` value is a game-tick; the `LAST_OVERHEAD_WARN_MS` value is
+milliseconds. These must not be mixed.
 
 All tunable at the top of `BotAnimalDefenseService`. In-game tuning pass
 expected once real playtesting begins.
@@ -372,8 +531,25 @@ No automated tests — the mod has none. Verification is in-game after deploy:
 11. **Self-preservation lockout.** Reduce bot to 25% HP; spawn hostile
     targeting owned wolf; verify bot flees instead of engaging.
 
-12. **Farm scan cost.** Stand in a 100-animal farm with 2 hostiles; run
-    for 60 seconds; verify no tick-lag (anecdotal but worth noting).
+12. **Commander offline.** Tame a wolf; commander logs out; spawn zombie
+    targeting the wolf while commander is offline. Expected: rules 1
+    (UUID compare via `getOwnerReference().getUuid()`) still matches, bot
+    engages the zombie. Rule 3 (leashed-to-commander) silently skips
+    because commander entity is null.
+
+13. **Commander in different dimension.** Commander teleports to Nether,
+    leaves tamed wolf in Overworld; zombie attacks wolf. Expected: bot
+    in Overworld still engages via rule 1 (UUID match).
+
+14. **Farm scan cost.** Stand in a 100-animal farm with 2 hostiles; run
+    for 60 seconds; monitor server log for `"Running behind, skipping"`
+    tick-lag warnings. Expected: no warnings. If any appear, review the
+    scan cadence or bounding box size.
+
+15. **Bot with no commander (guard/patrol).** Un-recruited guard bot with
+    zero ownership; tame a wolf; spawn zombie. Expected: rules 1–4
+    silently skip (no commander UUID), rule 5 still fires for
+    name-tagged victims, rule 6 still fires inside mapped villages.
 
 ## Devlog: future alliances system
 
