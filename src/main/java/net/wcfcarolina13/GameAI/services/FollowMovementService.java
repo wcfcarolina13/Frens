@@ -126,7 +126,10 @@ public final class FollowMovementService {
         if (lowerShield != null) {
             lowerShield.run();
         }
-        applyHumanLikeForwardInput(bot, target, sprint, sprint ? 0.24D : 0.16D, 0.12D);
+        // Sprint impulse is deliberately aggressive (0.32) so the bot can actually outpace a
+        // sprinting player during follow catch-up. Walk impulse stays conservative (0.16)
+        // because close-range follow looks jittery if the bot overshoots.
+        applyHumanLikeForwardInput(bot, target, sprint, sprint ? 0.32D : 0.16D, 0.12D);
     }
 
     public static void followInputStep(ServerPlayerEntity bot,
@@ -198,7 +201,9 @@ public final class FollowMovementService {
             lowerShield.run();
         }
         boolean sprint = distanceSq > followSprintDistanceSq;
-        applyHumanLikeForwardInput(bot, waypointCenter, sprint, sprint ? 0.24D : 0.17D, 0.12D);
+        // Aggressive sprint impulse so the bot can actually catch up across waypoints —
+        // see BotActions.applyMovementInput for the matching velocity-cap bump.
+        applyHumanLikeForwardInput(bot, waypointCenter, sprint, sprint ? 0.32D : 0.17D, 0.12D);
     }
 
     public static WaypointRepositionResult tryWaypointLocalRepositionDetailed(ServerPlayerEntity bot, BlockPos waypoint) {
@@ -373,7 +378,10 @@ public final class FollowMovementService {
         }
 
         boolean sprint = distanceSq > followSprintDistanceSq;
-        double impulse = sprint ? 0.26D : 0.18D;
+        // Aggressive sprint impulse — see BotActions.applyMovementInput for matching cap.
+        // At ground friction ~0.546, impulse 0.32 settles at ~0.385 m/tick (7.7 blocks/s),
+        // well above vanilla player sprint (~5.6 blocks/s) so the bot can close the gap.
+        double impulse = sprint ? 0.32D : 0.18D;
         applyHumanLikeForwardInput(bot, targetPos, sprint, impulse, 0.12D);
     }
 

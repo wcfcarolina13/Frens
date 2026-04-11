@@ -234,11 +234,22 @@ public final class BotActions {
         }
         Vec3d impulse = delta.normalize().multiply(tunedImpulse);
 
-        // Clamp horizontal velocity so repeated inputs do not spike speed.
+        // Clamp horizontal velocity so repeated inputs do not spike speed. The cap is
+        // sprint-aware: when the bot is flagged as sprinting (follow-catchup, flee, etc.),
+        // allow a higher ceiling so the sprint impulse can actually accumulate past walk-
+        // pace ground friction. Without this, the bot animates "sprint" but runs at walk
+        // speed because its velocity never breaks past the walk cap.
         Vec3d current = bot.getVelocity();
         Vec3d horiz = new Vec3d(current.x, 0, current.z);
         double horizMag = horiz.length();
-        double maxHoriz = waterLike ? (bot.isSubmergedInWater() ? 0.18D : 0.12D) : 0.45D;
+        double maxHoriz;
+        if (waterLike) {
+            maxHoriz = bot.isSubmergedInWater() ? 0.18D : 0.12D;
+        } else if (bot.isSprinting()) {
+            maxHoriz = 0.58D;
+        } else {
+            maxHoriz = 0.45D;
+        }
         if (horizMag > maxHoriz) {
             double scale = maxHoriz / horizMag;
             current = new Vec3d(horiz.x * scale, current.y, horiz.z * scale);
@@ -2743,11 +2754,84 @@ public final class BotActions {
                 bot
         );
         BlockHitResult hit = world.raycast(ctx);
-        return hit.getType() != HitResult.Type.MISS;
+        if (hit.getType() != HitResult.Type.MISS) {
+            return true;
+        }
+        // Cobwebs have empty collision shapes, so the COLLIDER raycast walks right through
+        // them — but shooting through cobwebs traps the arrow and often fails the hit.
+        // More importantly, if a skeleton is on the far side of a cobweb, the bot should
+        // NOT engage at range — it should retreat and let approach/cover logic take over.
+        if (isRangedLineBlockedByCobweb(world, fromEye, aim)) {
+            return true;
+        }
+        // Friendly-fire check: if a non-bot player is inside the fire cone between
+        // the bot's eye and the aim point, cancel the shot.
+        if (wouldRangedShotHitFriendly(bot, fromEye, aim)) {
+            return true;
+        }
+        return false;
     }
 
     /**
-     * Returns true if the bot's current ranged line to the target is blocked by terrain.
+     * Walks the ray from {@code fromEye} to {@code aim} sampling block cells at 0.5-block
+     * intervals. Returns true if any sampled cell contains a cobweb. Cobwebs have empty
+     * collision shapes so the vanilla COLLIDER raycast does not catch them.
+     */
+    private static boolean isRangedLineBlockedByCobweb(ServerWorld world, Vec3d fromEye, Vec3d aim) {
+        if (world == null || fromEye == null || aim == null) return false;
+        Vec3d delta = aim.subtract(fromEye);
+        double totalDist = delta.length();
+        if (totalDist < 0.25D) return false;
+        Vec3d stepVec = delta.normalize().multiply(0.5D);
+        int steps = (int) Math.ceil(totalDist / 0.5D);
+        Vec3d cursor = fromEye;
+        for (int i = 0; i <= steps; i++) {
+            BlockPos bp = BlockPos.ofFloored(cursor);
+            if (world.isChunkLoaded(bp) && world.getBlockState(bp).isOf(net.minecraft.block.Blocks.COBWEB)) {
+                return true;
+            }
+            cursor = cursor.add(stepVec);
+        }
+        return false;
+    }
+
+    /**
+     * Friendly-fire gate: returns true if a non-bot player is within the fire cone from
+     * {@code fromEye} to {@code aim}. Uses a simple "distance from point to line segment"
+     * test with a 1.5-block lateral threshold to account for player hitbox width plus bow
+     * divergence.
+     */
+    private static boolean wouldRangedShotHitFriendly(ServerPlayerEntity bot, Vec3d fromEye, Vec3d aim) {
+        if (bot == null || fromEye == null || aim == null) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        Vec3d delta = aim.subtract(fromEye);
+        double maxDist = delta.length();
+        if (maxDist < 0.5D) return false;
+        Vec3d dir = delta.multiply(1.0D / maxDist);
+        final double LATERAL_THRESHOLD = 1.5D;
+        final double LATERAL_THRESHOLD_SQ = LATERAL_THRESHOLD * LATERAL_THRESHOLD;
+        for (ServerPlayerEntity other : world.getPlayers()) {
+            if (other == null || other == bot || other.isRemoved() || !other.isAlive()) continue;
+            // Skip fellow bots — they're allies but also the only valid "in-fire-cone" targets
+            // we might accidentally shoot. A bot-on-bot friendly-fire concern is a different
+            // feature (tamed animal defense); here we only gate against human players.
+            if (net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(other.getUuid())) continue;
+            // Use the player's mid-body position (feet Y + half standing eye height).
+            Vec3d otherMid = new Vec3d(other.getX(), other.getY() + other.getStandingEyeHeight() / 2.0D, other.getZ());
+            Vec3d toOther = otherMid.subtract(fromEye);
+            double along = toOther.dotProduct(dir);
+            if (along <= 0.0D || along >= maxDist + 1.0D) continue;
+            Vec3d perp = toOther.subtract(dir.multiply(along));
+            if (perp.lengthSquared() <= LATERAL_THRESHOLD_SQ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the bot's current ranged line to the target is blocked by terrain,
+     * cobweb, or a friendly (non-bot) player in the fire cone.
      * Used by engageHostiles to decide whether to fall through to melee approach.
      */
     public static boolean isRangedLineCurrentlyBlocked(ServerPlayerEntity bot, LivingEntity target) {
@@ -2758,6 +2842,22 @@ public final class BotActions {
             return false;
         }
         return isRangedLineBlocked(world, bot, bot.getEyePos(), target);
+    }
+
+    /**
+     * Returns true if there is a cobweb block between the bot's eye and the target entity.
+     * Used by combat logic to switch from "engage" to "take cover" — the bot can't
+     * effectively shoot or melee through a cobweb (arrows stop, path is deadly), so it
+     * should back off with shield raised instead of sitting there taking arrows.
+     */
+    public static boolean isCobwebBetweenBotAndTarget(ServerPlayerEntity bot, LivingEntity target) {
+        if (bot == null || target == null) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        Vec3d from = bot.getEyePos();
+        Vec3d to = new Vec3d(target.getX(),
+                target.getY() + target.getStandingEyeHeight() / 2.0D,
+                target.getZ());
+        return isRangedLineBlockedByCobweb(world, from, to);
     }
 
     /** Cancel any committed reposition in progress (e.g. when LoS clears or target changes). */

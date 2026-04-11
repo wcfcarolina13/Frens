@@ -3782,6 +3782,33 @@ public class BotEventHandler {
             }
         }
 
+        // Cobweb barrier: if there's a cobweb between the bot and the target, we can't
+        // effectively engage — arrows are swallowed, and the pathfinder rejects cobweb
+        // cells as deadly terrain so we can't approach either. Back off with shield up
+        // instead of sitting there eating projectiles through the web. This matches the
+        // "take cover if being shot at through cobwebs" behaviour: the bot preserves
+        // distance while the commander can close the gap and break the web manually.
+        if (closest instanceof LivingEntity lvCobweb
+                && BotActions.isCobwebBetweenBotAndTarget(bot, lvCobweb)) {
+            BotActions.raiseShieldFacing(bot, closest);
+            if (distance <= 8.0D) {
+                // Move directly away from the target without the follow planner (which
+                // would try to path through the cobweb).
+                double bdx = bot.getX() - closest.getX();
+                double bdz = bot.getZ() - closest.getZ();
+                double blen = Math.sqrt(bdx * bdx + bdz * bdz);
+                if (blen > 0.01) {
+                    Vec3d retreat = new Vec3d(
+                            bot.getX() + (bdx / blen) * 4.0D,
+                            bot.getY(),
+                            bot.getZ() + (bdz / blen) * 4.0D);
+                    BotActions.sprint(bot, true);
+                    FollowMovementService.moveToward(bot, retreat, 0.5, true, null);
+                }
+            }
+            return true;
+        }
+
         if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
             if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
                 return true;

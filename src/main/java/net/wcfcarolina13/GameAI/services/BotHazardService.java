@@ -88,7 +88,13 @@ public final class BotHazardService {
                 || state.isOf(Blocks.SWEET_BERRY_BUSH)
                 || state.isOf(Blocks.WITHER_ROSE)
                 || state.isOf(Blocks.POWDER_SNOW)
-                || state.isOf(Blocks.POINTED_DRIPSTONE);
+                || state.isOf(Blocks.POINTED_DRIPSTONE)
+                // Cobweb is not damaging on its own, but it slows entities to ~15% speed and
+                // has an empty collision shape (so pathfinders happily path into them without
+                // this explicit reject). In caves, mineshafts, and dungeons this is a death
+                // sentence: the bot becomes a sitting target for skeleton arrows and zombies.
+                // Also a trap near raids and pillager patrols.
+                || state.isOf(Blocks.COBWEB);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
