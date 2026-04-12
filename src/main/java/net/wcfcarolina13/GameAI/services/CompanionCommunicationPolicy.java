@@ -200,7 +200,7 @@ public final class CompanionCommunicationPolicy {
         return isAllowedToControl(actor, bot.getName().getString());
     }
 
-    private static boolean isNearEnchantingTable(ServerPlayerEntity player, int radius) {
+    public static boolean isNearEnchantingTable(ServerPlayerEntity player, int radius) {
         if (player == null) {
             return false;
         }
@@ -219,6 +219,39 @@ public final class CompanionCommunicationPolicy {
             if (st != null && st.isOf(Blocks.ENCHANTING_TABLE)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the bot can send a long-range comm message to the commander.
+     * Four gates — any one passing unlocks:
+     * <ul>
+     *   <li>Bot OR commander has {@code Items.ENDER_EYE}</li>
+     *   <li>Bot OR commander has the wizard's tome item</li>
+     *   <li>Bot AND commander both have {@code Items.ENDER_PEARL}</li>
+     *   <li>Bot OR commander is within 8 blocks of an enchanting table</li>
+     * </ul>
+     */
+    public static boolean canLongRangeComm(ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        if (bot == null || commander == null) return false;
+        // Eye of ender (either)
+        ItemStack eyeStack = new ItemStack(Items.ENDER_EYE);
+        if (bot.getInventory().contains(eyeStack) || commander.getInventory().contains(eyeStack)) {
+            return true;
+        }
+        // Wizard's tome (either)
+        if (hasWizardTome(bot) || hasWizardTome(commander)) {
+            return true;
+        }
+        // Both have ender pearl
+        ItemStack pearlStack = new ItemStack(Items.ENDER_PEARL);
+        if (bot.getInventory().contains(pearlStack) && commander.getInventory().contains(pearlStack)) {
+            return true;
+        }
+        // Either near enchanting table (radius 8 for long-range comm)
+        if (isNearEnchantingTable(bot, 8) || isNearEnchantingTable(commander, 8)) {
+            return true;
         }
         return false;
     }
