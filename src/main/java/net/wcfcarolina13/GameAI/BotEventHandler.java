@@ -3616,6 +3616,63 @@ public class BotEventHandler {
         // mutates the input list.
         hostileEntities = net.wcfcarolina13.GameAI.services.BotAnimalDefenseService
                 .augmentHostilesWithDefenseTargets(bot, hostileEntities);
+        // Iron golem special rules: accidental hits get ignored entirely, and
+        // direct aggro forces a flee response (golems are tanky and the bot
+        // will lose). See spec section "Iron Golem Special Rules".
+        boolean golemAggroFlee = false;
+        if (!hostileEntities.isEmpty()) {
+            java.util.List<Entity> filtered = new java.util.ArrayList<>(hostileEntities.size());
+            for (Entity e : hostileEntities) {
+                if (e instanceof net.minecraft.entity.passive.IronGolemEntity golem) {
+                    LivingEntity golemTarget = golem.getTarget();
+                    if (golemTarget == bot) {
+                        golemAggroFlee = true;
+                        // Don't add to the engage list — flee branch handles it below.
+                        continue;
+                    }
+                    // Accidental hit: drop the golem from the engage list.
+                    continue;
+                }
+                filtered.add(e);
+            }
+            hostileEntities = filtered;
+        }
+        if (golemAggroFlee) {
+            // Reuse the existing creeper flee pattern from earlier in this
+            // method to retreat from the golem. We need a Vec3d retreat target.
+            // Find the closest iron golem in the original (pre-filter) input
+            // and flee from it.
+            Entity closestGolem = null;
+            double bestSq = Double.MAX_VALUE;
+            // We dropped the iron golems from hostileEntities; rescan via a
+            // small box query so we still know where the angry golem is.
+            if (bot.getEntityWorld() instanceof ServerWorld golemWorld) {
+                for (Entity g : golemWorld.getEntitiesByClass(
+                        net.minecraft.entity.passive.IronGolemEntity.class,
+                        Box.of(new Vec3d(bot.getX(), bot.getY(), bot.getZ()), 32, 16, 32),
+                        golem -> golem != null && golem.getTarget() == bot)) {
+                    double sq = g.squaredDistanceTo(bot);
+                    if (sq < bestSq) {
+                        bestSq = sq;
+                        closestGolem = g;
+                    }
+                }
+            }
+            if (closestGolem != null) {
+                double dx = bot.getX() - closestGolem.getX();
+                double dz = bot.getZ() - closestGolem.getZ();
+                double len = Math.sqrt(dx * dx + dz * dz);
+                if (len < 0.01) { dx = 1; dz = 0; len = 1; }
+                Vec3d fleeTarget = new Vec3d(
+                        bot.getX() + (dx / len) * 12,
+                        bot.getY(),
+                        bot.getZ() + (dz / len) * 12);
+                BotActions.sprint(bot, true);
+                FollowMovementService.moveToward(bot, fleeTarget, 1.0, true, null);
+                COMBAT_TARGET.remove(bot.getUuid());
+                return true;
+            }
+        }
         if (hostileEntities.isEmpty()) {
             COMBAT_TARGET.remove(bot.getUuid());
             return false;
