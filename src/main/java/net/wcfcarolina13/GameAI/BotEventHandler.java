@@ -3677,6 +3677,8 @@ public class BotEventHandler {
             COMBAT_TARGET.remove(bot.getUuid());
             return false;
         }
+        boolean patrolSuppressPursuit = net.wcfcarolina13.GameAI.services.BotPillagerAlertService
+                .checkForPatrolAndSuppressPursuit(bot, server, hostileEntities);
         boolean botArmed = BotActions.hasMeleeWeapon(bot) || BotActions.hasRangedWeapon(bot);
         // Filter out non-actionable phantoms: circling too high to hit and not diving.
         // These aren't real threats and shouldn't influence target selection or trigger
@@ -3914,8 +3916,13 @@ public class BotEventHandler {
         double preferredStopDistance = BotActions.getPreferredMeleeStopDistance(activeMainHand);
 
         if (distance > preferredEngageDistance) {
-            lowerShieldTracking(bot);
-            moveToward(bot, positionOf(closest), preferredStopDistance, true);
+            if (patrolSuppressPursuit && net.wcfcarolina13.GameAI.services.BotPillagerAlertService
+                    .shouldSuppressPursuit(bot, closest)) {
+                BotActions.raiseShieldFacing(bot, closest);
+            } else {
+                lowerShieldTracking(bot);
+                moveToward(bot, positionOf(closest), preferredStopDistance, true);
+            }
         } else if (shouldBlock) {
             // In melee range with a sword: stop sprinting when 2+ mobs are close so
             // sweep attacks can trigger (vanilla sweep requires: on ground, not sprinting,
@@ -3993,8 +4000,13 @@ public class BotEventHandler {
                     return true;
                 }
                 if (BotActions.shouldPressSpearCharge(bot, closest)) {
-                    BotActions.sprint(bot, true);
-                    moveToward(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()), true);
+                    if (patrolSuppressPursuit && net.wcfcarolina13.GameAI.services.BotPillagerAlertService
+                            .shouldSuppressPursuit(bot, closest)) {
+                        BotActions.raiseShieldFacing(bot, closest);
+                    } else {
+                        BotActions.sprint(bot, true);
+                        moveToward(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()), true);
+                    }
                 }
                 // Hit-and-retreat kiting: after swinging, backpedal during cooldown reset
                 // to dodge the mob's return hit, then step forward to re-engage.
@@ -4006,7 +4018,12 @@ public class BotEventHandler {
                         BotActions.moveBackward(bot);
                     } else if (cooldown >= 0.7f && distance > 2.0D) {
                         // Cooldown almost ready — step forward to re-engage
-                        moveToward(bot, positionOf(closest), 1.5D, false);
+                        if (patrolSuppressPursuit && net.wcfcarolina13.GameAI.services.BotPillagerAlertService
+                                .shouldSuppressPursuit(bot, closest)) {
+                            BotActions.raiseShieldFacing(bot, closest);
+                        } else {
+                            moveToward(bot, positionOf(closest), 1.5D, false);
+                        }
                     }
                 }
                 BotActions.attackTarget(bot, closest);
