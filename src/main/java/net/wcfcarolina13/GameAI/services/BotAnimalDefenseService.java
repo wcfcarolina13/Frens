@@ -19,6 +19,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
+import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService.BaseEntry;
 
 import org.slf4j.Logger;
@@ -136,7 +139,201 @@ public final class BotAnimalDefenseService {
      * END_SERVER_TICK services. Throttled internally to {@link #SCAN_INTERVAL_TICKS}.
      */
     public static void onServerTick(MinecraftServer server) {
-        // Stub: filled in chunk 3.
+        if (server == null) return;
+        if (server.getTicks() % SCAN_INTERVAL_TICKS != 0) return;
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+            if (bot == null || bot.isRemoved() || !bot.isAlive()) continue;
+            if (!(bot.getEntityWorld() instanceof ServerWorld)) continue;
+            if (bot.hasVehicle()) continue; // mounted bots are passengers, not defenders
+            tickOneBot(server, bot);
+        }
+    }
+
+    /**
+     * Per-bot tick body. Self-preservation gates first; then hostile-forward
+     * scan (Step 1); then watch-list reverse scan (Step 2). Both steps may
+     * mark attackers for the defense boost map.
+     */
+    private static void tickOneBot(MinecraftServer server, ServerPlayerEntity bot) {
+        // Self-preservation: bots below the HP threshold do not engage in defense.
+        // They may still emit overhead warnings (the warning is informational and
+        // doesn't put the bot at additional risk), so the HP gate only suppresses
+        // markAttackerForDefense, not the warning emitter.
+        boolean canEngage = bot.getHealth() > bot.getMaxHealth() * SELF_PRESERVATION_HP_FRACTION;
+
+        UUID commanderUuid = resolveCommanderUuid(bot);
+
+        scanHostilesStep1(server, bot, commanderUuid, canEngage);
+        scanWatchListStep2(server, bot, commanderUuid, canEngage);
+    }
+
+    /**
+     * Step 1 — hostile-forward scan. For each nearby hostile, look at its
+     * vanilla AI target. If the target is a defended entity for this bot
+     * (and the attacker isn't excluded by the farm-machinery heuristic or
+     * the tamed-vs-tamed skip), mark it for defense.
+     */
+    private static void scanHostilesStep1(
+            MinecraftServer server,
+            ServerPlayerEntity bot,
+            UUID commanderUuid,
+            boolean canEngage) {
+        List<Entity> hostiles = BotThreatService.findHostilesAround(bot, HOSTILE_SCAN_RADIUS);
+        if (hostiles.isEmpty()) return;
+        for (Entity hostile : hostiles) {
+            if (!(hostile instanceof MobEntity hostileMob)) continue;
+            LivingEntity target = hostileMob.getTarget();
+            if (target == null) continue;
+            if (!isDefendedEntity(target, commanderUuid, bot)) continue;
+            if (isExcludedByFarmHeuristic(hostile)) continue;
+            if (isTamedVsTamedCase(hostile, target, commanderUuid, bot)) continue;
+            // Distance gate: within DEFENSE_ENGAGE_RADIUS = engage; outside = warn.
+            double distToBot = Math.sqrt(hostile.squaredDistanceTo(bot));
+            if (distToBot <= DEFENSE_ENGAGE_RADIUS) {
+                if (canEngage) {
+                    markAttackerForDefense(server, bot, hostile);
+                }
+            } else {
+                maybeOverheadWarn(bot, target, hostile, "out-of-range");
+            }
+        }
+    }
+
+    /**
+     * Step 2 — watch-list reverse scan for player attackers and accidental
+     * hits that Step 1 cannot catch (players don't have an AI target;
+     * skeleton arrows clipping a cow won't show up as the skeleton's target).
+     * Watch list is small by construction (commander's pets, leashed mobs,
+     * named entities) — capped at WATCH_LIST_HARD_CAP.
+     */
+    private static void scanWatchListStep2(
+            MinecraftServer server,
+            ServerPlayerEntity bot,
+            UUID commanderUuid,
+            boolean canEngage) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
+        List<LivingEntity> watchList = collectWatchList(world, bot, commanderUuid);
+        if (watchList.isEmpty()) return;
+        ServerPlayerEntity commander = resolveCommanderEntity(server, commanderUuid, world);
+        for (LivingEntity watched : watchList) {
+            if (!passesVictimSanityGates(watched, bot)) continue;
+            if (!recentlyAttacked(watched)) continue;
+            LivingEntity attacker = watched.getAttacker();
+            if (attacker == null) continue;
+            if (commander != null && attacker == commander) continue; // commander butchering
+            if (attacker instanceof PlayerEntity attackerPlayer
+                    && attackerPlayer instanceof ServerPlayerEntity sp
+                    && !isAttackerAllied(bot, sp)) {
+                maybeOverheadWarn(bot, watched, attacker, "player-attacker");
+                continue;
+            }
+            if (isExcludedByFarmHeuristic(attacker)) continue;
+            if (isTamedVsTamedCase(attacker, watched, commanderUuid, bot)) continue;
+            double distToBot = Math.sqrt(attacker.squaredDistanceTo(bot));
+            if (distToBot <= DEFENSE_ENGAGE_RADIUS) {
+                if (canEngage) {
+                    markAttackerForDefense(server, bot, attacker);
+                }
+            } else {
+                maybeOverheadWarn(bot, watched, attacker, "out-of-range");
+            }
+        }
+    }
+
+    /**
+     * Builds the watch list from the bot's surroundings. Combines four
+     * sub-categories (commander's tameables, horses, leashed mobs, name-tagged
+     * entities) into a single deduplicated list capped at WATCH_LIST_HARD_CAP.
+     */
+    private static List<LivingEntity> collectWatchList(
+            ServerWorld world, ServerPlayerEntity bot, UUID commanderUuid) {
+        // Vec3d ctor instead of bot.getPos() — getPos() does not exist on Entity
+        // in 1.21.11 yarn (same trap that bit RescueTeleportNetworkManager earlier).
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Box box = Box.of(botPos, WATCH_LIST_SCAN_RADIUS * 2, WATCH_LIST_SCAN_RADIUS * 2,
+                WATCH_LIST_SCAN_RADIUS * 2);
+        List<LivingEntity> result = new ArrayList<>();
+        // We use a single broad query and filter, rather than four separate queries.
+        // This is cheaper than four separate getEntitiesByClass calls.
+        for (LivingEntity living : world.getEntitiesByClass(LivingEntity.class, box, e -> true)) {
+            if (result.size() >= WATCH_LIST_HARD_CAP) break;
+            if (living == bot) continue;
+            if (living.squaredDistanceTo(bot)
+                    > WATCH_LIST_SCAN_RADIUS * WATCH_LIST_SCAN_RADIUS) continue;
+            // Quick category match: any of rules 1-3 or rule 5 (named entity).
+            if (commanderUuid != null) {
+                if (living instanceof TameableEntity tameable
+                        && tameable.isTamed()
+                        && tameable.getOwnerReference() != null
+                        && commanderUuid.equals(tameable.getOwnerReference().getUuid())) {
+                    result.add(living);
+                    continue;
+                }
+                if (living instanceof AbstractHorseEntity horse
+                        && horse.isTame()
+                        && horse.getOwnerReference() != null
+                        && commanderUuid.equals(horse.getOwnerReference().getUuid())) {
+                    result.add(living);
+                    continue;
+                }
+                if (living instanceof MobEntity mob && mob.isLeashed()) {
+                    Entity holder = mob.getLeashHolder();
+                    if (holder instanceof ServerPlayerEntity holderPlayer
+                            && commanderUuid.equals(holderPlayer.getUuid())) {
+                        result.add(living);
+                        continue;
+                    }
+                }
+            }
+            // Rule 5: name-tagged entity (sanity gates run later in the caller).
+            if (living.hasCustomName()) {
+                result.add(living);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Records (bot, attacker) in the defense map with an expiry of
+     * {@code now + DEFEND_EXPIRE_TICKS}. The boost lifetime extends on each
+     * new mark, so a continuously-attacking mob stays prioritized.
+     */
+    private static void markAttackerForDefense(
+            MinecraftServer server, ServerPlayerEntity bot, Entity attacker) {
+        if (server == null || bot == null || attacker == null) return;
+        long expireAt = server.getTicks() + DEFEND_EXPIRE_TICKS;
+        DEFEND_TARGETS
+                .computeIfAbsent(bot.getUuid(), k -> new ConcurrentHashMap<>())
+                .put(attacker.getUuid(), expireAt);
+    }
+
+    /**
+     * Throttled overhead warning emitter. Calls
+     * CompanionOverheadDialogueService.showOverheadLine with a message
+     * tailored to the warning kind.
+     */
+    private static void maybeOverheadWarn(
+            ServerPlayerEntity bot,
+            LivingEntity victim,
+            Entity attacker,
+            String reason) {
+        if (bot == null || victim == null || attacker == null) return;
+        WarnKey key = new WarnKey(bot.getUuid(), victim.getUuid(), attacker.getUuid());
+        long now = System.currentTimeMillis();
+        Long lastWarnedAt = LAST_OVERHEAD_WARN_MS.get(key);
+        if (lastWarnedAt != null && now - lastWarnedAt < OVERHEAD_WARN_COOLDOWN_MS) {
+            return;
+        }
+        LAST_OVERHEAD_WARN_MS.put(key, now);
+        String victimName = victim.getName().getString();
+        String message = "player-attacker".equals(reason)
+                ? "Engaging threats against allies."
+                : "Something's attacking your " + victimName + "!";
+        CompanionOverheadDialogueService.showOverheadLine(
+                bot, message, 2_800, 32.0D, "animal-defense", reason);
+        LOGGER.info("animal-defense overhead-warn bot={} victim={} attacker={} reason={}",
+                bot.getName().getString(), victimName,
+                attacker.getName().getString(), reason);
     }
 
     /**
@@ -146,8 +343,22 @@ public final class BotAnimalDefenseService {
      * Lazy expiry sweep happens here on read.
      */
     public static double defenseBoost(ServerPlayerEntity bot, Entity candidate) {
-        // Stub: filled in chunk 3.
-        return 0.0D;
+        if (bot == null || candidate == null) return 0.0D;
+        Map<UUID, Long> botMap = DEFEND_TARGETS.get(bot.getUuid());
+        if (botMap == null || botMap.isEmpty()) return 0.0D;
+        Long expireAt = botMap.get(candidate.getUuid());
+        if (expireAt == null) return 0.0D;
+        long now = bot.getCommandSource().getServer() == null
+                ? -1L
+                : bot.getCommandSource().getServer().getTicks();
+        if (now < 0) return 0.0D;
+        if (now >= expireAt) {
+            // Lazy cleanup on read.
+            botMap.remove(candidate.getUuid());
+            if (botMap.isEmpty()) DEFEND_TARGETS.remove(bot.getUuid());
+            return 0.0D;
+        }
+        return DEFENSE_SCORE_BOOST;
     }
 
     /**
@@ -160,8 +371,49 @@ public final class BotAnimalDefenseService {
      */
     public static List<Entity> augmentHostilesWithDefenseTargets(
             ServerPlayerEntity bot, List<Entity> hostileList) {
-        // Stub: filled in chunk 3.
-        return hostileList;
+        if (bot == null || hostileList == null) return hostileList;
+        Map<UUID, Long> botMap = DEFEND_TARGETS.get(bot.getUuid());
+        if (botMap == null || botMap.isEmpty()) return hostileList;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return hostileList;
+        // Build a UUID set of entities already in the input list, so we dedup.
+        java.util.Set<UUID> existing = new java.util.HashSet<>(hostileList.size());
+        for (Entity e : hostileList) {
+            existing.add(e.getUuid());
+        }
+        long now = bot.getCommandSource().getServer() == null
+                ? -1L
+                : bot.getCommandSource().getServer().getTicks();
+        if (now < 0) return hostileList;
+        // Defensive copy — never mutate the input list (some callers pass
+        // Stream.toList() which is unmodifiable; see feedback_stream_tolist_mutation.md).
+        List<Entity> augmented = null;
+        java.util.Iterator<Map.Entry<UUID, Long>> it = botMap.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Long> entry = it.next();
+            if (now >= entry.getValue()) {
+                it.remove(); // lazy cleanup
+                continue;
+            }
+            UUID attackerUuid = entry.getKey();
+            if (existing.contains(attackerUuid)) continue;
+            // Resolve the attacker entity in this world via O(1) UUID lookup.
+            // ServerWorld.getEntityAnyDimension(UUID) is the correct 1.21.11
+            // API — much cheaper than iterating world entities for one match.
+            Entity attackerEntity = world.getEntityAnyDimension(attackerUuid);
+            if (attackerEntity == null) continue;
+            if (attackerEntity.isRemoved() || !attackerEntity.isAlive()) continue;
+            // Sanity: only inject attackers that are in the bot's current world.
+            // getEntityAnyDimension can return entities from other dimensions and
+            // the combat system expects same-world entities.
+            if (attackerEntity.getEntityWorld() != world) continue;
+            if (augmented == null) {
+                augmented = new ArrayList<>(hostileList);
+            }
+            augmented.add(attackerEntity);
+            existing.add(attackerUuid);
+        }
+        if (botMap.isEmpty()) DEFEND_TARGETS.remove(bot.getUuid());
+        return augmented != null ? augmented : hostileList;
     }
 
     /**
@@ -378,13 +630,11 @@ public final class BotAnimalDefenseService {
     }
 
     /** Resolves the bot's commander UUID via CompanionCommunicationPolicy. */
-    @SuppressWarnings("unused")
     private static UUID resolveCommanderUuid(ServerPlayerEntity bot) {
         return CompanionCommunicationPolicy.resolveOwnerUuid(bot);
     }
 
     /** Resolves the live commander entity in the bot's world, or null if offline/cross-dim. */
-    @SuppressWarnings("unused")
     private static ServerPlayerEntity resolveCommanderEntity(
             MinecraftServer server, UUID commanderUuid, ServerWorld botWorld) {
         if (server == null || commanderUuid == null || botWorld == null) {
