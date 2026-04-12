@@ -119,7 +119,7 @@ public final class CompanionCommunicationPolicy {
         return controller.squaredDistanceTo(bot) <= r * r;
     }
 
-    private static UUID resolveOwnerUuid(ServerPlayerEntity bot) {
+    public static UUID resolveOwnerUuid(ServerPlayerEntity bot) {
         if (bot == null) {
             return null;
         }
