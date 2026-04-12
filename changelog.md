@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-11 — Pillager patrol alert system (Feature B)
+
+- **New:** `BotPillagerAlertService` detects illager groups (2+ visible within 16 blocks via LOS-gated `canSee`) and goes defensive — shield up, pursuit suppressed until aggro. One-shot alert via tiered channels: goat horn (vanilla instrument sound, 128/48 block overhead above/below ground) > signal fire (lit campfire + hay bale within 24 blocks, FOLLOW mode suppressed) > direct message (magic-comm gated via `canLongRangeComm`: eye of ender, wizard's tome, both-have-pearl, or enchanting table) > fallback (16 blocks, always). Alert-then-escalate: normal combat + Feature A defense takes over when illagers aggro.
+- **New helper:** `CompanionCommunicationPolicy.canLongRangeComm(bot, commander)` — four-gate predicate for magic-comm items/proximity, reusable for future features.
+- **Integration:** patrol check + pursuit suppression at three `moveToward` sites in `engageHostiles`, `Frens.java` SERVER_STOPPING cleanup.
+
 ## 2026-04-11 — Tamed-animal defense (Feature A)
 
 - **New:** `BotAnimalDefenseService` consolidates "defend the commander's owned animals from non-commander attackers". Hostile-forward primary scan via `BotThreatService.findHostilesAround` + small reverse-scan watch list for player attackers and accidental hits. Threat-score boost via one-line hook in `BotEventHandler.scoreThreat`; non-`HostileEntity` attackers (wolves gone wild, etc.) injected into the engage list via one-line hook at the top of `BotEventHandler.engageHostiles`. Per-tick (10-tick throttle) registered in `Frens.java` alongside the other tick services.
