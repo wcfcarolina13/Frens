@@ -3599,7 +3599,14 @@ public class BotEventHandler {
             stickinessBonus = 3.0;
         }
 
-        return typeDanger * (1.0 + proximityBonus) * stateMult + stickinessBonus;
+        double baseScore = typeDanger * (1.0 + proximityBonus) * stateMult + stickinessBonus;
+        // Tamed-animal defense boost: if this bot has marked the candidate as a
+        // defended attacker (within DEFEND_EXPIRE_TICKS), add the boost so the
+        // candidate jumps to the top of the combat priority queue. Returns 0
+        // when not defended (zero allocation, zero state in the common case).
+        // See BotAnimalDefenseService for the boost map and expiry rules.
+        return baseScore + net.wcfcarolina13.GameAI.services.BotAnimalDefenseService
+                .defenseBoost(bot, entity);
     }
 
     private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
