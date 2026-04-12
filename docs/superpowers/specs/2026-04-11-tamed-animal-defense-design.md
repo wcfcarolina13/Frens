@@ -13,6 +13,15 @@
 > `BotHomeService.findBaseNearPosition` (honors per-base radius), corrected
 > helper name `BotThreatService.findHostilesAround`, added cleanup-on-stop,
 > and added commander-offline / cross-dimension edge cases.
+>
+> **Revision 2 (2026-04-11):** Post-review fix for two blocking errors — (a)
+> `BaseEntry` has no owner field so rule 4's "match commander UUID" gate was
+> fictional, reworked rule 4 to use `resolvePreferredHomeBase(bot)` which is
+> implicitly commander-scoped; (b) `LivingEntity.hurtTime` is a public field,
+> not a `getHurtTime()` getter, corrected in Step 2 watch-list scan. Also
+> softened line-number citations, clarified `MappedVillage` identity via
+> label equality, added `augmentHostilesWithDefenseTargets` mutability note,
+> and flagged the named-but-untamed horse/cat/wolf fallthrough behaviour.
 
 ## Overview
 
@@ -133,15 +142,51 @@ defended entity.
    different bot does NOT count. If commander is offline or cross-dimension,
    this rule silently skips. Effective within ~16 blocks.
 
-4. **Base-proximity farm animal.** Victim `instanceof AnimalEntity` AND
-   `BotHomeService.findBaseNearPosition(server, botWorld, target.getBlockPos())`
-   returns a present `BaseEntry` whose owner is the commander AND the victim
-   is within `HAY_BALE_RADIUS` (8 blocks) of a `Blocks.HAY_BLOCK` that is
-   **also** inside that same `BaseEntry`. Using `findBaseNearPosition` means
-   the per-base `radius` field is honored — not a hardcoded 32. Covers
-   unnamed farm animals (cow, sheep, pig, chicken, goat, etc.) only when
-   both animal and hay bale are on a commander-registered base. Requires a
-   registered base — bots without a base simply don't defend farm animals.
+4. **Preferred-home-base farm animal.** Victim `instanceof AnimalEntity` AND
+   the bot has a preferred home base set via
+   `BotHomeService.resolvePreferredHomeBase(bot)` (returns
+   `Optional<BlockPos>`) AND the victim is within `HAY_BALE_RADIUS` (8
+   blocks) of a `Blocks.HAY_BLOCK` that is inside the bot's preferred home
+   base radius.
+
+   **Ownership scoping note (corrected in rev 2):** `BotHomeService.BaseEntry`
+   has no owner field — bases are stored world-scoped in `WorldData.basesByLabel`.
+   However, `BotHomeService.preferredHomeBaseByBot` maps `botId -> baseLabel`
+   and is set only by explicit commander action (via the base-manager UI or
+   `/base` commands). This gives us implicit commander-scoping for free:
+   "the bot's preferred home base" is by construction the base the commander
+   designated for this bot. A bot without a preferred home base set will
+   silently skip rule 4, which is the intended "no base = no farm defense"
+   behaviour. A bot whose commander hasn't designated a preferred home base
+   — even if other bases exist on the same world — also silently skips,
+   preventing the bot from defending a stranger's base just because it's
+   on the same world.
+
+   Implementation sketch:
+   ```java
+   Optional<BlockPos> preferredBaseOpt = BotHomeService.resolvePreferredHomeBase(bot);
+   if (preferredBaseOpt.isEmpty()) return false;
+   BlockPos basePos = preferredBaseOpt.get();
+   Optional<BaseEntry> baseEntryOpt = BotHomeService.findBaseNearPosition(
+       server, (ServerWorld) bot.getEntityWorld(), basePos);
+   if (baseEntryOpt.isEmpty()) return false;
+   BaseEntry base = baseEntryOpt.get();
+   int baseRadius = base.radius() > 0
+       ? base.radius()
+       : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+   BlockPos victimPos = target.getBlockPos();
+   if (!base.pos().isWithinDistance(victimPos, baseRadius)) return false;
+   // Victim is inside preferred-home-base radius. Now require a hay bale
+   // within HAY_BALE_RADIUS of the victim that is also inside the base radius.
+   return findHayBaleNear(world, victimPos, HAY_BALE_RADIUS)
+       .stream()
+       .anyMatch(hayPos -> base.pos().isWithinDistance(hayPos, baseRadius));
+   ```
+
+   Covers unnamed farm animals (cow, sheep, pig, chicken, goat, etc.) only
+   when both animal and hay bale are on the bot's preferred home base.
+   Covers the "my farm, my animals" intent from Q3 without needing a
+   per-base ownership field.
 
 5. **Named entity override.** Victim has a name tag (`entity.hasCustomName()`)
    AND is within the bot's ~16-block scan range AND passes the **Victim
@@ -151,10 +196,29 @@ defended entity.
 
 6. **Named-village villager.** Victim `instanceof VillagerEntity` AND
    `MappedVillageService.isInsideMappedVillage(botWorld, target.getBlockPos())`
-   is true AND the bot itself is also inside or adjacent to the same mapped
-   village (same `MappedVillage` instance via
-   `MappedVillageService.getVillageAt(world, botPos)`). Unnamed/unmapped
-   villages are unprotected — keeps iron farms in random wild villages safe.
+   is true AND the bot itself is inside the same mapped village (resolved
+   via `MappedVillageService.getVillageAt(world, botPos)`).
+
+   **Identity check:** two `MappedVillage` instances are "the same" if
+   their `getName()` (label) strings are equal. Do NOT rely on reference
+   equality or `.equals()` — `MappedVillageService.load(...)` returns a
+   freshly-deserialized instance on each call, so pointer comparison will
+   silently fail after a reload. Use `.getName().equalsIgnoreCase(other.getName())`
+   or store the name string as a handle across the check.
+
+   Unnamed/unmapped villages are unprotected — keeps iron farms in random
+   wild villages safe.
+
+### Named-but-untamed fallthrough note
+
+Rules 1 and 2 both require the target to be **tamed** (`isTamed()` for
+tameables, `isTame()` for horses). A name-tagged but never-tamed horse/cat/
+wolf (e.g., a wild horse the commander named "Hero" but never saddle-trained)
+would fall through rules 1–2 and be picked up by rule 5 (name-tag override)
+instead. This is the correct and intended behaviour — if you named it,
+you care about it. Implementers should not add a "named implies owned" fast
+path in rules 1 or 2; keep those rules strict to the ownership UUID, and
+let rule 5 handle the named-but-untamed case.
 
 ### Victim Sanity Gates
 
@@ -336,11 +400,21 @@ for each watched in watchList:
             markAttackerForDefense(bot, attacker, DEFEND_EXPIRE_TICKS)
 ```
 
-`recentlyAttacked(victim)` uses `victim.getHurtTime()` (vanilla field,
-positive immediately after damage, decays over ~10 ticks) to avoid
-re-triggering on stale `getAttacker()` values that vanilla keeps for
-~100 ticks after the last hit. Without this gate, the bot would keep
-reacting to an attacker who stopped attacking 5 seconds ago.
+`recentlyAttacked(victim)` reads `victim.hurtTime` — a **public field** on
+`LivingEntity`, not a getter (`public int hurtTime;` in 1.21.11 Yarn). The
+field is set to `maxHurtTime` (default 10) immediately on damage and
+decrements by 1 per tick, so `victim.hurtTime > 0` means "took damage
+within the last ~10 ticks". This gates the watch-list scan away from the
+stale `getAttacker()` values that vanilla preserves for up to ~100 ticks,
+so the bot won't keep reacting to an attacker who stopped attacking
+5 seconds ago.
+
+Implementation form:
+```java
+private static boolean recentlyAttacked(LivingEntity victim) {
+    return victim != null && victim.hurtTime > 0;
+}
+```
 
 The watch list is **always small** because it only contains the commander's
 personal pets and named entities — not the farm. Even with a very invested
@@ -390,13 +464,27 @@ public final class BotAnimalDefenseService {
     public static double defenseBoost(ServerPlayerEntity bot, Entity candidate);
 
     // Hook for hostile-list augmentation, called from inside engageHostiles.
-    // Appends any in-map attackers not already in hostileList (dedupes by UUID).
-    public static void augmentHostilesWithDefenseTargets(
+    // Returns the (possibly new) list of hostiles augmented with in-map attackers,
+    // dedup by UUID. Returns the same reference if the defense map is empty for
+    // this bot (zero allocation common case). Always safe to reassign the caller's
+    // list variable to the returned value — never mutates the input.
+    public static List<Entity> augmentHostilesWithDefenseTargets(
         ServerPlayerEntity bot,
         List<Entity> hostileList);
 
     // Cleanup hook called from Frens.SERVER_STOPPING handler.
     public static void reset();
+
+    // Forward-compat hook for the future "alliances" system (rev 2 added
+    // this to the API surface to match the devlog section). For v1 this
+    // always returns false — player attackers are never treated as allied,
+    // so maybeWarnPlayerAttacker always fires the overhead line. When
+    // alliances lands, this method will gate behavior per-player.
+    public static boolean isAttackerAllied(ServerPlayerEntity bot,
+                                            ServerPlayerEntity attacker);
+    private static void maybeWarnPlayerAttacker(ServerPlayerEntity bot,
+                                                 LivingEntity victim,
+                                                 ServerPlayerEntity attacker);
 
     // Internal classification
     private static boolean isDefendedEntity(Entity target, UUID commanderUuid,
@@ -406,6 +494,7 @@ public final class BotAnimalDefenseService {
                                                UUID commanderUuid);
     private static boolean passesVictimSanityGates(Entity victim,
                                                     ServerPlayerEntity bot);
+    private static boolean recentlyAttacked(LivingEntity victim); // hurtTime > 0
     private static UUID resolveCommanderUuid(ServerPlayerEntity bot);
     private static ServerPlayerEntity resolveCommanderEntity(
         MinecraftServer server, UUID commanderUuid, ServerWorld botWorld);
@@ -421,9 +510,9 @@ Cleanup: `reset()` called from the `SERVER_STOPPING` handler.
 Three touchpoints in existing code:
 
 1. **`BotEventHandler.scoreThreat`** — one line added at the bottom of the
-   scoring function (currently around
-   [BotEventHandler.java:3541](../../src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3541)):
-   `return baseScore +
+   scoring function (grep for `private static double scoreThreat` — roughly
+   line ~3560 at time of writing; line numbers drift, so grep-then-patch
+   rather than trusting a hardcoded citation): `return baseScore +
    BotAnimalDefenseService.defenseBoost(bot, entity);`. Lazy map cleanup
    happens inside `defenseBoost` (expired entries dropped on read). The boost
    is **additive**, consistent with the existing `stickinessBonus` term. With
@@ -434,18 +523,31 @@ Three touchpoints in existing code:
    jumps above normal wolves/zombies.
 
 2. **`BotEventHandler.engageHostiles`** — **one line added at the top of
-   `engageHostiles`** (currently around
-   [BotEventHandler.java:3586](../../src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3586)),
-   before the `actionable = ...` filter:
-   `BotAnimalDefenseService.augmentHostilesWithDefenseTargets(bot,
-   hostileEntities);`. This is a **single hook inside the funnel**, not at
-   the multiple upstream list-builders (`1559`, `2322`, `3208`, `3280`) —
-   all paths flow through `engageHostiles` eventually, so hooking inside the
-   funnel catches every caller for one edit. The augmentation dedupes by
-   UUID before appending, so existing `HostileEntity` instances already in
-   the list are not duplicated. Ensures non-`HostileEntity` attackers
-   (tameable wolf gone wild, another bot's pet, ranged-weapon-wielding
-   goats if that's ever a thing) are visible to the combat system.
+   `engageHostiles`** (grep for `private static boolean engageHostiles` —
+   roughly line ~3605 at time of writing), before the `actionable = ...`
+   filter:
+
+   ```java
+   hostileEntities = BotAnimalDefenseService.augmentHostilesWithDefenseTargets(
+       bot, hostileEntities);
+   ```
+
+   Note the **return-new-list** form rather than mutate-in-place. Some
+   upstream callers pass immutable `Stream.toList()` results (see the
+   `feedback_stream_tolist_mutation.md` global memory), and relying on
+   in-place append would throw `UnsupportedOperationException` at the first
+   `list.add()`. `augmentHostilesWithDefenseTargets` must defensively copy
+   the input list if the defense map is non-empty and return the copy;
+   otherwise it returns the same reference (zero allocation in the
+   common "no defense targets" case).
+
+   This is a **single hook inside the funnel** — all `engageHostiles`
+   callers flow through this one call site, so no need to patch the
+   upstream list-builders individually. The augmentation dedupes by UUID
+   before appending, so existing `HostileEntity` instances already in the
+   list are not duplicated. Ensures non-`HostileEntity` attackers (tameable
+   wolf gone wild, another bot's pet, etc.) are visible to the combat
+   system.
 
 3. **`Frens.java`** — one line added to the `END_SERVER_TICK` registration
    block: `ServerTickEvents.END_SERVER_TICK.register(
