@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-11 — Tamed-animal defense (Feature A)
+
+- **New:** `BotAnimalDefenseService` consolidates "defend the commander's owned animals from non-commander attackers". Hostile-forward primary scan via `BotThreatService.findHostilesAround` + small reverse-scan watch list for player attackers and accidental hits. Threat-score boost via one-line hook in `BotEventHandler.scoreThreat`; non-`HostileEntity` attackers (wolves gone wild, etc.) injected into the engage list via one-line hook at the top of `BotEventHandler.engageHostiles`. Per-tick (10-tick throttle) registered in `Frens.java` alongside the other tick services.
+- **Defended categories:** commander-owned tameables (cat/wolf/parrot via `TameableEntity.isTamed` + UUID match), commander-owned horses (`AbstractHorseEntity.isTame`, no 'd'), mobs leashed to the commander (live entity required), animals on the bot's preferred home base near a hay bale (using `BotHomeService.resolvePreferredHomeBase` + `findBaseNearPosition`, implicitly commander-scoped via `WorldData.preferredHomeBaseByBot`), name-tagged entities (`hasCustomName`), and villagers inside mapped villages (label equality via `MappedVillageService.getVillageAt`).
+- **Excluded:** `HostileEntity`, `RaiderEntity`, slimes, magma cubes, ender dragon, wither, and the named-hostile loophole (Victim Sanity Gates run before any rule). Iron golems in unmapped villages stay safe (no farm-grief). Attackers riding vehicles (boat/minecart/mounted) skipped as a farm-machinery heuristic (iron-farm scarers, spawner grinders).
+- **Iron golem special rules:** accidental hits (golem.target != bot) get silently ignored — bot does not retaliate. Direct aggro (golem.target == bot) triggers a sprint-flee 12 blocks away from the closest aggroed golem; bot does not fight back (golems are too tanky).
+- **PvE only in v1.** Player attackers receive an overhead warning ("Engaging threats against allies") instead of engagement, pending the future "alliances" feature. The overhead warning hook (`maybeWarnPlayerAttacker`) and the alliance gate (`isAttackerAllied`, currently always false) are wired in as forward-compat stubs.
+- **Self-preservation:** bot below 30% HP suppresses defense engagement (still emits overhead warnings, which don't put it at additional risk).
+- **Spec:** `docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md` (rev 3, approved). Plan: `docs/superpowers/plans/2026-04-11-tamed-animal-defense.md`.
+
 ## 2026-04-11 — Drop sweep backs off from commander mining activity
 
 - **Problem.** Bots in FOLLOW mode would aggressively rush drops as the player broke blocks in tight tunnels, shoving the commander off their mining spot. The opportunistic idle-sweep path (`BotEventHandler.tickOpportunisticIdleSweep`, 15s idle threshold) fires whenever both bot and player are standing still — which is exactly what happens when the player stands in place hollowing out a tunnel. Every mined block drops an item, and the sweep immediately targets it.
