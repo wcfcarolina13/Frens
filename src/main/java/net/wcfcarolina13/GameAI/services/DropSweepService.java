@@ -120,6 +120,21 @@ public final class DropSweepService {
         if (bot == null) {
             return;
         }
+        // Hard suppression: if a real player is actively mining near the bot, don't start ANY
+        // sweep — the player is working in a tight space and we'd be shoving them. Command-driven
+        // sweeps (GUARD/PATROL) are exempt because those are explicit user requests.
+        if (!commandDrivenSweep && CommanderActivityService.isBotNearActiveMiner(bot)) {
+            LOGGER.debug("Drop sweep suppressed for {} — commander actively mining nearby",
+                    bot.getName().getString());
+            if (dropSweepInProgress.get()) {
+                UUID owner = dropSweepOwner;
+                if (owner == null || owner.equals(bot.getUuid())) {
+                    dropSweepCancelReason = "commander-mining";
+                    dropSweepCancelRequested.set(true);
+                }
+            }
+            return;
+        }
         if (dropSweepInProgress.get()) {
             return;
         }
@@ -150,7 +165,14 @@ public final class DropSweepService {
         long now = System.currentTimeMillis();
         Iterator<ItemEntity> iterator = drops.iterator();
         while (iterator.hasNext()) {
-            BlockPos pos = iterator.next().getBlockPos().toImmutable();
+            ItemEntity drop = iterator.next();
+            // Skip drops next to a real player who's actively mining — don't crowd the commander
+            // while they're breaking blocks in a tight tunnel.
+            if (CommanderActivityService.isDropNearActiveMiner(world, drop)) {
+                iterator.remove();
+                continue;
+            }
+            BlockPos pos = drop.getBlockPos().toImmutable();
             Long lastAttempt = dropRetryTimestamps.get(pos);
             if (lastAttempt != null) {
                 if (now - lastAttempt < DROP_RETRY_COOLDOWN_MS) {

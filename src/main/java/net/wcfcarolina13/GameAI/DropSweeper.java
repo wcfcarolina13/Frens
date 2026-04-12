@@ -206,6 +206,9 @@ public final class DropSweeper {
                                 && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED
                                 && drop.getBlockY() - player.getBlockY() <= 4) // skip unreachable elevated drops
                 .stream()
+                // Back off from drops near a real player who just broke a block.
+                .filter(drop -> !net.wcfcarolina13.GameAI.services.CommanderActivityService
+                        .isDropNearActiveMiner(world, drop))
                 .filter(drop -> {
                     // Skip items behind solid blocks — raycast from bot eye to item.
                     Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());

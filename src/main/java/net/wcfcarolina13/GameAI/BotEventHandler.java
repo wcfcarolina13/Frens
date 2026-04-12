@@ -3016,6 +3016,25 @@ public class BotEventHandler {
             return false;
         }
 
+        // Hard gate: while a real commander is mining in tight quarters, bail out of any
+        // idle-sweep state (pending, in-progress, or committed) so the bot stays clear of them.
+        // The 3.5s block-break window means the bot resumes normal behaviour shortly after
+        // the commander stops digging.
+        if (net.wcfcarolina13.GameAI.services.CommanderActivityService.isBotNearActiveMiner(bot)) {
+            boolean hadIdleSweepState = Boolean.TRUE.equals(FollowStateService.IDLE_SWEEP_ACTIVE.get(botId))
+                    || FollowStateService.IDLE_SWEEP_TARGET.containsKey(botId)
+                    || FollowStateService.IDLE_SWEEP_START_TICK.containsKey(botId);
+            boolean hadInFlightSweep = DropSweepService.isInProgressFor(bot);
+            if (hadIdleSweepState || hadInFlightSweep) {
+                LOGGER.debug("[IdleSweep] {} suppressed — commander mining nearby",
+                        bot.getName().getString());
+                FollowStateService.clearIdleSweep(botId);
+                DropSweepService.requestCancel(bot, "commander-mining");
+            }
+            BackgroundSweepPolicy.clearPendingIdleSweepState(botId);
+            return false;
+        }
+
         // Resolve the player for FOLLOW mode movement check.
         ServerPlayerEntity commander = null;
         if (mode == Mode.FOLLOW && state != null && state.followTargetUuid != null) {
@@ -6999,6 +7018,10 @@ public class BotEventHandler {
                         searchBox,
                         drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
                 .stream()
+                // Back off from drops near a real player who just broke a block — avoids shoving
+                // the commander while they're mining a tunnel.
+                .filter(drop -> !net.wcfcarolina13.GameAI.services.CommanderActivityService
+                        .isDropNearActiveMiner(world, drop))
                 .filter(drop -> {
                     // Skip items behind solid blocks — raycast from bot eye to item position.
                     Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());

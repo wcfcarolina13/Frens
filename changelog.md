@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-04-11 — Drop sweep backs off from commander mining activity
+
+- **Problem.** Bots in FOLLOW mode would aggressively rush drops as the player broke blocks in tight tunnels, shoving the commander off their mining spot. The opportunistic idle-sweep path (`BotEventHandler.tickOpportunisticIdleSweep`, 15s idle threshold) fires whenever both bot and player are standing still — which is exactly what happens when the player stands in place hollowing out a tunnel. Every mined block drops an item, and the sweep immediately targets it.
+- **Initial attempt (per-drop filter).** New `CommanderActivityService` tracks the last block-break timestamp per real player UUID (fake-player bots excluded). Hooked into the existing `PlayerBlockBreakEvents.AFTER` in `Frens.java`. Added `isDropNearActiveMiner(world, drop)` and filtered drops in `BotEventHandler.findNearestDrop` and `DropSweepService.collectNearbyDrops`.
+- **Why the first pass wasn't enough.** `DropSweeper.findClosestDrop` runs its OWN entity scan inside the async sweep loop (up to `maxTargets` iterations, re-querying the world every pass). Once a sweep started on a drop far from the player, the inner loop would happily target new drops as the player kept mining — bypassing both initial filters entirely. The 4.5-block / 3.5-second window was also too tight for real tunnel geometry.
+- **Fix (global suppression).** Upgraded to a hard bot-proximity gate with three layers:
+  1. **`CommanderActivityService.isBotNearActiveMiner(bot, 8.0)`** — returns true if any real player within 8 blocks of the bot has broken a block in the last 4 s. One helper used everywhere.
+  2. **Global suppression in `DropSweepService.collectNearbyDrops`** — if the bot is near an active miner, bail out immediately AND cancel any in-flight sweep this bot owns. Command-driven GUARD/PATROL sweeps are still allowed through (explicit user intent).
+  3. **`BotEventHandler.tickOpportunisticIdleSweep`** — added a top-of-function gate that clears pending idle-sweep state, requests cancel on any in-progress sweep, and returns. Ensures the idle-sweep walker stops mid-step when the commander starts mining.
+- **Plus per-drop filters at the remaining scanners** — `BotEventHandler.findNearestDrop` (the idle-sweep target picker) and the newly-patched `DropSweeper.findClosestDrop` (the async sweep's inner loop) both skip drops within 6 blocks of a recently-mining player. Safety net so even if a sweep starts legally, it can't retarget player-proximate drops mid-run.
+- **Tunables** at the top of `CommanderActivityService.java`: `MINING_DROP_EXCLUSION_RADIUS = 6.0`, `BOT_MINING_PROXIMITY_RADIUS = 8.0`, `MINING_WINDOW_MS = 4000L`.
+- Net effect: while the player is mining in a tight tunnel, the bot stays out of the tunnel entirely — no targeting, no walking, no pushing. ~4 seconds after the player stops breaking blocks, the sweep behaviour resumes normally.
+
 ## 2026-04-11 — Cobweb avoidance + sprint catch-up + friendly-fire gate + through-cobweb take-cover
 
 - **Cobweb added to deadly-block list.** `BotHazardService.isDeadlyBlock` now returns true for `Blocks.COBWEB`. Cobwebs don't deal direct damage but they slow entities to ~15% speed with an empty collision shape, which means the pathfinder previously treated them as freely-walkable air. In caves, mineshafts, and raids this is a death sentence — the bot wanders into a web, becomes a sitting target for skeleton arrows and zombies, and can't path out. Now rejected by both pathfinders, caught by the per-tick hazard escape, and added to the never-break list (so stuck-escape doesn't try to chop a cobweb wall mid-danger).

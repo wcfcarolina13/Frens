@@ -457,6 +457,7 @@ public class Frens implements ModInitializer {
             if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
                     && world instanceof net.minecraft.server.world.ServerWorld serverWorld) {
                 LearningModeService.onBlockBreakAfter(serverPlayer, serverWorld, pos, state);
+                net.wcfcarolina13.GameAI.services.CommanderActivityService.markBlockBreak(serverPlayer);
             }
         });
 
