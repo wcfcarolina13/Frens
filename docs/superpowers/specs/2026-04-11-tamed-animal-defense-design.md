@@ -22,6 +22,14 @@
 > softened line-number citations, clarified `MappedVillage` identity via
 > label equality, added `augmentHostilesWithDefenseTargets` mutability note,
 > and flagged the named-but-untamed horse/cat/wolf fallthrough behaviour.
+>
+> **Revision 3 (2026-04-11):** Cleanup pass for one regression and two minor
+> tightenings flagged in re-review of rev 2 — (a) removed the residual
+> "owner UUID match" sentence from the Tunable Constants box that
+> contradicted the rule 4 rewrite; (b) defined `WarnKey` as an explicit
+> `record` for unambiguous copy-paste; (c) marked the inline
+> `resolveOwnerUuid` snippet as simplified relative to the production
+> version in `CompanionCommunicationPolicy.java`.
 
 ## Overview
 
@@ -74,9 +82,13 @@ and other intentional mob-grinders.
 Defense categories 1–3 require knowing "who is this bot's commander". The mod
 already has a canonical resolver in
 [CompanionCommunicationPolicy.java:122](../../src/main/java/net/wcfcarolina13/GameAI/services/CompanionCommunicationPolicy.java#L122),
-currently `private`:
+currently `private`. Simplified for the spec (the real method has additional
+null guards on `bot` and `Frens.CONFIG` plus a try/catch):
 
 ```java
+// SIMPLIFIED — see CompanionCommunicationPolicy.resolveOwnerUuid for the
+// production version with full null-safety. Promote that method to public
+// or copy it verbatim.
 private static UUID resolveOwnerUuid(ServerPlayerEntity bot) {
     String alias = bot.getName().getString();
     ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(alias);
@@ -450,7 +462,8 @@ public final class BotAnimalDefenseService {
 
     // (botUuid, victimUuid, attackerUuid) -> lastWarnEpochMillis, used to
     // throttle overhead warnings for out-of-range and player attackers.
-    // Key is a small tuple wrapper; value is System.currentTimeMillis().
+    // Key is a small immutable tuple; value is System.currentTimeMillis().
+    private record WarnKey(UUID botUuid, UUID victimUuid, UUID attackerUuid) {}
     private static final Map<WarnKey, Long> LAST_OVERHEAD_WARN_MS =
         new ConcurrentHashMap<>();
 
@@ -574,11 +587,14 @@ No mixins. No new event listeners. No modifications to vanilla classes.
 | `SELF_PRESERVATION_HP_FRACTION` | `0.30` | flee instead of defending below 30% HP |
 | `DEFENSE_SCORE_BOOST` | `50.0` | additive term in `scoreThreat`, alongside existing `stickinessBonus` |
 
-**Base radius:** intentionally **NOT** a tunable constant. Use
-`BotHomeService.findBaseNearPosition(server, world, pos)` to obtain the
-`BaseEntry` (if any) covering the victim's position; the per-base `radius`
-field is authoritative. If the returned base's owner UUID does not match
-the bot's commander UUID, reject — the animal is on someone else's base.
+**Base radius:** intentionally **NOT** a tunable constant. Rule 4 obtains
+the bot's preferred home base via `BotHomeService.resolvePreferredHomeBase(bot)`,
+then uses `BotHomeService.findBaseNearPosition(server, world, basePos)` to
+obtain the `BaseEntry` so the per-base `radius` field is authoritative.
+**Commander scoping is implicit** via `WorldData.preferredHomeBaseByBot`
+(only the commander can set the bot's preferred base via the `/base` UI),
+so no explicit owner check is needed or possible — `BaseEntry` has no
+owner field. See rule 4 above for the full implementation sketch.
 
 **Units discipline:** any field ending in `_MS` is wall-clock milliseconds
 (`System.currentTimeMillis()`); any field ending in `_TICKS` or `_TICK` is
