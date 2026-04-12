@@ -1,10 +1,25 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.boss.WitherEntity;
+import net.minecraft.entity.boss.dragon.EnderDragonEntity;
+import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.mob.MagmaCubeEntity;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.mob.SlimeEntity;
+import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.AnimalEntity;
+import net.minecraft.entity.passive.TameableEntity;
+import net.minecraft.entity.passive.VillagerEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.raid.RaiderEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.GameAI.services.BotHomeService.BaseEntry;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -176,36 +191,190 @@ public final class BotAnimalDefenseService {
     // Internal — stubs to be filled in chunks 2-3
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** True if the candidate victim passes all sanity gates (chunk 2). */
-    @SuppressWarnings("unused")
+    /**
+     * Hard exclusions that run before any defended-category rule. A candidate
+     * victim must pass all of these or it is not a defended entity, regardless
+     * of name tag, ownership, or village membership. Closes the "named
+     * hostile" loophole in rule 5.
+     */
     private static boolean passesVictimSanityGates(Entity victim, ServerPlayerEntity bot) {
-        return false;
+        if (victim == null || victim.isRemoved() || !victim.isAlive()) return false;
+        if (bot == null || bot.getEntityWorld() != victim.getEntityWorld()) return false;
+        if (victim instanceof HostileEntity) return false;
+        if (victim instanceof RaiderEntity) return false;
+        if (victim instanceof SlimeEntity) return false;
+        if (victim instanceof MagmaCubeEntity) return false;
+        if (victim instanceof EnderDragonEntity) return false;
+        if (victim instanceof WitherEntity) return false;
+        return true;
     }
 
-    /** True if the victim is a defended entity for this bot (chunk 2, rules 1-6). */
-    @SuppressWarnings("unused")
+    /**
+     * Returns true if {@code target} is a defended victim for {@code bot}.
+     * Runs the six defended-category rules from the spec in priority order;
+     * the first rule that matches wins. {@link #passesVictimSanityGates}
+     * must be true or no rule fires (closes the named-hostile loophole).
+     */
     private static boolean isDefendedEntity(
             Entity target, UUID commanderUuid, ServerPlayerEntity bot) {
+        if (!passesVictimSanityGates(target, bot)) return false;
+        if (matchesRule1Tameable(target, commanderUuid, bot)) return true;
+        if (matchesRule2Horse(target, commanderUuid)) return true;
+        if (matchesRule3Leashed(target, commanderUuid, bot)) return true;
+        if (matchesRule4PreferredHomeBaseFarm(target, bot)) return true;
+        if (matchesRule5NameTag(target)) return true;
+        if (matchesRule6NamedVillageVillager(target, bot)) return true;
         return false;
     }
 
-    /** Farm-machinery exclusion: attacker is in a vehicle (boat, minecart, mounted) (chunk 2). */
-    @SuppressWarnings("unused")
+    /**
+     * Rule 1 — commander-owned tameable (cat, wolf, parrot).
+     * Tameable.isTamed() distinct from horse.isTame() (no 'd').
+     */
+    private static boolean matchesRule1Tameable(
+            Entity target, UUID commanderUuid, ServerPlayerEntity bot) {
+        if (commanderUuid == null) return false;
+        if (!(target instanceof TameableEntity tameable)) return false;
+        if (!tameable.isTamed()) return false;
+        // Prefer the entity-aware check when commander is online in the same world.
+        ServerPlayerEntity commander = resolveCommanderEntity(
+                bot.getCommandSource().getServer(),
+                commanderUuid,
+                (ServerWorld) bot.getEntityWorld());
+        if (commander != null) {
+            return tameable.isOwner(commander);
+        }
+        // Offline or cross-dimension: compare UUIDs via getOwnerReference.
+        if (tameable.getOwnerReference() == null) return false;
+        UUID ownerUuid = tameable.getOwnerReference().getUuid();
+        return commanderUuid.equals(ownerUuid);
+    }
+
+    /**
+     * Rule 2 — commander-owned horse family (horse, donkey, mule, llama, camel,
+     * skeleton/zombie horse). AbstractHorseEntity uses {@code isTame()} (no 'd'),
+     * distinct from TameableEntity.isTamed().
+     */
+    private static boolean matchesRule2Horse(Entity target, UUID commanderUuid) {
+        if (commanderUuid == null) return false;
+        if (!(target instanceof AbstractHorseEntity horse)) return false;
+        if (!horse.isTame()) return false;
+        if (horse.getOwnerReference() == null) return false;
+        UUID ownerUuid = horse.getOwnerReference().getUuid();
+        return commanderUuid.equals(ownerUuid);
+    }
+
+    /**
+     * Rule 3 — leashed to commander. Requires the commander to be a live
+     * LivingEntity in the same world. Leashed-to-fence-post or leashed-to-
+     * another-player does not count.
+     */
+    private static boolean matchesRule3Leashed(
+            Entity target, UUID commanderUuid, ServerPlayerEntity bot) {
+        if (commanderUuid == null) return false;
+        if (!(target instanceof MobEntity mob)) return false;
+        if (!mob.isLeashed()) return false;
+        ServerPlayerEntity commander = resolveCommanderEntity(
+                bot.getCommandSource().getServer(),
+                commanderUuid,
+                (ServerWorld) bot.getEntityWorld());
+        if (commander == null) return false;
+        return mob.getLeashHolder() == commander;
+    }
+
+    /**
+     * Rule 4 — base-proximity farm animal. The bot must have a preferred home
+     * base set (commander-scoped implicitly via WorldData.preferredHomeBaseByBot),
+     * and both the victim and a hay bale must be inside that base's radius.
+     * The hay bale must be within HAY_BALE_RADIUS of the victim.
+     */
+    private static boolean matchesRule4PreferredHomeBaseFarm(
+            Entity target, ServerPlayerEntity bot) {
+        if (!(target instanceof AnimalEntity)) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        java.util.Optional<BlockPos> preferredBaseOpt =
+                BotHomeService.resolvePreferredHomeBase(bot);
+        if (preferredBaseOpt.isEmpty()) return false;
+        BlockPos basePos = preferredBaseOpt.get();
+        java.util.Optional<BaseEntry> baseEntryOpt =
+                BotHomeService.findBaseNearPosition(world.getServer(), world, basePos);
+        if (baseEntryOpt.isEmpty()) return false;
+        BaseEntry base = baseEntryOpt.get();
+        int baseRadius = base.radius() > 0
+                ? base.radius()
+                : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+        BlockPos victimPos = target.getBlockPos();
+        if (!base.pos().isWithinDistance(victimPos, baseRadius)) return false;
+        // Find a hay bale within HAY_BALE_RADIUS of the victim that is also
+        // inside the base radius. Scan a small box around the victim.
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dx = -HAY_BALE_RADIUS; dx <= HAY_BALE_RADIUS; dx++) {
+            for (int dy = -HAY_BALE_RADIUS; dy <= HAY_BALE_RADIUS; dy++) {
+                for (int dz = -HAY_BALE_RADIUS; dz <= HAY_BALE_RADIUS; dz++) {
+                    cursor.set(victimPos.getX() + dx, victimPos.getY() + dy, victimPos.getZ() + dz);
+                    if (!world.getBlockState(cursor).isOf(Blocks.HAY_BLOCK)) continue;
+                    if (!base.pos().isWithinDistance(cursor, baseRadius)) continue;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Rule 5 — named-entity override. Any name-tagged entity that already
+     * passed the Victim Sanity Gates qualifies. The sanity gates excluded
+     * hostile classes, so a name-tagged zombie still won't be defended.
+     */
+    private static boolean matchesRule5NameTag(Entity target) {
+        return target.hasCustomName();
+    }
+
+    /**
+     * Rule 6 — villager inside a mapped village. Both the victim and the bot
+     * must be inside the same mapped village (label equality, not reference).
+     */
+    private static boolean matchesRule6NamedVillageVillager(Entity target, ServerPlayerEntity bot) {
+        if (!(target instanceof VillagerEntity)) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        java.util.Optional<MappedVillageService.MappedVillage> botVillageOpt =
+                MappedVillageService.getVillageAt(world, bot.getBlockPos());
+        if (botVillageOpt.isEmpty()) return false;
+        java.util.Optional<MappedVillageService.MappedVillage> victimVillageOpt =
+                MappedVillageService.getVillageAt(world, target.getBlockPos());
+        if (victimVillageOpt.isEmpty()) return false;
+        return botVillageOpt.get().getName().equalsIgnoreCase(victimVillageOpt.get().getName());
+    }
+
+    /**
+     * Farm-machinery heuristic: if the attacker is riding another entity (boat,
+     * minecart, mounted on another mob), it's almost certainly a farm component
+     * (zombie-in-boat for iron farms, minecart-trapped mobs in spawner grinders,
+     * AFK mob mounts). Skip defense for these cases.
+     */
     private static boolean isExcludedByFarmHeuristic(Entity attacker) {
-        return false;
+        return attacker != null && attacker.hasVehicle();
     }
 
-    /** Tamed-vs-tamed skip: attacker is itself a defended entity (chunk 2). */
-    @SuppressWarnings("unused")
+    /**
+     * If the attacker is itself a defended entity (e.g., llama spitting at owned
+     * wolf, owned wolf attacking owned sheep), skip defense. Prevents llama-spit
+     * cascades from causing the bot to attack its own pets.
+     */
     private static boolean isTamedVsTamedCase(
             Entity attacker, Entity victim, UUID commanderUuid, ServerPlayerEntity bot) {
-        return false;
+        if (attacker == null) return false;
+        return isDefendedEntity(attacker, commanderUuid, bot);
     }
 
-    /** True if the victim was hit recently (vanilla hurtTime field, chunk 2). */
-    @SuppressWarnings("unused")
+    /**
+     * True if the victim took damage within the last ~10 ticks. Reads the
+     * vanilla {@code LivingEntity.hurtTime} public int field (NOT a getter).
+     * Used by the watch-list reverse scan to gate against stale getAttacker()
+     * values that vanilla preserves for ~100 ticks after the last hit.
+     */
     private static boolean recentlyAttacked(LivingEntity victim) {
-        return false;
+        return victim != null && victim.hurtTime > 0;
     }
 
     /** Resolves the bot's commander UUID via CompanionCommunicationPolicy. */
