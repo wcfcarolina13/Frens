@@ -3610,6 +3610,12 @@ public class BotEventHandler {
     }
 
     private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
+        // Tamed-animal defense: inject any defended attackers into the hostile
+        // list (dedup by UUID, returns same reference if no defense targets).
+        // Always safe to reassign — augmentHostilesWithDefenseTargets never
+        // mutates the input list.
+        hostileEntities = net.wcfcarolina13.GameAI.services.BotAnimalDefenseService
+                .augmentHostilesWithDefenseTargets(bot, hostileEntities);
         if (hostileEntities.isEmpty()) {
             COMBAT_TARGET.remove(bot.getUuid());
             return false;
