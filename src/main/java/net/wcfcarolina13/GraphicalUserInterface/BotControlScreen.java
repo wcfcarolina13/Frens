@@ -288,7 +288,8 @@ public class BotControlScreen extends Screen {
     // ── Data records ──────────────────────────────────────────────────────
 
     private record SettingsSnapshot(
-            boolean autoRespawnOnDeath, String spawnMode, String gameMode,
+            boolean autoRespawnOnDeath, boolean autoSpawnOnLoad,
+            String spawnMode, String gameMode,
             String failsafeSpawnMode,
             boolean teleportDuringSkills, boolean followTeleport,
             boolean pauseOnFullInventory,
@@ -304,22 +305,24 @@ public class BotControlScreen extends Screen {
     private void captureCurrentWidgets() {
         if (settingGroups.isEmpty() || selectedAlias == null) return;
         List<CyclingButtonWidget<?>> ws = settingWidgets;
-        if (ws.size() < 11) return;
+        if (ws.size() < 12) return;
 
         boolean autoRespawn = Boolean.TRUE.equals(ws.get(0).getValue());
-        Object spawnModeValue = ws.get(1).getValue();
-        Object gameModeValue = ws.get(2).getValue();
-        Object failsafeValue = ws.get(3).getValue();
-        boolean teleportSkills = Boolean.TRUE.equals(ws.get(4).getValue());
-        boolean followTeleport = Boolean.TRUE.equals(ws.get(5).getValue());
-        boolean pauseInventory = Boolean.TRUE.equals(ws.get(6).getValue());
-        boolean teleportSweep = Boolean.TRUE.equals(ws.get(7).getValue());
-        boolean autoRegroup = Boolean.TRUE.equals(ws.get(8).getValue());
-        boolean llmEnabled = Boolean.TRUE.equals(ws.get(9).getValue());
-        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(10).getValue());
+        boolean autoSpawnOnLoad = Boolean.TRUE.equals(ws.get(1).getValue());
+        Object spawnModeValue = ws.get(2).getValue();
+        Object gameModeValue = ws.get(3).getValue();
+        Object failsafeValue = ws.get(4).getValue();
+        boolean teleportSkills = Boolean.TRUE.equals(ws.get(5).getValue());
+        boolean followTeleport = Boolean.TRUE.equals(ws.get(6).getValue());
+        boolean pauseInventory = Boolean.TRUE.equals(ws.get(7).getValue());
+        boolean teleportSweep = Boolean.TRUE.equals(ws.get(8).getValue());
+        boolean autoRegroup = Boolean.TRUE.equals(ws.get(9).getValue());
+        boolean llmEnabled = Boolean.TRUE.equals(ws.get(10).getValue());
+        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(11).getValue());
 
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 autoRespawn,
+                autoSpawnOnLoad,
                 spawnModeValue instanceof String s ? s : "training",
                 gameModeValue instanceof String s ? s : "survival",
                 failsafeValue instanceof String s ? s : "world_spawn",
@@ -350,6 +353,7 @@ public class BotControlScreen extends Screen {
         ManualConfig.BotControlSettings cfg =
                 Frens.CONFIG.getOrCreateBotControl(selectedAlias, clientWorldKey);
         boolean autoRespawn = snap != null ? snap.autoRespawnOnDeath : cfg.isAutoRespawnOnDeath();
+        boolean autoSpawnOnLoad = snap != null ? snap.autoSpawnOnLoad : cfg.isAutoSpawnOnLoad();
         String spawnMode = snap != null ? snap.spawnMode : cfg.getSpawnMode();
         String spawnModeUi = canonicalSpawnModeForUi(spawnMode);
         String gameMode = snap != null ? snap.gameMode : cfg.getGameMode();
@@ -364,6 +368,9 @@ public class BotControlScreen extends Screen {
 
         List<SettingEntry> spawning = new ArrayList<>();
         spawning.add(makeOnOff("Auto Respawn", "Respawn on death (skip resurrection ritual).", autoRespawn, TOGGLE_W));
+        spawning.add(makeOnOff("Auto Spawn on Load",
+                "Automatically spawn this bot when the world loads. Turn off to keep the bot shelved until manually spawned.",
+                autoSpawnOnLoad, TOGGLE_W));
         spawning.add(makeString("Spawn Mode", "Training is sandboxed. Questing/Admin use full gameplay presets.",
                 spawnModeUi, "training", "questing", "admin",
                 v -> Text.of(switch (v) {
@@ -465,6 +472,7 @@ public class BotControlScreen extends Screen {
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey(), saveWorldKey);
             SettingsSnapshot v = entry.getValue();
             s.setAutoRespawnOnDeath(v.autoRespawnOnDeath);
+            s.setAutoSpawnOnLoad(v.autoSpawnOnLoad);
             s.setSpawnMode(v.spawnMode);
             s.setGameMode(v.gameMode);
             s.setFailsafeSpawnMode(v.failsafeSpawnMode);
