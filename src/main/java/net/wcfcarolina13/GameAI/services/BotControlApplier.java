@@ -144,6 +144,9 @@ public final class BotControlApplier {
             }
             // Resolve spawn mode from per-world controls, falling back to "training"
             ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(alias, currentWorldKey);
+            if (settings != null && !settings.isAutoSpawnOnLoad()) {
+                continue;
+            }
             String mode = settings != null ? settings.getSpawnMode() : "training";
             ManualConfig.BotSpawn finalSpawn = spawn;
             boolean finalHasWorldState = hasWorldState;
