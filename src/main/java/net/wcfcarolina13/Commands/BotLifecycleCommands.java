@@ -17,6 +17,11 @@ final class BotLifecycleCommands {
     static ArgumentBuilder<ServerCommandSource, ?> buildDespawn() {
         return CommandManager.literal("despawn")
                 .executes(context -> modCommandRegistry.executeDespawnTargets(context, (String) null))
+                .then(CommandManager.literal("session")
+                        .executes(context -> modCommandRegistry.executeDespawnTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeDespawnTargets(context,
+                                        StringArgumentType.getString(context, "target"), true))))
                 .then(CommandManager.argument("target", StringArgumentType.string())
                         .executes(context -> modCommandRegistry.executeDespawnTargets(context,
                                 StringArgumentType.getString(context, "target"))));
