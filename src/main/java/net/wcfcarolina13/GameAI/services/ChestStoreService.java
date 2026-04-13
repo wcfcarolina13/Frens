@@ -916,8 +916,18 @@ public final class ChestStoreService {
         }
 
         Integer moved = callOnServer(server, () -> {
-            var be2 = source.getWorld().getBlockEntity(chestPos);
-            if (!(be2 instanceof Inventory storage)) {
+            BlockState state = source.getWorld().getBlockState(chestPos);
+            Inventory storage;
+            if (state.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
+                storage = net.minecraft.block.ChestBlock.getInventory(chestBlock, state, source.getWorld(), chestPos, true);
+            } else {
+                var be2 = source.getWorld().getBlockEntity(chestPos);
+                if (!(be2 instanceof Inventory inv)) {
+                    return 0;
+                }
+                storage = inv;
+            }
+            if (storage == null) {
                 return 0;
             }
             int result;
