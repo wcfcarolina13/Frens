@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Chest Offload & Fishing Filter Fixes (2026-04-13)
+
+- **Fix:** Double chests now use the merged 54-slot inventory instead of only the first 27 slots. Affects all chest offload operations globally.
+- **Fix:** Fishing offload filter updated — raw fish, leather boots, and nearly-broken rods/bows (<15% durability) are now offloaded. Cooked food and durable gear are kept.
+
 ## Cross-Session Bot Despawn (2026-04-13)
 
 - `/bot despawn <name>` now shelves bots across sessions — they stay gone until `/bot spawn`
