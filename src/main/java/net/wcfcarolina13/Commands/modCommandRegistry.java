@@ -5815,18 +5815,38 @@ public class modCommandRegistry {
     }
 
     static int executeDespawnTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        return executeDespawnTargets(context, targetArg, false);
+    }
+
+    static int executeDespawnTargets(CommandContext<ServerCommandSource> context, String targetArg, boolean sessionOnly) throws CommandSyntaxException {
         List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         int successes = 0;
+        MinecraftServer server = context.getSource().getServer();
+        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
         for (ServerPlayerEntity bot : targets) {
             BotTargetingService.forgetIfMatches(context.getSource(), bot.getName().getString());
+            if (!sessionOnly) {
+                String alias = bot.getName().getString();
+                ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias, worldKey);
+                ctrl.setAutoSpawnOnLoad(false);
+            }
             BotEventHandler.unregisterBot(bot);
             successes++;
+        }
+        if (!sessionOnly && !targets.isEmpty()) {
+            Frens.CONFIG.save();
         }
         if (!targets.isEmpty()) {
             String summary = formatBotList(targets, isAll);
             String verb = (isAll || targets.size() > 1) ? "have" : "has";
-            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " been despawned.");
+            if (sessionOnly) {
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        summary + " " + verb + " been removed for this session. They will return on next world load.");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        summary + " " + verb + " been despawned and shelved. Use /bot spawn to bring them back.");
+            }
         }
         return successes;
     }
