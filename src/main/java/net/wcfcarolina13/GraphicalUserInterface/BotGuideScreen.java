@@ -781,6 +781,22 @@ public final class BotGuideScreen extends Screen {
                         "bot controls settings spawn mode admin panel"
                     ),
                 new GuideTopic(
+                        "spawning_auto_spawn_on_load",
+                        "Spawning",
+                        "Auto Spawn on Load",
+                        "Controls whether a bot automatically returns when you re-enter the world.",
+                        List.of(
+                                "When ON (default), the bot spawns automatically on world load with full state restored.",
+                                "When OFF, the bot stays shelved until you manually run /bot spawn.",
+                                "Use /bot despawn to shelve a bot across sessions (turns this OFF).",
+                                "Use /bot despawn session to remove a bot for the current session only (does not change this setting).",
+                                "Toggle this in the Bot Controls panel under the Spawning tab."
+                        ),
+                        "bot despawn " + target,
+                        "",
+                        "shelve shelved auto spawn load world session despawn persist"
+                ),
+                new GuideTopic(
                         "move_follow",
                         "Movement",
                         "Follow",
