@@ -1221,6 +1221,7 @@ public class ManualConfig {
         private boolean voicedDialogue = true;
         private String failsafeSpawnMode = "world_spawn";  // owner_bed | world_spawn | saved_base
         private boolean autoRegroupOnLost = false;  // auto-regroup when bot loses contact at a drop-off
+        private boolean autoSpawnOnLoad = true;  // shelved when false
 
         /** @deprecated Use {@link #isAutoRespawnOnDeath()} instead. Kept for JSON compat. */
         @Deprecated
@@ -1357,6 +1358,19 @@ public class ManualConfig {
 
         public void setAutoRegroupOnLost(boolean autoRegroupOnLost) {
             this.autoRegroupOnLost = autoRegroupOnLost;
+        }
+
+        /**
+         * Whether this bot should automatically spawn when the world loads.
+         * When {@code false}, the bot is "shelved" and must be manually spawned
+         * with {@code /bot spawn}.  Defaults to {@code true}.
+         */
+        public boolean isAutoSpawnOnLoad() {
+            return autoSpawnOnLoad;
+        }
+
+        public void setAutoSpawnOnLoad(boolean autoSpawnOnLoad) {
+            this.autoSpawnOnLoad = autoSpawnOnLoad;
         }
     }
 
