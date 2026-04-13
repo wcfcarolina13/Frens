@@ -1659,34 +1659,60 @@ bot.getName().getString());
             return false;
         }
         Item item = stack.getItem();
-        if (item == Items.FISHING_ROD) {
+
+        // ── Fishing catches: offload raw fish ──
+        if (item == Items.COD || item == Items.SALMON
+                || item == Items.TROPICAL_FISH || item == Items.PUFFERFISH) {
+            return true;
+        }
+
+        // ── Fishing catches: offload leather boots ──
+        if (item == Items.LEATHER_BOOTS) {
+            return true;
+        }
+
+        // ── Rods and bows: offload if nearly broken (<15% durability), keep if healthy ──
+        if (item == Items.FISHING_ROD || item == Items.BOW) {
+            if (stack.isDamageable()) {
+                int maxDmg = stack.getMaxDamage();
+                int remaining = maxDmg - stack.getDamage();
+                return remaining < maxDmg * 0.15;
+            }
             return false;
         }
+
+        // Always offload rotten flesh
         if (item == Items.ROTTEN_FLESH) {
             return true;
         }
+
+        // Keep custom-named items
         if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.CUSTOM_NAME) != null) {
             return false;
         }
+
+        // Keep cooked food (raw fish was already handled above)
         if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null) {
             return false;
         }
+
+        // Keep other damageable items (armor, tools — the bot's actual gear)
         if (stack.isDamageable()) {
             return false;
         }
+
+        // Arrow handling
         if (isArrowStack(stack)) {
-            // Keep best arrows: always keep spectral arrows; otherwise keep the largest normal arrow stack.
             if (item == Items.SPECTRAL_ARROW) {
                 return !arrowKeep.keepSpectral();
             }
             if (item == Items.ARROW) {
                 return stack.getCount() < arrowKeep.bestNormalArrowCount();
             }
-            // Unknown arrow type: default to keeping it (likely "best" tipped arrows).
             return false;
         }
 
-        // Default: store almost everything to free space (safer than stopping).
+        // Default: store everything else to free space
         return true;
     }
 
