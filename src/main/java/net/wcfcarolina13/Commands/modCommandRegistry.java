@@ -2294,6 +2294,7 @@ public class modCommandRegistry {
                         if (ctrl != null) {
                             ctrl.setSpawnMode("training");
                             ctrl.setAutoRespawnOnDeath(true);
+                            ctrl.setAutoSpawnOnLoad(true);
                         }
                     }
 
@@ -2358,6 +2359,7 @@ public class modCommandRegistry {
                             if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
                                 ctrl.setAutoRespawnOnDeath(true);
                             }
+                            ctrl.setAutoSpawnOnLoad(true);
                         }
                     }
 
