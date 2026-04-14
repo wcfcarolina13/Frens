@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fix: sunrise fishing resume forgets saved spot (2026-04-14)
+
+- **Fix:** At sunset, `FishingSkill` saved the session via `FishingSessionService.saveSession(...)`, broke the cast loop, then immediately ran the post-loop "clear stale session on normal completion" line — wiping the data it had just persisted. Next morning, sunrise resume fast-travelled to the lodestone (success) but `consumeSession()` returned `null`, so the skill burned 50+ seconds scanning for a new spot near the landing position instead of returning to the saved stand.
+- Added a `savedForSunrise` flag set when the loop breaks due to sunset save-for-resume, and gated the post-loop `clearSession` behind it.
+
 ## Fishing: offload filter order + multi-spot retry (2026-04-14)
 
 - **Fix (filter bug):** Damaged/enchanted caught rods and bows weren't being offloaded. Root cause: `ChestStoreService.isOffloadProtected()` treats *all* damageable items as protected (to safeguard the bot's real gear), and that check ran *before* the fishing whitelist. Reordered `FishingSkill.shouldStoreItem()` so the raw-fish / leather-boots / rod+bow (<15% durability) checks evaluate FIRST, then the generic protection applies to everything else.

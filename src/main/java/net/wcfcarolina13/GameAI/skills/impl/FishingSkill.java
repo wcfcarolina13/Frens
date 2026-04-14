@@ -256,6 +256,12 @@ public final class FishingSkill implements Skill {
         long lastSweepTime = System.currentTimeMillis();
         long lastReactiveSweepTime = 0L;
 
+        // Tracks whether the loop exited via sunset save-for-resume.  Used after
+        // the loop to skip the "stale session" clear, otherwise the saved spot is
+        // wiped and the bot has to re-search for a spot from the lodestone landing
+        // position the next morning.
+        boolean savedForSunrise = false;
+
         String modeDesc = (targetFish == Integer.MAX_VALUE ? "until sunset" : targetFish + " catches") + (checkSunset && targetFish != Integer.MAX_VALUE ? " (or sunset)" : "");
         LOGGER.info("Starting fishing session for {} (mode: {})", bot.getName().getString(), modeDesc);
 
@@ -278,6 +284,9 @@ public final class FishingSkill implements Skill {
                         ChatUtils.sendSystemMessage(source,
                                 "Sun's setting. Heading home. I'll resume fishing tomorrow. ("
                                 + caught + " catch" + (caught != 1 ? "es" : "") + " so far)");
+                        // Mark for sunrise resume so the post-loop cleanup doesn't
+                        // wipe the session we just saved.
+                        savedForSunrise = true;
                     } else {
                         ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
                     }
@@ -488,8 +497,13 @@ public final class FishingSkill implements Skill {
             BotActions.stop(bot); // Ensure we don't drift
         }
 
-        // Clear any stale session on normal completion
-        FishingSessionService.clearSession(bot.getUuid());
+        // Clear any stale session on normal completion.  Skip if we explicitly
+        // saved the session for sunrise resume — otherwise the bot loses its
+        // saved fishing spot overnight and has to scan from the lodestone landing
+        // position (which can take 50+ seconds and pick a different spot).
+        if (!savedForSunrise) {
+            FishingSessionService.clearSession(bot.getUuid());
+        }
 
         // Final Sweep
         performSweep(source, bot, stand);
