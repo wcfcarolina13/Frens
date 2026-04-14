@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## `/bot worldmode reset` admin command (2026-04-14)
+
+- **New:** `/bot worldmode reset` (admin-only) clears the per-world mode-selection state and re-broadcasts the recruitment payload so `WorldModeSelectionScreen` becomes reachable again. Use when a world save path collides with a previously-configured world (recreated world with the same name) and the welcome/mode dialog doesn't reappear.
+- After running the command, press `[-]` (or rejoin) to reopen the mode selection screen.
+
 ## Fix: no-bots HUD persistence + multi-spawn pile-up (2026-04-14)
 
 - **Fix:** "No companions present" HUD hint no longer auto-fades after 10s. It now stays visible as long as the no-bots condition holds, and is only hidden by the X button or when bots reappear. The X button actually has an effect now.

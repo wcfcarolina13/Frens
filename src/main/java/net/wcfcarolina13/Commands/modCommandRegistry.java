@@ -432,6 +432,10 @@ public class modCommandRegistry {
 	                        .then(BotSkillCommands.buildFortify())
 	                        .then(BotLifecycleCommands.buildList())
 	                        .then(BotLifecycleCommands.buildDespawn())
+	                        .then(literal("worldmode")
+	                                .requires(Frens::hasBotCommandPermission)
+	                                .then(literal("reset")
+	                                        .executes(modCommandRegistry::executeWorldModeReset)))
 	                        .then(BotLifecycleCommands.buildStop())
 	                        .then(BotLifecycleCommands.buildResume())
                             .then(BotLifecycleCommands.buildResumeShort())
@@ -5845,6 +5849,39 @@ public class modCommandRegistry {
         } else {
             ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: (none) — target one by name or use 'all'.");
         }
+        return 1;
+    }
+
+    /**
+     * Admin-only reset of the per-world mode selection state.  Clears
+     * {@code modeSelectionDone} + {@code selectedWorldMode} and re-broadcasts the
+     * recruitment state so clients re-trigger the {@code WorldModeSelectionScreen}
+     * auto-open flow.  Useful when a world save path collides with a previously-
+     * configured world (recreated world with the same name) and you want the
+     * welcome/mode-select dialog to reappear.
+     */
+    static int executeWorldModeReset(CommandContext<ServerCommandSource> context) {
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Server unavailable.");
+            return 0;
+        }
+        ManualConfig.SurvivalRecruitmentState st =
+                net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.getState(server);
+        if (st == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No world state to reset.");
+            return 0;
+        }
+        st.setModeSelectionDone(false);
+        st.setSelectedWorldMode(null);
+        st.setModeSelectedAtEpochMs(0L);
+        st.setModeSelectedByName(null);
+        Frens.CONFIG.save();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(p);
+        }
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "World mode reset. Press [-] or rejoin to reopen the mode selection screen.");
         return 1;
     }
 
