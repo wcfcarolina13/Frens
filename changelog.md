@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fix: no-bots HUD persistence + multi-spawn pile-up (2026-04-14)
+
+- **Fix:** "No companions present" HUD hint no longer auto-fades after 10s. It now stays visible as long as the no-bots condition holds, and is only hidden by the X button or when bots reappear. The X button actually has an effect now.
+- **Fix:** Spawning multiple bots at the same look position no longer piles them into the same block. `spawnBot` counts fake players within 2 blocks of the target position and ring-spaces each new one (6-slot ring, radius 1.3). Fixes the multi-select `/bot spawn` pile-up from BotRestoreScreen.
+
 ## Multi-select Bot Restore screen + Admin Mode auto-open + dismissible HUD (2026-04-14)
 
 - **Rewrite of `BotRestoreScreen`:** clicking a row now toggles a checkbox (multi-select). New "Spawn Selected (N)" footer button sends `/bot spawn` for each chosen alias with a 220ms stagger so they don't pile up at one position. Pagination preserved.

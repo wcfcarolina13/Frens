@@ -1277,7 +1277,11 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         long now = System.currentTimeMillis();
-        if (noBotsHintUntilMs <= 0L || now > noBotsHintUntilMs) {
+        // Gate rendering on the debounce only — once the "no bots" condition has
+        // held long enough to confirm it, keep showing the hint indefinitely until
+        // the user dismisses it (X button) or bots reappear (resetNoBotsRestoreState).
+        if (noBotsDetectedSinceMs == 0L
+                || now - noBotsDetectedSinceMs < NO_BOTS_HINT_DEBOUNCE_MS) {
             return;
         }
         if (noBotsHintDismissed) {

@@ -2162,8 +2162,30 @@ public class modCommandRegistry {
 
             Vec2f facing = context.getSource().getRotation();
 
-            // Center the bot in the block space to avoid corner collisions
-            Vec3d pos = new Vec3d(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
+            // Center the bot in the block space to avoid corner collisions.
+            // If other bots are already near this spawn position (e.g. multi-spawn
+            // from BotRestoreScreen fires 4 /bot spawn commands in quick succession),
+            // ring-space each additional one so they don't pile into the same block.
+            Vec3d centerPos = new Vec3d(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
+            int nearbyBots = 0;
+            try {
+                for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+                    if (other instanceof createFakePlayer && other.squaredDistanceTo(
+                            centerPos.getX(), centerPos.getY(), centerPos.getZ()) < 4.0) {
+                        nearbyBots++;
+                    }
+                }
+            } catch (Throwable ignored) {}
+            Vec3d pos = centerPos;
+            if (nearbyBots > 0) {
+                // Ring of 6 around the center (radius 1.3) → up to 6 bots before stacking again.
+                double angle = Math.toRadians((nearbyBots * 60) % 360);
+                double radius = 1.3;
+                pos = new Vec3d(
+                        centerPos.getX() + Math.cos(angle) * radius,
+                        centerPos.getY(),
+                        centerPos.getZ() + Math.sin(angle) * radius);
+            }
 
             GameMode mode = GameMode.SURVIVAL;
             GameMode parsedExplicit = parseGameModeOrNull(explicitGameMode);
