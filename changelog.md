@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fix: Auto-Respawn Gate Not Enforced (2026-04-14)
+
+- **Fix:** Toggling "Auto Respawn" OFF had no effect — bots still respawned automatically on death. Root cause: `Frens.java` AFTER_DEATH handler always called `BotEventHandler.ensureRespawnHandled()` unconditionally, ignoring `BotControlSettings.autoRespawnOnDeath`. (The flag was only consulted in `BotPersistenceService.onBotDeath` for survival-recruitment gating, which doesn't apply outside that mode.)
+- Now: when `autoRespawnOnDeath == false`, the forced respawn is skipped AND the bot entity is unregistered after death-persistence runs. User must `/bot spawn <name>` to bring the bot back. Inventory was already wiped by vanilla death processing.
+
 ## Fix: Bot Post-Death Immortality (2026-04-14)
 
 - **Fix:** Bots became immortal after their first death/respawn — all subsequent damage was silently rejected. Root cause: `createFakePlayer.kill()` schedules `networkHandler.disconnect()` during `onDeath()`, which sets `ServerPlayNetworkHandler.dead = true`. `ServerPlayerEntity.isInvulnerableTo()` then short-circuits to invulnerable via `canInteractWithGame()`. Vanilla fixes this by creating a fresh `ServerPlayerEntity` on respawn; fake players reuse the same entity, so the flags must be reset manually.

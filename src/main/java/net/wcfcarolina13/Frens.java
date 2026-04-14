@@ -923,6 +923,7 @@ public class Frens implements ModInitializer {
 
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
+                boolean shouldAutoRespawn = true;
                 if (BotEventHandler.isRegisteredBot(serverPlayer)) {
                         LOGGER.info("Detected bot death at ({}, {}, {}) damageSource={} alive={}",
                                 serverPlayer.getX(), serverPlayer.getY(), serverPlayer.getZ(),
@@ -931,9 +932,32 @@ public class Frens implements ModInitializer {
                         net.wcfcarolina13.GameAI.services.BotFleeService.reset(serverPlayer.getUuid());
                         QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
                         BotEventHandler.botDied = true; // set flag for bot's death.
-                        BotEventHandler.ensureRespawnHandled(serverPlayer);
+
+                        // Auto-respawn gate: if the user disabled auto-respawn for this bot,
+                        // skip the forced respawn and remove the entity so it can be brought
+                        // back manually with /bot spawn.  Inventory is wiped by vanilla death
+                        // processing in BotPersistenceService.onBotDeath below regardless.
+                        try {
+                            net.minecraft.server.MinecraftServer srv = serverPlayer.getCommandSource().getServer();
+                            String alias = serverPlayer.getName().getString();
+                            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
+                            net.wcfcarolina13.FilingSystem.ManualConfig.BotControlSettings ctrl =
+                                    CONFIG != null ? CONFIG.getEffectiveBotControl(alias, wk) : null;
+                            if (ctrl != null) {
+                                shouldAutoRespawn = ctrl.isAutoRespawnOnDeath();
+                            }
+                        } catch (Throwable ignored) {}
+
+                        if (shouldAutoRespawn) {
+                            BotEventHandler.ensureRespawnHandled(serverPlayer);
+                        }
                 }
                 BotPersistenceService.onBotDeath(serverPlayer);
+                // After death persistence has run: if auto-respawn was disabled, remove
+                // the ghost entity.  User must /bot spawn <name> to bring them back.
+                if (!shouldAutoRespawn && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                    BotEventHandler.unregisterBot(serverPlayer);
+                }
                 HuntSessionService.clearSession(serverPlayer.getUuid());
             }
             if (entity instanceof net.minecraft.entity.LivingEntity dead) {
