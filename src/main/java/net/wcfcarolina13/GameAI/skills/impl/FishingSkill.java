@@ -207,6 +207,27 @@ public final class FishingSkill implements Skill {
             return SkillExecutionResult.failure("Can't reach the fishing spot (blocked?).");
         }
 
+        // Sunrise resume precision snap: navigateToSpot uses a "close enough"
+        // radius check, but on a sunrise-resumed session the bot fast-travelled
+        // from a lodestone ~17 blocks away and often stops 1 block short of the
+        // saved stand.  The drift check (>2.25 sq dist) and adjustPositionToWaterEdge
+        // (1.35 horiz dist) both consider that "close enough" and never correct it.
+        // The cast then originates from the wrong block and bobbers land badly,
+        // producing a silent zero-bite session.  Snap to the exact saved block.
+        if (savedSession != null && bot.getEntityWorld() instanceof ServerWorld snapWorld) {
+            BlockPos botBlock = bot.getBlockPos();
+            if (!botBlock.equals(stand) && botBlock.getSquaredDistance(stand) < 16.0) {
+                bot.refreshPositionAndAngles(
+                        stand.getX() + 0.5,
+                        stand.getY(),
+                        stand.getZ() + 0.5,
+                        bot.getYaw(),
+                        bot.getPitch());
+                LOGGER.info("Sunrise resume snap: {} positioned exactly on saved stand {}",
+                        bot.getName().getString(), stand.toShortString());
+            }
+        }
+
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         BlockPos castTarget = chooseCastTarget(world, bot, stand, spot.water(), spot.castTarget());
         LOGGER.info("Fishing spot chosen stand={} water={} cast={} options={}",
