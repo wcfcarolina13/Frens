@@ -924,31 +924,67 @@ public final class FishingSkill implements Skill {
     }
 
     /**
-     * Search radius for chest auto-discovery during fishing storage runs.
-     * Matches the 12-block radius used by other skills (HarvestCropSkill,
-     * BotMutualAidService, ChestStoreService DEFAULT_CHEST_SEARCH_RADIUS).
-     * The previous 5-block radius missed chests placed at the typical
-     * "set up a chest near the fishing dock" distance.
+     * Concentric chest search rings.  Tries the closest chests first; if none
+     * are found within a ring (or all are full), expands outward.  Capped at
+     * 48 blocks so the bot doesn't try to fast-travel halfway across a base
+     * for a far-away chest.
      */
-    private static final int FISHING_CHEST_SEARCH_RADIUS = 12;
+    private static final int[] FISHING_CHEST_SEARCH_RINGS = {12, 24, 48};
 
     private static BlockPos findNearbyChestWithSpace(ServerPlayerEntity bot) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
+        int prevRadius = 0;
+        for (int radius : FISHING_CHEST_SEARCH_RINGS) {
+            BlockPos closest = scanForChestWithSpace(world, origin, prevRadius, radius);
+            if (closest != null) {
+                if (prevRadius > 0) {
+                    LOGGER.info("Found chest with space at {} (expanded search to {} blocks)",
+                            closest.toShortString(), radius);
+                }
+                return closest;
+            }
+            prevRadius = radius;
+        }
+        return null;
+    }
+
+    /**
+     * Single-ring scan: looks at all blocks within {@code outerRadius} but skips
+     * the inner cube already covered by {@code innerRadius}.  Returns the
+     * closest chest-with-space inside the ring, or {@code null} if none found.
+     */
+    private static BlockPos scanForChestWithSpace(ServerWorld world, BlockPos origin,
+                                                   int innerRadius, int outerRadius) {
+        BlockPos closest = null;
+        double closestDistSq = Double.MAX_VALUE;
         for (BlockPos pos : BlockPos.iterate(
-                origin.add(-FISHING_CHEST_SEARCH_RADIUS, -3, -FISHING_CHEST_SEARCH_RADIUS),
-                origin.add(FISHING_CHEST_SEARCH_RADIUS, 3, FISHING_CHEST_SEARCH_RADIUS))) {
+                origin.add(-outerRadius, -3, -outerRadius),
+                origin.add(outerRadius, 3, outerRadius))) {
+            int dx = Math.abs(pos.getX() - origin.getX());
+            int dz = Math.abs(pos.getZ() - origin.getZ());
+            if (dx <= innerRadius && dz <= innerRadius) {
+                continue; // already searched in a smaller ring
+            }
             if (!world.isChunkLoaded(pos)) {
                 continue;
             }
             if (!(world.getBlockState(pos).isOf(Blocks.CHEST) || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST))) {
                 continue;
             }
-            if (world.getBlockEntity(pos) instanceof ChestBlockEntity chest && chestHasSpace(chest)) {
-                return pos.toImmutable();
+            if (!(world.getBlockEntity(pos) instanceof ChestBlockEntity chest)) {
+                continue;
+            }
+            if (!chestHasSpace(chest)) {
+                continue;
+            }
+            double distSq = pos.getSquaredDistance(origin);
+            if (distSq < closestDistSq) {
+                closestDistSq = distSq;
+                closest = pos.toImmutable();
             }
         }
-        return null;
+        return closest;
     }
 
     private static boolean chestHasSpace(ChestBlockEntity chest) {

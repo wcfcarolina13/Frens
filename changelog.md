@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fishing: expanding chest search rings (2026-04-14)
+
+- **Fix:** Even at 12 blocks, the chest search was missing dock chests further out. Replaced the single-radius scan with a concentric-ring expansion: try **12 → 24 → 48** blocks, expand on failure, return the closest chest with space inside the first ring that has one. Logs the expansion attempt so it's clear when the bot reached out further.
+
 ## Fishing: chest radius, post-task return, faster spot search (2026-04-14)
 
 - **Fix:** `FishingSkill.findNearbyChestWithSpace` was searching a tiny 5-block radius (vs 10–12 used by other skills). Storage-runs failed even when chests were placed at the typical "fishing dock" distance. Bumped to 12 blocks (matching `ChestStoreService.DEFAULT_CHEST_SEARCH_RADIUS`, `HarvestCropSkill`, `BotMutualAidService`, etc.).
