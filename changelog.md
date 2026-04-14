@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fishing: chest radius, post-task return, faster spot search (2026-04-14)
+
+- **Fix:** `FishingSkill.findNearbyChestWithSpace` was searching a tiny 5-block radius (vs 10–12 used by other skills). Storage-runs failed even when chests were placed at the typical "fishing dock" distance. Bumped to 12 blocks (matching `ChestStoreService.DEFAULT_CHEST_SEARCH_RADIUS`, `HarvestCropSkill`, `BotMutualAidService`, etc.).
+- **Fix:** Post-task return (the "fast-travel the bot back to the commander when its task ends" feature) is meant to recover stuck-underground bots. It was misfiring for surface skills like fishing, where the bot ending at the worksite is the expected outcome. Added `skill:fish`, `skill:farm`/`skill:harvestcrop`, `skill:woodcut`, `skill:hunt`, `skill:wool`, and `skill:fortifyvillage` to the suppress list.
+- **Perf:** Cold-path `findFishingSpot` was capped at 200 candidate evaluations, which produced 30–50 second searches in dense water areas. Lowered the cap to 80 and added an early-exit (after 25 evaluations) when a good-enough spot has been found (score ≤ 8). Cuts cold-path search time roughly in half without affecting quality for the common case.
+
 ## Fix: sunrise resume off-stand → silent zero-bite session (2026-04-14)
 
 - **Fix:** With the savedForSunrise change the bot correctly fast-travels to its lodestone and resumes the saved spot, but fast-travel lands it ~17 blocks from the saved stand and `MovementService` typically stops 1 block short of the exact target. The drift check and `adjustPositionToWaterEdge` both treat that as "close enough", so casts originate from the wrong block, bobbers land badly, and the bot sits silent for minutes.

@@ -923,10 +923,21 @@ public final class FishingSkill implements Skill {
         return Optional.empty();
     }
 
+    /**
+     * Search radius for chest auto-discovery during fishing storage runs.
+     * Matches the 12-block radius used by other skills (HarvestCropSkill,
+     * BotMutualAidService, ChestStoreService DEFAULT_CHEST_SEARCH_RADIUS).
+     * The previous 5-block radius missed chests placed at the typical
+     * "set up a chest near the fishing dock" distance.
+     */
+    private static final int FISHING_CHEST_SEARCH_RADIUS = 12;
+
     private static BlockPos findNearbyChestWithSpace(ServerPlayerEntity bot) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
-        for (BlockPos pos : BlockPos.iterate(origin.add(-5, -2, -5), origin.add(5, 2, 5))) {
+        for (BlockPos pos : BlockPos.iterate(
+                origin.add(-FISHING_CHEST_SEARCH_RADIUS, -3, -FISHING_CHEST_SEARCH_RADIUS),
+                origin.add(FISHING_CHEST_SEARCH_RADIUS, 3, FISHING_CHEST_SEARCH_RADIUS))) {
             if (!world.isChunkLoaded(pos)) {
                 continue;
             }
@@ -1066,10 +1077,18 @@ public final class FishingSkill implements Skill {
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
         int evaluated = 0;
-        int MAX_WATER_EVALUATIONS = 200; // Cap to prevent 18+ second searches
+        // Was 200 — produced 30-50s searches in dense water areas.  80 still
+        // explores enough to find a near-best spot.  Also exit early if we
+        // already have a very good score after some evaluations.
+        int MAX_WATER_EVALUATIONS = 80;
+        int EARLY_EXIT_AFTER = 25;
+        double EARLY_EXIT_SCORE = 8.0;
         for (BlockPos water : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
-            if (evaluated >= MAX_WATER_EVALUATIONS && best != null) {
-                break; // Good-enough spot found; stop searching
+            if (best != null && evaluated >= MAX_WATER_EVALUATIONS) {
+                break;
+            }
+            if (best != null && evaluated >= EARLY_EXIT_AFTER && bestScore <= EARLY_EXIT_SCORE) {
+                break; // good-enough spot found early
             }
             if (!world.isChunkLoaded(water)) {
                 continue;

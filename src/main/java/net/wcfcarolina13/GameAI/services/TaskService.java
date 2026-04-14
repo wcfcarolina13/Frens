@@ -638,6 +638,19 @@ public final class TaskService {
         if (lower.equals("skill:stripmine") || lower.equals("skill:mining")) return true;
         // Sleep: bot is in bed, trying to fast-travel it away is nonsensical
         if (lower.equals("skill:sleep")) return true;
+        // Surface skills: post-task return is meant to recover stuck-underground bots.
+        // For surface tasks, the bot ending its task at the worksite is the expected
+        // outcome — fast-travelling to the commander after a transient failure (e.g.
+        // "inventory full and no chest nearby") just yanks the bot away from where
+        // it was trying to work and confuses the player.
+        if (lower.equals("skill:fish")) return true;
+        if (lower.equals("skill:farm") || lower.equals("skill:harvestcrop")
+                || lower.equals("skill:harvest_crop")) return true;
+        if (lower.equals("skill:woodcut")) return true;
+        if (lower.equals("skill:hunt")) return true;
+        if (lower.equals("skill:wool") || lower.equals("skill:shear")) return true;
+        if (lower.equals("skill:fortifyvillage") || lower.equals("skill:fortify")
+                || lower.equals("skill:fortify_village")) return true;
         return false;
     }
 
