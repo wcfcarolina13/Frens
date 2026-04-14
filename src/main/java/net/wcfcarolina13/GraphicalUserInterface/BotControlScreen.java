@@ -463,6 +463,7 @@ public class BotControlScreen extends Screen {
         // Teleport toggle: ON (true) = clear global override (null), OFF (false) = globally disabled
         config.setGlobalTeleportDuringSkills(globalValues[5] ? null : Boolean.FALSE);
 
+        java.util.List<String> autoRespawnJustEnabled = new java.util.ArrayList<>();
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
             String saveWorldKey = null;
             net.minecraft.client.MinecraftClient mc2 = net.minecraft.client.MinecraftClient.getInstance();
@@ -471,6 +472,7 @@ public class BotControlScreen extends Screen {
             }
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey(), saveWorldKey);
             SettingsSnapshot v = entry.getValue();
+            boolean wasAutoRespawn = s.isAutoRespawnOnDeath();
             s.setAutoRespawnOnDeath(v.autoRespawnOnDeath);
             s.setAutoSpawnOnLoad(v.autoSpawnOnLoad);
             s.setSpawnMode(v.spawnMode);
@@ -483,9 +485,26 @@ public class BotControlScreen extends Screen {
             s.setAutoRegroupOnLost(v.autoRegroupOnLost);
             s.setLlmEnabled(v.llmEnabled);
             s.setVoicedDialogue(v.voicedDialogue);
+            if (!wasAutoRespawn && v.autoRespawnOnDeath) {
+                autoRespawnJustEnabled.add(entry.getKey());
+            }
         }
         config.save();
         configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
+
+        // If the user toggled Auto Respawn ON for any bot that isn't active, spawn
+        // them (handles the post-death "revive by toggling" flow).
+        if (!autoRespawnJustEnabled.isEmpty()) {
+            net.minecraft.client.MinecraftClient mc3 = net.minecraft.client.MinecraftClient.getInstance();
+            net.minecraft.server.MinecraftServer srv = mc3 != null ? mc3.getServer() : null;
+            if (srv != null) {
+                for (String alias : autoRespawnJustEnabled) {
+                    final String aliasFinal = alias;
+                    srv.execute(() -> net.wcfcarolina13.GameAI.services.BotRespawnPromptService
+                            .onAutoRespawnEnabled(srv, aliasFinal));
+                }
+            }
+        }
     }
 
     // ── Rendering ─────────────────────────────────────────────────────────

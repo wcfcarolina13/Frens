@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Respawn Permission Prompt (2026-04-14)
+
+- **New:** When a bot dies with Auto Respawn OFF, the controller gets a chat prompt: *"{name} died. Respawn now? (yes/no)"*. Reply `yes` to bring them back, `no` to stand down. Session-scoped — if you don't answer before the session ends, it defaults to "no" and the bot stays shelved until manually spawned.
+- **New:** Toggling Auto Respawn ON for a bot that isn't currently spawned auto-spawns them. Useful as a revive path after death-without-answer.
+- `/bot spawn <name>` also clears any pending respawn prompt (in case user prefers commands).
+- **Fix:** Manual respawn via `/bot spawn` no longer clobbers a user-customized `autoRespawnOnDeath` preference. Mode-based defaults only apply on a bot's first spawn (when the field is null). `autoSpawnOnLoad` still always resets to `true` on manual spawn since that's the user explicitly asking for the bot back.
+
+Complements the existing `SkillResumeService` prompt ("I died. Should I continue with the last job?") which handles skill resumption after respawn.
+
 ## Fix: Auto-Respawn Gate Not Enforced (2026-04-14)
 
 - **Fix:** Toggling "Auto Respawn" OFF had no effect — bots still respawned automatically on death. Root cause: `Frens.java` AFTER_DEATH handler always called `BotEventHandler.ensureRespawnHandled()` unconditionally, ignoring `BotControlSettings.autoRespawnOnDeath`. (The flag was only consulted in `BotPersistenceService.onBotDeath` for survival-recruitment gating, which doesn't apply outside that mode.)

@@ -767,6 +767,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.DurabilityFallbackService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotAnimalDefenseService.reset();
             net.wcfcarolina13.GameAI.services.BotPillagerAlertService.reset();
+            net.wcfcarolina13.GameAI.services.BotRespawnPromptService.clearAll();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -953,9 +954,16 @@ public class Frens implements ModInitializer {
                         }
                 }
                 BotPersistenceService.onBotDeath(serverPlayer);
-                // After death persistence has run: if auto-respawn was disabled, remove
-                // the ghost entity.  User must /bot spawn <name> to bring them back.
+                // After death persistence has run: if auto-respawn was disabled,
+                // prompt the controller for respawn approval, shelve the bot, and
+                // remove the ghost entity.  A "yes" reply (or toggling Auto Respawn
+                // ON) will bring the bot back; "no" or session end keeps them gone.
                 if (!shouldAutoRespawn && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                    net.minecraft.server.MinecraftServer srv = serverPlayer.getCommandSource().getServer();
+                    if (srv != null) {
+                        net.wcfcarolina13.GameAI.services.BotRespawnPromptService
+                                .promptForRespawn(srv, serverPlayer);
+                    }
                     BotEventHandler.unregisterBot(serverPlayer);
                 }
                 HuntSessionService.clearSession(serverPlayer.getUuid());
@@ -1078,6 +1086,9 @@ public class Frens implements ModInitializer {
                 return;
             }
 
+            if (net.wcfcarolina13.GameAI.services.BotRespawnPromptService.handleChat(sender, raw)) {
+                return;
+            }
             SkillResumeService.handleChat(sender, raw);
 
             ChatTarget target = resolveChatTargets(raw);

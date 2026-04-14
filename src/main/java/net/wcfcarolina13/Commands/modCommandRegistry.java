@@ -2185,6 +2185,9 @@ public class modCommandRegistry {
             if (validatedName == null) return;  // error already sent
             botName = validatedName;
 
+            // Manual spawn clears any pending respawn prompt for this bot.
+            net.wcfcarolina13.GameAI.services.BotRespawnPromptService.clear(botName);
+
                 if (!requestedSpawnMode.equalsIgnoreCase(normalizedSpawnMode)) {
                 ChatUtils.sendSystemMessage(serverSource,
                     "Note: '/bot spawn " + botName + " " + requestedSpawnMode + "' maps to mode '" + normalizedSpawnMode + "'.");
@@ -2287,13 +2290,17 @@ public class modCommandRegistry {
                     if (owner != null) {
                         Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
                     }
-                    // Training bots auto-respawn on death by default.
+                    // Training bots auto-respawn on death by default, but preserve any
+                    // user-customized autoRespawnOnDeath from prior sessions.
                     {
                         String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
                         ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
                         if (ctrl != null) {
                             ctrl.setSpawnMode("training");
-                            ctrl.setAutoRespawnOnDeath(true);
+                            if (ctrl.getRawAutoRespawnOnDeath() == null) {
+                                ctrl.setAutoRespawnOnDeath(true);
+                            }
+                            // Manual /bot spawn always clears shelved state (user wants the bot back).
                             ctrl.setAutoSpawnOnLoad(true);
                         }
                     }
@@ -2351,14 +2358,17 @@ public class modCommandRegistry {
                         Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
                     }
                     // Admin/questing bots: set spawn mode and auto-respawn default.
+                    // Preserve any user-customized autoRespawnOnDeath from prior sessions.
                     {
                         String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
                         ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
                         if (ctrl != null) {
                             ctrl.setSpawnMode(normalizedSpawnMode);
-                            if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
+                            if (isAdminLikeSpawnMode(normalizedSpawnMode)
+                                    && ctrl.getRawAutoRespawnOnDeath() == null) {
                                 ctrl.setAutoRespawnOnDeath(true);
                             }
+                            // Manual /bot spawn always clears shelved state (user wants the bot back).
                             ctrl.setAutoSpawnOnLoad(true);
                         }
                     }
