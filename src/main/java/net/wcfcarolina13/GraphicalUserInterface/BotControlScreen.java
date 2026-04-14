@@ -118,6 +118,11 @@ public class BotControlScreen extends Screen {
     private Rect globalPanelRect;
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
+    // Bulk-apply action buttons (only populated when panel is expanded).
+    private Rect bulkAutoRespawnOnRect;
+    private Rect bulkAutoRespawnOffRect;
+    private Rect bulkAutoSpawnOnLoadOnRect;
+    private Rect bulkAutoSpawnOnLoadOffRect;
     private Rect permissionsActionRect;
     // Personal Preferences footer button — commented out 2026-04-07. Toggle
     // moved to BotPlayerInventoryScreen Admin → Behavior. Restore this block
@@ -240,9 +245,11 @@ public class BotControlScreen extends Screen {
         globalsLabelY = subtitleY + this.textRenderer.fontHeight + 6;
         globalsStartY = globalsLabelY + this.textRenderer.fontHeight + 4;
 
-        // When collapsed: just the header row (18px).  When expanded: header + rows.
+        // When collapsed: just the header row (18px).  When expanded: header + rows
+        // + bulk-apply section (separator + label + 2 button rows).
+        int bulkSectionH = globalsExpanded ? getBulkSectionHeight() : 0;
         int globalPanelH = globalsExpanded
-                ? (GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20)
+                ? (GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20 + bulkSectionH)
                 : 18;
         globalPanelRect = new Rect(contentX - 2, globalsStartY - 1, contentW + 4, globalPanelH);
 
@@ -666,6 +673,135 @@ public class BotControlScreen extends Screen {
 
             y += rowH;
         }
+
+        // ── Bulk Apply section ────────────────────────────────────────────────
+        // Separator line + label + 2 rows of label + [ALL ON] [ALL OFF] action buttons.
+        y += 3;
+        context.fill(globalPanelRect.x + 6, y, globalPanelRect.right() - 6, y + 1, COL_SEC_LINE);
+        y += 3;
+        context.drawText(this.textRenderer,
+                "Bulk Apply (current world)",
+                globalPanelRect.x + 6, y, COL_SECTION, false);
+        y += this.textRenderer.fontHeight + 4;
+
+        int btnW = 52;
+        int btnGap = 4;
+        int bulkRowH = rowH;
+
+        // Row 1: Auto Respawn
+        {
+            Rect r = new Rect(rowX, y, rowW, bulkRowH);
+            context.fill(r.x, r.y, r.right(), r.bottom(), COL_ROW);
+            context.drawText(this.textRenderer, "Auto Respawn — All Bots",
+                    r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
+            bulkAutoRespawnOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
+            bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
+            drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY);
+            drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY);
+            y += bulkRowH + 2;
+        }
+
+        // Row 2: Auto Spawn on Load
+        {
+            Rect r = new Rect(rowX, y, rowW, bulkRowH);
+            context.fill(r.x, r.y, r.right(), r.bottom(), COL_ROW);
+            context.drawText(this.textRenderer, "Auto Spawn on Load — All Bots",
+                    r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
+            bulkAutoSpawnOnLoadOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
+            bulkAutoSpawnOnLoadOnRect  = new Rect(bulkAutoSpawnOnLoadOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
+            drawBulkButton(context, bulkAutoSpawnOnLoadOnRect,  "ALL ON",  true,  mouseX, mouseY);
+            drawBulkButton(context, bulkAutoSpawnOnLoadOffRect, "ALL OFF", false, mouseX, mouseY);
+        }
+    }
+
+    /**
+     * Apply {@code autoRespawnOnDeath = value} to every bot that has a settings
+     * entry in the current world.  If {@code value == true}, any bot whose
+     * autoRespawn flipped false→true and is not currently active will be
+     * auto-spawned via {@link net.wcfcarolina13.GameAI.services.BotRespawnPromptService#onAutoRespawnEnabled}.
+     */
+    private void applyBulkAutoRespawn(boolean value) {
+        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+        net.minecraft.server.MinecraftServer srv = mc != null ? mc.getServer() : null;
+        String worldKey = srv != null
+                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv)
+                : null;
+
+        List<String> justEnabled = new ArrayList<>();
+        Map<String, Map<String, ManualConfig.BotControlSettings>> byWorld =
+                Frens.CONFIG.getBotControlsByWorld();
+        if (byWorld != null) {
+            for (Map.Entry<String, Map<String, ManualConfig.BotControlSettings>> e : byWorld.entrySet()) {
+                Map<String, ManualConfig.BotControlSettings> worldMap = e.getValue();
+                if (worldMap == null) continue;
+                ManualConfig.BotControlSettings s = worldMap.get(worldKey);
+                if (s == null) continue;
+                boolean was = s.isAutoRespawnOnDeath();
+                s.setAutoRespawnOnDeath(value);
+                if (!was && value) {
+                    justEnabled.add(e.getKey());
+                }
+            }
+        }
+        Frens.CONFIG.save();
+
+        // Drop any staged per-bot edits and rebuild so the settings panel reflects
+        // the new live config values.
+        dirtySettings.clear();
+        rebuildSettingsWidgets();
+
+        if (value && srv != null) {
+            for (String alias : justEnabled) {
+                final String aliasFinal = alias;
+                srv.execute(() -> net.wcfcarolina13.GameAI.services.BotRespawnPromptService
+                        .onAutoRespawnEnabled(srv, aliasFinal));
+            }
+        }
+    }
+
+    /**
+     * Apply {@code autoSpawnOnLoad = value} to every bot that has a settings
+     * entry in the current world.  This controls session-to-session auto-spawn
+     * on world load only; it does not directly spawn or despawn any live bot.
+     */
+    private void applyBulkAutoSpawnOnLoad(boolean value) {
+        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+        net.minecraft.server.MinecraftServer srv = mc != null ? mc.getServer() : null;
+        String worldKey = srv != null
+                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv)
+                : null;
+
+        Map<String, Map<String, ManualConfig.BotControlSettings>> byWorld =
+                Frens.CONFIG.getBotControlsByWorld();
+        if (byWorld != null) {
+            for (Map.Entry<String, Map<String, ManualConfig.BotControlSettings>> e : byWorld.entrySet()) {
+                Map<String, ManualConfig.BotControlSettings> worldMap = e.getValue();
+                if (worldMap == null) continue;
+                ManualConfig.BotControlSettings s = worldMap.get(worldKey);
+                if (s == null) continue;
+                s.setAutoSpawnOnLoad(value);
+            }
+        }
+        Frens.CONFIG.save();
+
+        dirtySettings.clear();
+        rebuildSettingsWidgets();
+    }
+
+    private void drawBulkButton(DrawContext context, Rect rect, String label, boolean onFlavor,
+                                int mouseX, int mouseY) {
+        boolean hover = rect.contains(mouseX, mouseY);
+        int fill = onFlavor
+                ? (hover ? 0xFF3C713C : 0xFF2E5A2E)
+                : (hover ? 0xFF613333 : 0xFF4A2A2A);
+        context.fill(rect.x, rect.y, rect.right(), rect.bottom(), fill);
+        context.fill(rect.x, rect.y, rect.right(), rect.y + 1, 0xFF000000);
+        context.fill(rect.x, rect.bottom() - 1, rect.right(), rect.bottom(), 0xFF000000);
+        context.fill(rect.x, rect.y, rect.x + 1, rect.bottom(), 0xFF000000);
+        context.fill(rect.right() - 1, rect.y, rect.right(), rect.bottom(), 0xFF000000);
+        int tx = rect.x + (rect.w - this.textRenderer.getWidth(label)) / 2;
+        int ty = rect.y + (rect.h - this.textRenderer.fontHeight) / 2;
+        context.drawText(this.textRenderer, label, tx, ty, 0xFFEFEFEF, false);
     }
 
     private void renderSettingsPanel(DrawContext context, int mouseX, int mouseY) {
@@ -892,6 +1028,13 @@ public class BotControlScreen extends Screen {
         return compactLayout ? 15 : GLOBAL_ROW_H;
     }
 
+    private int getBulkSectionHeight() {
+        // separator (6) + section label (fontHeight + 4) + 2 rows of buttons (each rowH + 2 gap)
+        int rowH = getGlobalRowHeight();
+        return 6 + (this.textRenderer != null ? this.textRenderer.fontHeight : 9) + 4
+                + 2 * (rowH + 2);
+    }
+
     private int getSectionHeight() {
         return compactLayout ? 16 : SECTION_H;
     }
@@ -974,6 +1117,24 @@ public class BotControlScreen extends Screen {
                     globalValues[i] = !globalValues[i];
                     return true;
                 }
+            }
+
+            // Bulk Apply buttons
+            if (bulkAutoRespawnOnRect != null && bulkAutoRespawnOnRect.contains(mx, my)) {
+                applyBulkAutoRespawn(true);
+                return true;
+            }
+            if (bulkAutoRespawnOffRect != null && bulkAutoRespawnOffRect.contains(mx, my)) {
+                applyBulkAutoRespawn(false);
+                return true;
+            }
+            if (bulkAutoSpawnOnLoadOnRect != null && bulkAutoSpawnOnLoadOnRect.contains(mx, my)) {
+                applyBulkAutoSpawnOnLoad(true);
+                return true;
+            }
+            if (bulkAutoSpawnOnLoadOffRect != null && bulkAutoSpawnOnLoadOffRect.contains(mx, my)) {
+                applyBulkAutoSpawnOnLoad(false);
+                return true;
             }
 
             return true;  // consume click inside panel even if no row matched

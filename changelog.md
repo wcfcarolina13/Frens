@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Bulk Apply Buttons in Global Bot Controls (2026-04-14)
+
+- **New:** Expanded global toggles panel now has a "Bulk Apply (current world)" section with 4 action buttons:
+  - **Auto Respawn — All Bots:** `[ALL ON]` `[ALL OFF]`
+  - **Auto Spawn on Load — All Bots:** `[ALL ON]` `[ALL OFF]`
+- Clicking a button applies the value to every bot that has a per-bot settings entry in the current world. Not a persistent state — acts like a reset.
+- `ALL ON` for Auto Respawn also auto-spawns any inactive bot whose flag flipped false→true, consistent with the per-bot toggle behavior.
+- Buttons apply immediately and discard any staged per-bot edits in the currently open settings panel (the panel rebuilds from the new live config).
+
 ## Respawn Permission Prompt (2026-04-14)
 
 - **New:** When a bot dies with Auto Respawn OFF, the controller gets a chat prompt: *"{name} died. Respawn now? (yes/no)"*. Reply `yes` to bring them back, `no` to stand down. Session-scoped — if you don't answer before the session ends, it defaults to "no" and the bot stays shelved until manually spawned.
