@@ -578,6 +578,16 @@ public class BotControlScreen extends Screen {
                 false,
                 this.client != null,
                 mouseX, mouseY);
+        if (spawnBotsActionRect.contains(mouseX, mouseY) && tooltipText == null) {
+            updateTooltipCandidate("footer:spawnBots",
+                    "Opens the Bot Roster screen: multi-select saved bots to respawn, or create a new one.",
+                    mouseX, mouseY);
+        }
+        if (permissionsActionRect.contains(mouseX, mouseY) && tooltipText == null) {
+            updateTooltipCandidate("footer:permissions",
+                    "Edit which players can command this bot and what they can make it do.",
+                    mouseX, mouseY);
+        }
         // drawActionButton(context, personalPrefsActionRect,
         //         "Personal Preferences",
         //         false,
@@ -712,6 +722,15 @@ public class BotControlScreen extends Screen {
             bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
             drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY, "ar_on");
             drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY, "ar_off");
+            if (bulkAutoRespawnOnRect.contains(mouseX, mouseY) && tooltipText == null) {
+                updateTooltipCandidate("bulk:ar_on",
+                        "Sets Auto Respawn = ON for every bot in this world. Any inactive bot whose flag flipped will also be re-spawned.",
+                        mouseX, mouseY);
+            } else if (bulkAutoRespawnOffRect.contains(mouseX, mouseY) && tooltipText == null) {
+                updateTooltipCandidate("bulk:ar_off",
+                        "Sets Auto Respawn = OFF for every bot in this world. Dying bots will prompt you instead of coming back instantly.",
+                        mouseX, mouseY);
+            }
             y += bulkRowH;
         }
 
@@ -725,6 +744,15 @@ public class BotControlScreen extends Screen {
             bulkAutoSpawnOnLoadOnRect  = new Rect(bulkAutoSpawnOnLoadOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
             drawBulkButton(context, bulkAutoSpawnOnLoadOnRect,  "ALL ON",  true,  mouseX, mouseY, "sl_on");
             drawBulkButton(context, bulkAutoSpawnOnLoadOffRect, "ALL OFF", false, mouseX, mouseY, "sl_off");
+            if (bulkAutoSpawnOnLoadOnRect.contains(mouseX, mouseY) && tooltipText == null) {
+                updateTooltipCandidate("bulk:sl_on",
+                        "Un-shelves every bot: they will auto-spawn next time you load the world.",
+                        mouseX, mouseY);
+            } else if (bulkAutoSpawnOnLoadOffRect.contains(mouseX, mouseY) && tooltipText == null) {
+                updateTooltipCandidate("bulk:sl_off",
+                        "Shelves every bot: none will auto-spawn on world load. Use /bot spawn or toggle back ON to bring a bot back.",
+                        mouseX, mouseY);
+            }
         }
     }
 

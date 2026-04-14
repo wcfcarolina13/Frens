@@ -1293,7 +1293,7 @@ public class FrensClient implements ClientModInitializer {
             openKey = "-";
         }
         String line1 = "No companions are currently present in this world.";
-        String line2 = "Press [" + openKey + "] to restore one, or use /bot spawn <name> admin";
+        String line2 = "Press [" + openKey + "] to open the roster — click [x] to hide this hint";
 
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);

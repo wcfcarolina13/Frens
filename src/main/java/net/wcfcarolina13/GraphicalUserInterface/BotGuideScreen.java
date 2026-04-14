@@ -689,7 +689,9 @@ public final class BotGuideScreen extends Screen {
             return false;
         }
         String id = topic.id().trim().toLowerCase(Locale.ROOT);
-        return id.equals("modes_delegate") || id.equals("modes_direct");
+        return id.equals("modes_delegate")
+                || id.equals("modes_direct")
+                || id.equals("admin_worldmode_reset");
     }
 
     private List<GuideTopic> filteredTopics() {
@@ -795,6 +797,82 @@ public final class BotGuideScreen extends Screen {
                         "bot despawn " + target,
                         "",
                         "shelve shelved auto spawn load world session despawn persist"
+                ),
+                new GuideTopic(
+                        "spawning_auto_respawn",
+                        "Spawning",
+                        "Auto Respawn",
+                        "Controls what happens when a bot dies.",
+                        List.of(
+                                "When ON (default), the bot respawns instantly at the world spawn / bed / saved base.",
+                                "When OFF, the bot's death triggers a chat prompt: 'Respawn now? (yes/no)'. Reply yes to bring them back, no to stand down.",
+                                "If you don't answer before the session ends, the bot stays shelved; use /bot spawn <name> or toggle Auto Respawn back ON to bring them back.",
+                                "Toggling Auto Respawn ON while a bot is shelved auto-spawns them — useful as a revive shortcut."
+                        ),
+                        "",
+                        "Bot Controls > Spawning > Auto Respawn",
+                        "respawn death auto prompt revive"
+                ),
+                new GuideTopic(
+                        "spawning_bot_roster",
+                        "Spawning",
+                        "Bot Roster (Spawn Bots…)",
+                        "Multi-select screen for (re)spawning bots and creating new ones.",
+                        List.of(
+                                "Opens automatically after you pick Admin Mode on a fresh world, or when you press the [-] go-to-look hotkey while no bots are present.",
+                                "You can also open it any time from Bot Controls → 'Spawn Bots…' button in the footer.",
+                                "Tick one or more saved bots and click 'Spawn Selected (N)' — they spawn in a ring around your look position so they don't pile up.",
+                                "Create a brand-new bot with the name input field. Names follow Minecraft username rules (letters, numbers, _-.', max 24 chars). Random skin is assigned — customize later via the bot's inventory → skin chooser.",
+                                "The 'Manage settings → Bot Controls' link at the bottom opens the full Bot Controls panel for per-bot spawning rules."
+                        ),
+                        "",
+                        "Bot Controls > Spawn Bots… ; also '-' hotkey when no bots exist",
+                        "roster restore multi select spawn multiple checkbox create new bot skin"
+                ),
+                new GuideTopic(
+                        "spawning_bulk_apply",
+                        "Spawning",
+                        "Bulk Apply (All Bots)",
+                        "One-click reset buttons that set a spawning flag for every bot in this world.",
+                        List.of(
+                                "Expand the global toggles panel in Bot Controls to find them at the bottom.",
+                                "Auto Respawn — All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Respawn flag for every bot. ALL ON also auto-spawns any inactive bot that was waiting on a respawn decision.",
+                                "Auto Spawn on Load — All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Spawn on Load flag for every bot.",
+                                "These are reset buttons, not persistent toggles — they just apply the value and exit. Per-bot settings you tweak later still take precedence."
+                        ),
+                        "",
+                        "Bot Controls > Global Settings (expanded) > Bulk Apply",
+                        "bulk apply reset all bots mass global"
+                ),
+                new GuideTopic(
+                        "spawning_no_companions_hud",
+                        "Spawning",
+                        "No-Companions HUD Hint",
+                        "The on-screen notice that appears when no bots are currently in the world.",
+                        List.of(
+                                "Shown after ~2 seconds of no bots being present, in admin mode or when survival recruitment is complete.",
+                                "Press the open-roster hotkey to jump straight to the Bot Roster (same as Bot Controls > Spawn Bots…).",
+                                "Click the small [x] button on the hint to hide it for the rest of the session.",
+                                "It will reappear the next time bots transition from present → absent (e.g. everyone dies or you /bot despawn them)."
+                        ),
+                        "",
+                        "(HUD)",
+                        "no bots hint notification hud dismiss close x session"
+                ),
+                new GuideTopic(
+                        "admin_worldmode_reset",
+                        "Admin",
+                        "World Mode Reset",
+                        "Admin command to re-trigger the world mode selection (Questing vs Admin) welcome screen.",
+                        List.of(
+                                "Useful when a recreated world inherits the old mode-selection state (save-path collision) and the welcome screen doesn't reappear.",
+                                "Run /bot worldmode reset. You'll get a chat confirmation.",
+                                "Then press the open-roster hotkey (or rejoin) — the mode selection screen will open again.",
+                                "Requires bot command permission (admin)."
+                        ),
+                        "bot worldmode reset",
+                        "",
+                        "worldmode world mode reset welcome questing admin reopen"
                 ),
                 new GuideTopic(
                         "move_follow",

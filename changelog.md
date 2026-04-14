@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Tooltips + in-game guide coverage for new features (2026-04-14)
+
+- **Guide entries** added to `BotGuideScreen`: Auto Respawn, Bot Roster (Spawn Bots…), Bulk Apply (All Bots), No-Companions HUD Hint, World Mode Reset (admin-only).
+- **Tooltips** on Bot Controls footer buttons: Permissions Editor, Spawn Bots….
+- **Tooltips** on the four Bulk Apply buttons (ALL ON/OFF for Auto Respawn and Auto Spawn on Load).
+- **No-Companions HUD hint** line 2 now mentions the dismiss button inline: "Press [-] to open the roster — click [x] to hide this hint".
+
 ## `/bot worldmode reset` admin command (2026-04-14)
 
 - **New:** `/bot worldmode reset` (admin-only) clears the per-world mode-selection state and re-broadcasts the recruitment payload so `WorldModeSelectionScreen` becomes reachable again. Use when a world save path collides with a previously-configured world (recreated world with the same name) and the welcome/mode dialog doesn't reappear.
