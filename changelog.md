@@ -2,10 +2,10 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
-## Fix: sunrise resume positions bot off-stand → silent zero-bite session (2026-04-14)
+## Fix: sunrise resume off-stand → silent zero-bite session (2026-04-14)
 
-- **Fix:** With the savedForSunrise change, the bot now correctly fast-travels to its lodestone and resumes the saved spot. But fast-travel lands it ~17 blocks from the saved stand, and `MovementService` typically stops 1 block short of the exact target. The drift check (>2.25 sq dist) and `adjustPositionToWaterEdge` (1.35 horiz dist threshold) both treat that as "close enough", so the bot casts from the wrong block. Bobbers land badly, no bites for ~2 minutes, looks like the bot froze.
-- Added a precision snap on the sunrise-resume path: after `navigateToSpot` succeeds, if the bot's block position differs from the saved stand (within 16 sq dist), `refreshPositionAndAngles` puts it exactly on the saved stand block. Cold-start path is unchanged (it doesn't trigger the snap because `savedSession` is null).
+- **Fix:** With the savedForSunrise change the bot correctly fast-travels to its lodestone and resumes the saved spot, but fast-travel lands it ~17 blocks from the saved stand and `MovementService` typically stops 1 block short of the exact target. The drift check and `adjustPositionToWaterEdge` both treat that as "close enough", so casts originate from the wrong block, bobbers land badly, and the bot sits silent for minutes.
+- Added a precision walk step on the sunrise-resume path only: if the bot isn't on the exact saved stand after `navigateToSpot`, `nudgeTowardUntilClose` drives it the final block. If that walk can't land on the stand (terrain blocked), the saved spot is abandoned and `findFishingSpot` re-scans for a fresh reachable one. No teleport — bot walks naturally or picks a new spot.
 
 ## Fix: sunrise fishing resume forgets saved spot (2026-04-14)
 
