@@ -675,14 +675,11 @@ public class BotControlScreen extends Screen {
         }
 
         // ── Bulk Apply section ────────────────────────────────────────────────
-        // Separator line + label + 2 rows of label + [ALL ON] [ALL OFF] action buttons.
-        y += 3;
+        // Compact: thin separator line + 2 rows with [ALL ON] / [ALL OFF] action
+        // buttons.  Kept short to avoid squeezing the per-bot settings panel below.
+        y += 2;
         context.fill(globalPanelRect.x + 6, y, globalPanelRect.right() - 6, y + 1, COL_SEC_LINE);
-        y += 3;
-        context.drawText(this.textRenderer,
-                "Bulk Apply (current world)",
-                globalPanelRect.x + 6, y, COL_SECTION, false);
-        y += this.textRenderer.fontHeight + 4;
+        y += 2;
 
         int btnW = 52;
         int btnGap = 4;
@@ -698,7 +695,7 @@ public class BotControlScreen extends Screen {
             bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
             drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY);
             drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY);
-            y += bulkRowH + 2;
+            y += bulkRowH;
         }
 
         // Row 2: Auto Spawn on Load
@@ -1029,10 +1026,11 @@ public class BotControlScreen extends Screen {
     }
 
     private int getBulkSectionHeight() {
-        // separator (6) + section label (fontHeight + 4) + 2 rows of buttons (each rowH + 2 gap)
+        // Thin separator (2 gap + 1 line + 2 gap = 5) + 2 compact rows (rowH each).
+        // No explicit section header — the row labels ("Auto Respawn — All Bots"
+        // etc.) describe themselves and the buttons are visually distinct.
         int rowH = getGlobalRowHeight();
-        return 6 + (this.textRenderer != null ? this.textRenderer.fontHeight : 9) + 4
-                + 2 * (rowH + 2);
+        return 5 + 2 * rowH;
     }
 
     private int getSectionHeight() {
