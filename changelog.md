@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## UX polish — Bulk button feedback + Admin default (2026-04-14)
+
+- **New:** Bulk-apply buttons ("ALL ON" / "ALL OFF") now show a brief colored pulse when clicked so the user gets visual confirmation the action ran.
+- **Fix:** Bot Controls spawn-mode fallback now defaults to `admin` (matches the `BotControlSettings` field default). Previously the UI fell back to `training` when the raw value was null/blank/unknown — which disagreed with the stored field default. Manually-adjusted spawn modes still persist as before.
+
 ## Bulk Apply Buttons in Global Bot Controls (2026-04-14)
 
 - **New:** Expanded global toggles panel now has a "Bulk Apply (current world)" section with 4 action buttons:

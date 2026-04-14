@@ -151,6 +151,13 @@ public class BotControlScreen extends Screen {
     private long tooltipHoverStartMs = 0L;
     private boolean tooltipHoverSeenThisFrame = false;
 
+    // Bulk-action click feedback: identifier of the last-clicked button + the
+    // absolute ms at which the pulse highlight ends.  Keeps the draw loop simple
+    // — just compares current time to the expiry.
+    private String bulkPulseTarget = null;
+    private long bulkPulseEndMs = 0L;
+    private static final long BULK_PULSE_DURATION_MS = 260L;
+
     // Subtitle text
     private String subtitleText = "";
 
@@ -330,7 +337,7 @@ public class BotControlScreen extends Screen {
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 autoRespawn,
                 autoSpawnOnLoad,
-                spawnModeValue instanceof String s ? s : "training",
+                spawnModeValue instanceof String s ? s : "admin",
                 gameModeValue instanceof String s ? s : "survival",
                 failsafeValue instanceof String s ? s : "world_spawn",
                 teleportSkills,
@@ -412,12 +419,15 @@ public class BotControlScreen extends Screen {
     }
 
     private String canonicalSpawnModeForUi(String raw) {
-        if (raw == null || raw.isBlank()) return "training";
+        // Fresh/unknown bots default to "admin" to match the BotControlSettings
+        // field default in ManualConfig.  Only explicit "training"/"train" maps
+        // to training.  Anything else (null, blank, unknown) falls back to admin.
+        if (raw == null || raw.isBlank()) return "admin";
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "admin", "play" -> "admin";
+            case "training", "train" -> "training";
             case "questing", "quest" -> "questing";
-            default -> "training";
+            default -> "admin";
         };
     }
 
@@ -693,8 +703,8 @@ public class BotControlScreen extends Screen {
                     r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
             bulkAutoRespawnOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
             bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
-            drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY);
-            drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY);
+            drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY, "ar_on");
+            drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY, "ar_off");
             y += bulkRowH;
         }
 
@@ -706,8 +716,8 @@ public class BotControlScreen extends Screen {
                     r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
             bulkAutoSpawnOnLoadOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
             bulkAutoSpawnOnLoadOnRect  = new Rect(bulkAutoSpawnOnLoadOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
-            drawBulkButton(context, bulkAutoSpawnOnLoadOnRect,  "ALL ON",  true,  mouseX, mouseY);
-            drawBulkButton(context, bulkAutoSpawnOnLoadOffRect, "ALL OFF", false, mouseX, mouseY);
+            drawBulkButton(context, bulkAutoSpawnOnLoadOnRect,  "ALL ON",  true,  mouseX, mouseY, "sl_on");
+            drawBulkButton(context, bulkAutoSpawnOnLoadOffRect, "ALL OFF", false, mouseX, mouseY, "sl_off");
         }
     }
 
@@ -785,20 +795,61 @@ public class BotControlScreen extends Screen {
         rebuildSettingsWidgets();
     }
 
+    private void triggerBulkPulse(String key) {
+        bulkPulseTarget = key;
+        bulkPulseEndMs = System.currentTimeMillis() + BULK_PULSE_DURATION_MS;
+    }
+
     private void drawBulkButton(DrawContext context, Rect rect, String label, boolean onFlavor,
-                                int mouseX, int mouseY) {
+                                int mouseX, int mouseY, String pulseKey) {
         boolean hover = rect.contains(mouseX, mouseY);
+        long now = System.currentTimeMillis();
+        boolean pulsing = pulseKey != null
+                && pulseKey.equals(bulkPulseTarget)
+                && now < bulkPulseEndMs;
+
         int fill = onFlavor
                 ? (hover ? 0xFF3C713C : 0xFF2E5A2E)
                 : (hover ? 0xFF613333 : 0xFF4A2A2A);
+        if (pulsing) {
+            // Brighten fill + draw a 1px inset "pressed" outline.  Progress 1.0 → 0.0
+            // over the pulse duration lets the flash decay smoothly.
+            float progress = Math.max(0f, Math.min(1f,
+                    (bulkPulseEndMs - now) / (float) BULK_PULSE_DURATION_MS));
+            fill = onFlavor
+                    ? blendToward(fill, 0xFFBDF0BD, progress)
+                    : blendToward(fill, 0xFFF0BDBD, progress);
+        }
         context.fill(rect.x, rect.y, rect.right(), rect.bottom(), fill);
         context.fill(rect.x, rect.y, rect.right(), rect.y + 1, 0xFF000000);
         context.fill(rect.x, rect.bottom() - 1, rect.right(), rect.bottom(), 0xFF000000);
         context.fill(rect.x, rect.y, rect.x + 1, rect.bottom(), 0xFF000000);
         context.fill(rect.right() - 1, rect.y, rect.right(), rect.bottom(), 0xFF000000);
+        if (pulsing) {
+            int accent = onFlavor ? 0xFFCFF5CF : 0xFFF5CFCF;
+            context.fill(rect.x + 1, rect.y + 1, rect.right() - 1, rect.y + 2, accent);
+            context.fill(rect.x + 1, rect.bottom() - 2, rect.right() - 1, rect.bottom() - 1, accent);
+            context.fill(rect.x + 1, rect.y + 1, rect.x + 2, rect.bottom() - 1, accent);
+            context.fill(rect.right() - 2, rect.y + 1, rect.right() - 1, rect.bottom() - 1, accent);
+        }
         int tx = rect.x + (rect.w - this.textRenderer.getWidth(label)) / 2;
-        int ty = rect.y + (rect.h - this.textRenderer.fontHeight) / 2;
+        // 1px text nudge while pulsing to simulate a "press" feel.
+        int ty = rect.y + (rect.h - this.textRenderer.fontHeight) / 2 + (pulsing ? 1 : 0);
         context.drawText(this.textRenderer, label, tx, ty, 0xFFEFEFEF, false);
+    }
+
+    /**
+     * Blend {@code base} toward {@code accent} by {@code progress} (0.0–1.0).
+     * Used for the bulk-action click pulse so the flash decays smoothly.
+     */
+    private static int blendToward(int base, int accent, float progress) {
+        int ba = (base >>> 24) & 0xFF, br = (base >>> 16) & 0xFF, bg = (base >>> 8) & 0xFF, bb = base & 0xFF;
+        int aa = (accent >>> 24) & 0xFF, ar = (accent >>> 16) & 0xFF, ag = (accent >>> 8) & 0xFF, ab = accent & 0xFF;
+        int a = (int) (ba + (aa - ba) * progress);
+        int r = (int) (br + (ar - br) * progress);
+        int g = (int) (bg + (ag - bg) * progress);
+        int b = (int) (bb + (ab - bb) * progress);
+        return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     private void renderSettingsPanel(DrawContext context, int mouseX, int mouseY) {
@@ -1119,18 +1170,22 @@ public class BotControlScreen extends Screen {
 
             // Bulk Apply buttons
             if (bulkAutoRespawnOnRect != null && bulkAutoRespawnOnRect.contains(mx, my)) {
+                triggerBulkPulse("ar_on");
                 applyBulkAutoRespawn(true);
                 return true;
             }
             if (bulkAutoRespawnOffRect != null && bulkAutoRespawnOffRect.contains(mx, my)) {
+                triggerBulkPulse("ar_off");
                 applyBulkAutoRespawn(false);
                 return true;
             }
             if (bulkAutoSpawnOnLoadOnRect != null && bulkAutoSpawnOnLoadOnRect.contains(mx, my)) {
+                triggerBulkPulse("sl_on");
                 applyBulkAutoSpawnOnLoad(true);
                 return true;
             }
             if (bulkAutoSpawnOnLoadOffRect != null && bulkAutoSpawnOnLoadOffRect.contains(mx, my)) {
+                triggerBulkPulse("sl_off");
                 applyBulkAutoSpawnOnLoad(false);
                 return true;
             }
