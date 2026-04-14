@@ -62,6 +62,13 @@ public class WorldModeSelectionScreen extends Screen {
         }
         submitted = true;
         ClientPlayNetworking.send(new ModeSelectionChoicePayload(questingMode));
+        // After Admin Mode is chosen, drop the user into BotRestoreScreen so they
+        // can pick saved bots to spawn or create their first one.  Questing mode
+        // has its own recruitment dialogue flow — leave it alone.
+        if (!questingMode && this.client != null) {
+            java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
+            this.client.setScreen(new BotRestoreScreen(null, aliases));
+        }
     }
 
     @Override

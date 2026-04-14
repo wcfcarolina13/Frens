@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Multi-select Bot Restore screen + Admin Mode auto-open + dismissible HUD (2026-04-14)
+
+- **Rewrite of `BotRestoreScreen`:** clicking a row now toggles a checkbox (multi-select). New "Spawn Selected (N)" footer button sends `/bot spawn` for each chosen alias with a 220ms stagger so they don't pile up at one position. Pagination preserved.
+- **New "Create new bot" sub-section** in the same screen — name input field with client-side validation (`^[a-zA-Z0-9_ \-.']+$`, max 24 chars, duplicate check). "Create" button spawns the bot in admin mode with a randomly-assigned skin (customize later via the bot's inventory → skin chooser).
+- **New tooltip link** at the bottom of the screen — "Manage settings → Bot Controls" — clicks open `BotControlScreen` for per-bot rules, auto-respawn, and other preferences.
+- **Admin Mode auto-open:** picking "Admin Mode" in `WorldModeSelectionScreen` now drops the user into `BotRestoreScreen` immediately (instead of just printing chat instructions). If no saved aliases exist, the screen shows an empty-state hint pointing to the create-new section.
+- **Bot Controls "Spawn Bots…" footer button** opens the same restore screen — so you can spawn additional bots from the controls panel without needing to find and press the `-` hotkey.
+- **Dismissible HUD hint:** the "No companions are currently present" overlay now has an X button. Click X to hide it for the rest of the session. The hint reappears next time bots transition from present → absent (so it doesn't stay forever-dismissed if you despawn everyone again).
+- **New `MouseHudClickMixin`** to route HUD-level mouse clicks through `FrensClient.handleHudClick()` — required because Fabric's `HudRenderCallback` doesn't deliver mouse events.
+
 ## UX polish — Bulk button feedback + Admin default (2026-04-14)
 
 - **New:** Bulk-apply buttons ("ALL ON" / "ALL OFF") now show a brief colored pulse when clicked so the user gets visual confirmation the action ran.

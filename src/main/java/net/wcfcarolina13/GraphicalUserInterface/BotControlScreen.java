@@ -124,6 +124,7 @@ public class BotControlScreen extends Screen {
     private Rect bulkAutoSpawnOnLoadOnRect;
     private Rect bulkAutoSpawnOnLoadOffRect;
     private Rect permissionsActionRect;
+    private Rect spawnBotsActionRect;
     // Personal Preferences footer button — commented out 2026-04-07. Toggle
     // moved to BotPlayerInventoryScreen Admin → Behavior. Restore this block
     // (and the matching layout/render/click sites below) if you want the
@@ -271,8 +272,9 @@ public class BotControlScreen extends Screen {
         int footerGap = 8;
         closeRect = new Rect(outerPanelX + outerPanelW - 10 - footerBtnW, footerY, footerBtnW, BUTTON_H);
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
-        permissionsActionRect = new Rect(contentX, footerY, 160, BUTTON_H);
-        // personalPrefsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 110, BUTTON_H);
+        permissionsActionRect = new Rect(contentX, footerY, 130, BUTTON_H);
+        spawnBotsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 90, BUTTON_H);
+        // personalPrefsActionRect = new Rect(spawnBotsActionRect.right() + footerGap, footerY, 110, BUTTON_H);
     }
 
     private List<String> buildAliasList() {
@@ -570,6 +572,11 @@ public class BotControlScreen extends Screen {
                 "Permissions Editor",
                 false,
                 this.client != null && selectedAlias != null && !selectedAlias.isBlank(),
+                mouseX, mouseY);
+        drawActionButton(context, spawnBotsActionRect,
+                "Spawn Bots…",
+                false,
+                this.client != null,
                 mouseX, mouseY);
         // drawActionButton(context, personalPrefsActionRect,
         //         "Personal Preferences",
@@ -1205,6 +1212,15 @@ public class BotControlScreen extends Screen {
         if (permissionsActionRect.contains(mx, my)) {
             if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
                 this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
+            }
+            return true;
+        }
+
+        // Footer: Spawn Bots — opens BotRestoreScreen for multi-select spawning
+        if (spawnBotsActionRect.contains(mx, my)) {
+            if (this.client != null) {
+                java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
+                this.client.setScreen(new BotRestoreScreen(this, aliases));
             }
             return true;
         }

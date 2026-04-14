@@ -220,6 +220,11 @@ public class FrensClient implements ClientModInitializer {
     private static int topTipRightY = TOP_TIP_MARGIN;
     private static long noBotsDetectedSinceMs = 0L;
     private static long noBotsHintUntilMs = 0L;
+    /** Session-only HUD dismissal.  Resets when bots reappear in the world so
+     *  the hint shows again next time everyone goes missing. */
+    private static boolean noBotsHintDismissed = false;
+    /** Click target for the HUD X button (rendered inside renderNoBotsPresentHint). */
+    private static int noBotsHintCloseX, noBotsHintCloseY, noBotsHintCloseW, noBotsHintCloseH;
 
     private enum TopTipLane {
         LEFT,
@@ -1182,6 +1187,10 @@ public class FrensClient implements ClientModInitializer {
     private static void resetNoBotsRestoreState() {
         noBotsDetectedSinceMs = 0L;
         noBotsHintUntilMs = 0L;
+        // Reset session dismissal so the hint shows again next time everyone goes missing.
+        noBotsHintDismissed = false;
+        noBotsHintCloseW = 0;
+        noBotsHintCloseH = 0;
     }
 
     private static void tickNoBotsRestoreState(MinecraftClient client) {
@@ -1271,6 +1280,9 @@ public class FrensClient implements ClientModInitializer {
         if (noBotsHintUntilMs <= 0L || now > noBotsHintUntilMs) {
             return;
         }
+        if (noBotsHintDismissed) {
+            return;
+        }
 
         String openKey = keyNameOrNull(KEY_GO_TO_LOOK);
         if (openKey == null) {
@@ -1281,7 +1293,10 @@ public class FrensClient implements ClientModInitializer {
 
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
+        int textMaxW = Math.max(w1, w2);
+        int closeBtnSize = 10;
+        int closeBtnPad = 6; // gap between text and close button
+        int maxW = textMaxW + closeBtnPad + closeBtnSize;
         int x = (context.getScaledWindowWidth() - maxW) / 2;
         int boxH = client.textRenderer.fontHeight * 2 + 6;
         int y = reserveTopTipY(TopTipLane.CENTER, boxH + 7);
@@ -1294,6 +1309,54 @@ public class FrensClient implements ClientModInitializer {
 
         context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
         context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+
+        // ── Dismiss [X] button (top-right corner of the hint box) ──
+        noBotsHintCloseX = x + maxW - closeBtnSize + 2;
+        noBotsHintCloseY = y - 2;
+        noBotsHintCloseW = closeBtnSize;
+        noBotsHintCloseH = closeBtnSize;
+        context.fill(noBotsHintCloseX, noBotsHintCloseY,
+                noBotsHintCloseX + closeBtnSize, noBotsHintCloseY + closeBtnSize,
+                0xFF6B2A2A);
+        context.fill(noBotsHintCloseX, noBotsHintCloseY,
+                noBotsHintCloseX + closeBtnSize, noBotsHintCloseY + 1, 0xFF000000);
+        context.fill(noBotsHintCloseX, noBotsHintCloseY + closeBtnSize - 1,
+                noBotsHintCloseX + closeBtnSize, noBotsHintCloseY + closeBtnSize, 0xFF000000);
+        context.fill(noBotsHintCloseX, noBotsHintCloseY,
+                noBotsHintCloseX + 1, noBotsHintCloseY + closeBtnSize, 0xFF000000);
+        context.fill(noBotsHintCloseX + closeBtnSize - 1, noBotsHintCloseY,
+                noBotsHintCloseX + closeBtnSize, noBotsHintCloseY + closeBtnSize, 0xFF000000);
+        context.drawText(client.textRenderer, "x",
+                noBotsHintCloseX + (closeBtnSize - client.textRenderer.getWidth("x")) / 2,
+                noBotsHintCloseY + (closeBtnSize - client.textRenderer.fontHeight) / 2 + 1,
+                0xFFEFEFEF, false);
+    }
+
+    /**
+     * Mouse click intercept entry point — invoked from the Mouse mixin BEFORE the
+     * click reaches Minecraft's normal in-game handling.  Returns {@code true} if
+     * the click landed on the no-bots hint X button (and was consumed).
+     */
+    public static boolean handleHudClick(double mouseX, double mouseY, int button) {
+        if (button != 0) return false;
+        if (noBotsHintDismissed) return false;
+        if (noBotsHintCloseW <= 0 || noBotsHintCloseH <= 0) return false;
+        // Only react when no Screen is open (HUD-level click).
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.currentScreen != null) return false;
+        // Mouse positions reported by Minecraft are pixel coords; HUD coords are scaled
+        // by GUI scale.  Convert by dividing.  The framebuffer→GUI ratio equals the
+        // window's height / scaled height.
+        double scale = client.getWindow().getScaleFactor();
+        if (scale <= 0) scale = 1.0;
+        double sx = mouseX / scale;
+        double sy = mouseY / scale;
+        if (sx >= noBotsHintCloseX && sx <= noBotsHintCloseX + noBotsHintCloseW
+                && sy >= noBotsHintCloseY && sy <= noBotsHintCloseY + noBotsHintCloseH) {
+            noBotsHintDismissed = true;
+            return true;
+        }
+        return false;
     }
 
     private static void handleRecruitContactKey(MinecraftClient client) {

@@ -10,7 +10,8 @@
 	],
 	"client": [
 		"AbstractClientPlayerEntitySkinMixin",
-		"MouseAccessor"
+		"MouseAccessor",
+		"MouseHudClickMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
