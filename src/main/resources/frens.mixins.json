@@ -4,7 +4,9 @@
 	"compatibilityLevel": "JAVA_17",
 	"mixins": [
 		"ExampleMixin",
-		"CraftingResultSlotMixin"
+		"CraftingResultSlotMixin",
+		"LivingEntityAccessor",
+		"ServerPlayNetworkHandlerAccessor"
 	],
 	"client": [
 		"AbstractClientPlayerEntitySkinMixin",

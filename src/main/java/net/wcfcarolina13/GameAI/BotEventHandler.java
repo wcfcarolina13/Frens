@@ -1459,6 +1459,16 @@ public class BotEventHandler {
         bot.setInvulnerable(false); // ensure no stale invulnerability from a previous respawn
         bot.timeUntilRegen = 0;     // clear vanilla damage-immunity cooldown
         bot.hurtTime = 0;           // clear vanilla hurt animation timer
+        bot.deathTime = 0;          // clear death animation counter
+        // Clear LivingEntity.dead and ServerPlayNetworkHandler.dead.  Without this,
+        // ServerPlayerEntity.isInvulnerableTo() treats the bot as invulnerable for the
+        // rest of the session via canInteractWithGame(), blocking all damage after the
+        // first death.  Fake players reuse the same entity across "respawns" so both
+        // death flags must be reset manually.
+        ((net.wcfcarolina13.mixin.LivingEntityAccessor) bot).setDead(false);
+        if (bot.networkHandler != null) {
+            ((net.wcfcarolina13.mixin.ServerPlayNetworkHandlerAccessor) (Object) bot.networkHandler).setDead(false);
+        }
         if (srv != null) {
             lastRespawnHandledTick = srv.getTicks();
         }

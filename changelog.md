@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fix: Bot Post-Death Immortality (2026-04-14)
+
+- **Fix:** Bots became immortal after their first death/respawn — all subsequent damage was silently rejected. Root cause: `createFakePlayer.kill()` schedules `networkHandler.disconnect()` during `onDeath()`, which sets `ServerPlayNetworkHandler.dead = true`. `ServerPlayerEntity.isInvulnerableTo()` then short-circuits to invulnerable via `canInteractWithGame()`. Vanilla fixes this by creating a fresh `ServerPlayerEntity` on respawn; fake players reuse the same entity, so the flags must be reset manually.
+- Added two mixin accessors (`LivingEntityAccessor`, `ServerPlayNetworkHandlerAccessor`) that expose the private `dead` fields. `BotEventHandler.onBotRespawn()` now clears them alongside the existing `setInvulnerable(false)` / `timeUntilRegen` / `hurtTime` resets, plus `deathTime = 0`.
+- Bug was pre-existing, not a regression from the cross-session despawn feature. Visible now because autoRespawn=false exercises post-death behavior more aggressively.
+
 ## Chest Offload & Fishing Filter Fixes (2026-04-13)
 
 - **Fix:** Double chests now use the merged 54-slot inventory instead of only the first 27 slots. Affects all chest offload operations globally.
