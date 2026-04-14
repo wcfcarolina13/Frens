@@ -336,14 +336,29 @@ public final class FishingSkill implements Skill {
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
                 }
-                // Re-evaluate best fishing spot after storage
+                // Re-evaluate best fishing spot after storage.  If the first
+                // chosen spot is unreachable, blacklistTarget inside navigateToSpot
+                // will block it and findFishingSpot should pick a different one on
+                // retry.  Try up to 3 candidates before giving up on the session.
                 FishingSpot newSpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
                 if (newSpot != null) {
                     spot = newSpot;
                     stand = newSpot.stand();
                     LOGGER.info("Re-selected fishing spot after storage: stand={} water={}", stand.toShortString(), spot.water().toShortString());
-                    if (!navigateToSpot(source, bot, stand)) {
-                        return SkillExecutionResult.failure("Can't return to the fishing spot after storing items.");
+                    int retries = 0;
+                    while (!navigateToSpot(source, bot, stand)) {
+                        retries++;
+                        if (retries >= 3) {
+                            return SkillExecutionResult.failure("Can't return to the fishing spot after storing items.");
+                        }
+                        FishingSpot altSpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+                        if (altSpot == null || altSpot.stand().equals(stand)) {
+                            return SkillExecutionResult.failure("Can't return to the fishing spot after storing items.");
+                        }
+                        spot = altSpot;
+                        stand = altSpot.stand();
+                        LOGGER.info("Retrying with alternate fishing spot (attempt {}): stand={} water={}",
+                                retries + 1, stand.toShortString(), spot.water().toShortString());
                     }
                     adjustPositionToWaterEdge(bot, spot.water());
                 }
@@ -1655,23 +1670,29 @@ bot.getName().getString());
         if (stack == null || stack.isEmpty()) {
             return false;
         }
-        if (ChestStoreService.isOffloadProtected(stack)) {
-            return false;
-        }
         Item item = stack.getItem();
 
-        // ── Fishing catches: offload raw fish ──
+        // ── Fishing catch whitelist: evaluate these BEFORE ChestStoreService's
+        //    generic "isOffloadProtected" check, because that check marks every
+        //    damageable stack as protected (to keep the bot's real gear safe).
+        //    Caught rods/bows/fish/leather boots are fishing loot, not gear, so
+        //    the fishing skill makes its own decision for them. ──
+
+        // Raw fish: always offload (overrides the food-component check below).
         if (item == Items.COD || item == Items.SALMON
                 || item == Items.TROPICAL_FISH || item == Items.PUFFERFISH) {
             return true;
         }
 
-        // ── Fishing catches: offload leather boots ──
+        // Caught leather boots: common fishing junk.
         if (item == Items.LEATHER_BOOTS) {
             return true;
         }
 
-        // ── Rods and bows: offload if nearly broken (<15% durability), keep if healthy ──
+        // Caught rods and bows: offload if nearly broken (<15% remaining), keep
+        // if healthy so the bot's active fishing rod / bow isn't dumped.
+        // Runs BEFORE isOffloadProtected (which blanket-keeps all damageables)
+        // and ignores enchantments — an enchanted caught rod at 3/64 is still junk.
         if (item == Items.FISHING_ROD || item == Items.BOW) {
             if (stack.isDamageable()) {
                 int maxDmg = stack.getMaxDamage();
@@ -1681,22 +1702,27 @@ bot.getName().getString());
             return false;
         }
 
-        // Always offload rotten flesh
+        // Always offload rotten flesh.
         if (item == Items.ROTTEN_FLESH) {
             return true;
         }
 
-        // Keep custom-named items
+        // ── Default protection: for everything not in the fishing whitelist ──
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
+
+        // Keep custom-named items.
         if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.CUSTOM_NAME) != null) {
             return false;
         }
 
-        // Keep cooked food (raw fish was already handled above)
+        // Keep cooked food (raw fish was already handled above).
         if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null) {
             return false;
         }
 
-        // Keep other damageable items (armor, tools — the bot's actual gear)
+        // Keep other damageable items (armor, tools — the bot's actual gear).
         if (stack.isDamageable()) {
             return false;
         }

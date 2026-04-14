@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fishing: offload filter order + multi-spot retry (2026-04-14)
+
+- **Fix (filter bug):** Damaged/enchanted caught rods and bows weren't being offloaded. Root cause: `ChestStoreService.isOffloadProtected()` treats *all* damageable items as protected (to safeguard the bot's real gear), and that check ran *before* the fishing whitelist. Reordered `FishingSkill.shouldStoreItem()` so the raw-fish / leather-boots / rod+bow (<15% durability) checks evaluate FIRST, then the generic protection applies to everything else.
+- **Fix (navigation abort):** After offloading items, the fishing skill would abort the entire session if the chosen return spot was unreachable. It now retries with alternate spots up to 3 times (the failed spot is already blacklisted, so `findFishingSpot` naturally picks a different one) before giving up.
+
 ## Tooltips + in-game guide coverage for new features (2026-04-14)
 
 - **Guide entries** added to `BotGuideScreen`: Auto Respawn, Bot Roster (Spawn Bots…), Bulk Apply (All Bots), No-Companions HUD Hint, World Mode Reset (admin-only).
