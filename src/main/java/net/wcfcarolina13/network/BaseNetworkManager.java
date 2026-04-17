@@ -75,7 +75,23 @@ public final class BaseNetworkManager {
                         return;
                     }
                     BlockPos pos = player.getBlockPos().toImmutable();
-                    boolean ok = BotHomeService.addBase(server, world, label, pos);
+                    String ownerUuid = player.getUuid().toString();
+                    String ownerName = player.getName().getString();
+                    // New bases start at the default protection radius. Check that radius against
+                    // existing other-owner / non-allied bases before committing so we fail fast
+                    // with a clear message instead of silently creating a base that's already
+                    // inside someone else's sphere.
+                    if (!Frens.isOperator(player)) {
+                        var overlap = BotHomeService.findOverlappingBase(server, world, pos,
+                                BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, ownerUuid, null);
+                        if (overlap.isPresent()) {
+                            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                    formatOverlapReject(pos, BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, overlap.get()));
+                            sendBasesList(player, currentBotAliasContext(player));
+                            return;
+                        }
+                    }
+                    boolean ok = BotHomeService.addBase(server, world, label, pos, ownerUuid, ownerName);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
                             ? "Saved base '" + label + "' at " + pos.toShortString() + "."
                             : "Failed to save base.");
@@ -138,6 +154,10 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
+                    if (!checkBaseEditPermission(player, srv, world, label)) {
+                        sendBasesList(player, currentBotAliasContext(player));
+                        return;
+                    }
                     boolean removed = removeAnyEntry(srv, world, label);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), removed
                             ? "Removed '" + label + "'."
@@ -161,6 +181,10 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
+                    if (!checkBaseEditPermission(player, srv, world, oldLabel)) {
+                        sendBasesList(player, currentBotAliasContext(player));
+                        return;
+                    }
                     if (labelInUse(srv, world, newLabel, oldLabel)) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
                         return;
@@ -186,8 +210,40 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base first.");
                         return;
                     }
-                    int radius = Math.max(1, Math.min(payload.radius(), 128));
                     MinecraftServer srv = player.getCommandSource().getServer();
+                    if (!checkBaseEditPermission(player, srv, world, label)) {
+                        sendBasesList(player, currentBotAliasContext(player));
+                        return;
+                    }
+                    int cap = BotHomeService.getMaxBaseRadius(srv, world);
+                    int requested = payload.radius();
+                    int radius = Math.max(1, Math.min(requested, cap));
+                    if (requested > cap) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                "Radius " + requested + " exceeds server cap of " + cap + "; clamped.");
+                    }
+                    // Check whether growing to `radius` would intrude on another owner's base.
+                    // Pass `label` as excludeLabel so the base being resized doesn't conflict
+                    // with itself. Operator bypass applies here too.
+                    if (!Frens.isOperator(player)) {
+                        BotHomeService.BaseEntry self = null;
+                        for (BotHomeService.BaseEntry b : BotHomeService.listBases(srv, world)) {
+                            if (b != null && b.label() != null && b.label().equalsIgnoreCase(label)) {
+                                self = b;
+                                break;
+                            }
+                        }
+                        if (self != null) {
+                            var overlap = BotHomeService.findOverlappingBase(srv, world, self.pos(),
+                                    radius, player.getUuid().toString(), label);
+                            if (overlap.isPresent()) {
+                                ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                        formatOverlapReject(self.pos(), radius, overlap.get()));
+                                sendBasesList(player, currentBotAliasContext(player));
+                                return;
+                            }
+                        }
+                    }
                     boolean ok = BotHomeService.setBaseRadius(srv, world, label, radius);
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
                             ? "Set protection radius for '" + label + "' to " + radius + " blocks."
@@ -476,6 +532,66 @@ public final class BaseNetworkManager {
                             : subject.ownerName() + " did not have explicit access to '" + label + "'.");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
+
+        ServerPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.AdminMaxBaseRadiusPayload.ID, (payload, context) ->
+                context.server().execute(() -> {
+                    ServerPlayerEntity player = context.player();
+                    if (player == null) return;
+                    ServerWorld world = player.getCommandSource().getWorld();
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    if (srv == null) return;
+                    int requested = payload.value();
+                    if (requested >= 0) {
+                        // Set request: require operator permission. Non-ops silently fall through to a query.
+                        if (!Frens.isOperator(player)) {
+                            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                    "Only operators can change the world max base radius.");
+                        } else {
+                            int applied = BotHomeService.setMaxBaseRadius(srv, world, requested);
+                            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                    "World max base radius set to " + applied + ".");
+                        }
+                    }
+                    int current = BotHomeService.getMaxBaseRadius(srv, world);
+                    ServerPlayNetworking.send(player, new net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload(
+                            current, BotHomeService.HARD_MAX_BASE_RADIUS_LIMIT));
+                }));
+
+        ServerPlayNetworking.registerGlobalReceiver(BaseSetOwnerPayload.ID, (payload, context) ->
+                context.server().execute(() -> {
+                    ServerPlayerEntity player = context.player();
+                    if (player == null) return;
+                    ServerWorld world = player.getCommandSource().getWorld();
+                    if (world.getRegistryKey() != World.OVERWORLD) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
+                        return;
+                    }
+                    if (!Frens.isOperator(player)) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only operators can reassign base ownership.");
+                        return;
+                    }
+                    String label = payload.label();
+                    if (label == null || label.isBlank()) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base first.");
+                        return;
+                    }
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    String newUuid = payload.newOwnerUuid();
+                    String newName = payload.newOwnerName();
+                    // Normalize blank strings to null so canEditBase treats cleared owners as legacy.
+                    if (newUuid != null && newUuid.isBlank()) newUuid = null;
+                    if (newName != null && newName.isBlank()) newName = null;
+                    boolean ok = BotHomeService.setBaseOwner(srv, world, label, newUuid, newName);
+                    if (ok) {
+                        String display = newName != null ? newName
+                                : (BotHomeService.SERVER_OWNER_UUID.equals(newUuid) ? BotHomeService.SERVER_OWNER_NAME : "(unowned)");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                "Reassigned '" + label + "' owner to " + display + ".");
+                    } else {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "No base named '" + label + "' found.");
+                    }
+                    sendBasesList(player, currentBotAliasContext(player));
+                }));
     }
 
     public static void sendBasesList(ServerPlayerEntity player) {
@@ -503,14 +619,24 @@ public final class BaseNetworkManager {
         MinecraftServer server = player.getCommandSource().getServer();
         List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(server, world);
         List<BaseDto> out = new ArrayList<>(bases.size());
+        // PvP-style visibility: non-operators see only their own, allied, or server-owned
+        // bases. Legacy/null-owner bases are hidden for non-ops (admin can reassign to
+        // SERVER to expose as a public landmark). Operators see everything.
+        boolean isOp = net.wcfcarolina13.Frens.isOperator(player);
+        String viewerUuid = player.getUuid().toString();
         for (BotHomeService.BaseEntry b : bases) {
             if (b == null || b.pos() == null) continue;
+            if (!isOp && !isBaseVisibleToViewer(b, viewerUuid)) continue;
             String label = b.label() != null ? b.label() : "";
             boolean home = !homeNorm.isBlank() && homeNorm.equals(label.trim().toLowerCase(java.util.Locale.ROOT));
-            out.add(new BaseDto("base", label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, null, b.radius()));
+            String displayOwner = b.ownerName() != null && !b.ownerName().isBlank()
+                    ? b.ownerName() : null;
+            out.add(new BaseDto("base", label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, displayOwner, b.radius()));
         }
 
-        // Include saved fortification walls
+        // Include saved fortification walls — visible to owner, explicitly granted owners,
+        // allied owners, and operators. Matches the "walls belong to the player that built
+        // them and their alliances" rule.
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
         java.util.Set<String> baseLabelsLower = new java.util.HashSet<>();
         for (BaseDto dto : out) {
@@ -521,6 +647,7 @@ public final class BaseNetworkManager {
             if (fName == null) continue;
             // Skip if already present as a base
             if (baseLabelsLower.contains(fName.trim().toLowerCase(java.util.Locale.ROOT))) continue;
+            if (!isOp && !isWallVisibleToViewer(f, viewerUuid)) continue;
             net.minecraft.util.math.BlockPos center = f.getCenter();
             int totalEdges = f.getHullWallPoints().size();
             String status = f.isComplete() ? "complete"
@@ -551,6 +678,93 @@ public final class BaseNetworkManager {
 
         String json = GSON.toJson(out);
         ServerPlayNetworking.send(player, new BasesListPayload(json));
+    }
+
+    /**
+     * Returns true if {@code player} may modify the base with the given label — i.e. the base
+     * doesn't exist (likely a wall/village, whose ownership is gated elsewhere), OR the player
+     * owns it, OR the player is an operator. On denial, sends a chat message explaining who
+     * owns it; the caller still needs to short-circuit its own flow.
+     */
+    private static boolean checkBaseEditPermission(ServerPlayerEntity player,
+                                                   MinecraftServer server,
+                                                   ServerWorld world,
+                                                   String label) {
+        if (player == null || server == null || world == null || label == null) return false;
+        String norm = label.trim().toLowerCase(java.util.Locale.ROOT);
+        BotHomeService.BaseEntry target = null;
+        for (BotHomeService.BaseEntry b : BotHomeService.listBases(server, world)) {
+            if (b.label() != null && b.label().trim().toLowerCase(java.util.Locale.ROOT).equals(norm)) {
+                target = b;
+                break;
+            }
+        }
+        if (target == null) {
+            // Not a base — falls through so wall/village-specific handlers can apply their own gating.
+            return true;
+        }
+        if (BotHomeService.canEditBase(player, target)) return true;
+
+        String ownerName = target.ownerName() != null && !target.ownerName().isBlank()
+                ? target.ownerName() : "the server";
+        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                "Only " + ownerName + " (or an operator) can modify '" + label + "'.");
+        return false;
+    }
+
+    /**
+     * Builds a user-facing rejection message for a base overlap. Explains the conflicting base,
+     * its owner (or "the server" for server-owned / legacy), and the minimum distance the user
+     * would need to move to clear the collision — computed from current center-to-center distance
+     * vs the sum of protection radii.
+     */
+    private static String formatOverlapReject(BlockPos proposedCenter, int proposedRadius,
+                                               BotHomeService.BaseEntry conflicting) {
+        String ownerDisplay = conflicting.ownerName() != null && !conflicting.ownerName().isBlank()
+                ? conflicting.ownerName()
+                : "the server";
+        int otherRadius = conflicting.radius() > 0 ? conflicting.radius()
+                : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+        double dist = Math.sqrt(conflicting.pos().getSquaredDistance(proposedCenter));
+        double needed = (double) proposedRadius + (double) otherRadius;
+        int moveBy = Math.max(1, (int) Math.ceil(needed - dist));
+        String conflictLabel = conflicting.label() != null ? conflicting.label() : "(unnamed)";
+        return "Overlaps " + ownerDisplay + "'s base '" + conflictLabel + "'. "
+                + "Move at least " + moveBy + " blocks farther (or ally with " + ownerDisplay + ") and try again.";
+    }
+
+    /**
+     * Visibility rule for bases (PvP-friendly default). Returns true if the non-op viewer should
+     * see this base in their list. Operators bypass this and see everything.
+     *
+     * <p>Visible: viewer owns it, viewer is allied with the owner, or it's a server-owned base
+     * (Spawn and admin-claimed public landmarks). Hidden: another player's base, legacy/null-owner
+     * bases (admin can reassign to SERVER to expose as a public landmark).
+     */
+    private static boolean isBaseVisibleToViewer(BotHomeService.BaseEntry base, String viewerUuid) {
+        if (base == null) return false;
+        String ownerUuid = base.ownerUuid();
+        if (ownerUuid == null || ownerUuid.isBlank()) return false;
+        if (BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid)) return true;
+        if (viewerUuid != null && viewerUuid.equals(ownerUuid)) return true;
+        return net.wcfcarolina13.GameAI.services.PlayerAllianceService.areAllied(viewerUuid, ownerUuid);
+    }
+
+    /**
+     * Visibility rule for fortification walls. Owner, explicitly granted owners, and allied
+     * owners see the wall. Operators bypass.
+     */
+    private static boolean isWallVisibleToViewer(FortificationPersistenceService.SavedFortification wall,
+                                                  String viewerUuid) {
+        if (wall == null || viewerUuid == null) return false;
+        String ownerUuid = wall.getOwnerUuid();
+        if (ownerUuid != null && !ownerUuid.isBlank()) {
+            if (viewerUuid.equals(ownerUuid)) return true;
+            if (net.wcfcarolina13.GameAI.services.PlayerAllianceService.areAllied(viewerUuid, ownerUuid)) return true;
+        }
+        java.util.Set<String> granted = wall.getAllowedOwnerUuids();
+        if (granted != null && granted.contains(viewerUuid)) return true;
+        return false;
     }
 
     private static void rememberBotAliasContext(ServerPlayerEntity player, String botAlias) {

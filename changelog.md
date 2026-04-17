@@ -2,6 +2,495 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## PvP visibility: hide strangers' bases + walls from non-op list (2026-04-16)
+
+For PvP-friendly servers, non-operators should not be able to browse other players' base/wall locations in the bases manager. Previously `sendBasesList` returned every base and wall regardless of owner. Now visibility is gated.
+
+**Visibility rules (non-operators):**
+
+- **Bases:** viewer owns it, viewer is allied with the owner, or the base is server-owned (`SERVER_OWNER_UUID` — Spawn, admin-claimed landmarks). Legacy/null-owner bases are **hidden** — admins can reassign to SERVER to expose as a public landmark.
+- **Walls:** viewer owns it, viewer is in the wall's explicit `allowedOwnerUuids` (existing grant/revoke system — kept intact), or viewer is allied with the owner.
+- **Villages:** always visible — per the "names are first come first serve" decision. Not filtered.
+- **Operators:** bypass all of the above — see everything.
+
+**Implementation in [BaseNetworkManager.java](src/main/java/net/wcfcarolina13/network/BaseNetworkManager.java):**
+
+- `isBaseVisibleToViewer(base, viewerUuid)` and `isWallVisibleToViewer(wall, viewerUuid)` helpers.
+- `sendBasesList` now computes `isOp` once and filters the base loop and the wall loop. Village and lodestone entries are untouched.
+
+**What this does NOT change:**
+
+- **Overlap rejection** still fires on create/resize. A non-op will be told they overlap *someone*'s base by name (so they know who to ally with), even though that base doesn't appear in their list. That's intentional — the reject message is the one place where the owner reveal is actionable.
+- **Bot behavior** is unchanged. `findNearestBase` etc. still iterate every base in the world, so a bot may still treat a stranger's base as a "nearest fallback." Deliberate: visibility is a UI concern; bot navigation is a separate product question and worth revisiting independently.
+- **Existing wall grant/revoke semantics** stay intact — the explicit grant list and alliance are now both entry points to wall visibility.
+
+**Bump:** 1.1.25 → 1.1.26.
+
+## Base system overhaul phase 5: overlap rejection on create/resize (2026-04-16)
+
+Closes the loop on the base ownership + alliance work. When a player creates a new base or grows an existing one, the server now rejects the operation if it would overlap another player's (non-allied) base. This makes the alliance system actually useful: before you can plant a base on your ally's claim, they have to be your ally.
+
+**Overlap model: sphere-sphere intersection.**
+
+- Euclidean distance between centers vs sum of protection radii. `dist(c1, c2) < (r1 + r2)` → overlap.
+- Legacy and server-owned bases are treated as "another owner" — nobody but admin can place a base inside the server-owned Spawn sphere.
+
+**New helper in [BotHomeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java):**
+
+- `findOverlappingBase(server, world, center, radius, requesterUuid, excludeLabel)`: returns the first offending base, or empty. Skip conditions: same base (matched by normalized label — used during resize so a base doesn't conflict with itself), same owner, and {@link PlayerAllianceService#areAllied allied owners}. Operator check is caller-side.
+
+**Gating in [BaseNetworkManager.java](src/main/java/net/wcfcarolina13/network/BaseNetworkManager.java):**
+
+- `BaseSetPayload` (create): non-operator requests now pre-check overlap with `DEFAULT_BASE_PROTECTION_RADIUS`. On reject, send a formatted message and refresh the bases list.
+- `BaseSetRadiusPayload` (resize): same check with the target radius, passing the current label as `excludeLabel` so the base doesn't collide with itself.
+- Shared `formatOverlapReject(proposedCenter, proposedRadius, conflicting)` helper builds the error message. Computes minimum blocks to move — `ceil((r1 + r2) - dist)` — so the user gets actionable guidance instead of just "rejected". Owner name falls back to "the server" for server-owned and legacy bases.
+
+**Example reject text:**
+
+```
+Overlaps Jake's base 'Fishpond'. Move at least 12 blocks farther (or ally with Jake) and try again.
+```
+
+**Design decisions:**
+
+- **Operator override kept.** Admins can still create overlapping bases for moderation (e.g., staging a recovery base inside a griefer's claim). The check wraps in `if (!Frens.isOperator(player))`.
+- **Self-overlap allowed.** A player can create multiple overlapping bases of their own — no rule against it. Rare, but not worth blocking.
+- **Alliance is a gate on rejection, not a claim of co-ownership.** Allied players can place adjacent/overlapping bases freely, but they still can't *edit* each other's bases (Phase 3's `canEditBase` is unchanged). Whether to extend alliance to co-editing is a separate product decision.
+
+**Bump:** 1.1.24 → 1.1.25.
+
+## Base system overhaul phase 4a: player alliance backend + commands (2026-04-16)
+
+Backend and command surface for reciprocal player alliances. This is the foundation for Phase 5's overlap rejection ("bases cannot overlap with another user's bases unless they're allied"). Proper UI tab with the flag icon is deferred to Phase 4b.
+
+**Model — reciprocal, consent-based, symmetric:**
+
+- One side invites, the other side accepts by sending an invite in the opposite direction. When both directions exist, the service immediately promotes to a confirmed bond.
+- `revoke` breaks a confirmed bond (both ways) OR cancels an outgoing invite OR declines an incoming invite. Uniform verb covers all three exit paths.
+- State lives in `config/frens/alliances.json`. Two maps:
+  - `bondsByPlayer: Map<uuid, Set<uuid>>` — symmetric, both keys carry the other.
+  - `pendingInvitesByRecipient: Map<recipientUuid, Set<senderUuid>>` — one direction only; the service scans to derive outgoing invites for UI/list.
+- Name cache `nameByUuid` stores the display name at invite time so commands and UI can show names for offline players without hitting the server's user cache.
+
+**New service:**
+
+- [PlayerAllianceService.java](src/main/java/net/wcfcarolina13/GameAI/services/PlayerAllianceService.java): `invite`, `revoke`, `areAllied`, `snapshot(playerUuid)` (for listing), `lookupName(uuid)`. Result enums communicate outcome to callers: `InviteResult.{INVITED, ALLIED_NOW, ALREADY_BONDED, ALREADY_INVITED, SELF, INVALID}`, `RevokeResult.{BOND_BROKEN, INVITE_CANCELED, NOT_FOUND}`.
+
+**New commands** (added to [modCommandRegistry.java](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java)):
+
+- `/bot ally invite <player>` — sends an invitation; auto-bonds on mutual consent; also serves as "accept" (if target already invited you, this completes the bond). Both sides get a system message on bond formation.
+- `/bot ally revoke <player>` — breaks a confirmed bond or cancels/declines a pending invite. Notifies the counterparty when a bond is broken.
+- `/bot ally list` — three rows in chat: Allies, Incoming invites, Outgoing invites. Shows names (from cache) rather than UUIDs.
+
+**Not hooked into `canEditBase` yet:** Phase 3's `canEditBase` helper still returns false for non-owners even if they're allied. Whether allies should be able to edit each other's bases is a separate product decision — Phase 5 only needs `areAllied` for overlap-rejection, so I kept the co-editing question open.
+
+**Bump:** 1.1.23 → 1.1.24.
+
+## Base system overhaul phase 3: base ownership + server spawn base (2026-04-16)
+
+Bases now have owners. Previously all bases were world-scoped with no attribution — any player could edit, rename, resize, or delete any other player's base. This phase stamps an owner on base creation, enforces owner-or-operator permission on edits, introduces a reserved `SERVER` owner sentinel for server-owned bases (used by the new auto-seeded Spawn base), and adds an admin-only owner reassign API.
+
+**BotHomeService — data model + API:**
+
+- `BaseEntry` record now has `ownerUuid` and `ownerName` fields. Only two in-service construction sites; no external callers construct it.
+- `SavedBase` gained `ownerUuid` and `ownerName` fields. Gson defaults missing fields to `null` on legacy JSON load, so existing saves forward-migrate without touchup.
+- New constants: `SERVER_OWNER_UUID = "SERVER"` (sentinel — not a valid MC UUID format, no collision risk), `SERVER_OWNER_NAME = "Server"`, `AUTO_SPAWN_BASE_LABEL = "Spawn"`.
+- `addBase(...)` six-arg overload stamps owner; legacy four-arg overload delegates with null owner.
+- `setBaseOwner(server, world, label, ownerUuid, ownerName)` — admin-only caller responsibility; service doesn't gate.
+- `canEditBase(player, baseEntry)` permission helper. Rules: operators can edit anything; null/blank owner (legacy) = admin-only; `SERVER` owner = admin-only; owner UUID match = allowed. Alliance logic hooks in here in Phase 4.
+- `initializeSpawnBaseIfNeeded(server, world)` — idempotent per world via new `WorldData.spawnBaseInitialized` sticky flag. On first call, creates a base labeled "Spawn" at `world.getSpawnPoint().getPos()` with owner=SERVER. If admin deletes it later, the flag stays true and we don't re-create — matches the user directive "admin deletion should stick".
+
+**BaseNetworkManager — enforcement:**
+
+- `BaseSetPayload` receiver now stamps the creating player as owner via `player.getUuid()` + `player.getName().getString()`.
+- `BaseRemovePayload`, `BaseRenamePayload`, `BaseSetRadiusPayload` receivers now gate via new `checkBaseEditPermission(...)` helper. Helper returns true for non-bases (walls/villages) so existing wall-ownership paths keep working unchanged. On denial, sends `"Only <ownerName> (or an operator) can modify '<label>'."` to chat.
+- `sendBasesList` now populates `BaseDto.ownerName` for bases from the `SavedBase.ownerName` field (previously null for bases — the field was only used for wall claims). `BaseManagerScreen` already falls back to "Unclaimed" when blank, so legacy bases display as "Unclaimed" until an admin reassigns.
+- New `BaseSetOwnerPayload` receiver: admin-only reassign. Accepts `(label, newOwnerUuid, newOwnerName)` — blank UUID clears to legacy/unowned, `"SERVER"` marks server-owned.
+
+**New payload:**
+
+- [BaseSetOwnerPayload.java](src/main/java/net/wcfcarolina13/network/BaseSetOwnerPayload.java) (C2S, admin-only). Registered in [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) alongside other base payloads.
+
+**Frens.java — SERVER_STARTED hook:**
+
+- After server-instance assignment, iterate all `server.getWorlds()` and call `initializeSpawnBaseIfNeeded(server, w)` wrapped in try/catch. The service itself filters to Overworld only. Throwables are logged but don't block server start.
+
+**Scope notes:**
+
+- UI to reassign ownership is deferred to a later phase. For now, admins can invoke via command/script if needed, or wait for UI in Phase 3.5.
+- Legacy bases (null owner) are treated as admin-only. Design rationale: pre-ownership bases could belong to anyone; defaulting to admin-only prevents drive-by edits. Admins use the new `BaseSetOwnerPayload` to claim/reassign as needed.
+- `BaseSetHomePayload` was intentionally left ungated: setting a base as "home for my bot" doesn't modify the base itself, only the bot's reference to it. Any bot owner can target any base.
+
+**Bump:** 1.1.22 → 1.1.23.
+
+## Base system overhaul phase 2: admin-tuneable max base radius (2026-04-16)
+
+Server operators can now set a per-world ceiling on how large a base radius any user may configure. Previous behavior: hard-coded 128 in [BaseNetworkManager.java:189](src/main/java/net/wcfcarolina13/network/BaseNetworkManager.java#L189). New behavior: the cap is stored per-world and admin-editable via UI; the payload handler clamps to the current cap and notifies the user when a request exceeds it.
+
+**Backend changes:**
+
+- [BotHomeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java): added `DEFAULT_MAX_BASE_RADIUS = 128` (parity with prior behavior), `HARD_MAX_BASE_RADIUS_LIMIT = 256` (absolute ceiling even admins can't exceed — interacts with animal-defense / nav-artifact scans that multiply the radius), and per-world `maxBaseRadius` state field on `WorldData`. Public getter/setter: `getMaxBaseRadius(server, world)` and `setMaxBaseRadius(server, world, value)`. Setter clamps, flushes JSON, returns the applied value.
+- [BaseNetworkManager.java](src/main/java/net/wcfcarolina13/network/BaseNetworkManager.java): replaced hardcoded `128` in the `BaseSetRadiusPayload` receiver with dynamic `BotHomeService.getMaxBaseRadius(...)`. New receiver for `AdminMaxBaseRadiusPayload` handles both query (value < 0) and set (value ≥ 0); set path is operator-gated via `Frens.isOperator(player)`. Always responds with `AdminMaxBaseRadiusStatePayload` so the client UI always reflects authoritative state.
+
+**New payloads:**
+
+- [AdminMaxBaseRadiusPayload.java](src/main/java/net/wcfcarolina13/network/AdminMaxBaseRadiusPayload.java) (C2S): `int value`. Negative = query, non-negative = set request.
+- [AdminMaxBaseRadiusStatePayload.java](src/main/java/net/wcfcarolina13/network/AdminMaxBaseRadiusStatePayload.java) (S2C): `int current, int hardLimit`. Hard limit tells the client UI the absolute ceiling.
+- Registered in [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) alongside other base payloads.
+
+**UI surface:**
+
+- [AdminWorldSettingsScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/AdminWorldSettingsScreen.java) (new): minimal modal with a numeric text field, Apply, Done. Sends query on open and set on apply. S2C receiver in [FrensClient.java](src/main/java/net/wcfcarolina13/FrensClient.java) forwards state into the screen via `pushState(current, hardLimit)`. Static `INSTANCE` pointer is cleared on close/removed to avoid leaking references across screen transitions.
+- [BotPlayerInventoryScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java): new `OPEN_WORLD_SETTINGS` TopicAction, new "World Settings >" entry in the Admin tab's Controls section (next to "Player Permissions"). Visible and clickable only for admins (same gating as Player Permissions). Hover tooltip added.
+
+**Scope notes:**
+
+- Admin UI is intentionally minimalist for v1. Future Phase 2b candidates if more server-wide knobs accumulate: lift the screen to a multi-field form, add slider + numeric field combo, show the current default base radius and HARD limit inline.
+- Legacy bases that already have a radius >cap keep their saved radius — the cap only affects *future* set/resize operations. Deliberate: shrinking existing bases retroactively would break player expectations without warning.
+
+**Bump:** 1.1.21 → 1.1.22.
+
+## Base system overhaul phase 1 + return-intent API (2026-04-16)
+
+Three overlapping issues converged into a single phase: (1) fishing home-chest scan used a too-narrow y band (±3), (2) the default base protection radius (24) was too small for a typical survival base, (3) `resolveHomeTarget` treated the preferred home as absolute priority, so a bot fishing 40 blocks from a recently-slept-in base would walk 400 blocks back to the old preferred home at sunset.
+
+**Changes in [BotHomeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java):**
+
+- `DEFAULT_BASE_PROTECTION_RADIUS`: 24 → 40. Covers a standard survival base with attached farms. Still well below the 128 UI cap. Field survey of typical base sizes drove the choice; smaller bases pay no cost, larger bases (castles, mega-bases) still tune manually.
+- New `ReturnIntent` enum: `SUNSET_BED`, `COMMANDER_SIDE`, `BASE_CENTER_LAZY`, `DEFAULT`. Callers pick the mode that matches their situation.
+- New overload `resolveHomeTarget(bot, intent)`. Legacy no-arg version is unchanged (stays on `DEFAULT` semantics) so un-migrated callers keep current behavior.
+- `SUNSET_BED` implementation: **closest-validated candidate wins** among (lastSleep, preferredHome, nearestBase). lastSleep is validated by checking `state.isIn(BlockTags.BEDS)` at the stored position — if the chunk is loaded and the bed is gone, lastSleep is eliminated. Unloaded-chunk lastSleep is trusted but only wins if it's not wildly farther (≤ 2× distance) than loaded alternatives. This directly fixes the observed "bot walks back to old home even after sleeping at a new base" bug.
+- `COMMANDER_SIDE` and `BASE_CENTER_LAZY` are stubbed to delegate to `BASE_CENTER_LAZY`'s preferred→slept→nearest chain; proper commander lookup and walkable-surface snap will land when the first caller migrates to each intent (avoids building infrastructure with no consumer).
+- New `resolvePreferredHomeBaseEntry(bot)` returns the full `BaseEntry` (including the user-set radius). Used by callers that size scans/operations to the declared base extent.
+
+**Changes in [FishingSkill.java](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FishingSkill.java):**
+
+- Home chest scan y-span: ±3 → **±16** (covers basements + multi-story bases + watchtowers). Local ring scan: ±3 → **±8** (shore platforms, docks). Nearby scan: ±2 → **±6**. Iteration cost stays modest; the scan only runs when inventory is full.
+- Home scan xz radius is now `max(baseEntry.radius(), HOME_CHEST_SCAN_RADIUS)`. A user who set a 60-block base gets a 60-block scan; a default-radius base still gets at least the 48-block floor.
+- `handleFullInventory` now pulls `resolvePreferredHomeBaseEntry(bot)` first to get both position and radius; falls back to legacy `resolveHomeTarget(bot)` if no preferred base is set.
+
+**Changes in [BotAutoReturnSunsetService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotAutoReturnSunsetService.java):**
+
+- Both sunset-path `resolveHomeTarget(bot)` calls (HUD notification at line 464, actual destination selection at line 1212) now pass `ReturnIntent.SUNSET_BED`. Bot will now prefer a recently-slept nearby bed over a distant preferred home at dusk.
+
+**Bump:** 1.1.20 → 1.1.21.
+
+**Not migrated in this phase:** 11+ other `resolveHomeTarget` callers (FarmSkill, WoodcutSkill, HuntSkill, WanderSkill, ToolRegistry, ReturnBaseStuckService, etc.) stay on legacy semantics until each is reviewed for the correct intent. Deliberate: migration without context could regress subtle behaviors.
+
+## Fishing: chest-offload scanners ignored barrels (2026-04-16)
+
+User-reported: at a newly set home base with two freshly placed **barrels** near the shore, the bot's fishing session hit full inventory and failed offload — session terminated with "Inventory full and no reachable chest." Log trace (`[13:52:58]` → `[13:52:59]`):
+
+```
+No nearby empty chest detected around 892, 63, 1362; crafting/placing chest...
+Unable to locate or place a chest near 892, 63, 1362 during storage.
+No home-base chest with space found within 48 blocks of 886, 64, 1400
+```
+
+Root cause: `ChestStoreService` (the deposit/walk-to side) already treats `Blocks.BARREL` as a valid container at every check site (lines 435, 547, 570, 1311). But `FishingSkill` has five **local** scanner predicates that filter on `CHEST`/`TRAPPED_CHEST` only — they never saw the user's barrels:
+
+- `findChestWithSpaceNear` (home-base fallback scan)
+- `scanForChestWithSpace` (local ring-search)
+- `findNearbyChests` (local chest list before fallback)
+- `scanForChests` (helper used during session setup)
+
+Block-entity casts (`instanceof ChestBlockEntity`) also rejected `BarrelBlockEntity` even if the isOf check had passed.
+
+**Fix:**
+- Added `Blocks.BARREL` to all 5 `isOf` predicates in FishingSkill's local scanners.
+- Swapped `ChestBlockEntity` import for `net.minecraft.inventory.Inventory` — the common interface both `ChestBlockEntity` and `BarrelBlockEntity` implement. `chestHasSpace(Inventory)` works unchanged against either.
+- `ChestStoreService.depositMatching*` downstream already uses `Inventory` as the gate (lines 850, 1336), so barrels deposit fine once discovered.
+
+Left `placeChestNearby`'s post-placement check (`isOf(Blocks.CHEST)`) alone — it verifies a placement made with `Items.CHEST`, so barrel-handling there is a non-sequitur.
+
+**Bump:** 1.1.19 → 1.1.20.
+
+## Fishing: rod-state race at sunset abort (2026-04-16)
+
+User-reported regression: after a sunset auto-return that walked the bot home with the line still extended, all subsequent fishing sessions got zero bites. Bot appeared to cast only when told to stop; bites went un-reeled; recasts left no visible bobber.
+
+Root cause traced from Prism log `11:18:27` → `11:22:19`: **double-click race in the sunset-abort path**.
+
+Sequence:
+
+1. `BotAutoReturnSunsetService` at tick 12000 calls `TaskService.forceAbort(bot, ...)` which sets `ABORT_LATCH` and issues `Thread.interrupt()` on the skill's worker thread.
+2. Worker was inside `waitForBite`. Next abort-poll exits false.
+3. [FishingSkill.java:524](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FishingSkill.java#L524) `useSelectedItem(bot) // Retract` runs. Internally calls `runOnServerThread` which queues the reel runnable, then `future.get` throws `InterruptedException` immediately (worker's interrupt flag is set) and returns false. **Reel runnable stays on the server queue.**
+4. Worker's `continue` → next iteration → sunset branch at line 340 → line 343 `retractBobberIfPresent`. `findActiveBobber` scans the world. **The reel runnable hasn't drained yet** (server tick not fired). Bobber is still present.
+5. `retractBobberIfPresent` calls `useSelectedItem` **again** — queues a second reel runnable.
+6. Server thread drains both runnables in order: #1 reels (fishHook → null, bobber discarded). #2 sees fishHook==null → interprets as CAST → spawns a fresh bobber, sets fishHook.
+7. Session saves for sunrise. Bot walks home with a stray bobber in the water (matches user's "line still extended" observation).
+
+On sunrise resume, `bot.fishHook` points to that stray bobber. First iteration's `useSelectedItem // Cast` reels instead. `waitForBite` polls a non-existent bobber. User `/bot stop` → line 524 fires → fishHook==null → CASTS (matches user's "cast when told to stop"). Ping-pong persists across sessions until bobber auto-despawns or user takes the rod.
+
+**Fix:** replace the unconditional vanilla *toggle* (`stack.use()` which casts-if-null-reels-if-not) with intent-explicit helpers gated on `bot.fishHook` as the source of truth:
+
+- `hasActiveFishHook(bot)` — reads `bot.fishHook != null && !bot.fishHook.isRemoved()`. Source of truth; reflects vanilla's own cast/reel bookkeeping without lagging behind queued runnables.
+- `reelRod(bot)` — no-op if `fishHook==null`. Otherwise dispatches rod-use and polls `fishHook` up to 1s waiting for vanilla to process the reel. Debounced per-bot (1500ms) so back-to-back retract calls (line 524 + sunset block's `retractBobberIfPresent`) cannot queue a second runnable that would be processed as a CAST.
+- `castRod(bot)` — if `fishHook!=null`, reel first via `reelRod` (with wait). Then cast. If fishHook is still non-null after the reel (server stalled, thread interrupted), skip the cast rather than risk another vanilla-side inversion.
+- `retractBobberIfPresent(bot)` now delegates to `reelRod(bot)`.
+- Skill entry at [line 288](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FishingSkill.java#L288): after `ensureHotbarItem`, if `hasActiveFishHook(bot)` then reel before starting the session. Cleans stale state from any prior session's aborted retract, even if we can't retroactively know how the stray bobber got there.
+- All four unconditional `useSelectedItem` call-sites in the fishing loop (line 490 cast, line 514 bad-throw retract, line 524 no-bite retract, line 534 on-bite reel) replaced with the intent-explicit helpers.
+
+Does **not** touch `useSelectedItem` in `BotActions` or elsewhere — this is a fishing-skill-specific fix. Other skills that use the rod (none currently) would need similar treatment.
+
+Does **not** change `findActiveBobber` — it's still used for settle-check geometry (line 494, bad-throw detection). Its weakness was not bobber detection per se but the timing gap between world scan and queued runnable execution. Using `fishHook` for state decisions sidesteps this.
+
+Watch on next sunset: after forceAbort fires, the new `LAST_REEL_DISPATCH_MS` debounce + `awaitFishHookClear` polling means the worker thread blocks (up to 1s) until the server thread confirms fishHook is null. That cleanly serialises the reel. If the debounce window (1500ms) expires without clearance, we give up — that'd be a server-thread stall and should be investigated separately.
+
+## Door passage part 14: stop raycast heuristic from discarding pathfinder output (2026-04-16)
+
+The 1.1.17 diagnostic caught it. At `09:28:53→09:29:02` Jake was pinned inside a closed oak_door cell at `(888, 64, 1405)` — `feet=888, 64, 1405=minecraft:oak_door`, `reason=feet-not-passable`, repeated ~22 times over 9 seconds. Bot had walked the spiral staircase up through the tower interior trying to reach the commander (who moved outside), arrived at the south door, and got stuck because `isPassableForMovement(oak_door with OPEN=false)` returns false, so every velocity impulse was rejected before `addVelocity` could run. `/rescue` freed him.
+
+The deeper pattern: **`commander-route clear` (every ~2s during normal follow) was wiping `FOLLOW_WAYPOINTS` based on a 2-height raycast**. A raycast can miss thin door panels, stair corners, and box-boundary precision obstacles that the pathfinder's cell-by-cell analysis caught. Once waypoints are wiped, the follow tick falls through to `followInputStep` (direct-pursuit velocity push) which has no planner help. If the target cell contains a closed door or a box-boundary wedge, `canOccupyPosition` rejects, bot freezes. The raycast is weaker than the planner and should not be allowed to discard planner output. Architectural defect flagged at end of prior session; this fix addresses it.
+
+**Three changes:**
+
+1. [BotEventHandler.shouldFollowDoor()](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — `commander-route clear` no longer removes `FOLLOW_WAYPOINTS`. The pathfinder's plan persists until consumed normally (waypoint-reached), the commander moves far enough to trigger replan (`movedSq >= 256`), or stagnancy fires a replan (`stagnantTicks >= 10`). Door-plan scratch state still gets wiped — that's raycast-scoped and rebuilds next tick. Logged as `commander-route clear (waypoints preserved)` so the intent is visible in Prism logs.
+
+2. [BotActions.canOccupyPosition()](src/main/java/net/wcfcarolina13/GameAI/BotActions.java) — short-circuit when the target feet cell equals the bot's current feet cell. Sub-cell motion within the bot's own cell is always legal: vanilla physics has already accepted the bot at its current position, so a tiny nudge that stays in the same cell cannot violate any invariant our stricter passability check enforces. This frees a bot pinned in any wedge cell — closed door, stair-adjacent precision boundary, etc. — to accumulate velocity and eventually cross a cell boundary, where vanilla `Entity.move()` takes over with its own collision check. Strictly narrower than 1.1.15's reverted escape hatch (which allowed ENTRY into new standable cells — too permissive); this only allows WITHIN-CELL motion.
+
+3. [BotActions.applyMovementInput()](src/main/java/net/wcfcarolina13/GameAI/BotActions.java) — before the `canOccupyPosition` gate, if the bot's feet blockstate is a closed `DoorBlock`, dispatch `MovementService.tryOpenDoorAt(bot, feet)`. Self-heals the wedge state directly: the door opens, vanilla physics carries the bot through on the next tick. Throttled per-bot to once per 20 ticks (1s). Honors existing iron-door, locked, and cooldown gates in `tryOpenDoorAt`. New log line `auto-open-current-door` records every attempt with the block registry id and the open/fail result.
+
+Does **not** touch the door-plan state machine (door-corner/adjacent/escape/ray approach planning) — that still handles the "bot approaching a closed door" case where the bot is OUTSIDE the door cell. This fix handles the "bot inside a closed-door cell" wedge only.
+
+Does **not** change the other two waypoint-drop paths (`drop-waypoints: long-range target` at >30 blocks, `drop-waypoints: come-mode flat terrain direct-clear`) — those are scoped to specific contexts where the optimization is arguably correct. If they misbehave, revisit separately.
+
+Risks to watch:
+- Stale waypoints dragging the bot slightly off-direct when the commander is close. Mitigated by the commander-moved replan (`movedSq >= 256`) and waypoint consumption via `WAYPOINT_REACH_SQ`. Likely cosmetic if it shows up.
+- Auto-open firing on a legitimately-locked door. Shouldn't happen — `tryOpenDoorAt` checks `LockableBlockService.isLocked` and returns false; we log `opened=false` and don't retry until the throttle lapses.
+- A bot auto-opening a door and then immediately auto-closing. The `scheduleDoorClose` inside `tryOpenDoorAt` already handles this by deferring close until the bot has cleared the doorway, so no regression expected.
+
+## Door passage part 13: diagnostic for direct-pursuit rejection (2026-04-16)
+
+Last session ended with a residual issue: bot at `(888, 64, 1397)` stuck for ~11s with no door plan active (`commander-route clear` was clearing waypoints every ~2s), but the outer direct-pursuit path was silently rejected by `canOccupyPosition`. The task file says don't guess which gate — instrument and run it once in-game.
+
+Added `applyMovementInput-reject` log channel in [BotActions](src/main/java/net/wcfcarolina13/GameAI/BotActions.java). When `canOccupyPosition` rejects a velocity impulse, the new `diagnoseOccupancyRejection` helper re-runs the three gates and logs the specific failure reason:
+
+- `feet-not-passable` — feet cell's blockstate failed `isPassableForMovement` (the air/!blocksMovement + openable + WalkablePartialBlocks.isPathable ladder).
+- `head-not-passable` — same, for the cell above feet.
+- `box-clear-rejected` — bounding-box AABB intersected a non-walkable-partial collision shape; log includes the offending cell position and its block registry id (e.g., `minecraft:oak_stairs`).
+- `race-space-now-empty` — geometry changed between the original gate and the diag re-run.
+
+Each entry includes bot position, target cell, both `feet`/`head` cell positions with block registry ids, and the specific offending cell for box-clear rejections.
+
+Throttled per-bot to once per 10 server ticks (~0.5s) to keep a proper stall producing a steady heartbeat of ~22 entries over 11s without flooding the log during normal traversal. Only instruments the `applyMovementInput` call site — the task note specifically identified outer direct-pursuit as the failing path, and `FollowMovementService` already has the 1.1.12 `WalkablePartialBlocks.isPathable` fix for its own passability check.
+
+This is an evidence-collection build, not a fix. Once we see which gate + which block rejects, we can make a targeted fix without further guessing. Rule of thumb from last session: 3+ fix attempts already failed on door passage, so the next change has to be evidence-driven.
+
+## Door passage part 12: revert 1.1.15’s auto-step escape hatch (2026-04-16)
+
+1.1.15’s escape hatch in `canOccupyPosition` was too permissive. It allowed the bot to attempt movement into any cell where the feet block was `isStandable` + cells above were passable, trusting vanilla `Entity.move()` auto-step to handle the rise. In practice, vanilla couldn’t always auto-step (blocks taller than `stepHeight`, stair orientations where the back-top-half blocks further forward motion after the step), so the bot pushed into partials, got zero-velocity on collision, and accumulated stuck time — which eventually triggered rescue-mining behavior. Reverted `canOccupyPosition` to 1.1.14 behavior.
+
+Note: the "bot mining stairs on spawn" the user observed was NOT caused by 1.1.15 — it was pre-existing shelter-breakfree logic firing at `08:39:17` because the bot spawned indoors ("no sky"). That’s a separate, longstanding behavior that auto-mines upward when a bot respawns inside an enclosed structure. Worth revisiting separately but out of scope for door-passage work.
+
+## Door passage part 11: auto-step escape hatch in canOccupyPosition (2026-04-16)
+
+The 1.1.14 stuck-jump is a workaround, not a root-cause fix. The actual problem: [BotActions.canOccupyPosition](src/main/java/net/wcfcarolina13/GameAI/BotActions.java) rejected any target position where the feet cell contained a non-pathable partial block (slab, stair, snow layer). Vanilla `Entity.move()` has built-in auto-step — when horizontal motion would collide with a partial up to `stepHeight` (0.6 blocks), vanilla applies a Y adjustment automatically. But our pre-check rejected BEFORE `bot.addVelocity()` ran, so vanilla’s auto-step never got a chance.
+
+That’s why pressure plates initially stalled, and why stairs/slabs at the doorway threshold kept stalling even after 1.1.12 — players walk over these natively via auto-step; our pre-check was stricter than vanilla physics.
+
+**Fix:** add a second branch to `canOccupyPosition`. If `hasMovementClearance(feet)` fails, but the feet cell is `WalkablePartialBlocks.isStandable` (slab/stair/snow/carpet/plate/etc.) AND the two cells above are `isPassableForMovement`, allow the impulse. Vanilla `Entity.move()` then runs its auto-step and either raises the bot onto the partial or zeros the velocity on collision — no wasted impulse, no false rejection.
+
+Bot should now walk smoothly onto slabs, stairs, snow layers, and any other standable partial without needing a jump. The 1.1.14 stuck-jump remains as a belt-and-suspenders fallback for edge cases the auto-step path misses.
+
+## Door passage part 10: stuck-near-doorway auto-jump (2026-04-16)
+
+After 1.1.13 the bot was getting stuck 2 blocks north of the northern tower door, unable to walk onto the approach cell — same symptom that vanished when the commander jumped. Log at 07:41:13→07:41:26 shows bot stagnant at `(888, 64, 1397)` for 13 seconds, then at `07:41:26` briefly at `Y=65` (mid-jump), and suddenly moving freely through the door. The jump was triggered by the commander’s own Y going to 65 — `applyHumanLikeForwardInput` computes `dy = targetPos.y - bot.getY() > 0.6` and calls `BotActions.jump(bot)` unconditionally. Without that, bot sat there.
+
+Screenshot evidence from the user: the tower has a spiral staircase made of stone brick stairs wrapping a cobblestone column, plus partial blocks at the doorway threshold. Stairs/slabs/trapdoors at head level fail `isPassableForMovement` — they’re in `WalkablePartialBlocks.isStandable` (bot can stand on them) but not `isPathable` (bot can’t walk into a cell where they occupy head-level space). `hasMovementClearance` rejects, `canOccupyPosition` bails out of `applyMovementInput`, bot freezes.
+
+**Fix:** generalize the 1.1.9 forced-jump. Instead of only jumping when `plan.stepping() && doorOpen`, also jump whenever the door-plan’s stuck counter reaches `FOLLOW_DOOR_STUCK_JUMP_TICKS = 8` (0.4s of no block-position change). This mirrors exactly what the user does manually ("bot gets stuck until I jump a couple times"). A jump arc lifts the bot past head-level partial blocks and the forward impulse carries it through. After the jump, `bot.isOnGround()` is false for ~10 ticks (jump arc), so no jump-spam — bot bounces once per arc. If still stuck at `FOLLOW_DOOR_STUCK_ABORT_TICKS = 24`, the plan aborts as before.
+
+No changes to the `canOccupyPosition` classifier — `isPassableForMovement` correctly treats slabs/stairs as non-passable at head level, because admitting them there would let the bot walk into walls it can’t fit through (stairs aren’t ALWAYS walkable-through, only vertically walk-onto). Jump-and-clear is the right shape: it mimics a player realizing "I’m stuck on this threshold, hop over it."
+
+## Door passage part 9: tick-persistent door-open + confirmed-open gate on stepping flip (2026-04-15)
+
+After 1.1.12 the pressure-plate stall is fixed, but door passage is still spotty — sometimes door opens and bot passes, sometimes bot stalls at the approach cell pushing into a closed door. Log evidence at 17:55:16-22: plan flipped to `stepping=true` but NO `door-open success` or `door-open failed` was logged for door 1395 during that window — the `tryOpenDoorAt` call was silently throttled by `doorAttemptAllowed` (1500ms per-door rate limit) or the interact silently failed, yet the plan advanced anyway.
+
+Two root causes:
+1. **Door-open only fires in `!stepping` phase.** Once plan flips to `stepping=true`, the tick-loop at lines 4958-4964 skips the `tryOpenDoorAt` call entirely. If the door auto-closes mid-transit (scheduler fired) or the initial open was silently dropped (throttle / interact rejection), the bot pushes against a closed door for the remaining plan TTL.
+2. **Stepping flip trusts `tryOpenDoorAt` return instead of verifying state.** The old code: `boolean opened = tryOpenDoorAt(bot, doorBase) || isOpen`. If `tryOpenDoorAt` silently returned false (throttled) but `isOpen` was stale-true from an earlier read, `opened` was true — plan flipped to `stepping=true` with a closed door.
+
+**Fix 1:** Removed the `!plan.stepping()` guard on the door-open block. Now `tryOpenDoorAt` is called **every tick** the door is closed AND bot is within 2 blocks, regardless of stepping phase. If the door closed behind the bot mid-transit, the next tick re-opens it. `doorAttemptAllowed` throttle (1500ms) prevents spam, but ensures at least one real attempt per 1.5s. `doorOpen` flag is re-checked from world state AFTER the open attempt so the jump-while-stepping logic has an accurate signal.
+
+**Fix 2:** Removed the `tryOpenDoorAt` return-value trust from the stepping-flip. Now the flip ONLY commits when `doorOpen` (re-read from world state by the tick-loop above) is true. If the door isn’t open yet, the plan stays at `stepping=false` and the tick-loop keeps retrying. No more "flip then push into closed door" race.
+
+Also removed the old `door-open failed` recovery block (retreat 2 blocks for re-approach angle) — that path could oscillate if the open kept failing, and the tick-persistent retry handles it more robustly.
+
+## Door passage part 8: THE REAL FIX — pressure plate’s blocksMovement() returns true in 1.21.11 (2026-04-15)
+
+The 1.1.11 diagnostic build caught it immediately:
+
+```
+applyMovementInput-reject: feetCell=888, 64, 1396 feetState=Oak Pressure Plate
+    hasClearance=false isSpaceEmpty=false
+```
+
+**`hasMovementClearance` was returning false for the pressure plate cell.** Which means the `isPassableForMovement` helper I wrote in 1.1.5/1.1.6 was classifying pressure plates as **non-passable** — because I assumed `state.blocksMovement()` returns `false` for plates (the standard "non-blocking block" signal). **In 1.21.11 mappings it returns `true` for pressure plates.**
+
+So every movement input trying to step INTO a pressure plate cell was bailed out at the very first gate (line 259 of `applyMovementInput`). The 1.1.10 walkable-partial fallback in `canOccupyPosition` was never reached — `hasMovementClearance` returned false before `isSpaceEmpty` was ever called. The 1.1.9 forced-jump-while-stepping fix likewise — once the bot wasn't on the ground (jumping), subsequent ticks' horizontal impulse was still rejected by the plate cell check, so the bot didn't clear the doorway horizontally during the jump arc.
+
+All the 1.1.5 → 1.1.10 door-passage work was built on top of a broken classifier. My mistake: I trusted my mental model of `blocksMovement()` instead of checking it.
+
+**Fix:** `isPassableForMovement` now consults [WalkablePartialBlocks.isPathable](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java) as a third gate, after the air/non-blocking check and the openable-with-OPEN check. `WalkablePartialBlocks.isPathable` already correctly handles pressure plates (via `AbstractPressurePlateBlock`), carpets, rails, tripwire, lily pad, and anything with collision max Y ≤ 0.125 — the exact set of "has collision but doesn't obstruct horizontal motion" blocks we care about. Signature changed to take `(state, world, pos)` so `WalkablePartialBlocks.isPathable` can do its thin-partial fallback via `getCollisionShape`. Same change applied symmetrically to `FollowMovementService.isPassableForMovement`.
+
+**Unexpected bonus:** this also fixes the "head=Torch → isSpaceEmpty=false" case (torches have small collision), since torches pass the ≤ 0.125 fallback in `WalkablePartialBlocks.isPathable`.
+
+Diagnostic logging from 1.1.11 was removed — it served its purpose. `DOOR_DIAG_BOTS` machinery removed from `BotActions`; `FOLLOW_DOOR_DIAG_LOG_MS` kept in `FollowStateService` (unused for now; if the issue recurs we can re-enable without needing code changes).
+
+## Door passage part 7: diagnostic instrumentation (2026-04-15)
+
+After 1.1.10 the bot steps ONTO the pressure plate (so the plate-walkable-partial fix works) but still won't step through the door from the plate. Both the 1.1.9 forced-jump-while-stepping fix AND the 1.1.10 walkable-partial-aware `canOccupyPosition` should allow this. Something silent is still rejecting the motion.
+
+Systematic debugging rule: stop theorizing, add evidence. This build adds two diagnostic log channels — NO behavioral changes:
+
+- **`door-step-diag`** in [tickFollowDoorPlan](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — emitted once per second per bot while the door plan is `stepping=true` and the door is open. Reports: stepping flag, doorOpen flag, onGround flag, bot's exact (x, y, z), velocity vector, goal, doorBase.
+- **`applyMovementInput-reject`** in [BotActions.applyMovementInput](src/main/java/net/wcfcarolina13/GameAI/BotActions.java) — emitted once per second per bot when `canOccupyPosition` rejects an impulse, but ONLY for bots whose UUID is in the `DOOR_DIAG_BOTS` set (toggled on/off by tickFollowDoorPlan based on whether the plan is actively stepping). Reports: bot pos, proposed new pos, impulse, feet BlockPos, feet block name, head block name, `hasMovementClearance` result, `isSpaceEmpty` result.
+
+Together these will show whether the jump is firing, whether the bot is receiving impulse, and if rejected, exactly which collision check is blocking.
+
+## Door passage part 6: pressure plate stops stalling bot's approach to its own doorway (2026-04-15)
+
+User observation during 1.1.9 testing: after a rescue-teleport placed the bot 2 blocks north of an open door, the bot stood on the pressure plate approach cell staring at the commander and never walked through. Log evidence (`latest.log` 14:20:17 → 14:20:40): bot at (888, 64, 1403), door at z=1405 open for the full 23 seconds, waypoint `first=888, 64, 1404` (approach cell with pressure plate) replanned repeatedly, `directBlocked=false`, `commander-route clear` firing — yet bot's BlockPos never advanced. No door plan was active (that code path would have invoked the 1.1.9 forced-jump), just generic waypoint follow.
+
+**Root cause:** `BotActions.canOccupyPosition` pre-checks with `world.isSpaceEmpty(bot, targetBox)`. A pressure plate has a 1-pixel collision shape at y=[0, 0.0625]. When the bot's bounding box (minY = 64.0, maxY = 65.8) tries to step onto a plate cell (plate at y=[64.0, 64.0625]), vanilla `Box#intersects` uses strict less-than on all six axes:
+- `botMinY < plateMaxY` → `64.0 < 64.0625` ✓
+- `botMaxY > plateMinY` → `65.8 > 64.0` ✓
+
+Y axis overlaps even though the bot is physically STANDING on the ground. When the impulse shifts the box slightly in Z/X to enter the plate's horizontal footprint, all six axes return true → `isSpaceEmpty` returns false → impulse bailed out at [BotActions.java:259](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L259) without applying velocity. Vanilla movement physics would have lifted the bot 1/16 onto the plate smoothly. Our pre-check is stricter than vanilla.
+
+Same problem would trigger for carpets (1/16), snow layers 1-2 (1/16, 2/16), rails (2/16), and the thin collision strips on open doors/gates.
+
+**Fix:** In `canOccupyPosition`, when `world.isSpaceEmpty` rejects, run a second pass via new `isBoxClearIgnoringWalkablePartials` helper. It iterates block cells that overlap the target box and skips any whose state satisfies `isPassableForMovement` (air, non-blocking blocks, open doors/gates/trapdoors). For the non-skipped blocks it does exact `VoxelShape.getBoundingBoxes() ⟷ targetBox` intersection tests — so real walls, closed doors, and full-cube obstacles still correctly reject.
+
+Reuses the `isPassableForMovement` helper added in 1.1.5/1.1.6; pressure plates pass via `!blocksMovement()`, carpet/rail/tripwire/lilypad same, open doors/gates via the OPEN state check. This means the pressure plate, carpet, snow-1, and rail cases all share the same fix without per-block special-casing.
+
+Trade-off: the custom helper iterates block collisions only — entity collisions aren't considered. In the follow use case, personal-space guards already prevent the bot from walking into the commander. Other contexts (bot inside a mob pile) might see the bot push slightly closer before vanilla physics catches up, but this is a minor regression at worst and matches how vanilla players themselves behave.
+
+## Door passage part 5: jump when actively stepping through an open doorway (2026-04-15)
+
+User observation while testing 1.1.8: "the bot has a much easier time following me through doors if I jump or am a bit elevated. If we're on roughly the same horizon or the bot's standing on something like a pressure plate, it gets stuck until teleportation saves it."
+
+Traced the asymmetry:
+- When commander is elevated by ≥0.6 blocks, `FollowMovementService.applyHumanLikeForwardInput` computes `dy > 0.6` and calls `BotActions.jump(bot)` **unconditionally**.
+- When commander is level with bot, the same function falls to `BotActions.autoJumpIfNeeded(bot)`, which has an explicit door-skip at [BotActions.java:1894](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L1894): `if (frontState.getBlock() instanceof DoorBlock) { return; // doors handled elsewhere; don't bunny-hop at them }`. Even without that skip, its `headSpace` probe rejects open doors (the door's 3-pixel upper-half strip isn't an empty collision shape).
+
+That asymmetry is why the bot appears to "linger" at the threshold on level ground: it never jumps, and whatever is blocking sustained forward motion (pressure plate at y=0.0625 boundary? door's thin strip clipping the bot's box at a fractional X? collision engine friction?) eats enough of the impulse that the bot can't traverse the 1-block cell before the plan TTL expires or `commander-route clear` strips the plan.
+
+**Fix:** in [tickFollowDoorPlan](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) the "doors handled elsewhere" comment from the autoJumpIfNeeded skip now actually means something — when the plan is `stepping=true`, the door is open, and the bot is on the ground, force `BotActions.jump(bot)` each tick instead of deferring to autoJumpIfNeeded. Matches vanilla villager behavior: they don't hesitate at doorways they're actively crossing. Non-stepping phases (approach side, waiting for door to open) still use the existing autoJump logic.
+
+The fix is narrow — it only fires while a door plan is ACTIVELY stepping through an OPEN door. It does not change behavior at non-doorway obstacles, fence gates that are closed, or cases without a door plan.
+
+## Door passage part 4: wrong-side check applied to all FOUR door-plan creation sites (2026-04-15)
+
+1.1.7 log (`latest.log` 13:12:20 onward) shows the wrong-side-of-door check firing correctly in one place (`avoid-door: reason=wrong-side-of-door` at 13:13:29) but still letting backward-pointing plans slip through in two other places: `door-escape` (line ~4520) and `door-ray` (line ~4570). Both built plans with `approach` on the bot's side and `step` on the far side of a door that was BEHIND the bot relative to the commander, sending the bot backward into a 16-second stall before the `stuck=24` abort eventually kicked in and wolf-teleport rescued it.
+
+**Fix:** extracted [isDoorPlanWrongSide(approachPos, stepPos, goalBlock)](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) as a shared helper and applied it at **all four** door-plan creation sites:
+
+1. `door-corner` (line ~4658) — previously had the inline check; now uses the shared helper.
+2. `door-escape` (line ~4520) — stagnant-triggered escape when directly blocked; now gated.
+3. `door-ray` (line ~4558) — raycast-detected door between bot and goal; now gated.
+4. `door-adjacent` (line ~4465) — bot adjacent to a closed door; now gated.
+
+Each site now calls `avoidDoorFor(doorBase, 5_000L, "wrong-side-of-door")` + emits a `skip-door-*: wrong side` log entry + refuses to build the plan. The bot falls through to direct pursuit / wolf-teleport instead of committing 5-10 seconds to a backward door transit.
+
+This is a pure additive patch — the three existing paths still work normally for legitimate wrong-room scenarios where the door is actually between bot and commander.
+
+## Door passage part 3: villager-inspired simplification of follow-mode door plan (2026-04-15)
+
+After 1.1.6 the bot physically passes through open doors but lingers in the doorway for 8-15 seconds before either escaping or being wolf-teleported — exactly as the user reported. Log evidence (`latest.log` 11:59:31-45) shows the door-plan state machine **oscillating with itself** after a successful crossing: plan rebuilds with flipped approach/step orientation each tick, stepping flag toggles true↔false within 2-second windows, door-recovery retreats the bot back, then the plan immediately re-engages the same door.
+
+User observation: "Villagers never have issues pathfinding through doors." That's the right reference point. Vanilla villagers use a single path (with door tiles as plain waypoints), a 30-line `InteractWithDoorGoal` that just opens the door when the villager reaches it, and never retreat when stuck — they either push forward or replan. They don't have an "approach → open → step" phase machine and don't have 7 competing subsystems bidding for control each tick.
+
+Three targeted fixes applied to mimic villager behavior without a full rewrite:
+
+- **Deleted the door-recovery retreat in [tickFollowDoorPlan](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L4905).** The old "stuck for 8 ticks → retreat 2-3 blocks away from door" logic was the primary oscillation source: every time bot transit took longer than 0.4s, recovery pushed it backward, breaking momentum. Replaced with "stuck for 24 ticks → cancel plan entirely, avoid this door for 12s, let generic follow / direct pursuit / wolf-teleport take over." Matches villager "push or abandon" behavior. `BotActions.stop(bot)` is no longer called in the stuck path.
+- **Gated door-corner plan rebuild with a "wrong side" check** in [the door-subgoal branch](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L4609). Before creating a new plan, compare `approachPos.squaredDistanceTo(commanderBlock)` with `stepThroughPos.squaredDistanceTo(commanderBlock)`. If the approach (bot's current side) is already closer to the commander than the step pos is, the door is BEHIND the bot and rebuilding a plan for it would send the bot backward. Instead avoid that door for 5s and fall through. This kills the mirror-image plan that at 11:59:33 would've sent the bot back south through the same door it just crossed going north.
+- **Open doors/gates/trapdoors no longer block `isDirectRouteBlocked`** at [line 4734+](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L4722). The raycast uses both COLLIDER and OUTLINE shape types; an open door's OUTLINE can clip the ray even when the passage is physically clear. When the ray hits a block, check `Properties.OPEN == true` on DoorBlock/FenceGateBlock/TrapdoorBlock — if so, skip it and continue the ray. This removes false `directBlocked=true` signals that keep the door-plan alive after the bot has crossed, unblocking the `commander-route clear` early-exit path.
+
+Shared helper `isOpenOpenable(BlockState)` added to BotEventHandler so the three openable classes are classified identically wherever openness-as-passability matters.
+
+### Historical context (user note)
+
+The retreat logic was originally added months ago to solve shelter-escape / construction scenarios where the bot got trapped inside a corner of a structure it couldn't mine through and needed doors as the way out. Without retreat, the bot would sometimes oscillate between inside/outside targets of a partially-built shelter. That use case is now broken by this change — but it's a lesser-used feature and will be re-addressed separately when shelter/construction work resumes. For the follow use case (by far the more common path), vanilla-villager-style "push or abandon" produces dramatically better behavior.
+
+## Door passage part 2: same blocksMovement() bug in FollowMovementService.hasTwoHighClearance (2026-04-15)
+
+- **Symptom after 1.1.5 deploy:** bot can now enter the door cell (my earlier `BotActions.hasMovementClearance` fix worked — log 11:43:01→11:43:02 shows bot transiting z=1394 → z=1396 through door at z=1395), but then stalls at the step cell for ~16 seconds before finally escaping. User still has to teleport-rescue.
+- **Root cause:** [FollowMovementService.hasTwoHighClearance](src/main/java/net/wcfcarolina13/GameAI/services/FollowMovementService.java#L706) had the same `blocksMovement()` bug. This helper is consulted by four separate code paths: narrow-passage alignment, chokepoint detection, the local-obstacle nudge, and the dangerous-drop probe. Any of them treating the door cell as "blocked" when it's actually open corrupts routing decisions around doorways.
+- **Fix:** Extracted `isPassableForMovement(BlockState)` helper — identical structure to the one added in `BotActions` — and rewrote `hasTwoHighClearance` to use it. Sequence preserves all existing carpet/plate/tripwire behavior, then treats `DoorBlock`/`FenceGateBlock`/`TrapdoorBlock` instances with `Properties.OPEN == true` as passable. Every caller (narrow-passage align, chokepoint, nudge, drop-guard) benefits automatically.
+- **Uncertainty:** Haven't proven this is the full story. The log shows bot stagnant at z=1396 for 16 seconds after crossing the door, with multiple code paths firing ("commander-route clear", waypoint replans every 2-3 seconds, "door-corner" at stagnant=11). The `hasTwoHighClearance` fix is necessary but may not be sufficient — if stuck persists after deploy, next step is to add diagnostic logging to `applyMovementInput` / `applyHumanLikeForwardInput` showing whether impulse is being applied and whether the velocity is reaching target.
+
+## Door passage: bot stops refusing to step into its own open doors (2026-04-15)
+
+- **Symptom:** Bot opens a door, then hovers one block away on the approach side and can't advance. Every 1.5s the log repeats `door-close wait: bot too close` (door-close scheduler retrying), interspersed with `door-recovery: goal=<2 blocks back>` until the plan TTL expires, after which the bot sits at the approach cell indefinitely. Breaking the door and its pressure plate lets the bot pass. Log evidence from `latest.log` at 11:09:51–11:10:30: bot at (888, 64, 1406), door at (888, 64, 1405) open, target commander south past the door; distance stuck at 6.74 for ~36 seconds with no position change.
+- **Root cause:** [BotActions.hasMovementClearance](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L1774) uses `BlockState.blocksMovement()` as its passability test. That method is a **static block-class flag** set at registration time — for doors, gates, and trapdoors it returns `true` regardless of open/closed state. So when `applyMovementInput` calls `canOccupyPosition` on the door cell, `hasMovementClearance` says "blocked", `canOccupyPosition` returns false, and `applyMovementInput` early-exits without applying velocity. Bot never enters the door cell. `directBlocked=false` in the log was misleading because that check used a different code path.
+- **Prior art:** Exact same bug pattern was fixed in `ReturnBaseStuckService` on 2026-04-08 (commit 29a5de8) — "blocksMovement returns true for open gates … but the collision shape is empty. The bot refused to traverse its own open gates on the way home." The bug lived on in the movement-input path, never caught because it only surfaces when the bot tries to actively push through a door (follow, come, idle hobbies near a doorway).
+- **Why not just check `getCollisionShape().isEmpty()`:** That works for fence gates (empty when open) but not for doors. Vanilla `DoorBlock.getOutlineShape` returns a 3-pixel strip flush against the wall even when the door is open, so `isEmpty()` returns false. The authoritative signal is the `OPEN` blockstate property.
+- **Fix:** Extracted `isPassableForMovement(BlockState)` helper and rewrote `hasMovementClearance` to use it. Sequence: `isAir() || !blocksMovement()` (preserves existing carpet/plate/tripwire/etc. behavior), then a stateful override — if the block has `Properties.OPEN` and is a `DoorBlock`, `FenceGateBlock`, or `TrapdoorBlock` instance with `OPEN == true`, allow passage. Closed variants and `OPEN`-stateful blocks that are not doors/gates/trapdoors (chests, barrels) still correctly block. The outer `world.isSpaceEmpty(bot, targetBox)` check in `canOccupyPosition` remains — if the open door's thin leaf actually intersects the bot's hitbox (e.g., walking along the wall rather than through the center), it'll still reject.
+- **Verification:** Test the bot walking through: (a) a standalone open door, (b) a door triggered by a pressure plate on the approach side, (c) a closed iron door (should still refuse — no passability). (d) Bot should NOT walk through a closed wooden door without opening it first (the door-plan path opens it, then movement proceeds).
+
+## Fast-travel tier system: combination gating + rendered-map check + light requirement underground (2026-04-15)
+
+- **Behavior change (tightening):** Bots with no navigation artifacts can no longer fast-travel at all. Previously a no-artifact bot could travel at 3× delay regardless of destination; now surface fast-travel requires at least one gate to be open.
+- **Above-ground gates:**
+  - **Map + Compass (rendered)** — bot has at least one filled map *and* at least one compass, *and* the destination block is rendered (strict pixel non-zero) on at least one accessible map. Rendering state is read from the map's `MapState` regardless of where the map sits (inventory, bundle, shulker, ender chest), matching vanilla — the map must actually have been explored.
+  - **Smoke signal at labeled destination base** — lit campfire-on-hay within the base, bot within 5× base radius (existing rule, kept).
+- **Above-ground tier math:** 1 gate open → 3× delay; 2 gates → 2×; spyglass accessible anywhere (once, above-ground only) → one additional step. All three (map+compass + smoke signal + spyglass) → 1× (tier 2 equivalent). Spyglass is a speed modifier only, never a gate by itself.
+- **Tier 2+ short-circuits (unchanged):** lodestone compass with bound target, Eye of Ender, wizard tome, enchanting table within 6 blocks, or mutual ender pearls → 1× delay.
+- **Underground gate (new requirement):** Map + Compass now also requires a torch or lantern to read by. Accepted configurations: tier 2+ artifacts, map+compass+light → 2×, lodestone compass without bound target → 2×, smoke signal at dest base within 2× radius → 3×. Spyglass ignored underground.
+- **Unified container scanning:** New [ArtifactScanner.java](src/main/java/net/wcfcarolina13/GameAI/services/ArtifactScanner.java) walks main inventory → bundles → shulker-box contents → ender chest → nested bundles/shulkers inside the ender chest. Every gate/tier check consults this single surface, so the same item counts whether stashed or held.
+- **Map rendering API:** `ArtifactScanner.hasRenderedMapAt(bot, x, z, dim)` loads each filled map's `MapState` via `FilledMapItem.getMapState(mapId, world)`, validates dimension match, computes the pixel for the destination at the map's scale using `Math.floorDiv` (correct for negative coords), and checks `state.colors[pixelZ*128 + pixelX] != 0`.
+- **Refactor in [NavigationArtifactService.java](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java):** deleted the old multi-branch underground gate (lines ~954-1005) and the above-ground smoke extension (lines ~1008-1030). Replaced with a single call to `resolveSurfaceTier` or `resolveUndergroundTier` based on an `isSkyVisible + surfaceY-4` underground heuristic. Refusals emit a tailored chat message per `reason` tag. When a multiplier > 1 is returned, `delayTicks` is recomputed via `calculateDelayTicks(distance, crossDim, multiplier)` so the 7s/5min clamps inside that function remain correct (the old code multiplied the already-clamped value, which could double-exceed the 5-minute cap on long trips).
+- **Preserved:** `artifactDelayMultiplier(bot, owner)` returns 1/2/3 as before — kept alive for `ChestRegistryNetworkManager` (display-only ETA hint) and `BotEmergencyRescueService` (base multiplier). Actual enforcement happens inside `beginDelayedTravel`, so any mismatch surfaces as a slightly-off ETA, not a broken refusal. `skipArtifactGate` still bypasses the whole resolver for base-bypass / return-trip callers.
+
+## RideSync: chest boats and payload minecarts are no longer broken on dismount (2026-04-15)
+
+- **Behavior change:** When a bot dismounts its boat/minecart (either because commander dismounted or because RideSync loses its claim), the bot no longer tries to break chest boats, chest/furnace/hopper/TNT/command-block minecarts, or any vehicle carrying another passenger. Previously the bot would walk back and attack the vehicle to recover the item — risky when a chest boat held cargo, or when a mob/villager/player had boarded.
+- **New helpers in [RideSyncService.java](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java):**
+  - `isReclaimableBoat(entity)` — true only for plain `AbstractBoatEntity` that is not a `ChestBoatEntity`.
+  - `isReclaimableMinecart(entity)` — true only for `EntityType.MINECART` exactly (excludes chest/furnace/hopper/TNT/command-block variants).
+- **Gated at queue time:** `maybeQueueBoatBreak` and `maybeQueueMinecartBreak` return early if the vehicle is not reclaimable. `maybeQueueMinecartBreak` also now returns early if the cart has passengers (previously missing — boats had this check, minecarts didn't).
+- **Gated at break time:** `maybeProcessBoatBreaks` and `maybeProcessMinecartBreaks` now cancel the pending break if someone boards the vehicle between queue and execution. Previous behavior for boats was to keep looping until timeout; minecarts had no check at all. Cancellation uses `finishBoatBreak(..., "abort-passenger", suppressRemount=false)` so the bot isn't prevented from mounting other boats.
+- **Also gated in commander-loss iterators:** `maybeQueueBoatBreaksFromCommanderLoss` / `maybeQueueMinecartBreaksFromCommanderLoss` now skip non-reclaimable candidates when scanning nearby vehicles after a commander destroyed their own vehicle.
+- **Plain empty boats/minecarts still break** — the reclamation loop is preserved for the safe cases.
+
+## RideSync: bot boats keep up with commander boats at vanilla speed (2026-04-15)
+
+- **Fix:** When the commander and bot were in separate boats, the bot paddled at ~55-60% of vanilla speed and perpetually fell behind. User reported having to wait mid-voyage for the bot to catch up. Log evidence (latest.log 21:03): distance grew from 5.61 → 48.79 blocks in ~20s while every `RideSyncMove` line showed `botVel=0.00,0.00,0.00 commanderVel=0.00,0.00,0.00`.
+- **Root cause:** Vanilla `AbstractBoatEntity.tick()` considers a boat with a player passenger to be client-authoritative — the server calls `setVelocity(ZERO)` every tick and waits for `MoveVehiclePacket`s from the real client. Our bots are fake `ServerPlayerEntity` instances with no client, so **nothing** was advancing the boat. The only thing moving the bot boat was `forceMoveBoat`'s fallback `move(MovementType.SELF, step)`, which was gated on `horizSpeed < 0.02 && distance > 4.0` and hardcoded to 0.18-0.24 b/t (vs vanilla ~0.40 b/t).
+- **Secondary cause:** `commanderVehicle.getVelocity()` is also zeroed server-side for a player-driven boat, so `targetSpeed = max(baseSpeed, 0) = baseSpeed`, and the "match-vel" branch (`horizontal > 0.05`) never fired — meaning the bot only moved **reactively** once it was already lagging, not proactively.
+- **Changes in [RideSyncService.java](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java):**
+  - New `VEHICLE_LAST_POS` / `VEHICLE_LAST_POS_TICK` maps + `estimateVehicleHorizontalSpeed(vehicle, server)` helper. Diffs per-tick position to recover a vehicle's real horizontal speed when `getVelocity()` is zeroed. Used for commander tracking; cleared in `resetSession()`.
+  - `maybeSyncMovement` now uses the estimated speed for both the `commanderSpeed` passed to `forceMoveMount` and the `horizontal > 0.05` gate that triggers "match-vel". Result: bot tracks commander motion proactively while within the desired follow distance, instead of only reacting after it falls behind.
+  - `forceMoveBoat` rewritten to unconditionally call `move(MovementType.SELF, step)` every tick while there's a target, at a step speed scaled to commander speed (clamped to `[baseSpeed, vanillaMax]` = `[0.34, 0.42]` normal, `[0.42, 0.50]` sprint) with a `+0.05` lead-catch boost when `distance > 6`. Removed the `horizSpeed < 0.02` gate since horizSpeed is always ~0 (vanilla zeros it).
+- **Net effect:** bot matches vanilla cruise speed of ~0.40 b/t instead of 0.18-0.24 b/t, and maintains pace with the commander rather than playing perpetual catch-up. Y-velocity is preserved so boat buoyancy still works.
+
+## Fishing: sunrise-resume rescans when saved stand is unreachable from lodestone landing (2026-04-14)
+
+- **Fix:** When `navigateToSpot` failed on a sunrise-resumed saved stand, the skill immediately aborted with "Can't reach the fishing spot (blocked?)" even though a re-scan fallback existed later in the code. Root cause: a saved session's `standOptions` contains only the saved stand (singleton list), so the alt-loop found zero alternatives, and the `!approached` branch returned failure BEFORE the precision-walk re-scan at line 236 ever ran. The precision-walk re-scan only fires when `approached == true` but the bot stopped short of the exact stand.
+- **New branch:** If `!approached && savedSession != null`, scan fresh from the bot's current landing position (near the lodestone) with full `standOptions` alternates, and try those before returning failure. The original saved spot was chosen from the water's edge; after fast-travel the bot lands somewhere else and the terrain path can differ.
+- **Observed trigger:** Log line `Navigation to fishing spot 243, 63, 1228 failed: direct: walk blocked near class_2338{x=238, y=63, z=1235}` — obstacle between lodestone landing and saved stand that the original water-edge search didn't see.
+
+## Fishing: swim-to-shore helper bypasses safeNudge cliff-guard (2026-04-14)
+
+- **Fix:** When the bot drifted into the water (or was ordered to fish while already swimming), FishingSkill's water-exit guard delegated movement to `navigateToSpot`, whose `safeNudge` fallback treats a block-below-feet with empty collision shape as a cliff edge and refuses to step. Water has empty collision shape, so a swimming bot can NEVER reach shore through generic navigation — it would fail with `safe nudge failed` and the skill would abort with "I'm swimming and couldn't reach shore for fishing." even though multiple shore stands were reachable.
+- **New:** `BotWaterEscapeService.swimToShore(bot, radius, timeoutMs)` drives swim-forward input + auto-jump directly, with no cliff check (the bot is already in water — "falling" is a no-op). Iterates up to 5 ranked shore candidates internally so a single blacklisted or blocked stand doesn't abort the whole attempt. Stuck-detection bails to the next candidate after ~2s of zero progress.
+- **Call-site swaps in FishingSkill:**
+  - Entry water-escape guard now calls `swimToShore` instead of `navigateToSpot`.
+  - Main-loop anchor-drift check: if drift put the bot into water, swim out first, then let the regular nav walk to the stand.
+  - Main-loop "bot is in water / not standable" recovery branch: same — swim out before navigating back.
+
+## Fishing: break sunrise-resume loop + home-base chest fallback + chest-aware spotting + /bot fish forget (2026-04-14)
+
+- **Fix (sunrise-resume loop):** When `handleFullInventory` couldn't find any reachable chest at the fishing spot, `FishingSkill` returned failure WITHOUT clearing the saved session. `BotAutoReturnSunsetService` then kept firing sunrise resumes every morning (it only gates on `FishingSessionService.hasSession`), producing an infinite [fast-travel → inventory-full fail → wait → fast-travel] loop. Both inventory-full exits now call `clearSessionAfterStorageFailure`, which clears `FishingSessionService` + `SkillResumeService.clearSunriseResume`. Lodestone compasses (NBT on the compass item) are untouched.
+- **Fix (home-base chest fallback):** Local chest rings (12/24/48) miss chests at the bot's home base when the fishing spot was picked far away. `handleFullInventory` now also scans within 48 blocks of `BotHomeService.resolveHomeTarget(bot)` and uses `depositMatching` (default movement profile) so the bot can actually navigate there. After deposit, the main-loop anchor-drift check walks the bot back to the fishing stand.
+- **Behavior (chest-aware spotting):** `findStandOptions` now applies a `-0.45` score bonus for stands within 16 blocks of any known chest. Chest anchors are scanned once per spot search: 48 blocks of the bot plus 48 blocks of home base. Small enough that cast quality still wins in an open lake, strong enough that when two spots have similar water quality the bot picks the one it can actually offload to.
+- **New command:** `/bot fish forget [bot|all]` clears the saved fishing session + sunrise-resume record for the target bot(s). Gives the user a way to break out of a bad saved spot without editing config files. Lodestone compasses remain intact — next fresh `/bot fish` still fast-travels to the nearest compass target.
+- **In-game UI:** Added a "Forget Spot" button in the Actions menu (indented under "Fishing") with a tooltip explaining when to use it. Added a matching `gather_fish_forget` entry to the in-game Guide under "Gathering".
+- **Tuning (rod/bow offload threshold):** Bumped `shouldStoreItem`'s caught-rod/caught-bow durability threshold from `<15%` remaining to `<=25%`. Vanilla fishing treasure-catches cap at exactly 25% durability, so any rod/bow at-or-below that bar is disposable catch loot (and anything above must be the bot's own gear). At the old 15% threshold the bot was stockpiling 3 beaten-up rods at exactly 25% (16/64) and 3 bows at 18-22% alongside the active gear. Also added a named-item bypass (anvil-renamed rods/bows are kept) so user-curated keepsakes aren't auto-stored.
+
 ## Fishing: expanding chest search rings (2026-04-14)
 
 - **Fix:** Even at 12 blocks, the chest search was missing dock chests further out. Replaced the single-radius scan with a concentric-ring expansion: try **12 → 24 → 48** blocks, expand on failure, return the closest chest with space inside the first ring that has one. Logs the expansion attempt so it's clear when the bot reached out further.

@@ -461,7 +461,7 @@ public final class BotAutoReturnSunsetService {
                 ServerPlayerEntity owner = CompanionCommunicationPolicy.resolveController(server, bot);
                 if (owner != null && !owner.isRemoved()) {
                     String alias = bot.getName().getString();
-                    Optional<BlockPos> homeOpt = BotHomeService.resolveHomeTarget(bot);
+                    Optional<BlockPos> homeOpt = BotHomeService.resolveHomeTarget(bot, BotHomeService.ReturnIntent.SUNSET_BED);
                     if (homeOpt.isPresent()) {
                         BlockPos home = homeOpt.get();
                         double dist = Math.sqrt(bot.squaredDistanceTo(Vec3d.ofCenter(home)));
@@ -1209,7 +1209,7 @@ public final class BotAutoReturnSunsetService {
             }
         }
 
-        return BotHomeService.resolveHomeTarget(bot)
+        return BotHomeService.resolveHomeTarget(bot, BotHomeService.ReturnIntent.SUNSET_BED)
                 .map(BlockPos::toImmutable)
                 .orElse(null);
     }

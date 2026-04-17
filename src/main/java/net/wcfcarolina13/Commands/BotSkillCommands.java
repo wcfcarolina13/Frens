@@ -32,6 +32,11 @@ final class BotSkillCommands {
     static ArgumentBuilder<ServerCommandSource, ?> buildFish() {
         return CommandManager.literal("fish")
                 .executes(context -> modCommandRegistry.executeSkillTargets(context, "fish", null))
+                .then(CommandManager.literal("forget")
+                        .executes(modCommandRegistry::executeFishForget)
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeFishForget(context,
+                                        StringArgumentType.getString(context, "target")))))
                 .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
                         .executes(context -> modCommandRegistry.executeSkillTargets(context, "fish",
                                 StringArgumentType.getString(context, "arguments"))));

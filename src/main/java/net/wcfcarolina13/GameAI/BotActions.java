@@ -3,6 +3,9 @@ package net.wcfcarolina13.GameAI;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
+import net.minecraft.state.property.Properties;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ItemEnchantmentsComponent;
 import net.minecraft.enchantment.Enchantment;
@@ -37,6 +40,7 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
@@ -71,6 +75,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -256,8 +261,18 @@ public final class BotActions {
             bot.setVelocity(current);
         }
 
-        if (world != null && !canOccupyPosition(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z)) {
-            return;
+        if (world != null) {
+            // Self-heal: if the bot ended up standing inside a closed-door cell (e.g., the
+            // door slammed shut behind it, or a race between the door-plan open step and a
+            // vanilla auto-close), open the door so vanilla physics can carry the bot
+            // through on the next tick. Without this, isPassableForMovement rejects the
+            // feet cell indefinitely (a closed door fails the OPEN-property gate), and the
+            // bot freezes until wolf-teleport or /rescue fires. Throttled per-bot.
+            maybeAutoOpenCurrentDoor(bot, world);
+            if (!canOccupyPosition(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z)) {
+                diagnoseOccupancyRejection(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z);
+                return;
+            }
         }
 
         bot.addVelocity(impulse.x, 0, impulse.z);
@@ -1772,13 +1787,42 @@ public final class BotActions {
      */
     @SuppressWarnings("deprecation")
     private static boolean hasMovementClearance(ServerWorld world, BlockPos pos) {
+        BlockPos headPos = pos.up();
         BlockState feet = world.getBlockState(pos);
-        BlockState head = world.getBlockState(pos.up());
-        
-        // Allow if both feet and head positions are passable
-        // Air, water, lava (bot can handle), and other non-solid blocks
-        return (feet.isAir() || !feet.blocksMovement()) && 
-               (head.isAir() || !head.blocksMovement());
+        BlockState head = world.getBlockState(headPos);
+        return isPassableForMovement(feet, world, pos) && isPassableForMovement(head, world, headPos);
+    }
+
+    /**
+     * Authoritative "can the bot step into this cell" check. {@code blocksMovement()} is a
+     * static block-class flag set at registration time; in 1.21.11 it returns {@code true}
+     * for pressure plates, doors, gates, and trapdoors regardless of their actual passability.
+     * The diagnostic log in 1.1.11 confirmed an Oak Pressure Plate was returning
+     * {@code hasClearance=false} from this check even with the bot standing on it, which
+     * stalled the bot outside the doorway indefinitely. Three gates now:
+     * <ol>
+     *   <li>Air or {@code !blocksMovement()} → passable (old check, kept for fast path).</li>
+     *   <li>Openable (Door/FenceGate/Trapdoor) with {@link Properties#OPEN} = true → passable.</li>
+     *   <li>{@link WalkablePartialBlocks#isPathable} (pressure plates, carpets, rails,
+     *       tripwire, lily pad, anything with collision max Y ≤ 0.125) → passable.</li>
+     * </ol>
+     */
+    private static boolean isPassableForMovement(BlockState state, ServerWorld world, BlockPos pos) {
+        if (state.isAir() || !state.blocksMovement()) {
+            return true;
+        }
+        if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
+            var block = state.getBlock();
+            if (block instanceof DoorBlock
+                    || block instanceof FenceGateBlock
+                    || block instanceof TrapdoorBlock) {
+                return true;
+            }
+        }
+        if (net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(state, world, pos)) {
+            return true;
+        }
+        return false;
     }
 
     private static boolean canOccupyPosition(ServerPlayerEntity bot,
@@ -1790,11 +1834,221 @@ public final class BotActions {
             return false;
         }
         BlockPos feet = BlockPos.ofFloored(x, y, z);
+        // Sub-cell motion within the bot's current feet cell is always legal. Vanilla
+        // physics has already accepted the bot at its current position, so a tiny nudge
+        // that stays in the same cell cannot violate any invariant our stricter cell-
+        // based passability check enforces. Without this short-circuit, a bot standing
+        // in a wedge cell (closed door, stair-adjacent precision boundary, etc.) has
+        // every impulse rejected, freezing it in place. Cell crossings still go through
+        // the gates below; vanilla Entity.move() also runs its own collision check when
+        // velocity actually carries the bot across a cell boundary.
+        if (feet.equals(bot.getBlockPos())) {
+            return true;
+        }
         if (!hasMovementClearance(world, feet)) {
             return false;
         }
         Box targetBox = bot.getBoundingBox().offset(x - bot.getX(), y - bot.getY(), z - bot.getZ());
-        return world.isSpaceEmpty(bot, targetBox);
+        if (world.isSpaceEmpty(bot, targetBox)) {
+            return true;
+        }
+        // world.isSpaceEmpty is stricter than vanilla's actual movement physics: a pressure
+        // plate's 1/16 collision strip at y=[0, 0.0625] intersects the bot's bounding box
+        // (minY=64.0 < plateMaxY=64.0625 via Box#intersects strict less-than), causing a
+        // spurious "space not empty" rejection when the bot tries to step onto the plate.
+        // Vanilla would lift the bot 1/16 onto the plate and proceed. Same issue for carpets,
+        // rails, open-door thin strips, snow layers 1-2. Do a second pass ignoring those
+        // walkable-partial collisions so the bot doesn't stall outside doorways with plates.
+        return isBoxClearIgnoringWalkablePartials(world, targetBox);
+    }
+
+    /**
+     * Like {@link ServerWorld#isSpaceEmpty(Box)} but skips blocks whose state is a walkable
+     * partial — pressure plates, carpets, rails, tripwire, open doors/gates/trapdoors, snow
+     * layers ≤ 2, and anything else {@code isPassableForMovement} recognizes. These have
+     * non-empty collision shapes but never obstruct horizontal movement in practice.
+     */
+    private static boolean isBoxClearIgnoringWalkablePartials(ServerWorld world, Box targetBox) {
+        int minX = (int) Math.floor(targetBox.minX);
+        int minY = (int) Math.floor(targetBox.minY);
+        int minZ = (int) Math.floor(targetBox.minZ);
+        int maxX = (int) Math.floor(targetBox.maxX - 1.0E-7);
+        int maxY = (int) Math.floor(targetBox.maxY - 1.0E-7);
+        int maxZ = (int) Math.floor(targetBox.maxZ - 1.0E-7);
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    pos.set(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (isPassableForMovement(state, world, pos)) {
+                        continue;
+                    }
+                    VoxelShape collisionShape = state.getCollisionShape(world, pos);
+                    if (collisionShape.isEmpty()) {
+                        continue;
+                    }
+                    // Non-walkable block with a real collision shape — check exact overlap.
+                    double ox = x;
+                    double oy = y;
+                    double oz = z;
+                    for (Box shapeBox : collisionShape.getBoundingBoxes()) {
+                        if (shapeBox.offset(ox, oy, oz).intersects(targetBox)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    // Diagnostic: re-evaluate canOccupyPosition and log the specific rejection reason.
+    // Called only from applyMovementInput's rejection branch. Throttled per-bot so a long
+    // stall produces a steady heartbeat (~once/0.5s) instead of a tick-rate spam flood.
+    // Named "applyMovementInput-reject" so the user can grep Prism logs.
+    private static final ConcurrentHashMap<UUID, Long> LAST_OCCUPANCY_REJECT_DIAG_TICK = new ConcurrentHashMap<>();
+    private static final long OCCUPANCY_REJECT_DIAG_THROTTLE_TICKS = 10L;
+
+    private static void diagnoseOccupancyRejection(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   double x,
+                                                   double y,
+                                                   double z) {
+        if (bot == null || world == null) {
+            return;
+        }
+        long tick = world.getTime();
+        Long last = LAST_OCCUPANCY_REJECT_DIAG_TICK.get(bot.getUuid());
+        if (last != null && tick - last < OCCUPANCY_REJECT_DIAG_THROTTLE_TICKS) {
+            return;
+        }
+        LAST_OCCUPANCY_REJECT_DIAG_TICK.put(bot.getUuid(), tick);
+
+        BlockPos feet = BlockPos.ofFloored(x, y, z);
+        BlockPos head = feet.up();
+        BlockState feetState = world.getBlockState(feet);
+        BlockState headState = world.getBlockState(head);
+        boolean feetOk = isPassableForMovement(feetState, world, feet);
+        boolean headOk = isPassableForMovement(headState, world, head);
+
+        String reason;
+        String offenderStr = "-";
+        if (!feetOk) {
+            reason = "feet-not-passable";
+        } else if (!headOk) {
+            reason = "head-not-passable";
+        } else {
+            Box targetBox = bot.getBoundingBox()
+                    .offset(x - bot.getX(), y - bot.getY(), z - bot.getZ());
+            if (world.isSpaceEmpty(bot, targetBox)) {
+                // Geometry changed between the gate and this retry; effectively not rejecting
+                // anymore. Log it so we know the diag fired against stale state.
+                reason = "race-space-now-empty";
+            } else {
+                BlockPos offender = findFirstBoxClearOffender(world, targetBox);
+                if (offender != null) {
+                    reason = "box-clear-rejected";
+                    offenderStr = offender.toShortString()
+                            + "=" + blockRegistryId(world.getBlockState(offender));
+                } else {
+                    reason = "box-clear-rejected-unknown-cell";
+                }
+            }
+        }
+
+        LOGGER.info("applyMovementInput-reject bot={} from=({}, {}, {}) to=({}, {}, {}) reason={} feet={}={} head={}={} offender={}",
+                bot.getName().getString(),
+                String.format(Locale.ROOT, "%.2f", bot.getX()),
+                String.format(Locale.ROOT, "%.2f", bot.getY()),
+                String.format(Locale.ROOT, "%.2f", bot.getZ()),
+                String.format(Locale.ROOT, "%.2f", x),
+                String.format(Locale.ROOT, "%.2f", y),
+                String.format(Locale.ROOT, "%.2f", z),
+                reason,
+                feet.toShortString(),
+                blockRegistryId(feetState),
+                head.toShortString(),
+                blockRegistryId(headState),
+                offenderStr);
+    }
+
+    private static BlockPos findFirstBoxClearOffender(ServerWorld world, Box targetBox) {
+        int minX = (int) Math.floor(targetBox.minX);
+        int minY = (int) Math.floor(targetBox.minY);
+        int minZ = (int) Math.floor(targetBox.minZ);
+        int maxX = (int) Math.floor(targetBox.maxX - 1.0E-7);
+        int maxY = (int) Math.floor(targetBox.maxY - 1.0E-7);
+        int maxZ = (int) Math.floor(targetBox.maxZ - 1.0E-7);
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    pos.set(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (isPassableForMovement(state, world, pos)) {
+                        continue;
+                    }
+                    VoxelShape collisionShape = state.getCollisionShape(world, pos);
+                    if (collisionShape.isEmpty()) {
+                        continue;
+                    }
+                    double ox = x;
+                    double oy = y;
+                    double oz = z;
+                    for (Box shapeBox : collisionShape.getBoundingBoxes()) {
+                        if (shapeBox.offset(ox, oy, oz).intersects(targetBox)) {
+                            return pos.toImmutable();
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String blockRegistryId(BlockState state) {
+        if (state == null) {
+            return "null";
+        }
+        try {
+            return net.minecraft.registry.Registries.BLOCK.getId(state.getBlock()).toString();
+        } catch (Exception e) {
+            return state.getBlock().getClass().getSimpleName();
+        }
+    }
+
+    // Self-heal: when the bot's current feet cell is a closed door, open it so vanilla
+    // physics can carry the bot through. Runs as a side-effect before canOccupyPosition
+    // in applyMovementInput. Throttled per-bot so we don't spam interact packets.
+    private static final ConcurrentHashMap<UUID, Long> LAST_AUTO_OPEN_CURRENT_DOOR_TICK = new ConcurrentHashMap<>();
+    private static final long AUTO_OPEN_CURRENT_DOOR_THROTTLE_TICKS = 20L;
+
+    private static void maybeAutoOpenCurrentDoor(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return;
+        }
+        BlockPos feet = bot.getBlockPos();
+        BlockState feetState = world.getBlockState(feet);
+        if (!(feetState.getBlock() instanceof DoorBlock)) {
+            return;
+        }
+        if (!feetState.contains(Properties.OPEN)
+                || Boolean.TRUE.equals(feetState.get(Properties.OPEN))) {
+            return;
+        }
+        long tick = world.getTime();
+        Long last = LAST_AUTO_OPEN_CURRENT_DOOR_TICK.get(bot.getUuid());
+        if (last != null && tick - last < AUTO_OPEN_CURRENT_DOOR_THROTTLE_TICKS) {
+            return;
+        }
+        LAST_AUTO_OPEN_CURRENT_DOOR_TICK.put(bot.getUuid(), tick);
+        boolean opened = MovementService.tryOpenDoorAt(bot, feet);
+        LOGGER.info("auto-open-current-door bot={} at={} block={} opened={}",
+                bot.getName().getString(),
+                feet.toShortString(),
+                blockRegistryId(feetState),
+                opened);
     }
 
     private static boolean isWaterLikeMovementContext(ServerPlayerEntity bot, ServerWorld world) {

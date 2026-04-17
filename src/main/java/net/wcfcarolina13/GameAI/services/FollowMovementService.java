@@ -12,8 +12,12 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.fluid.FluidState;
+import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.Box;
 import java.util.ArrayList;
 import java.util.List;
@@ -707,9 +711,35 @@ public final class FollowMovementService {
         if (world == null || pos == null) {
             return false;
         }
+        BlockPos headPos = pos.up();
         BlockState feet = world.getBlockState(pos);
-        BlockState head = world.getBlockState(pos.up());
-        return (feet.isAir() || !feet.blocksMovement()) && (head.isAir() || !head.blocksMovement());
+        BlockState head = world.getBlockState(headPos);
+        return isPassableForMovement(feet, world, pos) && isPassableForMovement(head, world, headPos);
+    }
+
+    /**
+     * Mirrors {@code BotActions.isPassableForMovement}. See that method's Javadoc for the full
+     * rationale — in 1.21.11 {@code blocksMovement()} incorrectly returns true for pressure
+     * plates, so we have to consult {@link WalkablePartialBlocks} as a third gate. Keeping
+     * the two helpers identical prevents any passability check across the follow-movement
+     * surface from disagreeing with the movement-input gate.
+     */
+    private static boolean isPassableForMovement(BlockState state, ServerWorld world, BlockPos pos) {
+        if (state.isAir() || !state.blocksMovement()) {
+            return true;
+        }
+        if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
+            var block = state.getBlock();
+            if (block instanceof DoorBlock
+                    || block instanceof FenceGateBlock
+                    || block instanceof TrapdoorBlock) {
+                return true;
+            }
+        }
+        if (WalkablePartialBlocks.isPathable(state, world, pos)) {
+            return true;
+        }
+        return false;
     }
 
     private static boolean isGroundedTwoHighClearance(ServerWorld world, BlockPos pos) {

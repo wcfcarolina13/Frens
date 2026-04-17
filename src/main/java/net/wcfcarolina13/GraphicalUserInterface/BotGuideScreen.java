@@ -957,6 +957,21 @@ public final class BotGuideScreen extends Screen {
                         "fish food water"
                 ),
                 new GuideTopic(
+                        "gather_fish_forget",
+                        "Gathering",
+                        "Forget Fishing Spot",
+                        "Clears the bot's saved fishing stand so it picks a fresh spot next time.",
+                        List.of(
+                                "When a bot is mid-session the sunset auto-return saves the current stand so it can resume there at sunrise.",
+                                "If the saved spot is bad (unreachable, no nearby chest, unsafe shoreline), the bot can end up fast-travelling back to it every morning and failing.",
+                                "Running this clears the saved session and the sunrise-resume record for the target bot.",
+                                "Lodestone compasses are NOT touched — the next fresh /bot fish still fast-travels to the nearest compass target."
+                        ),
+                        "bot fish forget " + target,
+                        "Actions menu: Forget Spot (under Fishing)",
+                        "fish forget clear reset spot session resume"
+                ),
+                new GuideTopic(
                         "gather_woodcut",
                         "Gathering",
                         "Woodcut",

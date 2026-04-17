@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -52,9 +53,53 @@ public final class BotHomeService {
     private static boolean loaded = false;
 
     /** Default protection radius (blocks) applied when a base has no explicit radius. */
-    public static final int DEFAULT_BASE_PROTECTION_RADIUS = 24;
+    public static final int DEFAULT_BASE_PROTECTION_RADIUS = 40;
 
-    public record BaseEntry(String label, BlockPos pos, int radius) {}
+    /**
+     * Default ceiling on user-settable base radius. Admins can override per-world via
+     * {@link #setMaxBaseRadius}. Kept at 128 for parity with the pre-admin hard cap so
+     * existing worlds see no behavior change until an admin tunes it down (or up).
+     */
+    public static final int DEFAULT_MAX_BASE_RADIUS = 128;
+
+    /**
+     * Absolute ceiling. Even an admin can't set a world cap higher than this. 256 blocks
+     * is ~16 chunks — already well beyond any realistic base footprint, and bigger values
+     * start to interact badly with animal-defense/navigation-artifact scans that multiply
+     * the radius (e.g. fast-travel range = radius × 5).
+     */
+    public static final int HARD_MAX_BASE_RADIUS_LIMIT = 256;
+
+    /**
+     * Sentinel {@code ownerUuid} value for bases that belong to the server itself — e.g. the
+     * auto-created "Spawn" base, or bases explicitly claimed by an admin for moderation. Not a
+     * valid Minecraft UUID (UUIDs are 36 chars with dashes), so there's no collision risk with
+     * real player UUIDs.
+     */
+    public static final String SERVER_OWNER_UUID = "SERVER";
+
+    public static final String SERVER_OWNER_NAME = "Server";
+
+    /** Canonical label used when the server auto-creates a base at world spawn. */
+    public static final String AUTO_SPAWN_BASE_LABEL = "Spawn";
+
+    public record BaseEntry(String label, BlockPos pos, int radius, String ownerUuid, String ownerName) {}
+
+    /**
+     * Semantic intent for {@link #resolveHomeTarget(ServerPlayerEntity, ReturnIntent)}.
+     * Callers pick the mode that matches their situation; the resolver picks the best
+     * destination under that mode's rules.
+     */
+    public enum ReturnIntent {
+        /** Sunset return: prefer a recently-used bed (validated) over a stale preferred home. */
+        SUNSET_BED,
+        /** Commander-led: go to commander if present in same dimension; else fall through to BASE_CENTER_LAZY. */
+        COMMANDER_SIDE,
+        /** Declared base anchor with a lazy walkable-surface snap when the anchor is unwalkable. */
+        BASE_CENTER_LAZY,
+        /** Legacy closer-of-bed-or-base (preferred home wins outright if set). */
+        DEFAULT
+    }
 
     private BotHomeService() {}
 
@@ -680,7 +725,22 @@ public final class BotHomeService {
         flush();
     }
 
+    /**
+     * Legacy four-arg overload. Creates a base with no owner — i.e. treated as server-owned
+     * for permission gating (admin-only edits). Prefer the six-arg overload that stamps the
+     * creating player as owner.
+     */
     public static boolean addBase(MinecraftServer server, ServerWorld world, String label, BlockPos pos) {
+        return addBase(server, world, label, pos, null, null);
+    }
+
+    /**
+     * Creates a base and stamps the given owner. Owner {@code null}/blank is stored as-is and
+     * treated as server-owned by {@link #canEditBase}; pass {@link #SERVER_OWNER_UUID} explicitly
+     * to mark a permanent server-owned base (e.g. auto-spawn).
+     */
+    public static boolean addBase(MinecraftServer server, ServerWorld world, String label, BlockPos pos,
+                                  String ownerUuid, String ownerName) {
         if (server == null || world == null || label == null || label.isBlank() || pos == null) {
             return false;
         }
@@ -691,10 +751,152 @@ public final class BotHomeService {
             if (wd.basesByLabel == null) {
                 wd.basesByLabel = new HashMap<>();
             }
-            wd.basesByLabel.put(normalized, new SavedBase(trimmed, SavedPos.from(pos)));
+            wd.basesByLabel.put(normalized, new SavedBase(trimmed, SavedPos.from(pos), ownerUuid, ownerName));
         }
         flush();
         return true;
+    }
+
+    /**
+     * Replaces the owner on an existing base. Operator-only caller responsibility to gate — this
+     * method does not check permissions. Returns false if no base has the given label.
+     */
+    public static boolean setBaseOwner(MinecraftServer server, ServerWorld world, String label,
+                                       String ownerUuid, String ownerName) {
+        if (server == null || world == null || label == null || label.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeLabelKey(label);
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.basesByLabel == null) return false;
+            SavedBase base = wd.basesByLabel.get(normalized);
+            if (base == null) return false;
+            base.ownerUuid = ownerUuid;
+            base.ownerName = ownerName;
+        }
+        flush();
+        return true;
+    }
+
+    /**
+     * Permission gate for base edit/rename/resize/delete operations.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>Operators can edit any base.</li>
+     *   <li>Server-owned bases (owner = {@link #SERVER_OWNER_UUID}) are admin-only.</li>
+     *   <li>Legacy bases (null/blank owner) are treated the same as server-owned — admin-only —
+     *       until an admin explicitly reassigns ownership. Prevents drive-by edits on bases that
+     *       existed before ownership was tracked.</li>
+     *   <li>A base's stamped owner can edit their own base.</li>
+     * </ul>
+     *
+     * <p>Alliance logic will hook in here in Phase 4.
+     */
+    public static boolean canEditBase(ServerPlayerEntity player, BaseEntry base) {
+        if (player == null) return false;
+        if (isOperatorSafe(player)) return true;
+        if (base == null) return false;
+        String ownerUuid = base.ownerUuid();
+        if (ownerUuid == null || ownerUuid.isBlank()) return false; // legacy → admin-only
+        if (SERVER_OWNER_UUID.equals(ownerUuid)) return false;
+        return ownerUuid.equals(player.getUuid().toString());
+    }
+
+    private static boolean isOperatorSafe(ServerPlayerEntity player) {
+        try {
+            return net.wcfcarolina13.Frens.isOperator(player);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Creates the auto-spawn base if it hasn't been seeded yet for this world. Idempotent per
+     * world: once {@code spawnBaseInitialized} is true, this becomes a no-op even if the admin
+     * later deletes the "Spawn" base — matching the user directive that admin deletion should
+     * stick across restarts. Call from SERVER_STARTED.
+     */
+    public static void initializeSpawnBaseIfNeeded(MinecraftServer server, ServerWorld world) {
+        if (server == null || world == null) return;
+        if (world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return; // overworld only
+        WorldData wd = worldData(server, world);
+        boolean needCreate;
+        synchronized (LOCK) {
+            if (wd.spawnBaseInitialized) return;
+            String normalized = normalizeLabelKey(AUTO_SPAWN_BASE_LABEL);
+            boolean existsAlready = wd.basesByLabel != null && wd.basesByLabel.containsKey(normalized);
+            needCreate = !existsAlready;
+            wd.spawnBaseInitialized = true;
+        }
+        flush();
+        if (needCreate) {
+            BlockPos spawnPos = BlockPos.ORIGIN;
+            try {
+                var spawn = world.getSpawnPoint();
+                if (spawn != null && spawn.getPos() != null) {
+                    spawnPos = spawn.getPos();
+                }
+            } catch (Throwable ignored) {
+                // fall back to origin
+            }
+            addBase(server, world, AUTO_SPAWN_BASE_LABEL, spawnPos, SERVER_OWNER_UUID, SERVER_OWNER_NAME);
+            LOGGER.info("Auto-created server-owned '{}' base at {} for world {}",
+                    AUTO_SPAWN_BASE_LABEL, spawnPos.toShortString(), world.getRegistryKey().getValue());
+        }
+    }
+
+    /**
+     * Find a base owned by someone other than {@code requesterUuid} (and not allied with them)
+     * whose protection sphere overlaps the proposed {@code (center, radius)}. Used to reject
+     * creation or resize attempts that would step on other users' bases.
+     *
+     * <p>Sphere overlap test: Euclidean distance between centers &lt; (r1 + r2). Operators can
+     * still cause overlap — this method does not check operator status; the caller gates.
+     *
+     * <p>Skip conditions:
+     * <ul>
+     *   <li>Same base (label match with {@code excludeLabel}) — callers pass the label being
+     *       resized so the base doesn't conflict with itself.</li>
+     *   <li>Requester owns the conflicting base.</li>
+     *   <li>Requester and owner are allied (via {@link PlayerAllianceService#areAllied}).</li>
+     * </ul>
+     *
+     * <p>Legacy and server-owned bases are treated as "another owner" (nobody can overlap them
+     * without admin override). That protects the auto-Spawn base from being shadowed by a
+     * neighboring player base.
+     */
+    public static Optional<BaseEntry> findOverlappingBase(MinecraftServer server, ServerWorld world,
+                                                          BlockPos center, int radius,
+                                                          String requesterUuid, String excludeLabel) {
+        if (server == null || world == null || center == null || radius <= 0) {
+            return Optional.empty();
+        }
+        String excludeNorm = excludeLabel != null ? normalizeLabelKey(excludeLabel) : null;
+        for (BaseEntry other : listBases(server, world)) {
+            if (other == null || other.pos() == null) continue;
+            if (excludeNorm != null && normalizeLabelKey(other.label()).equals(excludeNorm)) continue;
+
+            String otherOwner = other.ownerUuid();
+            boolean sameOwner = requesterUuid != null && !requesterUuid.isBlank()
+                    && requesterUuid.equals(otherOwner);
+            if (sameOwner) continue;
+
+            boolean allied = requesterUuid != null && otherOwner != null
+                    && !SERVER_OWNER_UUID.equals(otherOwner)
+                    && !otherOwner.isBlank()
+                    && PlayerAllianceService.areAllied(requesterUuid, otherOwner);
+            if (allied) continue;
+
+            int otherRadius = other.radius() > 0 ? other.radius() : DEFAULT_BASE_PROTECTION_RADIUS;
+            double sumRadii = (double) radius + (double) otherRadius;
+            double distSq = other.pos().getSquaredDistance(center);
+            if (distSq < sumRadii * sumRadii) {
+                return Optional.of(other);
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -918,7 +1120,8 @@ public final class BotHomeService {
                     continue;
                 }
                 out.add(new BaseEntry(b.label, b.pos.toBlockPos(),
-                        b.radius > 0 ? b.radius : DEFAULT_BASE_PROTECTION_RADIUS));
+                        b.radius > 0 ? b.radius : DEFAULT_BASE_PROTECTION_RADIUS,
+                        b.ownerUuid, b.ownerName));
             }
             return out;
         }
@@ -1001,6 +1204,171 @@ public final class BotHomeService {
         return sleptSq <= baseSq ? slept : base;
     }
 
+    /**
+     * Intent-aware resolution. See {@link ReturnIntent}.
+     *
+     * <p>Rationale for SUNSET_BED existing as a separate intent: the legacy
+     * {@link #resolveHomeTarget(ServerPlayerEntity)} returns the preferred home whenever one is set,
+     * ignoring a recently-used bed. That sends the bot on long cross-map walks at dusk when it
+     * could sleep at a closer, freshly-used bed. SUNSET_BED flips the priority: validated lastSleep
+     * competes on distance against preferred/nearest, and the closest candidate wins.
+     */
+    public static Optional<BlockPos> resolveHomeTarget(ServerPlayerEntity bot, ReturnIntent intent) {
+        if (bot == null || intent == null) {
+            return Optional.empty();
+        }
+        return switch (intent) {
+            case SUNSET_BED -> resolveSunsetBed(bot);
+            case COMMANDER_SIDE -> resolveCommanderSide(bot);
+            case BASE_CENTER_LAZY -> resolveBaseCenterLazy(bot);
+            case DEFAULT -> resolveHomeTarget(bot);
+        };
+    }
+
+    private static Optional<BlockPos> resolveSunsetBed(ServerPlayerEntity bot) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        Optional<BlockPos> sleptOpt = getLastSleep(bot);
+        Optional<BlockPos> preferredOpt = resolvePreferredHomeBase(bot);
+        Optional<BlockPos> nearestOpt = findNearestBase(bot);
+
+        // Validate lastSleep: chunk loaded AND bed block still present. Unloaded chunk → trust.
+        boolean sleepChunkLoaded = false;
+        boolean sleepValidated = false;
+        if (sleptOpt.isPresent()) {
+            BlockPos pos = sleptOpt.get();
+            sleepChunkLoaded = world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+            if (sleepChunkLoaded) {
+                sleepValidated = world.getBlockState(pos).isIn(BlockTags.BEDS);
+                if (!sleepValidated) {
+                    LOGGER.debug("SUNSET_BED: lastSleep at {} is no longer a bed; falling through", pos.toShortString());
+                }
+            } else {
+                sleepValidated = true; // trust remote record
+            }
+        }
+
+        Vec3d origin = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double sleepDistSq = sleepValidated && sleptOpt.isPresent()
+                ? origin.squaredDistanceTo(Vec3d.ofCenter(sleptOpt.get()))
+                : Double.POSITIVE_INFINITY;
+        double preferredDistSq = preferredOpt.isPresent()
+                ? origin.squaredDistanceTo(Vec3d.ofCenter(preferredOpt.get()))
+                : Double.POSITIVE_INFINITY;
+        double nearestDistSq = nearestOpt.isPresent()
+                ? origin.squaredDistanceTo(Vec3d.ofCenter(nearestOpt.get()))
+                : Double.POSITIVE_INFINITY;
+
+        // Unloaded-chunk lastSleep: only wins if not wildly farther than loaded candidates.
+        // "Wildly farther" = 2× distance (4× distSq) of the closest loaded candidate.
+        if (sleepValidated && !sleepChunkLoaded) {
+            double minLoaded = Math.min(preferredDistSq, nearestDistSq);
+            if (Double.isFinite(minLoaded) && sleepDistSq > minLoaded * 4.0) {
+                LOGGER.debug("SUNSET_BED: unloaded-chunk lastSleep too far vs loaded alternatives; skipping");
+                sleepDistSq = Double.POSITIVE_INFINITY;
+            }
+        }
+
+        double best = Math.min(sleepDistSq, Math.min(preferredDistSq, nearestDistSq));
+        if (!Double.isFinite(best)) {
+            return Optional.empty();
+        }
+        if (best == sleepDistSq) return sleptOpt;
+        if (best == preferredDistSq) return preferredOpt;
+        return nearestOpt;
+    }
+
+    private static Optional<BlockPos> resolveCommanderSide(ServerPlayerEntity bot) {
+        // Phase-1 placeholder: commander lookup will be wired when first caller migrates.
+        // Semantically this should return commander's walkable position if present in same dim,
+        // and fall through otherwise. For now we fall through directly to BASE_CENTER_LAZY.
+        return resolveBaseCenterLazy(bot);
+    }
+
+    private static Optional<BlockPos> resolveBaseCenterLazy(ServerPlayerEntity bot) {
+        // Phase-1 implementation: preferred → lastSleep → nearestBase.
+        // Walkable-surface snap will be added when the first caller migrates and we
+        // can verify the snap doesn't regress existing pathfinding behavior.
+        Optional<BlockPos> preferred = resolvePreferredHomeBase(bot);
+        if (preferred.isPresent()) return preferred;
+        Optional<BlockPos> slept = getLastSleep(bot);
+        if (slept.isPresent()) return slept;
+        return findNearestBase(bot);
+    }
+
+    /**
+     * Returns the preferred-home base as a full {@link BaseEntry} (includes the saved radius).
+     * Used by callers that size a scan/operation to the base's declared extent, e.g. the fishing
+     * chest-offload fallback that scans for chests inside the home sphere. Returns empty when the
+     * bot has no preferred home (nothing to size against).
+     */
+    public static Optional<BaseEntry> resolvePreferredHomeBaseEntry(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return Optional.empty();
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return Optional.empty();
+        }
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.preferredHomeBaseByBot == null || wd.preferredHomeBaseByBot.isEmpty()
+                    || wd.basesByLabel == null || wd.basesByLabel.isEmpty()) {
+                return Optional.empty();
+            }
+            String preferredNorm = wd.preferredHomeBaseByBot.get(botId);
+            if (preferredNorm == null || preferredNorm.isBlank()) {
+                return Optional.empty();
+            }
+            SavedBase preferred = wd.basesByLabel.get(preferredNorm);
+            if (preferred == null || preferred.pos == null) {
+                return Optional.empty();
+            }
+            int r = preferred.radius > 0 ? preferred.radius : DEFAULT_BASE_PROTECTION_RADIUS;
+            return Optional.of(new BaseEntry(preferred.label, preferred.pos.toBlockPos(), r,
+                    preferred.ownerUuid, preferred.ownerName));
+        }
+    }
+
+    /**
+     * Returns the per-world maximum base radius an operator is allowed to set. This is the
+     * admin-tuneable ceiling enforced by the "Set Radius" payload handler. Falls back to
+     * {@link #DEFAULT_MAX_BASE_RADIUS} when the world has never had it configured.
+     */
+    public static int getMaxBaseRadius(MinecraftServer server, ServerWorld world) {
+        if (server == null || world == null) {
+            return DEFAULT_MAX_BASE_RADIUS;
+        }
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            return wd.maxBaseRadius > 0 ? wd.maxBaseRadius : DEFAULT_MAX_BASE_RADIUS;
+        }
+    }
+
+    /**
+     * Sets the per-world maximum base radius. Clamped to [1, {@link #HARD_MAX_BASE_RADIUS_LIMIT}].
+     * Does not retroactively shrink existing bases that were saved with a larger radius — those
+     * keep their saved value until the owner/admin adjusts them individually. Returns the clamped
+     * value that was stored.
+     */
+    public static int setMaxBaseRadius(MinecraftServer server, ServerWorld world, int value) {
+        if (server == null || world == null) {
+            return DEFAULT_MAX_BASE_RADIUS;
+        }
+        int clamped = Math.max(1, Math.min(value, HARD_MAX_BASE_RADIUS_LIMIT));
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            wd.maxBaseRadius = clamped;
+        }
+        flush();
+        return clamped;
+    }
+
     public static Optional<BlockPos> resolvePreferredHomeBase(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return Optional.empty();
@@ -1050,21 +1418,35 @@ public final class BotHomeService {
         Map<String, SavedBase> basesByLabel = new HashMap<>();
         Map<String, String> preferredHomeBaseByBot = new HashMap<>();
         Map<String, String> navModeByBot = new HashMap<>();
+        int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
+        boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
     }
 
     private static final class SavedBase {
         final String label;
         final SavedPos pos;
         int radius; // 0 = use DEFAULT_BASE_PROTECTION_RADIUS; Gson defaults missing field to 0
+        // Owner identity. Null/empty on legacy bases loaded from pre-Phase-3 JSON; treated as
+        // server-owned (admin-only) for permission gating so unclaimed bases can't be edited by
+        // arbitrary players. Use SERVER_OWNER_UUID for explicit server ownership.
+        String ownerUuid;
+        String ownerName;
 
         private SavedBase(String label, SavedPos pos) {
             this.label = label;
             this.pos = pos;
         }
 
+        private SavedBase(String label, SavedPos pos, String ownerUuid, String ownerName) {
+            this.label = label;
+            this.pos = pos;
+            this.ownerUuid = ownerUuid;
+            this.ownerName = ownerName;
+        }
+
         @Override
         public String toString() {
-            return "SavedBase{" + label + " @ " + pos + "}";
+            return "SavedBase{" + label + " @ " + pos + " owner=" + ownerName + "}";
         }
 
         @Override

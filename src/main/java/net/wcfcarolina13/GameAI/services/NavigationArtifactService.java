@@ -286,6 +286,182 @@ public final class NavigationArtifactService {
         return false;
     }
 
+    // ── Travel-tier resolver (surface / underground) ──────────────────────
+
+    /**
+     * Outcome of a tier resolution. {@code allowed = false} means the bot cannot
+     * initiate fast-travel at all in this context; {@code delayMultiplier} is a
+     * multiplier on the base delay (1.0 = tier 2, 2.0 = tier 1, 3.0 = fallback).
+     * {@code reason} is a short tag for logging/telemetry.
+     */
+    public record TravelTierResult(boolean allowed, double delayMultiplier, String reason) {
+        public static TravelTierResult refused(String reason) {
+            return new TravelTierResult(false, Double.POSITIVE_INFINITY, reason);
+        }
+        public static TravelTierResult allowed(double multiplier, String reason) {
+            return new TravelTierResult(true, multiplier, reason);
+        }
+    }
+
+    /**
+     * Resolve the travel tier for an above-ground trip.
+     * <p>Tier 2+ artifacts (lodestone compass with bound target, eye of ender, wizard tome,
+     * nearby enchanting table, or mutual ender pearls) short-circuit to 1.0×.
+     * <p>Otherwise two gates are considered:
+     * <ul>
+     *   <li><b>Map + Compass gate</b> — bot has at least one filled map, at least one
+     *       compass, and the destination pixel is rendered on at least one of the bot's
+     *       maps (strict: {@code colors[pixel] != 0}).</li>
+     *   <li><b>Smoke-signal gate</b> — the destination sits inside a labeled saved base
+     *       whose centre has a lit campfire-on-hay, and the bot is within 5× the base's
+     *       protection radius (Manhattan) of that centre.</li>
+     * </ul>
+     * Gate scoring: 1 gate → 3.0×, 2 gates → 2.0×. A spyglass anywhere in the scanner
+     * surface subtracts one more step (3→2 or 2→1). Zero gates → refused.
+     */
+    public static TravelTierResult resolveSurfaceTier(MinecraftServer server,
+                                                       ServerPlayerEntity bot,
+                                                       ServerPlayerEntity owner,
+                                                       BlockPos destination,
+                                                       RegistryKey<World> destDimension) {
+        if (bot == null || destination == null || destDimension == null) {
+            return TravelTierResult.refused("missing-context");
+        }
+
+        // ── Tier 2+ short-circuits ─────────────────────────────────────
+        if (LodestoneCompassService.hasLodestoneCompass(bot)) {
+            return TravelTierResult.allowed(1.0, "lodestone-compass");
+        }
+        if (ArtifactScanner.has(bot, Items.ENDER_EYE) || ArtifactScanner.has(owner, Items.ENDER_EYE)) {
+            return TravelTierResult.allowed(1.0, "ender-eye");
+        }
+        if (CompanionCommunicationPolicy.hasWizardTome(bot) || CompanionCommunicationPolicy.hasWizardTome(owner)) {
+            return TravelTierResult.allowed(1.0, "wizard-tome");
+        }
+        if (isNearBlock(bot, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
+                || isNearBlock(owner, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)) {
+            return TravelTierResult.allowed(1.0, "enchanting-table");
+        }
+        if (ArtifactScanner.has(bot, Items.ENDER_PEARL) && ArtifactScanner.has(owner, Items.ENDER_PEARL)) {
+            return TravelTierResult.allowed(1.0, "mutual-ender-pearls");
+        }
+
+        // ── Gate 1: Map + Compass with destination rendered ────────────
+        boolean mapCompassGate =
+                ArtifactScanner.hasCompass(bot)
+                && ArtifactScanner.hasMap(bot)
+                && ArtifactScanner.hasRenderedMapAt(bot, destination.getX(), destination.getZ(), destDimension);
+
+        // ── Gate 2: Smoke signal at labeled destination base ────────────
+        boolean smokeSignalGate = false;
+        if (server != null) {
+            ServerWorld destWorld = server.getWorld(destDimension);
+            if (destWorld != null) {
+                java.util.Optional<BotHomeService.BaseEntry> destBase =
+                        BotHomeService.findBaseNearPosition(server, destWorld, destination);
+                if (destBase.isPresent() && hasSmokeSignal(destWorld, destBase.get().pos())) {
+                    int baseRadius = destBase.get().radius() > 0
+                            ? destBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+                    double maxRange = baseRadius * 5.0;
+                    double distToBase = bot.getBlockPos().getManhattanDistance(destBase.get().pos());
+                    if (distToBase <= maxRange) {
+                        smokeSignalGate = true;
+                    }
+                }
+            }
+        }
+
+        int gates = (mapCompassGate ? 1 : 0) + (smokeSignalGate ? 1 : 0);
+        if (gates == 0) {
+            return TravelTierResult.refused("no-surface-gate");
+        }
+
+        boolean spyglass = ArtifactScanner.hasSpyglass(bot);
+        int stepsSaved = (gates == 2 ? 1 : 0) + (spyglass ? 1 : 0);
+        double multiplier = Math.max(1.0, 3.0 - stepsSaved);
+
+        StringBuilder reason = new StringBuilder();
+        if (mapCompassGate) reason.append("map+compass-rendered");
+        if (smokeSignalGate) { if (reason.length() > 0) reason.append("+"); reason.append("smoke-signal"); }
+        if (spyglass) reason.append("+spyglass");
+        return TravelTierResult.allowed(multiplier, reason.toString());
+    }
+
+    /**
+     * Resolve the travel tier for an underground trip. Stricter rules than the surface path:
+     * <ul>
+     *   <li>Tier 2+ artifacts (lodestone compass with bound target, eye of ender, wizard tome,
+     *       nearby enchanting table, mutual ender pearls) → 1.0×.</li>
+     *   <li>Map + Compass + at least one torch or lantern → 2.0× (light to read the map).</li>
+     *   <li>Lodestone compass without bound target → 2.0× (compass is still a nav tool).</li>
+     *   <li>Smoke signal at labeled destination base, within 2× base radius → 3.0×.</li>
+     *   <li>Otherwise refused.</li>
+     * </ul>
+     * Spyglass is not useful underground and is ignored.
+     */
+    public static TravelTierResult resolveUndergroundTier(MinecraftServer server,
+                                                           ServerPlayerEntity bot,
+                                                           ServerPlayerEntity owner,
+                                                           BlockPos destination,
+                                                           RegistryKey<World> destDimension) {
+        if (bot == null || destination == null || destDimension == null) {
+            return TravelTierResult.refused("missing-context");
+        }
+
+        // Tier 2+ short-circuits (same as surface).
+        if (LodestoneCompassService.hasLodestoneCompass(bot)) {
+            return TravelTierResult.allowed(1.0, "lodestone-compass");
+        }
+        if (ArtifactScanner.has(bot, Items.ENDER_EYE) || ArtifactScanner.has(owner, Items.ENDER_EYE)) {
+            return TravelTierResult.allowed(1.0, "ender-eye");
+        }
+        if (CompanionCommunicationPolicy.hasWizardTome(bot) || CompanionCommunicationPolicy.hasWizardTome(owner)) {
+            return TravelTierResult.allowed(1.0, "wizard-tome");
+        }
+        if (isNearBlock(bot, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
+                || isNearBlock(owner, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)) {
+            return TravelTierResult.allowed(1.0, "enchanting-table");
+        }
+        if (ArtifactScanner.has(bot, Items.ENDER_PEARL) && ArtifactScanner.has(owner, Items.ENDER_PEARL)) {
+            return TravelTierResult.allowed(1.0, "mutual-ender-pearls");
+        }
+
+        // Map + Compass + light source → 2.0×.
+        boolean hasMapAndCompass = ArtifactScanner.hasMap(bot) && ArtifactScanner.hasCompass(bot);
+        boolean hasLight = ArtifactScanner.hasTorchOrLantern(bot);
+        if (hasMapAndCompass && hasLight) {
+            return TravelTierResult.allowed(2.0, "map+compass+light");
+        }
+
+        // Lodestone compass without target (lenient) → 2.0×.
+        if (LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
+            return TravelTierResult.allowed(2.0, "lodestone-compass-lenient");
+        }
+
+        // Smoke signal fallback (tight underground range: 2× base radius).
+        if (server != null) {
+            ServerWorld destWorld = server.getWorld(destDimension);
+            if (destWorld != null) {
+                java.util.Optional<BotHomeService.BaseEntry> destBase =
+                        BotHomeService.findBaseNearPosition(server, destWorld, destination);
+                if (destBase.isPresent() && hasSmokeSignal(destWorld, destBase.get().pos())) {
+                    int baseRadius = destBase.get().radius() > 0
+                            ? destBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+                    double maxRange = baseRadius * 2.0;
+                    double distToBase = bot.getBlockPos().getManhattanDistance(destBase.get().pos());
+                    if (distToBase <= maxRange) {
+                        return TravelTierResult.allowed(3.0, "smoke-signal-underground");
+                    }
+                }
+            }
+        }
+
+        if (hasMapAndCompass && !hasLight) {
+            return TravelTierResult.refused("underground-no-light");
+        }
+        return TravelTierResult.refused("underground-no-artifact");
+    }
+
     // ── Bot-to-bot artifact teleport (summon home) ─────────────
 
     /** Distance threshold for bot-to-bot artifact teleport (same as sunset fast travel). */
@@ -775,82 +951,51 @@ public final class NavigationArtifactService {
                 }
             }
 
-            // ── Underground gate (requires Map+Compass or Tier 2+) ──────
-            ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
-            if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
-                // Check if bot is actually underground vs just under tree canopy
-                int surfaceY = SafePositionService.getWalkableGroundY(currentWorld, bot.getBlockX(), bot.getBlockZ());
-                boolean nearSurface = bot.getBlockPos().getY() >= surfaceY - 4;
-                if (!nearSurface) {
-                    if (skipArtifactGate) {
-                        // Base bypass: skip underground artifact check
-                    } else {
-                        ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
-                        double mult = artifactDelayMultiplier(bot, owner);
-                        if (mult <= 1.0) {
-                            // Tier 2+ artifacts — proceed normally, no penalty
-                        } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
-                                && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
-                            // Map + Compass on bot — allow but with 2x delay (underground is harder)
-                            delayTicks = (int) (delayTicks * 2.0);
-                        } else if (LodestoneCompassService.hasAnyLodestoneCompass(bot)) {
-                            // Lodestone compass (lenient: even if lodestone destroyed, the compass
-                            // is still a navigation tool). This catches edge cases where the strict
-                            // hasLodestoneCompass check (requires target) returns false but the bot
-                            // visually has a lodestone compass.
-                            delayTicks = (int) (delayTicks * 2.0);
-                        } else {
-                            // Check for smoke signal at destination base (underground: 2x radius)
-                            ServerWorld destWorld = server.getWorld(dimension);
-                            java.util.Optional<BotHomeService.BaseEntry> destBase = destWorld != null
-                                    ? BotHomeService.findBaseNearPosition(server, destWorld, destination)
-                                    : java.util.Optional.empty();
-                            if (destBase.isPresent()
-                                    && hasSmokeSignal(destWorld, destBase.get().pos())) {
-                                int baseRadius = destBase.get().radius() > 0
-                                        ? destBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
-                                double maxRange = baseRadius * 2.0;
-                                double distToBase = bot.getBlockPos().getManhattanDistance(destBase.get().pos());
-                                if (distToBase <= maxRange) {
-                                    delayTicks = (int) (delayTicks * 3.0);
-                                } else {
-                                    notifyOwner(server, ownerUuid,
-                                            "\u00A7c" + botAlias + " is too far underground to see the smoke signal.\u00A7r");
-                                    return false;
-                                }
-                            } else {
-                                notifyOwner(server, ownerUuid,
-                                        "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass, or Lodestone Compass.\u00A7r");
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
         }
 
-        // ── Above-ground smoke signal range extension (no-artifact bots) ─
+        // ── Travel-tier resolver (surface or underground) ───────────────
+        // Replaces the old underground gate + above-ground smoke extension.
+        // Refuses when no gate is open; otherwise multiplies the delay based on
+        // which artifacts the bot has access to (via ArtifactScanner — scans
+        // main inventory, bundles, shulker boxes, and the bot's ender chest).
         if (!skipGates && !skipArtifactGate) {
-            ServerPlayerEntity ownerPlayer = server.getPlayerManager().getPlayer(ownerUuid);
-            double aboveMult = artifactDelayMultiplier(bot, ownerPlayer);
-            if (aboveMult >= 3.0) {
-                ServerWorld destWorldCheck = server.getWorld(dimension);
-                java.util.Optional<BotHomeService.BaseEntry> smokeBase = destWorldCheck != null
-                        ? BotHomeService.findBaseNearPosition(server, destWorldCheck, destination)
-                        : java.util.Optional.empty();
-                if (smokeBase.isPresent()
-                        && hasSmokeSignal(destWorldCheck, smokeBase.get().pos())) {
-                    int baseRadius = smokeBase.get().radius() > 0
-                            ? smokeBase.get().radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
-                    double maxRange = baseRadius * 5.0;
-                    double distToBase = bot.getBlockPos().getManhattanDistance(smokeBase.get().pos());
-                    if (distToBase <= maxRange) {
-                        double dist = bot.getBlockPos().getManhattanDistance(destination);
-                        boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(dimension);
-                        delayTicks = calculateDelayTicks(dist, crossDim, 3.0);
-                    }
+            ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+            ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
+
+            boolean isUnderground = false;
+            if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
+                int surfaceY = SafePositionService.getWalkableGroundY(currentWorld, bot.getBlockX(), bot.getBlockZ());
+                if (bot.getBlockPos().getY() < surfaceY - 4) {
+                    isUnderground = true;
                 }
             }
+
+            TravelTierResult tier = isUnderground
+                    ? resolveUndergroundTier(server, bot, owner, destination, dimension)
+                    : resolveSurfaceTier(server, bot, owner, destination, dimension);
+
+            if (!tier.allowed()) {
+                String msg = switch (tier.reason()) {
+                    case "no-surface-gate" ->
+                            botAlias + " needs a Map + Compass (with the destination explored) or a smoke signal at the destination base to fast-travel here.";
+                    case "underground-no-light" ->
+                            botAlias + " can't read the map underground without a torch or lantern.";
+                    case "underground-no-artifact" ->
+                            botAlias + " can't fast-travel underground without a Map + Compass (and a light), a Lodestone Compass, or a smoke signal at the destination base.";
+                    default ->
+                            botAlias + " can't fast-travel right now (" + tier.reason() + ").";
+                };
+                notifyOwner(server, ownerUuid, "\u00A7c" + msg + "\u00A7r");
+                return false;
+            }
+
+            if (tier.delayMultiplier() > 1.0) {
+                boolean crossDim = !currentWorld.getRegistryKey().equals(dimension);
+                delayTicks = calculateDelayTicks(travelDistance, crossDim, tier.delayMultiplier());
+            }
+
+            LOGGER.info("Fast-travel tier: bot={} underground={} reason={} mult={}",
+                    botAlias, isUnderground, tier.reason(), tier.delayMultiplier());
         }
 
         // ── Mount evaluation ──────────────────────────────────────────────

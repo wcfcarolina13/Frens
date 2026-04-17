@@ -2,8 +2,8 @@ package net.wcfcarolina13.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -95,6 +95,14 @@ public final class FishingSkill implements Skill {
 
     private static final Field CAUGHT_FISH_FIELD = findCaughtFishField();
 
+    // Chest-proximity scoring: small score bonus for fishing stands within this
+    // radius of a known chest. Tight enough that a chest next door outweighs a
+    // slightly better cast spot, but small enough that cast quality still wins
+    // in an open lake with no nearby chests.
+    private static final int CHEST_PROXIMITY_RADIUS = 16;
+    private static final double CHEST_PROXIMITY_BONUS = -0.45;
+    private static final int HOME_CHEST_SCAN_RADIUS = 48;
+
     @Override
     public String name() {
         return "fish";
@@ -111,12 +119,15 @@ public final class FishingSkill implements Skill {
 
         if (BotWaterEscapeService.isInWater(bot)) {
             ChatUtils.sendSystemMessage(source, "I'm in the water. Moving to shore before fishing.");
-            BlockPos shoreStand = BotWaterEscapeService.findNearestShoreStand(bot, WATER_SEARCH_RADIUS + 6);
-            if (shoreStand == null) {
-                return SkillExecutionResult.failure("I'm swimming and cannot find safe shore to fish from.");
-            }
-            if (bot.getBlockPos().getSquaredDistance(shoreStand) > 1.44D && !navigateToSpot(source, bot, shoreStand)) {
-                return SkillExecutionResult.failure("I'm swimming and couldn't reach shore for fishing.");
+            // Use the water-aware swim helper instead of navigateToSpot — the
+            // latter's safeNudge fallback treats the water-below-feet as a cliff
+            // edge and refuses to move, so a swimming bot can never reach shore
+            // through generic navigation.  swimToShore drives swim-forward input
+            // and iterates multiple shore candidates internally.
+            if (!BotWaterEscapeService.swimToShore(bot, WATER_SEARCH_RADIUS + 6, 8000L)) {
+                if (BotWaterEscapeService.isInWater(bot)) {
+                    return SkillExecutionResult.failure("I'm swimming and couldn't reach shore for fishing.");
+                }
             }
             if (BotWaterEscapeService.isInWater(bot)) {
                 return SkillExecutionResult.failure("Still in water after shore move. Try again from land.");
@@ -131,7 +142,8 @@ public final class FishingSkill implements Skill {
             LOGGER.info("Inventory full at start of fishing. Attempting to store items before selecting a spot.");
             Optional<BlockPos> storedChest = handleFullInventory(bot, source, bot.getBlockPos());
             if (storedChest.isEmpty()) {
-                return SkillExecutionResult.failure("Inventory full and couldn't store items.");
+                clearSessionAfterStorageFailure(bot);
+                return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot — give me a chest near a water spot and try again.");
             }
             if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                 return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
@@ -203,6 +215,36 @@ public final class FishingSkill implements Skill {
                 }
             }
         }
+        // Sunrise-resume rescue: a saved session's standOptions contains only
+        // the saved stand, so the alt-loop above has zero alternatives to try.
+        // If the saved stand is unreachable from the lodestone landing position
+        // (terrain obstacle the original water-edge search didn't see), scan
+        // fresh from the bot's current position instead of immediately failing.
+        if (!approached && savedSession != null) {
+            LOGGER.info("Sunrise resume: saved stand {} unreachable from landing position {}, re-scanning for a fresh spot",
+                    stand.toShortString(), bot.getBlockPos().toShortString());
+            FishingSpot rescan = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+            if (rescan != null) {
+                spot = rescan;
+                stand = rescan.stand();
+                if (navigateToSpot(source, bot, stand)) {
+                    approached = true;
+                    LOGGER.info("Sunrise resume: switched to fresh fishing spot stand={}", stand.toShortString());
+                } else {
+                    for (BlockPos alt : rescan.standOptions()) {
+                        if (alt.equals(stand)) {
+                            continue;
+                        }
+                        if (navigateToSpot(source, bot, alt)) {
+                            stand = alt;
+                            approached = true;
+                            LOGGER.info("Sunrise resume: switched to fresh fishing stand alt={}", stand.toShortString());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         if (!approached) {
             return SkillExecutionResult.failure("Can't reach the fishing spot (blocked?).");
         }
@@ -245,6 +287,15 @@ public final class FishingSkill implements Skill {
 
         if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
             return SkillExecutionResult.failure("Unable to equip the fishing rod.");
+        }
+
+        // Clear any stale fishHook from a prior session (e.g., a stray bobber left by a
+        // sunset-abort double-click race). Without this, the first cast in the loop would
+        // be interpreted by vanilla as a REEL, leading to the cast/reel inversion that
+        // breaks sessions 2+ after a botched sunset abort.
+        if (hasActiveFishHook(bot)) {
+            LOGGER.info("Skill entry: stale fishHook detected, reeling before starting session");
+            reelRod(bot);
         }
 
         int targetFish = getIntParameter(context.parameters(), "count", -1);
@@ -326,6 +377,11 @@ public final class FishingSkill implements Skill {
             // Anchor: if we drift from our chosen stand (e.g., after loot shimmy or nudges), return.
             // This prevents "follow-the-commander"-looking creep during long sessions.
             if (bot.getBlockPos().getSquaredDistance(stand) > 2.25D) {
+                // If drift took the bot into the water, swim out before navigating —
+                // otherwise safeNudge refuses to move and the skill aborts.
+                if (BotWaterEscapeService.isInWater(bot)) {
+                    BotWaterEscapeService.swimToShore(bot, WATER_SEARCH_RADIUS + 6, 5000L);
+                }
                 if (!navigateToSpot(source, bot, stand)) {
                     return SkillExecutionResult.failure("Can't maintain position at the fishing spot.");
                 }
@@ -365,7 +421,8 @@ public final class FishingSkill implements Skill {
                 LOGGER.info("Inventory full. Attempting to store items.");
                 Optional<BlockPos> storedChest = handleFullInventory(bot, source, stand);
                 if (storedChest.isEmpty()) {
-                    return SkillExecutionResult.failure("Inventory full and couldn't store items.");
+                    clearSessionAfterStorageFailure(bot);
+                    return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot — give me a chest near a water spot and try again.");
                 }
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
@@ -402,6 +459,13 @@ public final class FishingSkill implements Skill {
             // Ensure we are on solid ground before casting; if not, try returning to our chosen stand first.
             if (!isStandable(world, bot.getBlockPos()) || world.getFluidState(bot.getBlockPos()).isIn(FluidTags.WATER)) {
                 LOGGER.info("Bot is in water or not on solid ground; returning to fishing stand before casting.");
+                // If the bot actually drifted into the water mid-session,
+                // navigateToSpot's safeNudge fallback can't climb out (treats
+                // water-below-feet as a cliff edge).  Swim out first, then let
+                // the regular nav walk back to the stand.
+                if (BotWaterEscapeService.isInWater(bot)) {
+                    BotWaterEscapeService.swimToShore(bot, WATER_SEARCH_RADIUS + 6, 6000L);
+                }
                 if (!navigateToSpot(source, bot, stand)) {
                     FishingSpot recoverySpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
                     if (recoverySpot != null) {
@@ -432,8 +496,8 @@ public final class FishingSkill implements Skill {
             }
 
             aimTowardWater(bot, castTarget);
-            BotActions.useSelectedItem(bot); // Cast
-            
+            castRod(bot); // Cast — guaranteed fresh cast, reels first if stale bobber
+
             // Wait for bobber to settle and check validity
             sleep(1200L);
             FishingBobberEntity bobber = findActiveBobber(bot);
@@ -456,17 +520,17 @@ public final class FishingSkill implements Skill {
                             bobberPos.toShortString(),
                             bobberState.getBlock().getName().getString(),
                             bobberFluid.isIn(FluidTags.WATER) ? "water" : "not-water");
-                    BotActions.useSelectedItem(bot); // Retract
+                    reelRod(bot); // Retract — no-op if already cleared
                     attempts++;
                     adjustPositionToWaterEdge(bot, spot.water());
                     continue;
                 }
             }
-            
+
             boolean caughtFish = waitForBite(bot);
-            
+
             if (!caughtFish) {
-                 BotActions.useSelectedItem(bot); // Retract
+                 reelRod(bot); // Retract — no-op if already cleared (e.g., abort race)
                  attempts++;
                  continue;
             }
@@ -476,7 +540,7 @@ public final class FishingSkill implements Skill {
             if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                 return SkillExecutionResult.failure("Lost fishing rod before reel-in.");
             }
-            BotActions.useSelectedItem(bot); // Reel in
+            reelRod(bot); // Reel in — guaranteed reel (fishHook is set since we have a bite)
             waitForBobberRemoval(bot);
             // Choose next cast target AFTER reeling (for the next cast cycle).
             castTarget = chooseCastTarget(world, bot, stand, spot.water(), castTarget);
@@ -920,7 +984,83 @@ public final class FishingSkill implements Skill {
         } else {
             LOGGER.warn("Unable to locate or place a chest near {} during storage.", safeStand.toShortString());
         }
+
+        // Home-base fallback: the local rings can't see chests at the bot's home
+        // if the fishing spot was picked far away (e.g. for water quality).  Scan
+        // around the bot's resolved home base and use depositMatching with the
+        // obstacle-aware movement profile so the bot can actually navigate there.
+        // Prefer the saved base's declared radius when available: a user who sets a larger base
+        // expects the scan to cover it. Fall back to the static HOME_CHEST_SCAN_RADIUS floor.
+        Optional<BotHomeService.BaseEntry> homeEntry = BotHomeService.resolvePreferredHomeBaseEntry(bot);
+        Optional<BlockPos> home = homeEntry.map(BotHomeService.BaseEntry::pos)
+                .or(() -> BotHomeService.resolveHomeTarget(bot));
+        if (home.isPresent() && bot.getEntityWorld() instanceof ServerWorld homeWorld) {
+            BlockPos homePos = home.get();
+            int scanRadius = homeEntry.map(BotHomeService.BaseEntry::radius)
+                    .map(r -> Math.max(r, HOME_CHEST_SCAN_RADIUS))
+                    .orElse(HOME_CHEST_SCAN_RADIUS);
+            BlockPos homeChest = findChestWithSpaceNear(homeWorld, homePos, scanRadius);
+            if (homeChest != null) {
+                LOGGER.info("Falling back to home-base chest at {} (home={}, scanRadius={}, bot={})",
+                        homeChest.toShortString(), homePos.toShortString(), scanRadius, bot.getBlockPos().toShortString());
+                int deposited = ChestStoreService.depositMatching(source, bot, homeChest, stack -> shouldStoreItem(stack, arrowKeep));
+                if (deposited > 0) {
+                    LOGGER.info("Stored {} items in home-base chest {}", deposited, homeChest.toShortString());
+                    return Optional.of(homeChest);
+                }
+                LOGGER.warn("Home-base chest {} reachable but depositMatching returned {} items.", homeChest.toShortString(), deposited);
+            } else {
+                LOGGER.info("No home-base chest with space found within {} blocks of {}", scanRadius, homePos.toShortString());
+            }
+        }
         return Optional.empty();
+    }
+
+    /** Y half-span for the home-base chest scan. Covers basements + multi-story bases. */
+    private static final int HOME_CHEST_Y_SPAN = 16;
+
+    private static BlockPos findChestWithSpaceNear(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null || radius <= 0) {
+            return null;
+        }
+        BlockPos closest = null;
+        double closestDistSq = Double.MAX_VALUE;
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -HOME_CHEST_Y_SPAN, -radius), center.add(radius, HOME_CHEST_Y_SPAN, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (!(state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL))) {
+                continue;
+            }
+            if (!(world.getBlockEntity(pos) instanceof Inventory chest)) {
+                continue;
+            }
+            if (!chestHasSpace(chest)) {
+                continue;
+            }
+            double distSq = pos.getSquaredDistance(center);
+            if (distSq < closestDistSq) {
+                closestDistSq = distSq;
+                closest = pos.toImmutable();
+            }
+        }
+        return closest;
+    }
+
+    /**
+     * Called when handleFullInventory fails completely — i.e. no chest reachable
+     * locally or at home base.  Clears any saved fishing session and sunrise-resume
+     * record so the bot doesn't infinite-loop on [sunrise fast-travel → inventory
+     * full → fail → sunrise fast-travel → fail].  Lodestone compasses are NBT on
+     * the compass item itself and are untouched.
+     */
+    private static void clearSessionAfterStorageFailure(ServerPlayerEntity bot) {
+        if (bot == null) return;
+        FishingSessionService.clearSession(bot.getUuid());
+        SkillResumeService.clearSunriseResume(bot.getUuid());
+        LOGGER.info("Cleared fishing session + sunrise resume for {} after storage failure to break sunrise-resume loop",
+                bot.getName().getString());
     }
 
     /**
@@ -954,13 +1094,16 @@ public final class FishingSkill implements Skill {
      * the inner cube already covered by {@code innerRadius}.  Returns the
      * closest chest-with-space inside the ring, or {@code null} if none found.
      */
+    /** Y half-span for the local ring scan around the fishing spot. Covers shore platforms/docks. */
+    private static final int LOCAL_CHEST_Y_SPAN = 8;
+
     private static BlockPos scanForChestWithSpace(ServerWorld world, BlockPos origin,
                                                    int innerRadius, int outerRadius) {
         BlockPos closest = null;
         double closestDistSq = Double.MAX_VALUE;
         for (BlockPos pos : BlockPos.iterate(
-                origin.add(-outerRadius, -3, -outerRadius),
-                origin.add(outerRadius, 3, outerRadius))) {
+                origin.add(-outerRadius, -LOCAL_CHEST_Y_SPAN, -outerRadius),
+                origin.add(outerRadius, LOCAL_CHEST_Y_SPAN, outerRadius))) {
             int dx = Math.abs(pos.getX() - origin.getX());
             int dz = Math.abs(pos.getZ() - origin.getZ());
             if (dx <= innerRadius && dz <= innerRadius) {
@@ -969,10 +1112,11 @@ public final class FishingSkill implements Skill {
             if (!world.isChunkLoaded(pos)) {
                 continue;
             }
-            if (!(world.getBlockState(pos).isOf(Blocks.CHEST) || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST))) {
+            BlockState ringState = world.getBlockState(pos);
+            if (!(ringState.isOf(Blocks.CHEST) || ringState.isOf(Blocks.TRAPPED_CHEST) || ringState.isOf(Blocks.BARREL))) {
                 continue;
             }
-            if (!(world.getBlockEntity(pos) instanceof ChestBlockEntity chest)) {
+            if (!(world.getBlockEntity(pos) instanceof Inventory chest)) {
                 continue;
             }
             if (!chestHasSpace(chest)) {
@@ -987,7 +1131,7 @@ public final class FishingSkill implements Skill {
         return closest;
     }
 
-    private static boolean chestHasSpace(ChestBlockEntity chest) {
+    private static boolean chestHasSpace(Inventory chest) {
         if (chest == null) {
             return false;
         }
@@ -1013,12 +1157,12 @@ public final class FishingSkill implements Skill {
         }
         BlockPos origin = bot.getBlockPos();
         List<BlockPos> chests = new ArrayList<>();
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -6, -radius), origin.add(radius, 6, radius))) {
             if (!serverWorld.isChunkLoaded(pos)) {
                 continue;
             }
             var state = serverWorld.getBlockState(pos);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
                 chests.add(pos.toImmutable());
             }
         }
@@ -1104,11 +1248,16 @@ public final class FishingSkill implements Skill {
         
         // Pre-capture a reachability snapshot centered on the bot for A* validation.
         FollowPathService.FollowSnapshot reachabilitySnapshot = FollowPathService.capture(world, origin, origin, true);
-        
+
         // Clean up expired blacklist entries.
         UUID botUuid = bot.getUuid();
         cleanupBlacklist(botUuid);
         Map<BlockPos, Long> blacklist = FAILED_TARGET_BLACKLIST.getOrDefault(botUuid, Map.of());
+
+        // Chest anchors: local scan + home-base scan.  Scored stands near any
+        // of these get a small bonus so the bot naturally picks spots it can
+        // actually offload inventory to.
+        List<BlockPos> chestAnchors = collectChestAnchors(bot, world);
         
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
@@ -1137,7 +1286,7 @@ public final class FishingSkill implements Skill {
             }
             evaluated++;
 
-            List<StandOption> options = findStandOptions(world, water, origin);
+            List<StandOption> options = findStandOptions(world, water, origin, chestAnchors);
             if (options.isEmpty()) {
                 continue;
             }
@@ -1186,13 +1335,14 @@ public final class FishingSkill implements Skill {
         return best;
     }
 
-    private static List<StandOption> findStandOptions(ServerWorld world, BlockPos water, BlockPos botPos) {
+    private static List<StandOption> findStandOptions(ServerWorld world, BlockPos water, BlockPos botPos, List<BlockPos> chestAnchors) {
         List<BlockPos> stands = findStandCandidates(world, water, botPos);
         if (stands.isEmpty()) {
             return List.of();
         }
 
         List<StandOption> options = new ArrayList<>();
+        double chestRadiusSq = (double) CHEST_PROXIMITY_RADIUS * CHEST_PROXIMITY_RADIUS;
         for (BlockPos stand : stands) {
             BlockPos castTarget = chooseCastTargetHeuristic(world, stand, water);
             if (castTarget == null) {
@@ -1213,11 +1363,59 @@ public final class FishingSkill implements Skill {
             // Weak travel penalty: don't let bot/commander position dominate the choice.
             double travelPenalty = botPos.getSquaredDistance(stand) * 0.01;
 
-            options.add(new StandOption(stand.toImmutable(), castTarget.toImmutable(), quality + shorePenalty + travelPenalty));
+            // Chest proximity: a spot within reach of a chest means inventory-full
+            // handling actually works without aborting the session.
+            double chestBonus = 0.0D;
+            if (chestAnchors != null && !chestAnchors.isEmpty()) {
+                for (BlockPos chest : chestAnchors) {
+                    if (stand.getSquaredDistance(chest) <= chestRadiusSq) {
+                        chestBonus = CHEST_PROXIMITY_BONUS;
+                        break;
+                    }
+                }
+            }
+
+            options.add(new StandOption(stand.toImmutable(), castTarget.toImmutable(), quality + shorePenalty + travelPenalty + chestBonus));
         }
 
         options.sort(Comparator.comparingDouble(StandOption::score));
         return options;
+    }
+
+    /**
+     * Collects chest positions near the bot and near the bot's home base.
+     * Home-base scan is cheap (one-time per spot search) and dramatically improves
+     * the odds that the picked fishing spot is within offload range of a chest.
+     */
+    private static List<BlockPos> collectChestAnchors(ServerPlayerEntity bot, ServerWorld world) {
+        List<BlockPos> anchors = new ArrayList<>();
+        if (bot == null || world == null) {
+            return anchors;
+        }
+        BlockPos botPos = bot.getBlockPos();
+        scanForChests(world, botPos, HOME_CHEST_SCAN_RADIUS, anchors);
+        Optional<BlockPos> home = BotHomeService.resolveHomeTarget(bot);
+        home.ifPresent(h -> {
+            if (h.getSquaredDistance(botPos) > 4.0D) {
+                scanForChests(world, h, HOME_CHEST_SCAN_RADIUS, anchors);
+            }
+        });
+        return anchors;
+    }
+
+    private static void scanForChests(ServerWorld world, BlockPos center, int radius, List<BlockPos> out) {
+        if (world == null || center == null || radius <= 0 || out == null) {
+            return;
+        }
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -HOME_CHEST_Y_SPAN, -radius), center.add(radius, HOME_CHEST_Y_SPAN, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
+                out.add(pos.toImmutable());
+            }
+        }
     }
 
     private static BlockPos chooseCastTarget(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor, BlockPos preferred) {
@@ -1567,17 +1765,78 @@ public final class FishingSkill implements Skill {
     }
 
     private static void retractBobberIfPresent(ServerPlayerEntity bot) {
+        reelRod(bot);
+    }
+
+    // Source of truth for rod state: vanilla's PlayerEntity.fishHook field. Set by vanilla
+    // FishingRodItem.use() on cast, cleared on reel, also cleared by FishingBobberEntity when
+    // it auto-discards (distance, timer). Previously the skill used findActiveBobber (world
+    // scan) which lagged behind queued runnables, creating a double-click race at sunset
+    // abort that left a stray bobber in the water and inverted rod state for all subsequent
+    // sessions. See changelog "Fishing part: rod-state race".
+    private static boolean hasActiveFishHook(ServerPlayerEntity bot) {
+        return bot != null && bot.fishHook != null && !bot.fishHook.isRemoved();
+    }
+
+    // Reel in if (and only if) there's an active bobber. Dispatches the rod-use on the
+    // server thread, then polls fishHook up to 1s waiting for vanilla to actually process
+    // the reel and clear the field. Debounced per-bot so back-to-back retract calls (e.g.,
+    // line 524 + the sunset block's retractBobberIfPresent at line 343) don't queue a
+    // second runnable that would then be processed as a CAST against the now-cleared field.
+    private static final ConcurrentHashMap<UUID, Long> LAST_REEL_DISPATCH_MS = new ConcurrentHashMap<>();
+    private static final long REEL_DISPATCH_DEBOUNCE_MS = 1500L;
+
+    private static void reelRod(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
         }
-        FishingBobberEntity bobber = findActiveBobber(bot);
-        if (bobber == null) {
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        Long last = LAST_REEL_DISPATCH_MS.get(id);
+        if (last != null && now - last < REEL_DISPATCH_DEBOUNCE_MS) {
+            // A reel runnable is already pending/recent. Don't queue another — just wait
+            // for the pending one to clear the fishHook, then return.
+            awaitFishHookClear(bot, last + REEL_DISPATCH_DEBOUNCE_MS);
             return;
         }
-        try {
-            BotActions.useSelectedItem(bot);
-            sleep(250L);
-        } catch (Throwable ignored) {
+        if (!hasActiveFishHook(bot)) {
+            return;
+        }
+        LAST_REEL_DISPATCH_MS.put(id, now);
+        BotActions.useSelectedItem(bot);
+        awaitFishHookClear(bot, now + 1000L);
+    }
+
+    // Cast the rod, guaranteeing vanilla's fishHook will be non-null on success. If a stray
+    // bobber is present (e.g., from a prior session's sunset-abort race), reel it in first
+    // and wait for clearance before casting. Without this, the vanilla rod.use() would
+    // interpret the cast call as a REEL, leaving no bobber in water and subsequent retract
+    // calls as CASTS — the ping-pong state that broke sessions 2+3 in the latest fishing log.
+    private static void castRod(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        if (hasActiveFishHook(bot)) {
+            reelRod(bot);
+        }
+        if (hasActiveFishHook(bot)) {
+            // Reel did not clear the field (server thread stalled, interrupt, etc.). Abort
+            // the cast rather than risk a vanilla-side reel-instead-of-cast. Next iteration
+            // will re-check and retry.
+            LOGGER.warn("castRod: fishHook still non-null after reel; skipping cast this iteration");
+            return;
+        }
+        BotActions.useSelectedItem(bot);
+    }
+
+    private static void awaitFishHookClear(ServerPlayerEntity bot, long deadlineMs) {
+        while (hasActiveFishHook(bot) && System.currentTimeMillis() < deadlineMs) {
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
@@ -1783,15 +2042,23 @@ bot.getName().getString());
             return true;
         }
 
-        // Caught rods and bows: offload if nearly broken (<15% remaining), keep
-        // if healthy so the bot's active fishing rod / bow isn't dumped.
-        // Runs BEFORE isOffloadProtected (which blanket-keeps all damageables)
-        // and ignores enchantments — an enchanted caught rod at 3/64 is still junk.
+        // Caught rods and bows: offload if at-or-below 25% remaining, keep if
+        // healthy so the bot's active fishing rod / bow isn't dumped.  Per vanilla
+        // treasure-catch mechanics, fished-up rods/bows spawn capped AT exactly
+        // 25% durability, so anything at-or-below that bar is disposable catch
+        // loot (and anything above must be the bot's own gear).  Runs BEFORE
+        // isOffloadProtected (which blanket-keeps all damageables) and ignores
+        // enchantments — an enchanted caught rod at 10/64 is still junk the bot
+        // doesn't need four of.  Named items (renamed in an anvil) are excluded
+        // so user-curated keepsakes survive.
         if (item == Items.FISHING_ROD || item == Items.BOW) {
+            if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.CUSTOM_NAME) != null) {
+                return false;
+            }
             if (stack.isDamageable()) {
                 int maxDmg = stack.getMaxDamage();
                 int remaining = maxDmg - stack.getDamage();
-                return remaining < maxDmg * 0.15;
+                return remaining <= maxDmg * 0.25;
             }
             return false;
         }

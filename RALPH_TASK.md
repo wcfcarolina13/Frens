@@ -3,6 +3,47 @@ task: farm tree-clear + irrigation pipeline stabilization
 test_command: "./gradlew build -x test"
 ---
 
+## Session Notes 2026-04-16 — Door passage series (1.1.5 → 1.1.16)
+
+**Current deployed version: 1.1.16** (all three Prism instances). This session ran a long iterative series on bot door passage; documenting where each fix landed and what's still open so the next session can pick up cleanly.
+
+### What shipped and is known-good (do not revert)
+
+- **1.1.5** `BotActions.hasMovementClearance` — replaced `blocksMovement()` feet/head check with stateful `isPassableForMovement`. Open doors/gates/trapdoors with `Properties.OPEN == true` are now passable. Same bug-pattern fix pattern as commit 29a5de8 (ReturnBaseStuckService, 2026-04-08).
+- **1.1.6** `FollowMovementService.hasTwoHighClearance` — same fix applied to the follow-movement passability helper used by narrow-passage align, chokepoint, dropoff guard, local-obstacle nudge.
+- **1.1.7** Door-plan refactor in [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java): (a) deleted the `door-recovery` retreat (was retreating bot 2-3 blocks away from door when stuck → primary oscillation source); (b) gated `door-corner` plan rebuild with wrong-side check; (c) `isDirectRouteBlocked` now skips hits on open openables. This change intentionally breaks the old shelter-escape "trapped in corner, needs door as exit" behavior — documented as acceptable trade-off at the time, re-address later.
+- **1.1.8** Extracted `isDoorPlanWrongSide(approach, step, goal)` helper and applied it at **all four** door-plan creation sites (`door-corner`, `door-adjacent`, `door-escape`, `door-ray`). Previously only `door-corner` had the check.
+- **1.1.9** In `tickFollowDoorPlan`: when `plan.stepping() && doorOpen && onGround`, force `BotActions.jump(bot)` each tick instead of deferring to `autoJumpIfNeeded` (which explicitly skips door cells).
+- **1.1.10** Extracted `isBoxClearIgnoringWalkablePartials` helper in `BotActions`. When `world.isSpaceEmpty` rejects due to a walkable partial's thin collision overlapping the bot's bounding box at the Y boundary (strict-less-than `Box#intersects`), second pass skips cells whose state passes `isPassableForMovement`. Covered plates, carpets, rails, thin partials, open door strips.
+- **1.1.11** **Diagnostic-only build** — added `door-step-diag` (tickFollowDoorPlan) and `applyMovementInput-reject` (BotActions) log channels. Evidence caught that pressure plates failed `hasClearance=false`.
+- **1.1.12** **THE FIX** — `isPassableForMovement` now consults [WalkablePartialBlocks.isPathable](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java) as a third gate. In 1.21.11 `state.blocksMovement()` **returns `true` for pressure plates** (contrary to my assumption), so the previous two gates rejected. `WalkablePartialBlocks.isPathable` correctly handles plates via `AbstractPressurePlateBlock`, plus carpets, rails, tripwire, lily pad, collision max Y ≤ 0.125 fallback. Signature changed to `(state, world, pos)`. Applied symmetrically in `FollowMovementService`.
+- **1.1.13** Tick-persistent door-open retry (was only firing in `!plan.stepping()` phase) + stepping-flip only commits when `doorOpen` is confirmed from world state (not trusting `tryOpenDoorAt`'s return).
+- **1.1.14** Stuck-near-doorway auto-jump — generalized 1.1.9. When door plan stuck counter ≥ 8 ticks and bot on ground, force jump regardless of stepping phase. Generalizes the user's "jump a couple times to unstick" reflex.
+- **1.1.16** = 1.1.14 (1.1.15 reverted, see below).
+
+### What was reverted (1.1.15, deployed as 1.1.16)
+
+- 1.1.15 added an auto-step escape hatch in `canOccupyPosition`: if `hasMovementClearance(feet)` failed but feet cell was `WalkablePartialBlocks.isStandable` and cells above passed, allow the impulse anyway, trust vanilla `Entity.move()` auto-step. **Too permissive.** Bot pushed into stair back-top-halves and other partials where vanilla auto-step couldn't actually resolve the step-up, accumulated stuck time, triggered rescue-mining behavior. Reverted in 1.1.16.
+
+### Still open — priority order for next session
+
+1. **Bot gets stuck approaching the northern tower door** (residual from 1.1.16 testing). Specific pattern from latest log at `08:39:44 → 08:39:55`: bot at `(888, 64, 1397)`, no door plan active, `commander-route clear` firing every ~2s (removing waypoints), outer direct-pursuit tries to apply impulse but something rejects it. Bot sits for 11 seconds until a wolf-teleport or user-jump rescues it. `canOccupyPosition` is rejecting movement from `z=1397` to `z=1396` even though `z=1396` should just be a pressure plate (1.1.12 fix handles plates). Something in the approach path — likely the head cell at `(888, 65, 1396)` — is not passable. Need to re-enable the 1.1.11-style diagnostic to see exactly what block rejects. Don't guess again.
+
+2. **Shelter-breakfree misfires on indoor spawn.** Triggered by `Bot Jake trapped on join — hasn't moved (0.0 blocks) and no sky. Launching break-free.` in log. When bot legitimately respawns inside an enclosed structure (tower, house, base), the detection flags it as trapped and auto-mines upward, destroying stairs and other structural blocks. Need a smarter indoor-detection heuristic — e.g., check if there's a door within N blocks before assuming the bot must mine out. Or make the break-free path prefer walking toward known doors/bases before mining.
+
+3. **Bot standing at end of staircase not trying to walk around.** New symptom reported in this session — bot on opposite end of the spiral staircase from commander, just stares, doesn't even attempt pathfinding around the central column. Likely the pathfinder ([BaritoneStylePathFinder](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java) or classic [PathFinder](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java)) can't build a multi-level path through interior stairs around a column. Separate, larger issue from door passage — may need to expand the pathfinder's node-type classification for interior stair traversal. Out of scope for a quick door-fix session; worth its own investigation.
+
+### Architectural concern to raise with user at start of next session
+
+3+ fix attempts on door passage in this session triggered the systematic-debugging `3+ fixes failed → question architecture` rule. The current door-plan state machine (approach/step/stepping + four separate creation sites + stuck counter + wrong-side check + forced jump + tick-persistent retry) is VERY complex compared to vanilla villager door handling (~30 line `InteractWithDoorGoal`). Possible simplification: drop the door-plan entirely and have the pathfinder emit door tiles as regular waypoints, with an `InteractWithDoorGoal`-style observer that opens doors opportunistically when the bot's next waypoint is a closed door. Large change but may eliminate several bug classes at once. Discuss before attempting.
+
+### Test procedure for next session
+
+When testing door passage:
+1. Spawn bot **OUTSIDE** the tower (sky visible) to avoid triggering shelter-breakfree. This isolates the door-passage issue.
+2. Have bot follow; walk through each door in both directions; observe whether stall occurs and at which cell.
+3. If stall happens and cause isn't obvious from log, **re-enable the 1.1.11-style diagnostic first** rather than guessing. The diagnostic caught the pressure plate root cause in one test run.
+
 ## Session Notes 2026-04-11 — Tamed-animal defense (Feature A)
 
 - **New service:** `BotAnimalDefenseService` consolidates owned-animal defense with hostile-forward scan + small reverse watch list. See `docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md` (rev 3) and `docs/superpowers/plans/2026-04-11-tamed-animal-defense.md` for full design + plan.

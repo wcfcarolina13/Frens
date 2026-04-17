@@ -734,6 +734,12 @@ public class FrensClient implements ClientModInitializer {
             context.client().execute(() -> BaseManagerScreen.applyBasesJson(json));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.ID, (payload, context) -> {
+            int current = payload.current();
+            int hardLimit = payload.hardLimit();
+            context.client().execute(() -> net.wcfcarolina13.GraphicalUserInterface.AdminWorldSettingsScreen.pushState(current, hardLimit));
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(CraftingHistoryPayload.ID, (payload, context) -> {
             String json = payload.historyJson();
             context.client().execute(() -> CraftingHistoryScreen.applyHistoryJson(json));

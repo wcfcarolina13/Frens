@@ -771,6 +771,20 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null, null)))
                         )
+	                        .then(literal("ally")
+	                                .then(literal("invite")
+	                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+	                                                .executes(context -> executeAllyInvite(
+	                                                        context,
+	                                                        EntityArgumentType.getPlayer(context, "player")))))
+	                                .then(literal("revoke")
+	                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+	                                                .executes(context -> executeAllyRevoke(
+	                                                        context,
+	                                                        EntityArgumentType.getPlayer(context, "player")))))
+	                                .then(literal("list")
+	                                        .executes(context -> executeAllyList(context)))
+	                        )
 	                        .then(literal("store")
 	                                .then(literal("deposit")
 	                                        .executes(context -> executeStoreDeposit(context, "all", "", getActiveBotOrThrow(context)))
@@ -5928,6 +5942,44 @@ public class modCommandRegistry {
         return 1;
     }
 
+    static int executeFishForget(CommandContext<ServerCommandSource> context) {
+        try {
+            return executeFishForget(context, null);
+        } catch (CommandSyntaxException e) {
+            context.getSource().sendError(net.minecraft.text.Text.literal(e.getMessage()));
+            return 0;
+        }
+    }
+
+    static int executeFishForget(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets;
+        try {
+            targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        } catch (CommandSyntaxException e) {
+            if (targetArg == null) {
+                ServerPlayerEntity active = getActiveBotOrThrow(context);
+                BotTargetingService.remember(context.getSource(), active.getGameProfile().name());
+                targets = List.of(active);
+            } else {
+                throw e;
+            }
+        }
+        int cleared = 0;
+        for (ServerPlayerEntity bot : targets) {
+            net.wcfcarolina13.GameAI.services.FishingSessionService.clearSession(bot.getUuid());
+            SkillResumeService.clearSunriseResume(bot.getUuid());
+            cleared++;
+        }
+        if (!targets.isEmpty()) {
+            boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+            String summary = formatBotList(targets, isAll);
+            String verb = (isAll || targets.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    summary + " " + verb + " forgotten their saved fishing spots. Lodestone compasses are untouched.");
+        }
+        return cleared;
+    }
+
     static int executeDefendTargets(CommandContext<ServerCommandSource> context, String modeRaw, String targetArg) throws CommandSyntaxException {
         boolean enable = parseAssistMode(modeRaw);
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
@@ -8092,6 +8144,78 @@ public class modCommandRegistry {
         Frens.CONFIG.save();
         ChatUtils.sendSystemMessage(context.getSource(), "Set owner of " + alias + " to " + owner.getName().getString());
         return 1;
+    }
+
+    private static int executeAllyInvite(CommandContext<ServerCommandSource> context, ServerPlayerEntity target) throws CommandSyntaxException {
+        ServerPlayerEntity self = context.getSource().getPlayerOrThrow();
+        net.wcfcarolina13.GameAI.services.PlayerAllianceService.InviteResult r =
+                net.wcfcarolina13.GameAI.services.PlayerAllianceService.invite(
+                        self.getUuid().toString(), self.getName().getString(),
+                        target.getUuid().toString(), target.getName().getString());
+        String selfName = self.getName().getString();
+        String targetName = target.getName().getString();
+        switch (r) {
+            case INVITED -> {
+                ChatUtils.sendSystemMessage(context.getSource(), "Sent alliance invitation to " + targetName + ".");
+                ChatUtils.sendSystemMessage(target.getCommandSource(),
+                        selfName + " has invited you to an alliance. Run /bot ally invite " + selfName + " to accept, or /bot ally revoke " + selfName + " to decline.");
+            }
+            case ALLIED_NOW -> {
+                ChatUtils.sendSystemMessage(context.getSource(), "Alliance formed with " + targetName + ".");
+                ChatUtils.sendSystemMessage(target.getCommandSource(), "Alliance formed with " + selfName + ".");
+            }
+            case ALREADY_BONDED -> ChatUtils.sendSystemMessage(context.getSource(),
+                    "You're already allied with " + targetName + ".");
+            case ALREADY_INVITED -> ChatUtils.sendSystemMessage(context.getSource(),
+                    "You've already invited " + targetName + "; awaiting their response.");
+            case SELF -> ChatUtils.sendSystemMessage(context.getSource(), "You can't ally with yourself.");
+            case INVALID -> ChatUtils.sendSystemMessage(context.getSource(), "Couldn't resolve the target player.");
+        }
+        return r == net.wcfcarolina13.GameAI.services.PlayerAllianceService.InviteResult.INVITED
+                || r == net.wcfcarolina13.GameAI.services.PlayerAllianceService.InviteResult.ALLIED_NOW ? 1 : 0;
+    }
+
+    private static int executeAllyRevoke(CommandContext<ServerCommandSource> context, ServerPlayerEntity target) throws CommandSyntaxException {
+        ServerPlayerEntity self = context.getSource().getPlayerOrThrow();
+        net.wcfcarolina13.GameAI.services.PlayerAllianceService.RevokeResult r =
+                net.wcfcarolina13.GameAI.services.PlayerAllianceService.revoke(
+                        self.getUuid().toString(), target.getUuid().toString());
+        String selfName = self.getName().getString();
+        String targetName = target.getName().getString();
+        switch (r) {
+            case BOND_BROKEN -> {
+                ChatUtils.sendSystemMessage(context.getSource(), "Alliance with " + targetName + " ended.");
+                ChatUtils.sendSystemMessage(target.getCommandSource(), "Alliance with " + selfName + " ended.");
+            }
+            case INVITE_CANCELED -> ChatUtils.sendSystemMessage(context.getSource(),
+                    "Canceled alliance invitation with " + targetName + ".");
+            case NOT_FOUND -> ChatUtils.sendSystemMessage(context.getSource(),
+                    "No alliance or pending invitation with " + targetName + ".");
+        }
+        return r == net.wcfcarolina13.GameAI.services.PlayerAllianceService.RevokeResult.NOT_FOUND ? 0 : 1;
+    }
+
+    private static int executeAllyList(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerPlayerEntity self = context.getSource().getPlayerOrThrow();
+        net.wcfcarolina13.GameAI.services.PlayerAllianceService.AllianceSnapshot snap =
+                net.wcfcarolina13.GameAI.services.PlayerAllianceService.snapshot(self.getUuid().toString());
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Allies (" + snap.bonds().size() + "): " + formatAllyList(snap.bonds()));
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Incoming invites (" + snap.incomingInvites().size() + "): " + formatAllyList(snap.incomingInvites()));
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Outgoing invites (" + snap.outgoingInvites().size() + "): " + formatAllyList(snap.outgoingInvites()));
+        return 1;
+    }
+
+    private static String formatAllyList(java.util.List<net.wcfcarolina13.GameAI.services.PlayerAllianceService.NamedUuid> list) {
+        if (list.isEmpty()) return "(none)";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(list.get(i).name());
+        }
+        return sb.toString();
     }
 
     static int executeZoneProtect(CommandContext<ServerCommandSource> context, int radius, String label) throws CommandSyntaxException {

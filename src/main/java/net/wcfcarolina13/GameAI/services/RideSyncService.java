@@ -164,6 +164,13 @@ public final class RideSyncService {
     private static final Map<UUID, Long> BOAT_REMOUNT_SUPPRESS_UNTIL_TICK = new HashMap<>();
     private static final long JOIN_ENCLOSURE_RIDE_GRACE_TICKS = 160L;
 
+    // Per-tick position snapshots used to derive a vehicle's real horizontal speed.
+    // Vanilla AbstractBoatEntity zeroes its server-side velocity every tick when a
+    // player is the controlling passenger (client is authoritative for motion).
+    // That makes Entity#getVelocity() useless here — we must diff position instead.
+    private static final Map<UUID, Vec3d> VEHICLE_LAST_POS = new HashMap<>();
+    private static final Map<UUID, Long>  VEHICLE_LAST_POS_TICK = new HashMap<>();
+
     private enum RideCategory {
         HORSE_LIKE,
         BOAT,
@@ -337,6 +344,40 @@ public final class RideSyncService {
         BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.clear();
         FOLLOW_OVERRIDE_TARGET.clear();
         FOLLOW_OVERRIDE_UNTIL_TICK.clear();
+        VEHICLE_LAST_POS.clear();
+        VEHICLE_LAST_POS_TICK.clear();
+    }
+
+    /**
+     * Estimate a vehicle's horizontal speed (blocks/tick). Player-controlled boats report
+     * {@code getVelocity() == ZERO} on the server because the real client drives them via
+     * {@code MoveVehiclePacket}. Diff the last-seen position to recover the true speed.
+     */
+    private static double estimateVehicleHorizontalSpeed(Entity vehicle, MinecraftServer server) {
+        if (vehicle == null) {
+            return 0.0D;
+        }
+        double serverVel = vehicle.getVelocity().horizontalLength();
+        if (server == null) {
+            return serverVel;
+        }
+        UUID id = vehicle.getUuid();
+        Vec3d currentPos = new Vec3d(vehicle.getX(), vehicle.getY(), vehicle.getZ());
+        long nowTick = server.getTicks();
+        Vec3d prevPos = VEHICLE_LAST_POS.put(id, currentPos);
+        Long prevTick = VEHICLE_LAST_POS_TICK.put(id, nowTick);
+        if (prevPos == null || prevTick == null) {
+            return serverVel;
+        }
+        long dt = nowTick - prevTick;
+        if (dt <= 0L || dt > 5L) {
+            // Stale or same-tick sample: trust whichever is larger between the two readings.
+            return serverVel;
+        }
+        double dx = currentPos.x - prevPos.x;
+        double dz = currentPos.z - prevPos.z;
+        double perTick = Math.sqrt(dx * dx + dz * dz) / dt;
+        return Math.max(serverVel, perTick);
     }
 
     private static void setFollowOverride(ServerPlayerEntity bot, MinecraftServer server, Vec3d targetPos) {
@@ -1059,6 +1100,24 @@ public final class RideSyncService {
 
     private static boolean isChestBoat(Entity entity) {
         return entity instanceof ChestBoatEntity;
+    }
+
+    /**
+     * Whether a boat is safe to break for item reclamation. Chest boats carry
+     * player/bot loot and are never broken. Passenger presence is checked
+     * separately at both queue time and break time.
+     */
+    private static boolean isReclaimableBoat(Entity entity) {
+        return entity instanceof AbstractBoatEntity && !isChestBoat(entity);
+    }
+
+    /**
+     * Whether a minecart is safe to break for item reclamation. Only plain
+     * minecarts (no chest/furnace/hopper/TNT/command-block payload) qualify;
+     * breaking a payload cart would destroy its contents/effect.
+     */
+    private static boolean isReclaimableMinecart(Entity entity) {
+        return entity != null && entity.getType() == EntityType.MINECART;
     }
 
     private static boolean hasNonCommanderPassenger(Entity vehicle, ServerPlayerEntity commander) {
@@ -1974,6 +2033,10 @@ public final class RideSyncService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
+        // Chest boats carry loot and are never broken for reclamation.
+        if (!isReclaimableBoat(vehicle)) {
+            return;
+        }
         UUID commanderId = commander.getUuid();
         Long lostTick = LAST_COMMANDER_BOAT_LOST_TICK.get(commanderId);
         if (lostTick == null) {
@@ -2019,6 +2082,9 @@ public final class RideSyncService {
             }
             Entity boat = world.getEntity(boatId);
             if (boat == null || boat.isRemoved() || boat.hasPassengers()) {
+                continue;
+            }
+            if (!isReclaimableBoat(boat)) {
                 continue;
             }
             if (bot.squaredDistanceTo(boat) > (SEARCH_RADIUS_SQ * 4.0D)) {
@@ -2088,6 +2154,15 @@ public final class RideSyncService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
+        // Payload minecarts (chest/furnace/hopper/TNT/command-block) carry contents
+        // or effects that breaking would destroy. Skip reclamation for those.
+        if (!isReclaimableMinecart(vehicle)) {
+            return;
+        }
+        // Any other passenger aboard → leave the cart alone so we don't strand them.
+        if (vehicle.hasPassengers()) {
+            return;
+        }
         UUID commanderId = commander.getUuid();
         Long lostTick = LAST_COMMANDER_MINECART_LOST_TICK.get(commanderId);
         if (lostTick == null) {
@@ -2143,6 +2218,9 @@ public final class RideSyncService {
             if (cart == null || cart.isRemoved() || cart.hasPassengers()) {
                 continue;
             }
+            if (!isReclaimableMinecart(cart)) {
+                continue;
+            }
             if (bot.squaredDistanceTo(cart) > (SEARCH_RADIUS_SQ * 4.0D)) {
                 continue;
             }
@@ -2172,6 +2250,14 @@ public final class RideSyncService {
             }
             Entity cart = world.getEntity(cartId);
             if (cart == null || cart.isRemoved()) {
+                PENDING_MINECART_BREAK.remove(bot.getUuid());
+                PENDING_MINECART_BREAK_START.remove(bot.getUuid());
+                continue;
+            }
+            // Someone boarded between queue and break — cancel. Reclamation is strictly opt-in.
+            if (cart.hasPassengers()) {
+                LOGGER.info("RideSyncMinecartBreak: bot={} phase=abort-passenger cart={}",
+                        bot.getName().getString(), cartId);
                 PENDING_MINECART_BREAK.remove(bot.getUuid());
                 PENDING_MINECART_BREAK_START.remove(bot.getUuid());
                 continue;
@@ -2609,7 +2695,11 @@ public final class RideSyncService {
                         boatId);
                 continue;
             }
+            // Someone boarded between queue and break — cancel. Reclamation is strictly opt-in.
             if (boat.hasPassengers()) {
+                LOGGER.info("RideSyncBoatBreak: bot={} phase=abort-passenger boat={}",
+                        bot.getName().getString(), boatId);
+                finishBoatBreak(bot, server, "abort-passenger", false);
                 continue;
             }
             if (bot.squaredDistanceTo(boat) > MOUNT_REACH_SQ) {
@@ -2993,36 +3083,36 @@ public final class RideSyncService {
                 }
             }
         }
-        Vec3d commanderVelocity = commanderVehicle.getVelocity();
+        MinecraftServer tickServer = bot.getCommandSource().getServer();
+        double commanderHorizSpeed = estimateVehicleHorizontalSpeed(commanderVehicle, tickServer);
         if (isFollowingCommander(bot, commander) && distSq < desiredSq * 0.95D) {
-            maybeLogRideMovement(bot.getCommandSource().getServer(), bot, commander, commanderVehicle, "backoff", desiredSpace, distSq);
+            maybeLogRideMovement(tickServer, bot, commander, commanderVehicle, "backoff", desiredSpace, distSq);
             driveAway(bot, new Vec3d(commanderVehicle.getX(), commanderVehicle.getY(), commanderVehicle.getZ()), commander.isSprinting());
             forceMoveMount(botVehicle,
                     new Vec3d(botVehicle.getX() + dx, botVehicle.getY(), botVehicle.getZ() + dz),
                     commander.isSprinting(),
-                    commanderVelocity.horizontalLength(),
+                    commanderHorizSpeed,
                     Math.sqrt(distSq));
             return;
         }
         if (isFollowingCommander(bot, commander) && distSq > desiredSq) {
-            maybeLogRideMovement(bot.getCommandSource().getServer(), bot, commander, commanderVehicle, "steer", desiredSpace, distSq);
+            maybeLogRideMovement(tickServer, bot, commander, commanderVehicle, "steer", desiredSpace, distSq);
             driveToward(bot, targetPos, commander.isSprinting());
             forceMoveMount(botVehicle,
                     targetPos,
                     commander.isSprinting(),
-                    commanderVelocity.horizontalLength(),
+                    commanderHorizSpeed,
                     Math.sqrt(distSq));
             return;
         }
-        double horizontal = commanderVelocity.horizontalLength();
-        if (horizontal > 0.05D) {
+        if (commanderHorizSpeed > 0.05D) {
             alignToCommander(bot, commander);
-            maybeLogRideMovement(bot.getCommandSource().getServer(), bot, commander, commanderVehicle, "match-vel", desiredSpace, distSq);
+            maybeLogRideMovement(tickServer, bot, commander, commanderVehicle, "match-vel", desiredSpace, distSq);
             driveToward(bot, targetPos, commander.isSprinting());
             forceMoveMount(botVehicle,
                     targetPos,
                     commander.isSprinting(),
-                    commanderVelocity.horizontalLength(),
+                    commanderHorizSpeed,
                     Math.sqrt(distSq));
         } else if (isFollowingCommander(bot, commander)) {
             dampenVehicle(botVehicle);
@@ -3193,8 +3283,13 @@ public final class RideSyncService {
     }
 
     /**
-     * Nudge boat velocity toward the target and keep paddles active for visuals.
-     * This avoids direct position moves that look tethered.
+     * Drive a bot-controlled boat toward the target. Why this is hand-rolled:
+     * vanilla {@link AbstractBoatEntity#tick()} treats player-controlled boats as
+     * client-authoritative and calls {@code setVelocity(ZERO)} every server tick.
+     * A fake player has no real client to send {@code MoveVehiclePacket}s, so the
+     * boat would just sit still if we relied on setInputs/setVelocity alone.
+     * We therefore translate the boat directly via {@code move(MovementType.SELF, step)}
+     * at a speed keyed to the commander's observed per-tick displacement.
      */
     private static void forceMoveBoat(Entity boatEntity,
                                       Vec3d targetPos,
@@ -3223,28 +3318,26 @@ public final class RideSyncService {
             boat.setInputs(false, false, true, false);
         }
 
-        Vec3d current = boatEntity.getVelocity();
-        Vec3d horiz = new Vec3d(current.x, 0.0D, current.z);
-        double horizSpeed = horiz.length();
-        double baseSpeed = sprint ? 0.45D : 0.35D;
-        double maxSpeed = sprint ? 0.95D : 0.80D;
-        double targetSpeed = Math.max(baseSpeed, commanderSpeed);
+        // Vanilla boat cruise ≈ 0.40 b/t; with a downhill/open-water burst up to ~0.50 b/t.
+        // Keep our step in that envelope so the bot doesn't overshoot vanilla capabilities.
+        double vanillaMax = sprint ? 0.50D : 0.42D;
+        double baseSpeed = sprint ? 0.42D : 0.34D;
+        double stepSpeed = Math.max(baseSpeed, commanderSpeed);
         if (distance > 6.0D) {
-            targetSpeed = Math.max(targetSpeed, commanderSpeed + 0.12D);
+            // Small lead-catch boost when lagging, but never exceed what a real boat could do.
+            stepSpeed = Math.max(stepSpeed, commanderSpeed + 0.05D);
         }
-        targetSpeed = Math.min(targetSpeed, maxSpeed);
-        double dot = horizSpeed > 1.0E-4 ? horiz.normalize().dotProduct(direction) : 0.0D;
-        if (horizSpeed < targetSpeed * 0.95D || dot < 0.7D) {
-            Vec3d next = new Vec3d(direction.x * targetSpeed, current.y, direction.z * targetSpeed);
-            boatEntity.setVelocity(next);
-            boatEntity.velocityDirty = true;
-        }
+        stepSpeed = Math.min(stepSpeed, vanillaMax);
 
-        if (horizSpeed < 0.02D && distance > 4.0D) {
-            double stepSpeed = distance > 10.0D ? 0.24D : 0.18D;
-            Vec3d step = new Vec3d(direction.x * stepSpeed, 0.0D, direction.z * stepSpeed);
-            boatEntity.move(MovementType.SELF, step);
-        }
+        double stepDistance = Math.min(stepSpeed, Math.sqrt(lenSq));
+        Vec3d step = new Vec3d(direction.x * stepDistance, 0.0D, direction.z * stepDistance);
+        boatEntity.move(MovementType.SELF, step);
+
+        // Keep a plausible velocity snapshot for any observers/physics that read it before
+        // vanilla zeroes it next tick. Y preserved so buoyancy keeps working.
+        Vec3d current = boatEntity.getVelocity();
+        boatEntity.setVelocity(direction.x * stepSpeed, current.y, direction.z * stepSpeed);
+        boatEntity.velocityDirty = true;
     }
 
     /**

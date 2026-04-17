@@ -500,6 +500,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         COOKING,
         HUNTING,
         SKILL_FISH,
+        SKILL_FISH_FORGET,
         SKILL_WOODCUT,
         SKILL_WOODCUT_CLEANUP,
         SKILL_WOOL,
@@ -516,6 +517,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_LEAF_LITTER,
         OPEN_BOT_CONTROLS,
         OPEN_PLAYER_SETTINGS,
+        OPEN_WORLD_SETTINGS,
         ADMIN_PREVIEW_NON_ADMIN,
         AUTONOMOUS_RESCUES,
         OWNED_SUNSET_SS,
@@ -623,6 +625,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             TopicEntry.skillHeader("Skills"),
             TopicEntry.skill("Fishing", TopicAction.SKILL_FISH, false, 0),
+            TopicEntry.skill("Forget Spot", TopicAction.SKILL_FISH_FORGET, false, 1),
             TopicEntry.skill("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             TopicEntry.skill("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             TopicEntry.skill("Wool", TopicAction.SKILL_WOOL, false, 0),
@@ -683,6 +686,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 TopicEntry.adminHeader("🧭 Controls"),
                 new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null),
                 new TopicEntry("Player Permissions >", TopicCategory.ADMIN, TopicAction.OPEN_PLAYER_SETTINGS, false, 0, null),
+                new TopicEntry("World Settings >", TopicCategory.ADMIN, TopicAction.OPEN_WORLD_SETTINGS, false, 0, null),
                 new TopicEntry("Preview as Non-Admin", TopicCategory.ADMIN, TopicAction.ADMIN_PREVIEW_NON_ADMIN, true, 0, null),
 
                 TopicEntry.adminHeader("🧙 Magic & Skins"),
@@ -3673,6 +3677,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case QUICK_STORE -> "📥";
             case QUICK_FETCH -> "📤";
             case SKILL_FISH -> "🎣";
+            case SKILL_FISH_FORGET -> "✗";
             case SKILL_WOODCUT -> "🪓";
             case SKILL_WOODCUT_CLEANUP -> "•";
             case SKILL_WOOL -> "✂";
@@ -3948,6 +3953,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Admins only."
                 );
             }
+            if (entry.action == TopicAction.OPEN_WORLD_SETTINGS) {
+                return java.util.List.of(
+                        "World Settings",
+                        "Server-wide knobs: max user-settable base radius, etc.",
+                        "Admins only."
+                );
+            }
             if (entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
                 return java.util.List.of(
                         "Preview as Non-Admin",
@@ -4215,6 +4227,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Fishing",
                 "Casts and catches fish from a nearby shoreline.",
                 "Set a catch target, or leave it at the default to fish until sunset."
+            );
+            case SKILL_FISH_FORGET -> java.util.List.of(
+                "Forget Fishing Spot",
+                "Clears the bot's saved fishing stand and sunrise-resume record.",
+                "Use this if the bot keeps fast-travelling back to a bad spot each morning.",
+                "Lodestone compasses are untouched — the next /bot fish still routes to the nearest compass."
             );
             case SKILL_WOODCUT_CLEANUP -> java.util.List.of(
                 "Woodcut Cleanup",
@@ -4886,6 +4904,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
+            case OPEN_WORLD_SETTINGS -> openAdminWorldSettings();
             case ADMIN_PREVIEW_NON_ADMIN -> toggleAdminPreviewAsNonAdmin();
             case AUTONOMOUS_RESCUES -> toggleAutonomousRescues();
             case OWNED_SUNSET_SS -> toggleOwnedSunsetSelfSufficientBulk();
@@ -4929,6 +4948,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case STORAGE -> openStorageMenu();
             case CONSTRUCTION -> openConstructionMenu();
             case SKILL_FISH -> runFishSkillCommand();
+            case SKILL_FISH_FORGET -> runFishForgetCommand();
             case SKILL_WOODCUT -> runWoodcutSkillCommand();
             case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
             case SKILL_WOOL -> runWoolSkillCommand();
@@ -5108,7 +5128,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         boolean isAdmin = isAdminUser();
-        if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+        if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS
+                || entry.action == TopicAction.OPEN_WORLD_SETTINGS
+                || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
             return isAdmin;
         }
 
@@ -5543,6 +5565,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         runSkillCommand("fish", arg);
     }
 
+    private void runFishForgetCommand() {
+        sendChatCommand("bot fish forget " + formatBotTarget());
+        this.close();
+    }
+
     private void runWoolSkillCommand() {
         String arg = woolTargetCount > 0 ? Integer.toString(woolTargetCount) : null;
         if (woolSearchRange != SKILL_WOOL_RANGE_DEFAULT) {
@@ -5754,6 +5781,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             boolean show;
             if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS
+                    || entry.action == TopicAction.OPEN_WORLD_SETTINGS
                     || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN
                     || entry.action == TopicAction.AUTONOMOUS_RESCUES) {
                 show = isAdmin;
@@ -6386,6 +6414,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         requestAdminPermissionsSnapshot(this.botAlias);
         this.client.setScreen(new AdminPlayerSettingsScreen(this, this.botAlias));
+    }
+
+    private void openAdminWorldSettings() {
+        if (this.client == null || !isAdminUser()) {
+            return;
+        }
+        this.client.setScreen(new AdminWorldSettingsScreen(this));
     }
 
     private void toggleAdminPreviewAsNonAdmin() {

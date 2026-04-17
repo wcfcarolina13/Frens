@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.state.property.Properties;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
@@ -143,6 +144,16 @@ public class BotEventHandler {
     private static final int FOLLOW_TELEPORT_STUCK_TICKS = 30; // ~1.5 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
+    // Door-plan stuck abort: if bot's block hasn't changed in this many ticks, give up on the
+    // door plan and let generic follow (direct pursuit / wolf-teleport) take over. Larger than
+    // normal walking-through-door transit time so we don't false-trigger while the bot is
+    // actively moving through the doorway (a 1-block transit takes ~5-8 ticks at follow speed).
+    private static final int  FOLLOW_DOOR_STUCK_ABORT_TICKS = 24;
+    private static final long FOLLOW_DOOR_ABORT_AVOID_MS = 12_000L;
+    // Stuck-jump trigger: after ~0.4s of no block-position change while ticking a door plan,
+    // force a jump each tick. Slabs/stairs/trapdoors at head level block horizontal motion
+    // but are cleared by a simple hop. Same remedy as commander's own jump nudging the bot.
+    private static final int  FOLLOW_DOOR_STUCK_JUMP_TICKS = 8;
     private static final double COME_REACHABILITY_PROBE_RANGE_SQ = 32.0D * 32.0D;
     private static final long COME_REACHABILITY_PROBE_TIMEOUT_MS = 60L;
     private static final long COME_REACHABILITY_PROBE_COOLDOWN_TICKS = 80L;
@@ -4266,12 +4277,22 @@ public class BotEventHandler {
         boolean clearRoute = fixedGoalActive ? !commanderRouteBlocked : (canSee && !commanderRouteBlocked);
         if (clearRoute) {
             if (!botSealed && !commanderSealed) {
+                // Door-plan scratch state is raycast-scoped — dropping it is fine, it'll
+                // rebuild next tick if the bot encounters another door. But FOLLOW_WAYPOINTS
+                // is the pathfinder's considered plan, produced by cell-by-cell analysis
+                // that is geometrically stronger than this 2-height raycast. A raycast can
+                // miss thin door panels, stair corners, and box-boundary precision issues
+                // that the pathfinder caught. Discarding the plan on a raycast-only signal
+                // drops the bot into direct-pursuit (followInputStep), which has no obstacle
+                // awareness and freezes on the very wedges the pathfinder routed around.
+                // Keep the waypoints; let them be consumed naturally as the bot progresses.
+                // The commander-moved replan guard in maybeRequestFollowPathPlan handles
+                // stale plans when the commander relocates.
                 FOLLOW_DOOR_PLAN.remove(id);
                 FOLLOW_DOOR_LAST_BLOCK.remove(id);
                 FOLLOW_DOOR_STUCK_TICKS.remove(id);
                 FOLLOW_DOOR_RECOVERY.remove(id);
-                FOLLOW_WAYPOINTS.remove(id);
-                maybeLogFollowDecision(bot, "commander-route clear: dist="
+                maybeLogFollowDecision(bot, "commander-route clear (waypoints preserved): dist="
                         + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
                 return false;
             } else {
@@ -4460,6 +4481,13 @@ public class BotEventHandler {
                         if (directBlocked) {
                             FollowDoorPlan plan = buildFollowDoorPlan(bot, world, candidate);
                             if (plan != null) {
+                                BlockPos goalForCheck = target != null ? target.getBlockPos() : navGoalBlock;
+                                if (isDoorPlanWrongSide(plan.approachPos(), plan.stepThroughPos(), goalForCheck)) {
+                                    avoidDoorFor(id, plan.doorBase(), 5_000L, "wrong-side-of-door");
+                                    maybeLogFollowDecision(bot, "skip-door-adjacent: wrong side doorBase="
+                                            + plan.doorBase().toShortString());
+                                    break;
+                                }
                                 FOLLOW_DOOR_PLAN.put(id, plan);
                                 maybeLogFollowDecision(bot, "door-adjacent: plan doorBase=" + plan.doorBase().toShortString()
                                         + " approach=" + plan.approachPos().toShortString()
@@ -4511,6 +4539,12 @@ public class BotEventHandler {
                         escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, escape.doorBase());
                     }
                     if (escape != null && (targetDistSq < 900.0D || !MovementService.isDoorRecentlyClosed(id, escape.doorBase()))) {
+                        BlockPos goalForCheck = target != null ? target.getBlockPos() : navGoalBlock;
+                        if (isDoorPlanWrongSide(escape.approachPos(), escape.stepThroughPos(), goalForCheck)) {
+                            avoidDoorFor(id, escape.doorBase(), 5_000L, "wrong-side-of-door");
+                            maybeLogFollowDecision(bot, "skip-door-escape: wrong side doorBase="
+                                    + escape.doorBase().toShortString());
+                        } else {
                         // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
                         long doorTimeout = fixedGoalActive ? 10_000L : 5_000L;
                         FollowDoorPlan plan = new FollowDoorPlan(
@@ -4527,6 +4561,7 @@ public class BotEventHandler {
                                 + " approach=" + plan.approachPos().toShortString()
                                 + " step=" + plan.stepThroughPos().toShortString());
                         return true;
+                        }
                     }
                 }
                 if (fixedGoalActive && navGoalBlock != null) {
@@ -4560,6 +4595,13 @@ public class BotEventHandler {
                 if (bot.getEntityWorld() instanceof ServerWorld world) {
                     FollowDoorPlan plan = buildFollowDoorPlan(bot, world, blockingDoor);
                     if (plan != null) {
+                        BlockPos goalForCheck = target != null ? target.getBlockPos() : navGoalBlock;
+                        if (isDoorPlanWrongSide(plan.approachPos(), plan.stepThroughPos(), goalForCheck)) {
+                            avoidDoorFor(id, plan.doorBase(), 5_000L, "wrong-side-of-door");
+                            maybeLogFollowDecision(bot, "skip-door-ray: wrong side doorBase="
+                                    + plan.doorBase().toShortString());
+                            return false;
+                        }
                         FOLLOW_DOOR_PLAN.put(id, plan);
                         maybeLogFollowDecision(bot, "door-ray: hit=" + blockingDoor.toShortString()
                                 + " plan doorBase=" + plan.doorBase().toShortString()
@@ -4625,8 +4667,18 @@ public class BotEventHandler {
 	                }
 	                if (plan != null) {
 	                    BlockPos lastDoor = FOLLOW_LAST_DOOR_BASE.get(id);
-	                    if (lastDoorMs >= 0 && lastDoor != null && lastDoor.equals(plan.doorBase()) && (System.currentTimeMillis() - lastDoorMs) < 4_500L) {
-	                        // Avoid immediate oscillation back through the same door we just crossed.
+	                    boolean sameDoorOscillation = lastDoorMs >= 0
+	                            && lastDoor != null
+	                            && lastDoor.equals(plan.doorBase())
+	                            && (System.currentTimeMillis() - lastDoorMs) < 4_500L;
+	                    BlockPos goalForCheck = target != null ? target.getBlockPos() : goalBlock;
+	                    boolean wrongSideOfDoor = isDoorPlanWrongSide(plan.approachPos(), plan.stepThroughPos(), goalForCheck);
+	                    if (sameDoorOscillation || wrongSideOfDoor) {
+	                        if (wrongSideOfDoor) {
+	                            avoidDoorFor(id, plan.doorBase(), 5_000L, "wrong-side-of-door");
+	                            maybeLogFollowDecision(bot, "skip-door: bot already past door on commander's side doorBase="
+	                                    + plan.doorBase().toShortString());
+	                        }
 	                    } else {
                         // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
                         long doorTimeout = fixedGoalActive ? 10_000L : 4_000L;
@@ -4719,6 +4771,35 @@ public class BotEventHandler {
         return dx * dx + dz * dz;
     }
 
+    /**
+     * Villager-inspired sanity check: the bot should never commit to a door plan that would push
+     * it further from its goal. If {@code approachPos} (bot's current side of the door) is already
+     * closer to {@code goalBlock} than {@code stepPos} (the other side) is, the door is BEHIND the
+     * bot relative to its goal — crossing it would be backwards. Applied to every door-plan
+     * creation site so a single missed check can't reintroduce the mirror-image oscillation.
+     */
+    private static boolean isDoorPlanWrongSide(BlockPos approachPos, BlockPos stepPos, BlockPos goalBlock) {
+        if (approachPos == null || stepPos == null || goalBlock == null) {
+            return false;
+        }
+        double approachToGoalSq = approachPos.getSquaredDistance(goalBlock);
+        double stepToGoalSq = stepPos.getSquaredDistance(goalBlock);
+        return approachToGoalSq <= stepToGoalSq;
+    }
+
+    private static boolean isOpenOpenable(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (!state.contains(Properties.OPEN) || !Boolean.TRUE.equals(state.get(Properties.OPEN))) {
+            return false;
+        }
+        var block = state.getBlock();
+        return block instanceof DoorBlock
+                || block instanceof FenceGateBlock
+                || block instanceof TrapdoorBlock;
+    }
+
     private static boolean isDirectRouteBlocked(ServerPlayerEntity bot, Vec3d goalPos, BlockPos goalBlock) {
         if (bot == null || goalPos == null) {
             return false;
@@ -4747,6 +4828,14 @@ public class BotEventHandler {
                         bot
                 ));
                 if (hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult bhr)) {
+                    continue;
+                }
+                // Open doors/gates/trapdoors present a small OUTLINE shape that the raycast may
+                // clip, even though the passage is physically clear. Vanilla villagers route
+                // through open doors as a normal path node — so should we. If the ray only hit
+                // open openables, don't treat the route as blocked.
+                BlockState hitState = world.getBlockState(bhr.getBlockPos());
+                if (isOpenOpenable(hitState)) {
                     continue;
                 }
                 anyRayHit = true;
@@ -4876,15 +4965,18 @@ public class BotEventHandler {
         }
         BlockState doorState = world.getBlockState(doorBase);
 
-        // If we are near the door and it's closed, try opening it even before we perfectly reach the
-        // approach cell. This reduces "push into door" stalls when alignment is imperfect.
+        // Keep the door open for the ENTIRE plan, not just the approach phase. If the door
+        // auto-closed or the initial open was throttled, re-open each tick while within range.
+        // Villager-inspired: they interact opportunistically, not as a one-shot phase gate.
         boolean doorOpen = doorState.contains(Properties.OPEN)
             && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
-        if (!plan.stepping() && !doorOpen) {
+        if (!doorOpen) {
             double doorDistSq = bot.squaredDistanceTo(Vec3d.ofCenter(doorBase));
-            if (doorDistSq <= 4.0D) { // ~2 blocks
+            if (doorDistSq <= 4.0D) {
                 MovementService.tryOpenDoorAt(bot, doorBase);
                 doorState = world.getBlockState(doorBase);
+                doorOpen = doorState.contains(Properties.OPEN)
+                        && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
             }
         }
 
@@ -4899,10 +4991,44 @@ public class BotEventHandler {
         boolean sprint = distSq > FOLLOW_SPRINT_DISTANCE_SQ;
         LookController.faceBlock(bot, goal);
         BotActions.sprint(bot, sprint);
-        BotActions.autoJumpIfNeeded(bot);
+        // User-observed asymmetry: the bot passes through doors reliably when the commander
+        // is elevated (dy > 0.6 triggers an unconditional jump in applyHumanLikeForwardInput),
+        // but stalls on level ground because BotActions.autoJumpIfNeeded explicitly skips
+        // door cells ("doors handled elsewhere") and the headSpace probe rejects the door's
+        // 3-pixel upper-half strip. Force a jump while the plan is actively stepping through
+        // an open doorway — it lifts the bot over any pressure plate / rail / threshold
+        // collision sitting inside or adjacent to the door frame. Matches vanilla villager
+        // behavior: they don't hesitate at doorways they're actively crossing.
+        // Force a jump during two door-plan scenarios that otherwise stall the bot on
+        // head/torso-level partial blocks (slabs, stairs, trapdoors, signs, etc. — the
+        // tower interior in screenshot 1 has stone brick stairs that partially overhang
+        // the doorway threshold). Vanilla autoJumpIfNeeded explicitly skips door cells
+        // and its headSpace probe rejects any head-cell with non-empty collision, so it
+        // can't help here.
+        //   (a) Stepping through an open door — matches the 1.1.9 fix, lifts bot over
+        //       the door's 3-pixel leaf collision and any pressure plate at the threshold.
+        //   (b) Approaching or stepping but stuck ≥ 8 ticks — a diagnostic timing: the
+        //       user's observation is "bot unsticks when I jump a couple times" (commander
+        //       Y > 0.6 triggers dy-based jump in applyHumanLikeForwardInput, which works).
+        //       Trigger the same jump automatically when stagnant near the doorway.
+        boolean steppingThroughOpenDoor = plan.stepping() && doorOpen;
+        int currentStuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
+        boolean stuckNearDoorway = currentStuck >= FOLLOW_DOOR_STUCK_JUMP_TICKS;
+        if ((steppingThroughOpenDoor || stuckNearDoorway) && bot.isOnGround()) {
+            BotActions.jump(bot);
+        } else {
+            BotActions.autoJumpIfNeeded(bot);
+        }
         BotActions.applyMovementInput(bot, goalCenter, sprint ? 0.18 : 0.14);
 
-        // If we're stuck on a doorway threshold, apply a small lateral nudge to re-align.
+        // Stuck tracking: bot's BlockPos hasn't changed in N ticks.
+        // Villager learning: when stuck, vanilla mob AI cancels/replans — it never retreats
+        // back through the door it's trying to cross. The old "door-recovery" retreated the
+        // bot 2-3 blocks AWAY from the door, which created the follow-mode oscillation the
+        // user observed. Old retreat logic was originally added for shelter-escape scenarios
+        // where a trapped bot needed to back out of a corner to find an exit door; that use
+        // case will need its own, separate handling (see construction-era context), but it
+        // should not live in the general follow-mode door plan path.
         BlockPos curBlock = bot.getBlockPos();
         BlockPos prev = FOLLOW_DOOR_LAST_BLOCK.get(botId);
         int stuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
@@ -4913,124 +5039,24 @@ public class BotEventHandler {
             FOLLOW_DOOR_LAST_BLOCK.put(botId, curBlock.toImmutable());
         }
         FOLLOW_DOOR_STUCK_TICKS.put(botId, stuck);
-        if (stuck >= 8) {
-            // When blocked by a doorway/fence corner, attempt short, local repositioning moves.
-            // Choosing recovery relative to the current block works better than using only the approach block.
-            BlockPos cur = bot.getBlockPos();
-            Direction towardGoal = approximateToward(cur, goal);
-            if (!towardGoal.getAxis().isHorizontal()) {
-                towardGoal = bot.getHorizontalFacing();
-            }
-
-            ArrayList<BlockPos> candidates = new ArrayList<>(10);
-
-            // Prefer a true “double back” on the approach side (more reliable than tiny nudges).
-            Direction awayFromDoor = Direction.getFacing(
-                    approachPos.getX() - doorBase.getX(),
-                    0,
-                    approachPos.getZ() - doorBase.getZ());
-            if (awayFromDoor.getAxis().isHorizontal()) {
-                BlockPos retreat2 = doorBase.offset(awayFromDoor, 2);
-                BlockPos retreat3 = doorBase.offset(awayFromDoor, 3);
-                if (isStandable(world, retreat2)) {
-                    FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat2.toImmutable(), 14));
-                    FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
-                    BotActions.stop(bot);
-                    maybeLogFollowDecision(bot, "door-recovery: goal=" + retreat2.toShortString()
-                            + " doorBase=" + doorBase.toShortString()
-                            + " stepping=" + plan.stepping());
-                    Vec3d retreatCenter = Vec3d.ofCenter(retreat2);
-                    LookController.faceBlock(bot, retreat2);
-                    BotActions.applyMovementInput(bot, retreatCenter, 0.14);
-                    return true;
-                }
-                if (isStandable(world, retreat3)) {
-                    FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat3.toImmutable(), 16));
-                    FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
-                    BotActions.stop(bot);
-                    maybeLogFollowDecision(bot, "door-recovery: goal=" + retreat3.toShortString()
-                            + " doorBase=" + doorBase.toShortString()
-                            + " stepping=" + plan.stepping());
-                    Vec3d retreatCenter = Vec3d.ofCenter(retreat3);
-                    LookController.faceBlock(bot, retreat3);
-                    BotActions.applyMovementInput(bot, retreatCenter, 0.14);
-                    return true;
-                }
-                candidates.add(doorBase.offset(awayFromDoor, 2).offset(awayFromDoor.rotateYClockwise()));
-                candidates.add(doorBase.offset(awayFromDoor, 2).offset(awayFromDoor.rotateYCounterclockwise()));
-            }
-
-            // Fallback: local sidesteps/backstep (clears hinge/fence corners).
-            candidates.add(cur.offset(towardGoal.getOpposite()));
-            candidates.add(cur.offset(towardGoal.rotateYClockwise()));
-            candidates.add(cur.offset(towardGoal.rotateYCounterclockwise()));
-
-            double bestDist = Double.MAX_VALUE;
-            BlockPos best = null;
-            for (BlockPos c : candidates) {
-                if (c == null || !isStandable(world, c)) {
-                    continue;
-                }
-                double d = c.getSquaredDistance(goal);
-                if (d < bestDist) {
-                    bestDist = d;
-                    best = c.toImmutable();
-                }
-            }
-
-            if (best != null) {
-                FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(best, 12));
-                FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
-                BotActions.stop(bot);
-                maybeLogFollowDecision(bot, "door-recovery: goal=" + best.toShortString()
-                        + " toward=" + towardGoal
-                        + " doorBase=" + doorBase.toShortString()
-                        + " stepping=" + plan.stepping());
-                Vec3d bestCenter = Vec3d.ofCenter(best);
-                LookController.faceBlock(bot, best);
-                BotActions.applyMovementInput(bot, bestCenter, 0.14);
-                return true;
-            }
-
-            // If we can't find any safe local reposition, stop committing to this door plan.
-            if (stuck >= 16) {
-                maybeLogFollowDecision(bot, "door-plan abort: stuck=" + stuck
-                        + " doorBase=" + doorBase.toShortString()
-                        + " goal=" + goal.toShortString()
-                        + " stepping=" + plan.stepping());
-                avoidDoorFor(botId, doorBase, 2_000L, "door-plan-abort");
-                FOLLOW_DOOR_PLAN.remove(botId);
-                FOLLOW_DOOR_LAST_BLOCK.remove(botId);
-                FOLLOW_DOOR_STUCK_TICKS.remove(botId);
-                FOLLOW_DOOR_RECOVERY.remove(botId);
-                return false;
-            }
+        if (stuck >= FOLLOW_DOOR_STUCK_ABORT_TICKS) {
+            maybeLogFollowDecision(bot, "door-plan abort: stuck=" + stuck
+                    + " doorBase=" + doorBase.toShortString()
+                    + " goal=" + goal.toShortString()
+                    + " stepping=" + plan.stepping());
+            avoidDoorFor(botId, doorBase, FOLLOW_DOOR_ABORT_AVOID_MS, "door-plan-stuck-abort");
+            FOLLOW_DOOR_PLAN.remove(botId);
+            FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+            FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+            FOLLOW_DOOR_RECOVERY.remove(botId);
+            return false;
         }
 
         if (distSq <= 2.25D) {
             if (!plan.stepping()) {
-            boolean isOpen = doorState.contains(Properties.OPEN)
-                && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
-                // Always invoke the door helper here:
-                // - if the door is closed, this opens it
-                // - if the door is already open, this schedules an auto-close behind the bot
-                boolean opened = MovementService.tryOpenDoorAt(bot, doorBase) || isOpen;
-                if (!opened) {
-                    // Don't commit to stepping through a door we couldn't open; instead, try to re-approach
-                    // for a better interaction angle.
-                    if (!FOLLOW_DOOR_RECOVERY.containsKey(botId)) {
-                        Direction away = Direction.getFacing(
-                                approachPos.getX() - doorBase.getX(),
-                                0,
-                                approachPos.getZ() - doorBase.getZ());
-                        if (away.getAxis().isHorizontal()) {
-                            BlockPos retreat = approachPos.offset(away).offset(away);
-                            if (isStandable(world, retreat)) {
-                                FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat.toImmutable(), 10));
-                            }
-                        }
-                    }
-                    maybeLogFollowDecision(bot, "door-open failed: doorBase=" + doorBase.toShortString());
+                // Only flip to stepping when the door is confirmed open. The tick-loop
+                // door-open above handles retries; we just check the result here.
+                if (!doorOpen) {
                     return true;
                 }
                 FOLLOW_DOOR_PLAN.put(botId, new FollowDoorPlan(

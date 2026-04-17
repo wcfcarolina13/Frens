@@ -492,6 +492,9 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRemovePayload.ID, net.wcfcarolina13.network.BaseRemovePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRenamePayload.ID, net.wcfcarolina13.network.BaseRenamePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetRadiusPayload.ID, net.wcfcarolina13.network.BaseSetRadiusPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.AdminMaxBaseRadiusPayload.ID, net.wcfcarolina13.network.AdminMaxBaseRadiusPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.ID, net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetOwnerPayload.ID, net.wcfcarolina13.network.BaseSetOwnerPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetHomePayload.ID, net.wcfcarolina13.network.BaseSetHomePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGoToPayload.ID, net.wcfcarolina13.network.BaseGoToPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseMapVillagePayload.ID, net.wcfcarolina13.network.BaseMapVillagePayload.CODEC);
@@ -701,6 +704,17 @@ public class Frens implements ModInitializer {
             LOGGER.info("Server instance stored!");
 
             System.out.println("Server instance is " + serverInstance);
+
+            // Seed the server-owned "Spawn" base on first start of each world. Idempotent per
+            // world — if an admin deletes it later, the sticky flag keeps us from recreating it.
+            for (net.minecraft.server.world.ServerWorld w : server.getWorlds()) {
+                try {
+                    net.wcfcarolina13.GameAI.services.BotHomeService.initializeSpawnBaseIfNeeded(server, w);
+                } catch (Throwable t) {
+                    LOGGER.warn("Spawn-base auto-seed failed for world {}: {}",
+                            w.getRegistryKey().getValue(), t.getMessage());
+                }
+            }
 
             enqueueBertLoad();
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);

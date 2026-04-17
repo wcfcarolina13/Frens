@@ -56,6 +56,7 @@ public final class FollowStateService {
     public static final Map<UUID, Long> FOLLOW_SEALED_STATE_MS = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_REPLAN_AFTER_DOOR_MS = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS = new ConcurrentHashMap<>();
+    public static final Map<UUID, Long> FOLLOW_DOOR_DIAG_LOG_MS = new ConcurrentHashMap<>();
     public static final Map<UUID, BlockPos> FOLLOW_DOOR_LAST_BLOCK = new ConcurrentHashMap<>();
     public static final Map<UUID, Integer> FOLLOW_DOOR_STUCK_TICKS = new ConcurrentHashMap<>();
     public static final Map<UUID, Integer> FOLLOW_DIRECT_BLOCKED_TICKS = new ConcurrentHashMap<>();
