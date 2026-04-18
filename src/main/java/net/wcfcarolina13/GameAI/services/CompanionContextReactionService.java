@@ -6,6 +6,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.mob.CreeperEntity;
+import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.WardenEntity;
 import net.minecraft.entity.passive.ChickenEntity;
@@ -117,6 +118,10 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] UNDERGROUND_LINES = new WeightedLine[] {
             new WeightedLine("underground_yearn_mines", "I yearn for the mines.", BotDialogueSounds.LINE_UNDERGROUND_YEARN_MINES, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] ENDERMAN_SPOTTED_LINES = new WeightedLine[] {
+            new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
     };
 
     private static final WeightedLine[] DIG_DOWN_LINES = new WeightedLine[] {
@@ -367,6 +372,7 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("follow_ack", 30_000L);
         TRIGGER_COOLDOWN_MS.put("stop_ack", 30_000L);
         TRIGGER_COOLDOWN_MS.put("commander_staring", COOLDOWN_META_MS);
+        TRIGGER_COOLDOWN_MS.put("enderman_spotted", COOLDOWN_180S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -445,6 +451,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryCommanderStaring(bot, world, state, nowTick)) {
+                continue;
+            }
+            if (tryEndermanSpotted(bot, world, state)) {
                 continue;
             }
         }
@@ -1017,6 +1026,27 @@ public final class CompanionContextReactionService {
         if (world.isSkyVisible(bot.getBlockPos().up())) return false;
         if (RNG.nextDouble() > 0.012D) return false;
         return tryTrigger(bot, "underground_mines", UNDERGROUND_LINES, null, false);
+    }
+
+    /** Fires enderman_spotted_dont_look when a live enderman is within 16 blocks
+     *  and roughly in the bot's forward cone. Cooldown-throttled to 3 min so the
+     *  bot doesn't spam the line while near a nest. */
+    private static boolean tryEndermanSpotted(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(16.0D, 8.0D, 16.0D);
+        List<EndermanEntity> endermen = world.getEntitiesByClass(
+                EndermanEntity.class, box, e -> e != null && e.isAlive());
+        if (endermen.isEmpty()) return false;
+        boolean anyInForwardCone = false;
+        for (EndermanEntity end : endermen) {
+            if (isEntityFacing(bot, end)) {
+                anyInForwardCone = true;
+                break;
+            }
+        }
+        if (!anyInForwardCone) return false;
+        if (RNG.nextDouble() > 0.06D) return false;
+        return tryTrigger(bot, "enderman_spotted", ENDERMAN_SPOTTED_LINES, null, false);
     }
 
     /** Fires meta_stop_looking only after the commander has been staring at the
