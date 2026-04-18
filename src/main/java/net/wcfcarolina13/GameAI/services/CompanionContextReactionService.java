@@ -5,6 +5,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.TntEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HostileEntity;
@@ -95,6 +96,10 @@ public final class CompanionContextReactionService {
         /** Accumulated ticks of continuous commander-looking-at-bot since solicitation.
          *  Reaches 60 (3 s) → fires "I'm the captain now." */
         int endShipLookingTicks = 0;
+        /** TNT-proximity plea sequence. -1 = idle; 0..3 = next line index to fire. */
+        int tntSequenceIndex = -1;
+        /** Tick when the last TNT plea line was fired; used to space lines ~1 s apart. */
+        long tntLastLineTick = 0L;
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -128,6 +133,15 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] ENDERMAN_SPOTTED_LINES = new WeightedLine[] {
             new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
+    };
+
+    // TNT-proximity sequence — 4 escalating pleas, fired in order ~1 s apart
+    // while the bot is near primed TNT and the commander is watching.
+    private static final WeightedLine[] TNT_SEQUENCE_LINES = new WeightedLine[] {
+            new WeightedLine("tnt_wouldnt", "You wouldn't.", BotDialogueSounds.LINE_TNT_WOULDNT, WEIGHT_COMMON),
+            new WeightedLine("tnt_wont", "You won't.", BotDialogueSounds.LINE_TNT_WONT, WEIGHT_COMMON),
+            new WeightedLine("tnt_talk_over", "Come on, let's talk this over.", BotDialogueSounds.LINE_TNT_TALK_OVER, WEIGHT_COMMON),
+            new WeightedLine("tnt_terminator", "I promise I won't make any more Terminator jokes.", BotDialogueSounds.LINE_TNT_TERMINATOR, WEIGHT_COMMON)
     };
 
     // End-ship "captain now" sequence — 3-stage conditional gag. Initial
@@ -399,6 +413,10 @@ public final class CompanionContextReactionService {
         // gated by the state machine anyway.
         TRIGGER_COOLDOWN_MS.put("end_ship_captain", 5_000L);
         TRIGGER_COOLDOWN_MS.put("end_ship_ruined_joke", 5_000L);
+        // TNT plea cooldowns: the sequence itself is long-cooldowned; individual
+        // line cooldowns are short because the sequence paces them.
+        TRIGGER_COOLDOWN_MS.put("tnt_sequence_start", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("tnt_sequence_step", 500L);
     }
 
     private CompanionContextReactionService() {
@@ -483,6 +501,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
+                continue;
+            }
+            if (tryTntSequence(bot, world, state, nowTick)) {
                 continue;
             }
         }
@@ -1055,6 +1076,75 @@ public final class CompanionContextReactionService {
         if (world.isSkyVisible(bot.getBlockPos().up())) return false;
         if (RNG.nextDouble() > 0.012D) return false;
         return tryTrigger(bot, "underground_mines", UNDERGROUND_LINES, null, false);
+    }
+
+    /**
+     * TNT-proximity plea sequence. When the bot is stationary near primed
+     * TNT and the commander is watching (facing the TNT or the bot), the
+     * bot fires four escalating lines paced ~1 s apart:
+     *
+     * <ol>
+     *   <li>"You wouldn't."</li>
+     *   <li>"You won't."</li>
+     *   <li>"Come on, let's talk this over."</li>
+     *   <li>"I promise I won't make any more Terminator jokes."</li>
+     * </ol>
+     *
+     * If the TNT despawns (explodes) mid-sequence the rest of the lines are
+     * cancelled. The whole sequence is 5 min-cooldown to avoid spam on
+     * TNT-heavy builds.
+     */
+    private static boolean tryTntSequence(ServerPlayerEntity bot, ServerWorld world, TriggerState state, long nowTick) {
+        if (state.tntSequenceIndex >= 0) {
+            // Sequence in flight — pace subsequent lines ~1 s apart.
+            if (nowTick - state.tntLastLineTick < 20L) return true;
+            if (state.tntSequenceIndex >= TNT_SEQUENCE_LINES.length) {
+                state.tntSequenceIndex = -1;
+                return false;
+            }
+            if (!hasPrimedTntNear(bot, world, 10.0)) {
+                // TNT gone (exploded / removed) — bail.
+                state.tntSequenceIndex = -1;
+                return false;
+            }
+            String lineId = TNT_SEQUENCE_LINES[state.tntSequenceIndex].id;
+            if (tryTrigger(bot, "tnt_sequence_step", TNT_SEQUENCE_LINES, lineId, false)) {
+                state.tntSequenceIndex++;
+                state.tntLastLineTick = nowTick;
+            }
+            return true;
+        }
+
+        // Entry: bot stationary, primed TNT nearby, commander aware.
+        if (bot.hasVehicle()) return false;
+        if (bot.getVelocity().lengthSquared() > 0.04D) return false;
+        if (!hasPrimedTntNear(bot, world, 10.0)) return false;
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 24.0);
+        if (commander == null) return false;
+        if (!isCommanderWatchingTnt(commander, bot, world)) return false;
+
+        // Fire first line with the 5-minute start cooldown.
+        WeightedLine[] firstOnly = new WeightedLine[] { TNT_SEQUENCE_LINES[0] };
+        if (!tryTrigger(bot, "tnt_sequence_start", firstOnly, null, false)) {
+            return false;
+        }
+        state.tntSequenceIndex = 1;
+        state.tntLastLineTick = nowTick;
+        return true;
+    }
+
+    private static boolean hasPrimedTntNear(ServerPlayerEntity bot, ServerWorld world, double range) {
+        Box box = bot.getBoundingBox().expand(range, range, range);
+        return !world.getEntitiesByClass(TntEntity.class, box, t -> t != null && t.isAlive()).isEmpty();
+    }
+
+    private static boolean isCommanderWatchingTnt(ServerPlayerEntity commander, ServerPlayerEntity bot, ServerWorld world) {
+        Box box = bot.getBoundingBox().expand(10.0D, 6.0D, 10.0D);
+        for (TntEntity tnt : world.getEntitiesByClass(TntEntity.class, box, t -> t != null && t.isAlive())) {
+            if (isEntityFacing(commander, tnt)) return true;
+        }
+        // Fall back to "commander facing the bot" — they're watching either way.
+        return isEntityFacing(commander, bot);
     }
 
     /**
