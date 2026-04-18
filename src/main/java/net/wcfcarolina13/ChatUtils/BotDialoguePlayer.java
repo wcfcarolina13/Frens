@@ -570,6 +570,34 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_1, "A Nether portal? Here? Someone's been busy.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_2, "Portal to the Nether...in The End. That's unsettling.");
 
+        // April 2026 backlog
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DIG_DOWN_WARNING, "Never dig straight down! Are you new here?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TREE_PUNCH_TIME, "Time to punch some trees.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TREE_PUNCH_OWES_MONEY, "This tree owes me money.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TREE_PUNCH_ORA, "Ora ora ora ora ora ora ora ora ora ora!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PIG_STARING, "That pig has been looking at me for a long time. It's getting weird.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_UNDERGROUND_YEARN_MINES, "I yearn for the mines.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_END_SHIP_LOOK_AT_ME, "Hey, hey, look at me.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_END_SHIP_CAPTAIN, "I'm the captain now.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_END_SHIP_RUINED_JOKE, "That ruined the joke.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TNT_WOULDNT, "You wouldn't.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TNT_WONT, "You won't.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TNT_TALK_OVER, "Come on, let's talk this over.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_TNT_TERMINATOR, "I promise I won't make any more Terminator jokes.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DIRT_DIGGY_HOLE, "Diggy diggy hole.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, "I think I saw a bird.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_HAD_PLAN, "What was I doing? I had a plan. I definitely had a plan.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_GIANT_STATUE, "I should probably build a giant statue of myself. Or a farm. Probably a farm.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_FORGOT_SOMETHING, "I'm 100% sure I forgot something, but I can't remember what it is.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_SAME_TREE, "I swear I've walked past this exact tree three times now. I am definitely lost.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MODE_FOLLOW_YOU_LEAD, "You lead.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MODE_FOLLOW_LETS_GO, "Let's go.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MODE_FOLLOW_MOVING, "Moving.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STOP_ILL_STAY_HERE, "I'll stay here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STOP_DONT_BE_LONG, "Don't be too long.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STOP_SEE_YA, "See ya.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STOP_ADIOS, "Adiós.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STOP_ILL_WAIT_HERE, "I'll wait here.");
     }
 
     private BotDialoguePlayer() {

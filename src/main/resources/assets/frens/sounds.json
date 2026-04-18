@@ -9416,5 +9416,140 @@
     "category": "voice",
     "replace": false,
     "sounds": []
+  },
+  "bot.line.dig_down_warning": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tree_punch_time": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tree_punch_owes_money": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tree_punch_ora": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.pig_staring": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.underground_yearn_mines": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.end_ship_look_at_me": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.end_ship_captain": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.end_ship_ruined_joke": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tnt_wouldnt": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tnt_wont": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tnt_talk_over": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.tnt_terminator": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.dirt_diggy_hole": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.ambient_saw_bird": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.ambient_had_plan": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.ambient_giant_statue": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.ambient_forgot_something": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.ambient_same_tree": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.mode_follow_you_lead": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.mode_follow_lets_go": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.mode_follow_moving": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.stop_ill_stay_here": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.stop_dont_be_long": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.stop_see_ya": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.stop_adios": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.stop_ill_wait_here": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
   }
 }

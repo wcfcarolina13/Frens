@@ -694,6 +694,55 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_WEIRD_PORTAL_NETHER_IN_END_1 = register("bot.line.weird_portal_nether_in_end_1");
     public static final SoundEvent LINE_WEIRD_PORTAL_NETHER_IN_END_2 = register("bot.line.weird_portal_nether_in_end_2");
 
+    // === APRIL 2026 BACKLOG ===
+
+    // Dig-straight-down warning
+    public static final SoundEvent LINE_DIG_DOWN_WARNING = register("bot.line.dig_down_warning");
+
+    // First tree punch (3 variants)
+    public static final SoundEvent LINE_TREE_PUNCH_TIME = register("bot.line.tree_punch_time");
+    public static final SoundEvent LINE_TREE_PUNCH_OWES_MONEY = register("bot.line.tree_punch_owes_money");
+    public static final SoundEvent LINE_TREE_PUNCH_ORA = register("bot.line.tree_punch_ora");
+
+    // Pig staring
+    public static final SoundEvent LINE_PIG_STARING = register("bot.line.pig_staring");
+
+    // Underground / mines
+    public static final SoundEvent LINE_UNDERGROUND_YEARN_MINES = register("bot.line.underground_yearn_mines");
+
+    // End ship sequence (captain-now bit)
+    public static final SoundEvent LINE_END_SHIP_LOOK_AT_ME = register("bot.line.end_ship_look_at_me");
+    public static final SoundEvent LINE_END_SHIP_CAPTAIN = register("bot.line.end_ship_captain");
+    public static final SoundEvent LINE_END_SHIP_RUINED_JOKE = register("bot.line.end_ship_ruined_joke");
+
+    // Near primed TNT
+    public static final SoundEvent LINE_TNT_WOULDNT = register("bot.line.tnt_wouldnt");
+    public static final SoundEvent LINE_TNT_WONT = register("bot.line.tnt_wont");
+    public static final SoundEvent LINE_TNT_TALK_OVER = register("bot.line.tnt_talk_over");
+    public static final SoundEvent LINE_TNT_TERMINATOR = register("bot.line.tnt_terminator");
+
+    // Dirt digging
+    public static final SoundEvent LINE_DIRT_DIGGY_HOLE = register("bot.line.dirt_diggy_hole");
+
+    // Ambient chatter additions
+    public static final SoundEvent LINE_AMBIENT_SAW_BIRD = register("bot.line.ambient_saw_bird");
+    public static final SoundEvent LINE_AMBIENT_HAD_PLAN = register("bot.line.ambient_had_plan");
+    public static final SoundEvent LINE_AMBIENT_GIANT_STATUE = register("bot.line.ambient_giant_statue");
+    public static final SoundEvent LINE_AMBIENT_FORGOT_SOMETHING = register("bot.line.ambient_forgot_something");
+    public static final SoundEvent LINE_AMBIENT_SAME_TREE = register("bot.line.ambient_same_tree");
+
+    // Follow command acks
+    public static final SoundEvent LINE_MODE_FOLLOW_YOU_LEAD = register("bot.line.mode_follow_you_lead");
+    public static final SoundEvent LINE_MODE_FOLLOW_LETS_GO = register("bot.line.mode_follow_lets_go");
+    public static final SoundEvent LINE_MODE_FOLLOW_MOVING = register("bot.line.mode_follow_moving");
+
+    // Stop-follow command acks ("standing by" already exists as LINE_MODE_STAY_STANDING_BY)
+    public static final SoundEvent LINE_STOP_ILL_STAY_HERE = register("bot.line.stop_ill_stay_here");
+    public static final SoundEvent LINE_STOP_DONT_BE_LONG = register("bot.line.stop_dont_be_long");
+    public static final SoundEvent LINE_STOP_SEE_YA = register("bot.line.stop_see_ya");
+    public static final SoundEvent LINE_STOP_ADIOS = register("bot.line.stop_adios");
+    public static final SoundEvent LINE_STOP_ILL_WAIT_HERE = register("bot.line.stop_ill_wait_here");
+
     private BotDialogueSounds() {
     }
 

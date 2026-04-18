@@ -60,6 +60,7 @@ import net.wcfcarolina13.GameAI.services.LodestoneCompassService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
+import net.wcfcarolina13.GameAI.services.CompanionContextReactionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotInventoryFullDialogueService;
@@ -3411,7 +3412,11 @@ public class modCommandRegistry {
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow.");
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.setFollowMode(bot, target, false);
-        return isFollowingTarget(bot, target) ? 1 : 0;
+        boolean following = isFollowingTarget(bot, target);
+        if (following) {
+            CompanionContextReactionService.playFollowAck(bot);
+        }
+        return following ? 1 : 0;
     }
 
     private static int executeFollowDistance(CommandContext<ServerCommandSource> context,
@@ -5777,6 +5782,7 @@ public class modCommandRegistry {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow stop.");
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.stopFollowing(bot, false);
+        CompanionContextReactionService.playStopAck(bot);
         return 1;
     }
 
@@ -5801,6 +5807,7 @@ public class modCommandRegistry {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot stay.");
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
+        CompanionContextReactionService.playStopAck(bot);
         return 1;
     }
 

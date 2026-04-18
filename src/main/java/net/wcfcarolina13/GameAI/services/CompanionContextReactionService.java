@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
@@ -12,11 +14,13 @@ import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.Items;
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.biome.Biome;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
 import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
@@ -94,7 +98,49 @@ public final class CompanionContextReactionService {
             new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_RARE),
             new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_RARE),
             new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_RARE),
-            new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON)
+            new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON),
+            new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_COMMON),
+            new WeightedLine("ambient_had_plan", "What was I doing? I had a plan. I definitely had a plan.", BotDialogueSounds.LINE_AMBIENT_HAD_PLAN, WEIGHT_UNCOMMON),
+            new WeightedLine("ambient_giant_statue", "I should probably build a giant statue of myself. Or a farm. Probably a farm.", BotDialogueSounds.LINE_AMBIENT_GIANT_STATUE, WEIGHT_RARE),
+            new WeightedLine("ambient_forgot_something", "I'm 100% sure I forgot something, but I can't remember what it is.", BotDialogueSounds.LINE_AMBIENT_FORGOT_SOMETHING, WEIGHT_UNCOMMON),
+            new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE)
+    };
+
+    private static final WeightedLine[] PIG_STARING_LINES = new WeightedLine[] {
+            new WeightedLine("pig_staring", "That pig has been looking at me for a long time. It's getting weird.", BotDialogueSounds.LINE_PIG_STARING, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] UNDERGROUND_LINES = new WeightedLine[] {
+            new WeightedLine("underground_yearn_mines", "I yearn for the mines.", BotDialogueSounds.LINE_UNDERGROUND_YEARN_MINES, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] DIG_DOWN_LINES = new WeightedLine[] {
+            new WeightedLine("dig_down_warning", "Never dig straight down! Are you new here?", BotDialogueSounds.LINE_DIG_DOWN_WARNING, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] TREE_PUNCH_LINES = new WeightedLine[] {
+            new WeightedLine("tree_punch_time", "Time to punch some trees.", BotDialogueSounds.LINE_TREE_PUNCH_TIME, WEIGHT_COMMON),
+            new WeightedLine("tree_punch_owes_money", "This tree owes me money.", BotDialogueSounds.LINE_TREE_PUNCH_OWES_MONEY, WEIGHT_COMMON),
+            new WeightedLine("tree_punch_ora", "Ora ora ora ora ora ora ora ora ora ora!", BotDialogueSounds.LINE_TREE_PUNCH_ORA, WEIGHT_RARE)
+    };
+
+    private static final WeightedLine[] DIRT_DIG_LINES = new WeightedLine[] {
+            new WeightedLine("dirt_diggy_hole", "Diggy diggy hole.", BotDialogueSounds.LINE_DIRT_DIGGY_HOLE, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] FOLLOW_ACK_LINES = new WeightedLine[] {
+            new WeightedLine("mode_follow_you_lead", "You lead.", BotDialogueSounds.LINE_MODE_FOLLOW_YOU_LEAD, WEIGHT_COMMON),
+            new WeightedLine("mode_follow_lets_go", "Let's go.", BotDialogueSounds.LINE_MODE_FOLLOW_LETS_GO, WEIGHT_COMMON),
+            new WeightedLine("mode_follow_moving", "Moving.", BotDialogueSounds.LINE_MODE_FOLLOW_MOVING, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] STOP_ACK_LINES = new WeightedLine[] {
+            new WeightedLine("stop_ill_stay_here", "I'll stay here.", BotDialogueSounds.LINE_STOP_ILL_STAY_HERE, WEIGHT_COMMON),
+            new WeightedLine("stop_dont_be_long", "Don't be too long.", BotDialogueSounds.LINE_STOP_DONT_BE_LONG, WEIGHT_COMMON),
+            new WeightedLine("stop_see_ya", "See ya.", BotDialogueSounds.LINE_STOP_SEE_YA, WEIGHT_COMMON),
+            new WeightedLine("stop_adios", "Adiós.", BotDialogueSounds.LINE_STOP_ADIOS, WEIGHT_COMMON),
+            new WeightedLine("stop_ill_wait_here", "I'll wait here.", BotDialogueSounds.LINE_STOP_ILL_WAIT_HERE, WEIGHT_COMMON),
+            new WeightedLine("mode_stay_standing_by", "Standing by.", BotDialogueSounds.LINE_MODE_STAY_STANDING_BY, WEIGHT_COMMON)
     };
 
     private static final WeightedLine[] HIGH_THREAT_LINES = new WeightedLine[] {
@@ -267,6 +313,13 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("weather_change", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("wake_up", COOLDOWN_MEME_MS);
         TRIGGER_COOLDOWN_MS.put("cooking_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("pig_staring", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("underground_mines", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("dig_straight_down", 60_000L);
+        TRIGGER_COOLDOWN_MS.put("tree_punch_first", COOLDOWN_90S_MS);
+        TRIGGER_COOLDOWN_MS.put("dirt_dig", COOLDOWN_90S_MS);
+        TRIGGER_COOLDOWN_MS.put("follow_ack", 30_000L);
+        TRIGGER_COOLDOWN_MS.put("stop_ack", 30_000L);
     }
 
     private CompanionContextReactionService() {
@@ -336,6 +389,12 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryPlayerHungry(bot, world, state)) {
+                continue;
+            }
+            if (tryPigStaring(bot, world, state)) {
+                continue;
+            }
+            if (tryUnderground(bot, world, state)) {
                 continue;
             }
         }
@@ -880,5 +939,91 @@ public final class CompanionContextReactionService {
         if (commander == null || commander.isRemoved() || !commander.isAlive()) return null;
         if (commander.squaredDistanceTo(bot) > maxRange * maxRange) return null;
         return commander;
+    }
+
+    // ---- April 2026 backlog triggers ----
+
+    private static boolean tryPigStaring(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(6.0D, 3.0D, 6.0D);
+        List<Entity> pigs = world.getOtherEntities(bot, box,
+                e -> e != null && e.getType() == EntityType.PIG && e.isAlive());
+        if (pigs.isEmpty()) return false;
+        for (Entity pig : pigs) {
+            if (isEntityFacing(pig, bot)) {
+                if (RNG.nextDouble() < 0.015D) {
+                    return tryTrigger(bot, "pig_staring", PIG_STARING_LINES, null, false);
+                }
+                break;
+            }
+        }
+        return false;
+    }
+
+    private static boolean tryUnderground(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        if (!world.getDimension().hasSkyLight()) return false;
+        if (bot.getY() >= 40.0D) return false;
+        if (world.isSkyVisible(bot.getBlockPos().up())) return false;
+        if (RNG.nextDouble() > 0.012D) return false;
+        return tryTrigger(bot, "underground_mines", UNDERGROUND_LINES, null, false);
+    }
+
+    private static boolean isEntityFacing(Entity source, Entity target) {
+        if (source == null || target == null) return false;
+        Vec3d toTarget = target.getEntityPos().subtract(source.getEntityPos());
+        double len = toTarget.length();
+        if (len < 0.0001) return false;
+        toTarget = toTarget.multiply(1.0 / len);
+        double yawRad = Math.toRadians(source.getYaw());
+        Vec3d forward = new Vec3d(-Math.sin(yawRad), 0, Math.cos(yawRad)).normalize();
+        return toTarget.dotProduct(forward) > 0.85D;
+    }
+
+    /**
+     * Called from the server-wide block-break hook. Fans out to dig-down, tree-punch,
+     * and dirt-dig reactions when the broken block matches.
+     */
+    public static void onBotBlockBreak(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, BlockState state) {
+        if (bot == null || world == null || pos == null || state == null) return;
+        if (!BotEventHandler.isRegisteredBot(bot)) return;
+
+        BlockPos feet = bot.getBlockPos();
+        if (pos.getX() == feet.getX() && pos.getZ() == feet.getZ() && pos.getY() == feet.getY() - 1) {
+            if (RNG.nextDouble() < 0.35D) {
+                tryTrigger(bot, "dig_straight_down", DIG_DOWN_LINES, null, false);
+            }
+            return;
+        }
+
+        if (state.isIn(BlockTags.LOGS)) {
+            if (RNG.nextDouble() < 0.30D) {
+                tryTrigger(bot, "tree_punch_first", TREE_PUNCH_LINES, null, false);
+            }
+            return;
+        }
+
+        if (state.isOf(Blocks.DIRT)
+                || state.isOf(Blocks.COARSE_DIRT)
+                || state.isOf(Blocks.ROOTED_DIRT)
+                || state.isOf(Blocks.GRASS_BLOCK)
+                || state.isOf(Blocks.PODZOL)
+                || state.isOf(Blocks.MYCELIUM)) {
+            if (RNG.nextDouble() < 0.08D) {
+                tryTrigger(bot, "dirt_dig", DIRT_DIG_LINES, null, false);
+            }
+        }
+    }
+
+    /** Call from /bot follow to emit a voice ack. Cooldown-throttled; safe to call often. */
+    public static boolean playFollowAck(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        return tryTrigger(bot, "follow_ack", FOLLOW_ACK_LINES, null, false);
+    }
+
+    /** Call from /bot follow stop and /bot stay to emit a voice ack. Cooldown-throttled. */
+    public static boolean playStopAck(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        return tryTrigger(bot, "stop_ack", STOP_ACK_LINES, null, false);
     }
 }

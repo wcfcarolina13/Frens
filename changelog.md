@@ -2,6 +2,34 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dialogue backlog scaffolding: 27 new unvoiced events + triggers (2026-04-17)
+
+Lays the mod-side groundwork for the April 2026 dialogue backlog (from `Minecraft Frens Feature Backlog March 2026.md`) so Chatterbox TTS generation can proceed. No audio files yet — each event is registered with an empty `sounds[]` so the triage tool will catch incoming OGGs as orphans and the handoff generator fills in the `sounds[]` arrays.
+
+**Event registrations** (27 total) in [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java), [sounds.json](src/main/resources/assets/frens/sounds.json), and [BotDialoguePlayer.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java) subtitle map:
+
+- **Context-triggered (14):** dig-straight-down; tree-punch (3 variants); pig-staring; underground/mines; end-ship sequence (3); TNT proximity (4); dirt-dig.
+- **Ambient chatter (5):** saw-a-bird; had-a-plan; giant-statue; forgot-something; same-tree-lost.
+- **Follow acks (3):** you-lead; let's-go; moving.
+- **Stop acks (5):** I'll-stay-here; don't-be-too-long; see-ya; adiós; I'll-wait-here. ("standing by" reuses the existing `LINE_MODE_STAY_STANDING_BY`.)
+
+**Trigger wiring** in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java):
+
+- New weighted pools + cooldown entries for each category.
+- Tick-scan triggers: `tryPigStaring` (expanded-box pig search + forward-vector dot-product facing check; 1.5%/tick) and `tryUnderground` ("I yearn for the mines" — Y<40 + sky blocked + overworld-like dimension; 1.2%/tick).
+- Block-break entry point: `onBotBlockBreak(bot, world, pos, state)` dispatches to dig-down (broken block is directly under the bot's feet; 35%), tree-punch (block matches `BlockTags.LOGS`; 30%), or dirt-dig (dirt/coarse-dirt/rooted-dirt/grass/podzol/mycelium; 8%). Hooked from the existing `PlayerBlockBreakEvents.AFTER` handler in [Frens.java](src/main/java/net/wcfcarolina13/Frens.java). Gated by `BotEventHandler.isRegisteredBot` so player-broken blocks don't trigger.
+- Public acks: `playFollowAck(bot)` and `playStopAck(bot)` — cooldown-throttled (30s).
+
+**Follow/stop command acks** in [modCommandRegistry.java](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java): `executeFollow` plays follow-ack on successful mode transition; `executeFollowStop` and `executeStay` play stop-ack. Cooldown prevents spam from repeat commands; the existing voice-throttle in `BotDialoguePlayer` further guards against bursts.
+
+**Deferred intentionally:**
+
+- **End-ship look-at-me sequence** — the 3-line captain-now bit (`look-at-me` → look-check → `captain-now` OR leave → `ruined-joke`) needs a per-bot state machine tracking the player's look direction over several seconds. Out of scope for this pass; events + subtitles are scaffolded so TTS can still be recorded.
+- **TNT proximity** — 4 lines conditional on "bot ordered to stand near primed TNT + player moving away while looking at the TNT." Same story: scaffolded, needs a dedicated detector later.
+- **Entity interactions** (iron/copper golem banter, daisy gift, snowmen, creation reactions) — the backlog itself flags these as needing line text written first; not scaffolded.
+
+**No version bump, no deploy** — the triage/handoff pipeline is the only consumer of these registrations until TTS arrives.
+
 ## PvP visibility: hide strangers' bases + walls from non-op list (2026-04-16)
 
 For PvP-friendly servers, non-operators should not be able to browse other players' base/wall locations in the bases manager. Previously `sendBasesList` returned every base and wall regardless of owner. Now visibility is gated.
