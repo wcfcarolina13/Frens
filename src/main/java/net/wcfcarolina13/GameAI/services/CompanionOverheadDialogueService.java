@@ -194,6 +194,14 @@ public final class CompanionOverheadDialogueService {
 
         LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
+        // If the line has a DialogueTextMapper entry, play the matching sound.
+        // This was missing from the public overload (only tryShowGeneric had it),
+        // which caused greeting/skill_sleep/topic_*/many other lines to show
+        // overhead text but never play audio. Callers that also manually
+        // BotDialoguePlayer.playSoundForBotDetailed(...) are protected from
+        // double-play by BotDialoguePlayer's MIN_GAP_ANY_VOICE_MS mutex.
+        tryPlayVoicedOverheadLine(bot, line);
+
         if (tag != null && !tag.isBlank()) {
             if (reason != null && !reason.isBlank()) {
                 LOGGER.debug("Overhead line ({}) bot={} reason={} line={}", tag, bot.getName().getString(), reason, line);
