@@ -765,6 +765,20 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Fresh air. Finally.", BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD);
         EXACT_MAP.put("Back to the surface. Good.", BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD_2);
 
+        // ============ APRIL 2026 HANDOFF (v1.1.30+) ============
+        // Berry-bush reactions (fired via CompanionOverheadDialogueService.tryShowSweetBerryBush*)
+        EXACT_MAP.put("Ouch!", BotDialogueSounds.LINE_BERRY_BUSH_OUCH);
+        EXACT_MAP.put("Yowch!", BotDialogueSounds.LINE_BERRY_BUSH_YOWCH);
+        EXACT_MAP.put("These are thorny!", BotDialogueSounds.LINE_BERRY_BUSH_THORNY);
+        EXACT_MAP.put("These are edible...I think.", BotDialogueSounds.LINE_BERRY_BUSH_EDIBLE_I_THINK);
+        EXACT_MAP.put("These are edible... I think.", BotDialogueSounds.LINE_BERRY_BUSH_EDIBLE_I_THINK);
+
+        // Foliage-stuck reactions (via CompanionOverheadDialogueService LEAF_STUCK_LINES)
+        EXACT_MAP.put("These branches are thick!", BotDialogueSounds.LINE_FOLIAGE_STUCK_BRANCHES_THICK);
+        EXACT_MAP.put("Hold on - stuck in some branches.", BotDialogueSounds.LINE_FOLIAGE_STUCK_IN_BRANCHES);
+        EXACT_MAP.put("Can't get through these leaves.", BotDialogueSounds.LINE_FOLIAGE_STUCK_CANT_GET_THROUGH);
+        EXACT_MAP.put("Just a sec... foliage's got me.", BotDialogueSounds.LINE_FOLIAGE_STUCK_GOT_ME);
+
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
 
         // Build reverse map (sound → first matching text) for overhead display.
