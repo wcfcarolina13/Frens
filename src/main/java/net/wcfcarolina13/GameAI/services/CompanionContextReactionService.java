@@ -85,6 +85,9 @@ public final class CompanionContextReactionService {
         boolean wasCommanderLowHealth = false;
         boolean wasCommanderHungry = false;
         int lastWeatherKind = -1;
+        /** Tick at which commander last was NOT looking at the bot. Used to compute
+         *  how long the commander has been staring. -1 = not currently staring. */
+        long commanderStareStartTick = -1L;
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -95,15 +98,17 @@ public final class CompanionContextReactionService {
     private static final long SPAWN_GRACE_TICKS = 200L;
 
     private static final WeightedLine[] AMBIENT_LINES = new WeightedLine[] {
-            new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_RARE),
-            new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_RARE),
+            // ambient_bad_feeling moved to HIGH_THREAT_LINES per triage retune — was
+            // firing too often in safe ambient settings.
+            new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_VERY_RARE),
             new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_RARE),
             new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON),
             new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_COMMON),
             new WeightedLine("ambient_had_plan", "What was I doing? I had a plan. I definitely had a plan.", BotDialogueSounds.LINE_AMBIENT_HAD_PLAN, WEIGHT_UNCOMMON),
             new WeightedLine("ambient_giant_statue", "I should probably build a giant statue of myself. Or a farm. Probably a farm.", BotDialogueSounds.LINE_AMBIENT_GIANT_STATUE, WEIGHT_RARE),
             new WeightedLine("ambient_forgot_something", "I'm 100% sure I forgot something, but I can't remember what it is.", BotDialogueSounds.LINE_AMBIENT_FORGOT_SOMETHING, WEIGHT_UNCOMMON),
-            new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE)
+            new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE),
+            new WeightedLine("ambient_teeth_itch", "My teeth itch!", BotDialogueSounds.LINE_AMBIENT_TEETH_ITCH, WEIGHT_RARE)
     };
 
     private static final WeightedLine[] PIG_STARING_LINES = new WeightedLine[] {
@@ -146,7 +151,15 @@ public final class CompanionContextReactionService {
     private static final WeightedLine[] HIGH_THREAT_LINES = new WeightedLine[] {
             new WeightedLine("creepy_head_swivel", "Keep your head on a swivel.", BotDialogueSounds.LINE_CREEPY_HEAD_SWIVEL, WEIGHT_UNCOMMON),
             new WeightedLine("creepy_bad_ideas_mature", "This is where bad ideas go to mature.", BotDialogueSounds.LINE_CREEPY_BAD_IDEAS_MATURE, WEIGHT_UNCOMMON),
-            new WeightedLine("creepy_complaint_reality", "I'd like to file a complaint with reality.", BotDialogueSounds.LINE_CREEPY_COMPLAINT_REALITY, WEIGHT_RARE)
+            new WeightedLine("creepy_complaint_reality", "I'd like to file a complaint with reality.", BotDialogueSounds.LINE_CREEPY_COMPLAINT_REALITY, WEIGHT_RARE),
+            new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_UNCOMMON),
+            new WeightedLine("creepy_place_heard_that", "I heard that. I hate that I heard that.", BotDialogueSounds.LINE_CREEPY_PLACE_HEARD_THAT, WEIGHT_UNCOMMON),
+            new WeightedLine("creepy_place_im_fine_probably", "I'm fine. Probably.", BotDialogueSounds.LINE_CREEPY_PLACE_IM_FINE_PROBABLY, WEIGHT_UNCOMMON),
+            new WeightedLine("creepy_place_pretend_didnt_see", "I'll pretend I didn't see that.", BotDialogueSounds.LINE_CREEPY_PLACE_PRETEND_DIDNT_SEE, WEIGHT_UNCOMMON),
+            new WeightedLine("creepy_place_saw_nothing", "I saw nothing.", BotDialogueSounds.LINE_CREEPY_PLACE_SAW_NOTHING, WEIGHT_COMMON),
+            new WeightedLine("creepy_place_shouldnt_be_here", "This place has strong 'we shouldn't be here' energy.", BotDialogueSounds.LINE_CREEPY_PLACE_SHOULDNT_BE_HERE, WEIGHT_RARE),
+            new WeightedLine("creepy_place_we_can_recover", "We can recover.", BotDialogueSounds.LINE_CREEPY_PLACE_WE_CAN_RECOVER, WEIGHT_UNCOMMON),
+            new WeightedLine("creepy_place_win_or_leave", "We can win this. Or we can leave. I'm flexible.", BotDialogueSounds.LINE_CREEPY_PLACE_WIN_OR_LEAVE, WEIGHT_RARE)
     };
 
     private static final WeightedLine[] SCARY_LINES = new WeightedLine[] {
@@ -207,8 +220,13 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] META_LINES = new WeightedLine[] {
             new WeightedLine("meta_not_robot", "I'm not a robot. You're a robot.", BotDialogueSounds.LINE_META_NOT_ROBOT, WEIGHT_RARE),
-            new WeightedLine("meta_human_laugh", "That was a human laugh. Totally normal.", BotDialogueSounds.LINE_META_HUMAN_LAUGH, WEIGHT_RARE),
-            new WeightedLine("meta_stop_looking", "Stop looking at me like that. I'm trying.", BotDialogueSounds.LINE_META_STOP_LOOKING, WEIGHT_RARE)
+            new WeightedLine("meta_human_laugh", "That was a human laugh. Totally normal.", BotDialogueSounds.LINE_META_HUMAN_LAUGH, WEIGHT_RARE)
+            // meta_stop_looking moved to COMMANDER_STARING_LINES per triage retune —
+            // only fires after ≥5 s of commander looking at the bot.
+    };
+
+    private static final WeightedLine[] COMMANDER_STARING_LINES = new WeightedLine[] {
+            new WeightedLine("meta_stop_looking", "Stop looking at me like that. I'm trying.", BotDialogueSounds.LINE_META_STOP_LOOKING, WEIGHT_COMMON)
     };
 
     private static final WeightedLine[] MEME_CHICKEN_LINES = new WeightedLine[] {
@@ -252,23 +270,51 @@ public final class CompanionContextReactionService {
     private static final WeightedLine[] SHELTER_LINES = new WeightedLine[] {
             new WeightedLine("shelter_roof_luxury", "We have a roof. Luxury.", BotDialogueSounds.LINE_SHELTER_ROOF_LUXURY, WEIGHT_UNCOMMON),
             new WeightedLine("shelter_not_pretty", "It's not pretty, but it's ours.", BotDialogueSounds.LINE_SHELTER_NOT_PRETTY, WEIGHT_UNCOMMON),
-            new WeightedLine("shelter_some_problems", "This will keep out... some of the problems.", BotDialogueSounds.LINE_SHELTER_SOME_PROBLEMS, WEIGHT_UNCOMMON)
+            new WeightedLine("shelter_some_problems", "This will keep out... some of the problems.", BotDialogueSounds.LINE_SHELTER_SOME_PROBLEMS, WEIGHT_UNCOMMON),
+            new WeightedLine("shelter_built_almost_sound", "I'm proud of us. This is almost structurally sound.", BotDialogueSounds.LINE_SHELTER_BUILT_ALMOST_SOUND, WEIGHT_UNCOMMON),
+            new WeightedLine("shelter_built_intentional", "If anyone asks, this was intentional.", BotDialogueSounds.LINE_SHELTER_BUILT_INTENTIONAL, WEIGHT_UNCOMMON),
+            new WeightedLine("shelter_built_rectangle", "Aesthetic update. We live in a rectangle.", BotDialogueSounds.LINE_SHELTER_BUILT_RECTANGLE, WEIGHT_UNCOMMON),
+            new WeightedLine("shelter_built_resources_limited", "We call this style. Resources were limited.", BotDialogueSounds.LINE_SHELTER_BUILT_RESOURCES_LIMITED, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] WEATHER_RAIN_LINES = new WeightedLine[] {
-            new WeightedLine("weather_rain", "Rain's coming down.", BotDialogueSounds.LINE_WEATHER_RAIN, WEIGHT_COMMON)
+            new WeightedLine("weather_rain", "Rain's coming down.", BotDialogueSounds.LINE_WEATHER_RAIN, WEIGHT_COMMON),
+            new WeightedLine("weather_rain_01", "It's starting to rain.", BotDialogueSounds.LINE_WEATHER_RAIN_01, WEIGHT_COMMON),
+            new WeightedLine("weather_rain_02", "Rain's coming down.", BotDialogueSounds.LINE_WEATHER_RAIN_02, WEIGHT_COMMON),
+            new WeightedLine("weather_rain_03", "Getting wet out here.", BotDialogueSounds.LINE_WEATHER_RAIN_03, WEIGHT_COMMON),
+            new WeightedLine("weather_rain_04", "Hope this clears up soon.", BotDialogueSounds.LINE_WEATHER_RAIN_04, WEIGHT_COMMON),
+            new WeightedLine("weather_rain_05", "At least it's not snow.", BotDialogueSounds.LINE_WEATHER_RAIN_05, WEIGHT_UNCOMMON),
+            new WeightedLine("weather_rain_06", "The rain feels nice, actually.", BotDialogueSounds.LINE_WEATHER_RAIN_06, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] WEATHER_SNOW_LINES = new WeightedLine[] {
-            new WeightedLine("weather_snow", "Snow's coming down.", BotDialogueSounds.LINE_WEATHER_SNOW, WEIGHT_COMMON)
+            new WeightedLine("weather_snow", "Snow's coming down.", BotDialogueSounds.LINE_WEATHER_SNOW, WEIGHT_COMMON),
+            new WeightedLine("weather_snow_01", "Snow's falling.", BotDialogueSounds.LINE_WEATHER_SNOW_01, WEIGHT_COMMON),
+            new WeightedLine("weather_snow_02", "It's snowing out here.", BotDialogueSounds.LINE_WEATHER_SNOW_02, WEIGHT_COMMON),
+            new WeightedLine("weather_snow_03", "Cold. Very cold.", BotDialogueSounds.LINE_WEATHER_SNOW_03, WEIGHT_COMMON),
+            new WeightedLine("weather_snow_04", "Bundle up. It's snowing.", BotDialogueSounds.LINE_WEATHER_SNOW_04, WEIGHT_COMMON),
+            new WeightedLine("weather_snow_05", "Snow everywhere. Beautiful, but cold.", BotDialogueSounds.LINE_WEATHER_SNOW_05, WEIGHT_UNCOMMON),
+            new WeightedLine("weather_snow_06", "I can barely see through this snow.", BotDialogueSounds.LINE_WEATHER_SNOW_06, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] WEATHER_THUNDER_LINES = new WeightedLine[] {
-            new WeightedLine("weather_thunder", "Thunderstorm.", BotDialogueSounds.LINE_WEATHER_THUNDER, WEIGHT_COMMON)
+            new WeightedLine("weather_thunder", "Thunderstorm.", BotDialogueSounds.LINE_WEATHER_THUNDER, WEIGHT_COMMON),
+            new WeightedLine("weather_thunder_01", "Thunder! Find cover!", BotDialogueSounds.LINE_WEATHER_THUNDER_01, WEIGHT_COMMON),
+            new WeightedLine("weather_thunder_02", "Storm's rolling in.", BotDialogueSounds.LINE_WEATHER_THUNDER_02, WEIGHT_COMMON),
+            new WeightedLine("weather_thunder_03", "Thunderstorm. Stay low.", BotDialogueSounds.LINE_WEATHER_THUNDER_03, WEIGHT_COMMON),
+            new WeightedLine("weather_thunder_04", "That lightning is close!", BotDialogueSounds.LINE_WEATHER_THUNDER_04, WEIGHT_COMMON),
+            new WeightedLine("weather_thunder_05", "I don't like the sound of that thunder.", BotDialogueSounds.LINE_WEATHER_THUNDER_05, WEIGHT_UNCOMMON),
+            new WeightedLine("weather_thunder_06", "Bad time to be outside.", BotDialogueSounds.LINE_WEATHER_THUNDER_06, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] WEATHER_SUNNY_LINES = new WeightedLine[] {
-            new WeightedLine("weather_sunny", "Nice clear day.", BotDialogueSounds.LINE_WEATHER_SUNNY, WEIGHT_COMMON)
+            new WeightedLine("weather_sunny", "Nice clear day.", BotDialogueSounds.LINE_WEATHER_SUNNY, WEIGHT_COMMON),
+            new WeightedLine("weather_sunny_01", "Sun's out again.", BotDialogueSounds.LINE_WEATHER_SUNNY_01, WEIGHT_COMMON),
+            new WeightedLine("weather_sunny_02", "Clear skies. Nice.", BotDialogueSounds.LINE_WEATHER_SUNNY_02, WEIGHT_COMMON),
+            new WeightedLine("weather_sunny_03", "Finally, some sunshine.", BotDialogueSounds.LINE_WEATHER_SUNNY_03, WEIGHT_COMMON),
+            new WeightedLine("weather_sunny_04", "Weather cleared up.", BotDialogueSounds.LINE_WEATHER_SUNNY_04, WEIGHT_COMMON),
+            new WeightedLine("weather_sunny_05", "Good day for exploring.", BotDialogueSounds.LINE_WEATHER_SUNNY_05, WEIGHT_UNCOMMON),
+            new WeightedLine("weather_sunny_06", "Much better without the rain.", BotDialogueSounds.LINE_WEATHER_SUNNY_06, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] WAKE_LINES = new WeightedLine[] {
@@ -320,6 +366,7 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("dirt_dig", COOLDOWN_90S_MS);
         TRIGGER_COOLDOWN_MS.put("follow_ack", 30_000L);
         TRIGGER_COOLDOWN_MS.put("stop_ack", 30_000L);
+        TRIGGER_COOLDOWN_MS.put("commander_staring", COOLDOWN_META_MS);
     }
 
     private CompanionContextReactionService() {
@@ -395,6 +442,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryUnderground(bot, world, state)) {
+                continue;
+            }
+            if (tryCommanderStaring(bot, world, state, nowTick)) {
                 continue;
             }
         }
@@ -967,6 +1017,24 @@ public final class CompanionContextReactionService {
         if (world.isSkyVisible(bot.getBlockPos().up())) return false;
         if (RNG.nextDouble() > 0.012D) return false;
         return tryTrigger(bot, "underground_mines", UNDERGROUND_LINES, null, false);
+    }
+
+    /** Fires meta_stop_looking only after the commander has been staring at the
+     *  bot continuously for ≥ 5 seconds (≥ 100 server ticks). */
+    private static boolean tryCommanderStaring(ServerPlayerEntity bot, ServerWorld world, TriggerState state, long nowTick) {
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 12.0);
+        if (commander == null || !isEntityFacing(commander, bot)) {
+            state.commanderStareStartTick = -1L;
+            return false;
+        }
+        if (state.commanderStareStartTick < 0L) {
+            state.commanderStareStartTick = nowTick;
+            return false;
+        }
+        long staredTicks = nowTick - state.commanderStareStartTick;
+        if (staredTicks < 100L) return false;  // 5 s at 20 TPS
+        if (RNG.nextDouble() > 0.15D) return false;
+        return tryTrigger(bot, "commander_staring", COMMANDER_STARING_LINES, null, false);
     }
 
     private static boolean isEntityFacing(Entity source, Entity target) {

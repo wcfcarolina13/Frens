@@ -85,6 +85,7 @@ public final class BotCombatCalloutService {
     private static final class CombatMetadata {
         int maxDangerousMobCount = 0;
         boolean explosionSeen = false;
+        boolean creeperExplosionSeen = false;
         boolean sawAnyHostile = false;
         boolean sawNonWeakHostile = false;
     }
@@ -111,13 +112,17 @@ public final class BotCombatCalloutService {
     private static final WeightedLine[] COMBAT_MULTI_LINES = new WeightedLine[] {
             new WeightedLine("combat_multi_not_fair", "Not a fair fight.", BotDialogueSounds.LINE_COMBAT_MULTI_NOT_FAIR, WEIGHT_COMMON),
             new WeightedLine("combat_multi_relax", "Alright, everybody relax.", BotDialogueSounds.LINE_COMBAT_MULTI_RELAX, WEIGHT_UNCOMMON),
-            new WeightedLine("combat_multi_excessive", "This is excessive.", BotDialogueSounds.LINE_COMBAT_MULTI_EXCESSIVE, WEIGHT_UNCOMMON)
+            new WeightedLine("combat_multi_excessive", "This is excessive.", BotDialogueSounds.LINE_COMBAT_MULTI_EXCESSIVE, WEIGHT_UNCOMMON),
+            new WeightedLine("intense_combat_point_me_at_problem", "I'm ready. Point me at the problem.", BotDialogueSounds.LINE_INTENSE_COMBAT_POINT_ME_AT_PROBLEM, WEIGHT_UNCOMMON),
+            new WeightedLine("intense_combat_thriving_in_terrible", "Look at us. Absolutely thriving in terrible conditions.", BotDialogueSounds.LINE_INTENSE_COMBAT_THRIVING_IN_TERRIBLE, WEIGHT_RARE),
+            new WeightedLine("intense_combat_trying_to_kill_us", "Alright! Something's trying to kill us. Love that for us.", BotDialogueSounds.LINE_INTENSE_COMBAT_TRYING_TO_KILL_US, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] POST_COMBAT_GENERAL_LINES = new WeightedLine[] {
             new WeightedLine("post_combat_still_alive", "We're still alive. Good.", BotDialogueSounds.LINE_POST_COMBAT_STILL_ALIVE, WEIGHT_COMMON),
             new WeightedLine("post_combat_adequate", "That was... adequate.", BotDialogueSounds.LINE_POST_COMBAT_ADEQUATE, WEIGHT_COMMON),
-            new WeightedLine("combat_clear", "All clear.", BotDialogueSounds.LINE_COMBAT_CLEAR, WEIGHT_COMMON)
+            new WeightedLine("combat_clear", "All clear.", BotDialogueSounds.LINE_COMBAT_CLEAR, WEIGHT_COMMON),
+            new WeightedLine("post_combat_wasnt_awesome", "Tell me that wasn't awesome. Tell me.", BotDialogueSounds.LINE_POST_COMBAT_WASNT_AWESOME, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] POST_COMBAT_MULTI_LINES = new WeightedLine[] {
@@ -132,20 +137,42 @@ public final class BotCombatCalloutService {
             new WeightedLine("post_combat_single_inconvenience", "Barely an inconvenience.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_INCONVENIENCE, WEIGHT_RARE)
     };
 
+    // Generic post-explosion pool — plays after any explosion (creeper, TNT,
+    // end crystal, ghast fireball, wither skull, etc.).
     private static final WeightedLine[] POST_EXPLOSION_LINES = new WeightedLine[] {
+            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON),
+            new WeightedLine("post_explosion_exactly_how_it_went", "That went... exactly how it went.", BotDialogueSounds.LINE_POST_EXPLOSION_EXACTLY_HOW_IT_WENT, WEIGHT_UNCOMMON)
+    };
+
+    // Creeper-specific post-explosion pool (per triage retune: bones should only
+    // fire when a creeper exploded, not for e.g. TNT).
+    private static final WeightedLine[] POST_EXPLOSION_CREEPER_LINES = new WeightedLine[] {
             new WeightedLine("post_explosion_bones", "I felt that in my bones.", BotDialogueSounds.LINE_POST_EXPLOSION_BONES, WEIGHT_COMMON),
-            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON)
+            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON),
+            new WeightedLine("post_explosion_exactly_how_it_went", "That went... exactly how it went.", BotDialogueSounds.LINE_POST_EXPLOSION_EXACTLY_HOW_IT_WENT, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] FF_RECEIVED_LINES = new WeightedLine[] {
             new WeightedLine("ff_received_ow_that_was_you", "Ow. That was you.", BotDialogueSounds.LINE_FF_RECEIVED_OW_THAT_WAS_YOU, WEIGHT_UNCOMMON),
             new WeightedLine("ff_received_on_your_team", "I'm on your team!", BotDialogueSounds.LINE_FF_RECEIVED_ON_YOUR_TEAM, WEIGHT_UNCOMMON),
-            new WeightedLine("combat_player_hit", "Hey! Watch it!", BotDialogueSounds.LINE_COMBAT_PLAYER_HIT, WEIGHT_UNCOMMON)
+            new WeightedLine("combat_player_hit", "Hey! Watch it!", BotDialogueSounds.LINE_COMBAT_PLAYER_HIT, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_that_hurt", "Hey, that hurt!", BotDialogueSounds.LINE_PLAYER_HIT_ME_THAT_HURT, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_stop_that", "Hey, stop that!", BotDialogueSounds.LINE_PLAYER_HIT_ME_STOP_THAT, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_quit_it", "Quit it!", BotDialogueSounds.LINE_PLAYER_HIT_ME_QUIT_IT, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_watch_where", "Watch where you point that!", BotDialogueSounds.LINE_PLAYER_HIT_ME_WATCH_WHERE, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_friendly_fire", "Friendly fire!", BotDialogueSounds.LINE_PLAYER_HIT_ME_FRIENDLY_FIRE, WEIGHT_UNCOMMON),
+            new WeightedLine("player_hit_me_look_out", "Look out!", BotDialogueSounds.LINE_PLAYER_HIT_ME_LOOK_OUT, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] FF_DEALT_LINES = new WeightedLine[] {
             new WeightedLine("ff_dealt_panicked", "I panicked!", BotDialogueSounds.LINE_FF_DEALT_PANICKED, WEIGHT_UNCOMMON),
-            new WeightedLine("ff_dealt_didnt_mean", "I didn't mean to do that!", BotDialogueSounds.LINE_FF_DEALT_DIDNT_MEAN, WEIGHT_UNCOMMON)
+            new WeightedLine("ff_dealt_didnt_mean", "I didn't mean to do that!", BotDialogueSounds.LINE_FF_DEALT_DIDNT_MEAN, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_my_bad", "My bad!", BotDialogueSounds.LINE_I_HIT_PLAYER_MY_BAD, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_sorry", "Sorry!", BotDialogueSounds.LINE_I_HIT_PLAYER_SORRY, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_oops_sorry", "Oops, sorry!", BotDialogueSounds.LINE_I_HIT_PLAYER_OOPS_SORRY, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_accident", "Accident, my bad!", BotDialogueSounds.LINE_I_HIT_PLAYER_ACCIDENT, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_not_on_purpose", "That wasn't on purpose!", BotDialogueSounds.LINE_I_HIT_PLAYER_NOT_ON_PURPOSE, WEIGHT_UNCOMMON),
+            new WeightedLine("i_hit_player_must_have_hurt", "Sorry, that must have hurt!", BotDialogueSounds.LINE_I_HIT_PLAYER_MUST_HAVE_HURT, WEIGHT_UNCOMMON)
     };
     
     private BotCombatCalloutService() {}
@@ -186,6 +213,7 @@ public final class BotCombatCalloutService {
         int active = 0;
         int nonWeak = 0;
         boolean explosionSourceSeen = false;
+        boolean creeperSeen = false;
         for (Entity hostile : hostiles) {
             if (!(hostile instanceof HostileEntity) || hostile.isRemoved() || !hostile.isAlive()) {
                 continue;
@@ -196,6 +224,9 @@ public final class BotCombatCalloutService {
             }
             if (isExplosionProneMob(hostile.getType())) {
                 explosionSourceSeen = true;
+            }
+            if (hostile.getType() == EntityType.CREEPER) {
+                creeperSeen = true;
             }
         }
         if (active <= 0) {
@@ -214,6 +245,9 @@ public final class BotCombatCalloutService {
         }
         if (explosionSourceSeen) {
             meta.explosionSeen = true;
+        }
+        if (creeperSeen) {
+            meta.creeperExplosionSeen = true;
         }
         if (active > meta.maxDangerousMobCount) {
             meta.maxDangerousMobCount = active;
@@ -251,6 +285,9 @@ public final class BotCombatCalloutService {
             }
             if (isExplosionProneMob(threat.getType())) {
                 meta.explosionSeen = true;
+            }
+            if (threat.getType() == EntityType.CREEPER) {
+                meta.creeperExplosionSeen = true;
             }
         }
         if (meta.maxDangerousMobCount < 1) {
@@ -303,11 +340,14 @@ public final class BotCombatCalloutService {
             if (isExplosionProneMob(target.getType())) {
                 meta.explosionSeen = true;
             }
+            if (target.getType() == EntityType.CREEPER) {
+                meta.creeperExplosionSeen = true;
+            }
         }
         if (meta.maxDangerousMobCount < 1) {
             meta.maxDangerousMobCount = 1;
         }
-        
+
         if (RNG.nextBoolean()) {
             sayWithSound(bot, "Engaging!", BotDialogueSounds.LINE_COMBAT_ATTACKING);
         } else {
@@ -345,9 +385,15 @@ public final class BotCombatCalloutService {
             if (isExplosionProneMob(attacker.getType())) {
                 meta.explosionSeen = true;
             }
+            if (attacker.getType() == EntityType.CREEPER) {
+                meta.creeperExplosionSeen = true;
+            }
         }
         if (source != null && source.isIn(DamageTypeTags.IS_EXPLOSION)) {
             meta.explosionSeen = true;
+            // Damage source explosions don't carry an attacker type here, so we
+            // don't flip creeperExplosionSeen; the attacker branch above covers
+            // creeper-inflicted damage.
         }
         if (meta.maxDangerousMobCount < 1) {
             meta.maxDangerousMobCount = 1;
@@ -400,6 +446,9 @@ public final class BotCombatCalloutService {
             }
             if (isExplosionProneMob(killed.getType())) {
                 meta.explosionSeen = true;
+            }
+            if (killed.getType() == EntityType.CREEPER) {
+                meta.creeperExplosionSeen = true;
             }
         }
         if (meta.maxDangerousMobCount < 1) {
@@ -457,7 +506,8 @@ public final class BotCombatCalloutService {
 
         WeightedLine line;
         if (meta != null && meta.explosionSeen) {
-            line = pickWeightedLine(POST_EXPLOSION_LINES, null);
+            WeightedLine[] pool = meta.creeperExplosionSeen ? POST_EXPLOSION_CREEPER_LINES : POST_EXPLOSION_LINES;
+            line = pickWeightedLine(pool, null);
         } else if (meta != null && meta.maxDangerousMobCount >= 3) {
             line = pickWeightedLine(POST_COMBAT_MULTI_LINES, null);
         } else if (meta != null && meta.sawAnyHostile && meta.maxDangerousMobCount <= 1 && !meta.sawNonWeakHostile) {

@@ -126,16 +126,26 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_IDLE_STILL_STANDING,
     };
 
-        // Ambient / cave chatter (used when underground or in cave-like conditions)
+        // Ambient / cave chatter (used when underground or in cave-like conditions).
+        // Per triage retune: CAVE_DEEP is gated to deep Y only, DONT_LIKE_THIS is gated
+        // to deep or hostile-near, so both are excluded from the shallow-cave pool.
         private static final SoundEvent[] AMBIENT_CAVE_CHATTER = {
             BotDialogueSounds.LINE_AMBIENT_HEARD_SOMETHING,
             BotDialogueSounds.LINE_AMBIENT_DID_YOU_HEAR,
             BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED,
             BotDialogueSounds.LINE_AMBIENT_NOT_ALONE,
             BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE,
-            BotDialogueSounds.LINE_AMBIENT_DONT_LIKE_THIS,
             BotDialogueSounds.LINE_AMBIENT_CREEPY,
+        };
+
+        // Deep-cave-only lines (fire when y < 20 and isLowLight).
+        private static final SoundEvent[] AMBIENT_DEEP_CAVE_CHATTER = {
             BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP,
+        };
+
+        // Deep-or-hostile lines (fire when y < 20 OR hostiles within 16 blocks).
+        private static final SoundEvent[] AMBIENT_HOSTILE_CAVE_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_DONT_LIKE_THIS,
         };
 
     // Context-aware chatter - things the bot might muse about (NEUTRAL mood variant)
@@ -158,6 +168,21 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
             BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS,
     };
+
+    // Sunset-soon variants (original + 6 new from the April 2026 batch).
+    private static final SoundEvent[] SUNSET_SOON_VARIANTS = {
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_01,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_02,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_03,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_04,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_05,
+            BotDialogueSounds.LINE_TIME_SUNSET_SOON_06,
+    };
+
+    private static SoundEvent pickSunsetSoonLine() {
+        return SUNSET_SOON_VARIANTS[RNG.nextInt(SUNSET_SOON_VARIANTS.length)];
+    }
 
     // Health-related sounds when bot is injured (INJURED mood)
     private static final SoundEvent[] INJURED_CHATTER = {
@@ -237,6 +262,14 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_WILDLIFE_CHICKEN,
             BotDialogueSounds.LINE_WILDLIFE_NICE_DAY,
             BotDialogueSounds.LINE_WILDLIFE_HEARD_WOLF,
+            // April 2026 handoff — animal-proximity reactions.
+            BotDialogueSounds.LINE_ANIMAL_NEARBY_LOVE_ANIMALS,
+            BotDialogueSounds.LINE_PARROT_NEARBY_NICE_BIRD,
+            BotDialogueSounds.LINE_HORSE_NEARBY_NICE_HORSE,
+            BotDialogueSounds.LINE_CAMEL_NEARBY_NICE_CAMEL,
+            BotDialogueSounds.LINE_WOLF_NEARBY_GOOD_DOG,
+            BotDialogueSounds.LINE_WOLF_NEARBY_LOVE_DOGS,
+            BotDialogueSounds.LINE_WOLF_NEARBY_SKINWALKER,
         };
 
         // Nether ambience (used when in the Nether)
@@ -908,7 +941,7 @@ public final class BotAmbientChatter {
                 boolean nearRecentBed = BotHomeService.isNearRecentSleep(bot, 48.0D, RECENT_SLEEP_WINDOW_MS);
 
                 if (!nearBase && !nearRecentBed) {
-                    if (playEvent(bot, BotDialogueSounds.LINE_TIME_SUNSET_SOON)) {
+                    if (playEvent(bot, pickSunsetSoonLine())) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastSunsetSoonEventTick = nowTick;
                         state.lastSunsetSoonDay = day;
@@ -1458,6 +1491,22 @@ public final class BotAmbientChatter {
         // Deepslate detection - ancient cold stone in the depths
         if (isDeepUnderground && isLowLight && RNG.nextFloat() < 0.30f && hasNearbyDeepslate(world, pos)) {
             return DEEPSLATE_CHATTER[RNG.nextInt(DEEPSLATE_CHATTER.length)];
+        }
+
+        // Deep-cave-only: CAVE_DEEP should not fire in shallow caves (per triage retune).
+        boolean isDeepCave = y < 20 && isLowLight;
+        if (isDeepCave && RNG.nextFloat() < 0.20f) {
+            return AMBIENT_DEEP_CAVE_CHATTER[RNG.nextInt(AMBIENT_DEEP_CAVE_CHATTER.length)];
+        }
+
+        // Hostile-or-deep: DONT_LIKE_THIS should only fire in hostile situations
+        // or deeper Y (per triage retune).
+        boolean hostilesNear = !world.getEntitiesByClass(
+                net.minecraft.entity.mob.HostileEntity.class,
+                new net.minecraft.util.math.Box(pos).expand(16.0D, 8.0D, 16.0D),
+                h -> h != null && h.isAlive()).isEmpty();
+        if ((isDeepCave || hostilesNear) && RNG.nextFloat() < 0.25f) {
+            return AMBIENT_HOSTILE_CAVE_CHATTER[RNG.nextInt(AMBIENT_HOSTILE_CAVE_CHATTER.length)];
         }
 
         // Generic cave/ambient chatter when underground

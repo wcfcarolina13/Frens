@@ -743,6 +743,109 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_STOP_ADIOS = register("bot.line.stop_adios");
     public static final SoundEvent LINE_STOP_ILL_WAIT_HERE = register("bot.line.stop_ill_wait_here");
 
+    // === APRIL 2026 HANDOFF (v1.1.30) — audio delivered, Java wiring in progress ===
+
+    // Ambient chatter additions
+    public static final SoundEvent LINE_AMBIENT_TEETH_ITCH = register("bot.line.ambient_teeth_itch");
+
+    // Animal proximity reactions
+    public static final SoundEvent LINE_ANIMAL_NEARBY_LOVE_ANIMALS = register("bot.line.animal_nearby_love_animals");
+    public static final SoundEvent LINE_PARROT_NEARBY_NICE_BIRD = register("bot.line.parrot_nearby_nice_bird");
+    public static final SoundEvent LINE_HORSE_NEARBY_NICE_HORSE = register("bot.line.horse_nearby_nice_horse");
+    public static final SoundEvent LINE_CAMEL_NEARBY_NICE_CAMEL = register("bot.line.camel_nearby_nice_camel");
+    public static final SoundEvent LINE_WOLF_NEARBY_GOOD_DOG = register("bot.line.wolf_nearby_good_dog");
+    public static final SoundEvent LINE_WOLF_NEARBY_LOVE_DOGS = register("bot.line.wolf_nearby_love_dogs");
+    public static final SoundEvent LINE_WOLF_NEARBY_SKINWALKER = register("bot.line.wolf_nearby_skinwalker");
+
+    // Berry-bush skill callbacks
+    public static final SoundEvent LINE_BERRY_BUSH_OUCH = register("bot.line.berry_bush_ouch");
+    public static final SoundEvent LINE_BERRY_BUSH_YOWCH = register("bot.line.berry_bush_yowch");
+    public static final SoundEvent LINE_BERRY_BUSH_EDIBLE_I_THINK = register("bot.line.berry_bush_these_are_edible_i_think");
+    public static final SoundEvent LINE_BERRY_BUSH_THORNY = register("bot.line.berry_bush_these_are_thorny");
+
+    // "Creepy place" — high-threat/unnerving-location flavor
+    public static final SoundEvent LINE_CREEPY_PLACE_HEARD_THAT = register("bot.line.creepy_place_heard_that");
+    public static final SoundEvent LINE_CREEPY_PLACE_IM_FINE_PROBABLY = register("bot.line.creepy_place_im_fine_probably");
+    public static final SoundEvent LINE_CREEPY_PLACE_PRETEND_DIDNT_SEE = register("bot.line.creepy_place_pretend_didnt_see");
+    public static final SoundEvent LINE_CREEPY_PLACE_SAW_NOTHING = register("bot.line.creepy_place_saw_nothing");
+    public static final SoundEvent LINE_CREEPY_PLACE_SHOULDNT_BE_HERE = register("bot.line.creepy_place_shouldnt_be_here");
+    public static final SoundEvent LINE_CREEPY_PLACE_WE_CAN_RECOVER = register("bot.line.creepy_place_we_can_recover");
+    public static final SoundEvent LINE_CREEPY_PLACE_WIN_OR_LEAVE = register("bot.line.creepy_place_win_or_leave");
+
+    // Enderman sighted
+    public static final SoundEvent LINE_ENDERMAN_SPOTTED_DONT_LOOK = register("bot.line.enderman_spotted_dont_look");
+
+    // Foliage/branch stuck (navigation)
+    public static final SoundEvent LINE_FOLIAGE_STUCK_CANT_GET_THROUGH = register("bot.line.foliage_stuck_cant_get_through_these_leaves");
+    public static final SoundEvent LINE_FOLIAGE_STUCK_GOT_ME = register("bot.line.foliage_stuck_foliage_got_me");
+    public static final SoundEvent LINE_FOLIAGE_STUCK_IN_BRANCHES = register("bot.line.foliage_stuck_hold_on_stuck_in_branches");
+    public static final SoundEvent LINE_FOLIAGE_STUCK_BRANCHES_THICK = register("bot.line.foliage_stuck_these_branches_are_thick");
+
+    // Bot hit player (apology)
+    public static final SoundEvent LINE_I_HIT_PLAYER_ACCIDENT = register("bot.line.i_hit_player_accident");
+    public static final SoundEvent LINE_I_HIT_PLAYER_MUST_HAVE_HURT = register("bot.line.i_hit_player_must_have_hurt");
+    public static final SoundEvent LINE_I_HIT_PLAYER_MY_BAD = register("bot.line.i_hit_player_my_bad");
+    public static final SoundEvent LINE_I_HIT_PLAYER_NOT_ON_PURPOSE = register("bot.line.i_hit_player_not_on_purpose");
+    public static final SoundEvent LINE_I_HIT_PLAYER_OOPS_SORRY = register("bot.line.i_hit_player_oops_sorry");
+    public static final SoundEvent LINE_I_HIT_PLAYER_SORRY = register("bot.line.i_hit_player_sorry");
+
+    // Intense combat
+    public static final SoundEvent LINE_INTENSE_COMBAT_POINT_ME_AT_PROBLEM = register("bot.line.intense_combat_point_me_at_problem");
+    public static final SoundEvent LINE_INTENSE_COMBAT_THRIVING_IN_TERRIBLE = register("bot.line.intense_combat_thriving_in_terrible");
+    public static final SoundEvent LINE_INTENSE_COMBAT_TRYING_TO_KILL_US = register("bot.line.intense_combat_trying_to_kill_us");
+
+    // Player hit bot (protest)
+    public static final SoundEvent LINE_PLAYER_HIT_ME_FRIENDLY_FIRE = register("bot.line.player_hit_me_friendly_fire");
+    public static final SoundEvent LINE_PLAYER_HIT_ME_LOOK_OUT = register("bot.line.player_hit_me_look_out");
+    public static final SoundEvent LINE_PLAYER_HIT_ME_QUIT_IT = register("bot.line.player_hit_me_quit_it");
+    public static final SoundEvent LINE_PLAYER_HIT_ME_STOP_THAT = register("bot.line.player_hit_me_stop_that");
+    public static final SoundEvent LINE_PLAYER_HIT_ME_THAT_HURT = register("bot.line.player_hit_me_that_hurt");
+    public static final SoundEvent LINE_PLAYER_HIT_ME_WATCH_WHERE = register("bot.line.player_hit_me_watch_where");
+
+    // Post-combat / post-explosion extras
+    public static final SoundEvent LINE_POST_COMBAT_WASNT_AWESOME = register("bot.line.post_combat_wasnt_awesome");
+    public static final SoundEvent LINE_POST_EXPLOSION_EXACTLY_HOW_IT_WENT = register("bot.line.post_explosion_exactly_how_it_went");
+
+    // Shelter completion
+    public static final SoundEvent LINE_SHELTER_BUILT_ALMOST_SOUND = register("bot.line.shelter_built_almost_sound");
+    public static final SoundEvent LINE_SHELTER_BUILT_INTENTIONAL = register("bot.line.shelter_built_intentional");
+    public static final SoundEvent LINE_SHELTER_BUILT_RECTANGLE = register("bot.line.shelter_built_rectangle");
+    public static final SoundEvent LINE_SHELTER_BUILT_RESOURCES_LIMITED = register("bot.line.shelter_built_resources_limited");
+
+    // Sunset variants (extend existing LINE_TIME_SUNSET_SOON)
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_01 = register("bot.line.time_sunset_soon_01");
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_02 = register("bot.line.time_sunset_soon_02");
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_03 = register("bot.line.time_sunset_soon_03");
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_04 = register("bot.line.time_sunset_soon_04");
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_05 = register("bot.line.time_sunset_soon_05");
+    public static final SoundEvent LINE_TIME_SUNSET_SOON_06 = register("bot.line.time_sunset_soon_06");
+
+    // Weather variants (extend WEATHER_*_LINES pools)
+    public static final SoundEvent LINE_WEATHER_RAIN_01 = register("bot.line.weather_rain_01");
+    public static final SoundEvent LINE_WEATHER_RAIN_02 = register("bot.line.weather_rain_02");
+    public static final SoundEvent LINE_WEATHER_RAIN_03 = register("bot.line.weather_rain_03");
+    public static final SoundEvent LINE_WEATHER_RAIN_04 = register("bot.line.weather_rain_04");
+    public static final SoundEvent LINE_WEATHER_RAIN_05 = register("bot.line.weather_rain_05");
+    public static final SoundEvent LINE_WEATHER_RAIN_06 = register("bot.line.weather_rain_06");
+    public static final SoundEvent LINE_WEATHER_SNOW_01 = register("bot.line.weather_snow_01");
+    public static final SoundEvent LINE_WEATHER_SNOW_02 = register("bot.line.weather_snow_02");
+    public static final SoundEvent LINE_WEATHER_SNOW_03 = register("bot.line.weather_snow_03");
+    public static final SoundEvent LINE_WEATHER_SNOW_04 = register("bot.line.weather_snow_04");
+    public static final SoundEvent LINE_WEATHER_SNOW_05 = register("bot.line.weather_snow_05");
+    public static final SoundEvent LINE_WEATHER_SNOW_06 = register("bot.line.weather_snow_06");
+    public static final SoundEvent LINE_WEATHER_SUNNY_01 = register("bot.line.weather_sunny_01");
+    public static final SoundEvent LINE_WEATHER_SUNNY_02 = register("bot.line.weather_sunny_02");
+    public static final SoundEvent LINE_WEATHER_SUNNY_03 = register("bot.line.weather_sunny_03");
+    public static final SoundEvent LINE_WEATHER_SUNNY_04 = register("bot.line.weather_sunny_04");
+    public static final SoundEvent LINE_WEATHER_SUNNY_05 = register("bot.line.weather_sunny_05");
+    public static final SoundEvent LINE_WEATHER_SUNNY_06 = register("bot.line.weather_sunny_06");
+    public static final SoundEvent LINE_WEATHER_THUNDER_01 = register("bot.line.weather_thunder_01");
+    public static final SoundEvent LINE_WEATHER_THUNDER_02 = register("bot.line.weather_thunder_02");
+    public static final SoundEvent LINE_WEATHER_THUNDER_03 = register("bot.line.weather_thunder_03");
+    public static final SoundEvent LINE_WEATHER_THUNDER_04 = register("bot.line.weather_thunder_04");
+    public static final SoundEvent LINE_WEATHER_THUNDER_05 = register("bot.line.weather_thunder_05");
+    public static final SoundEvent LINE_WEATHER_THUNDER_06 = register("bot.line.weather_thunder_06");
+
     private BotDialogueSounds() {
     }
 
