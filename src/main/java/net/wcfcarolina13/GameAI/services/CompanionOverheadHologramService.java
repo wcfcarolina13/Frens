@@ -77,6 +77,14 @@ public final class CompanionOverheadHologramService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
+        // Entity spawning + positioning must happen on the server thread. Callers like
+        // WoodcutSkill.execute run on skill worker threads; re-enqueue rather than crashing
+        // C2ME's preventAsyncEntityLoad guard.
+        MinecraftServer server = world.getServer();
+        if (server != null && !server.isOnThread()) {
+            server.execute(() -> show(bot, line, durationMs));
+            return;
+        }
         UUID botId = bot.getUuid();
         if (botId == null) {
             return;

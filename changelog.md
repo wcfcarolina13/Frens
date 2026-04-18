@@ -2,6 +2,27 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fix async entity spawn crash in hologram service (2026-04-18)
+
+**Symptom:** Woodcut skill crashed repeatedly (`Skill 'woodcut' crashed: Async entity load`) when the bot tried to show its "Scanning for trees..." overhead label. Stack trace ([latest.log 00:05:21](~/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log)):
+
+```text
+java.util.ConcurrentModificationException: Async entity load
+    at class_3898.handler$zfp000$c2me-fixes-general-threading-issues$preventAsyncEntityLoad
+    at class_3218.method_8649 (World#spawnEntity)
+    at CompanionOverheadHologramService.spawnStand:192
+    at CompanionOverheadHologramService.show:92
+    at WoodcutSkill.execute:779
+```
+
+**Cause:** `WoodcutSkill.execute` runs on the `mod-command-skill-1` worker thread. It calls `CompanionOverheadHologramService.show` directly, which calls `spawnStand` → `world.spawnEntity`. Entity spawning is a server-thread-only operation; C2ME's `preventAsyncEntityLoad` mixin correctly rejects off-thread spawns by throwing `ConcurrentModificationException`. This crashes the skill thread, aborting woodcut.
+
+**Fix** in [CompanionOverheadHologramService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionOverheadHologramService.java): defensive re-enqueue at the service boundary. Before touching the ACTIVE map or calling `spawnStand`, check `server.isOnThread()`. If false, schedule a `server.execute(() -> show(bot, line, durationMs))` and return. Server-thread callers are unaffected (one boolean check).
+
+This pattern protects every caller: `WoodcutSkill`, any other skill that labels its progress, and the dialogue-ack paths added in [33e81fe](https://github.com/) (follow/stop acks, context reactions — all of which eventually funnel through `CompanionOverheadHologramService.show` via `CompanionOverheadDialogueService.showOverheadLine`). No need to audit each call site.
+
+**Why fix in the service and not the call site:** the pattern in this repo is "keep server-thread sections small: compute off-thread, execute atomically on-thread" (CLAUDE.md → Threading Rules). Fixing at each worker-thread call site is defensible but fragile — future contributors adding an overhead label from a new skill would trip the same crash. One guard in the service closes the category of bug.
+
 ## Dialogue backlog scaffolding: 27 new unvoiced events + triggers (2026-04-17)
 
 Lays the mod-side groundwork for the April 2026 dialogue backlog (from `Minecraft Frens Feature Backlog March 2026.md`) so Chatterbox TTS generation can proceed. No audio files yet — each event is registered with an empty `sounds[]` so the triage tool will catch incoming OGGs as orphans and the handoff generator fills in the `sounds[]` arrays.
