@@ -89,6 +89,12 @@ public final class CompanionContextReactionService {
         /** Tick at which commander last was NOT looking at the bot. Used to compute
          *  how long the commander has been staring. -1 = not currently staring. */
         long commanderStareStartTick = -1L;
+        /** End-ship "captain now" sequence state. -1 = idle; otherwise tick when
+         *  the "hey, hey, look at me" solicitation line fired. */
+        long endShipSolicitedAtTick = -1L;
+        /** Accumulated ticks of continuous commander-looking-at-bot since solicitation.
+         *  Reaches 60 (3 s) → fires "I'm the captain now." */
+        int endShipLookingTicks = 0;
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -122,6 +128,20 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] ENDERMAN_SPOTTED_LINES = new WeightedLine[] {
             new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
+    };
+
+    // End-ship "captain now" sequence — 3-stage conditional gag. Initial
+    // solicitation → branches on whether the commander looks at the bot.
+    private static final WeightedLine[] END_SHIP_LOOK_AT_ME_LINES = new WeightedLine[] {
+            new WeightedLine("end_ship_look_at_me", "Hey, hey, look at me.", BotDialogueSounds.LINE_END_SHIP_LOOK_AT_ME, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] END_SHIP_CAPTAIN_LINES = new WeightedLine[] {
+            new WeightedLine("end_ship_captain", "I'm the captain now.", BotDialogueSounds.LINE_END_SHIP_CAPTAIN, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] END_SHIP_RUINED_JOKE_LINES = new WeightedLine[] {
+            new WeightedLine("end_ship_ruined_joke", "That ruined the joke.", BotDialogueSounds.LINE_END_SHIP_RUINED_JOKE, WEIGHT_COMMON)
     };
 
     private static final WeightedLine[] DIG_DOWN_LINES = new WeightedLine[] {
@@ -373,6 +393,12 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("stop_ack", 30_000L);
         TRIGGER_COOLDOWN_MS.put("commander_staring", COOLDOWN_META_MS);
         TRIGGER_COOLDOWN_MS.put("enderman_spotted", COOLDOWN_180S_MS);
+        // End-ship gag: very long cooldown — it's a one-shot meme per session.
+        TRIGGER_COOLDOWN_MS.put("end_ship_look_at_me", 30L * 60L * 1000L);
+        // The follow-up lines use their own short cooldowns because they're
+        // gated by the state machine anyway.
+        TRIGGER_COOLDOWN_MS.put("end_ship_captain", 5_000L);
+        TRIGGER_COOLDOWN_MS.put("end_ship_ruined_joke", 5_000L);
     }
 
     private CompanionContextReactionService() {
@@ -454,6 +480,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryEndermanSpotted(bot, world, state)) {
+                continue;
+            }
+            if (tryEndShipSequence(bot, world, state, nowTick)) {
                 continue;
             }
         }
@@ -1026,6 +1055,66 @@ public final class CompanionContextReactionService {
         if (world.isSkyVisible(bot.getBlockPos().up())) return false;
         if (RNG.nextDouble() > 0.012D) return false;
         return tryTrigger(bot, "underground_mines", UNDERGROUND_LINES, null, false);
+    }
+
+    /**
+     * End-ship "captain now" gag. Three-stage conditional sequence:
+     *
+     * <ol>
+     *   <li>Solicitation: bot says "Hey, hey, look at me." when a nearby commander
+     *       is NOT currently looking at the bot and the bot is perched / riding
+     *       something / in The End.</li>
+     *   <li>Resolution — captain: if the commander then faces the bot for ≥ 3 s
+     *       (60 ticks) within a 14 s window, bot says "I'm the captain now."</li>
+     *   <li>Resolution — ruined: if 14 s elapse without the commander ever looking
+     *       long enough, bot says "That ruined the joke."</li>
+     * </ol>
+     */
+    private static boolean tryEndShipSequence(ServerPlayerEntity bot, ServerWorld world, TriggerState state, long nowTick) {
+        // Stage 2/3: sequence already in flight — advance or resolve.
+        if (state.endShipSolicitedAtTick >= 0L) {
+            long elapsed = nowTick - state.endShipSolicitedAtTick;
+            ServerPlayerEntity commander = findNearbyCommander(bot, world, 32.0);
+            boolean commanderLookingNow = commander != null && isEntityFacing(commander, bot);
+            if (commanderLookingNow) {
+                state.endShipLookingTicks++;
+                if (state.endShipLookingTicks >= 60) {  // 3 s at 20 TPS
+                    state.endShipSolicitedAtTick = -1L;
+                    state.endShipLookingTicks = 0;
+                    return tryTrigger(bot, "end_ship_captain", END_SHIP_CAPTAIN_LINES, null, false);
+                }
+            } else {
+                // Reset the streak — the 3 s needs to be continuous.
+                state.endShipLookingTicks = 0;
+            }
+            if (elapsed >= 280L) {  // 14 s at 20 TPS
+                state.endShipSolicitedAtTick = -1L;
+                state.endShipLookingTicks = 0;
+                return tryTrigger(bot, "end_ship_ruined_joke", END_SHIP_RUINED_JOKE_LINES, null, false);
+            }
+            return true;  // still in flight; don't let other triggers steal the turn
+        }
+
+        // Stage 1: entry conditions.
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 24.0);
+        if (commander == null) return false;
+        if (isEntityFacing(commander, bot)) return false;  // joke needs the look-away setup
+
+        // Bot should be "perched" — riding something, OR in The End, OR elevated.
+        boolean ridingSomething = bot.hasVehicle();
+        String dim = world.getRegistryKey().getValue().toString();
+        boolean inEnd = dim.contains("the_end");
+        boolean elevated = !ridingSomething && bot.getY() >= 70.0 && world.isSkyVisible(bot.getBlockPos().up());
+        if (!ridingSomething && !inEnd && !elevated) return false;
+
+        if (RNG.nextDouble() > 0.0008D) return false;  // very rare
+
+        if (!tryTrigger(bot, "end_ship_look_at_me", END_SHIP_LOOK_AT_ME_LINES, null, false)) {
+            return false;
+        }
+        state.endShipSolicitedAtTick = nowTick;
+        state.endShipLookingTicks = 0;
+        return true;
     }
 
     /** Fires enderman_spotted_dont_look when a live enderman is within 16 blocks
