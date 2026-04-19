@@ -112,15 +112,24 @@ public final class CompanionContextReactionService {
     private static final WeightedLine[] AMBIENT_LINES = new WeightedLine[] {
             // ambient_bad_feeling moved to HIGH_THREAT_LINES per triage retune — was
             // firing too often in safe ambient settings.
+            // ambient_saw_bird + ambient_same_tree moved to OUTDOOR_AMBIENT_LINES —
+            // they were firing underground where neither line makes sense, and saw_bird
+            // was also overused at WEIGHT_COMMON.
             new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_VERY_RARE),
             new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_RARE),
             new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON),
-            new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_COMMON),
             new WeightedLine("ambient_had_plan", "What was I doing? I had a plan. I definitely had a plan.", BotDialogueSounds.LINE_AMBIENT_HAD_PLAN, WEIGHT_UNCOMMON),
             new WeightedLine("ambient_giant_statue", "I should probably build a giant statue of myself. Or a farm. Probably a farm.", BotDialogueSounds.LINE_AMBIENT_GIANT_STATUE, WEIGHT_RARE),
             new WeightedLine("ambient_forgot_something", "I'm 100% sure I forgot something, but I can't remember what it is.", BotDialogueSounds.LINE_AMBIENT_FORGOT_SOMETHING, WEIGHT_UNCOMMON),
-            new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE),
             new WeightedLine("ambient_teeth_itch", "My teeth itch!", BotDialogueSounds.LINE_AMBIENT_TEETH_ITCH, WEIGHT_RARE)
+    };
+
+    // Lines that only make sense with the sky overhead (surface overworld / nether open
+    // roof / end island top). "Walked past this tree" is nonsensical underground, and
+    // "I think I saw a bird" was firing everywhere including caves.
+    private static final WeightedLine[] OUTDOOR_AMBIENT_LINES = new WeightedLine[] {
+            new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_VERY_RARE),
+            new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE)
     };
 
     private static final WeightedLine[] PIG_STARING_LINES = new WeightedLine[] {
@@ -417,6 +426,7 @@ public final class CompanionContextReactionService {
         // line cooldowns are short because the sequence paces them.
         TRIGGER_COOLDOWN_MS.put("tnt_sequence_start", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("tnt_sequence_step", 500L);
+        TRIGGER_COOLDOWN_MS.put("outdoor_ambient", COOLDOWN_META_MS);
     }
 
     private CompanionContextReactionService() {
@@ -477,6 +487,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryAmbient(bot, state, inCombat)) {
+                continue;
+            }
+            if (tryOutdoorAmbient(bot, world, state, inCombat)) {
                 continue;
             }
             if (tryMetaAndMemes(bot, world, state, inCombat, hostiles)) {
@@ -678,6 +691,17 @@ public final class CompanionContextReactionService {
             return false;
         }
         return tryTrigger(bot, "random_idle_not_combat", AMBIENT_LINES, null, false);
+    }
+
+    /** Outdoor-only ambient pool: lines like "I saw a bird" and "walked past this tree"
+     *  only make sense with the sky overhead. Gated on sky-visible, hasSkyLight (so it
+     *  doesn't fire in nether/end), and rarer than AMBIENT_LINES to curb overuse. */
+    private static boolean tryOutdoorAmbient(ServerPlayerEntity bot, ServerWorld world, TriggerState state, boolean inCombat) {
+        if (inCombat || bot.hasVehicle()) return false;
+        if (!world.getDimension().hasSkyLight()) return false;
+        if (!world.isSkyVisible(bot.getBlockPos().up())) return false;
+        if (RNG.nextDouble() > 0.008D) return false;
+        return tryTrigger(bot, "outdoor_ambient", OUTDOOR_AMBIENT_LINES, null, false);
     }
 
     private static boolean tryWeather(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
