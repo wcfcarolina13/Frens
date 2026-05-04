@@ -3654,6 +3654,10 @@ public class BotEventHandler {
                     // Accidental hit: drop the golem from the engage list.
                     continue;
                 }
+                if (!net.wcfcarolina13.GameAI.services.BotCombatPolicyService.shouldBotAttack(e, bot)) {
+                    // Name-tagged mob — bot is forbidden from engaging.
+                    continue;
+                }
                 filtered.add(e);
             }
             hostileEntities = filtered;
@@ -6981,6 +6985,12 @@ public class BotEventHandler {
 
     private static boolean tryWolfTeleport(ServerPlayerEntity bot, ServerPlayerEntity target, MinecraftServer server) {
         if (bot == null || target == null || server == null) {
+            return false;
+        }
+        // Vanilla ServerPlayerEntity#teleport dismounts the rider, which would
+        // orphan the bot's horse/boat at its current position. RideSync handles
+        // catch-up for mounted bots; let it stay in charge.
+        if (bot.hasVehicle()) {
             return false;
         }
         UUID id = bot.getUuid();

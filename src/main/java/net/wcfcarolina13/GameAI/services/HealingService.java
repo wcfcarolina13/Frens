@@ -71,10 +71,38 @@ public final class HealingService {
         if (stack == null || stack.isEmpty()) return false;
         FoodComponent food = getFoodComponent(stack);
         if (food == null) return false;
-        String itemId = stack.getItem().getTranslationKey().toLowerCase(java.util.Locale.ROOT);
-        if (FORBIDDEN_FOODS.stream().anyMatch(itemId::contains)) return false;
-        if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) return false;
+        if (isForbidden(stack)) return false;
+        if (isPrecious(stack)) return false;
         return true;
+    }
+
+    public static boolean isPrecious(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        return PRECIOUS_FOODS.stream().anyMatch(itemId::contains);
+    }
+
+    public static boolean isForbidden(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        return FORBIDDEN_FOODS.stream().anyMatch(itemId::contains);
+    }
+
+    /**
+     * Returns true if the bot has at least one full stack (64+) of any single non-precious,
+     * non-forbidden edible item. Used to lower the auto-eat stinginess threshold.
+     */
+    public static boolean hasAbundantFood(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        PlayerInventory inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack.isEmpty() || stack.getCount() < 64) continue;
+            if (isPrecious(stack) || isForbidden(stack)) continue;
+            FoodComponent food = getFoodComponent(stack);
+            if (food != null && food.nutrition() > 0) return true;
+        }
+        return false;
     }
 
     private HealingService() {
@@ -121,7 +149,10 @@ public final class HealingService {
         boolean missingHealth = health + 0.001F < maxHealth;
 
         // Keep legacy behaviour: don't casually dip into food while at full hunger.
-        boolean needsComfortFood = foodLevel < HUNGER_COMFORTABLE;
+        // Raise the threshold when the bot has a full stack of non-precious food — if there's
+        // plenty to eat, no reason to be stingy.
+        int effectiveComfort = hasAbundantFood(bot) ? 18 : HUNGER_COMFORTABLE;
+        boolean needsComfortFood = foodLevel < effectiveComfort;
 
         // New behaviour: if we're hurt and our hunger/saturation isn't high enough to naturally regen hearts, top up.
         // In practice, hearts won't regen reliably unless the hunger bar is high (>=18) and there's some satiation.

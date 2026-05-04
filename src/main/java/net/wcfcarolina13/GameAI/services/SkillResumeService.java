@@ -69,6 +69,11 @@ public final class SkillResumeService {
         AWAITING_DECISION.remove(botUuid);
         AUTO_RESUME_PENDING.remove(botUuid);
         PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(botUuid));
+        // Any explicit intent-reset (/bot stop, /bot follow) should also drop the
+        // pending sunrise-resume record. Without this, a fishing skill that aborts
+        // at sunset persists "resume tomorrow" state that the next sunrise auto-fires
+        // even after the player has clearly taken manual control.
+        SUNRISE_RESUME_BY_BOT.remove(botUuid);
     }
 
     public static boolean isAwaiting(UUID botUuid) {

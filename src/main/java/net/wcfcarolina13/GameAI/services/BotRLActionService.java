@@ -88,11 +88,14 @@ public final class BotRLActionService {
                             .filter(EntityUtil::isHostile)
                             .toList();
                 }
-                if (!hostiles.isEmpty()) {
-                    FaceClosestEntity.faceClosestEntity(bot, hostiles);
-                    BotActions.attackNearest(bot, hostiles);
+                List<Entity> attackable = hostiles.stream()
+                        .filter(e -> BotCombatPolicyService.shouldBotAttack(e, bot))
+                        .toList();
+                if (!attackable.isEmpty()) {
+                    FaceClosestEntity.faceClosestEntity(bot, attackable);
+                    BotActions.attackNearest(bot, attackable);
                 } else {
-                    debugFn.accept("No hostile entities available to attack.");
+                    debugFn.accept("No attackable hostile entities (all name-tagged or none present).");
                 }
             }
             case "hotbar1" -> {

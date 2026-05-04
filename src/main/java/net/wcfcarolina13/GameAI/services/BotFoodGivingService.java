@@ -3,16 +3,21 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.FoodComponent;
 import net.minecraft.entity.player.HungerManager;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.MutableText;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.wcfcarolina13.GameAI.BotActions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Locale;
+import java.util.Iterator;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -20,19 +25,15 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Handles the direct food-giving mechanic: player right-clicks bot with food in hand.
  * <p>
- * If the bot is hungry (same rules as {@link HealingService#autoEat}), the bot takes one
- * food item from the player's hand, places it in its own inventory, and eats it.
- * If the bot is not hungry, it refuses and nothing happens.
+ * For non-precious food, accepted whenever hunger is below full (foodLevel &lt; 20).
+ * For precious food (golden apple etc.), a clickable chat prompt asks the player to confirm
+ * before consuming.
  * <p>
- * Overhead dialogue lines are shown for both accept and refuse, rate-limited.
+ * Overhead dialogue lines are shown for accept and refuse, rate-limited.
  */
 public final class BotFoodGivingService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-food-giving");
-
-    /** Hunger thresholds (mirrors HealingService). */
-    private static final int HUNGER_COMFORTABLE = 15;
-    private static final int REGEN_READY_FOOD_LEVEL = 18;
 
     /** Per-bot cooldown for accept/refuse dialogue. */
     private static final long DIALOGUE_COOLDOWN_MS = 60_000L; // 1 minute
@@ -40,10 +41,8 @@ public final class BotFoodGivingService {
     private static final int DISPLAY_DURATION_MS = 3_000;
     private static final double OVERHEAD_RANGE = 32.0;
 
-    /** Foods the bot will never eat (same as HealingService.FORBIDDEN_FOODS). */
-    private static final Set<String> FORBIDDEN_FOODS = Set.of(
-            "rotten_flesh", "poisonous_potato", "spider_eye", "pufferfish", "suspicious_stew"
-    );
+    /** Precious-food confirmation prompt lifespan. */
+    private static final long PENDING_FEED_TTL_MS = 15_000L;
 
     private static final String[] ACCEPT_LINES = {
             "Thanks, I needed that.",
@@ -59,7 +58,16 @@ public final class BotFoodGivingService {
             "I'll pass for now."
     };
 
+    private record PendingFeed(UUID playerUuid, UUID botUuid, Item expectedItem, long expiryMillis) {
+        boolean isExpired(long nowMillis) {
+            return nowMillis >= expiryMillis;
+        }
+    }
+
     private static final Map<UUID, Long> LAST_DIALOGUE_MS = new ConcurrentHashMap<>();
+
+    /** Key = botUuid. A single pending prompt per bot at a time — a second interaction replaces it. */
+    private static final Map<UUID, PendingFeed> PENDING_FEEDS = new ConcurrentHashMap<>();
 
     private BotFoodGivingService() {
     }
@@ -69,8 +77,9 @@ public final class BotFoodGivingService {
      *
      * @param player the player right-clicking the bot
      * @param bot    the bot being interacted with
-     * @return true if the interaction was consumed (food given or refused with dialogue),
-     *         false if the player isn't holding food (let normal interaction proceed)
+     * @return true if the interaction was consumed (food given, refused with dialogue, or a
+     *         confirmation prompt was shown), false if the player isn't holding food (let normal
+     *         interaction proceed)
      */
     public static boolean tryGiveFood(ServerPlayerEntity player, ServerPlayerEntity bot) {
         if (player == null || bot == null || player.isRemoved() || bot.isRemoved()) {
@@ -82,65 +91,144 @@ public final class BotFoodGivingService {
             return false;
         }
 
-        // Check if held item is food.
         FoodComponent food = heldStack.getComponents().get(DataComponentTypes.FOOD);
         if (food == null) {
             return false; // Not food — let normal interaction proceed.
         }
 
-        // Check if it's a forbidden food the bot won't eat.
-        String itemId = heldStack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        boolean forbidden = FORBIDDEN_FOODS.stream().anyMatch(itemId::contains);
-        if (forbidden) {
-            showDialogue(bot, false);
-            return true; // Consumed the interaction, but refused the food.
-        }
-
-        // Check hunger conditions (mirrors HealingService.autoEat logic).
-        HungerManager hunger = bot.getHungerManager();
-        int foodLevel = hunger.getFoodLevel();
-        float saturation = hunger.getSaturationLevel();
-        float health = bot.getHealth();
-        float maxHealth = bot.getMaxHealth();
-
-        boolean isHungry = foodLevel < 20;
-        boolean missingHealth = health + 0.001F < maxHealth;
-        boolean needsComfortFood = foodLevel < HUNGER_COMFORTABLE;
-        boolean needsRegenFuel = isHungry && missingHealth && (foodLevel < REGEN_READY_FOOD_LEVEL || saturation <= 0.0F);
-
-        if (!needsComfortFood && !needsRegenFuel) {
-            // Bot is not hungry enough — refuse.
+        if (HealingService.isForbidden(heldStack)) {
             showDialogue(bot, false);
             return true;
         }
 
-        // Bot is hungry — take one food item from the player and eat it.
-        ItemStack taken = heldStack.split(1);
-        if (taken.isEmpty()) {
-            return false;
+        HungerManager hunger = bot.getHungerManager();
+        if (hunger.getFoodLevel() >= 20) {
+            showDialogue(bot, false);
+            return true;
         }
 
-        // Place food in bot's inventory.
+        if (HealingService.isPrecious(heldStack)) {
+            if (net.wcfcarolina13.Frens.CONFIG.getAutoAcceptPreciousFoods(player.getUuid())) {
+                // Player has opted in to auto-accept — skip the prompt and consume directly.
+                doFeed(player, bot, heldStack);
+            } else {
+                sendConfirmationPrompt(player, bot, heldStack);
+            }
+            return true;
+        }
+
+        doFeed(player, bot, heldStack);
+        return true;
+    }
+
+    /**
+     * Invoked when the player clicks [Yes] on a precious-food confirmation prompt.
+     * Validates the pending entry and completes the feed if still valid.
+     */
+    public static void confirmPending(ServerPlayerEntity player, UUID botUuid) {
+        if (player == null || botUuid == null) return;
+
+        PendingFeed pending = PENDING_FEEDS.get(botUuid);
+        long now = System.currentTimeMillis();
+        if (pending == null || pending.isExpired(now) || !pending.playerUuid.equals(player.getUuid())) {
+            PENDING_FEEDS.remove(botUuid);
+            player.sendMessage(Text.literal("That food offer has expired.").formatted(Formatting.GRAY), false);
+            return;
+        }
+
+        ItemStack held = player.getStackInHand(Hand.MAIN_HAND);
+        if (held.isEmpty() || held.getItem() != pending.expectedItem) {
+            PENDING_FEEDS.remove(botUuid);
+            player.sendMessage(Text.literal("You're no longer holding that item.").formatted(Formatting.GRAY), false);
+            return;
+        }
+
+        MinecraftServer server = player.getCommandSource() != null ? player.getCommandSource().getServer() : null;
+        ServerPlayerEntity bot = server != null ? server.getPlayerManager().getPlayer(botUuid) : null;
+        if (bot == null || bot.isRemoved()) {
+            PENDING_FEEDS.remove(botUuid);
+            player.sendMessage(Text.literal("That bot is no longer available.").formatted(Formatting.GRAY), false);
+            return;
+        }
+
+        PENDING_FEEDS.remove(botUuid);
+        doFeed(player, bot, held);
+    }
+
+    /** Invoked when the player clicks [No] on a precious-food confirmation prompt. */
+    public static void cancelPending(ServerPlayerEntity player, UUID botUuid) {
+        if (player == null || botUuid == null) return;
+        PendingFeed pending = PENDING_FEEDS.remove(botUuid);
+        if (pending != null && pending.playerUuid.equals(player.getUuid())) {
+            player.sendMessage(Text.literal("Kept for later.").formatted(Formatting.GRAY), false);
+        }
+    }
+
+    /** Periodic sweep to purge expired pending prompts. Registered as a server tick handler. */
+    public static void onServerTick(MinecraftServer server) {
+        if (PENDING_FEEDS.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<UUID, PendingFeed>> it = PENDING_FEEDS.entrySet().iterator();
+        while (it.hasNext()) {
+            if (it.next().getValue().isExpired(now)) {
+                it.remove();
+            }
+        }
+    }
+
+    private static void sendConfirmationPrompt(ServerPlayerEntity player, ServerPlayerEntity bot, ItemStack held) {
+        Item item = held.getItem();
+        UUID botUuid = bot.getUuid();
+        long expiry = System.currentTimeMillis() + PENDING_FEED_TTL_MS;
+        PENDING_FEEDS.put(botUuid, new PendingFeed(player.getUuid(), botUuid, item, expiry));
+
+        String itemName = held.getName().getString();
+        String botName = bot.getName().getString();
+
+        MutableText yes = Text.literal("[Yes]").styled(s -> s
+                .withColor(Formatting.GREEN)
+                .withBold(true)
+                .withClickEvent(new ClickEvent.RunCommand("/bot feedconfirm " + botUuid)));
+        MutableText no = Text.literal("[No]").styled(s -> s
+                .withColor(Formatting.RED)
+                .withBold(true)
+                .withClickEvent(new ClickEvent.RunCommand("/bot feedcancel " + botUuid)));
+
+        MutableText prompt = Text.literal("")
+                .append(Text.literal(botName + ": ").formatted(Formatting.AQUA))
+                .append(Text.literal("That " + itemName + " is precious. Eat it anyway? "))
+                .append(yes)
+                .append(Text.literal(" "))
+                .append(no);
+
+        player.sendMessage(prompt, false);
+        LOGGER.info("Precious-food prompt shown: player={} bot={} item={}",
+                player.getName().getString(), botName, item.getTranslationKey());
+    }
+
+    private static void doFeed(ServerPlayerEntity player, ServerPlayerEntity bot, ItemStack heldStack) {
+        ItemStack taken = heldStack.split(1);
+        if (taken.isEmpty()) {
+            return;
+        }
+
         int emptySlot = findEmptyHotbarSlot(bot);
         if (emptySlot < 0) {
             emptySlot = findEmptyInventorySlot(bot);
         }
         if (emptySlot < 0) {
-            // Bot has no room. Give item back.
             heldStack.increment(1);
             showDialogue(bot, false);
-            return true;
+            return;
         }
 
         bot.getInventory().setStack(emptySlot, taken);
         bot.getInventory().markDirty();
 
-        // Move to hotbar and consume.
         int hotbarSlot = emptySlot;
         if (emptySlot >= 9) {
             int hbSlot = findEmptyHotbarSlot(bot);
             if (hbSlot < 0) hbSlot = 8;
-            // Swap to hotbar.
             ItemStack temp = bot.getInventory().getStack(hbSlot);
             bot.getInventory().setStack(hbSlot, bot.getInventory().getStack(emptySlot));
             bot.getInventory().setStack(emptySlot, temp);
@@ -155,7 +243,6 @@ public final class BotFoodGivingService {
                 bot.getName().getString(), taken.getItem().getTranslationKey(), player.getName().getString());
 
         showDialogue(bot, true);
-        return true;
     }
 
     private static void showDialogue(ServerPlayerEntity bot, boolean accepted) {
@@ -170,7 +257,6 @@ public final class BotFoodGivingService {
             return;
         }
 
-        // 70% chance to show dialogue on accept, 50% on refuse.
         double roll = ThreadLocalRandom.current().nextDouble();
         if (accepted && roll > 0.70) return;
         if (!accepted && roll > 0.50) return;
@@ -205,8 +291,20 @@ public final class BotFoodGivingService {
         return -1;
     }
 
+    /** Clear pending feed prompts tied to a specific bot (e.g., when the bot is removed). */
+    public static void clearPendingForBot(UUID botUuid) {
+        if (botUuid != null) PENDING_FEEDS.remove(botUuid);
+    }
+
+    /** Clear pending feed prompts authored by a specific player (e.g., on disconnect). */
+    public static void clearPendingForPlayer(UUID playerUuid) {
+        if (playerUuid == null) return;
+        PENDING_FEEDS.values().removeIf(p -> p.playerUuid.equals(playerUuid));
+    }
+
     /** Call on server stop. */
     public static void clear() {
         LAST_DIALOGUE_MS.clear();
+        PENDING_FEEDS.clear();
     }
 }

@@ -48,6 +48,7 @@ public class ManualConfig {
     private Map<String, String> botGameProfile = new HashMap<>();
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
     private Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
+    private Map<String, Boolean> playerAutoAcceptPreciousFoods = new HashMap<>();
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     // Per-world bot spawn points: alias → worldKey → BotSpawn.
     private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
@@ -487,6 +488,23 @@ public class ManualConfig {
             playerPreserveExpensiveGear = new HashMap<>();
         }
         playerPreserveExpensiveGear.put(playerUuid.toString(), value);
+    }
+
+    public boolean getAutoAcceptPreciousFoods(UUID playerUuid) {
+        if (playerUuid == null || playerAutoAcceptPreciousFoods == null) {
+            return false;
+        }
+        return playerAutoAcceptPreciousFoods.getOrDefault(playerUuid.toString(), Boolean.FALSE);
+    }
+
+    public void setAutoAcceptPreciousFoods(UUID playerUuid, boolean value) {
+        if (playerUuid == null) {
+            return;
+        }
+        if (playerAutoAcceptPreciousFoods == null) {
+            playerAutoAcceptPreciousFoods = new HashMap<>();
+        }
+        playerAutoAcceptPreciousFoods.put(playerUuid.toString(), value);
     }
 
     /** @deprecated Legacy accessor. Use {@link #getBotSpawnPointsByWorld()} instead. */

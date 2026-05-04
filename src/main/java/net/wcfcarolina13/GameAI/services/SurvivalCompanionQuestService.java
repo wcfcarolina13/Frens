@@ -91,6 +91,27 @@ public final class SurvivalCompanionQuestService {
 
         long nowTick = server.getTicks();
 
+        String normalizedKey = topicKey == null ? "" : topicKey.trim().toLowerCase(Locale.ROOT);
+
+        // Batch3 passive world-observation topics (biomes, structures, dimensions,
+        // traders/mounts, travel) are just flavor lines about what the bot is seeing.
+        // They have nothing to do with questline progression, so serve them in any
+        // mode — including admin worlds where recruitment is never enabled.
+        if (isBatch3TopicKey(normalizedKey)) {
+            ManualConfig.SurvivalRecruitmentState stForAlias = SurvivalRecruitmentService.getState(server);
+            String recruitedAliasIfAny = stForAlias != null ? stForAlias.getBotAlias() : null;
+            String memoryAlias = (recruitedAliasIfAny != null && !recruitedAliasIfAny.isBlank())
+                    ? recruitedAliasIfAny
+                    : (botAlias == null ? "" : botAlias.trim());
+            String line = Batch3TopicDialogueService.pickLineForTopic(memoryAlias, normalizedKey);
+            if (line == null || line.isBlank()) {
+                line = "...";
+            }
+            int stageForResponse = stForAlias != null ? stForAlias.getCompanionQuestStage() : 0;
+            boolean permanentForResponse = stForAlias != null && stForAlias.isPermanentCompanion();
+            return Response.ofLines(List.of(line), stageForResponse, permanentForResponse);
+        }
+
         if (!SurvivalRecruitmentService.isEnabled(server)) {
             return Response.ofLines(List.of("This world isn't using survival recruitment."), 0, false);
         }
@@ -118,7 +139,7 @@ public final class SurvivalCompanionQuestService {
         int stage = st.getCompanionQuestStage();
         boolean permanent = st.isPermanentCompanion();
 
-        String k = topicKey == null ? "" : topicKey.trim().toLowerCase(Locale.ROOT);
+        String k = normalizedKey;
 
         // Anchor changes should be explicit and authorized.
         if (k.equals("companion_anchor_set")) {
@@ -253,6 +274,22 @@ public final class SurvivalCompanionQuestService {
         }
         RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
         return server.getWorld(key);
+    }
+
+    private static boolean isBatch3TopicKey(String k) {
+        if (k == null || k.isEmpty()) return false;
+        if (k.equals(Batch3TopicDialogueService.KEY_BIOMES)
+                || k.equals(Batch3TopicDialogueService.KEY_STRUCTURES)
+                || k.equals(Batch3TopicDialogueService.KEY_DIMENSIONS)
+                || k.equals(Batch3TopicDialogueService.KEY_TRADERS_MOUNTS)
+                || k.equals(Batch3TopicDialogueService.KEY_TRAVEL)) {
+            return true;
+        }
+        // Legacy aliases accepted by Batch3TopicDialogueService.canonicalGroupKey.
+        return switch (k) {
+            case "topic_biomes", "topic_structures", "topic_dimensions", "topic_mounts", "topic_travel" -> true;
+            default -> false;
+        };
     }
 
     private static boolean isAuthorizedAdvancer(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {

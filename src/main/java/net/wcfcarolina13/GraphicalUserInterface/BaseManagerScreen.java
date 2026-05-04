@@ -608,6 +608,17 @@ public class BaseManagerScreen extends Screen {
 
         context.fill(list.x, list.y, list.right(), list.bottom(), 0xCC0F0F0F);
 
+        // Inline legend: color-code key so the two "home" concepts aren't confusing.
+        // See the 'Home & Bases Explained' guide topic for the full breakdown.
+        if (!bases.isEmpty()) {
+            String legend = "§e[Base]§7 = registered base · §fwhite§7 = lodestone compass · [Home] = preferred";
+            int legendX = list.x + 4;
+            int legendY = list.y - this.textRenderer.fontHeight - 2;
+            if (legendY >= content.y) {
+                context.drawTextWithShadow(this.textRenderer, legend, legendX, legendY, 0xFF999999);
+            }
+        }
+
         if (bases.isEmpty()) {
             String hint1 = "No bases saved yet.";
             String hint2 = "Type a name above, then click 'Set here'.";

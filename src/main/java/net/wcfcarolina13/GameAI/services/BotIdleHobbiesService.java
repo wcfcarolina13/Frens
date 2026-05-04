@@ -489,6 +489,11 @@ public final class BotIdleHobbiesService {
         return BlockPos.ORIGIN;
     }
 
+    /** Convenience: per-bot hobby toggle from BotHomeService. Default = enabled. */
+    private static boolean hobbyAllowed(ServerPlayerEntity bot, String name) {
+        return BotHomeService.isHobbyEnabled(bot, name);
+    }
+
     private static String pickHobby(ServerPlayerEntity bot, ServerWorld world, boolean preferFood) {
         if (bot == null || world == null) {
             return null;
@@ -498,7 +503,7 @@ public final class BotIdleHobbiesService {
         boolean canCook = SmeltingService.hasCookableFoodInventoryItems(bot, world)
                 && (SmeltingService.hasFuelForAutoCook(bot, world)
                     || hasNearbyLeafLitter(world, bot.getBlockPos(), 14));
-        if (shouldPreferCooking(bot.getUuid()) && canCook) {
+        if (shouldPreferCooking(bot.getUuid()) && canCook && hobbyAllowed(bot, "cook")) {
             clearPreferCooking(bot.getUuid());
             return "cook";
         }
@@ -590,6 +595,8 @@ public final class BotIdleHobbiesService {
         if (canCollectHoney) {
             weighted.add("honey_collect");
         }
+        // Strip hobbies the user has unchecked for this bot.
+        weighted.removeIf(name -> !hobbyAllowed(bot, name));
         if (weighted.isEmpty()) {
             return null;
         }
@@ -605,26 +612,27 @@ public final class BotIdleHobbiesService {
         boolean canCook = SmeltingService.hasCookableFoodInventoryItems(bot, world)
                 && (SmeltingService.hasFuelForAutoCook(bot, world)
                     || hasNearbyLeafLitter(world, bot.getBlockPos(), 14));
-        if (shouldPreferCooking(bot.getUuid()) && canCook) {
+        if (shouldPreferCooking(bot.getUuid()) && canCook && hobbyAllowed(bot, "cook")) {
             clearPreferCooking(bot.getUuid());
             return "cook";
         }
 
         boolean hasRod = hasItem(bot, Items.FISHING_ROD);
-        boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER);
+        boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER) && hobbyAllowed(bot, "fish");
         boolean hasCampfireNearby = hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.CAMPFIRE)
                 || hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.SOUL_CAMPFIRE);
-        boolean canFeedAnimals = hasFeedTargets(bot, world);
-        boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
+        boolean canFeedAnimals = hasFeedTargets(bot, world) && hobbyAllowed(bot, "feed_animals");
+        boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18) && hobbyAllowed(bot, "flowers");
         boolean canHunt = bot.getHealth() >= 18.0F
                 && bot.getHungerManager().getFoodLevel() >= 16
                 && !world.isThundering()
-                && HuntSkill.hasAmbientHuntCandidate(bot, world);
-        boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
-        boolean canForageMushrooms = hasNearbyMushrooms(world, bot.getBlockPos(), 16);
-        boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
-        boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
-        boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12);
+                && HuntSkill.hasAmbientHuntCandidate(bot, world)
+                && hobbyAllowed(bot, "hunt");
+        boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14) && hobbyAllowed(bot, "leaf_litter");
+        boolean canForageMushrooms = hasNearbyMushrooms(world, bot.getBlockPos(), 16) && hobbyAllowed(bot, "mushrooms");
+        boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16) && hobbyAllowed(bot, "grass_seeds");
+        boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world) && hobbyAllowed(bot, "shadow_companion");
+        boolean canMineStone = hasAnyPickaxe(bot) && hasNearbyStone(world, bot.getBlockPos(), 12) && hobbyAllowed(bot, "mining");
         if (canMineStone && shouldSuppressMiningHobby(bot, world)) {
             canMineStone = false;
         }
@@ -665,7 +673,7 @@ public final class BotIdleHobbiesService {
             return "shadow_companion";
         }
         // Never force hangout unless a campfire exists nearby.
-        if (hasCampfireNearby) {
+        if (hasCampfireNearby && hobbyAllowed(bot, "hangout")) {
             return "hangout";
         }
         if (canCollectLeafLitter && canForageMushrooms) {
@@ -678,7 +686,10 @@ public final class BotIdleHobbiesService {
             return "mushrooms";
         }
         // If no specific hobby candidates exist, still do a low-intensity local stroll.
-        return "wander";
+        if (hobbyAllowed(bot, "wander")) {
+            return "wander";
+        }
+        return null;
     }
 
     private static boolean hasItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {

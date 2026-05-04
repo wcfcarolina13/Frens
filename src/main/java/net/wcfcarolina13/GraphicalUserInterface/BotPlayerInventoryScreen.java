@@ -174,6 +174,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Guards guide-flag init so resize re-inits don't reset guideRemoteOpen.
     private boolean guideStateInitialized = false;
     private boolean preserveRequestSent = false;
+    private boolean autoAcceptPreciousRequestSent = false;
 
     // Browse state for scrolling past blocked bots in the switcher.
     private int switchBrowseOffset = 0;
@@ -474,6 +475,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SPELL_CHORUS_RECALL,
         SPELL_SOUL_OF_ENDER,
         SPELL_REMOTE_INVENTORY,
+        SPELL_SUMMON,
+        SPELL_ENCHANT,
+        SPELL_ANVIL,
         OPEN_GUIDE,
         STOP,
         RESUME,
@@ -487,7 +491,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         TACTICAL_SHELTER,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         AUTO_RETURN_SKIP_PERMISSION,
+        ATTACK_NAMED_MOBS,
         IDLE_HOBBIES,
+        CONFIGURE_HOBBIES,
         AUTO_HUNT_STARVING,
         GAMEPLAY_TIPS,
         IDLE_HOBBIES_ANYWHERE,
@@ -523,6 +529,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         OWNED_SUNSET_SS,
         LOCK_BLOCKS_MODE,
         PRESERVE_EXPENSIVE_GEAR,
+        AUTO_ACCEPT_PRECIOUS_FOODS,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
@@ -610,7 +617,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Sunset Return in Guard/Patrol", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Skip Permission", TopicAction.AUTO_RETURN_SKIP_PERMISSION, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
+            TopicEntry.skill("Configure Hobbies...", TopicAction.CONFIGURE_HOBBIES, false, 1),
             TopicEntry.skill("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
+            TopicEntry.skill("Attack Named Mobs", TopicAction.ATTACK_NAMED_MOBS, true, 1),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
             TopicEntry.skill("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
 
@@ -640,10 +649,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     );
 
     private static final List<TopicEntry> SPELL_TOPIC_ENTRIES = List.of(
+            TopicEntry.spellHeader("Movement"),
+            TopicEntry.spell("Regroup", TopicAction.COMPANION_COME),
+            TopicEntry.spell("Summon", TopicAction.SPELL_SUMMON),
+            TopicEntry.spell("Home", TopicAction.COMPANION_HOME),
+            TopicEntry.spellHeader("Travel"),
             TopicEntry.spell("Remote Guidance", TopicAction.SPELL_REMOTE_GUIDANCE),
             TopicEntry.spell("Chorus Recall", TopicAction.SPELL_CHORUS_RECALL),
             TopicEntry.spell("Soul of Ender", TopicAction.SPELL_SOUL_OF_ENDER),
-            TopicEntry.spell("Remote Inventory", TopicAction.SPELL_REMOTE_INVENTORY)
+            TopicEntry.spellHeader("Remote Access"),
+            TopicEntry.spell("Remote Inventory", TopicAction.SPELL_REMOTE_INVENTORY),
+            TopicEntry.spell("Enchant", TopicAction.SPELL_ENCHANT),
+            TopicEntry.spell("Anvil", TopicAction.SPELL_ANVIL)
     );
 
             // Curated, non-scroll quick actions for the collapsed panel.
@@ -703,6 +720,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
                 new TopicEntry("Lock Blocks Mode", TopicCategory.ADMIN, TopicAction.LOCK_BLOCKS_MODE, true, 0, null),
                 new TopicEntry("Preserve Expensive Gear", TopicCategory.ADMIN, TopicAction.PRESERVE_EXPENSIVE_GEAR, true, 0, null),
+                new TopicEntry("Auto-accept Precious Foods", TopicCategory.ADMIN, TopicAction.AUTO_ACCEPT_PRECIOUS_FOODS, true, 0, null),
 
                 TopicEntry.adminHeader("🎓 Learning"),
                 TopicEntry.admin("Learning Status", "learning_status"),
@@ -772,6 +790,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             preserveRequestSent = true;
             net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
                     net.wcfcarolina13.network.RequestPlayerPreservePayload.INSTANCE);
+        }
+        if (!autoAcceptPreciousRequestSent) {
+            autoAcceptPreciousRequestSent = true;
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                    net.wcfcarolina13.network.RequestPlayerAutoAcceptPreciousPayload.INSTANCE);
         }
 
         // Guide requested opening directly to Admin tab (via ] hotkey remote open).
@@ -1812,7 +1835,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                  AUTO_RETURN_SELF_SUFFICIENT,
                  TACTICAL_SHELTER,
                  AUTO_RETURN_SUNSET_GUARD_PATROL,
-                 AUTO_RETURN_SKIP_PERMISSION -> false;
+                 AUTO_RETURN_SKIP_PERMISSION,
+                 ATTACK_NAMED_MOBS -> false;
             default -> true;
         };
     }
@@ -2755,7 +2779,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         TopicEntry entry = getTopicEntryAtOverlay(mouseX, mouseY);
         if (entry != null) {
             if ((entry.category == TopicCategory.ADMIN && isAdminHeaderEntry(entry))
-                    || (entry.category == TopicCategory.SKILL && isSkillHeaderEntry(entry))) {
+                    || (entry.category == TopicCategory.SKILL && isSkillHeaderEntry(entry))
+                    || (entry.category == TopicCategory.SPELL && isSpellHeaderEntry(entry))) {
                 return true;
             }
             // Entries with explicit control boxes are only actionable via the
@@ -2989,7 +3014,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return false;
         }
         // Headers have no control box.
-        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry)) {
+        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry) || isSpellHeaderEntry(entry)) {
             return false;
         }
         // Custom rows with their own +/- controls are not action control boxes.
@@ -3536,11 +3561,21 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
-        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry)) {
+        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry) || isSpellHeaderEntry(entry)) {
             context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, 0xFF141414);
             int accentY = rowY + TOPIC_ROW_HEIGHT - 3;
-            int accentColor = entry.category == TopicCategory.SKILL ? 0xFF35546C : 0xFF5A4728;
-            int textColor = entry.category == TopicCategory.SKILL ? 0xFFB9D6EC : 0xFFB08C40;
+            int accentColor;
+            int textColor;
+            if (entry.category == TopicCategory.SKILL) {
+                accentColor = 0xFF35546C; // blueish for Actions
+                textColor = 0xFFB9D6EC;
+            } else if (entry.category == TopicCategory.SPELL) {
+                accentColor = 0xFF6A4A8C; // amethyst for Spells
+                textColor = 0xFFD4B5E6;
+            } else {
+                accentColor = 0xFF5A4728; // warm gold for Admin
+                textColor = 0xFFB08C40;
+            }
             context.fill(rowX + 6, accentY, rowX + rowW - 6, accentY + 1, accentColor);
             int textY = rowY + Math.max(0, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2 - 1);
             context.drawText(this.textRenderer, entry.label != null ? entry.label : "", rowX + 4, textY, textColor, false);
@@ -3662,6 +3697,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case TACTICAL_SHELTER -> "⛏";
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> "↔";
             case AUTO_RETURN_SKIP_PERMISSION -> "⏩";
+            case ATTACK_NAMED_MOBS -> "⚐";
             case IDLE_HOBBIES -> "✦";
             case AUTO_HUNT_STARVING -> "⚔";
             case UNLEASH_TETHERED -> "✂";
@@ -3901,12 +3937,34 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return java.util.List.of();
         }
 
-        if (isSkillHeaderEntry(entry)) {
+        if (isSkillHeaderEntry(entry) || isSpellHeaderEntry(entry)) {
             return java.util.List.of();
         }
 
         // Spell tooltips.
         if (entry.category == TopicCategory.SPELL) {
+            if (entry.action == TopicAction.COMPANION_COME) {
+                return java.util.List.of(
+                        "Regroup",
+                        "Call your companion to your current location.",
+                        "Requires: Enchanting Table or Wizard's Tome, or Goat Horn."
+                );
+            }
+            if (entry.action == TopicAction.SPELL_SUMMON) {
+                return java.util.List.of(
+                        "Summon",
+                        "Teleport your companion directly to you.",
+                        "Requires: Enchanting Table or Wizard's Tome, or",
+                        "Eye of Ender (60s cooldown)."
+                );
+            }
+            if (entry.action == TopicAction.COMPANION_HOME) {
+                return java.util.List.of(
+                        "Home",
+                        "Send your companion back to their home base.",
+                        "Requires: Navigation tier 1+ (Map on bot) or higher."
+                );
+            }
             if (entry.action == TopicAction.SPELL_REMOTE_GUIDANCE) {
                 return java.util.List.of(
                         "Remote Guidance",
@@ -3936,6 +3994,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Remote Inventory",
                         "Open your companion's inventory remotely.",
                         "Requires full access (Enchanting Table or Wizard's Tome)."
+                );
+            }
+            if (entry.action == TopicAction.SPELL_ENCHANT) {
+                return java.util.List.of(
+                        "Enchant",
+                        "Open the enchanting table for your companion.",
+                        "Uses the bot's XP, lapis, and inventory.",
+                        "Requires: you standing within 4 blocks of an Enchanting Table."
+                );
+            }
+            if (entry.action == TopicAction.SPELL_ANVIL) {
+                return java.util.List.of(
+                        "Anvil",
+                        "Open an anvil for your companion.",
+                        "Repair, rename, or combine items using the bot's XP.",
+                        "Requires: you standing within 4 blocks of an Anvil."
                 );
             }
             return java.util.List.of();
@@ -3991,6 +4065,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "alternative, check a chest, or craft a new one.",
                         "Applies to every bot you own. See the in-game guide for details.",
                         "Current: " + (isPreserveExpensiveGearActive() ? "ON" : "OFF")
+                );
+            }
+            if (entry.action == TopicAction.AUTO_ACCEPT_PRECIOUS_FOODS) {
+                return java.util.List.of(
+                        "Auto-accept Precious Foods",
+                        "When OFF, offering a golden apple, enchanted golden apple,",
+                        "or golden carrot to a bot pops up a chat confirmation before",
+                        "the bot eats it. When ON, the bot accepts silently.",
+                        "Applies to every bot you own.",
+                        "Current: " + (isAutoAcceptPreciousFoodsActive() ? "ON" : "OFF")
                 );
             }
             if (entry.action == TopicAction.LOCK_BLOCKS_MODE) {
@@ -4164,6 +4248,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Skip Permission",
                 "Bots return home at sunset without asking permission first."
             );
+            case ATTACK_NAMED_MOBS -> java.util.List.of(
+                "Attack Named Mobs",
+                "When OFF (default), the bot protects any name-tagged mob — hostile or peaceful — and flees if one attacks it. Turn ON to let the bot engage name-tagged mobs normally."
+            );
             case IDLE_HOBBIES -> java.util.List.of(
                 "Idle Hobbies",
                 "Lets the bot do light background activities when it has nothing urgent to work on."
@@ -4207,6 +4295,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case QUICK_STORE -> java.util.List.of(
                 "Quick Store",
                 "Point at a nearby chest and click to deposit items.",
+                "Click: deposit loose items, keep equipped gear, mainhand tool, food, and bundles.",
+                "Shift+click: dump everything (including armor and tools).",
                 "The bot walks to the chest and deposits. It will not remember this chest."
             );
             case QUICK_FETCH -> java.util.List.of(
@@ -4815,7 +4905,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
-        if (isSkillHeaderEntry(entry)) {
+        if (isSkillHeaderEntry(entry) || isSpellHeaderEntry(entry)) {
             return;
         }
 
@@ -4896,11 +4986,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COMPANION_COME -> runCompanionCome();
             case COMPANION_SUMMON -> runCompanionSummon();
             case COMPANION_HOME -> runCompanionHome();
-            case OPEN_SPELLS -> openSpellsMenu();
+            case OPEN_SPELLS -> switchToSpellsTab();
             case SPELL_REMOTE_GUIDANCE -> openSpellGuidanceConfirm();
             case SPELL_CHORUS_RECALL -> openSpellRecallConfirm();
             case SPELL_SOUL_OF_ENDER -> castSoulOfEnder();
             case SPELL_REMOTE_INVENTORY -> sendChatCommand("bot companion open " + formatBotTarget());
+            case SPELL_SUMMON -> runCompanionSummon();
+            case SPELL_ENCHANT -> openBotEnchant();
+            case SPELL_ANVIL -> openBotAnvil();
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
@@ -4910,6 +5003,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OWNED_SUNSET_SS -> toggleOwnedSunsetSelfSufficientBulk();
             case LOCK_BLOCKS_MODE -> toggleLockBlocksMode();
             case PRESERVE_EXPENSIVE_GEAR -> togglePreserveExpensiveGear();
+            case AUTO_ACCEPT_PRECIOUS_FOODS -> toggleAutoAcceptPreciousFoods();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
@@ -4925,7 +5019,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case TACTICAL_SHELTER -> toggleTacticalShelter();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case AUTO_RETURN_SKIP_PERMISSION -> toggleAutoReturnSkipPermission();
+            case ATTACK_NAMED_MOBS -> toggleAttackNamedMobs();
             case IDLE_HOBBIES -> toggleIdleHobbies();
+            case CONFIGURE_HOBBIES -> openConfigureHobbies();
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case GAMEPLAY_TIPS -> toggleGameplayTips();
             case IDLE_HOBBIES_ANYWHERE -> toggleIdleHobbiesAnywhere();
@@ -5379,6 +5475,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case TACTICAL_SHELTER -> isTacticalShelterActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case AUTO_RETURN_SKIP_PERMISSION -> isAutoReturnSkipPermissionActive();
+            case ATTACK_NAMED_MOBS -> isAttackNamedMobsActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
@@ -5389,6 +5486,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
             case LOCK_BLOCKS_MODE -> isLockBlocksModeActive();
             case PRESERVE_EXPENSIVE_GEAR -> isPreserveExpensiveGearActive();
+            case AUTO_ACCEPT_PRECIOUS_FOODS -> isAutoAcceptPreciousFoodsActive();
             case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
@@ -5458,8 +5556,32 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SPELL_CHORUS_RECALL -> full || playerHasChorus;
             case SPELL_SOUL_OF_ENDER -> full || eye || playerHasPearl;
             case SPELL_REMOTE_INVENTORY -> full;
+            // New entries migrated from the legacy CompanionSpellsScreen so players
+            // have one canonical spell list. Server still authoritatively gates; the
+            // client checks are for UX (grey out when clearly unusable). Goat Horn
+            // is a secondary Regroup path the server honors but we don't check here.
+            case COMPANION_COME -> full || eye;                // Regroup
+            case SPELL_SUMMON -> full || eye;                  // Summon
+            case COMPANION_HOME -> true;                       // Home — server gates on nav tier
+            case SPELL_ENCHANT -> isNearEnchantingTable(mc, 4);
+            case SPELL_ANVIL -> isNearAnvil(mc, 4);
             default -> false;
         };
+    }
+
+    /** True if the player is standing within {@code radius} blocks of any anvil block. */
+    private boolean isNearAnvil(MinecraftClient client, int radius) {
+        if (client == null || client.player == null || client.world == null) return false;
+        net.minecraft.util.math.BlockPos origin = client.player.getBlockPos();
+        int r = Math.max(1, radius);
+        for (net.minecraft.util.math.BlockPos pos : net.minecraft.util.math.BlockPos.iterate(
+                origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!client.world.isChunkLoaded(pos)) continue;
+            if (client.world.getBlockState(pos).isIn(net.minecraft.registry.tag.BlockTags.ANVIL)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Check if the bot entity (looked up by alias) is near an enchanting table in the client world. */
@@ -5533,6 +5655,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAutoReturnSkipPermissionActive() {
         return this.handler != null && this.handler.isBotAutoReturnSkipPermission();
+    }
+
+    private boolean isAttackNamedMobsActive() {
+        return this.handler != null && this.handler.isBotAttackNamedMobs();
     }
 
     private String buildSkillCommand(String skillName, String action) {
@@ -5694,6 +5820,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 && "__header__".equals(entry.dialogueKey);
     }
 
+    private boolean isSpellHeaderEntry(TopicEntry entry) {
+        return entry != null
+                && entry.category == TopicCategory.SPELL
+                && entry.action == null
+                && "__header__".equals(entry.dialogueKey);
+    }
+
     private String permissionKeyForAdminEntry(TopicEntry entry) {
         if (entry == null || entry.category != TopicCategory.ADMIN) {
             return null;
@@ -5710,6 +5843,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case OWNED_SUNSET_SS -> "recruit_manage";
                 case LOCK_BLOCKS_MODE -> "lock_blocks_mode";
                 case PRESERVE_EXPENSIVE_GEAR -> "preserve_expensive_gear";
+                case AUTO_ACCEPT_PRECIOUS_FOODS -> "auto_accept_precious_foods";
                 case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
                 case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
                 default -> null;
@@ -6234,6 +6368,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void toggleAttackNamedMobs() {
+        String botTarget = formatBotTarget();
+        String command = "bot attack_named_mobs toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
     private void toggleIdleHobbies() {
         String botTarget = formatBotTarget();
         String command = "bot idle_hobbies toggle " + botTarget;
@@ -6305,6 +6445,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new net.wcfcarolina13.network.UpdatePlayerPreservePayload(next));
     }
 
+    private boolean isAutoAcceptPreciousFoodsActive() {
+        Boolean v = net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.AUTO_ACCEPT_PRECIOUS_SERVER_VALUE;
+        return v != null && v;
+    }
+
+    private void toggleAutoAcceptPreciousFoods() {
+        boolean next = !isAutoAcceptPreciousFoodsActive();
+        net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.setAutoAcceptPreciousServerValue(next);
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                new net.wcfcarolina13.network.UpdatePlayerAutoAcceptPreciousPayload(next));
+    }
+
     private boolean isUnleashTetheredActive() {
         return this.handler != null && this.handler.isBotUnleashTetheredEnabled();
     }
@@ -6330,6 +6482,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BaseManagerScreen(this, botAlias));
+    }
+
+    private void openConfigureHobbies() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new ConfigureHobbiesScreen(this, this.handler, formatBotTarget()));
     }
 
     private void openCraftingHistory() {
@@ -6376,6 +6535,43 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.4f);
         }
         this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
+    }
+
+    /**
+     * Switch the topic overlay panel to the Spells tab in-place instead of
+     * opening the legacy {@link CompanionSpellsScreen}. Keeps the player in
+     * the same inventory screen and gives them one canonical spell list
+     * (including Summon / Enchant / Anvil which previously only lived on the
+     * legacy screen).
+     */
+    private void switchToSpellsTab() {
+        if (this.client != null && this.client.player != null) {
+            this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
+        }
+        this.overlayCategory = TopicCategory.SPELL;
+        if (!this.topicsExpanded) {
+            toggleTopicsExpanded(true);
+        }
+    }
+
+    private void openBotEnchant() {
+        MinecraftClient c = this.client;
+        if (c == null || c.getNetworkHandler() == null) return;
+        ClientPlayNetworking.send(new net.wcfcarolina13.network.BotEnchantOpenPayload(this.botAlias));
+        // DO NOT call close() here. The server's openHandledScreen() closes the
+        // previous (this) screen as part of opening the new bot enchant screen.
+        // Sending an explicit CloseHandledScreenC2SPacket races the open and ends
+        // up closing the just-opened bot enchant screen on the server (vanilla
+        // onCloseHandledScreen does not check syncId). The client keeps showing
+        // the screen but every click is silently dropped by the syncId mismatch
+        // in onClickSlot, so nothing the player does ever commits server-side.
+    }
+
+    private void openBotAnvil() {
+        MinecraftClient c = this.client;
+        if (c == null || c.getNetworkHandler() == null) return;
+        ClientPlayNetworking.send(new net.wcfcarolina13.network.BotAnvilOpenPayload(this.botAlias));
+        // See openBotEnchant() — same race; do not call close() here.
     }
 
     private void openSpellGuidanceConfirm() {

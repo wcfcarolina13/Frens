@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.fluid.FluidState;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.entity.projectile.FishingBobberEntity;
@@ -1327,8 +1328,10 @@ public final class FishingSkill implements Skill {
         }
         
         if (best != null) {
-            LOGGER.info("Selected fishing spot: stand={} water={} (score={:.2f})", 
-                    best.stand().toShortString(), best.water().toShortString(), bestScore);
+            LOGGER.info("Selected fishing spot: stand={} water={} (score={})",
+                    best.stand().toShortString(),
+                    best.water().toShortString(),
+                    String.format(Locale.ROOT, "%.2f", bestScore));
         } else {
             LOGGER.info("No reachable fishing spot found within radius {} from {}", radius, origin.toShortString());
         }
@@ -1352,9 +1355,13 @@ public final class FishingSkill implements Skill {
             double castDistancePenalty = Math.abs(castDistSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
             int openness = countOpenWaterSurface(world, castTarget, 1);
             int depth = estimateWaterDepth(world, castTarget, 6);
+            // Strong bonus when the cast target passes the vanilla open-water check —
+            // treasure catches require it, so the qualitative jump dominates the
+            // modest openness/depth deltas between shoreline and open-water spots.
+            double openWaterBonus = isVanillaOpenWater(world, castTarget) ? -5.0 : 0.0;
 
             // Prefer open/deep water and a reasonable cast distance.
-            double quality = castDistancePenalty - openness * 0.35 - depth * 0.55;
+            double quality = castDistancePenalty - openness * 0.35 - depth * 0.55 + openWaterBonus;
 
             // Strong preference for shoreline adjacency: loot pickup suffers when we stand a few blocks back.
             // This is deliberately large enough to override small water-quality differences.
@@ -1558,39 +1565,70 @@ public final class FishingSkill implements Skill {
 
     /**
      * Vanilla Minecraft open water check for treasure-quality catches.
-     * Checks a 5x4x5 area centered on the bobber position:
-     * - Water surface (Y) and below (Y-1): all 5x5 must be Blocks.WATER
-     * - Above (Y+1, Y+2): all 5x5 must be non-opaque, no lily pads
-     * - Sky access above the bobber column
-     * Cost: ~100 block reads. Only use on cast target candidates.
+     * Ported from {@code FishingBobberEntity#isOpenOrWaterAround} so this
+     * matches the exact criterion the game uses every tick to decide whether
+     * {@code isInOpenWater()} stays true.
+     *
+     * <p>{@code waterSurface} is the top water block; the bobber floats on
+     * {@code waterSurface.up()}, which is what vanilla's check is centered on.
+     *
+     * <p>Iterates four 5x5 slabs at bobber Y-1..Y+2. Each slab classifies as
+     * {@code INSIDE_WATER} (all still water fluid with empty collision),
+     * {@code ABOVE_WATER} (all air or lily pad), or {@code INVALID}. The
+     * sequence must go INSIDE_WATER..ABOVE_WATER with no INVALID slab and no
+     * ABOVE_WATER → INSIDE_WATER regression. Sky access is <b>not</b>
+     * required — vanilla permits covered open water.
      */
     private static boolean isVanillaOpenWater(ServerWorld world, BlockPos waterSurface) {
         if (world == null || waterSurface == null) return false;
-        // Water layers: surface and one below must be water source blocks
-        for (int dy = -1; dy <= 0; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    BlockPos check = waterSurface.add(dx, dy, dz);
-                    if (!world.getBlockState(check).isOf(Blocks.WATER)) {
-                        return false;
-                    }
+        BlockPos bobberPos = waterSurface.up();
+        OpenWaterPositionType prev = OpenWaterPositionType.INVALID;
+        for (int dy = -1; dy <= 2; dy++) {
+            OpenWaterPositionType current = classifyOpenWaterSlab(world, bobberPos, dy);
+            switch (current) {
+                case ABOVE_WATER:
+                    if (prev == OpenWaterPositionType.INVALID) return false;
+                    break;
+                case INSIDE_WATER:
+                    if (prev == OpenWaterPositionType.ABOVE_WATER) return false;
+                    break;
+                case INVALID:
+                    return false;
+            }
+            prev = current;
+        }
+        return true;
+    }
+
+    private enum OpenWaterPositionType { INSIDE_WATER, ABOVE_WATER, INVALID }
+
+    private static OpenWaterPositionType classifyOpenWaterSlab(ServerWorld world, BlockPos center, int dy) {
+        OpenWaterPositionType aggregate = null;
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                BlockPos pos = center.add(dx, dy, dz);
+                if (!world.isChunkLoaded(pos)) return OpenWaterPositionType.INVALID;
+                OpenWaterPositionType type = classifyOpenWaterPos(world, pos);
+                if (aggregate == null) {
+                    aggregate = type;
+                } else if (aggregate != type) {
+                    return OpenWaterPositionType.INVALID;
                 }
             }
         }
-        // Air layers: Y+1 and Y+2 must be non-opaque, no lily pads
-        for (int dy = 1; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    BlockPos check = waterSurface.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(check);
-                    if (state.isOpaque() || state.isOf(Blocks.LILY_PAD)) {
-                        return false;
-                    }
-                }
-            }
+        return aggregate == null ? OpenWaterPositionType.INVALID : aggregate;
+    }
+
+    private static OpenWaterPositionType classifyOpenWaterPos(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isOf(Blocks.LILY_PAD)) {
+            return OpenWaterPositionType.ABOVE_WATER;
         }
-        // Sky access: heightmap O(1) check
-        return world.isSkyVisible(waterSurface.up());
+        FluidState fluid = state.getFluidState();
+        if (fluid.isIn(FluidTags.WATER) && fluid.isStill() && state.getCollisionShape(world, pos).isEmpty()) {
+            return OpenWaterPositionType.INSIDE_WATER;
+        }
+        return OpenWaterPositionType.INVALID;
     }
 
     private static int countOpenWaterSurface(ServerWorld world, BlockPos center, int radius) {

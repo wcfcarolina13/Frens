@@ -156,6 +156,30 @@ final class BotHomeCommands {
                                         StringArgumentType.getString(context, "target")))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildAttackNamedMobs() {
+        return CommandManager.literal("attack_named_mobs")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeAttackNamedMobsSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAttackNamedMobsSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeAttackNamedMobsSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAttackNamedMobsSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeAttackNamedMobsToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAttackNamedMobsToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildIdleHobbies() {
         return CommandManager.literal("idle_hobbies")
                 .then(CommandManager.literal("on")
@@ -191,6 +215,32 @@ final class BotHomeCommands {
                                 .executes(context -> modCommandRegistry.executeIdleHobbiesToggleAndIdleTargets(
                                         context,
                                         StringArgumentType.getString(context, "target")))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildHobby() {
+        // /bot hobby <name> on|off [target]
+        return CommandManager.literal("hobby")
+                .then(CommandManager.argument("name", StringArgumentType.string())
+                        .then(CommandManager.literal("on")
+                                .executes(context -> modCommandRegistry.executeHobbySetTargets(
+                                        context, null,
+                                        StringArgumentType.getString(context, "name"), true))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> modCommandRegistry.executeHobbySetTargets(
+                                                context,
+                                                StringArgumentType.getString(context, "target"),
+                                                StringArgumentType.getString(context, "name"),
+                                                true))))
+                        .then(CommandManager.literal("off")
+                                .executes(context -> modCommandRegistry.executeHobbySetTargets(
+                                        context, null,
+                                        StringArgumentType.getString(context, "name"), false))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> modCommandRegistry.executeHobbySetTargets(
+                                                context,
+                                                StringArgumentType.getString(context, "target"),
+                                                StringArgumentType.getString(context, "name"),
+                                                false)))));
     }
 
     static ArgumentBuilder<ServerCommandSource, ?> buildAutoHuntStarving() {

@@ -20,6 +20,7 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.block.Blocks;
@@ -56,6 +57,7 @@ import net.wcfcarolina13.network.BotTaskPeekStatusPayload;
 import net.wcfcarolina13.network.LearningInputSamplePayload;
 import net.wcfcarolina13.network.LearningSessionStatusPayload;
 import net.wcfcarolina13.network.PlayerPreserveStatePayload;
+import net.wcfcarolina13.network.PlayerAutoAcceptPreciousStatePayload;
 import net.wcfcarolina13.items.ModItems;
 import org.lwjgl.glfw.GLFW;
 
@@ -154,6 +156,9 @@ public class FrensClient implements ClientModInitializer {
     // Both cases fire the same action: /bot stop <name> + /bot leash <name>.
     private static boolean mountedLeashHintVisible = false;
     private static String mountedLeashBotName = null;
+    // True when the mounted bot's vehicle is a boat — changes wording from
+    // horse/tether to boat/dismount in the HUD hint.
+    private static boolean mountedLeashBotOnBoat = false;
 
     // ===== Survival recruitment mode (client UI) =====
     private static boolean survivalRecruitmentEnabled = false;
@@ -982,6 +987,10 @@ public class FrensClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(PlayerPreserveStatePayload.ID, (payload, context) -> {
             net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.setServerValue(payload.enabled());
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(PlayerAutoAcceptPreciousStatePayload.ID, (payload, context) -> {
+            net.wcfcarolina13.GraphicalUserInterface.BotPlayerPreferencesScreen.setAutoAcceptPreciousServerValue(payload.enabled());
         });
 
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
@@ -3002,6 +3011,7 @@ public class FrensClient implements ClientModInitializer {
             leashButtonBotName = null;
             mountedLeashHintVisible = false;
             mountedLeashBotName = null;
+            mountedLeashBotOnBoat = false;
             return;
         }
 
@@ -3010,6 +3020,7 @@ public class FrensClient implements ClientModInitializer {
         leashButtonBotName = null;
         mountedLeashHintVisible = false;
         mountedLeashBotName = null;
+        mountedLeashBotOnBoat = false;
 
         // Case 1: Looking at a bot with leashed animals.
         String lookAtBotName = findLookedAtBotName(client);
@@ -3046,16 +3057,21 @@ public class FrensClient implements ClientModInitializer {
         if (lookAtBotEntity != null && lookAtBotEntity.hasVehicle()) {
             mountedLeashHintVisible = true;
             mountedLeashBotName = lookAtBotName;
+            mountedLeashBotOnBoat = lookAtBotEntity.getVehicle() instanceof AbstractBoatEntity;
             return;
         }
 
         // Case 3: Player is mounted and there's a nearby mounted bot (classic
         // ride-along case — commander and bot riding side-by-side).
         if (client.player.hasVehicle()) {
-            String nearbyBotName = findNearbyMountedBotName(client);
-            if (nearbyBotName != null) {
-                mountedLeashHintVisible = true;
-                mountedLeashBotName = nearbyBotName;
+            PlayerEntity nearbyBot = findNearbyMountedBot(client);
+            if (nearbyBot != null) {
+                String name = nearbyBot.getName().getString();
+                if (name != null && !name.isBlank()) {
+                    mountedLeashHintVisible = true;
+                    mountedLeashBotName = name;
+                    mountedLeashBotOnBoat = nearbyBot.getVehicle() instanceof AbstractBoatEntity;
+                }
             }
         }
     }
@@ -3104,9 +3120,9 @@ public class FrensClient implements ClientModInitializer {
 
     /**
      * Find a nearby bot (player entity that isn't the client player) that is mounted.
-     * Returns the bot's name, or null if none found.
+     * Returns the closest mounted bot entity, or null if none found.
      */
-    private static String findNearbyMountedBotName(MinecraftClient client) {
+    private static PlayerEntity findNearbyMountedBot(MinecraftClient client) {
         if (client == null || client.player == null || client.world == null) {
             return null;
         }
@@ -3128,11 +3144,7 @@ public class FrensClient implements ClientModInitializer {
             }
         }
 
-        if (closest != null) {
-            String name = closest.getName().getString();
-            return (name != null && !name.isBlank()) ? name : null;
-        }
-        return null;
+        return closest;
     }
 
     /**
@@ -3157,9 +3169,15 @@ public class FrensClient implements ClientModInitializer {
             line2 = "Press ['] to tie to nearby fence";
         } else if (mountedLeashHintVisible && mountedLeashBotName != null) {
             // Wording works whether player is on foot or mounted: bot is on
-            // a horse, and the keybind tells it to dismount and tether.
-            line1 = "🐴 " + mountedLeashBotName + " is riding a horse";
-            line2 = "Press ['] to dismount & tether";
+            // a mount, and the keybind tells it to dismount (and tether the
+            // horse, if applicable — boats don't need securing).
+            if (mountedLeashBotOnBoat) {
+                line1 = "🛶 " + mountedLeashBotName + " is riding a boat";
+                line2 = "Press ['] to dismount";
+            } else {
+                line1 = "🐴 " + mountedLeashBotName + " is riding a horse";
+                line2 = "Press ['] to dismount & tether";
+            }
         }
 
         if (line1 == null || line2 == null) {

@@ -190,7 +190,7 @@ public final class BotAnimalDefenseService {
             // Distance gate: within DEFENSE_ENGAGE_RADIUS = engage; outside = warn.
             double distToBot = Math.sqrt(hostile.squaredDistanceTo(bot));
             if (distToBot <= DEFENSE_ENGAGE_RADIUS) {
-                if (canEngage) {
+                if (canEngage && BotCombatPolicyService.shouldBotAttack(hostile, bot)) {
                     markAttackerForDefense(server, bot, hostile);
                 }
             } else {
@@ -231,7 +231,7 @@ public final class BotAnimalDefenseService {
             if (isTamedVsTamedCase(attacker, watched, commanderUuid, bot)) continue;
             double distToBot = Math.sqrt(attacker.squaredDistanceTo(bot));
             if (distToBot <= DEFENSE_ENGAGE_RADIUS) {
-                if (canEngage) {
+                if (canEngage && BotCombatPolicyService.shouldBotAttack(attacker, bot)) {
                     markAttackerForDefense(server, bot, attacker);
                 }
             } else {

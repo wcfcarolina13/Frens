@@ -458,8 +458,10 @@ public class modCommandRegistry {
                                 .then(BotHomeCommands.buildTacticalShelter())
 	                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSkipPermission())
+                            .then(BotHomeCommands.buildAttackNamedMobs())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
                             .then(BotHomeCommands.buildIdleHobbies())
+                            .then(BotHomeCommands.buildHobby())
                             .then(BotHomeCommands.buildAutoHuntStarving())
                             .then(BotHomeCommands.buildIdleNow())
                             .then(BotHomeCommands.buildBase())
@@ -1731,7 +1733,38 @@ public class modCommandRegistry {
                                             return executeLodestoneTravel(context, botName, compassName);
                                         })))))
                 );
+
+                // Precious-food confirmation commands. Surfaced via clickable [Yes]/[No] text
+                // components from BotFoodGivingService — not meant to be typed by players.
+                dispatcher.register(
+                        literal("bot")
+                            .requires(Frens::hasBotCommandPermission)
+                            .then(literal("feedconfirm")
+                                .then(CommandManager.argument("bot_uuid", StringArgumentType.string())
+                                    .executes(context -> executeFeedConfirm(context, true))))
+                            .then(literal("feedcancel")
+                                .then(CommandManager.argument("bot_uuid", StringArgumentType.string())
+                                    .executes(context -> executeFeedConfirm(context, false))))
+                );
         });
+    }
+
+    private static int executeFeedConfirm(CommandContext<ServerCommandSource> context, boolean confirm) {
+        ServerPlayerEntity player = context.getSource().getPlayer();
+        if (player == null) return 0;
+        String rawUuid = StringArgumentType.getString(context, "bot_uuid");
+        java.util.UUID botUuid;
+        try {
+            botUuid = java.util.UUID.fromString(rawUuid);
+        } catch (IllegalArgumentException e) {
+            return 0;
+        }
+        if (confirm) {
+            net.wcfcarolina13.GameAI.services.BotFoodGivingService.confirmPending(player, botUuid);
+        } else {
+            net.wcfcarolina13.GameAI.services.BotFoodGivingService.cancelPending(player, botUuid);
+        }
+        return 1;
     }
 
     private static int executeLodestoneTravel(
@@ -3410,6 +3443,11 @@ public class modCommandRegistry {
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow.");
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow.");
+        // /bot follow is an explicit take-manual-control signal. Drop any pending
+        // auto-resume (sunrise fishing etc.) and cancel an active sunset-return
+        // session so neither re-fires behind the player's back once follow ends.
+        SkillResumeService.clearAndNotify(bot.getUuid());
+        net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.setFollowMode(bot, target, false);
         boolean following = isFollowingTarget(bot, target);
@@ -6658,6 +6696,52 @@ public class modCommandRegistry {
         return successes;
     }
 
+    static int executeAttackNamedMobsSetTargets(CommandContext<ServerCommandSource> context,
+                                                String targetArg,
+                                                boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) continue;
+            if (BotHomeService.setAttackNamedMobs(bot, enabled)) successes++;
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " attack named mobs is now " + (enabled ? "ON" : "OFF") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAttackNamedMobsToggleTargets(CommandContext<ServerCommandSource> context,
+                                                   String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) continue;
+            if (!BotHomeService.toggleAttackNamedMobs(bot)) continue;
+            successes++;
+            if (BotHomeService.isAttackNamedMobs(bot)) enabledCount++;
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " attack named mobs enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAttackNamedMobs(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " attack named mobs is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
     static int executeAutoReturnSunsetPreferLastBedSetTargets(CommandContext<ServerCommandSource> context,
                                                              String targetArg,
                                                              boolean enabled) throws CommandSyntaxException {
@@ -6744,6 +6828,41 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             ChatUtils.sendSystemMessage(source,
                     summary + " idle hobbies " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    /**
+     * Per-hobby toggle. The set of valid hobby names is open-ended (the picker can
+     * emit new ones in future without us updating the registry), so this accepts
+     * any string and lets BotHomeService persist it as-is.
+     */
+    static int executeHobbySetTargets(CommandContext<ServerCommandSource> context,
+                                      String targetArg,
+                                      String hobbyName,
+                                      boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        if (hobbyName == null || hobbyName.isBlank()) {
+            ChatUtils.sendSystemMessage(source, "§cHobby name required.");
+            return 0;
+        }
+        String normalized = hobbyName.trim().toLowerCase(Locale.ROOT);
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) continue;
+            if (BotHomeService.setHobbyEnabled(bot, normalized, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " hobby '" + normalized + "' " + (enabled ? "enabled" : "disabled") + ".");
         }
         return successes;
     }

@@ -2,6 +2,380 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Idle hobbies: per-hobby on/off menu so the user can pick which hobbies a bot is allowed to do (2026-05-03)
+
+The master Idle Hobbies switch was all-or-nothing — when a hobby misbehaves (e.g. mining destroying surface terrain in [the latest.log autopsy](src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java#L1345)), the user had to disable everything to stop it. Now there's per-hobby control.
+
+**Storage** ([BotHomeService](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java)): added `Map<String, Map<String, Boolean>> hobbyDisabledByBot` to per-world JSON. Stored as a "disabled" set so the default (everything enabled) requires no migration on existing worlds. New API: `setHobbyEnabled(bot, name, enabled)`, `isHobbyEnabled(bot, name)`, `getDisabledHobbies(bot)`.
+
+**Selection gate** ([BotIdleHobbiesService](src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java)): `pickHobby` filters the weighted pool with `weighted.removeIf(name -> !hobbyAllowed(bot, name))` after the pool is built. `pickFallbackHobby` ANDs each `canX` flag with `hobbyAllowed(bot, "X")` so the sequential preference cascade naturally skips disabled hobbies. The unconditional final `wander` fallback is also gated; if disabled, returns null and the bot just sits idle that tick.
+
+**Command** (new `/bot hobby <name> on|off [target]`): registered via `BotHomeCommands.buildHobby()`, executor `executeHobbySetTargets` in [modCommandRegistry](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java). Accepts any hobby name string — no whitelist, so future hobbies don't need a registry edit.
+
+**UI** — new sub-screen [ConfigureHobbiesScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/ConfigureHobbiesScreen.java), reachable from a new "Configure Hobbies..." entry sitting under the master "Idle Hobbies" entry in [BotPlayerInventoryScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java). 3×5 grid of toggle buttons showing `[x] Hunt` / `[ ] Hunt` style state, plus Enable All / Disable All / Done at the bottom. Each toggle sends a chat command (same path as the master toggle), no new payload class.
+
+**State sync to the client**: `BotPlayerInventoryScreenHandler` got a new `botStats` slot 25 holding a 15-bit bitmask of disabled hobbies. The order is fixed by `BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER` — append-only, never reorder, or saved bots will see the wrong hobbies disabled. Client reads via `handler.isHobbyAllowed(name)`.
+
+After the toggle, the screen rebuilds itself; the next server tick refreshes the bitmask, so the checkmark flips on its own. Doesn't fix the underlying mining-on-surface bug from yesterday — that still needs the `shouldSuppressMiningHobby` surface-suppression rule — but the user can now uncheck "Mine Stone" as a workaround.
+
+## Mount sync: never auto-mount llamas when commander is on a non-llama horse-like (2026-05-02)
+
+Riding a horse or camel and walking past a wild/tame llama would cause the bot to drop pursuit and hop onto the llama, because all of HORSE/DONKEY/MULE/CAMEL/LLAMA/TRADER_LLAMA share `RideCategory.HORSE_LIKE` and the auto-mount loop picked the nearest match. Llamas can't be steered with a saddle and are slow, so this was almost always the wrong call.
+
+Fix in [RideSyncService](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java): added `isLlamaType()` and `shouldExcludeLlamaCandidates()`. When the commander's vehicle is HORSE_LIKE but not itself a llama, llamas are filtered out of both the candidate scan ([findCandidateVehicles](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java#L4025)) and the persisted-mount resolution ([resolvePreferredMount](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java#L1694)). With no llama-allowed mount available, the bot falls through to on-foot pursuit. If the commander is themselves on a llama, llamas remain valid candidates — riding a llama IS the manual signal.
+
+## Bot anvil/enchant: fix server-side close race that silently dropped every interaction (2026-05-02)
+
+**The bug:** clicking Anvil or Enchant from the bot inventory screen opened the bot's anvil/enchant UI on the client, but every subsequent slot click was silently rejected by the server. Items "in" the slots were pure client-side prediction — nothing committed. Closing the screen returned the bot's inventory to its original state because the server never processed any operation.
+
+**Root cause:** `openBotAnvil()` and `openBotEnchant()` in [BotPlayerInventoryScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java) sent the open-payload then called `close()` on the inventory screen. `HandledScreen.close()` sends a `CloseHandledScreenC2SPacket` to the server. Vanilla `ServerPlayNetworkHandler.onCloseHandledScreen` does NOT check syncId — it unconditionally calls `player.closeHandledScreen()` on whatever the current handler is. Server packet processing order:
+
+1. `BotAnvilOpenPayload` arrives → `player.openHandledScreen(...)` opens the anvil with new syncId Y; server's currentScreenHandler is now the anvil.
+2. `CloseHandledScreen` arrives milliseconds later → vanilla closes whatever's current → **closes the just-opened anvil**.
+
+Vanilla `onClickSlot` DOES check `currentScreenHandler.syncId == packet.syncId`, so subsequent slot clicks from the client (still showing the anvil with anvil syncId Y) get silently dropped — nothing reaches our `BotAnvilScreenHandler.onSlotClick` / `canTakeOutput` / `onTakeOutput`. The client UI keeps showing predicted state until the player closes (or opens another screen) because the server has no anvil handler to send slot updates from.
+
+**Fix:** removed the `close()` call from both methods. The server's `openHandledScreen()` already calls `closeHandledScreen()` on any existing screen as part of opening the new one, so the explicit close is redundant AND harmful.
+
+**Confirmed by diagnostics:** v1.1.52 added `[anvil-onSlotClick]` logging on every slot interaction reaching the server-side handler. A repro session showed bot-inv-open → anvil-onClosed with **zero** slot-click rows in between — proving every click was being rejected before reaching our handler.
+
+Diagnostic logging stays in place; tags `anvil-onSlotClick`, `anvil-canTakeOutput-allow/-deny`, `anvil-take-output-pre/post`, `enchant-onButtonClick-pre/post`, `*-onClosed-*` all remain. Once a repro confirms operations now commit, the chatty logging can be trimmed in a follow-up.
+
+## Spells header button now expands the overlay + anvil canTakeOutput chat warning (2026-05-02)
+
+Two fixes from the in-session debug pass:
+
+- **Spells header button**: `switchToSpellsTab()` in [BotPlayerInventoryScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java) only set `overlayCategory = TopicCategory.SPELL` and played a chime — it never called `toggleTopicsExpanded(true)`. So clicking the [✦] icon in the header from the collapsed state played the sound but didn't visibly open anything. Now it expands the overlay if it's collapsed, then switches the tab.
+- **Anvil canTakeOutput diagnostics + chat warning**: extended [BotAnvilScreenHandler.canTakeOutput](src/main/java/net/wcfcarolina13/ui/BotAnvilScreenHandler.java) to log every accept/reject decision with bot XP vs cost, and to send a `§e[Anvil] Jake has X XP levels but needs Y§r` (or "no valid anvil output") chat line on rejection so the player can see why their click did nothing. The vanilla client predicts a successful take, then snaps back when the server rejects, which previously looked indistinguishable from a successful operation that "reverted." Same diagnostic surface as the earlier instrumentation; new logger tags `anvil-canTakeOutput-allow` / `-deny`.
+
+If repro shows `validCost=false`, the spellbook items aren't producing a real anvil recipe (different bug); if it shows `enoughXp=false`, the "reverting" symptom is actually the bot lacking XP for the operation and the next step is to surface bot XP to the client so it doesn't predict false success.
+
+## Bot anvil/enchant diagnostic build (2026-05-02)
+
+Diagnostic logging added under logger `bot-anvil-enchant-diag` to track down the reported bug where anvil book-combine and enchant operations appear to apply (visible in-screen, output taken to cursor / shift-clicked back into inventory) but revert when the bot inventory is re-opened. Static code paths look correct, so this build instruments every read/write boundary so a single repro pinpoints the divergence:
+
+- `enchant-onButtonClick-pre/post` — bot XP, slot 0/1 contents, item-stack identity hash, bot inventory summary
+- `anvil-take-output-pre/post` — level cost, bot/viewer XP, output stack, input stacks, viewer cursor
+- `*-onClosed-pre/post` + `*-insert` — cursor and slot contents at close; per-insert `attempted/inserted/remainder` rows so we can see exactly what ends up in `bot.getInventory()`
+- `bot-inv-open` — bot inventory snapshot at the moment the player views it post-anvil/enchant
+
+Also added a defensive `BotInventoryStorageService.save(bot)` at the end of `BotAnvilScreenHandler.onClosed` and `BotEnchantmentScreenHandler.onClosed` so any concurrent autosave or join-restore path can't roll back what just landed. If this alone fixes the bug, we'll know it's a persistence race; if the logs show a mutated inventory followed by a stale `bot-inv-open` summary, we'll know there's a reset path still to find.
+
+Helper class: `net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics`. Logs are intentionally chatty for a single repro — once the bug is identified the logging can be trimmed.
+
+## Store Here: tooltip + in-game guide updated for new modifier (2026-05-01)
+
+Quick Store tooltip in `BotPlayerInventoryScreen` and the Quick Store / Quick Fetch guide entry in `BotGuideScreen` now describe both modifiers (plain = filtered, shift = dump everything). Picker overlay HUD already mentioned both modes from the prior commit.
+
+## Store Here: filtered by default, shift+click for full dump (2026-05-01)
+
+The "Store Here" target picker (`StoreTargetPickerOverlay` → `StoreTargetPayload` → `ChestRegistryNetworkManager.handleStoreTarget`) used to call `ChestStoreService.depositAll` unconditionally, dumping the bot's entire inventory including equipped armor, mainhand tool, food, and lodestone compasses.
+
+New behavior:
+
+- **Plain left-click** → filtered deposit using `!isOffloadProtected(stack)` (same predicate the bot uses for its own auto-offload and `depositHuntLoot`). Skips damageable gear, bundles, lodestone compasses, cooked food, and items in `OFFLOAD_PROTECTED_ITEMS`.
+- **Shift + left-click** → unfiltered `depositAll` (legacy "dump everything" behavior, kept for cases where the player explicitly wants to strip the bot — e.g. swapping loadouts at a base).
+
+Confirmation message includes a "(kept its gear)" suffix on the filtered path so the player can tell which variant ran. HUD instructions on the picker now mention both modes. Older clients that don't send `keepGear` default to filtered (safer) on the server.
+
+## Walkable-partials fix in workstation stand-finders (2026-05-01)
+
+Audited the rest of the codebase for the same walkable-partial-collision bug that broke chest deposits. Three sites had identical bugs in their "find a place near the workstation for the bot to stand" logic:
+
+- [CraftingHelper.findStandableOptions](src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java) — used by auto-crafting (e.g., log → planks); a crafting table with stairs/slabs/carpets in any of its accessible neighbor cells would have been impossible to use.
+- [SmeltingService.findStandableOptions](src/main/java/net/wcfcarolina13/GameAI/services/SmeltingService.java) — used by the auto-cook batch flow; a furnace on a stair-edged kitchen counter would have been impossible to fuel.
+- [HangoutSkill.isStandable](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HangoutSkill.java) — campfire hangout idle behavior; carpets / pressure plates near a fireplace would have been treated as un-standable.
+
+All three now accept walkable partials at the foot and head positions via `WalkablePartialBlocks.isStandable` / `isPathable`. The footing-below check (which correctly requires non-empty collision) is unchanged.
+
+Audit also flagged a few sites that turned out to be polarity-confusion false positives (HarvestCropSkill / FarmSkill / PlantSeedsSkill `isSafeStandingGround`, MovementService `isFootSolid`) — those check that the FOOTING block is non-empty, which is the correct behavior; stairs-as-footing already pass. `MovementService.hasClearance` has a minor cosmetic walkable-partial issue (rejects standing exactly inside a carpet cell), but it's used pervasively for door / gate / corridor traversal so it's left alone — too risky to change without a specific failure log.
+
+## Chest stand-candidate also tries chestY - 1 (2026-05-01)
+
+Same beach chest from earlier today still failed to deposit even with the walkable-partial fix. The chest is the upper of a 2-tall stacked-chest pair at (227, 65, 1253) — no platform around it at y=65, just open air with sand at y=63. The original logic only tried stand cells at `chest.y` (feet at y=65), and for every horizontal neighbor the cell at y=64 (below) is air, so the footing check rejected all four candidates.
+
+Fix: [ChestStoreService.findStandCandidatesNearChest](src/main/java/net/wcfcarolina13/GameAI/services/ChestStoreService.java) now iterates `yOffset ∈ {0, -1}`. The `chest.y - 1` candidate puts the bot's feet on the ground next to the lower chest with its head at chest level — exactly the position a player uses to access an elevated/stacked chest, and well within the standard reach distance for `BlockInteractionService.canInteract` to succeed.
+
+## Chest stand-candidate accepts walkable partials (2026-05-01)
+
+Bot repeatedly failed to deposit into an empty, accessible chest on a beach with `Store transfer abort: no stand candidates from findStandCandidatesNearChest at 228, 65, 1253`. Root cause: [ChestStoreService.findStandCandidatesNearChest](src/main/java/net/wcfcarolina13/GameAI/services/ChestStoreService.java) rejected any horizontal neighbor whose stand or head cell had a non-empty collision shape. Stairs/slabs/carpets/pressure plates have non-empty shapes but are walkable — the same pattern already documented in `feedback_walkable_partial_blocks.md` and handled by `WalkablePartialBlocks`. The chest sat on a stair-edged sandy platform, so all four neighbors were stairs and every candidate was rejected.
+
+Fix: stand cell now accepts blocks that pass `WalkablePartialBlocks.isStandable(...)` (slabs, stairs, snow layers, carpets, plates, rails); head cell accepts blocks that pass `WalkablePartialBlocks.isPathable(...)` (thin partials only — carpets/plates/rails/etc., not slabs/stairs which would actually block the head). Footing-below check is unchanged: solid collision required.
+
+## Liberal feeding + hunger tuning + hunt crash fix (2026-04-21)
+
+**Symptoms observed in the 2026-04-20 session:**
+
+1. Bot's hunger plateaued at food=15 for ~10 minutes. Trying to hand-feed raw salmon was refused. Bot also didn't self-eat from inventory.
+2. Sunset fast-travel + sunrise resume dropped food to 9. `Auto-hunt (hungry) starting for Jake at food=9` fired — even though the bot had 300+ raw fish in its inventory. Simultaneously `Auto-cook: started batch cook` sent `"Heading to the furnace..."`.
+3. The hunt immediately crashed with `ThreadLocalRandom accessed from a different thread (owner: Server thread, current: auto-hunt-1)` from [HuntSkill.attackTarget](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HuntSkill.java) — c2me's `CheckedThreadLocalRandom` caught `bot.attack` being called off the server thread.
+
+**Root causes** (three independent, see [docs/superpowers/specs/2026-04-21-liberal-feeding-and-hunger-tuning-design.md](docs/superpowers/specs/2026-04-21-liberal-feeding-and-hunger-tuning-design.md) for the full investigation):
+
+- `HealingService.autoEat` and `BotFoodGivingService.tryGiveFood` both gated eating on `foodLevel < HUNGER_COMFORTABLE (15)` — strict less-than, so at exactly 15 neither self-eat nor hand-feed fired.
+- `BotAutoHuntService` fired at `food ≤ 10` without consulting the bot's larder. The existing `MIN_BACKUP_FOOD_ITEMS` check only ran when `food > 10`.
+- `HuntSkill.attackTarget` loops on a worker thread (`auto-hunt-N`) but called `bot.attack(target)` + `bot.swingHand(...)` directly — both mutate entity state and use RNG, forbidden off the server thread.
+
+The sunset/sunrise "double fast-travel" was investigated and is working as designed — one trip home at sunset, one resume trip back at sunrise ([BotAutoReturnSunsetService.java:315–348](src/main/java/net/wcfcarolina13/GameAI/services/BotAutoReturnSunsetService.java)).
+
+**Fixes:**
+
+- **Liberal feeding** in [BotFoodGivingService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotFoodGivingService.java): non-precious food is now accepted whenever `foodLevel < 20`. The `HUNGER_COMFORTABLE`/`needsRegenFuel` gates are gone. Precious foods (golden apple, enchanted golden apple, golden carrot) instead open a clickable chat prompt — `"<Bot>: That golden apple is precious. Eat it anyway? [Yes] [No]"` — with a 15-second TTL. `[Yes]`/`[No]` fire internal `/bot feedconfirm <uuid>` / `/bot feedcancel <uuid>` commands registered in [modCommandRegistry.java](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java). Pending entries are validated against sender UUID + held item before consuming; a tick sweep purges expired ones. Forbidden foods (rotten flesh, pufferfish, etc.) still refuse.
+- **Per-player "Auto-accept Precious Foods" toggle** following the established durability-preservation pattern: new [UpdatePlayerAutoAcceptPreciousPayload](src/main/java/net/wcfcarolina13/network/UpdatePlayerAutoAcceptPreciousPayload.java) / [RequestPlayerAutoAcceptPreciousPayload](src/main/java/net/wcfcarolina13/network/RequestPlayerAutoAcceptPreciousPayload.java) / [PlayerAutoAcceptPreciousStatePayload](src/main/java/net/wcfcarolina13/network/PlayerAutoAcceptPreciousStatePayload.java), `ManualConfig.playerAutoAcceptPreciousFoods` map + getter/setter, server handlers in [Frens.java](src/main/java/net/wcfcarolina13/Frens.java), client S2C receiver in [FrensClient.java](src/main/java/net/wcfcarolina13/FrensClient.java), new `AUTO_ACCEPT_PRECIOUS_SERVER_VALUE` field + setter on [BotPlayerPreferencesScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerPreferencesScreen.java), new `AUTO_ACCEPT_PRECIOUS_FOODS` TopicAction row in Admin → Behavior on [BotPlayerInventoryScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java). Default OFF. When ON, precious foods are consumed without the prompt.
+- **Hunt gate** in [BotAutoHuntService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotAutoHuntService.java): check `HuntSkill.countSafeFoodItems(bot) >= MIN_BACKUP_FOOD_ITEMS` **before** the hunger threshold. If the bot has enough safe non-precious food, auto-hunt skips — `autoEat` will consume next tick. `MIN_BACKUP_FOOD_ITEMS` bumped from 4 → 8 so "plenty of fish" is the rule, not "has 4 scraps." New helper `HuntSkill.countSafeFoodItems` excludes precious (golden apple etc.) and forbidden (rotten flesh etc.) items so a single golden apple doesn't block legitimate hunts.
+- **Abundance auto-eat** in [HealingService.java](src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java): new `hasAbundantFood(bot)` — true if any single non-precious, non-forbidden edible stack has `count >= 64`. When true, `autoEat`'s comfort threshold rises from 15 → 18 so bots eat sooner when there's plenty in the bag. New public `HealingService.isPrecious(ItemStack)` / `isForbidden(ItemStack)` helpers replace the scattered inline lowercase-contains checks in three places.
+- **Threading fix** in [HuntSkill.attackTarget](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HuntSkill.java): the in-range branch now schedules `selectBestMeleeWeapon` + `bot.attack` + `bot.swingHand` via `server.execute(...)` with an `isAlive`/`isRemoved` re-check inside the lambda. `distSq`/`canSee` stay on the worker thread (read-only). `sleep(220L)` keeps the worker-thread loop paced.
+
+**What this does NOT change:**
+
+- `BotAutoCookingService` threshold stays at `food ≤ 10`. With the hunt gate in place, auto-hunt will no longer fire simultaneously, and auto-cook alone doing "heading to the furnace" when food is low is reasonable.
+- Sunset/sunrise fast-travel behavior unchanged — it was working correctly.
+- Emergency starvation path (food ≤ 2) unchanged. If auto-eat somehow can't fire at emergency and the bot has food in inventory, hunting isn't the right remediation anyway — auto-eat reaching that state is itself the bug to fix.
+
+**Build:** `./gradlew build -x test` — green. No `mod_version` bump — user was playing during implementation; deploy when the game is closed.
+
+## Trader/llama proximity dialogue + ungate Batch3 topics from questing mode (2026-04-21)
+
+**Symptom:** In admin-mode worlds, the bot never said any of the `topic_trader_*` / `topic_llama_*` lines even when a wandering trader and its llamas walked right past. Ditto every other Batch3 topic group — clicking "Tell me about traders and mounts" in the dialogue UI replied `"This world isn't using survival recruitment."` All five Batch3 passive-observation topic groups (biomes, structures, dimensions, traders/mounts, travel) were unreachable outside questing mode.
+
+**Cause:** [SurvivalCompanionQuestService.handleTopic](src/main/java/net/wcfcarolina13/GameAI/services/SurvivalCompanionQuestService.java) gates ALL topic keys on `SurvivalRecruitmentService.isEnabled` + `st.isRecruited()`. Those gates belong on quest-progression keys (`companion_status`, `companion_check`, `village_missing`, `village_projects`, `companion_anchor_set`, `companion_anchor_here`) — not on passive world-observation lines that are just flavor about what the bot sees.
+
+**Fixes:**
+
+- **Ambient proximity trigger** in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java): new `tryTraderOrLlamaNearby` fires `topic_trader_*` or `topic_llama_*` from two flat weighted pools (`TRADER_NEARBY_LINES`, `LLAMA_NEARBY_LINES`) when a `WANDERING_TRADER`, `TRADER_LLAMA`, or `LLAMA` is within 14 blocks horizontally / 6 vertically. Trader takes priority when both are present (llama is usually leashed to it anyway). 1.5%/tick probability, `COOLDOWN_180S_MS` per family — matches the pig-staring / enderman-spotted cadence. Weights lean `ASK` > `FIRST` > `MEMORY` so intro lines still fire but don't dominate. Independent state — does not touch `Batch3TopicDialogueService` quest-memory tracker, so the two paths stay decoupled. Debug handles added (`/bot debug_line trader_nearby <id>` / `llama_nearby <id>`).
+- **Batch3 gate removal** in [SurvivalCompanionQuestService.java](src/main/java/net/wcfcarolina13/GameAI/services/SurvivalCompanionQuestService.java): new `isBatch3TopicKey` helper matches the five Batch3 group keys (plus their legacy `topic_*` aliases). When the incoming topic key matches, `handleTopic` short-circuits BEFORE the `isEnabled` / `isRecruited` checks, serves the line via `Batch3TopicDialogueService.pickLineForTopic` with whatever alias is available (recruited alias if any, else the passed `botAlias`), and returns. Quest-specific topic keys still flow through all the existing gates.
+
+**What this does NOT change:**
+
+- Quest progression topics (`companion_status`, `village_missing`, `village_projects`, `companion_check`, `companion_anchor_set`) still require questing mode + recruitment. They're genuinely quest-scoped.
+- `BotQuestService.java:138` passive sidequest proposer gate (2026-04-18) stays — that one is about suppressing unwanted auto-triggered sidequests in admin mode, different category from "allow the bot to say words about a llama."
+- Distant non-HOME base compass requirement (`BotEventHandler.java:2079`) stays — world navigation gate, not dialogue.
+
+**Build:** `./gradlew build -x test` — green. No version bump yet; deploy on user confirm.
+
+## 1.1.42 — Named-mob pacifism (2026-04-20)
+
+**User intent:** When the player name-tags a mob — hostile (a display zombie in a farm, a kept raid captain) or peaceful (a prize cow) — the bot should treat it as off-limits. No attacking; if hit back, flee instead of fighting. Per-bot opt-in toggle restores normal engagement for players who want the bot to keep defending them.
+
+**Design.** The naive `if (entity.hasCustomName()) return false` inside `EntityUtil.isHostile` was rejected as too blunt: it would strip named hostiles from threat detection entirely, meaning the bot couldn't even react (flee) when they damage it. The split is:
+
+- **Threat detection unchanged.** `EntityUtil.isHostile` still matches named hostiles so hostile scans and the flee planner see them.
+- **New central policy service.** [BotCombatPolicyService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotCombatPolicyService.java) exposes `shouldBotAttack(Entity, ServerPlayerEntity)` — single method returning `false` for any `LivingEntity` with a custom name when the bot's `attackNamedMobs` toggle is off.
+- **Per-bot persisted toggle** on [BotHomeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java) modelled 1:1 on `autoReturnPreferLastBedAtSunset`. Default OFF (pacifism is the default).
+- **Flee-on-damage hook** via new `BotFleeService.fleeFromEntity(bot, attacker, currentTick)` — public wrapper over the existing private `startFleeing` that seeds state with the attacker as the sole threat.
+
+**Engagement gates** (where bots would otherwise attack a named mob):
+
+- `BotEventHandler.engageHostiles` — added a `shouldBotAttack(e, bot)` gate inside the existing `filtered` loop at ~L3657. This is the single choke point for all 8+ `BotActions.attackTarget` sites inside `engageHostiles`.
+- `BotAnimalDefenseService.scanHostilesStep1` / `scanWatchListStep2` — gated the `markAttackerForDefense` call in each `canEngage` branch. Step-1/Step-2 still run the scan (so named hostiles remain visible in threat detection), the gate only stops the engagement.
+- `BotMutualAidService.respondToDefenseRequest` — guard clause returns `false` before `attackTarget` if the target is named.
+- `BotRLActionService` `"attack"` case — filter hostile list before `attackNearest`; logs "No attackable hostile entities (all name-tagged or none present)" when filtered empty.
+
+**HuntSkill was already safe.** [HuntSkill.java:992](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HuntSkill.java#L992) `isDomesticated()` already returned `true` on `hasCustomName()`, so named cows/sheep were never valid hunt targets. No change needed.
+
+**Damage listener** in [Frens.java:899-911](src/main/java/net/wcfcarolina13/Frens.java#L899-L911): after the existing player/hostile callout branches, if attacker is a non-player `LivingEntity` with a custom name and the toggle is off, call `fleeFromEntity`. Player attackers are explicitly excluded — the pacifism rule is about mobs, not PvP.
+
+**Mode caveat documented in the `fleeFromEntity` javadoc** (not fixed): `tickFlee` only continues flee when the bot is in `Mode.IDLE`. If the bot is in COMBAT against *other* hostiles when a named mob hits it, seeded flee state won't tick until that combat ends. If in-game testing shows this is wrong, the fix is a `forcedByDamage` flag on `FleeState` that bypasses the mode guard — not committed pre-emptively since it complicates the existing flee state machine without evidence we need it.
+
+**Admin plumbing:**
+
+- New chat command `/bot attack_named_mobs on|off|toggle [<target>]` via `BotHomeCommands.buildAttackNamedMobs()` and two handlers in `modCommandRegistry`.
+- New Admin-tab toggle row **Attack Named Mobs** (⚐) between **Auto Hunt (Starving)** and **Unleash Tethered**. `botStats` delegate grew from 24 → 25 slots, slot 24 exposes the toggle to the client.
+- Tooltip: "When OFF (default), the bot protects any name-tagged mob — hostile or peaceful — and flees if one attacks it. Turn ON to let the bot engage name-tagged mobs normally."
+
+**Unchanged as of this ship:** named raid captains during an active raid are still pacified. If mid-raid testing shows this breaks the Bad Omen mechanic (bot can't engage the rest of the raid because the named captain blocks the engagement flow), follow-up will add a raid-in-progress bypass. Not wired pre-emptively because `BotAnimalDefenseService`'s gate only blocks defense marking — the engageHostiles filter excludes the one named captain while letting other raiders through, so the common case is already correct.
+
+## Unified spells menu — migrate CompanionSpellsScreen into the Spells tab (2026-04-20)
+
+**Symptom:** Two separate "spells" surfaces with mostly-disjoint content, both labelled "Spells". (1) `CompanionSpellsScreen` — a dedicated grid screen with Regroup, Summon, Home, Remote Inventory, Enchant, Anvil. (2) Bot Inventory → Spells tab — a topic list with Remote Guidance, Chorus Recall, Soul of Ender, Remote Inventory. User (dev) reported: "Shouldn't these be the same thing? If I have the Eye of Ender and/or am next to the Enchanting Table, I should just see that in the spell menu." Only "Remote Inventory" appeared in both. Which UI you landed in depended on which button you clicked. No single canonical list.
+
+**Fix** in [BotPlayerInventoryScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java):
+
+- Added three new `TopicAction` values: `SPELL_SUMMON`, `SPELL_ENCHANT`, `SPELL_ANVIL`. Reused the existing `COMPANION_COME` and `COMPANION_HOME` actions for the Regroup and Home entries (they already have server-side handlers).
+- Rebuilt `SPELL_TOPIC_ENTRIES` with three categorical groupings: **Movement** (Regroup / Summon / Home), **Travel** (Remote Guidance / Chorus Recall / Soul of Ender), **Remote Access** (Remote Inventory / Enchant / Anvil). All 9 spells now live in one list.
+- Added `switchToSpellsTab()` — the `OPEN_SPELLS` action (`✦` button in the inventory header) now switches `overlayCategory` to `SPELL` in-place instead of opening the legacy screen. One screen, one spell list.
+- Added `openBotEnchant()` and `openBotAnvil()` that send the same `BotEnchantOpenPayload` / `BotAnvilOpenPayload` the legacy screen used.
+- Extended `isSpellEntryEnabled()` with gates for the new actions: Regroup and Summon need full access or an Eye of Ender; Enchant needs the player within 4 blocks of an Enchanting Table; Anvil needs the player within 4 blocks of an Anvil (new `isNearAnvil` helper). Home is left always-enabled — server gates by navigation tier which the client can't cheaply verify.
+- Added per-spell tooltip text mirroring the CompanionSpellsScreen tooltips so hover reveals the gating requirements.
+
+The legacy `CompanionSpellsScreen` is no longer referenced from the inventory flow, but was left in the codebase for one session so the cutover can be verified before deletion. Backlog flagged in `RALPH_TASK.md` for removal plus the two Actions-tab duplicates (Regroup / Return Home) that could also move into Spells for full consolidation.
+
+## Fast-travel gate visibility in chat + guide topic (2026-04-20)
+
+**Symptom:** When the bot fast-travels (sunset return, sunrise resume, `/bot home`, etc.) the chat just says `Jake has departed and will arrive in ~10 seconds.` — no mention of which gate opened (lodestone compass? map+compass? smoke signal? ender eye? nearby enchanting table?). The reason tag was already being logged to `latest.log` as `Fast-travel tier: … reason=lodestone-compass mult=1.0`, but never surfaced to the player. Meant that even the dev couldn't tell in-game whether a departure used the tier-2 lodestone shortcut or the tier-1 map-reading path, and players had no way to learn what gates existed without reading source.
+
+**Fix** in [NavigationArtifactService.java](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java):
+
+- Hoisted `tier.reason()` and `tier.delayMultiplier()` out of the gate-evaluation block into local variables available at the departure-notification site (~L1103).
+- New `formatTierSuffix(reason, multiplier)` helper maps the compact telemetry tags (`lodestone-compass`, `map+compass-rendered+smoke-signal+spyglass`, `underground-no-artifact`) into readable prose (`lodestone compass`, `map + compass + smoke signal + spyglass`, etc.) plus a speed label (`instant-class` / `tier 1` / `slow`).
+- Departure chat now reads: `Jake has departed §7(fast-travel: lodestone compass, instant-class)§e and will arrive in ~10 seconds.` The existing refused-travel chat messages were already specific per-reason and were left untouched.
+
+**Also added** a new `fast_travel_gates` guide topic under Basics (and a `bases_home_explained` topic in the same pass). The gates topic documents:
+
+- Tier 2 (1.0×) qualifiers: lodestone compass, Eye of Ender, Wizard's Tome, nearby Enchanting Table, mutual Ender Pearls.
+- Surface tier 1 gates (map+compass+rendered destination, smoke signal within 5× base radius), the spyglass step-saver, and 1-gate (3.0×) / 2-gate (2.0×) scoring.
+- Underground gate variants (map+compass+light, lodestone-no-target lenient path, smoke signal within 2× radius).
+- An important clarification: these gates apply to automatic fast-travel. The **Summon** button in the spellbook (CompanionSpellsScreen) uses Eye of Ender as its own gate with 60s cooldown, and the **Remote Guidance** / **Chorus Recall** / **Soul of Ender** spells in the Bot Inventory Spells topic are separate manual spells with their own costs (ender pearls / chorus fruit). Addresses the "I have an Eye of Ender but don't see anything teleport-related in the spellbook" confusion by pointing at the two different UI surfaces.
+
+## Follow/stop clear pending sunrise-resume + Base Manager clarity (2026-04-20)
+
+**Symptom:** After `/bot fish` aborts at sunset, the mod persists a "resume fishing tomorrow" record. Player then issues `/bot stop` (clears active task) and `/bot follow` (manual control), walks the bot back to base, sleeps. The next morning the bot auto-fast-travels back to the fishing spot and resumes the skill the player had explicitly stopped. Traced in [latest.log](~/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log) around `15:05:19 → 15:06:14`: sunrise-resume record saved, `/bot stop` + `/bot follow` issued, bot slept, dawn broke, `Sunrise fishing resume` fired regardless.
+
+**Cause:** [`SkillResumeService.clear()`](src/main/java/net/wcfcarolina13/GameAI/services/SkillResumeService.java#L64) wipes `LAST_SKILL_BY_BOT`, `AWAITING_DECISION`, `AUTO_RESUME_PENDING`, and `PENDING_BY_RESPONDER` — but **not** `SUNRISE_RESUME_BY_BOT`. That map was only ever dropped by `/bot fish forget` (`executeFishForget`). Additionally, [`executeFollow`](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java#L3410) only aborted the current task and set follow mode; it didn't touch any resume state or the sunset-return session.
+
+**Fix:**
+
+- `SkillResumeService.clear(UUID)` now also calls `SUNRISE_RESUME_BY_BOT.remove(botUuid)`. Any code path that resets pending-skill state (manual `/bot stop`, no-vote decline, etc.) now drops the sunrise resume as part of the same clear.
+- `executeFollow(...)` now calls `SkillResumeService.clearAndNotify(bot.getUuid())` and `BotAutoReturnSunsetService.clearSession(bot.getUuid())` before setting follow mode. Explicit manual control = clear latent auto-resume paths so nothing re-fires behind the player's back.
+
+**Base Manager clarity pass (same symptoms, different reach):** the menu shows registered bases (yellow `§e[Base]`) mixed with lodestone compasses (white rows), and `[Home]` means two different things depending on row color — the preferred home base vs the designated home compass. Three layers of clarity added:
+
+- [BaseManagerScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BaseManagerScreen.java) renders a one-line legend above the list when it's non-empty: `[Base] = registered base · white = lodestone compass · [Home] = preferred`.
+- [BotGuideScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotGuideScreen.java) gets a new `bases_home_explained` guide topic under Basics covering the color code, the two `[Home]` meanings, the sunset-return priority (closest of lastSleep / preferred / nearest base), and why spawn can steal the return when a preferred home is far away.
+- `RALPH_TASK.md` carries the remaining UX work (section headers, hover tooltips, echo-on-Set-Home confirmation) into a dedicated backlog item so the next session can do the full polish.
+
+Also added a separate backlog item for the **named-hostile-mob pacifism** idea — skip combat targeting on any mob with a custom name tag and engage flee behavior if hit, to keep mob-collection farms/displays safe.
+
+## Dialogue audio: apply in-mod-fill TTS batch (2026-04-18)
+
+TTS job for `april_2026_in_mod_fill` completed and produced 55 OGGs. Staged all 55 into `src/main/resources/assets/frens/sounds/dialogue/`. Full categories filled: `cook_*` (8 events), all `food_accept_*` / `food_refuse_*` (8 events), `react_rotten_*` (3 of 4 — `brave` not generated), `react_stew_*` (3 of 4 — `bold` not generated), `wake_*` (4 events), `portal_nether_overworld_1` (3 variants), `portal_end_overworld_1` (3 variants), `follow_dim_nether` (3 variants), `follow_dim_end_2` (3 variants), partial fills for 4 other `follow_dim_*` events.
+
+**Reconciled sounds.json against on-disk OGGs** — the TTS run produced fewer variants than planned for some events. Pruned 13 events' `sounds[]` to only reference OGGs that actually exist:
+- `cook_could_eat`, `react_rotten_brave`, `react_stew_bold`, `portal_nether_overworld_2`, `weird_portal_end_in_nether_1/2`, `weird_portal_nether_in_end_1/2` → empty `"sounds": []` with `"replace": false` (registered event, silent until a future TTS pass produces audio).
+- `follow_dim_end` → keep `[1, 2]`, drop `[3]`
+- `follow_dim_nether_2` → keep `[1, 2]`, drop `[3]`
+- `follow_dim_overworld` → keep `[1, 3]`, drop `[2]`
+- `follow_dim_overworld_2` → keep `[1]`, drop `[2, 3]`
+- `portal_end_overworld_2` → keep `[1]`, drop `[2, 3]`
+
+Also populated `care_player_hurt_1` with newly-generated `__02` variant (now has `[1, 2, 3]`).
+
+Net effect at next launch: zero "File … does not exist, cannot add it to event" warnings for the staged categories. Every OGG referenced by sounds.json exists on disk; every OGG on disk is referenced by sounds.json.
+
+**Handoff doc note**: `generate_handoff.py` output ([`audio_triage/handoff_to_mod_repo.md`](/Users/roti/gemini_projects/ai-player-dialogue/audio_triage/handoff_to_mod_repo.md)) had several generator bugs I worked around rather than applied verbatim: duplicate filename entries in sounds.json blocks (counts OGG+WAV as two variants), WAV files listed as copy targets (WAVs shouldn't ship), and false-positive "new event" entries for events that already exist under a different prefix (e.g. `bot.line.hurt_grunt` vs the existing `bot.fx.hurt_grunt`). Worth fixing in the generator when there's time, but none of those issues leaked into this apply — computed deltas directly from the on-disk state instead.
+
+## Dialogue audio: apply pending `map` decisions from triage (2026-04-18)
+
+Staged 24 OGG files tagged `map` in [`audio_decisions.json`](/Users/roti/gemini_projects/ai-player-dialogue/audio_triage/audio_decisions.json) from [`april_2026_v1_1_36_fill/output_ogg/`](/Users/roti/pontus/ai-player-dialogue/april_2026_v1_1_36_fill/output_ogg) and [`april_2026_v1_1_36_redo/output_ogg/`](/Users/roti/pontus/ai-player-dialogue/april_2026_v1_1_36_redo/output_ogg) into the mod's `sounds/dialogue/`.
+
+**Creeper joke line (`bot.line.banter_creeper_kidding`)** — swapped in the A/B-tested Apr 18 take `banter_creeper_kidding__01.ogg` (29,360 B) over the old Jan 8 version, and collapsed the event from 3 variants → 1 (removed `__02`/`__03` OGGs and sounds.json entries). User rejected the A/B __02 take in triage (`delete`), so this is now single-variant.
+
+**Kraken line (`bot.line.boat_kraken`)** — removed voiced audio entirely per user instruction ("not good, marked for removal"). Deleted `boat_kraken__{01,02,03}.ogg`; set `sounds.json` → `"sounds": []` with `"replace": false` so the event stays registered (overhead text dialogue still resolves) and is a clean target for future regen. All existing takes across batches were tagged `regen` or `delete` in triage.
+
+**Care reactions (6 events × various variants = 12 new OGGs)** — populated previously-empty `sounds[]` arrays in sounds.json for `care_player_hurt_1/2/3` and `care_player_hungry_2/3`. Note: `care_player_hurt_1` has only `__01` + `__03` (no `__02` was generated/tagged); `care_player_hungry_2` has only `__02`; `care_player_hungry_1` still has no audio (not in the fill batch). Fed by `CompanionContextReactionService.tryPlayerHurt` / `tryPlayerHungry`.
+
+**Tree-punch "ora" line (`bot.line.tree_punch_ora`)** — populated previously-empty `sounds[]` with single `__01` variant.
+
+**Fresh takes replacing existing OGGs (11 files, same filenames):** `ambient_saw_bird__01`, `dig_down_warning__01`, `discover_mineshaft__02`, `discover_quartz__01`, `freefall_aaahaha__01`, `freefall_woohoo__03`, `hurt_grunt__06`, `mount_cant_find_food__02/03`, `skill_woodcut_careful__01`, `wolf_guard_duty__03`. No sounds.json changes — same filenames, new contents.
+
+## Fishing: treasure-eligible open-water picks (2026-04-18)
+
+**Symptom:** Near open lakes, Jake was routinely setting up at shoreline spots that don't pass vanilla's 5x5x4 open-water check — so no treasure (enchanted books, saddles, bows, name tags). [latest.log:5147](~/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log#L5147) confirmed scores weren't even being logged — `score={:.2f}` printed literally.
+
+**Three fixes** in [FishingSkill.java](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FishingSkill.java):
+
+1. **Scoring bug.** `findStandOptions` at L1357 ranked stand+cast combinations without considering whether the chosen cast target passes the vanilla open-water check — the `-3.0` bonus only lived inside `chooseCastTargetAlongLine`, which picks *the best target per stand*, so the bonus never crossed the stand-comparison boundary. A slightly deeper shoreline spot could out-score a true open-water spot. Added an `isVanillaOpenWater(world, castTarget)` bonus of `-5.0` directly in the per-stand quality formula — large enough to dominate typical openness/depth deltas (±3.15 / ±3.30).
+
+2. **`isVanillaOpenWater` didn't actually match vanilla.** Old implementation diverged three ways from [`FishingBobberEntity#isOpenOrWaterAround`](https://maven.fabricmc.net/docs/yarn/): (a) required `Blocks.WATER` block match instead of still-water fluid + empty collision (rejected waterlogged edge cases vanilla accepts), (b) used `!isOpaque()` for upper layers instead of `isAir() || isLilyPad` (accepted tall grass / string spots vanilla rejects), (c) required `isSkyVisible()` which vanilla does **not** check (rejected treasure-eligible covered ponds). Rewrote as a faithful port: four 5x5 slabs at bobber `Y-1..Y+2`, three-way `PositionType` classification (INSIDE_WATER / ABOVE_WATER / INVALID), state-machine transition rules. Dropped the sky-visibility requirement.
+
+3. **Log format.** `LOGGER.info("... (score={:.2f})", ..., bestScore)` used Python-style format specifiers in an SLF4J template — SLF4J printed the placeholder literally. Changed to `LOGGER.info("... (score={})", ..., String.format(Locale.ROOT, "%.2f", bestScore))` so future sessions actually log a number.
+
+Kept `findFishingSpot`'s `EARLY_EXIT_SCORE=8.0` threshold untouched — with the stronger bonus, true open-water spots will now score low enough that the early-exit should fire on them, not on shoreline candidates.
+
+## Skip wolf-teleport when the bot is mounted (2026-04-18)
+
+**Symptom:** While the commander galloped ahead on their own horse, Jake fell behind on his horse, then abruptly appeared next to the commander *on foot* — his horse was nowhere to be seen. Reproduced in [latest.log](~/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log) around 16:35:44 — mount record saved at 16:35:35 (horse `924fd96b-…` at `185,64,1387`, saddled, HP 17), then `Follow wolf-teleport: bot=Jake -> 224, 68, 1407` fires and Jake is 41 blocks away on foot. `resolvePreferredMount` then rejects the saved horse repeatedly as `state-too-far` with distSq growing (4.6k → 40k) as the commander keeps moving — the horse is orphaned at its last position.
+
+**Cause:** `tryWolfTeleport` calls `bot.teleport(world, x, y, z, …)` unconditionally. Vanilla `ServerPlayerEntity#teleport` dismounts the rider before moving, so the horse/boat is left behind. No `hasVehicle()` guard existed at [BotEventHandler.java:6982](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L6982) or at either call site (~4338, ~4730).
+
+**Fix** in [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java): add an early `if (bot.hasVehicle()) return false;` at the top of `tryWolfTeleport`. Mounted bots now rely entirely on `RideSyncService` to keep up with the commander — the wolf-teleport fallback only fires for on-foot bots. Tradeoff: if `RideSync` can't catch a mounted bot up (e.g. commander crosses into unreachable terrain), the bot falls behind until the commander comes back or stops. That's strictly better than silently losing a saddled horse in unloaded chunks.
+
+## TNT-proximity plea sequence (2026-04-18, v1.1.36)
+
+Implements the 4-line escalating gag from the March 2026 backlog when the bot is stationary near primed TNT and the commander is watching. Mirrors the end-ship state machine.
+
+**Trigger in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java)** (`tryTntSequence`). Entry: bot not in a vehicle, velocity² < 0.04, live `TntEntity` within 10 blocks, commander within 24 blocks and either facing the TNT or facing the bot, 5-minute start cooldown. Sequence: 4 lines ~1 s apart via `TNT_SEQUENCE_LINES`. Cancels if the TNT despawns (explodes) mid-sequence so we don't play to empty air.
+
+## End-ship "captain now" conditional gag (2026-04-18, v1.1.35)
+
+Implements the 3-stage conditional sequence the user flagged in `audio_decisions.json`:
+
+> *"The hey hey look at me needs to come first, then only after you look at the bot for 3 seconds does it follow with the line 'I'm the captain now.' It's conditional. If you don't turn to look at the bot for more than 14 seconds, the bot says 'that ruined the joke'"*
+
+**Trigger in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java)** (`tryEndShipSequence`). Entry: commander within 24 blocks, commander NOT currently facing bot (joke needs the look-away setup), bot is perched (in a vehicle, in The End, or y≥70 under open sky), rare roll (~0.08%/tick), 30-min start cooldown. State machine: if commander looks at bot for ≥ 60 continuous ticks (3 s) within 14 s → `I'm the captain now.` If 280 ticks (14 s) elapse without 3 s of continuous looking → `That ruined the joke.` Either resolution resets the state. New fields on `TriggerState`: `endShipSolicitedAtTick`, `endShipLookingTicks`.
+
+## Wire enderman-spotted reaction (2026-04-18, v1.1.34)
+
+New tick-scan trigger `tryEndermanSpotted` in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java). Scans a 32×16×32 box for live endermen; if any is in the bot's forward cone (dot-product > 0.85 via existing `isEntityFacing`) the bot has a 6%/tick roll to fire `enderman_spotted_dont_look` ("Don't look at it."), 3-min cooldown. No aggro side-effects — `EndermanSafetyService`'s look-avoidance is unaffected.
+
+## Berry-bush + foliage-stuck audio (2026-04-18, v1.1.33)
+
+Both categories had `tryShowSweetBerryBush*` / leaf-stuck plumbing in `CompanionOverheadDialogueService` already — they just weren't reachable from `DialogueTextMapper`, so audio lookup returned null. Added exact mappings in [DialogueTextMapper.java](src/main/java/net/wcfcarolina13/ChatUtils/DialogueTextMapper.java):
+
+- `LINE_BERRY_BUSH_OUCH` / `_YOWCH` / `_THORNY` / `_EDIBLE_I_THINK` (both `...I think` and `... I think` spacings)
+- `LINE_FOLIAGE_STUCK_BRANCHES_THICK` / `_IN_BRANCHES` / `_CANT_GET_THROUGH` / `_GOT_ME` (em-dashes and ellipses pre-normalized)
+
+## Fix load-bearing gap in `showOverheadLine` (2026-04-18, v1.1.32)
+
+**Root cause of most "never heard" triage retune items.** `CompanionOverheadDialogueService.showOverheadLine` showed the overhead hologram but never invoked `tryPlayVoicedOverheadLine`, so any caller that went through it got silent dialogue. The private helper `tryShowGeneric` did play audio, but only a handful of internal call sites used it. Everything routed through the public entry point (~48 call sites: greetings, touch-chat context, topic dialogue, overhead lines in `BotEventHandler`, `HuntSkill`, `MushroomForageSkill`, `FortifyVillageSkill`, `LeafLitterSkill`, `GrassSeedSkill`, `BotAutoReturnSunsetService`, `BotFoodGivingService`, `BotAnimalDefenseService`, `PlayerEatingReactionService`, etc.) showed text but played no sound.
+
+**Fix** in [CompanionOverheadDialogueService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionOverheadDialogueService.java): also invoke `tryPlayVoicedOverheadLine` from the public method. Safety: `BotDialoguePlayer`'s `MIN_GAP_ANY_VOICE_MS` (2.5 s) throttle protects the few callers that also manually play audio (combat `sayWithSound`, `CompanionContextReactionService.tryTrigger`). In those paths the sound event resolved from the mapper matches the explicit one, so only one play survives the throttle.
+
+Expected impact on triage retune list: greetings (×4), skill_sleep (×2), context_fish (×3), topic_enchanting_ask_3, topic_llama_memory, and most other "I've seen the overhead but never heard it" items resolve in a single fix.
+
+## Phase B: wire new events into existing pools + apply triage retunes (2026-04-18, v1.1.31)
+
+Wires the 75 new April 2026 backlog events into existing game triggers, plus applies actionable triage retune notes.
+
+**B.1 — Register 75 new events + subtitles** in [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) and [BotDialoguePlayer.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java): weather variants ×24, sunset variants ×6, ambient_teeth_itch, animal/parrot/horse/camel/wolf proximity ×7, berry_bush ×4, creepy_place ×7, enderman, foliage_stuck ×4, i_hit_player ×6, intense_combat ×3, player_hit_me ×6, post_combat/post_explosion extras, shelter_built ×4.
+
+**B.1b — Wire into existing pools**: `CompanionContextReactionService` extends `WEATHER_*_LINES`, `AMBIENT_LINES`, `HIGH_THREAT_LINES`, `SHELTER_LINES`. `BotAmbientChatter` extends `WILDLIFE_CHATTER` + adds `SUNSET_SOON_VARIANTS` helper that picks randomly from the original + 6 new sunset variants. `BotCombatCalloutService` extends `POST_COMBAT_GENERAL_LINES`, `POST_EXPLOSION_LINES`, `FF_RECEIVED_LINES` (+6 player_hit_me), `FF_DEALT_LINES` (+6 i_hit_player), `COMBAT_MULTI_LINES` (+3 intense_combat).
+
+**B.2 — Six triage retune tunings**:
+
+- `ambient_bad_feeling`: moved from `AMBIENT_LINES` to `HIGH_THREAT_LINES` (fires only in nether/end/deep-dark/ancient-city/soul-sand-valley biomes).
+- `ambient_my_job`: weight dropped `RARE` → `VERY_RARE` (was still too frequent).
+- `meta_stop_looking`: extracted from `META_LINES` into new `COMMANDER_STARING_LINES` with `tryCommanderStaring` trigger that only fires after ≥ 5 s (100 ticks) of the commander continuously facing the bot.
+- `ambient_cave_deep`: split into `AMBIENT_DEEP_CAVE_CHATTER`, gated to `y<20 + low-light` (was firing in shallow caves).
+- `ambient_dont_like_this`: split into `AMBIENT_HOSTILE_CAVE_CHATTER`, gated to `(y<20 + low-light)` OR `hostile mob within 16 blocks`.
+- `post_explosion_bones`: moved to new `POST_EXPLOSION_CREEPER_LINES` pool. Added `creeperExplosionSeen` flag to `CombatMetadata`, set at the 5 explosion-detection sites when `EntityType.CREEPER`. End-of-combat picker now routes to the creeper-only pool only when `creeperExplosionSeen` is true.
+
+## Apply audio triage handoff Phase A: map-new + in-mod deletes (2026-04-18, v1.1.30)
+
+Machine-applied from `audio_decisions.json` via `/tmp/handoff_apply/plan.py`, NOT from the markdown handoff (which had OGG/WAV duplication bugs in its sounds.json snippets for single-variant events).
+
+[sounds.json](src/main/resources/assets/frens/sounds.json):
+
+- 75 new events created (`bot.line.*`), sourced from 2026-04-17/18 Chatterbox batches (`april_2026_v1_1_27_fill`, `january_2026_batch3`).
+- 25 events had new OGG variants appended (mostly filling empty `sounds[]` scaffolded in v1.1.27).
+- 32 events had variants pruned (69 OGGs deleted from `dialogue/`). 18 of those events drained to empty `sounds[]` — kept the event definitions intact so Java triggers that reference them don't break.
+- File reformatted with consistent `{ "name": ..., "weight": 1 }` compact inline style.
+
+Also copied 149 OGGs into `src/main/resources/assets/frens/sounds/dialogue/` and deleted 69 OGGs from the same directory.
+
+Deferred (for TTS agent / separate passes):
+
+- **Regen** (20 files, 12 events): needs re-TTS workflow, no new audio yet.
+- **Retune** (163 decisions, 63 events): requires per-trigger Java tuning (6 of the high-priority ones applied in v1.1.31).
+- **Java wiring for the 75 genuinely-new events**: handled in v1.1.31 for the routable ones.
+
+## Gate passive sidequest proposer on questing mode (2026-04-18)
+
+**Symptom:** In admin-mode worlds, companions would still spontaneously propose sidequests (e.g. `combat_secure_this_place` — "If we're stopping here, let's make it safe." — triggered by a hostile-mob constraint match). Admin-mode players aren't using the questing flow and don't want these auto-triggered.
+
+**Fix** in [BotQuestService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotQuestService.java): before the passive proposing block in `onServerTick`, skip the bot when `SurvivalRecruitmentService.isEnabled(server)` is false (i.e. admin mode). Active quests (if any carried over from a mode switch) still tick to completion or timeout. The explicit chat hook `tryHandleQuestPrompt` is unaffected — typing "give me a quest" to a bot still works in either mode.
+
+## Mounted-leash HUD hint: boat wording (2026-04-18)
+
+**Symptom:** When a bot was sitting in a boat, the mounted-leash HUD hint still said `🐴 Jake is riding a horse` / `Press ['] to dismount & tether`. The "tether" half is a no-op for boats (RideSync already handles non-leashable vehicles via the `CANNOT_SECURE` path), but the wording was misleading.
+
+**Fix** in [FrensClient.java](src/main/java/net/wcfcarolina13/FrensClient.java): detect `vehicle instanceof AbstractBoatEntity` when populating the mounted-leash hint (both the look-at case and the ride-along case), store it in a new `mountedLeashBotOnBoat` flag, and branch the rendered text:
+
+- Boat: `🛶 <name> is riding a boat` / `Press ['] to dismount`
+- Horse / other mount (unchanged): `🐴 <name> is riding a horse` / `Press ['] to dismount & tether`
+
+`findNearbyMountedBotName` was renamed to `findNearbyMountedBot` and now returns the `PlayerEntity` so the caller can inspect the vehicle. Keybind action is unchanged — `/bot stop` + `/bot leash` still does the right thing in both cases.
+
 ## Fix async entity spawn crash in hologram service (2026-04-18)
 
 **Symptom:** Woodcut skill crashed repeatedly (`Skill 'woodcut' crashed: Async entity load`) when the bot tried to show its "Scanning for trees..." overhead label. Stack trace ([latest.log 00:05:21](~/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log)):

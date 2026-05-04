@@ -638,7 +638,7 @@ public final class RideSyncService {
             return;
         }
 
-        List<Entity> candidates = findCandidateVehicles(world, commander, bots, commanderCategory);
+        List<Entity> candidates = findCandidateVehicles(world, commander, bots, commanderCategory, commanderVehicle);
         if (candidates.isEmpty()) {
             for (ServerPlayerEntity bot : bots) {
                 if (shouldSyncBot(bot, commander)) {
@@ -1735,6 +1735,10 @@ public final class RideSyncService {
         if (categorize(preferred) != commanderCategory) {
             logPreferredReject(bot, state,
                     "category-mismatch preferred=" + categorize(preferred) + " commander=" + commanderCategory);
+            return null;
+        }
+        if (shouldExcludeLlamaCandidates(commanderVehicle) && isLlamaType(preferred.getType())) {
+            logPreferredReject(bot, state, "llama-excluded-commander-on-non-llama-mount");
             return null;
         }
         if (!matchesVehicleRules(preferred)) {
@@ -4025,16 +4029,21 @@ public final class RideSyncService {
     private static List<Entity> findCandidateVehicles(ServerWorld world,
                                                       ServerPlayerEntity commander,
                                                       List<ServerPlayerEntity> bots,
-                                                      RideCategory category) {
+                                                      RideCategory category,
+                                                      Entity commanderVehicle) {
         if (world == null || commander == null) {
             return List.of();
         }
+        boolean excludeLlamas = shouldExcludeLlamaCandidates(commanderVehicle);
         BlockPos center = commander.getBlockPos();
         Box box = new Box(center).expand(SEARCH_RADIUS + 4.0D);
         List<Entity> entities = world.getEntitiesByClass(Entity.class, box, entity -> entity != null && entity.isAlive());
         List<Entity> matches = new ArrayList<>();
         for (Entity entity : entities) {
             if (categorize(entity) != category) {
+                continue;
+            }
+            if (excludeLlamas && isLlamaType(entity.getType())) {
                 continue;
             }
             if (!matchesVehicleRules(entity)) {
@@ -4044,6 +4053,26 @@ public final class RideSyncService {
         }
         matches.sort(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(commander)));
         return matches;
+    }
+
+    private static boolean isLlamaType(EntityType<?> type) {
+        return type == EntityType.LLAMA || type == EntityType.TRADER_LLAMA;
+    }
+
+    /**
+     * Llamas are slow and can't be steered well, so the bot should never auto-mount one
+     * just to keep up. Skip llama candidates whenever the commander is on a non-llama
+     * horse-like mount; if the commander is themselves on a llama, llamas remain valid
+     * candidates (they've explicitly chosen llama travel).
+     */
+    private static boolean shouldExcludeLlamaCandidates(Entity commanderVehicle) {
+        if (commanderVehicle == null) {
+            return false;
+        }
+        if (categorize(commanderVehicle) != RideCategory.HORSE_LIKE) {
+            return false;
+        }
+        return !isLlamaType(commanderVehicle.getType());
     }
 
     private static boolean matchesVehicleRules(Entity entity) {

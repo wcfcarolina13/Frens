@@ -26,6 +26,22 @@ import net.wcfcarolina13.GameAI.services.TaskService;
  * Screen handler that mirrors the vanilla player inventory for both bot and viewer.
  */
 public class BotPlayerInventoryScreenHandler extends ScreenHandler {
+    /**
+     * Stable bit index per hobby for the disabled-hobbies bitmask synced in botStats slot 25.
+     * Append new hobbies to the END of this list — never reorder, or saved bots will see the
+     * wrong hobbies marked disabled. Up to 31 entries fit in a signed int.
+     */
+    public static final java.util.List<String> HOBBY_BIT_ORDER = java.util.List.of(
+            "hunt", "fish", "feed_animals", "flowers", "grass_seeds",
+            "mining", "shadow_companion", "hangout", "cook", "leaf_litter",
+            "mushrooms", "wander", "woodcut", "collect_dirt", "honey_collect"
+    );
+
+    public static int hobbyBitIndex(String hobbyName) {
+        if (hobbyName == null) return -1;
+        return HOBBY_BIT_ORDER.indexOf(hobbyName.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
     private static final int BOT_SLOT_COUNT = 41;
     private static final int PLAYER_SLOT_COUNT = 41;
     private static final int ARMOR_AND_OFFHAND_SLOTS = 5;
@@ -60,11 +76,16 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(24);
+        this.botStats = new ArrayPropertyDelegate(26);
         this.addProperties(this.botStats);
         refreshStats();
 
         botInventory.onOpen(playerInventory.player);
+
+        if (botRef != null) {
+            net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logInventoryOpen(
+                    "bot-inv-open", botRef, playerInventory.player);
+        }
 
         int offsetBot = 0;
         int offsetPlayer = SECTION_WIDTH + BLOCK_GAP;
@@ -252,6 +273,18 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         // Index 22: guard radius, Index 23: patrol radius (encoded as value * 10)
         botStats.set(22, (int) Math.round(GuardPatrolService.getGuardRadius(botRef.getUuid()) * 10.0D));
         botStats.set(23, (int) Math.round(GuardPatrolService.getPatrolRadius(botRef.getUuid()) * 10.0D));
+        botStats.set(24, BotHomeService.isAttackNamedMobs(botRef) ? 1 : 0);
+
+        // Slot 25: bitmask of disabled hobbies, indexed by HOBBY_BIT_ORDER.
+        java.util.Set<String> disabled = BotHomeService.getDisabledHobbies(botRef);
+        int mask = 0;
+        for (String name : disabled) {
+            int bit = hobbyBitIndex(name);
+            if (bit >= 0 && bit < 31) {
+                mask |= (1 << bit);
+            }
+        }
+        botStats.set(25, mask);
     }
 
     public float getBotHealth() {
@@ -298,6 +331,13 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         return botStats.get(11) != 0;
     }
 
+    /** True if the named hobby is currently allowed for this bot. */
+    public boolean isHobbyAllowed(String hobbyName) {
+        int bit = hobbyBitIndex(hobbyName);
+        if (bit < 0) return true;
+        return (botStats.get(25) & (1 << bit)) == 0;
+    }
+
     public boolean isBotAutoReturnGuardPatrolEligible() {
         return botStats.get(12) != 0;
     }
@@ -312,6 +352,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotTacticalShelterEnabled() {
         return botStats.get(21) != 0;
+    }
+
+    public boolean isBotAttackNamedMobs() {
+        return botStats.get(24) != 0;
     }
 
     public boolean isBotReturningToBase() {

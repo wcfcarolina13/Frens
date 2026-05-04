@@ -559,6 +559,10 @@ public final class BotMutualAidService {
             );
         }
         if (closeEnough) {
+            if (!BotCombatPolicyService.shouldBotAttack(hostile, defender)) {
+                // Target is name-tagged — bot is forbidden from engaging even in mutual aid.
+                return false;
+            }
             LookController.faceEntity(defender, hostile);
             BotActions.selectBestWeapon(defender);
             BotActions.attackTarget(defender, hostile);

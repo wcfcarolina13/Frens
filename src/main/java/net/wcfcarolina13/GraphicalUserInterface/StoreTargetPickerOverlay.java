@@ -70,10 +70,14 @@ public final class StoreTargetPickerOverlay {
         boolean attackDown = client.options.attackKey.isPressed();
         boolean useDown = client.options.useKey.isPressed();
 
-        // Left-click edge: select container
+        // Left-click edge: select container.
+        // Plain click   → filtered deposit (keep equipped gear, mainhand tool, food, etc.).
+        // Shift + click → unfiltered "dump everything" (legacy behavior).
+        // Shift modifier is ignored for fetch mode — there's nothing to filter when withdrawing.
         if (attackDown && !lastAttackDown) {
             if (hoveredContainer != null && hoveredIsContainer) {
-                sendTargetPayload(hoveredContainer);
+                boolean keepGear = !client.options.sneakKey.isPressed();
+                sendTargetPayload(hoveredContainer, keepGear);
                 deactivate();
             }
         }
@@ -97,9 +101,10 @@ public final class StoreTargetPickerOverlay {
 
         // Instructions below crosshair
         String cleanName = botName != null ? botName.replace("\"", "") : "bot";
-        String line1 = "fetch".equals(mode)
+        boolean isFetch = "fetch".equals(mode);
+        String line1 = isFetch
                 ? "Point at a chest and click to direct " + cleanName + " to take items"
-                : "Point at a chest and click to direct " + cleanName + " to deposit items";
+                : "Point at a chest: click to deposit (keep gear), shift+click to dump everything";
         String line2 = "Right-click to cancel";
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
@@ -151,7 +156,7 @@ public final class StoreTargetPickerOverlay {
         hoveredIsContainer = be instanceof Inventory;
     }
 
-    private static void sendTargetPayload(BlockPos pos) {
+    private static void sendTargetPayload(BlockPos pos, boolean keepGear) {
         if (pos == null || botName == null) return;
         if (!ClientPlayNetworking.canSend(StoreTargetPayload.ID)) return;
         Map<String, Object> out = new LinkedHashMap<>();
@@ -160,6 +165,7 @@ public final class StoreTargetPickerOverlay {
         out.put("x", pos.getX());
         out.put("y", pos.getY());
         out.put("z", pos.getZ());
+        out.put("keepGear", keepGear);
         ClientPlayNetworking.send(new StoreTargetPayload(GSON.toJson(out)));
     }
 }

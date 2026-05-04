@@ -144,6 +144,28 @@ public final class CompanionContextReactionService {
             new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
     };
 
+    // Wandering-trader proximity — flat pool of all trader topic lines. The
+    // questing-mode "tell me about traders" path still goes through
+    // SurvivalCompanionQuestService; this is the ambient gate so the lines
+    // also fire in admin worlds when the bot actually sees a trader.
+    private static final WeightedLine[] TRADER_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("topic_trader_first_1", "A salesman approaches. Stay strong.", BotDialogueSounds.LINE_TOPIC_TRADER_FIRST_1, WEIGHT_UNCOMMON),
+            new WeightedLine("topic_trader_first_2", "That's either commerce... or a scam with llamas.", BotDialogueSounds.LINE_TOPIC_TRADER_FIRST_2, WEIGHT_UNCOMMON),
+            new WeightedLine("topic_trader_ask_1", "He sells junk with confidence. I respect it.", BotDialogueSounds.LINE_TOPIC_TRADER_ASK_1, WEIGHT_COMMON),
+            new WeightedLine("topic_trader_ask_2", "He travels the world to offer... two ferns and a bucket. Iconic.", BotDialogueSounds.LINE_TOPIC_TRADER_ASK_2, WEIGHT_COMMON),
+            new WeightedLine("topic_trader_ask_3", "The llamas are the real security detail.", BotDialogueSounds.LINE_TOPIC_TRADER_ASK_3, WEIGHT_COMMON),
+            new WeightedLine("topic_trader_memory_1", "Remember the wandering trader? He had the vibe of a side quest.", BotDialogueSounds.LINE_TOPIC_TRADER_MEMORY_1, WEIGHT_RARE),
+            new WeightedLine("topic_trader_memory_2", "I still think about those llamas. Professional posture.", BotDialogueSounds.LINE_TOPIC_TRADER_MEMORY_2, WEIGHT_RARE)
+    };
+
+    private static final WeightedLine[] LLAMA_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("topic_llama_first", "Those llamas look like they've seen things.", BotDialogueSounds.LINE_TOPIC_LLAMA_FIRST, WEIGHT_UNCOMMON),
+            new WeightedLine("topic_llama_ask_1", "They're not pets. They're coworkers.", BotDialogueSounds.LINE_TOPIC_LLAMA_ASK_1, WEIGHT_COMMON),
+            new WeightedLine("topic_llama_ask_2", "If one spits at me, I'm taking it personally.", BotDialogueSounds.LINE_TOPIC_LLAMA_ASK_2, WEIGHT_COMMON),
+            new WeightedLine("topic_llama_ask_3", "Respect the llama. Fear the llama.", BotDialogueSounds.LINE_TOPIC_LLAMA_ASK_3, WEIGHT_COMMON),
+            new WeightedLine("topic_llama_memory", "We met a trader's llamas once. I'm still not over it.", BotDialogueSounds.LINE_TOPIC_LLAMA_MEMORY, WEIGHT_RARE)
+    };
+
     // TNT-proximity sequence — 4 escalating pleas, fired in order ~1 s apart
     // while the bot is near primed TNT and the commander is watching.
     private static final WeightedLine[] TNT_SEQUENCE_LINES = new WeightedLine[] {
@@ -416,6 +438,8 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("stop_ack", 30_000L);
         TRIGGER_COOLDOWN_MS.put("commander_staring", COOLDOWN_META_MS);
         TRIGGER_COOLDOWN_MS.put("enderman_spotted", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("trader_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("llama_nearby", COOLDOWN_180S_MS);
         // End-ship gag: very long cooldown — it's a one-shot meme per session.
         TRIGGER_COOLDOWN_MS.put("end_ship_look_at_me", 30L * 60L * 1000L);
         // The follow-up lines use their own short cooldowns because they're
@@ -513,6 +537,9 @@ public final class CompanionContextReactionService {
             if (tryEndermanSpotted(bot, world, state)) {
                 continue;
             }
+            if (tryTraderOrLlamaNearby(bot, world, state)) {
+                continue;
+            }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
                 continue;
             }
@@ -566,6 +593,8 @@ public final class CompanionContextReactionService {
             case "weather_sunny" -> tryTrigger(bot, "weather_change", WEATHER_SUNNY_LINES, lineId, true);
             case "wake_up", "wake" -> tryTrigger(bot, "wake_up", WAKE_LINES, lineId, true);
             case "cooking_nearby", "cook" -> tryTrigger(bot, "cooking_nearby", COOK_LINES, lineId, true);
+            case "trader_nearby", "trader" -> tryTrigger(bot, "trader_nearby", TRADER_NEARBY_LINES, lineId, true);
+            case "llama_nearby", "llama" -> tryTrigger(bot, "llama_nearby", LLAMA_NEARBY_LINES, lineId, true);
             default -> false;
         };
     }
@@ -1250,6 +1279,38 @@ public final class CompanionContextReactionService {
         if (!anyInForwardCone) return false;
         if (RNG.nextDouble() > 0.06D) return false;
         return tryTrigger(bot, "enderman_spotted", ENDERMAN_SPOTTED_LINES, null, false);
+    }
+
+    /** Fires topic_trader_* or topic_llama_* when a wandering trader or llama is
+     *  within 14 blocks. Trader takes priority when both are present (llama is
+     *  usually leashed to the trader anyway). Cooldown-throttled to 3 min per
+     *  family so the bot doesn't chatter while traveling alongside a caravan. */
+    private static boolean tryTraderOrLlamaNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(14.0D, 6.0D, 14.0D);
+        List<Entity> nearby = world.getOtherEntities(bot, box, e -> {
+            if (e == null || !e.isAlive()) return false;
+            EntityType<?> t = e.getType();
+            return t == EntityType.WANDERING_TRADER
+                    || t == EntityType.TRADER_LLAMA
+                    || t == EntityType.LLAMA;
+        });
+        if (nearby.isEmpty()) return false;
+
+        boolean hasTrader = false;
+        boolean hasLlama = false;
+        for (Entity e : nearby) {
+            EntityType<?> t = e.getType();
+            if (t == EntityType.WANDERING_TRADER) hasTrader = true;
+            else if (t == EntityType.TRADER_LLAMA || t == EntityType.LLAMA) hasLlama = true;
+            if (hasTrader && hasLlama) break;
+        }
+
+        if (RNG.nextDouble() > 0.015D) return false;
+        if (hasTrader) {
+            return tryTrigger(bot, "trader_nearby", TRADER_NEARBY_LINES, null, false);
+        }
+        return tryTrigger(bot, "llama_nearby", LLAMA_NEARBY_LINES, null, false);
     }
 
     /** Fires meta_stop_looking only after the commander has been staring at the

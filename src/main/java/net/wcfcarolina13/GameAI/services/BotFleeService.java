@@ -627,6 +627,33 @@ public final class BotFleeService {
         return 4;      // armed but barely any armor
     }
 
+    /**
+     * Named-mob pacifism hook: seed flee state with a specific attacker so the bot
+     * runs instead of fighting back. Called from the server damage listener when a
+     * name-tagged mob hits the bot and {@link BotHomeService#isAttackNamedMobs}
+     * is off.
+     *
+     * <p>Returns the seeded {@link #FLEE_STATES} state for the bot so callers can
+     * inspect whether a flee direction was found. If the bot is already fleeing,
+     * this is a no-op — {@code tickFlee} will continue the existing flee. If the
+     * bot is cornered (no traversable direction), {@code startFleeing} bails
+     * without setting {@code isFleeing}, and the caller's path should fall through
+     * to normal combat handling.
+     *
+     * <p><b>Mode caveat:</b> {@code tickFlee} currently early-returns when the bot
+     * is not in {@code Mode.IDLE}. If the bot is actively engaging other hostiles
+     * (COMBAT mode) when a named mob hits it, seeded flee state will not tick
+     * until combat ends. Phase 3 (damage hook) revisits this; if the observed
+     * behavior is wrong in-game, the fix is a {@code forcedByDamage} flag on
+     * {@code FleeState} that bypasses the mode guard.
+     */
+    public static void fleeFromEntity(ServerPlayerEntity bot, Entity attacker, long currentTick) {
+        if (bot == null || attacker == null) return;
+        FleeState state = FLEE_STATES.computeIfAbsent(bot.getUuid(), id -> new FleeState());
+        if (state.isFleeing) return;
+        startFleeing(bot, state, List.of(attacker), currentTick);
+    }
+
     private static void startFleeing(ServerPlayerEntity bot, FleeState state,
                                      List<Entity> hostiles, long currentTick) {
         Vec3d fleeDir = computeTraversableFleeDirection(bot, hostiles);

@@ -38,6 +38,7 @@ import java.util.Optional;
  *   <li>Auto-return-at-sunset eligibility for guard/patrol per bot</li>
  *   <li>Idle/ambient hobbies toggle per bot</li>
  *   <li>Auto-hunt-when-starving toggle per bot</li>
+ *   <li>Attack-named-mobs toggle per bot (default off — bot ignores name-tagged mobs)</li>
  * </ul>
  *
  * <p>Data is keyed by server save name + dimension key so integrated-server worlds do not collide.
@@ -485,6 +486,58 @@ public final class BotHomeService {
         }
     }
 
+    public static boolean setAttackNamedMobs(ServerPlayerEntity bot, boolean enabled) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.attackNamedMobsByBot == null) {
+                wd.attackNamedMobsByBot = new HashMap<>();
+            }
+            wd.attackNamedMobsByBot.put(botId, enabled);
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean toggleAttackNamedMobs(ServerPlayerEntity bot) {
+        boolean next = !isAttackNamedMobs(bot);
+        return setAttackNamedMobs(bot, next);
+    }
+
+    public static boolean isAttackNamedMobs(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.attackNamedMobsByBot == null) {
+                return false;
+            }
+            Boolean val = wd.attackNamedMobsByBot.get(botId);
+            return Boolean.TRUE.equals(val);
+        }
+    }
+
     public static boolean setAutoReturnGuardPatrolEligible(ServerPlayerEntity bot, boolean enabled) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
@@ -629,6 +682,75 @@ public final class BotHomeService {
             }
             Boolean val = wd.idleHobbiesEnabledByBot.get(botId);
             return Boolean.TRUE.equals(val);
+        }
+    }
+
+    /**
+     * Per-hobby enable/disable. Default = enabled. Stored as a "disabled" set so the
+     * default behavior (all hobbies allowed) works without a migration step on existing
+     * worlds — absent entries mean enabled.
+     */
+    public static boolean setHobbyEnabled(ServerPlayerEntity bot, String hobbyName, boolean enabled) {
+        if (bot == null || hobbyName == null || hobbyName.isBlank()) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        MinecraftServer server = world.getServer();
+        if (server == null) return false;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return false;
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.hobbyDisabledByBot == null) {
+                wd.hobbyDisabledByBot = new HashMap<>();
+            }
+            Map<String, Boolean> perBot = wd.hobbyDisabledByBot.computeIfAbsent(botId, k -> new HashMap<>());
+            if (enabled) {
+                perBot.remove(hobbyName);
+            } else {
+                perBot.put(hobbyName, Boolean.TRUE);
+            }
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean isHobbyEnabled(ServerPlayerEntity bot, String hobbyName) {
+        if (bot == null || hobbyName == null || hobbyName.isBlank()) return true;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return true;
+        MinecraftServer server = world.getServer();
+        if (server == null) return true;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return true;
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.hobbyDisabledByBot == null) return true;
+            Map<String, Boolean> perBot = wd.hobbyDisabledByBot.get(botId);
+            if (perBot == null) return true;
+            return !Boolean.TRUE.equals(perBot.get(hobbyName));
+        }
+    }
+
+    /** Returns the set of hobby names currently disabled for this bot (defensive copy). */
+    public static java.util.Set<String> getDisabledHobbies(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return java.util.Set.of();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return java.util.Set.of();
+        String botId = botKey(bot);
+        if (botId.isBlank()) return java.util.Set.of();
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.hobbyDisabledByBot == null) return java.util.Set.of();
+            Map<String, Boolean> perBot = wd.hobbyDisabledByBot.get(botId);
+            if (perBot == null) return java.util.Set.of();
+            java.util.Set<String> out = new java.util.HashSet<>();
+            for (Map.Entry<String, Boolean> e : perBot.entrySet()) {
+                if (Boolean.TRUE.equals(e.getValue())) out.add(e.getKey());
+            }
+            return out;
         }
     }
 
@@ -1414,7 +1536,10 @@ public final class BotHomeService {
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();
         Map<String, Boolean> autoReturnSkipPermissionByBot = new HashMap<>();
         Map<String, Boolean> idleHobbiesEnabledByBot = new HashMap<>();
+        // Per-bot, per-hobby disabled list. Absent or false = enabled. Null map = all enabled.
+        Map<String, Map<String, Boolean>> hobbyDisabledByBot = new HashMap<>();
         Map<String, Boolean> autoHuntStarvingEnabledByBot = new HashMap<>();
+        Map<String, Boolean> attackNamedMobsByBot = new HashMap<>();
         Map<String, SavedBase> basesByLabel = new HashMap<>();
         Map<String, String> preferredHomeBaseByBot = new HashMap<>();
         Map<String, String> navModeByBot = new HashMap<>();

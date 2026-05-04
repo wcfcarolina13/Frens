@@ -143,13 +143,15 @@ public final class BotAutoHuntService {
                     continue;
                 }
             }
+            // If the bot already has plenty of safe food, don't hunt — eat what you have.
+            // autoEat will consume it next tick; auto-cook (same threshold) will still fire if
+            // only raw food is available and furnace/fuel are ready.
+            if (HuntSkill.countSafeFoodItems(bot) >= HuntSkill.MIN_BACKUP_FOOD_ITEMS) {
+                continue;
+            }
             int foodLevel = bot.getHungerManager().getFoodLevel();
             if (foodLevel > AUTO_HUNT_HUNGER_THRESHOLD) {
-                // Food bar is above threshold, but if still moderately hungry (11-14)
-                // with no backup food items, keep hunting for self-sufficiency
-                if (foodLevel > 14 || HuntSkill.countFoodItems(bot) >= HuntSkill.MIN_BACKUP_FOOD_ITEMS) {
-                    continue;
-                }
+                continue;
             }
             long next = NEXT_DECISION_TICK.getOrDefault(bot.getUuid(), 0L);
             if (nowTick < next) {

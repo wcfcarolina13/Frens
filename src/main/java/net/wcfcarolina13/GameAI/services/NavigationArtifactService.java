@@ -229,6 +229,52 @@ public final class NavigationArtifactService {
         return seconds * 20;
     }
 
+    /**
+     * Render the tier-reason tag into a player-readable chat suffix.
+     *
+     * <p>The reason strings produced by {@link #resolveSurfaceTier} and
+     * {@link #resolveUndergroundTier} are compact telemetry tags
+     * (e.g. {@code lodestone-compass}, {@code map+compass-rendered+smoke-signal},
+     * {@code underground-no-artifact}) — fine for the server log, opaque in chat.
+     * This helper turns them into prose for the departure notification so
+     * players can see why fast-travel activated (lodestone compass? smoke signal?)
+     * and at which speed (1.0× / 2.0× / 3.0×).
+     *
+     * <p>Returns an empty string when no tier was resolved — the travel path
+     * bypassed gating (internal summon, debug skip, etc.) and there's nothing
+     * meaningful to say.
+     */
+    private static String formatTierSuffix(String reason, double multiplier) {
+        if (reason == null || reason.isBlank()) {
+            return "";
+        }
+        String human = switch (reason) {
+            case "lodestone-compass" -> "lodestone compass";
+            case "lodestone-compass-lenient" -> "lodestone compass (no target bound)";
+            case "ender-eye" -> "Eye of Ender";
+            case "wizard-tome" -> "Wizard's Tome";
+            case "enchanting-table" -> "nearby Enchanting Table";
+            case "mutual-ender-pearls" -> "mutual Ender Pearls";
+            case "map+compass+light" -> "map + compass + light source";
+            default -> reason
+                    .replace("map+compass-rendered", "map + compass")
+                    .replace("smoke-signal-underground", "underground smoke signal")
+                    .replace("smoke-signal", "smoke signal")
+                    .replace("spyglass", "spyglass")
+                    .replace("-", " ")
+                    .replace("+", " + ");
+        };
+        String speed;
+        if (multiplier <= 1.0) {
+            speed = "instant-class";
+        } else if (multiplier <= 2.0) {
+            speed = "tier 1";
+        } else {
+            speed = "slow";
+        }
+        return " \u00A77(fast-travel: " + human + ", " + speed + ")\u00A7e";
+    }
+
     /** Determine delay multiplier based on bot/player artifact tier. 2x for Tier 1, 1x for Tier 2+. */
     public static double artifactDelayMultiplier(ServerPlayerEntity bot, ServerPlayerEntity owner) {
         // Lodestone compass with valid target — Tier 2 (instant-class navigation)
@@ -958,6 +1004,8 @@ public final class NavigationArtifactService {
         // Refuses when no gate is open; otherwise multiplies the delay based on
         // which artifacts the bot has access to (via ArtifactScanner — scans
         // main inventory, bundles, shulker boxes, and the bot's ender chest).
+        String tierReasonForMessage = null;
+        double tierMultForMessage = 1.0;
         if (!skipGates && !skipArtifactGate) {
             ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
             ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
@@ -996,6 +1044,9 @@ public final class NavigationArtifactService {
 
             LOGGER.info("Fast-travel tier: bot={} underground={} reason={} mult={}",
                     botAlias, isUnderground, tier.reason(), tier.delayMultiplier());
+
+            tierReasonForMessage = tier.reason();
+            tierMultForMessage = tier.delayMultiplier();
         }
 
         // ── Mount evaluation ──────────────────────────────────────────────
@@ -1099,10 +1150,15 @@ public final class NavigationArtifactService {
                 botAlias, destination.toShortString(),
                 dimension.getValue(), delaySeconds, delayTicks);
 
-        // Notify the owner that the bot has departed (queues if offline).
+        // Notify the owner that the bot has departed (queues if offline). Include
+        // the fast-travel tier reason so the player can see why fast-travel was
+        // possible — otherwise the same chat line fires regardless of which gate
+        // opened, and players (including the dev) can't tell whether it was the
+        // lodestone compass, a map+compass, a smoke signal, or something else.
         if (!suppressOwnerNotify) {
+            String tierSuffix = formatTierSuffix(tierReasonForMessage, tierMultForMessage);
             notifyOwner(server, ownerUuid,
-                    "\u00A7e" + botAlias + " has departed and will arrive in ~"
+                    "\u00A7e" + botAlias + " has departed" + tierSuffix + " and will arrive in ~"
                     + delaySeconds + " seconds.\u00A7r");
         }
 

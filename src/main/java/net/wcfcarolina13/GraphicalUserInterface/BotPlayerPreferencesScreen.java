@@ -37,9 +37,17 @@ public class BotPlayerPreferencesScreen extends Screen {
     // Public so BotPlayerInventoryScreen can read/write it directly.
     public static volatile Boolean SERVER_VALUE = null;
 
+    /** Server-authoritative value for the Auto-accept precious foods toggle. */
+    public static volatile Boolean AUTO_ACCEPT_PRECIOUS_SERVER_VALUE = null;
+
     /** Called from the client payload receiver. */
     public static void setServerValue(boolean value) {
         SERVER_VALUE = value;
+    }
+
+    /** Called from the client payload receiver for the auto-accept-precious toggle. */
+    public static void setAutoAcceptPreciousServerValue(boolean value) {
+        AUTO_ACCEPT_PRECIOUS_SERVER_VALUE = value;
     }
 
     private final Screen parent;

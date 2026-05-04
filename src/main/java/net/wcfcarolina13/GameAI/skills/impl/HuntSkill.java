@@ -17,6 +17,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -33,6 +34,7 @@ import net.wcfcarolina13.GameAI.services.BotEmergencyRescueService;
 import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
+import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
 import net.wcfcarolina13.GameAI.services.HuntConfigService;
@@ -92,7 +94,7 @@ public final class HuntSkill implements Skill {
     private static final int STARVING_HUNGER = 5;
     private static final int EMERGENCY_HUNGER = 1;
     private static final float EMERGENCY_HEALTH = 2.0F;
-    public static final int MIN_BACKUP_FOOD_ITEMS = 4;
+    public static final int MIN_BACKUP_FOOD_ITEMS = 8;
 
     private static final Set<Item> RAW_MEAT = Set.of(
             Items.BEEF,
@@ -1180,9 +1182,17 @@ public final class HuntSkill implements Skill {
             }
             double distSq = bot.squaredDistanceTo(target);
             if (distSq <= ATTACK_RANGE_SQ && bot.canSee(target)) {
-                BotActions.selectBestMeleeWeapon(bot);
-                bot.attack(target);
-                bot.swingHand(net.minecraft.util.Hand.MAIN_HAND, true);
+                // bot.attack / swingHand mutate entity state and use RNG — must run on server thread.
+                // c2me's CheckedThreadLocalRandom throws when called from a worker thread.
+                MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+                if (server != null) {
+                    server.execute(() -> {
+                        if (!target.isAlive() || target.isRemoved()) return;
+                        BotActions.selectBestMeleeWeapon(bot);
+                        bot.attack(target);
+                        bot.swingHand(net.minecraft.util.Hand.MAIN_HAND, true);
+                    });
+                }
             } else {
                 MovementService.nudgeTowardUntilClose(bot, target.getBlockPos(), ATTACK_RANGE_SQ, 1200L, 0.18, "hunt-attack");
             }
@@ -1562,6 +1572,26 @@ public final class HuntSkill implements Skill {
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
+            FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
+            if (food != null && food.nutrition() > 0) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Counts only food the bot can casually eat — excludes precious (golden apple etc.)
+     * and forbidden (rotten flesh etc.) items. Used to gate auto-hunt: "has enough safe
+     * food to eat instead of going hunting."
+     */
+    public static int countSafeFoodItems(ServerPlayerEntity bot) {
+        if (bot == null) return 0;
+        int count = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (HealingService.isPrecious(stack) || HealingService.isForbidden(stack)) continue;
             FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
             if (food != null && food.nutrition() > 0) {
                 count += stack.getCount();

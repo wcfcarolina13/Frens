@@ -1356,19 +1356,33 @@ public final class ChestStoreService {
             return java.util.List.of();
         }
         java.util.List<BlockPos> options = new java.util.ArrayList<>();
-        for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-            BlockPos stand = chestPos.offset(dir);
-            BlockPos below = stand.down();
-            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
-                continue;
+        // Try stand candidates at the chest's Y level AND one block below. Elevated
+        // chests (e.g. stacked on top of another chest, on a platform, or shelf-style
+        // along a wall) have no footing at chest_y in the surrounding cells — the bot
+        // must stand at chest_y - 1 with head at chest_y reaching up to the face.
+        for (int yOffset : new int[]{0, -1}) {
+            for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+                BlockPos stand = chestPos.offset(dir).add(0, yOffset, 0);
+                BlockPos below = stand.down();
+                if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                    continue;
+                }
+                BlockState standState = world.getBlockState(stand);
+                if (!standState.getCollisionShape(world, stand).isEmpty()
+                        && !WalkablePartialBlocks.isStandable(standState, world, stand)) {
+                    continue;
+                }
+                BlockPos head = stand.up();
+                BlockState headState = world.getBlockState(head);
+                if (!headState.getCollisionShape(world, head).isEmpty()
+                        && !WalkablePartialBlocks.isPathable(headState, world, head)) {
+                    continue;
+                }
+                BlockPos immutable = stand.toImmutable();
+                if (!options.contains(immutable)) {
+                    options.add(immutable);
+                }
             }
-            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
-                continue;
-            }
-            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
-                continue;
-            }
-            options.add(stand.toImmutable());
         }
         options.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(bot.getBlockPos())));
         return options;

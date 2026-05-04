@@ -2938,8 +2938,12 @@ public final class CraftingHelper {
             BlockPos head = foot.up();
             BlockPos below = foot.down();
             boolean solidBelow = !world.getBlockState(below).getCollisionShape(world, below).isEmpty();
-            boolean footClear = world.getBlockState(foot).getCollisionShape(world, foot).isEmpty();
-            boolean headClear = world.getBlockState(head).getCollisionShape(world, head).isEmpty();
+            BlockState footState = world.getBlockState(foot);
+            boolean footClear = footState.getCollisionShape(world, foot).isEmpty()
+                    || WalkablePartialBlocks.isStandable(footState, world, foot);
+            BlockState headState = world.getBlockState(head);
+            boolean headClear = headState.getCollisionShape(world, head).isEmpty()
+                    || WalkablePartialBlocks.isPathable(headState, world, head);
             if (solidBelow && footClear && headClear) {
                 options.add(foot);
             }

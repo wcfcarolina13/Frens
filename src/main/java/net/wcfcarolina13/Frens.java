@@ -49,6 +49,9 @@ import net.wcfcarolina13.network.SaveCustomProviderPayload;
 import net.wcfcarolina13.network.UpdatePlayerPreservePayload;
 import net.wcfcarolina13.network.RequestPlayerPreservePayload;
 import net.wcfcarolina13.network.PlayerPreserveStatePayload;
+import net.wcfcarolina13.network.UpdatePlayerAutoAcceptPreciousPayload;
+import net.wcfcarolina13.network.RequestPlayerAutoAcceptPreciousPayload;
+import net.wcfcarolina13.network.PlayerAutoAcceptPreciousStatePayload;
 import net.wcfcarolina13.network.configNetworkManager;
 import net.wcfcarolina13.network.ConfirmRecruitmentPayload;
 import net.wcfcarolina13.network.OpenRecruitmentDialoguePayload;
@@ -580,6 +583,9 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(UpdatePlayerPreservePayload.ID, UpdatePlayerPreservePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestPlayerPreservePayload.ID, RequestPlayerPreservePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(PlayerPreserveStatePayload.ID, PlayerPreserveStatePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(UpdatePlayerAutoAcceptPreciousPayload.ID, UpdatePlayerAutoAcceptPreciousPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RequestPlayerAutoAcceptPreciousPayload.ID, RequestPlayerAutoAcceptPreciousPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(PlayerAutoAcceptPreciousStatePayload.ID, PlayerAutoAcceptPreciousStatePayload.CODEC);
 
         // Rescue teleport (player-pressed keybind to un-stick a nearby following bot)
         PayloadTypeRegistry.playC2S().register(
@@ -652,6 +658,32 @@ public class Frens implements ModInitializer {
                 boolean current = Frens.CONFIG != null
                         && Frens.CONFIG.getPreserveExpensiveGear(senderUuid);
                 net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
+            });
+        });
+
+        // Player auto-accept precious foods C2S receivers
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(UpdatePlayerAutoAcceptPreciousPayload.ID, (payload, context) -> {
+            ServerPlayerEntity sender = context.player();
+            if (sender == null) return;
+            java.util.UUID senderUuid = sender.getUuid();
+            if (senderUuid == null) return;
+            context.server().execute(() -> {
+                if (Frens.CONFIG != null) {
+                    Frens.CONFIG.setAutoAcceptPreciousFoods(senderUuid, payload.enabled());
+                    Frens.CONFIG.save();
+                }
+            });
+        });
+
+        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(RequestPlayerAutoAcceptPreciousPayload.ID, (payload, context) -> {
+            ServerPlayerEntity sender = context.player();
+            if (sender == null) return;
+            java.util.UUID senderUuid = sender.getUuid();
+            if (senderUuid == null) return;
+            context.server().execute(() -> {
+                boolean current = Frens.CONFIG != null
+                        && Frens.CONFIG.getAutoAcceptPreciousFoods(senderUuid);
+                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
             });
         });
 
@@ -896,6 +928,20 @@ public class Frens implements ModInitializer {
                         // Hostile damage clears shelter — bot needs to fight back
                         net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(serverPlayer.getUuid());
                     }
+
+                    // Named-mob pacifism: if a name-tagged mob (hostile or peaceful) damages
+                    // the bot and attackNamedMobs is off, trigger flee instead of retaliation.
+                    // Player attackers are excluded — the pacifism rule is about mobs.
+                    if (attacker instanceof net.minecraft.entity.LivingEntity namedLiving
+                            && !(attacker instanceof net.minecraft.entity.player.PlayerEntity)
+                            && namedLiving.hasCustomName()
+                            && !net.wcfcarolina13.GameAI.services.BotHomeService.isAttackNamedMobs(serverPlayer)) {
+                        net.minecraft.server.MinecraftServer fleeServer = serverPlayer.getCommandSource().getServer();
+                        if (fleeServer != null) {
+                            net.wcfcarolina13.GameAI.services.BotFleeService.fleeFromEntity(
+                                    serverPlayer, attacker, fleeServer.getTicks());
+                        }
+                    }
                 }
 
                 // If bot is taking IN_WALL damage, try to escape immediately
@@ -1034,6 +1080,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFoodGivingService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotEmergencyRescueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService::onServerTick);

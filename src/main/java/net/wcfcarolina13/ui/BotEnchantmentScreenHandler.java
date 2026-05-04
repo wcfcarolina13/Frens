@@ -136,6 +136,9 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
         ItemStack lapisStack = this.slots.get(1).getStack();
         int cost = id + 1;
 
+        net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logEnchantClick(
+                "enchant-onButtonClick-pre", bot, id, cost, itemStack, lapisStack);
+
         // Lapis check (bots are never in creative)
         if (lapisStack.isEmpty() || lapisStack.getCount() < cost) {
             return false;
@@ -186,6 +189,10 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
             }
         });
 
+        net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logEnchantClick(
+                "enchant-onButtonClick-post", bot, id, cost,
+                this.slots.get(0).getStack(), this.slots.get(1).getStack());
+
         return true;
     }
 
@@ -195,12 +202,20 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
      */
     @Override
     public void onClosed(PlayerEntity player) {
+        net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logScreenClose(
+                "enchant-onClosed-pre", bot, player, this.getCursorStack(),
+                this.slots.get(0).getStack(), this.slots.get(1).getStack());
+
         // Handle cursor stack for the real player (super.super)
         if (player instanceof ServerPlayerEntity) {
             ItemStack cursor = this.getCursorStack();
             if (!cursor.isEmpty()) {
                 // Give cursor item back to the bot, not the real player
-                if (!bot.getInventory().insertStack(cursor)) {
+                ItemStack attempt = cursor.copy();
+                boolean inserted = bot.getInventory().insertStack(cursor);
+                net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logInsert(
+                        "enchant-onClosed-cursor-insert", bot, attempt, inserted, cursor);
+                if (!inserted) {
                     bot.dropItem(cursor, false);
                 }
                 this.setCursorStack(ItemStack.EMPTY);
@@ -212,12 +227,26 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
             for (int i = 0; i < 2; i++) {
                 ItemStack stack = this.enchantSlots.removeStack(i);
                 if (!stack.isEmpty()) {
-                    if (!bot.getInventory().insertStack(stack)) {
+                    ItemStack attempt = stack.copy();
+                    boolean inserted = bot.getInventory().insertStack(stack);
+                    net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logInsert(
+                            "enchant-onClosed-slot-insert-" + i, bot, attempt, inserted, stack);
+                    if (!inserted) {
                         bot.dropItem(stack, false);
                     }
                 }
             }
         });
+
+        // Defensive: persist bot inventory to disk so any concurrent autosave or
+        // join-restore path can't roll back what we just committed.
+        if (bot != null && !bot.isRemoved()) {
+            net.wcfcarolina13.GameAI.services.BotInventoryStorageService.save(bot);
+        }
+
+        net.wcfcarolina13.GameAI.services.BotAnvilEnchantDiagnostics.logScreenClose(
+                "enchant-onClosed-post", bot, player, this.getCursorStack(),
+                this.slots.get(0).getStack(), this.slots.get(1).getStack());
     }
 
     /**

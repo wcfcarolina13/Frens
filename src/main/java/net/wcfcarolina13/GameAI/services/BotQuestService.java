@@ -131,6 +131,14 @@ public final class BotQuestService {
                 continue;
             }
 
+            // Passive proposing is a questing-mode feature. In admin mode the
+            // bot should not spontaneously pop into sidequests (e.g. "secure
+            // this place" triggered by a nearby hostile). The explicit
+            // tryHandleQuestPrompt chat hook is unaffected.
+            if (!SurvivalRecruitmentService.isEnabled(server)) {
+                continue;
+            }
+
             // Passive proposing (low frequency)
             Long next = NEXT_PROPOSE_TICK.get(bot.getUuid());
             if (next == null) {

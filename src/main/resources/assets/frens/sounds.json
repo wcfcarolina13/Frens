@@ -673,9 +673,8 @@
   },
   "bot.line.cook_could_eat": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/cook_could_eat__01", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.react_rotten_really": {
     "category": "voice",
@@ -697,9 +696,8 @@
   },
   "bot.line.react_rotten_brave": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/react_rotten_brave__01", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.react_stew_suspicious": {
     "category": "voice",
@@ -721,9 +719,8 @@
   },
   "bot.line.react_stew_bold": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/react_stew_bold__01", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.food_accept_needed": {
     "category": "voice",
@@ -1571,9 +1568,7 @@
   "bot.line.banter_creeper_kidding": {
     "category": "voice",
     "sounds": [
-      { "name": "frens:dialogue/banter_creeper_kidding__01", "weight": 1 },
-      { "name": "frens:dialogue/banter_creeper_kidding__02", "weight": 1 },
-      { "name": "frens:dialogue/banter_creeper_kidding__03", "weight": 1 }
+      { "name": "frens:dialogue/banter_creeper_kidding__01", "weight": 1 }
     ]
   },
   "bot.line.banter_if_yell_run": {
@@ -3078,11 +3073,8 @@
   },
   "bot.line.boat_kraken": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/boat_kraken__01", "weight": 1 },
-      { "name": "frens:dialogue/boat_kraken__02", "weight": 1 },
-      { "name": "frens:dialogue/boat_kraken__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.boat_shipwreck_speedrun": {
     "category": "voice",
@@ -4471,8 +4463,7 @@
     "category": "voice",
     "sounds": [
       { "name": "frens:dialogue/follow_dim_end__01", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_end__02", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_end__03", "weight": 1 }
+      { "name": "frens:dialogue/follow_dim_end__02", "weight": 1 }
     ]
   },
   "bot.line.follow_dim_end_2": {
@@ -4495,24 +4486,20 @@
     "category": "voice",
     "sounds": [
       { "name": "frens:dialogue/follow_dim_nether_2__01", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_nether_2__02", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_nether_2__03", "weight": 1 }
+      { "name": "frens:dialogue/follow_dim_nether_2__02", "weight": 1 }
     ]
   },
   "bot.line.follow_dim_overworld": {
     "category": "voice",
     "sounds": [
       { "name": "frens:dialogue/follow_dim_overworld__01", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_overworld__02", "weight": 1 },
       { "name": "frens:dialogue/follow_dim_overworld__03", "weight": 1 }
     ]
   },
   "bot.line.follow_dim_overworld_2": {
     "category": "voice",
     "sounds": [
-      { "name": "frens:dialogue/follow_dim_overworld_2__01", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_overworld_2__02", "weight": 1 },
-      { "name": "frens:dialogue/follow_dim_overworld_2__03", "weight": 1 }
+      { "name": "frens:dialogue/follow_dim_overworld_2__01", "weight": 1 }
     ]
   },
   "bot.line.portal_nether_overworld_1": {
@@ -4525,11 +4512,8 @@
   },
   "bot.line.portal_nether_overworld_2": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/portal_nether_overworld_2__01", "weight": 1 },
-      { "name": "frens:dialogue/portal_nether_overworld_2__02", "weight": 1 },
-      { "name": "frens:dialogue/portal_nether_overworld_2__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.portal_end_overworld_1": {
     "category": "voice",
@@ -4542,57 +4526,52 @@
   "bot.line.portal_end_overworld_2": {
     "category": "voice",
     "sounds": [
-      { "name": "frens:dialogue/portal_end_overworld_2__01", "weight": 1 },
-      { "name": "frens:dialogue/portal_end_overworld_2__02", "weight": 1 },
-      { "name": "frens:dialogue/portal_end_overworld_2__03", "weight": 1 }
+      { "name": "frens:dialogue/portal_end_overworld_2__01", "weight": 1 }
     ]
   },
   "bot.line.weird_portal_end_in_nether_1": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/weird_portal_end_in_nether_1__01", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_end_in_nether_1__02", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_end_in_nether_1__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.weird_portal_end_in_nether_2": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/weird_portal_end_in_nether_2__01", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_end_in_nether_2__02", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_end_in_nether_2__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.weird_portal_nether_in_end_1": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/weird_portal_nether_in_end_1__01", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_nether_in_end_1__02", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_nether_in_end_1__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.weird_portal_nether_in_end_2": {
     "category": "voice",
-    "sounds": [
-      { "name": "frens:dialogue/weird_portal_nether_in_end_2__01", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_nether_in_end_2__02", "weight": 1 },
-      { "name": "frens:dialogue/weird_portal_nether_in_end_2__03", "weight": 1 }
-    ]
+    "replace": false,
+    "sounds": []
   },
   "bot.line.care_player_hurt_1": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/care_player_hurt_1__01", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_1__02", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_1__03", "weight": 1 }
+    ]
   },
   "bot.line.care_player_hurt_2": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/care_player_hurt_2__01", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_2__02", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_2__03", "weight": 1 }
+    ]
   },
   "bot.line.care_player_hurt_3": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/care_player_hurt_3__01", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_3__02", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hurt_3__03", "weight": 1 }
+    ]
   },
   "bot.line.care_player_hungry_1": {
     "category": "voice",
@@ -4601,13 +4580,17 @@
   },
   "bot.line.care_player_hungry_2": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/care_player_hungry_2__02", "weight": 1 }
+    ]
   },
   "bot.line.care_player_hungry_3": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/care_player_hungry_3__01", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hungry_3__02", "weight": 1 },
+      { "name": "frens:dialogue/care_player_hungry_3__03", "weight": 1 }
+    ]
   },
   "bot.line.dig_down_warning": {
     "category": "voice",
@@ -4631,8 +4614,9 @@
   },
   "bot.line.tree_punch_ora": {
     "category": "voice",
-    "replace": false,
-    "sounds": []
+    "sounds": [
+      { "name": "frens:dialogue/tree_punch_ora__01", "weight": 1 }
+    ]
   },
   "bot.line.pig_staring": {
     "category": "voice",

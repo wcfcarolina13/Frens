@@ -196,6 +196,10 @@ public final class ChestRegistryNetworkManager {
 
             String mode = parsed.get("mode") instanceof String s2 ? s2 : "store";
             boolean deposit = "store".equals(mode);
+            // Plain click → keepGear=true (filtered, leaves equipped tools/armor/food alone).
+            // Shift+click → keepGear=false (legacy "dump everything" behavior).
+            // Older clients without the field default to true so a stray click can't strip the bot.
+            boolean keepGear = !(parsed.get("keepGear") instanceof Boolean kg) || kg;
 
             if (!(parsed.get("x") instanceof Number nx)
                     || !(parsed.get("y") instanceof Number ny)
@@ -248,6 +252,7 @@ public final class ChestRegistryNetworkManager {
 
             // Run on worker thread — walk is blocking. Retry up to 2 times if combat interrupts.
             final boolean isDeposit = deposit;
+            final boolean isKeepGear = keepGear;
             final String finalAction = action;
             java.util.concurrent.CompletableFuture.runAsync(() -> {
                 try {
@@ -287,8 +292,14 @@ public final class ChestRegistryNetworkManager {
 
                         // Attempt walk + transfer
                         if (isDeposit) {
-                            moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositAll(
-                                    bot.getCommandSource(), bot, chestPos);
+                            if (isKeepGear) {
+                                moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositMatching(
+                                        bot.getCommandSource(), bot, chestPos,
+                                        stack -> !net.wcfcarolina13.GameAI.services.ChestStoreService.isOffloadProtected(stack));
+                            } else {
+                                moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositAll(
+                                        bot.getCommandSource(), bot, chestPos);
+                            }
                         } else {
                             moved = net.wcfcarolina13.GameAI.services.ChestStoreService.withdrawAllFrom(
                                     bot.getCommandSource(), bot, chestPos);
@@ -310,7 +321,8 @@ public final class ChestRegistryNetworkManager {
                     final int finalMoved = moved;
                     String msg;
                     if (finalMoved > 0) {
-                        msg = "\u00A7a" + botName + " " + verb + " " + finalMoved + " items.\u00A7r";
+                        String suffix = (isDeposit && isKeepGear) ? " (kept its gear)." : ".";
+                        msg = "\u00A7a" + botName + " " + verb + " " + finalMoved + " items" + suffix + "\u00A7r";
                     } else {
                         msg = "\u00A7e" + botName + " could not " + finalAction + " any items. "
                                 + (isDeposit ? "Chest may be full or bot inventory empty." : "Chest may be empty or bot inventory full.")

@@ -469,10 +469,12 @@ public final class HangoutSkill implements Skill {
         }
         var feetState = world.getBlockState(feet);
         var headState = world.getBlockState(head);
-        if (!feetState.getCollisionShape(world, feet).isEmpty()) {
+        if (!feetState.getCollisionShape(world, feet).isEmpty()
+                && !net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isStandable(feetState, world, feet)) {
             return false;
         }
-        if (!headState.getCollisionShape(world, head).isEmpty()) {
+        if (!headState.getCollisionShape(world, head).isEmpty()
+                && !net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(headState, world, head)) {
             return false;
         }
         BlockPos below = feet.down();

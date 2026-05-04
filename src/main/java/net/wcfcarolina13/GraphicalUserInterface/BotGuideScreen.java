@@ -1126,6 +1126,53 @@ public final class BotGuideScreen extends Screen {
                         "fortify village wall defense perimeter tower gatehouse resume patch status merge hull particles"
                 ),
                 new GuideTopic(
+                        "fast_travel_gates",
+                        "Basics",
+                        "Fast-Travel Gates",
+                        "Which items/conditions let the bot fast-travel, and at what speed.",
+                        List.of(
+                                "§eTier 2 (1.0×, instant-class)§r — any one of these alone qualifies:",
+                                "  • Bot holds a §flodestone compass bound to a target§r",
+                                "  • Bot §for§r owner has an §fEye of Ender§r",
+                                "  • Bot §for§r owner has a §fWizard's Tome§r",
+                                "  • Bot §for§r owner is within 6 blocks of an §fEnchanting Table§r",
+                                "  • §fBoth§r bot and owner hold §fEnder Pearls§r",
+                                "§eSurface Tier 1§r — needs at least one gate (Tier 2 unmet):",
+                                "  • §fMap + Compass§r and destination pixel rendered on one of the bot's maps, OR",
+                                "  • §fSmoke signal§r: destination is inside a labeled base, lit campfire on hay at base centre, bot within 5× base radius",
+                                "  • §fSpyglass§r in bot inventory shaves one tier step",
+                                "  • 1 gate → 3.0× delay, 2 gates → 2.0× delay",
+                                "§eUnderground§r (stricter):",
+                                "  • Map + Compass §fplus torch/lantern§r → 2.0×",
+                                "  • Lodestone compass without bound target → 2.0×",
+                                "  • Smoke signal within §f2× base radius§r → 3.0× (tight range)",
+                                "  • Otherwise refused — bot walks",
+                                "§cNote:§r these gates apply to automatic fast-travel (sunset return, sunrise resume, /bot home). The §fSummon§r button in the spellbook uses the Eye of Ender (60s cooldown) as its own gate. The §fRemote Guidance§r and §fChorus Recall§r spells in Bot Inventory are separate manual spells with their own pearl/chorus costs.",
+                                "Chat tells you which gate activated each time fast-travel fires, so you can tune your setup."
+                        ),
+                        "UI-only",
+                        "See chat when bot departs: '(fast-travel: ...)' tag",
+                        "fast travel gates lodestone compass eye ender enchanting table smoke signal map tier delay"
+                ),
+                new GuideTopic(
+                        "bases_home_explained",
+                        "Basics",
+                        "Home & Bases Explained",
+                        "Two kinds of rows in the Base Manager, and two meanings of [Home].",
+                        List.of(
+                                "§eYellow [Base]§r rows are registered bases — saved locations with a protection radius (r=40). Use 'Set Home' to mark one as the bot's preferred home.",
+                                "§fWhite rows§r are lodestone compasses in the bot's inventory. They have no protection; they're just named travel targets.",
+                                "[Home] before a §eyellow§r name = this base is the bot's §epreferred home§r. Used by sunset-return and most 'go home' logic.",
+                                "[Home] before a §fwhite§r name = this lodestone compass is the bot's §edesignated home compass§r. Used by the fast-travel mechanics.",
+                                "You can have a preferred home base AND a designated home compass at the same time — they are independent.",
+                                "Sunset-return picks the CLOSEST of: last-slept bed, preferred home, or nearest base. If your preferred home is far away and Spawn is closer, the bot may go to Spawn instead.",
+                                "To force a specific base on return, either delete the closer alternatives or keep the bot geographically near the preferred home."
+                        ),
+                        "UI-only",
+                        "Inventory > Bases button",
+                        "home base lodestone compass preferred yellow white explained legend"
+                ),
+                new GuideTopic(
                         "construction_map_village",
                         "Construction",
                         "Map Village",
@@ -1354,9 +1401,11 @@ public final class BotGuideScreen extends Screen {
                         "Quick Store & Quick Fetch",
                         "Point at a nearby chest and click to deposit or take items.",
                         List.of(
-                                "Quick Store: Actions \u2192 Core Actions \u2192 Quick Store. Bot walks to the chest and deposits its inventory.",
+                                "Quick Store: Actions \u2192 Core Actions \u2192 Quick Store. Bot walks to the chest and deposits.",
                                 "Quick Fetch: Actions \u2192 Core Actions \u2192 Quick Fetch. Bot walks to the chest and takes items into its inventory.",
                                 "Point at any container (chest, barrel, shulker box) and left-click to confirm.",
+                                "Quick Store \u2014 plain click: deposits loose items, keeps the bot's equipped armor, mainhand tool, food, and bundles.",
+                                "Quick Store \u2014 shift+click: dumps everything (including armor, tools, and food). Use when swapping loadouts.",
                                 "The bot physically walks to the chest before interacting \u2014 it must be within 32 blocks.",
                                 "If the chest fills up (store) or the bot\u2019s inventory fills up (fetch), remaining items stay put.",
                                 "The bot does NOT remember chests used this way. Only automated-task chests appear in Storage.",
