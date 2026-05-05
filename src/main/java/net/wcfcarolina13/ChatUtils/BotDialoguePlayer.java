@@ -686,6 +686,12 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ZOMBIFIED_PIGLIN_PORKCHOP, "What's up, porkchop?");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_HOGLIN_BACON_SPREE, "If they give us gravel again I'm going on a bacon spree.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_PIGLIN_BRUTE_BIGGER, "That one's bigger than the others!");
+
+        // May 2026 backlog — aquatic + raid mob proximity lines
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SQUID_JUST_A, "Just a squid.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GLOW_SQUID_PRETTY, "Pretty.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DOLPHIN_DID_YOU_SEE, "Did you see that dolphin?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_VEX_GOBLINS_WINGS, "Goblins with wings! Duck and cover!");
     }
 
     private BotDialoguePlayer() {

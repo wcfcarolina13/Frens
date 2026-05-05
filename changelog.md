@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 4 aquatic + raid mob-proximity dialogue lines (2026-05-05, 1.1.59)
+
+Continued the May 2026 dialogue backlog. 4 simple proximity lines, all in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java), all scaffolded with empty `sounds[]` for parallel TTS.
+
+**`tryAquaticAmbient`** — single 12-block scan, three pools in priority order:
+
+- `LINE_GLOW_SQUID_PRETTY` ("Pretty.") — `GlowSquidEntity`, 8% roll, 5-min cooldown. Highest priority because it's the rare standout.
+- `LINE_SQUID_JUST_A` ("Just a squid.") — `SquidEntity`, 5% roll, 5-min cooldown. The squid scan filters out `GlowSquidEntity` subclass instances so the priority above isn't double-counted.
+- `LINE_DOLPHIN_DID_YOU_SEE` ("Did you see that dolphin?") — `DolphinEntity`, 8% roll, 3-min cooldown. Uses the existing `isEntityFacing` forward-cone helper so it only fires when the bot is actually facing the dolphin — matches the "Did you SEE that dolphin?" framing.
+
+The whole aquatic scan is gated on `!bot.hasVehicle()` so the existing `in_boat_dolphin_nearby` boat-escort line keeps the on-the-water flavor without competing with the new sighting line.
+
+**`tryVexNearby`** — 12-block scan for `VexEntity`, 12% roll, 3-min cooldown. Higher roll than the ambient pools because vexes are combat-relevant (raids, woodland mansions) and the bot should react promptly. Single line: `LINE_VEX_GOBLINS_WINGS` ("Goblins with wings! Duck and cover!").
+
+Verified `SquidEntity`, `GlowSquidEntity`, `VexEntity` class paths in the 1.21.11 yarn mappings before importing — `GlowSquidEntity` extends `SquidEntity` (passive package) which is why the priority filter is needed.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## 5 mob-proximity dialogue lines + walking-dogs hobby spec (2026-05-05, 1.1.58)
 
 Continued the May 2026 dialogue backlog. 5 simple proximity-triggered lines, all scaffolded with empty `sounds[]` for parallel TTS.

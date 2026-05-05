@@ -5279,5 +5279,21 @@
   "bot.line.piglin_brute_bigger": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.squid_just_a": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.glow_squid_pretty": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.dolphin_did_you_see": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.vex_goblins_wings": {
+    "category": "voice",
+    "sounds": []
   }
 }

@@ -864,6 +864,12 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_HOGLIN_BACON_SPREE = register("bot.line.hoglin_bacon_spree");
     public static final SoundEvent LINE_PIGLIN_BRUTE_BIGGER = register("bot.line.piglin_brute_bigger");
 
+    // Aquatic + raid mob proximity reactions.
+    public static final SoundEvent LINE_SQUID_JUST_A = register("bot.line.squid_just_a");
+    public static final SoundEvent LINE_GLOW_SQUID_PRETTY = register("bot.line.glow_squid_pretty");
+    public static final SoundEvent LINE_DOLPHIN_DID_YOU_SEE = register("bot.line.dolphin_did_you_see");
+    public static final SoundEvent LINE_VEX_GOBLINS_WINGS = register("bot.line.vex_goblins_wings");
+
     private BotDialogueSounds() {
     }
 

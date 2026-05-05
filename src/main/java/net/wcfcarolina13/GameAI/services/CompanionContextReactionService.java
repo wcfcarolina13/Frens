@@ -11,11 +11,14 @@ import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.HoglinEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.PiglinBruteEntity;
+import net.minecraft.entity.mob.VexEntity;
 import net.minecraft.entity.mob.WardenEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.passive.ChickenEntity;
 import net.minecraft.entity.passive.DolphinEntity;
+import net.minecraft.entity.passive.GlowSquidEntity;
 import net.minecraft.entity.passive.SnifferEntity;
+import net.minecraft.entity.passive.SquidEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.Items;
@@ -165,6 +168,26 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] PIGLIN_BRUTE_LINES = new WeightedLine[] {
             new WeightedLine("piglin_brute_bigger", "That one's bigger than the others!", BotDialogueSounds.LINE_PIGLIN_BRUTE_BIGGER, WEIGHT_COMMON)
+    };
+
+    // Aquatic ambient — squid is mundane, glow squid is the rare standout.
+    private static final WeightedLine[] SQUID_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("squid_just_a", "Just a squid.", BotDialogueSounds.LINE_SQUID_JUST_A, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] GLOW_SQUID_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("glow_squid_pretty", "Pretty.", BotDialogueSounds.LINE_GLOW_SQUID_PRETTY, WEIGHT_COMMON)
+    };
+
+    // Dolphin sighting — only fires when bot is NOT in a boat, since the existing
+    // in_boat_dolphin_nearby trigger covers the escort scenario with its own line.
+    private static final WeightedLine[] DOLPHIN_SIGHTED_LINES = new WeightedLine[] {
+            new WeightedLine("dolphin_did_you_see", "Did you see that dolphin?", BotDialogueSounds.LINE_DOLPHIN_DID_YOU_SEE, WEIGHT_COMMON)
+    };
+
+    // Vex — raid / woodland mansion mob. Combat-relevant so faster trigger.
+    private static final WeightedLine[] VEX_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("vex_goblins_wings", "Goblins with wings! Duck and cover!", BotDialogueSounds.LINE_VEX_GOBLINS_WINGS, WEIGHT_COMMON)
     };
 
     // Wandering-trader proximity — flat pool of all trader topic lines. The
@@ -479,6 +502,10 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("zombified_piglin_nearby", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("hoglin_nearby", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("piglin_brute_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("squid_nearby", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("glow_squid_nearby", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("dolphin_sighted", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("vex_nearby", COOLDOWN_180S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -572,6 +599,12 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryNetherNeighbourNearby(bot, world, state)) {
+                continue;
+            }
+            if (tryAquaticAmbient(bot, world, state)) {
+                continue;
+            }
+            if (tryVexNearby(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1357,6 +1390,67 @@ public final class CompanionContextReactionService {
             return true;
         }
         return false;
+    }
+
+    /** Aquatic ambient — squid is the mundane "Just a squid." remark, glow squid
+     *  gets the rarer "Pretty." line. Glow squid takes priority when both are in
+     *  range since the standout reaction beats the mundane one. Suppressed when
+     *  the bot is in a boat (existing in_boat_dolphin_nearby etc. already cover
+     *  on-the-water flavor). */
+    private static boolean tryAquaticAmbient(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+
+        boolean hasGlow = !world.getEntitiesByClass(
+                GlowSquidEntity.class, box, g -> g != null && g.isAlive()).isEmpty();
+        if (hasGlow && RNG.nextDouble() <= 0.08D
+                && tryTrigger(bot, "glow_squid_nearby", GLOW_SQUID_NEARBY_LINES, null, false)) {
+            return true;
+        }
+
+        // Squid scan filters out the GlowSquidEntity subclass so the priority
+        // above isn't double-counted as a "regular squid" sighting.
+        boolean hasSquid = !world.getEntitiesByClass(
+                SquidEntity.class, box,
+                s -> s != null && s.isAlive() && !(s instanceof GlowSquidEntity)
+        ).isEmpty();
+        if (hasSquid && RNG.nextDouble() <= 0.05D
+                && tryTrigger(bot, "squid_nearby", SQUID_NEARBY_LINES, null, false)) {
+            return true;
+        }
+
+        // Dolphin sighting — uses the existing forward-cone helper so it fires
+        // when the bot is actually facing a dolphin (matches the "Did you SEE
+        // that dolphin?" framing — implies the bot noticed it).
+        List<DolphinEntity> dolphins = world.getEntitiesByClass(
+                DolphinEntity.class, box.expand(4.0D, 0.0D, 4.0D),
+                d -> d != null && d.isAlive());
+        if (!dolphins.isEmpty()) {
+            boolean anyInForwardCone = false;
+            for (DolphinEntity d : dolphins) {
+                if (isEntityFacing(bot, d)) {
+                    anyInForwardCone = true;
+                    break;
+                }
+            }
+            if (anyInForwardCone && RNG.nextDouble() <= 0.08D
+                    && tryTrigger(bot, "dolphin_sighted", DOLPHIN_SIGHTED_LINES, null, false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Fires vex_goblins_wings when a live vex is within 12 blocks. Combat-
+     *  relevant (raid / woodland mansion) so the roll is faster (12%) than the
+     *  ambient pools — bot should react promptly when one shows up. */
+    private static boolean tryVexNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+        boolean any = !world.getEntitiesByClass(
+                VexEntity.class, box, v -> v != null && v.isAlive()).isEmpty();
+        if (!any) return false;
+        if (RNG.nextDouble() > 0.12D) return false;
+        return tryTrigger(bot, "vex_nearby", VEX_NEARBY_LINES, null, false);
     }
 
     /** Fires topic_trader_* or topic_llama_* when a wandering trader or llama is
