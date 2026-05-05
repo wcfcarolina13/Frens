@@ -895,6 +895,11 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_ELDER_GUARDIAN_BOSS = register("bot.line.elder_guardian_boss");
     public static final SoundEvent LINE_ELDER_GUARDIAN_FATIGUE = register("bot.line.elder_guardian_fatigue");
 
+    // Mob-crusher detection (≥6 same-type passives stuffed in one cell).
+    public static final SoundEvent LINE_MOB_CRUSHER_HUMANE = register("bot.line.mob_crusher_humane");
+    public static final SoundEvent LINE_MOB_CRUSHER_CRUELTY_FREE = register("bot.line.mob_crusher_cruelty_free");
+    public static final SoundEvent LINE_MOB_CRUSHER_NETHER_PLACE = register("bot.line.mob_crusher_nether_place");
+
     private BotDialogueSounds() {
     }
 

@@ -5355,5 +5355,17 @@
   "bot.line.elder_guardian_fatigue": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.mob_crusher_humane": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.mob_crusher_cruelty_free": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.mob_crusher_nether_place": {
+    "category": "voice",
+    "sounds": []
   }
 }

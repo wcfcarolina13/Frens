@@ -19,16 +19,20 @@ import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.passive.AxolotlEntity;
 import net.minecraft.entity.passive.BeeEntity;
 import net.minecraft.entity.passive.ChickenEntity;
+import net.minecraft.entity.passive.CowEntity;
 import net.minecraft.entity.passive.DolphinEntity;
 import net.minecraft.entity.passive.FoxEntity;
 import net.minecraft.entity.passive.GlowSquidEntity;
 import net.minecraft.entity.passive.OcelotEntity;
 import net.minecraft.entity.passive.PandaEntity;
 import net.minecraft.entity.passive.ParrotEntity;
+import net.minecraft.entity.passive.PigEntity;
 import net.minecraft.entity.passive.RabbitEntity;
+import net.minecraft.entity.passive.SheepEntity;
 import net.minecraft.entity.passive.SnifferEntity;
 import net.minecraft.entity.passive.SquidEntity;
 import net.minecraft.entity.passive.TurtleEntity;
+import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.Items;
@@ -237,6 +241,14 @@ public final class CompanionContextReactionService {
     private static final WeightedLine[] ELDER_GUARDIAN_NEARBY_LINES = new WeightedLine[] {
             new WeightedLine("elder_guardian_boss", "That one's the boss. We should leave.", BotDialogueSounds.LINE_ELDER_GUARDIAN_BOSS, WEIGHT_COMMON),
             new WeightedLine("elder_guardian_fatigue", "Mining Fatigue incoming, I just know it.", BotDialogueSounds.LINE_ELDER_GUARDIAN_FATIGUE, WEIGHT_COMMON)
+    };
+
+    // Mob-crusher anti-cruelty pool — editorial line, fires when ≥6 same-type
+    // passives are crammed into one block-cell within an 8-block scan.
+    private static final WeightedLine[] MOB_CRUSHER_LINES = new WeightedLine[] {
+            new WeightedLine("mob_crusher_humane", "Totally humane.", BotDialogueSounds.LINE_MOB_CRUSHER_HUMANE, WEIGHT_COMMON),
+            new WeightedLine("mob_crusher_cruelty_free", "100% cruelty free.", BotDialogueSounds.LINE_MOB_CRUSHER_CRUELTY_FREE, WEIGHT_COMMON),
+            new WeightedLine("mob_crusher_nether_place", "There's a special place in the Nether for whoever built this.", BotDialogueSounds.LINE_MOB_CRUSHER_NETHER_PLACE, WEIGHT_RARE)
     };
 
     // Cute-animal pool — fires near various untamed cute mobs. Dispatched AFTER the
@@ -573,6 +585,7 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("guardian_proximity", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("guardian_charging", 60_000L);
         TRIGGER_COOLDOWN_MS.put("elder_guardian_nearby", 8L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("mob_crusher", 10L * 60L * 1000L);
     }
 
     private CompanionContextReactionService() {
@@ -684,6 +697,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryGuardianFamily(bot, world, state)) {
+                continue;
+            }
+            if (tryMobCrusher(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1542,6 +1558,39 @@ public final class CompanionContextReactionService {
 
         if (RNG.nextDouble() > 0.10D) return false;
         return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+    }
+
+    /** Mob-crusher anti-cruelty detection. Scans an 8-block box for passives of
+     *  the curated set (cow / sheep / pig / chicken / villager — explicitly NOT
+     *  hostiles, so skeleton/zombie grinders don't fire this), groups by entity
+     *  type + integer block-cell, and fires when any single (type, cell) bucket
+     *  has ≥ 6 entities — i.e., they're stuffed in a 1×1 column. 20% roll, 10-
+     *  min cooldown since the line is editorial, not scan-frequent. */
+    private static boolean tryMobCrusher(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        Box box = bot.getBoundingBox().expand(8.0D, 4.0D, 8.0D);
+        List<Entity> passives = world.getOtherEntities(bot, box, e -> {
+            if (e == null || !e.isAlive()) return false;
+            return e instanceof CowEntity
+                    || e instanceof SheepEntity
+                    || e instanceof PigEntity
+                    || e instanceof ChickenEntity
+                    || e instanceof VillagerEntity;
+        });
+        if (passives.size() < 6) return false;
+
+        java.util.HashMap<String, Integer> stuffingCounts = new java.util.HashMap<>();
+        for (Entity e : passives) {
+            BlockPos cell = e.getBlockPos();
+            String key = e.getType().toString() + ":" + cell.getX() + "," + cell.getY() + "," + cell.getZ();
+            stuffingCounts.merge(key, 1, Integer::sum);
+        }
+        int maxStuffed = 0;
+        for (int n : stuffingCounts.values()) {
+            if (n > maxStuffed) maxStuffed = n;
+        }
+        if (maxStuffed < 6) return false;
+        if (RNG.nextDouble() > 0.20D) return false;
+        return tryTrigger(bot, "mob_crusher", MOB_CRUSHER_LINES, null, false);
     }
 
     /** Guardian + elder guardian proximity reactions. Single 16-block scan, three

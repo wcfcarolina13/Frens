@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Mob-crusher anti-cruelty dialogue (2026-05-05, 1.1.63)
+
+`tryMobCrusher` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).
+
+Detection algorithm: scan an 8-block box for living passives of the curated set (`CowEntity`, `SheepEntity`, `PigEntity`, `ChickenEntity`, `VillagerEntity` — hostiles explicitly excluded per spec so skeleton/zombie grinders don't fire). Group by entity type + integer block-cell and check if any single bucket has ≥ 6 entities. The "stuffed in a 1×1 column" pattern is what distinguishes a crusher from a normal pen.
+
+3 weighted lines:
+
+- `LINE_MOB_CRUSHER_HUMANE` ("Totally humane.") — COMMON
+- `LINE_MOB_CRUSHER_CRUELTY_FREE` ("100% cruelty free.") — COMMON
+- `LINE_MOB_CRUSHER_NETHER_PLACE` ("There's a special place in the Nether for whoever built this.") — RARE
+
+20% roll, 10-min cooldown — the line is editorial, not scan-frequent.
+
+Verified `CowEntity`, `SheepEntity`, `PigEntity`, `VillagerEntity` class paths in 1.21.11 yarn mappings before importing.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Guardian + elder guardian proximity dialogue (2026-05-05, 1.1.62)
 
 `tryGuardianFamily` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java). Single 16-block scan, three state branches in priority order:

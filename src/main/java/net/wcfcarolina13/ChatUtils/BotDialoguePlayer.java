@@ -713,6 +713,11 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, "That beam is gonna hurt — move!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_BOSS, "That one's the boss. We should leave.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_FATIGUE, "Mining Fatigue incoming, I just know it.");
+
+        // May 2026 backlog — mob-crusher anti-cruelty pool
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_HUMANE, "Totally humane.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_CRUELTY_FREE, "100% cruelty free.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_NETHER_PLACE, "There's a special place in the Nether for whoever built this.");
     }
 
     private BotDialoguePlayer() {
