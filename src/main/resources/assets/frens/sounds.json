@@ -5367,5 +5367,13 @@
   "bot.line.mob_crusher_nether_place": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.redstone_machine_tech": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.redstone_machine_hell_and_back": {
+    "category": "voice",
+    "sounds": []
   }
 }

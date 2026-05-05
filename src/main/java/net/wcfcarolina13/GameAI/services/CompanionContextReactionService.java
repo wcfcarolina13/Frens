@@ -251,6 +251,12 @@ public final class CompanionContextReactionService {
             new WeightedLine("mob_crusher_nether_place", "There's a special place in the Nether for whoever built this.", BotDialogueSounds.LINE_MOB_CRUSHER_NETHER_PLACE, WEIGHT_RARE)
     };
 
+    // Redstone-machine proximity — fires near complex contraptions outside bases.
+    private static final WeightedLine[] REDSTONE_MACHINE_LINES = new WeightedLine[] {
+            new WeightedLine("redstone_machine_tech", "Tech-o-no-lo-hee-ah", BotDialogueSounds.LINE_REDSTONE_MACHINE_TECH, WEIGHT_COMMON),
+            new WeightedLine("redstone_machine_hell_and_back", "We literally went to hell and back to build this.", BotDialogueSounds.LINE_REDSTONE_MACHINE_HELL_AND_BACK, WEIGHT_UNCOMMON)
+    };
+
     // Cute-animal pool — fires near various untamed cute mobs. Dispatched AFTER the
     // more-specific triggers above (fox+chicken, panda variants) so those win first.
     private static final WeightedLine[] CUTE_ANIMAL_LINES = new WeightedLine[] {
@@ -586,6 +592,7 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("guardian_charging", 60_000L);
         TRIGGER_COOLDOWN_MS.put("elder_guardian_nearby", 8L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("mob_crusher", 10L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("redstone_machine_nearby", COOLDOWN_90S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -700,6 +707,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryMobCrusher(bot, world, state)) {
+                continue;
+            }
+            if (tryRedstoneMachineNearby(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1558,6 +1568,44 @@ public final class CompanionContextReactionService {
 
         if (RNG.nextDouble() > 0.10D) return false;
         return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+    }
+
+    /** Redstone-machine proximity detection. Counts redstone-component blocks in
+     *  a 5×5×5 box around the bot. Trigger when ≥4 components AND ≥2 distinct
+     *  block types — that's the threshold above which we're confident it's a
+     *  contraption rather than a single redstone door or pressure-plate. Skipped
+     *  when the bot is inside a registered base, since the user's own base will
+     *  almost certainly hit this threshold and we don't want chatter at home. */
+    private static boolean tryRedstoneMachineNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        // Skip when bot is inside a registered base — the user's own base will trigger constantly.
+        if (net.wcfcarolina13.GameAI.services.BotHomeService.findBaseNearPosition(
+                world.getServer(), world, bot.getBlockPos()).isPresent()) {
+            return false;
+        }
+
+        BlockPos.Mutable cur = new BlockPos.Mutable();
+        BlockPos center = bot.getBlockPos();
+        int componentCount = 0;
+        java.util.HashSet<net.minecraft.block.Block> distinctTypes = new java.util.HashSet<>();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    cur.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    BlockState s = world.getBlockState(cur);
+                    net.minecraft.block.Block b = s.getBlock();
+                    if (b == Blocks.REPEATER || b == Blocks.COMPARATOR || b == Blocks.OBSERVER
+                            || b == Blocks.PISTON || b == Blocks.STICKY_PISTON
+                            || b == Blocks.DISPENSER || b == Blocks.DROPPER || b == Blocks.HOPPER) {
+                        componentCount++;
+                        distinctTypes.add(b);
+                    }
+                }
+            }
+        }
+        if (componentCount < 4 || distinctTypes.size() < 2) return false;
+        if (RNG.nextDouble() > 0.20D) return false;
+        return tryTrigger(bot, "redstone_machine_nearby", REDSTONE_MACHINE_LINES, null, false);
     }
 
     /** Mob-crusher anti-cruelty detection. Scans an 8-block box for passives of

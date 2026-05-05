@@ -900,6 +900,10 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_MOB_CRUSHER_CRUELTY_FREE = register("bot.line.mob_crusher_cruelty_free");
     public static final SoundEvent LINE_MOB_CRUSHER_NETHER_PLACE = register("bot.line.mob_crusher_nether_place");
 
+    // Redstone-machine proximity (≥4 components AND ≥2 distinct types in a 5×5×5).
+    public static final SoundEvent LINE_REDSTONE_MACHINE_TECH = register("bot.line.redstone_machine_tech");
+    public static final SoundEvent LINE_REDSTONE_MACHINE_HELL_AND_BACK = register("bot.line.redstone_machine_hell_and_back");
+
     private BotDialogueSounds() {
     }
 

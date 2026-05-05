@@ -2,6 +2,36 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Redstone-machine proximity dialogue — May 2026 backlog complete (2026-05-05, 1.1.64)
+
+`tryRedstoneMachineNearby` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).
+
+Detection: scan a 5×5×5 box (125 cells) around the bot, count redstone components (`REPEATER`, `COMPARATOR`, `OBSERVER`, `PISTON`, `STICKY_PISTON`, `DISPENSER`, `DROPPER`, `HOPPER`) and tally distinct block types. Threshold per spec: **≥ 4 components AND ≥ 2 distinct types**. Below that we're not confident enough it's a contraption (vs. a redstone door or single pressure-plate setup).
+
+Skipped via `BotHomeService.findBaseNearPosition` when the bot is inside a registered base — the user's own base would trigger the line constantly otherwise.
+
+2 weighted lines:
+
+- `LINE_REDSTONE_MACHINE_TECH` ("Tech-o-no-lo-hee-ah") — COMMON
+- `LINE_REDSTONE_MACHINE_HELL_AND_BACK` ("We literally went to hell and back to build this.") — UNCOMMON
+
+20% roll, 90s cooldown.
+
+**The May 2026 dialogue backlog is now fully wired.** All trigger pools from RALPH_TASK.md's "Dialogue / Voiced Lines (backlog 2026-05-04)" section are now implemented across 1.1.57 → 1.1.64:
+
+- 1.1.57 — Nautilus untamed/tamed + mount-quality pool split
+- 1.1.58 — Cat / sniffer / 3 Nether neighbours + walking-dogs hobby spec captured
+- 1.1.59 — Squid / glow squid / dolphin / vex
+- 1.1.60 — Fox+ocelot near chickens + 4 panda variants
+- 1.1.61 — Cute-animal "can we keep it?" pool
+- 1.1.62 — Guardian (proximity + laser-charging) + elder guardian
+- 1.1.63 — Mob-crusher anti-cruelty pool
+- 1.1.64 — Redstone-machine proximity pool
+
+35 new dialogue lines, 13 new triggers, all scaffolded with empty `sounds[]` for parallel TTS generation. Verified all entity classes against 1.21.11 yarn mappings; all builds clean. Not deployed.
+
+The walking-dogs hobby remains in the backlog under `### Hobbies (new ideas)` — design captured, implementation deferred to a future session per CLAUDE.md "one clearly bounded task at a time" rule.
+
 ## Mob-crusher anti-cruelty dialogue (2026-05-05, 1.1.63)
 
 `tryMobCrusher` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).

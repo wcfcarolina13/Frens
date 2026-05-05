@@ -718,6 +718,10 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_HUMANE, "Totally humane.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_CRUELTY_FREE, "100% cruelty free.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_MOB_CRUSHER_NETHER_PLACE, "There's a special place in the Nether for whoever built this.");
+
+        // May 2026 backlog — redstone-machine proximity pool
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REDSTONE_MACHINE_TECH, "Tech-o-no-lo-hee-ah");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REDSTONE_MACHINE_HELL_AND_BACK, "We literally went to hell and back to build this.");
     }
 
     private BotDialoguePlayer() {
