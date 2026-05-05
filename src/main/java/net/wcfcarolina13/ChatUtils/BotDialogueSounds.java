@@ -870,6 +870,15 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_DOLPHIN_DID_YOU_SEE = register("bot.line.dolphin_did_you_see");
     public static final SoundEvent LINE_VEX_GOBLINS_WINGS = register("bot.line.vex_goblins_wings");
 
+    // Fox / ocelot near chickens — shared line for either predator type.
+    public static final SoundEvent LINE_FOX_OCELOT_NEAR_CHICKENS = register("bot.line.fox_ocelot_near_chickens");
+
+    // Panda variants (PandaEntity.getMainGene() = WORRIED / LAZY / BROWN / AGGRESSIVE).
+    public static final SoundEvent LINE_PANDA_WORRIED = register("bot.line.panda_worried");
+    public static final SoundEvent LINE_PANDA_LAZY = register("bot.line.panda_lazy");
+    public static final SoundEvent LINE_PANDA_BROWN = register("bot.line.panda_brown");
+    public static final SoundEvent LINE_PANDA_AGGRESSIVE = register("bot.line.panda_aggressive");
+
     private BotDialogueSounds() {
     }
 

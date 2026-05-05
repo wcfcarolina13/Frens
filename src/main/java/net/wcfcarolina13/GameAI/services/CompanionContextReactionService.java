@@ -16,7 +16,10 @@ import net.minecraft.entity.mob.WardenEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.passive.ChickenEntity;
 import net.minecraft.entity.passive.DolphinEntity;
+import net.minecraft.entity.passive.FoxEntity;
 import net.minecraft.entity.passive.GlowSquidEntity;
+import net.minecraft.entity.passive.OcelotEntity;
+import net.minecraft.entity.passive.PandaEntity;
 import net.minecraft.entity.passive.SnifferEntity;
 import net.minecraft.entity.passive.SquidEntity;
 import net.minecraft.entity.passive.WolfEntity;
@@ -188,6 +191,28 @@ public final class CompanionContextReactionService {
     // Vex — raid / woodland mansion mob. Combat-relevant so faster trigger.
     private static final WeightedLine[] VEX_NEARBY_LINES = new WeightedLine[] {
             new WeightedLine("vex_goblins_wings", "Goblins with wings! Duck and cover!", BotDialogueSounds.LINE_VEX_GOBLINS_WINGS, WEIGHT_COMMON)
+    };
+
+    // Fox or ocelot near chickens — combined-condition pool.
+    private static final WeightedLine[] FOX_OCELOT_CHICKEN_LINES = new WeightedLine[] {
+            new WeightedLine("fox_ocelot_near_chickens", "Don't let it near the chickens.", BotDialogueSounds.LINE_FOX_OCELOT_NEAR_CHICKENS, WEIGHT_COMMON)
+    };
+
+    // Panda variant-specific pools — keyed off PandaEntity.getMainGene().
+    private static final WeightedLine[] PANDA_WORRIED_LINES = new WeightedLine[] {
+            new WeightedLine("panda_worried", "That panda looks stressed.", BotDialogueSounds.LINE_PANDA_WORRIED, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PANDA_LAZY_LINES = new WeightedLine[] {
+            new WeightedLine("panda_lazy", "Lying down on the job, eh?", BotDialogueSounds.LINE_PANDA_LAZY, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PANDA_BROWN_LINES = new WeightedLine[] {
+            new WeightedLine("panda_brown", "A brown panda. That's special.", BotDialogueSounds.LINE_PANDA_BROWN, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PANDA_AGGRESSIVE_LINES = new WeightedLine[] {
+            new WeightedLine("panda_aggressive", "That one looks angry. Give it space.", BotDialogueSounds.LINE_PANDA_AGGRESSIVE, WEIGHT_COMMON)
     };
 
     // Wandering-trader proximity — flat pool of all trader topic lines. The
@@ -506,6 +531,11 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("glow_squid_nearby", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("dolphin_sighted", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("vex_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("fox_ocelot_near_chickens", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("panda_worried", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("panda_lazy", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("panda_brown", 10L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("panda_aggressive", COOLDOWN_180S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -605,6 +635,12 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryVexNearby(bot, world, state)) {
+                continue;
+            }
+            if (tryFoxOcelotNearChickens(bot, world, state)) {
+                continue;
+            }
+            if (tryPandaProximity(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1437,6 +1473,77 @@ public final class CompanionContextReactionService {
                     && tryTrigger(bot, "dolphin_sighted", DOLPHIN_SIGHTED_LINES, null, false)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /** Fires fox_ocelot_near_chickens when a fox or ocelot AND a chicken are
+     *  both within 12 blocks of the bot. Single shared pool — both predators
+     *  trigger the same line. 5-min cooldown so the bot doesn't chatter while
+     *  the predator/prey pair is loitering near a coop. */
+    private static boolean tryFoxOcelotNearChickens(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+
+        boolean hasFoxOrOcelot = !world.getEntitiesByClass(
+                FoxEntity.class, box, f -> f != null && f.isAlive()).isEmpty();
+        if (!hasFoxOrOcelot) {
+            hasFoxOrOcelot = !world.getEntitiesByClass(
+                    OcelotEntity.class, box, o -> o != null && o.isAlive()).isEmpty();
+        }
+        if (!hasFoxOrOcelot) return false;
+
+        boolean hasChicken = !world.getEntitiesByClass(
+                ChickenEntity.class, box, c -> c != null && c.isAlive()).isEmpty();
+        if (!hasChicken) return false;
+
+        if (RNG.nextDouble() > 0.10D) return false;
+        return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+    }
+
+    /** Variant-keyed panda proximity reactions. Iterates all pandas in a 12-block
+     *  scan, picks the highest-priority gene, and fires the matching line.
+     *  Priority: BROWN (rarest IRL) > AGGRESSIVE (combat-relevant) > WORRIED >
+     *  LAZY. NORMAL / PLAYFUL / WEAK don't have lines and are skipped. Each
+     *  variant has its own cooldown so seeing a brown panda and then a worried
+     *  panda later can fire both lines. */
+    private static boolean tryPandaProximity(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+        List<PandaEntity> pandas = world.getEntitiesByClass(
+                PandaEntity.class, box, p -> p != null && p.isAlive());
+        if (pandas.isEmpty()) return false;
+
+        // Walk the list once to find the highest-priority gene present.
+        boolean hasBrown = false;
+        boolean hasAggressive = false;
+        boolean hasWorried = false;
+        boolean hasLazy = false;
+        for (PandaEntity p : pandas) {
+            switch (p.getMainGene()) {
+                case BROWN -> hasBrown = true;
+                case AGGRESSIVE -> hasAggressive = true;
+                case WORRIED -> hasWorried = true;
+                case LAZY -> hasLazy = true;
+                default -> { /* NORMAL / PLAYFUL / WEAK don't have lines */ }
+            }
+        }
+
+        if (hasBrown && RNG.nextDouble() <= 0.20D
+                && tryTrigger(bot, "panda_brown", PANDA_BROWN_LINES, null, false)) {
+            return true;
+        }
+        if (hasAggressive && RNG.nextDouble() <= 0.10D
+                && tryTrigger(bot, "panda_aggressive", PANDA_AGGRESSIVE_LINES, null, false)) {
+            return true;
+        }
+        if (hasWorried && RNG.nextDouble() <= 0.08D
+                && tryTrigger(bot, "panda_worried", PANDA_WORRIED_LINES, null, false)) {
+            return true;
+        }
+        if (hasLazy && RNG.nextDouble() <= 0.06D
+                && tryTrigger(bot, "panda_lazy", PANDA_LAZY_LINES, null, false)) {
+            return true;
         }
         return false;
     }

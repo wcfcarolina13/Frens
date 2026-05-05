@@ -692,6 +692,13 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_GLOW_SQUID_PRETTY, "Pretty.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_DOLPHIN_DID_YOU_SEE, "Did you see that dolphin?");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_VEX_GOBLINS_WINGS, "Goblins with wings! Duck and cover!");
+
+        // May 2026 backlog — fox/ocelot near chickens + panda variants
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOX_OCELOT_NEAR_CHICKENS, "Don't let it near the chickens.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_WORRIED, "That panda looks stressed.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_LAZY, "Lying down on the job, eh?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_BROWN, "A brown panda. That's special.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_AGGRESSIVE, "That one looks angry. Give it space.");
     }
 
     private BotDialoguePlayer() {

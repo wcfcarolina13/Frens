@@ -2,6 +2,25 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fox/ocelot + chicken conjunction line + panda variant-keyed lines (2026-05-05, 1.1.60)
+
+Continued the May 2026 dialogue backlog. 5 lines across 2 new triggers in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).
+
+**`tryFoxOcelotNearChickens`** — combined-condition scan within 12 blocks. Fires `LINE_FOX_OCELOT_NEAR_CHICKENS` ("Don't let it near the chickens.") only when a `FoxEntity` or `OcelotEntity` AND a `ChickenEntity` are both in range. 10% roll, 5-min cooldown. Single shared pool — both predator types trigger the same line per spec.
+
+**`tryPandaProximity`** — variant-keyed via `PandaEntity.getMainGene()`. Walks all pandas in a 12-block scan once to determine which genes are present, then fires the highest-priority pool:
+
+- `LINE_PANDA_BROWN` ("A brown panda. That's special.") — 20% roll, 10-min cooldown. Highest priority because brown is the rarest variant (Qinling subspecies analogue).
+- `LINE_PANDA_AGGRESSIVE` ("That one looks angry. Give it space.") — 10% roll, 3-min cooldown. Combat-relevant.
+- `LINE_PANDA_WORRIED` ("That panda looks stressed.") — 8% roll, 5-min cooldown.
+- `LINE_PANDA_LAZY` ("Lying down on the job, eh?") — 6% roll, 5-min cooldown.
+
+`NORMAL`, `PLAYFUL`, and `WEAK` variants don't have lines and are skipped — the spec only requested 4 variant lines. Each variant has its own cooldown so seeing a brown panda and then a worried panda later can fire both.
+
+Verified `PandaEntity.getMainGene()` and the 7-member `Gene` enum (NORMAL/LAZY/WORRIED/PLAYFUL/BROWN/WEAK/AGGRESSIVE) in the 1.21.11 yarn mappings before committing — wiki MCP + mappings cross-check, no training-data assumptions.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## 4 aquatic + raid mob-proximity dialogue lines (2026-05-05, 1.1.59)
 
 Continued the May 2026 dialogue backlog. 4 simple proximity lines, all in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java), all scaffolded with empty `sounds[]` for parallel TTS.

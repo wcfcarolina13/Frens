@@ -5295,5 +5295,25 @@
   "bot.line.vex_goblins_wings": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.fox_ocelot_near_chickens": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_worried": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_lazy": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_brown": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_aggressive": {
+    "category": "voice",
+    "sounds": []
   }
 }
