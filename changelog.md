@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Cute-animal "can we keep it?" pool (2026-05-05, 1.1.61)
+
+`tryCuteAnimalNearby` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java). Single 12-block scan over a multi-class predicate: `FoxEntity`, `OcelotEntity`, `AxolotlEntity`, `BeeEntity`, `RabbitEntity`, `TurtleEntity`, `PandaEntity`, `ParrotEntity` (untamed only — tamed parrots already trigger `LINE_PARROT_NEARBY_NICE_BIRD`). Sniffers excluded per spec since they have their own dedicated line.
+
+4 weighted lines:
+
+- `LINE_CUTE_ANIMAL_KEEP_IT` ("Can we keep it?") — UNCOMMON
+- `LINE_CUTE_ANIMAL_LOOK_AT_IT` ("Look at it!") — COMMON
+- `LINE_CUTE_ANIMAL_WANT_ONE` ("I want one of those.") — UNCOMMON
+- `LINE_CUTE_ANIMAL_SO_CUTE` ("It's so cute.") — COMMON
+
+5% roll, 8-min cooldown — flavor remark, not chatter. Dispatched AFTER `tryFoxOcelotNearChickens` and `tryPandaProximity` so those more-specific triggers win when applicable: foxes near chickens fire the chicken-specific line, pandas with BROWN/AGGRESSIVE/WORRIED/LAZY genes fire variant lines, and only NORMAL/PLAYFUL/WEAK pandas (no variant line) fall through to this pool.
+
+Verified `AxolotlEntity`, `BeeEntity`, `RabbitEntity`, `ParrotEntity`, `TurtleEntity` class paths in 1.21.11 yarn mappings before importing.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Fox/ocelot + chicken conjunction line + panda variant-keyed lines (2026-05-05, 1.1.60)
 
 Continued the May 2026 dialogue backlog. 5 lines across 2 new triggers in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).

@@ -879,6 +879,12 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_PANDA_BROWN = register("bot.line.panda_brown");
     public static final SoundEvent LINE_PANDA_AGGRESSIVE = register("bot.line.panda_aggressive");
 
+    // Cute-animal "can we keep it?" pool — fires near various untamed cute mobs.
+    public static final SoundEvent LINE_CUTE_ANIMAL_KEEP_IT = register("bot.line.cute_animal_keep_it");
+    public static final SoundEvent LINE_CUTE_ANIMAL_LOOK_AT_IT = register("bot.line.cute_animal_look_at_it");
+    public static final SoundEvent LINE_CUTE_ANIMAL_WANT_ONE = register("bot.line.cute_animal_want_one");
+    public static final SoundEvent LINE_CUTE_ANIMAL_SO_CUTE = register("bot.line.cute_animal_so_cute");
+
     private BotDialogueSounds() {
     }
 

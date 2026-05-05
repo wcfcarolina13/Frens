@@ -14,14 +14,19 @@ import net.minecraft.entity.mob.PiglinBruteEntity;
 import net.minecraft.entity.mob.VexEntity;
 import net.minecraft.entity.mob.WardenEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
+import net.minecraft.entity.passive.AxolotlEntity;
+import net.minecraft.entity.passive.BeeEntity;
 import net.minecraft.entity.passive.ChickenEntity;
 import net.minecraft.entity.passive.DolphinEntity;
 import net.minecraft.entity.passive.FoxEntity;
 import net.minecraft.entity.passive.GlowSquidEntity;
 import net.minecraft.entity.passive.OcelotEntity;
 import net.minecraft.entity.passive.PandaEntity;
+import net.minecraft.entity.passive.ParrotEntity;
+import net.minecraft.entity.passive.RabbitEntity;
 import net.minecraft.entity.passive.SnifferEntity;
 import net.minecraft.entity.passive.SquidEntity;
+import net.minecraft.entity.passive.TurtleEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.Items;
@@ -213,6 +218,15 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] PANDA_AGGRESSIVE_LINES = new WeightedLine[] {
             new WeightedLine("panda_aggressive", "That one looks angry. Give it space.", BotDialogueSounds.LINE_PANDA_AGGRESSIVE, WEIGHT_COMMON)
+    };
+
+    // Cute-animal pool — fires near various untamed cute mobs. Dispatched AFTER the
+    // more-specific triggers above (fox+chicken, panda variants) so those win first.
+    private static final WeightedLine[] CUTE_ANIMAL_LINES = new WeightedLine[] {
+            new WeightedLine("cute_animal_keep_it", "Can we keep it?", BotDialogueSounds.LINE_CUTE_ANIMAL_KEEP_IT, WEIGHT_UNCOMMON),
+            new WeightedLine("cute_animal_look_at_it", "Look at it!", BotDialogueSounds.LINE_CUTE_ANIMAL_LOOK_AT_IT, WEIGHT_COMMON),
+            new WeightedLine("cute_animal_want_one", "I want one of those.", BotDialogueSounds.LINE_CUTE_ANIMAL_WANT_ONE, WEIGHT_UNCOMMON),
+            new WeightedLine("cute_animal_so_cute", "It's so cute.", BotDialogueSounds.LINE_CUTE_ANIMAL_SO_CUTE, WEIGHT_COMMON)
     };
 
     // Wandering-trader proximity — flat pool of all trader topic lines. The
@@ -536,6 +550,7 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("panda_lazy", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("panda_brown", 10L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("panda_aggressive", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("cute_animal_nearby", 8L * 60L * 1000L);
     }
 
     private CompanionContextReactionService() {
@@ -641,6 +656,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryPandaProximity(bot, world, state)) {
+                continue;
+            }
+            if (tryCuteAnimalNearby(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1499,6 +1517,32 @@ public final class CompanionContextReactionService {
 
         if (RNG.nextDouble() > 0.10D) return false;
         return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+    }
+
+    /** Cute-animal "can we keep it?" pool — fires near untamed cute mobs. Runs
+     *  AFTER the fox+chicken and panda-variant triggers above so those win when
+     *  applicable. Pandas with NORMAL/PLAYFUL/WEAK genes (no variant line) fall
+     *  through to this pool, as do tamed parrots? No — only UNTAMED parrots
+     *  count, since tamed parrots already trigger LINE_PARROT_NEARBY_NICE_BIRD.
+     *  Long cooldown (8 min) per spec — this is a flavor remark, not chatter. */
+    private static boolean tryCuteAnimalNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+        boolean any = !world.getOtherEntities(bot, box, e -> {
+            if (e == null || !e.isAlive()) return false;
+            if (e instanceof FoxEntity) return true;
+            if (e instanceof OcelotEntity) return true;
+            if (e instanceof AxolotlEntity) return true;
+            if (e instanceof BeeEntity) return true;
+            if (e instanceof RabbitEntity) return true;
+            if (e instanceof TurtleEntity) return true;
+            if (e instanceof PandaEntity) return true;
+            if (e instanceof ParrotEntity p) return !p.isTamed();
+            return false;
+        }).isEmpty();
+        if (!any) return false;
+        if (RNG.nextDouble() > 0.05D) return false;
+        return tryTrigger(bot, "cute_animal_nearby", CUTE_ANIMAL_LINES, null, false);
     }
 
     /** Variant-keyed panda proximity reactions. Iterates all pandas in a 12-block

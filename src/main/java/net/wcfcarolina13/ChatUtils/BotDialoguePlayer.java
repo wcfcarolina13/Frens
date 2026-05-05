@@ -699,6 +699,12 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_LAZY, "Lying down on the job, eh?");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_BROWN, "A brown panda. That's special.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_PANDA_AGGRESSIVE, "That one looks angry. Give it space.");
+
+        // May 2026 backlog — cute-animal "can we keep it?" pool
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_KEEP_IT, "Can we keep it?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_LOOK_AT_IT, "Look at it!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_WANT_ONE, "I want one of those.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_SO_CUTE, "It's so cute.");
     }
 
     private BotDialoguePlayer() {

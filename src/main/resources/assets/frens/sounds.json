@@ -5315,5 +5315,21 @@
   "bot.line.panda_aggressive": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.cute_animal_keep_it": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.cute_animal_look_at_it": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.cute_animal_want_one": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.cute_animal_so_cute": {
+    "category": "voice",
+    "sounds": []
   }
 }
