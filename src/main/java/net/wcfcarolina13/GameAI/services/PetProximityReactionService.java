@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.entity.passive.AbstractNautilusEntity;
 import net.minecraft.entity.passive.CamelEntity;
+import net.minecraft.entity.passive.CatEntity;
 import net.minecraft.entity.passive.NautilusEntity;
 import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.passive.WolfEntity;
@@ -34,6 +35,7 @@ public final class PetProximityReactionService {
     private static final long ANIMAL_WELL_BEHAVED_COOLDOWN_MS = 90_000L;
     private static final long MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L;
     private static final long NAUTILUS_COOLDOWN_MS = 10L * 60_000L;
+    private static final long CAT_COOLDOWN_MS = 5L * 60_000L;
 
     // Rarity weights: COMMON=10, UNCOMMON=5
     private static final int WEIGHT_COMMON = 10;
@@ -47,6 +49,7 @@ public final class PetProximityReactionService {
     private static final ConcurrentHashMap<UUID, Long> LAST_MOUNT_QUALITY_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_NAUTILUS_UNTAMED_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_NAUTILUS_TAMED_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_CAT_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Float> WOLF_LAST_HEALTH = new ConcurrentHashMap<>();
 
     private static final class WeightedLine {
@@ -93,6 +96,11 @@ public final class PetProximityReactionService {
             new WeightedLine("nautilus_ride", "You can actually ride one of these?", BotDialogueSounds.LINE_NAUTILUS_RIDE, WEIGHT_UNCOMMON)
     };
 
+    // Tamed cat — separate pool from the broad-tamed-animal line per spec ("Meow." isn't a quality assessment).
+    private static final WeightedLine[] CAT_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("cat_meow", "Meow.", BotDialogueSounds.LINE_CAT_MEOW, WEIGHT_UNCOMMON)
+    };
+
     private PetProximityReactionService() {
     }
 
@@ -121,6 +129,10 @@ public final class PetProximityReactionService {
 
             if (hasNearbyMountAnimal(world, bot)) {
                 maybeMountQuality(bot);
+            }
+
+            if (hasNearbyTamedCat(world, bot)) {
+                maybeCatNearby(bot);
             }
 
             // Nautilus scans run independent of the broad pet pool above; the broad pool
@@ -158,6 +170,7 @@ public final class PetProximityReactionService {
             case "mount_quality", "animal_quality" -> playLine(bot, MOUNT_QUALITY_LINES, lineId, LAST_MOUNT_QUALITY_MS, 0L);
             case "nautilus_untamed", "nautilus_wild" -> playLine(bot, NAUTILUS_UNTAMED_LINES, lineId, LAST_NAUTILUS_UNTAMED_MS, 0L);
             case "nautilus_tamed" -> playLine(bot, NAUTILUS_TAMED_LINES, lineId, LAST_NAUTILUS_TAMED_MS, 0L);
+            case "cat_nearby", "cat_meow" -> playLine(bot, CAT_NEARBY_LINES, lineId, LAST_CAT_MS, 0L);
             default -> false;
         };
     }
@@ -174,7 +187,7 @@ public final class PetProximityReactionService {
     private static boolean hasNearbyTamedNonWolfAnimal(ServerWorld world, ServerPlayerEntity bot) {
         Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
 
-        // Exclude wolves (covered by the wolf pool) and nautiluses (covered by the dedicated nautilus pools).
+        // Exclude wolves, cats, and nautiluses — each has its own dedicated pool.
         boolean tameables = !world.getEntitiesByClass(
                 TameableEntity.class,
                 box,
@@ -182,6 +195,7 @@ public final class PetProximityReactionService {
                         && tameable.isAlive()
                         && tameable.isTamed()
                         && !(tameable instanceof WolfEntity)
+                        && !(tameable instanceof CatEntity)
                         && !(tameable instanceof AbstractNautilusEntity)
         ).isEmpty();
 
@@ -224,6 +238,15 @@ public final class PetProximityReactionService {
                 box,
                 n -> n != null && n.isAlive()
         );
+    }
+
+    private static boolean hasNearbyTamedCat(ServerWorld world, ServerPlayerEntity bot) {
+        Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
+        return !world.getEntitiesByClass(
+                CatEntity.class,
+                box,
+                cat -> cat != null && cat.isAlive() && cat.isTamed()
+        ).isEmpty();
     }
 
     private static void maybeWolfNearby(ServerPlayerEntity bot) {
@@ -275,6 +298,13 @@ public final class PetProximityReactionService {
             return;
         }
         playLine(bot, NAUTILUS_TAMED_LINES, null, LAST_NAUTILUS_TAMED_MS, NAUTILUS_COOLDOWN_MS);
+    }
+
+    private static void maybeCatNearby(ServerPlayerEntity bot) {
+        if (RNG.nextDouble() > 0.20D) {
+            return;
+        }
+        playLine(bot, CAT_NEARBY_LINES, null, LAST_CAT_MS, CAT_COOLDOWN_MS);
     }
 
     private static boolean playLine(ServerPlayerEntity bot,

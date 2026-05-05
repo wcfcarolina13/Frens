@@ -679,6 +679,13 @@ public final class BotDialoguePlayer {
         // May 2026 backlog — nautilus mob (1.21.11)
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_NAUTILUS_OCEAN_NEVER, "Never going near the ocean again.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_NAUTILUS_RIDE, "You can actually ride one of these?");
+
+        // May 2026 backlog — wild + tamed mob proximity lines
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CAT_MEOW, "Meow.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNIFFER_DINOSAUR, "Dinosaur.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_ZOMBIFIED_PIGLIN_PORKCHOP, "What's up, porkchop?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_HOGLIN_BACON_SPREE, "If they give us gravel again I'm going on a bacon spree.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PIGLIN_BRUTE_BIGGER, "That one's bigger than the others!");
     }
 
     private BotDialoguePlayer() {

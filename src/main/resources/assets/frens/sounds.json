@@ -5259,5 +5259,25 @@
   "bot.line.nautilus_ride": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.cat_meow": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.sniffer_dinosaur": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.zombified_piglin_porkchop": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.hoglin_bacon_spree": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.piglin_brute_bigger": {
+    "category": "voice",
+    "sounds": []
   }
 }

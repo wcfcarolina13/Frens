@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 5 mob-proximity dialogue lines + walking-dogs hobby spec (2026-05-05, 1.1.58)
+
+Continued the May 2026 dialogue backlog. 5 simple proximity-triggered lines, all scaffolded with empty `sounds[]` for parallel TTS.
+
+**Tamed cat — `LINE_CAT_MEOW`** ("Meow."). Goes in [PetProximityReactionService](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java) with its own pool — split out of the broad-tamed scan per the backlog spec ("this one isn't a quality assessment"). 10-block scan, 5-min cooldown, 20% roll. `CatEntity` excluded from the broad-pet scan so it doesn't double-fire alongside `animal_well_behaved`.
+
+**Sniffer — `LINE_SNIFFER_DINOSAUR`** ("Dinosaur."). [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) `trySnifferNearby`. 12-block, 5-min cooldown, 8% roll. Sniffers are rare so the cooldown is generous — keeps it a remark.
+
+**Nether neighbours — three pools, one trigger.** `tryNetherNeighbourNearby` runs three sequential pool checks within a single 12-block scan, in priority order (rarer/weirder first):
+
+- `LINE_PIGLIN_BRUTE_BIGGER` ("That one's bigger than the others!") — `PiglinBruteEntity`, 8% roll.
+- `LINE_HOGLIN_BACON_SPREE` ("If they give us gravel again I'm going on a bacon spree.") — `HoglinEntity`, 6% roll.
+- `LINE_ZOMBIFIED_PIGLIN_PORKCHOP` ("What's up, porkchop?") — `ZombifiedPiglinEntity`, 6% roll.
+
+Each pool has its own 3-min cooldown so seeing all three Nether mobs in quick succession can fire all three lines. `tryNetherNeighbourNearby` returns true on the first successful trigger, so the priority order also serves as a "skip the rest of the scan this tick" gate when the priority mob fires.
+
+Sound events registered in [BotDialogueSounds](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) under the existing `=== MAY 2026 BACKLOG ===` section. Subtitles in [BotDialoguePlayer.SUBTITLE_MAP](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java).
+
+Debug triggers added: `cat_meow`, `sniffer_nearby` and the per-pool nether keys are reachable through the standard `tryTrigger` cooldown registry.
+
+Wiki MCP confirmed entity class paths in 1.21.11 mappings (`SnifferEntity`, `PiglinBruteEntity`, `HoglinEntity`, `ZombifiedPiglinEntity`, `CatEntity`) before importing — no training-data guessing.
+
+**Walking-dogs hobby — design captured in [RALPH_TASK.md](RALPH_TASK.md)**, not implemented yet. Spec includes pickup conditions (unnamed tamed sitting wolf within 12 blocks), physical-interaction rule (bot must walk into reach + LoS and activate the sit/stand toggle the way a player would, NOT direct `setSitting()` mutation), composition with other hobbies (runs as a passive companion-tracker, not via `TaskService.beginSkill()`), random end-of-session sit gate (~50% roll when bot returns to home/last-bed), and external cancellation (any other agent ordering the wolf to sit ends the session smoothly). Identifies hooks to grep for at implementation time and lists open design questions for the next session.
+
+Built clean on `./gradlew build -x test`. Not deployed — user is currently playing.
+
 ## Nautilus proximity dialogue + mount-quality pool split (2026-05-05, 1.1.57)
 
 Picked up the May 2026 dialogue backlog. Two scoped changes in [PetProximityReactionService](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java):

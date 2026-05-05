@@ -853,6 +853,17 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_NAUTILUS_OCEAN_NEVER = register("bot.line.nautilus_ocean_never");
     public static final SoundEvent LINE_NAUTILUS_RIDE = register("bot.line.nautilus_ride");
 
+    // Tamed cat sighting (separate from "quality animal" — cats get their own line).
+    public static final SoundEvent LINE_CAT_MEOW = register("bot.line.cat_meow");
+
+    // Sniffer sighting — rare cute mob.
+    public static final SoundEvent LINE_SNIFFER_DINOSAUR = register("bot.line.sniffer_dinosaur");
+
+    // Nether-mob proximity reactions.
+    public static final SoundEvent LINE_ZOMBIFIED_PIGLIN_PORKCHOP = register("bot.line.zombified_piglin_porkchop");
+    public static final SoundEvent LINE_HOGLIN_BACON_SPREE = register("bot.line.hoglin_bacon_spree");
+    public static final SoundEvent LINE_PIGLIN_BRUTE_BIGGER = register("bot.line.piglin_brute_bigger");
+
     private BotDialogueSounds() {
     }
 

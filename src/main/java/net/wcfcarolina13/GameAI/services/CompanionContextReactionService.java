@@ -8,10 +8,14 @@ import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.TntEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.EndermanEntity;
+import net.minecraft.entity.mob.HoglinEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.mob.PiglinBruteEntity;
 import net.minecraft.entity.mob.WardenEntity;
+import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.passive.ChickenEntity;
 import net.minecraft.entity.passive.DolphinEntity;
+import net.minecraft.entity.passive.SnifferEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.item.Items;
@@ -142,6 +146,25 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] ENDERMAN_SPOTTED_LINES = new WeightedLine[] {
             new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
+    };
+
+    // Sniffer — rare cute mob, "Dinosaur." reaction.
+    private static final WeightedLine[] SNIFFER_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("sniffer_dinosaur", "Dinosaur.", BotDialogueSounds.LINE_SNIFFER_DINOSAUR, WEIGHT_COMMON)
+    };
+
+    // Nether neighbours — three separate pools, each its own cooldown so the bot
+    // can react to a piglin brute even if it just commented on a hoglin.
+    private static final WeightedLine[] ZOMBIFIED_PIGLIN_LINES = new WeightedLine[] {
+            new WeightedLine("zombified_piglin_porkchop", "What's up, porkchop?", BotDialogueSounds.LINE_ZOMBIFIED_PIGLIN_PORKCHOP, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] HOGLIN_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("hoglin_bacon_spree", "If they give us gravel again I'm going on a bacon spree.", BotDialogueSounds.LINE_HOGLIN_BACON_SPREE, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PIGLIN_BRUTE_LINES = new WeightedLine[] {
+            new WeightedLine("piglin_brute_bigger", "That one's bigger than the others!", BotDialogueSounds.LINE_PIGLIN_BRUTE_BIGGER, WEIGHT_COMMON)
     };
 
     // Wandering-trader proximity — flat pool of all trader topic lines. The
@@ -451,6 +474,11 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("tnt_sequence_start", 5L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("tnt_sequence_step", 500L);
         TRIGGER_COOLDOWN_MS.put("outdoor_ambient", COOLDOWN_META_MS);
+        // May 2026 — wild mob proximity reactions
+        TRIGGER_COOLDOWN_MS.put("sniffer_nearby", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("zombified_piglin_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("hoglin_nearby", COOLDOWN_180S_MS);
+        TRIGGER_COOLDOWN_MS.put("piglin_brute_nearby", COOLDOWN_180S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -538,6 +566,12 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryTraderOrLlamaNearby(bot, world, state)) {
+                continue;
+            }
+            if (trySnifferNearby(bot, world, state)) {
+                continue;
+            }
+            if (tryNetherNeighbourNearby(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1279,6 +1313,50 @@ public final class CompanionContextReactionService {
         if (!anyInForwardCone) return false;
         if (RNG.nextDouble() > 0.06D) return false;
         return tryTrigger(bot, "enderman_spotted", ENDERMAN_SPOTTED_LINES, null, false);
+    }
+
+    /** Fires sniffer_dinosaur when a live sniffer is within 12 blocks. Sniffers
+     *  are rare (lush caves / sniffer egg hatches) so 5-min cooldown plus 8% roll
+     *  keeps the line a remark, not background chatter. */
+    private static boolean trySnifferNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+        boolean any = !world.getEntitiesByClass(
+                SnifferEntity.class, box, s -> s != null && s.isAlive()).isEmpty();
+        if (!any) return false;
+        if (RNG.nextDouble() > 0.08D) return false;
+        return tryTrigger(bot, "sniffer_nearby", SNIFFER_NEARBY_LINES, null, false);
+    }
+
+    /** Fires the appropriate Nether-neighbour line when a piglin brute / hoglin /
+     *  zombified piglin is within 12 blocks. Each mob family has its own pool +
+     *  cooldown, so seeing all three in quick succession can fire all three lines.
+     *  Priority: piglin brute (rarer + more remarkable) > hoglin > zombified piglin. */
+    private static boolean tryNetherNeighbourNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
+
+        boolean hasBrute = !world.getEntitiesByClass(
+                PiglinBruteEntity.class, box, p -> p != null && p.isAlive()).isEmpty();
+        if (hasBrute && RNG.nextDouble() <= 0.08D
+                && tryTrigger(bot, "piglin_brute_nearby", PIGLIN_BRUTE_LINES, null, false)) {
+            return true;
+        }
+
+        boolean hasHoglin = !world.getEntitiesByClass(
+                HoglinEntity.class, box, h -> h != null && h.isAlive()).isEmpty();
+        if (hasHoglin && RNG.nextDouble() <= 0.06D
+                && tryTrigger(bot, "hoglin_nearby", HOGLIN_NEARBY_LINES, null, false)) {
+            return true;
+        }
+
+        boolean hasZpiglin = !world.getEntitiesByClass(
+                ZombifiedPiglinEntity.class, box, z -> z != null && z.isAlive()).isEmpty();
+        if (hasZpiglin && RNG.nextDouble() <= 0.06D
+                && tryTrigger(bot, "zombified_piglin_nearby", ZOMBIFIED_PIGLIN_LINES, null, false)) {
+            return true;
+        }
+        return false;
     }
 
     /** Fires topic_trader_* or topic_llama_* when a wandering trader or llama is
