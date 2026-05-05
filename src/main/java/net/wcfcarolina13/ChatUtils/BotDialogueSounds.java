@@ -846,6 +846,13 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_WEATHER_THUNDER_05 = register("bot.line.weather_thunder_05");
     public static final SoundEvent LINE_WEATHER_THUNDER_06 = register("bot.line.weather_thunder_06");
 
+    // === MAY 2026 BACKLOG ===
+
+    // Nautilus mob (1.21.11): wild ocean encounter + tamed-rideable encounter.
+    // Per the wiki MCP: NautilusEntity extends TameableEntity; tame via pufferfish, ride via saddle.
+    public static final SoundEvent LINE_NAUTILUS_OCEAN_NEVER = register("bot.line.nautilus_ocean_never");
+    public static final SoundEvent LINE_NAUTILUS_RIDE = register("bot.line.nautilus_ride");
+
     private BotDialogueSounds() {
     }
 

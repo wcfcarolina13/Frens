@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Nautilus proximity dialogue + mount-quality pool split (2026-05-05, 1.1.57)
+
+Picked up the May 2026 dialogue backlog. Two scoped changes in [PetProximityReactionService](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java):
+
+**Nautilus lines (new in 1.21.11).** The wiki MCP confirmed Nautilus is a tameable, rideable ocean mob added in 1.21.11 — full spawn/taming/riding spec retrieved fresh, no training-data guessing. Two scaffolded lines with empty `sounds[]` so TTS generation can run in parallel:
+
+- `LINE_NAUTILUS_OCEAN_NEVER` — "Never going near the ocean again." Fires near a wild `NautilusEntity` (untamed). 12-block scan, 10-min cooldown, 20% roll per 20-tick check.
+- `LINE_NAUTILUS_RIDE` — "You can actually ride one of these?" Fires near a tamed `NautilusEntity`. Same scan/cooldown/roll. Tamed takes priority when both present.
+
+The scan uses `NautilusEntity` (passive) explicitly rather than `AbstractNautilusEntity`, so the future zombie-nautilus variant (in `entity.mob`, separate trigger) won't accidentally fire either pool.
+
+**`ANIMAL_NEARBY_LINES` pool split.** Per the backlog item: the old combined pool fired "That's a quality animal." every ~90s with one cat/parrot/horse in range, which felt constant. Split into:
+
+- `ANIMAL_WELL_BEHAVED_LINES` — broad tamed-non-wolf-non-nautilus pool. Keeps the 90s cooldown and "I respect a well-behaved animal." line.
+- `MOUNT_QUALITY_LINES` — only fires for tamed `AbstractHorseEntity` (covers horse/donkey/mule/llama/trader-llama) or any living `CamelEntity`. Camels have no vanilla tame system in 1.21.11 so any nearby living camel counts. 5-min cooldown so the line stays a remark, not background chatter.
+
+Also excluded `AbstractNautilusEntity` from the broad scan so a tamed nautilus only triggers the dedicated nautilus line, not the broad-pet line on top of it.
+
+Subtitles wired in [BotDialoguePlayer.SUBTITLE_MAP](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java). Sound events registered in [BotDialogueSounds](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) under a new `// === MAY 2026 BACKLOG ===` section. `sounds.json` entries use empty `sounds[]` arrays following the same scaffold pattern as the April 2026 backlog commit (`33e81fe`). Debug triggers added: `nautilus_untamed`, `nautilus_tamed`, `mount_quality`.
+
+Built clean on `./gradlew build -x test`. Not deployed — backlog items 12+ remain (pandas, foxes/ocelots, cats, zombified piglins, hoglins, piglin brutes, sniffers, vexes, guardians, elder guardians, squids, glow squids, dolphins, redstone-machine and mob-crusher detection) and the user is currently playing.
+
+Also: `CLAUDE.md` "Game / API Knowledge" section now leads with the Minecraft Wiki MCP rather than `WebFetch`, citing the Nautilus example as proof that the MCP returns 1.21.11-current data the training set doesn't have. `RALPH_TASK.md` got a matching MCP-first reminder under "Ralph Instructions."
+
+## Configure Hobbies screen: optimistic toggle feedback + per-hobby tooltips (2026-05-04)
+
+User reported that toggling a hobby in the new menu only showed visible `[x]/[ ]` flip after closing and reopening the screen. Root cause: the screen sent the chat command and immediately rebuilt buttons, but the server's `botStats[25]` bitmask resync arrives a tick or two later — so the rebuilt buttons read the OLD authoritative state.
+
+Fix in [ConfigureHobbiesScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/ConfigureHobbiesScreen.java): added a `Map<String, Boolean> localOverrides` that flips immediately on click. Render reads from override-first, falling back to `handler.isHobbyAllowed(name)`. A `reconcileOverrides()` pass on each `render()` drops any override whose value already matches the handler's authoritative state, so once the server resyncs we transparently return to handler-source reads with no visible flicker.
+
+Also added `Tooltip.of(...)` per hobby button — short factual descriptions, with a red §c warning on Mine Stone calling out the surface-mining bug and on Wander explaining it's the default fallback. Tooltips use the existing pattern from CompanionSpellsScreen.
+
 ## Idle hobbies: per-hobby on/off menu so the user can pick which hobbies a bot is allowed to do (2026-05-03)
 
 The master Idle Hobbies switch was all-or-nothing — when a hobby misbehaves (e.g. mining destroying surface terrain in [the latest.log autopsy](src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java#L1345)), the user had to disable everything to stop it. Now there's per-hobby control.

@@ -675,6 +675,10 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEATHER_THUNDER_04, "That lightning is close!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEATHER_THUNDER_05, "I don't like the sound of that thunder.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEATHER_THUNDER_06, "Bad time to be outside.");
+
+        // May 2026 backlog — nautilus mob (1.21.11)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_NAUTILUS_OCEAN_NEVER, "Never going near the ocean again.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_NAUTILUS_RIDE, "You can actually ride one of these?");
     }
 
     private BotDialoguePlayer() {

@@ -5251,5 +5251,13 @@
       { "name": "frens:dialogue/wolf_nearby_skinwalker__02", "weight": 1 },
       { "name": "frens:dialogue/wolf_nearby_skinwalker__03", "weight": 1 }
     ]
+  },
+  "bot.line.nautilus_ocean_never": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.nautilus_ride": {
+    "category": "voice",
+    "sounds": []
   }
 }

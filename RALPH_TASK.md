@@ -275,6 +275,8 @@ No active Ralph criteria. Pick from the backlog below when starting a new iterat
 6. When ALL criteria are [x], say: "RALPH COMPLETE"
 7. If stuck 3+ times on same issue, say: "RALPH GUTTER"
 
+**For any vanilla-game knowledge** (mob behavior, entity classes, item names, block properties, drops, recipes, biome rules), use the **Minecraft Wiki MCP** (`MinecraftWiki_searchWiki`, `MinecraftWiki_getPageSummary`, `MinecraftWiki_getPageSection`) **before relying on training data**. 1.21.11 ships with content that postdates training (e.g. the rideable Nautilus mob, Mounts of Mayhem); training-data assertions about new mobs/items will be wrong. See CLAUDE.md "Game / API Knowledge" + "MCP integrations for this work" for the full guidance.
+
 ---
 
 # Backlog
@@ -425,6 +427,69 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 - [ ] Command queuing (multi-step instructions)
 - [ ] Voiced banter variants for follow-adventure lines
+
+### Dialogue / Voiced Lines (backlog 2026-05-04)
+
+New mob-proximity and context-triggered ambient lines. All would extend the existing dialogue pipeline (`PetProximityReactionService` / `CompanionOverheadDialogueService` / `BotDialoguePlayer` / `BotDialogueSounds` + subtitle map in `BotDialoguePlayer.SUBTITLE_MAP` + `DialogueTextMapper.EXACT_MAP`). New OGGs need to be staged + wired through `BotDialogueSounds` constants.
+
+**Cute-animal "can we keep it?" pool** — fires near untamed cute mobs. Candidates: foxes, ocelots, axolotls, pandas, bees, rabbits, parrots, sniffers (already have own line below), turtles. Long cooldown (~5–10 min/bot).
+
+**Pandas** — variant-specific lines keyed off `PandaEntity.getMainGene()` (NORMAL / LAZY / WORRIED / PLAYFUL / WEAK / BROWN / AGGRESSIVE). At minimum:
+
+- Worried → "That panda looks stressed."
+- Lazy → reference to flopping over.
+- Brown → rare-variant callout.
+- Aggressive → wariness line.
+
+**Foxes & ocelots** — "Don't let it near the chickens." Single shared pool, fires when a fox or ocelot is within ~12 blocks AND a chicken is within ~12 blocks of the bot.
+
+**Cats** — literal "Meow." line near tamed cats. Probably a separate pool from the existing tamed-animal-nearby pool (this one isn't a quality assessment).
+
+**Zombified piglins** — "What's up, porkchop?" near `ZombifiedPiglinEntity` (current name; was "zombie pigman" pre-1.16).
+
+**Hoglins** — "If they give us gravel again I'm going on a bacon spree." near `HoglinEntity`. (Reference to piglins bartering gravel.)
+
+**Piglin brutes** — "That one's bigger than the others!" near `PiglinBruteEntity`. (User originally said "hoglin brute" — there's no such mob; this is the piglin brute.)
+
+**Sniffers** — "Dinosaur." or "That's the cutest thing I've ever seen." near `SnifferEntity`.
+
+**Vexes** — "Goblins with wings! Duck and cover!" near `VexEntity`.
+
+**Guardians** — fires near `GuardianEntity` (ocean monuments). Wiki notes the guardian's eye follows the player and the laser charges over 4 seconds, going purple → yellow. Two trigger states:
+
+- Proximity (mere sighting, ~16 blocks): "It's staring right at me." / "I don't like the way it's looking at us."
+- Laser-charging (when guardian has begun beam wind-up on the bot or commander): "Why is it glowing at me?!" / "That beam is gonna hurt — move!"
+
+**Elder guardians** — fires near `ElderGuardianEntity`. Rarer/more-emphatic pool: "That one's the boss. We should leave." / "Mining Fatigue incoming, I just know it." (References the iconic Mining Fatigue debuff Elder Guardians inflict.)
+
+**Squids** — fires near `SquidEntity` underwater. Benign tone:
+
+- "Just a squid." (mundane)
+- When ink cloud spawns nearby (squid was hit): "...Ew."
+
+**Glow squids** — fires near `GlowSquidEntity` (deep dark water, Y < 30). Curious tone:
+
+- "Pretty." / "It's glowing." (single-word delivery preferred, since it's an "aqua luminescent" rare passive)
+- "Grab the ink — that color's rare." (only the glow variant drops glow ink sacs)
+
+**Dolphins** — "Did you see that dolphin?" Fires when a `DolphinEntity` enters the bot's view cone within ~16 blocks.
+
+**Nautilus, untamed** — "Never going near the ocean again." Fires near a wild `NautilusEntity` (or whatever the entity class is named in 1.21.11; per [minecraft.wiki/w/Nautilus](https://minecraft.wiki/w/Nautilus) they're neutral mobs that spawn 1–3 per group in all ocean biomes between Y 38–58, retaliate when attacked, and dash at pufferfish — so the fearful-traveler tone fits).
+
+**Nautilus, tamed** — "You can actually ride one of these?" Fires near a tamed nautilus (pufferfish-tamed, saddle-equipped). Per the wiki, ridden nautiluses grant "Breath of the Nautilus" (oxygen-pause underwater) and have a dash ability — a second optional line could reference the dash: "It just *jumped* through the water!" Confirm the entity class and tamed-flag accessor at implementation time.
+
+**Redstone machines (proximity)** — fires near complex redstone setups. Lines: "Tech-o-no-lo-hee-ah" / "We literally went to hell and back to build this."
+
+- Lowest-impact detection proposal: on the existing 20-tick idle scan, count powered redstone components (repeaters, comparators, observers, pistons, dispensers) with `block.hasComparatorOutput()` or `state.get(Properties.POWERED) == true` in a 5×5×5 box around the bot. Threshold ≥ 4 components AND ≥ 2 distinct block types triggers the pool. 90s cooldown. Skips if bot is already in a pre-classified base structure.
+
+**Mob-crusher detection (anti-cruelty line)** — "Totally humane." / "100% cruelty free." / "There's a special place in the Nether for whoever built this."
+
+- Lowest-impact detection proposal: scan within ~8 blocks for any `BlockPos` containing ≥ 6 living entities of the same passive type (cows, sheep, pigs, chickens, villagers — explicitly **excludes** hostile mobs per user spec, so skeleton/zombie grinders don't fire). Use `world.getEntitiesByClass(LivingEntity.class, smallBox, …)` filtered to passives, grouped by type. Long cooldown (~10 min/bot) since the line is editorial, not a scan-frequent reaction.
+
+**"That's a quality animal."** — scope down + slow down.
+
+- Currently in [PetProximityReactionService.java:67-70](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L67-L70). `ANIMAL_NEARBY_LINES` fires on **any tamed non-wolf animal** (`hasNearbyTamedNonWolfAnimal` matches all `TameableEntity` + all `AbstractHorseEntity`), 20% roll per 20-tick check, 90s cooldown. With a single horse + a cat + a parrot in range it effectively fires every 90s — that's why it feels constant.
+- Fix: split the pool. Keep "I respect a well-behaved animal." on the broad tamed-animal trigger but rebuild "That's a quality animal." to fire only when an `AbstractHorseEntity`, `CamelEntity`, or `LlamaEntity`/`TraderLlamaEntity` is tamed-and-nearby. Also bump `ANIMAL_NEARBY_COOLDOWN_MS` from 90_000L to ~300_000L (5 min) for the quality pool specifically.
 
 ## LLM Integration (Future)
 
