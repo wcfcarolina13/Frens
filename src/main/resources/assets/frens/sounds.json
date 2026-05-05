@@ -5331,5 +5331,29 @@
   "bot.line.cute_animal_so_cute": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.guardian_staring_right": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.guardian_dont_like": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.guardian_glowing": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.guardian_beam_hurt": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.elder_guardian_boss": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.elder_guardian_fatigue": {
+    "category": "voice",
+    "sounds": []
   }
 }

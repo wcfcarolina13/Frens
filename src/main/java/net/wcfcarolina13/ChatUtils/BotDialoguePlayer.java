@@ -705,6 +705,14 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_LOOK_AT_IT, "Look at it!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_WANT_ONE, "I want one of those.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_CUTE_ANIMAL_SO_CUTE, "It's so cute.");
+
+        // May 2026 backlog — guardian + elder guardian
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_STARING_RIGHT, "It's staring right at me.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_DONT_LIKE, "I don't like the way it's looking at us.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_GLOWING, "Why is it glowing at me?!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, "That beam is gonna hurt — move!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_BOSS, "That one's the boss. We should leave.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_FATIGUE, "Mining Fatigue incoming, I just know it.");
     }
 
     private BotDialoguePlayer() {

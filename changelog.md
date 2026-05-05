@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Guardian + elder guardian proximity dialogue (2026-05-05, 1.1.62)
+
+`tryGuardianFamily` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java). Single 16-block scan, three state branches in priority order:
+
+1. **Elder guardian present** — wins outright (rarer, more emphatic encounter). 20% roll, 8-min cooldown. Two lines:
+   - `LINE_ELDER_GUARDIAN_BOSS` ("That one's the boss. We should leave.")
+   - `LINE_ELDER_GUARDIAN_FATIGUE` ("Mining Fatigue incoming, I just know it.")
+2. **Regular guardian charging at us** — `guardian.hasBeamTarget()` AND beam target is bot or commander. 30% roll, **60s** cooldown so the bot can re-react during sustained combat. Two lines:
+   - `LINE_GUARDIAN_GLOWING` ("Why is it glowing at me?!")
+   - `LINE_GUARDIAN_BEAM_HURT` ("That beam is gonna hurt — move!")
+3. **Regular guardian present, not charging at us** — fallback proximity pool. 10% roll, 5-min cooldown. Two lines:
+   - `LINE_GUARDIAN_STARING_RIGHT` ("It's staring right at me.")
+   - `LINE_GUARDIAN_DONT_LIKE` ("I don't like the way it's looking at us.")
+
+`ElderGuardianEntity` extends `GuardianEntity`, so the regular-guardian scan filters out elder instances to keep the priority hierarchy clean. Commander resolved via the existing `findNearbyCommander` helper (24-block scan).
+
+Verified `GuardianEntity.hasBeamTarget()` and `getBeamTarget()` accessors in 1.21.11 yarn mappings. The "charging" detection uses these public methods rather than reading the DataTracker directly — clean and stable across versions.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Cute-animal "can we keep it?" pool (2026-05-05, 1.1.61)
 
 `tryCuteAnimalNearby` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java). Single 12-block scan over a multi-class predicate: `FoxEntity`, `OcelotEntity`, `AxolotlEntity`, `BeeEntity`, `RabbitEntity`, `TurtleEntity`, `PandaEntity`, `ParrotEntity` (untamed only — tamed parrots already trigger `LINE_PARROT_NEARBY_NICE_BIRD`). Sniffers excluded per spec since they have their own dedicated line.

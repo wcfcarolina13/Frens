@@ -885,6 +885,16 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_CUTE_ANIMAL_WANT_ONE = register("bot.line.cute_animal_want_one");
     public static final SoundEvent LINE_CUTE_ANIMAL_SO_CUTE = register("bot.line.cute_animal_so_cute");
 
+    // Guardian (ocean monument) — proximity + laser-charging states.
+    public static final SoundEvent LINE_GUARDIAN_STARING_RIGHT = register("bot.line.guardian_staring_right");
+    public static final SoundEvent LINE_GUARDIAN_DONT_LIKE = register("bot.line.guardian_dont_like");
+    public static final SoundEvent LINE_GUARDIAN_GLOWING = register("bot.line.guardian_glowing");
+    public static final SoundEvent LINE_GUARDIAN_BEAM_HURT = register("bot.line.guardian_beam_hurt");
+
+    // Elder guardian — rarer/more-emphatic pool.
+    public static final SoundEvent LINE_ELDER_GUARDIAN_BOSS = register("bot.line.elder_guardian_boss");
+    public static final SoundEvent LINE_ELDER_GUARDIAN_FATIGUE = register("bot.line.elder_guardian_fatigue");
+
     private BotDialogueSounds() {
     }
 

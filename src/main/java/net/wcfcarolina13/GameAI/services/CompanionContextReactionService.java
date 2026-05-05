@@ -8,6 +8,8 @@ import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.TntEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.EndermanEntity;
+import net.minecraft.entity.mob.ElderGuardianEntity;
+import net.minecraft.entity.mob.GuardianEntity;
 import net.minecraft.entity.mob.HoglinEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.PiglinBruteEntity;
@@ -218,6 +220,23 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] PANDA_AGGRESSIVE_LINES = new WeightedLine[] {
             new WeightedLine("panda_aggressive", "That one looks angry. Give it space.", BotDialogueSounds.LINE_PANDA_AGGRESSIVE, WEIGHT_COMMON)
+    };
+
+    // Guardian (regular) — proximity vs laser-charging are split into two pools.
+    private static final WeightedLine[] GUARDIAN_PROXIMITY_LINES = new WeightedLine[] {
+            new WeightedLine("guardian_staring_right", "It's staring right at me.", BotDialogueSounds.LINE_GUARDIAN_STARING_RIGHT, WEIGHT_COMMON),
+            new WeightedLine("guardian_dont_like", "I don't like the way it's looking at us.", BotDialogueSounds.LINE_GUARDIAN_DONT_LIKE, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] GUARDIAN_CHARGING_LINES = new WeightedLine[] {
+            new WeightedLine("guardian_glowing", "Why is it glowing at me?!", BotDialogueSounds.LINE_GUARDIAN_GLOWING, WEIGHT_COMMON),
+            new WeightedLine("guardian_beam_hurt", "That beam is gonna hurt — move!", BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, WEIGHT_COMMON)
+    };
+
+    // Elder guardian — rare, more emphatic. Includes the iconic Mining Fatigue gag.
+    private static final WeightedLine[] ELDER_GUARDIAN_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("elder_guardian_boss", "That one's the boss. We should leave.", BotDialogueSounds.LINE_ELDER_GUARDIAN_BOSS, WEIGHT_COMMON),
+            new WeightedLine("elder_guardian_fatigue", "Mining Fatigue incoming, I just know it.", BotDialogueSounds.LINE_ELDER_GUARDIAN_FATIGUE, WEIGHT_COMMON)
     };
 
     // Cute-animal pool — fires near various untamed cute mobs. Dispatched AFTER the
@@ -551,6 +570,9 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("panda_brown", 10L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("panda_aggressive", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("cute_animal_nearby", 8L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("guardian_proximity", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("guardian_charging", 60_000L);
+        TRIGGER_COOLDOWN_MS.put("elder_guardian_nearby", 8L * 60L * 1000L);
     }
 
     private CompanionContextReactionService() {
@@ -659,6 +681,9 @@ public final class CompanionContextReactionService {
                 continue;
             }
             if (tryCuteAnimalNearby(bot, world, state)) {
+                continue;
+            }
+            if (tryGuardianFamily(bot, world, state)) {
                 continue;
             }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
@@ -1517,6 +1542,54 @@ public final class CompanionContextReactionService {
 
         if (RNG.nextDouble() > 0.10D) return false;
         return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+    }
+
+    /** Guardian + elder guardian proximity reactions. Single 16-block scan, three
+     *  state branches:
+     *  1. Elder guardian present → wins outright (rarer, more emphatic).
+     *  2. Regular guardian targeting bot or commander (hasBeamTarget && target == us)
+     *     → laser-charging pool, short 60s cooldown so the bot can re-react if hit again.
+     *  3. Regular guardian present but not charging at us → proximity pool, 5min cd.
+     *  ElderGuardianEntity extends GuardianEntity so the regular-guardian scan
+     *  filters out elder instances. */
+    private static boolean tryGuardianFamily(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        Box box = bot.getBoundingBox().expand(16.0D, 8.0D, 16.0D);
+
+        // Elder guardian wins first if present.
+        boolean hasElder = !world.getEntitiesByClass(
+                ElderGuardianEntity.class, box, e -> e != null && e.isAlive()).isEmpty();
+        if (hasElder && RNG.nextDouble() <= 0.20D
+                && tryTrigger(bot, "elder_guardian_nearby", ELDER_GUARDIAN_NEARBY_LINES, null, false)) {
+            return true;
+        }
+
+        List<GuardianEntity> guardians = world.getEntitiesByClass(
+                GuardianEntity.class, box,
+                g -> g != null && g.isAlive() && !(g instanceof ElderGuardianEntity));
+        if (guardians.isEmpty()) return false;
+
+        // Charging branch — fires when a guardian's beam target is the bot or commander.
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 24.0);
+        boolean chargingAtUs = false;
+        for (GuardianEntity g : guardians) {
+            if (!g.hasBeamTarget()) continue;
+            net.minecraft.entity.LivingEntity target = g.getBeamTarget();
+            if (target == null) continue;
+            if (target == bot || (commander != null && target == commander)) {
+                chargingAtUs = true;
+                break;
+            }
+        }
+        if (chargingAtUs && RNG.nextDouble() <= 0.30D
+                && tryTrigger(bot, "guardian_charging", GUARDIAN_CHARGING_LINES, null, false)) {
+            return true;
+        }
+
+        // Plain proximity branch.
+        if (RNG.nextDouble() <= 0.10D) {
+            return tryTrigger(bot, "guardian_proximity", GUARDIAN_PROXIMITY_LINES, null, false);
+        }
+        return false;
     }
 
     /** Cute-animal "can we keep it?" pool — fires near untamed cute mobs. Runs
