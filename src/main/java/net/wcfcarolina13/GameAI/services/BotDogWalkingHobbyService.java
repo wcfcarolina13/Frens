@@ -14,6 +14,8 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -169,6 +171,20 @@ public final class BotDogWalkingHobbyService {
         long duration = MIN_SESSION_TICKS
                 + (long) (RNG.nextDouble() * (MAX_SESSION_TICKS - MIN_SESSION_TICKS));
         SESSIONS.put(botId, new Session(wolf.getUuid(), tick + duration));
+
+        // Voiced session-start line — pick one of "Who's a good dog?" / "Going for walkies."
+        playSessionStartLine(bot);
+    }
+
+    /** Pool of two session-start lines, each fired with 50/50 weight. Plays the audio
+     *  via the standard BotDialoguePlayer path; the overhead-text companion line falls
+     *  out of the SUBTITLE_MAP entry. */
+    private static void playSessionStartLine(ServerPlayerEntity bot) {
+        boolean useGoodDog = RNG.nextBoolean();
+        BotDialoguePlayer.playSoundForBotDetailed(
+                bot,
+                useGoodDog ? BotDialogueSounds.LINE_WALK_DOGS_GOOD_DOG
+                           : BotDialogueSounds.LINE_WALK_DOGS_WALKIES);
     }
 
     private static void advanceSession(MinecraftServer server, ServerWorld world,

@@ -5375,5 +5375,13 @@
   "bot.line.redstone_machine_hell_and_back": {
     "category": "voice",
     "sounds": []
+  },
+  "bot.line.walk_dogs_good_dog": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.walk_dogs_walkies": {
+    "category": "voice",
+    "sounds": []
   }
 }

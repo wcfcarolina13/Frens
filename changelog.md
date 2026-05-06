@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Walking-dogs: voiced session-start line (2026-05-06, 1.1.67)
+
+Closes the first deferred follow-up from the walking-dogs hobby work in 1.1.65. New 2-line pool fires once per session start in [BotDogWalkingHobbyService](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java) right after the wolf actually flips to standing and the session is recorded:
+
+- `LINE_WALK_DOGS_GOOD_DOG` ("Who's a good dog?")
+- `LINE_WALK_DOGS_WALKIES` ("Going for walkies.")
+
+50/50 coin flip per fire. Audio plays via `BotDialoguePlayer.playSoundForBotDetailed`; the overhead-text companion comes from the standard SUBTITLE_MAP entry, same wiring as every other voiced bot line. Empty `sounds[]` arrays scaffolded for parallel TTS generation.
+
+Dispatch is gated by the existing session-start path — the call is placed *after* `SESSIONS.put(...)`, so the line only fires when (a) the wolf was eligible, (b) `ensureNonFoodInMainHand` succeeded, (c) `BotActions.interactEntity` returned accepted, and (d) the post-interact `wolf.isSitting()` re-check confirmed the toggle worked. No risk of the line firing on a misfire.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Walking-dogs: strip food + golden-* items from hand before wolf interact (2026-05-06, 1.1.66)
 
 User concern: wolves' feedable item list keeps growing across Minecraft versions (rabbit stew, tropical fish, golden apples / carrots in current vanilla, plus a rumored golden-dandelion-style item in an upcoming snapshot). When the bot wants to walk a dog, having any of these in main hand causes the right-click to feed the wolf instead of toggling sit/stand — wasting valuable items and silently failing to start the session.

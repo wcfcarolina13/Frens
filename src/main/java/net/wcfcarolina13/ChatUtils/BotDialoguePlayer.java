@@ -722,6 +722,10 @@ public final class BotDialoguePlayer {
         // May 2026 backlog — redstone-machine proximity pool
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_REDSTONE_MACHINE_TECH, "Tech-o-no-lo-hee-ah");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_REDSTONE_MACHINE_HELL_AND_BACK, "We literally went to hell and back to build this.");
+
+        // Walking-dogs hobby — session-start lines
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WALK_DOGS_GOOD_DOG, "Who's a good dog?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WALK_DOGS_WALKIES, "Going for walkies.");
     }
 
     private BotDialoguePlayer() {

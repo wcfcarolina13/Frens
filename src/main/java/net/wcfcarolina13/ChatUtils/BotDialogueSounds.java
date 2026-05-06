@@ -904,6 +904,10 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_REDSTONE_MACHINE_TECH = register("bot.line.redstone_machine_tech");
     public static final SoundEvent LINE_REDSTONE_MACHINE_HELL_AND_BACK = register("bot.line.redstone_machine_hell_and_back");
 
+    // Walking-dogs hobby — fires when the bot stands a sitting wolf up to start a walk.
+    public static final SoundEvent LINE_WALK_DOGS_GOOD_DOG = register("bot.line.walk_dogs_good_dog");
+    public static final SoundEvent LINE_WALK_DOGS_WALKIES = register("bot.line.walk_dogs_walkies");
+
     private BotDialogueSounds() {
     }
 
