@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Add shelves + containers to no-break list (2026-05-06, 1.1.68)
+
+Closes a long-standing backlog item. `ProtectedStructureBlockHelper.isNeverBreakBlock` now rejects player-facing storage + workstation blocks via a new `isProtectedContainer` predicate, so bot stuck-escape / mine-escape / `breakFreeGeneric` paths can no longer accidentally destroy a chest and dump its contents while panicking.
+
+Covered:
+
+- Bookshelves: `BOOKSHELF`, `CHISELED_BOOKSHELF`
+- Chest family: `CHEST`, `TRAPPED_CHEST`, `ENDER_CHEST`, `BARREL`
+- All shulker box variants — matched via translation-key suffix `endsWith("shulker_box")` so the uncolored shulker box + all 16 dyed variants pass with one check
+- Redstone-storage: `HOPPER`, `DISPENSER`, `DROPPER`
+- Newer storage: `DECORATED_POT` (1.20+ single-slot), `CRAFTER` (1.21+ auto-crafter)
+- Active workstations: `BREWING_STAND`, `FURNACE`, `BLAST_FURNACE`, `SMOKER` — these hold fuel/input/output stacks; breaking mid-cook would dump or destroy them
+
+The new predicate is exposed publicly so other callers (e.g. mining safety paths, never-break guards) can specifically check "is this a player container?" without going through the broader `isNeverBreakBlock` umbrella. `BotRescueService`, `ReturnBaseStuckService`, `BotStuckService`, `MovementService` mine-paths, and `MiningTool` mineBlock guards all consult `isNeverBreakBlock` and inherit the new protection automatically.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Walking-dogs: voiced session-start line (2026-05-06, 1.1.67)
 
 Closes the first deferred follow-up from the walking-dogs hobby work in 1.1.65. New 2-line pool fires once per session start in [BotDogWalkingHobbyService](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java) right after the wolf actually flips to standing and the session is recorded:
