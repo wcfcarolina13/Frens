@@ -32,6 +32,31 @@ The 2026-04-20 backlog item line at the bottom of P2 Commands/UX was kept for no
 
 These are all independent follow-ups for whichever session picks them up next.
 
+## Session Notes 2026-05-06 — Backlog audit pass
+
+Swept the Backlog section against the current codebase to catch items that had quietly shipped without being checked off. Results:
+
+**Flipped to [x] with implementation pointers:**
+
+- Creeper evasion (sprint away when unarmed) — `BotEventHandler.java:3794`
+- Protected build zones (no-grief areas) — `ProtectedZoneService` (AABB zones, persisted per-world)
+- Till soil, plant seeds, harvest, replant — `PlantSeedsSkill` + `HarvestCropSkill` + `FarmSkill` cover the loop, auto-replant validated 2026-04-08
+- Tree chopping (safe climbing, late drop collection) — `WoodcutSkill` (registered hobby `woodcut`)
+- Strip mining with safety offset — `StripMineSkill`
+
+**Annotated with current-state notes (still [ ] but partial):**
+
+- Bundle-aware inventory scanning — lodestone / navigation / honey already migrated; HungerService / MiningTool / ChestStoreService still raw-slot
+- Boat support — `TravelMountHandler` covers mount/dismount/leashed-rejoin sync; free-form bot-driven boat navigation still open
+- Farm irrigation leak patching — detection shipped (`irrigationLeakReason`), patch path open
+- Animal husbandry — shears used in `WoolSkill` / `HoneyCollectSkill`; breed/pen still open
+- Create infinite water source — `FarmSkill` *uses* an existing 2×2 basin but doesn't *create* one
+- Fall-clutch / ride-sync verification items — code shipped (`BotFallSafetyService`, `RideSyncService`); just unverified in-game
+
+**Genuinely still open (large set — left as-is):** drop-sweep cobblestone loop, idle during fast-travel cooldown, furnace offload fallback, craft chest from wood, hunger-aware task interruption, smoker preference, HealingService cooked-food preference, fuel-acquisition fallback, farm underground recovery, farm proactive chest workflow, cave/structure detection, water encounter handling, shelves+containers no-break list, water location memory, fight with teammates, craft common items / armor / walls / 2-person house, recipe awareness, hunt camp shelter, multi-bot UX, advanced combat, command queuing, voiced banter for follow-adventure, quick-action buttons, shift-click inventory UI, ShelterSkill refactor, construction parity, FortifyVillageSkill Phase 2, command pruning eval, Base Manager UX polish, legacy `CompanionSpellsScreen` deletion (file still exists + still referenced by `FrensClient.java:38, 1578`), Actions-tab Regroup duplicate, Elder Scrolls dialogue/journal, LLM Phase 1+.
+
+No code changes in this audit pass — RALPH-only documentation cleanup.
+
 ---
 
 ## Session Notes 2026-04-16 — Door passage series (1.1.5 → 1.1.16)
@@ -253,7 +278,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Drop-sweep cobblestone loop**: During patrol, drop sweep detects full inventory → tries bundle (no leather) → tries chest (none) → drops 64x Cobblestone "to free space" → sweep picks it back up → repeats every ~7s indefinitely. Fix: skip "drop items to make room" when no reachable offload target exists. Log evidence: `"Store: no chest in inventory and couldn't craft one."` → `"Dropped 64x Cobblestone to free inventory space."` → sweep picks it up → cycle. See `ForkJoinPool.commonPool-worker-1` thread in logs 22:45:21–22:46:08 (2026-03-28).
 - [ ] **Idle during fast-travel cooldown**: When a bot wants to fast-travel but has an active cooldown, it should do useful things while waiting (idle hobbies if enabled, chest offloading to nearby existing chests if disabled), then fast-travel when cooldown expires. Currently the bot just sits idle. For sunset→home specifically, don't build new chests — only use existing ones.
 - [x] **Axe retrieval from nearby chests**: When the bot runs out of axes during woodcut, check nearby registered chests (via BotChestRegistryService) for wooden/stone/copper axes — nothing better than copper, nothing enchanted. Take one and continue. Currently the bot just stops or mines with bare hands/wrong tool.
-- [ ] **Bundle-aware inventory scanning**: The bot ignores items inside bundles across the entire codebase. Only lodestone compass scanning was patched. Needs a systematic fix: food detection (HungerService, isFoodItem, cookAllFoodSync), tool selection (MiningTool, armorUtils, CombatInventoryManager), crafting material checks (CraftingHelper), chest offloading (ChestStoreService), and any other inventory iteration that calls `inv.getStack(i)` without checking for `BUNDLE_CONTENTS`. Consider a shared `InventoryIterator` utility that yields both direct slots and bundle contents, so every caller gets bundle support automatically.
+- [ ] **Bundle-aware inventory scanning**: Partially shipped. Audited 2026-05-06: lodestone compass ([LodestoneCompassService](src/main/java/net/wcfcarolina13/GameAI/services/LodestoneCompassService.java)), navigation artifacts ([NavigationArtifactService:312](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L312)), [HoneyCollectSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HoneyCollectSkill.java), and [BundleService](src/main/java/net/wcfcarolina13/GameAI/services/BundleService.java) + [ArtifactScanner](src/main/java/net/wcfcarolina13/GameAI/services/ArtifactScanner.java) all read `BUNDLE_CONTENTS`. Still raw-slot in food detection (HungerService, isFoodItem, cookAllFoodSync), tool selection (MiningTool, armorUtils, CombatInventoryManager), crafting material checks (CraftingHelper), chest offloading (ChestStoreService). Consider a shared `InventoryIterator` utility that yields both direct slots and bundle contents, so every caller gets bundle support automatically.
 - [ ] **Escape-with-full-inventory**: Guard/patrol stuck escape (pillar via `ensureAtSurfaceForHobby`) fails when inventory has no room for scaffold blocks — `"pillar recovery placed no blocks"` repeated every ~12s. Bot stuck in 1-block hole with full cobblestone inventory. Consider: temporarily drop a non-essential stack, pillar out, pick it back up. Or: use cobblestone directly as scaffold material.
 
 ## P2 — Medium
@@ -307,7 +332,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 ### Navigation & Movement
 
 - [ ] Swimming parity (surface and underwater, verify behavior matches survival movement)
-- [ ] Boat support (enter, exit, navigate)
+- [ ] Boat support (enter, exit, navigate) — partial: [TravelMountHandler](src/main/java/net/wcfcarolina13/GameAI/services/TravelMountHandler.java) handles boat mount/dismount/leashed-rejoin sync (incl. ChestBoatEntity); free-form bot-driven boat *navigation* (steer, paddle to a point) is not implemented.
 - [ ] Test fishing from a boat
 - [ ] Portal following (Nether, End)
 - [ ] Cross-realm teleport command
@@ -325,13 +350,13 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 ### Combat & Safety
 
-- [ ] Creeper evasion (sprint away when unarmed)
-- [ ] Protected build zones (no-grief areas)
+- [x] Creeper evasion (sprint away when unarmed) — implemented in [BotEventHandler.java:3794](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3794): default flee sprints away within 6 blocks, raises shield within 4.5, with extra `isIgnited()` boost in scoreThreat (line 3603).
+- [x] Protected build zones (no-grief areas) — implemented as [ProtectedZoneService](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedZoneService.java) with AABB zones, persisted per-world; consulted by FeedAnimalsSkill, MiningHazardDetector, and others.
 - [ ] Fight with teammates
 - [ ] In-game check: stand near passive endermen and confirm bot does not face/aggro them; then provoke one and confirm bot can still target it once hostile
-- [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions
-- [ ] Ride sync verification: mount/dismount mirroring across entities
-- [ ] Ride sync leashed persistence: tethered after disconnect/rejoin
+- [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions — **code shipped** in [BotFallSafetyService](src/main/java/net/wcfcarolina13/GameAI/services/BotFallSafetyService.java) ("Attempts a last-second water-bucket clutch when a lethal fall is detected"); just unverified in-game.
+- [ ] Ride sync verification: mount/dismount mirroring across entities — **code shipped** in [RideSyncService](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java); just unverified in-game.
+- [ ] Ride sync leashed persistence: tethered after disconnect/rejoin — **code shipped** in [Frens.java:803-809](src/main/java/net/wcfcarolina13/Frens.java#L803-L809) (`trySecureMountBeforeDismount` + `secureLeashedMountOnDisconnect`); just unverified in-game.
 
 ### Crafting & Building
 
@@ -347,12 +372,12 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 ### Farming & Survival
 
 - [ ] **Hunger-aware task interruption**: Bot should stop working when starving instead of working until death. HungerService should trigger food acquisition: (1) search chests/barrels, (2) cook raw food (DONE: cookAllFoodSync), (3) hunt/fish (DONE: auto-hunt). Resume after eating.
-- [ ] Till soil, plant seeds, harvest, replant
-- [ ] Create infinite water source
-- [ ] Animal husbandry (shear, collect meat, pen animals)
+- [x] Till soil, plant seeds, harvest, replant — implemented across [PlantSeedsSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/PlantSeedsSkill.java), [HarvestCropSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HarvestCropSkill.java), and [FarmSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java) (full pipeline: assess site → till → irrigate → plant → harvest → replant; auto-replanting validated 2026-04-08).
+- [ ] Create infinite water source — [FarmSkill.java:332+](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L332) detects + uses an existing 2×2 still-water basin, but does NOT yet *create* one when none exists. The "create from scratch" path is still open.
+- [ ] Animal husbandry (shear, collect meat, pen animals) — partial: shears used for [WoolSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoolSkill.java) (sheep) and [HoneyCollectSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HoneyCollectSkill.java); auto-hunt collects meat. Breed/pen behavior not done.
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
-- [ ] **Farm irrigation leak patching**: Detect and patch leakage
+- [ ] **Farm irrigation leak patching**: Detection partially shipped — [FarmSkill.java:741](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L741) (`irrigationLeakReason`) flags leaks; the *patch* path (replace flowing-water cells with source / plug missing edges) is still open.
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
 - [ ] **HealingService cooked food preference**: Auto-eat should prefer cooked over raw food
 - [ ] **Smoker preference for food cooking**: resolveFurnaceTarget should prefer smokers for food-only cooking (2x faster)
@@ -372,8 +397,8 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 ### Mining & Resource Gathering
 
-- [ ] Tree chopping (safe climbing, late drop collection)
-- [ ] Strip mining with safety offset (sand, gravel, lava)
+- [x] Tree chopping (safe climbing, late drop collection) — implemented as [WoodcutSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java) (also a registered hobby `woodcut`). Mine-from-outside trunk, scaffold ascent, late drop sweep, hazard scanning, sapling replant — all shipped through 2026-04-03.
+- [x] Strip mining with safety offset (sand, gravel, lava) — implemented as [StripMineSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/StripMineSkill.java); torch placement + falling-block guards in place.
 - [ ] Cave/structure detection and reporting
 - [ ] Water encounter handling
 
