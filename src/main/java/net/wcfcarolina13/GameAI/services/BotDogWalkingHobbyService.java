@@ -1,13 +1,19 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.passive.WolfEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -144,15 +150,20 @@ public final class BotDogWalkingHobbyService {
 
         LAST_PICKUP_ATTEMPT_TICK.put(botId, tick);
 
-        // Physical interaction: face the wolf, then right-click. This routes through
-        // the same bot.interact() path used by other entity interactions in the mod —
-        // no direct setSitting() mutation.
+        // Strip food from main hand before interacting — wolves with food in their
+        // owner's hand get fed instead of toggled. Skip the wolf this tick if we
+        // can't find a non-food slot anywhere in inventory.
+        if (!ensureNonFoodInMainHand(bot)) return;
+
+        // Physical interaction: face the wolf, then right-click. Same bot.interact()
+        // path other entity interactions use — no direct setSitting() mutation.
         LookController.faceEntity(bot, wolf);
         boolean accepted = BotActions.interactEntity(bot, wolf, Hand.MAIN_HAND);
         if (!accepted) return;
 
-        // Confirm the toggle actually flipped — bot might have had wolf food in main
-        // hand and fed the wolf instead of toggling.
+        // Belt-and-suspenders: if we somehow still ended up feeding (e.g. an unknown
+        // future food item that bypasses the FOOD-component check), don't open a
+        // session — the wolf is still sitting.
         if (wolf.isSitting()) return;
 
         long duration = MIN_SESSION_TICKS
@@ -188,7 +199,7 @@ public final class BotDogWalkingHobbyService {
         // Session timer expired — try to sit the wolf if at home, otherwise just end.
         if (tick >= session.endByTick) {
             if (isAtHome(server, world, bot) && wolf.squaredDistanceTo(bot) <= INTERACT_REACH_SQ) {
-                if (RNG.nextDouble() < SIT_AT_HOME_CHANCE) {
+                if (RNG.nextDouble() < SIT_AT_HOME_CHANCE && ensureNonFoodInMainHand(bot)) {
                     LookController.faceEntity(bot, wolf);
                     BotActions.interactEntity(bot, wolf, Hand.MAIN_HAND);
                 }
@@ -220,6 +231,59 @@ public final class BotDogWalkingHobbyService {
             }
         }
         return closest;
+    }
+
+    /** Switch the bot's main hand to a non-food item before interacting with a wolf,
+     *  so the right-click toggles sit/stand instead of feeding. Wolves' feedable item
+     *  list grows over Minecraft versions (rabbit stew, tropical fish, golden apples,
+     *  golden carrots, and rumored upcoming items like a golden dandelion), so the
+     *  defensive predicate strips anything with a FOOD component AND anything whose
+     *  registry id starts with "golden_" — that catches both today's vanilla food list
+     *  and the speculative "golden dandelion" / future golden-* items even before they
+     *  ship with a FOOD component.
+     *
+     *  Strategy: if currently selected slot is risky, prefer selecting an existing
+     *  non-risky hotbar slot; failing that, swap a non-risky main-inventory stack into
+     *  the selected slot. Returns false only when EVERY inventory slot is risky — in
+     *  that case, skip the interact entirely rather than risk a misfire. */
+    private static boolean ensureNonFoodInMainHand(ServerPlayerEntity bot) {
+        PlayerInventory inv = bot.getInventory();
+        int currentSlot = MathHelper.clamp(inv.getSelectedSlot(), 0, 8);
+        if (!isWolfFeedingRisk(inv.getStack(currentSlot))) return true;
+
+        // Prefer an existing non-risky hotbar slot — empty stacks count as non-risky.
+        for (int i = 0; i < 9; i++) {
+            if (i == currentSlot) continue;
+            if (!isWolfFeedingRisk(inv.getStack(i))) {
+                BotActions.selectHotbarSlot(bot, i);
+                return true;
+            }
+        }
+
+        // No safe hotbar slot. Swap a non-risky main-inventory stack into the
+        // currently selected slot so the bot ends up holding something safe.
+        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
+            if (!isWolfFeedingRisk(inv.getStack(i))) {
+                ItemStack hotbarStack = inv.getStack(currentSlot);
+                ItemStack mainStack = inv.getStack(i);
+                inv.setStack(currentSlot, mainStack);
+                inv.setStack(i, hotbarStack);
+                inv.markDirty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Risky == has the FOOD data component (covers all current vanilla wolf-edible
+     *  food: meat, rabbit stew, tropical fish, golden apples, etc.) OR has a registry
+     *  id starting with "golden_" (defensive against upcoming items like a golden
+     *  dandelion that may become wolf-feedable in a future update). */
+    private static boolean isWolfFeedingRisk(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (stack.getComponents().contains(DataComponentTypes.FOOD)) return true;
+        Identifier id = Registries.ITEM.getId(stack.getItem());
+        return id != null && id.getPath().startsWith("golden_");
     }
 
     /** True if the bot is within {@link #AT_HOME_RADIUS} of either a registered base or

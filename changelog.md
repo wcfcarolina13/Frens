@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Walking-dogs: strip food + golden-* items from hand before wolf interact (2026-05-06, 1.1.66)
+
+User concern: wolves' feedable item list keeps growing across Minecraft versions (rabbit stew, tropical fish, golden apples / carrots in current vanilla, plus a rumored golden-dandelion-style item in an upcoming snapshot). When the bot wants to walk a dog, having any of these in main hand causes the right-click to feed the wolf instead of toggling sit/stand — wasting valuable items and silently failing to start the session.
+
+Fix in [BotDogWalkingHobbyService](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java): new `ensureNonFoodInMainHand(bot)` helper that runs **before every wolf interact** (both the initial stand-up and the at-home sit-down). Strategy:
+
+1. Inspect the currently-selected hotbar slot. If it's not risky, no-op.
+2. Scan hotbar for a non-risky slot (empty counts as non-risky) and select it.
+3. Otherwise scan the main inventory for a non-risky stack and swap it into the currently-selected hotbar slot.
+4. If every slot in the entire inventory is risky, skip the interact this tick rather than risk a misfire.
+
+"Risky" predicate (`isWolfFeedingRisk`):
+
+- Has the `FOOD` data component → catches all current vanilla wolf-edible food (raw beef, mutton, rabbit stew, tropical fish, golden apples, etc.).
+- OR registry id starts with `golden_` → defensive future-proofing against the rumored golden-dandelion / other upcoming `golden_*` items, even before they ship with a `FOOD` component.
+
+The string-prefix check is broader than strictly necessary (catches `golden_ingot`, etc.) but the bot doesn't lose anything by holding a sword or stick when toggling a wolf — over-eager-by-a-little is the right side of safety here.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Walking-dogs hobby (2026-05-06, 1.1.65)
 
 New idle-companion hobby. When the bot walks past an unnamed sitting tamed wolf during idle time, it stands the wolf up and the wolf tags along until a 3–10 minute timer expires. If the bot is back near a registered base or its last-slept bed when the timer ends, there's a 50% chance it sits the wolf again.
