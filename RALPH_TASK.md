@@ -402,24 +402,10 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 ### Hobbies (new ideas)
 
-- [ ] **Walking dogs (2026-05-05)**: New hobby — when the bot is idle and a nearby unnamed tamed wolf is sitting, the bot walks the dog for a while. Composes alongside other hobbies; doesn't claim a TaskService slot.
-  - **Pickup conditions:** unnamed (`!hasCustomName()`) tamed `WolfEntity` (`isTamed() && isSitting()`) within ~12 blocks. Wolf must be tamed by anyone (commander, the bot itself, another bot — doesn't matter), but excluded if it has a custom name (player-curated pet, hands off).
-  - **Bot performs the interaction physically, like a player would:** walk into 2-block reach + line-of-sight, then activate the wolf's sit/stand toggle the same way a right-click does. Spec says "the way a player would" — so use the existing `BotActions` interact path (`useOnEntity` style), not direct `setSitting(false)` mutation. The activation primitive should mirror what `/bot come <wolf>`-equivalent code already does for entity interaction.
-  - **Walk session:** wolf follows on its own (vanilla follow-owner-while-standing AI). Bot continues whatever else it was going to do (other hobbies, chest offload, idle wander). Random duration ~3–10 minutes per session.
-  - **Dismissal:** at end of session OR when bot returns to a registered base / last-slept bed (use `BotHomeService.getHomeBaseLocation` + `getLastSleptBed`), random ~50% roll to order a sit. Same physical-interaction rule — walk to range + LoS + activate. If the wolf has wandered off and isn't reachable, just drop the session (wolf reverts to standing-and-following until vanilla AI sits it down or the player intervenes).
-  - **External cancellation:** if anyone else (commander, another bot, another player) orders the wolf to sit while the bot's session is active, end the session smoothly — don't try to re-stand it. Detect via `WolfEntity.isSitting()` flipping true while we still hold the session, OR via `TameableEntity` data-tracker change events. Either way, this means the bot must not assume the wolf is standing just because it ordered stand earlier; check on each tick.
-  - **Concurrency:** runs on its own light tick handler (BotIdleHobbiesService side-channel or new `BotDogWalkingHobbyService`), NOT through `TaskService.beginSkill()`. The bot doesn't drop its current task to walk the dog — the dog tags along. So this is implemented as a passive companion-tracker, not a skill.
-  - **Hobby gate:** new entry in `HOBBY_BIT_ORDER` (append-only — see [project_per_hobby_toggles.md] memory). Default ON. Reachable from the Configure Hobbies menu.
-  - **Existing scaffolding to reuse:**
-    - `WolfEntity.isSitting()` / `setSitting()` for state checks (don't directly call setSitting — use the interaction path).
-    - `BotActions.useOnEntity` (or whatever the bot's right-click-on-entity primitive is — grep first).
-    - `MovementService.execute(DIRECT)` to walk to the wolf, with LoS check before the interact swing.
-    - `BotHomeService.getHomeBaseLocation(bot)` + `getLastSleptBed(bot)` for the "back at home" check.
-    - `BotPersistenceService` for per-bot session state (active wolf UUID, session-start tick).
-  - **Open design questions for next session before implementing:**
-    - Should the bot have a max # of dogs walked simultaneously? (Spec doesn't say. Default to 1 to keep behavior legible.)
-    - What happens when the wolf teleports away (vanilla owner-teleport on distance > 12)? Does the session end, or does the bot try to relocate? Default: session ends, since the wolf is back near its actual owner.
-    - Voiced line opportunity: "Who's a good dog?" / "Going for walkies." pool when starting a session.
+- [x] **Walking dogs** — implemented in 1.1.65 as [BotDogWalkingHobbyService](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java). v1 design choice: opportunistic-only (no detour to find a wolf — fires when bot is within 3 blocks of an eligible sitting wolf during idle time). Sessions 3–10 min, 50% sit-at-home roll, external cancellation via per-tick `wolf.isSitting()` re-read. See changelog 1.1.65 for full notes. Open follow-ups deferred:
+  - Voiced "Going for walkies" / "Who's a good dog?" line on session start (separate dialogue commit).
+  - Multi-dog sessions (currently 1 wolf per bot).
+  - Bot-side detour-to-wolf if user wants the bot to actively seek out sitters (currently fully opportunistic per spec).
 
 ### Mining & Resource Gathering
 

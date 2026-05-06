@@ -2,6 +2,37 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Walking-dogs hobby (2026-05-06, 1.1.65)
+
+New idle-companion hobby. When the bot walks past an unnamed sitting tamed wolf during idle time, it stands the wolf up and the wolf tags along until a 3–10 minute timer expires. If the bot is back near a registered base or its last-slept bed when the timer ends, there's a 50% chance it sits the wolf again.
+
+**Architecture — passive companion-tracker, not a skill.** The hobby does NOT take a `TaskService` slot. It only fires when the bot's idle wandering brings it within direct interact reach (3 blocks) of an eligible wolf. The bot doesn't detour to find one — true to "the dog tags along."
+
+**New service:** [BotDogWalkingHobbyService](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java) tick handler runs every 20 ticks and per-bot does one of:
+
+- **No active session** — only proceed if `TaskService.hasActiveTask(bot) == false`, bot has no vehicle, bot is not inside a registered base, and pickup-retry cooldown (30 s) has elapsed. If a `WolfEntity` within 4.5 blocks satisfies `isAlive() && isTamed() && isSitting() && !hasCustomName()`, face it via `LookController.faceEntity` and call `BotActions.interactEntity(bot, wolf, MAIN_HAND)`. This routes through the same vanilla `bot.interact()` path used elsewhere in the mod — no direct `setSitting()` mutation. If the wolf actually flipped to standing (it won't if the bot was holding wolf food and fed it instead), open a session with a random 3–10 min duration.
+- **Active session** — read `wolf.isSitting()` each tick. If anyone else (commander / another bot / another player) sat the wolf, drop the session quietly. Also drop if the wolf is dead/removed, or if it's separated by more than 24 blocks. When the timer expires, check at-home (within 16 blocks of a registered base or `getLastSleep`) AND wolf within 3 blocks; on a 50% roll, interact again to sit it.
+
+**Custom-named wolves are excluded entirely** — `name your wolf` to opt out. Inside a registered base the hobby doesn't try to pick up sitting wolves at all (the user's home wolves stay seated).
+
+**Hobby gate:**
+
+- `walk_dogs` appended to `BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER` (per the append-only rule documented in MEMORY.md so saved bots don't see the wrong hobbies disabled).
+- New `Walk Dogs` button + tooltip in [ConfigureHobbiesScreen](src/main/java/net/wcfcarolina13/GraphicalUserInterface/ConfigureHobbiesScreen.java) — slots into the existing 16th cell of the 3-column grid; popup dimensions already had headroom.
+- Default ON. Disabled mid-session drops the session immediately (wolf reverts to vanilla owner-follow / sit AI).
+- Tick handler registered alongside `PetProximityReactionService` in [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) END_SERVER_TICK chain.
+
+**Edge cases handled:**
+
+- Bot holding wolf food in main hand → wolf gets fed instead of toggled. Session not opened (we re-check `wolf.isSitting()` after the interact call).
+- Wolf teleports far away (vanilla owner-teleport when distance > 12) → session drops on the separation check.
+- Bot disabled hobby mid-walk → session drops; wolf falls back to vanilla AI.
+- State garbage-collected each tick against the live registered-bot set so removed bots don't leak entries.
+
+Verified all entity APIs (`WolfEntity.isSitting()`, `isTamed()`, `hasCustomName()`) and the `bot.interact(target, hand)` path in the existing `BotActions.interactEntity` helper before importing.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Redstone-machine proximity dialogue — May 2026 backlog complete (2026-05-05, 1.1.64)
 
 `tryRedstoneMachineNearby` in [CompanionContextReactionService](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).

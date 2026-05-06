@@ -34,7 +34,8 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     public static final java.util.List<String> HOBBY_BIT_ORDER = java.util.List.of(
             "hunt", "fish", "feed_animals", "flowers", "grass_seeds",
             "mining", "shadow_companion", "hangout", "cook", "leaf_litter",
-            "mushrooms", "wander", "woodcut", "collect_dirt", "honey_collect"
+            "mushrooms", "wander", "woodcut", "collect_dirt", "honey_collect",
+            "walk_dogs"
     );
 
     public static int hobbyBitIndex(String hobbyName) {
