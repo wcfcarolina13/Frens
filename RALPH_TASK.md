@@ -275,7 +275,9 @@ No active Ralph criteria. Pick from the backlog below when starting a new iterat
 6. When ALL criteria are [x], say: "RALPH COMPLETE"
 7. If stuck 3+ times on same issue, say: "RALPH GUTTER"
 
-**For any vanilla-game knowledge** (mob behavior, entity classes, item names, block properties, drops, recipes, biome rules), use the **Minecraft Wiki MCP** (`MinecraftWiki_searchWiki`, `MinecraftWiki_getPageSummary`, `MinecraftWiki_getPageSection`) **before relying on training data**. 1.21.11 ships with content that postdates training (e.g. the rideable Nautilus mob, Mounts of Mayhem); training-data assertions about new mobs/items will be wrong. See CLAUDE.md "Game / API Knowledge" + "MCP integrations for this work" for the full guidance.
+**For any vanilla-game knowledge** (mob behavior, entity classes, item names, block properties, drops, recipes, biome rules), use the **Minecraft Wiki MCP** (`MinecraftWiki_searchWiki`, `MinecraftWiki_getPageSummary`, `MinecraftWiki_getPageSection`) **before relying on training data**. 1.21.11 ships with content that postdates training (e.g. the rideable Nautilus mob, Mounts of Mayhem); training-data assertions about new mobs/items will be wrong.
+
+**For any modding-API question** (Fabric APIs, mixins, registries, networking, screen handlers, server lifecycle hooks, Yarn / Parchment mappings, obfuscated→deobfuscated class lookups), use the **MCModding MCP** (`get_class_details`, `lookup_obfuscated`, `get_method_signature`, etc.) **before guessing or falling back to docs.fabricmc.net or the loom-decompiled jars**. The Parchment-mappings DB covers 1.21.11 down to 1.16.5 with documented class / method / field signatures. See CLAUDE.md "Game / API Knowledge" + "MCP integrations for this work" for the full guidance on both MCPs.
 
 ---
 
