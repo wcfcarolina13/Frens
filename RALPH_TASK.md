@@ -1,75 +1,36 @@
 ---
-task: Named-hostile-mob pacifism — bot ignores & flees from name-tagged hostiles
+task: (no active task — pick from Backlog below)
 test_command: "./gradlew build -x test"
 ---
 
-## Session Notes 2026-04-20 — Handoff for next session (deployed: 1.1.41)
+## Session Notes 2026-05-06 — Named-hostile pacifism shipped (verified in 1.1.55)
 
-**Current deployed version: 1.1.41** on all three Prism instances (1.21.11, 1.21.10, 1.21.10 TEST). See the top of [changelog.md](changelog.md) for the five 2026-04-20 entries that shipped in this session:
+The "Next session's task" handed off on 2026-04-20 was **fully implemented and shipped in commit `aeef62a` (1.1.55)** along with the per-hobby toggle menu + llama mount filter. All hook points, the toggle, the flee hook, and the Admin UI are wired:
 
-1. **1.1.38** — Creeper line swapped to A/B-tested take; kraken lines removed; 24 `map`-tagged OGGs staged from `april_2026_v1_1_36_fill`.
-2. **1.1.39** — `SkillResumeService.clear()` now wipes `SUNRISE_RESUME_BY_BOT` so `/bot stop` truly clears pending fishing resume; `executeFollow` calls `clearAndNotify` + `BotAutoReturnSunsetService.clearSession` so `/bot follow` is a proper take-manual-control signal; Base Manager got an inline legend + new `bases_home_explained` guide topic.
-3. **1.1.39** — Fast-travel gate reason now surfaces in the departure chat (`Jake has departed §7(fast-travel: lodestone compass, instant-class)§e …`); new `fast_travel_gates` guide topic under Basics.
-4. **1.1.40** — Unified spells menu: Regroup / Summon / Home / Remote Guidance / Chorus Recall / Soul of Ender / Remote Inventory / Enchant / Anvil all now live in the Spells tab under Movement / Travel / Remote Access headers. `✦` Spells button redirects to the tab in-place instead of opening `CompanionSpellsScreen`.
-5. **1.1.41** — Spell-tab section headers now use the same dark-row + accent-underline styling as Action-tab headers, with an amethyst-purple accent (`#6A4A8C` / text `#D4B5E6`) to differentiate tabs.
+| Spec item | Location |
+|---|---|
+| `BotCombatPolicyService.shouldBotAttack` | [services/BotCombatPolicyService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotCombatPolicyService.java) |
+| Per-bot toggle storage + getter/setter/toggle | [services/BotHomeService.java:489](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java#L489) (`isAttackNamedMobs` / `setAttackNamedMobs` / `toggleAttackNamedMobs`) |
+| `engageHostiles` filter (covers all 8 call sites) | [BotEventHandler.java:3657](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3657) |
+| `BotAnimalDefenseService` Step 1 + Step 2 (scan still runs, only engagement gated) | [services/BotAnimalDefenseService.java:193, 234](src/main/java/net/wcfcarolina13/GameAI/services/BotAnimalDefenseService.java#L193) |
+| `BotMutualAidService` ally-threat | [services/BotMutualAidService.java:562](src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java#L562) |
+| `BotRLActionService` candidate set | [services/BotRLActionService.java:92](src/main/java/net/wcfcarolina13/GameAI/services/BotRLActionService.java#L92) |
+| Damage-intake flee hook | [Frens.java:932-944](src/main/java/net/wcfcarolina13/Frens.java#L932-L944) |
+| `BotFleeService.fleeFromEntity` | [services/BotFleeService.java:650](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L650) |
+| `/bot attack_named_mobs on/off/toggle` chat command | [Commands/BotHomeCommands.java:159](src/main/java/net/wcfcarolina13/Commands/BotHomeCommands.java#L159) |
+| Admin UI row "Attack Named Mobs" | [BotPlayerInventoryScreen.java:622](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java#L622) |
 
-All five are validated in-game by the user. No regressions reported.
+`BotCombatCalloutService` was on the spec's hook list but inspection confirmed it's voice-line-only and has no attack-target selection — no filter needed. Behavior matches the spec intent: hostile scans still see name-tagged mobs (so flee can trigger and overhead warnings still fire), only the engagement boundary rejects them.
 
-### Next session's task: Named-hostile-mob pacifism
+The 2026-04-20 backlog item line at the bottom of P2 Commands/UX was kept for now as a "test in-game and confirm" reminder; can be checked off after manual verification of the spec's 6-item test plan.
 
-**User intent:** When the player nametags a hostile mob (e.g. a zombie in a mob-collection farm, a skeleton display, a named raid captain set aside for decoration), the bot should treat it as passive — **do not attack**, and **if the named mob attacks the bot, flee instead of fighting back**. This protects player-curated mob setups from a companion that would otherwise clear them on sight.
+### Other backlog items still open from 2026-04-20
 
-### Design (pre-baked — don't re-derive)
-
-The naive fix — `if (entity.hasCustomName()) return false;` in `EntityUtil.isHostile(Entity)` — is **too blunt**. It would make the bot ignore the named mob entirely, including damage response. We still want threat-detection to see the named mob so flee behavior can fire. The right split:
-
-- **Keep `EntityUtil.isHostile()` as-is** — threat detection remains accurate.
-- **Add a new filter at the attack-engagement boundary** — a method like `BotCombatPolicyService.shouldBotAttack(Entity, ServerPlayerEntity)` that returns `false` for named hostiles (unless the per-bot opt-in toggle is ON).
-- **On damage from a named hostile, trigger flee** — `BotFleeService.fleeFromEntity(bot, attacker, radius, …)`, prefer putting a wall between bot and attacker.
-- **Per-bot toggle** — `BotHomeService.setBotAttackNamedHostiles(bot, boolean)` (new persisted flag, default `false`), with a companion Admin UI row `Attack Named Hostiles` in the Admin tab so users who *want* the bot to still defend can opt in. Follow the same pattern as `autoReturnPreferLastBedAtSunset` etc.
-
-### Exact hook points
-
-Grep these and add the `shouldBotAttack` gate:
-
-- **`BotAnimalDefenseService.markAttackerForDefense`** at [BotAnimalDefenseService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotAnimalDefenseService.java) — the Step-1 scan at line ~181 calls `BotThreatService.findHostilesAround(bot, HOSTILE_SCAN_RADIUS)` then iterates. Gate the engagement at line ~192 (`canEngage` branch) via the new filter. The Step-2 watch-list reverse scan has the same pattern. **Step 1/2 should still CALL the scan** (we want to see named mobs for flee-trigger purposes), just not mark them for defense.
-- **`BotCombatCalloutService`** — any place that sets an attack target or selects from the hostiles list. Same filter.
-- **`BotRLActionService`** — the RL agent's combat action selection. Filter the candidate set before picking.
-- **`BotEventHandler`** — search for `attack` or `setTarget` sites and gate.
-- **`BotMutualAidService`** — ally-threat engagement; apply filter so bots don't help each other attack named mobs.
-
-### Flee hook
-
-When a named hostile damages the bot:
-
-- Listen on damage intake (there's existing `onBotHurt` / `noteObstructDamage` / similar hooks — search for `DamageSource` + bot handling).
-- If attacker is a named hostile AND `attackNamedHostiles` toggle is `false`, call `BotFleeService.fleeFromEntity(bot, attacker, 12.0, …)`.
-- Check `BotFleeService` signature first — if no `fleeFromEntity` exists, add one. Prefer existing flee primitives (`BotFleeService` exists per grep).
-
-### Test plan
-
-Run all of these in-game before marking done:
-
-1. Spawn a zombie, name-tag it with "Bob" (vanilla anvil-rename + right-click on zombie). Bot should NOT engage. Bot should still include "Bob" in warning overhead lines (`§c(out-of-range)` etc. — Step-1 scan sees the threat).
-2. Let "Bob" hit the bot. Bot should flee — move away, try to interpose a wall.
-3. Spawn a second un-named zombie near "Bob". Bot should attack the un-named one while still avoiding "Bob".
-4. Toggle `Attack Named Hostiles` ON for the bot. Repeat #1-#2 — bot should now engage "Bob" normally (opt-in behavior preserved).
-5. Named raid captain during a raid — verify bot doesn't break the Bad Omen mechanic. (If the named captain is aggressive and other raiders spawn, the bot should still engage the non-named raiders.)
-6. Confirm no regression in `BotAnimalDefenseService.isDefendedEntity` — named mobs should not accidentally become defended because they have a custom name.
-
-### Build verification
-
-Standard: `./gradlew build -x test` (the `test_command` above). No automated tests exist for combat targeting; the test plan above is the verification contract.
-
-### Backlog items pre-existing from prior sessions
-
-See the P2 Commands / UX section below for:
-
-- **Base Manager UX polish (2026-04-20 carry-forward)** — sort rows / section headers / hover tooltip / Set Home chat echo.
+- **Base Manager UX polish** — sort rows / section headers / hover tooltip / Set Home chat echo.
 - **Delete legacy `CompanionSpellsScreen` (post-1.1.40 cutover)** — the unified tab is validated; safe to remove the dead screen and its references.
 - **Actions-tab Regroup duplicate** — decide whether to keep `Regroup` / `Return Home` in both Actions and Spells or consolidate.
 
-Those are all independent follow-ups; don't block the main task on them.
+These are all independent follow-ups for whichever session picks them up next.
 
 ---
 
@@ -339,7 +300,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed
 - [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments
 - [ ] **Base Manager UX polish (carry-forward from 2026-04-20)**: the menu mixes registered bases (yellow `[Base]`) with lodestone compasses (white rows) in one flat list, and `[Home]` means two different things depending on row color. Even the dev got confused. A minimal inline legend landed in 1.1.39 and a "Home & Bases Explained" guide topic was added, but the full fix is: (a) sort rows so registered bases come first, lodestones second; (b) insert section headers (`Registered Bases`, `Lodestone Compasses`); (c) on row hover, show a one-line tooltip describing what clicking `Set Home` will do for that row type; (d) when the user clicks `Set Home` on a row, echo the stored label back in chat (`Jake will treat 'home' as home.`) — so they can immediately verify it took.
-- [ ] **Named-hostile-mob pacifism (from 2026-04-20 backlog)**: when targeting hostile mobs for combat, skip any mob with a custom name tag. If a named hostile does hit the bot, engage flee behavior (`BotFleeService.fleeFromEntity` with a modest radius, prefer putting a wall between bot and attacker). Keeps player mob-collection farms/displays safe. Add a toggle so players who want "bot still fights back" can opt in. Hook points: `BotCombatCalloutService`, `BotAnimalDefenseService`, target-selection in `BotEventHandler`.
+- [x] **Named-hostile-mob pacifism (from 2026-04-20 backlog)** — implemented in `aeef62a` (1.1.55). `BotCombatPolicyService.shouldBotAttack` gates engagement; named hostiles still appear in scans so flee fires on damage; per-bot `attackNamedMobs` opt-in toggle reachable via `/bot attack_named_mobs <on|off|toggle> [target]` and the Admin tab "Attack Named Mobs" row. **Manual in-game verification still pending** — see the 6-item test plan in the 2026-05-06 session notes at the top of this file.
 - [ ] **Delete legacy `CompanionSpellsScreen` (post-1.1.40 cutover)**: the unified Spells tab in `BotPlayerInventoryScreen` now covers Regroup / Summon / Home / Remote Guidance / Chorus Recall / Soul of Ender / Remote Inventory / Enchant / Anvil. The `✦` button was redirected to switch tabs in-place. `CompanionSpellsScreen.java` and the `openSpellsMenu` method are no longer reachable through the UI, but were left in the codebase for one session so the unified tab can be verified. Once validated: delete `CompanionSpellsScreen.java`, remove `openSpellsMenu` from `BotPlayerInventoryScreen`, scrub `FrensClient.isEyeSpellOnCooldown()` / `armEyeSpellCooldown()` if they're only used by the legacy screen, and drop unused imports.
 - [ ] **Actions-tab Regroup duplicate**: `Regroup` lives in both the Actions tab (`Orders & Travel`) and the Spells tab (Movement). Users may hit the Actions-tab version first; it runs `/bot companion come` which the server then rejects if artifacts are missing. Decide: keep both with a visible "gated" indicator on the Actions copy, or remove Regroup from Actions and leave it in Spells only. Same question for `Return Home` (Actions) vs `Home` (Spells) — distinct actions (`RETURN_HOME` vs `COMPANION_HOME`) so this may just need clearer labels.
 
