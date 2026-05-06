@@ -6526,23 +6526,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.client.setScreen(new ConstructionScreen(this, formatBotTarget()));
     }
 
-    private void openSpellsMenu() {
-        if (this.client == null) {
-            return;
-        }
-        if (this.client.player != null) {
-            this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
-            this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.4f);
-        }
-        this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
-    }
-
     /**
      * Switch the topic overlay panel to the Spells tab in-place instead of
      * opening the legacy {@link CompanionSpellsScreen}. Keeps the player in
      * the same inventory screen and gives them one canonical spell list
      * (including Summon / Enchant / Anvil which previously only lived on the
      * legacy screen).
+     *
+     * <p>The legacy screen is still reached via the dedicated `KEY_OPEN_SPELLS`
+     * keybind path in {@link net.wcfcarolina13.FrensClient} — that's an
+     * intentional second access route, NOT dead code.
      */
     private void switchToSpellsTab() {
         if (this.client != null && this.client.player != null) {

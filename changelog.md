@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Remove dead `openSpellsMenu` method + reframe `CompanionSpellsScreen` backlog (2026-05-06, 1.1.69)
+
+Audited the 2026-04-20 backlog item that called for deleting `CompanionSpellsScreen.java` after the unified Spells tab cutover. Finding: the legacy screen is **not** dead. It's still reached via:
+
+- The dedicated `KEY_OPEN_SPELLS` keybind path in [FrensClient.java:660 → 1578](src/main/java/net/wcfcarolina13/FrensClient.java#L660)
+- The recruit-contact key fall-through after recruitment is complete
+- The temporary `-` go-to-spells override (active when holding a spell trigger item like tome / horn / eye, or near an enchanting table)
+
+`isEyeSpellOnCooldown` / `armEyeSpellCooldown` are also still consumed inside `FrensClient` itself (line 1570), not just by the legacy screen — so they can't be ripped out either. Deleting the screen would break the keybind UX.
+
+What WAS dead and is now removed: `openSpellsMenu` in [BotPlayerInventoryScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java) — defined at the old line 6529 but never called anywhere (grep confirmed no invocations). It was a leftover from the pre-cutover wiring; `switchToSpellsTab` is the in-place replacement that the `✦` button uses now. Updated `switchToSpellsTab`'s javadoc to call out that the keybind path to the legacy screen is intentional, not orphan code.
+
+Updated the backlog entry in `RALPH_TASK.md`: marked partial-complete with the dead-method removal noted, with a follow-up to either migrate the keybind to use the unified Spells tab (would let us actually delete the legacy screen) or accept the dual UX as intentional.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Add shelves + containers to no-break list (2026-05-06, 1.1.68)
 
 Closes a long-standing backlog item. `ProtectedStructureBlockHelper.isNeverBreakBlock` now rejects player-facing storage + workstation blocks via a new `isProtectedContainer` predicate, so bot stuck-escape / mine-escape / `breakFreeGeneric` paths can no longer accidentally destroy a chest and dump its contents while panicking.
