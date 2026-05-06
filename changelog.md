@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Named-hostile pacifism: close the Phase 3 mode-guard gap (2026-05-06, 1.1.71)
+
+Closes the Phase 3 caveat that's been a `// TODO` comment in [BotFleeService.fleeFromEntity:643-648](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L643-L648) since 1.1.55. Walking through the named-hostile pacifism test plan against the current implementation surfaced this as the one real blocker for Step 2 of the test plan ("Let Bob hit the bot. Bot should flee.").
+
+**The gap:** [BotFleeService.tickFlee:420](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L420) returns false when `mode != Mode.IDLE`. The bot's `Mode` enum is `IDLE / FOLLOW / GUARD / PATROL / STAY / RETURNING_BASE / TRAVELING`. So if the bot is following the commander (FOLLOW), guarding a base (GUARD), or on patrol (PATROL) when a name-tagged hostile damages it, the damage hook in `Frens.java:932-944` calls `fleeFromEntity` which seeds `FleeState` and runs the initial `applyFleeMovement` impulse — but on every subsequent tick, `tickFlee` returns false because of the mode guard, so `continueFlee` never runs to update direction or apply movement. The bot moves once and stops.
+
+**Fix:** new `forcedByDamage` boolean on `FleeState`. `fleeFromEntity` sets it true when `startFleeing` actually launches (i.e., flee direction was traversable). `tickFlee` checks the flag to bypass the mode guard:
+
+```java
+boolean damageOverride = modeBypass != null && modeBypass.forcedByDamage && modeBypass.isFleeing;
+if (mode != BotEventHandler.Mode.IDLE && !damageOverride) return false;
+```
+
+`stopFleeing` clears the flag so the next non-damage flee starts clean.
+
+This makes the spec intent ("if the named mob attacks the bot, flee instead of fighting back") work regardless of bot mode — flee from named-hostile damage now overrides the bot's current orders.
+
+**Other findings from the test-plan walkthrough** (left as-is):
+
+- **Wall-interpose during flee is not implemented.** The spec wording "prefer putting a wall between bot and attacker" was aspirational. Current `computeTraversableFleeDirection` picks a direction with the most clear blocks (5 candidate angles); doesn't place a block between bot and attacker. Refinement, not a blocker.
+- **Step 1b "overhead warn still fires for named hostiles" is conditional.** `BotAnimalDefenseService.maybeOverheadWarn` only fires when the named mob is targeting a defended entity (commander pet, etc.), not generically. To fully see this in-game, set up a defended animal nearby.
+- **Steps 1, 3, 4, 5, 6 verified correct in code** — `engageHostiles` filter at `BotEventHandler:3657` cleanly drops named hostiles from the engage list while leaving them visible in scans, and `BotAnimalDefenseService.passesVictimSanityGates` explicitly filters `HostileEntity` / `RaiderEntity` / etc. so a named zombie can't accidentally become "defended" (the named-hostile loophole is closed by design).
+
+Built clean on `./gradlew build -x test`. Deploying to all three Prism instances.
+
 ## Drop-sweep cobblestone loop: per-bot TTL self-drop suppression (2026-05-06, 1.1.70)
 
 Closes the long-standing 2026-03-28 backlog item. The bug: when a bot's inventory fills up during patrol/idle, [DropSweeper.ensureSpaceForDropSweep](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java) tries bundle-pack → chest-store → drop-cheap-stack as a fallback chain. In environments with no reachable chest and no leather, the bot reaches the drop step and dumps 64x cobblestone "to free space." But it's still standing there, so the next sweep tick (~7s later) finds the freshly-dropped cobblestone, walks to it, picks it back up — full inventory again. Repeat forever.

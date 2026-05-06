@@ -406,6 +406,12 @@ public final class BotFleeService {
         boolean emergencyTacticAttempted;
         /** Position when flee started — used to detect if flee is actually working. */
         Vec3d fleeStartPos;
+        /** Set true when {@link #fleeFromEntity} seeds the state from a damage hook
+         *  (named-hostile pacifism). Causes {@link #tickFlee} to bypass the
+         *  IDLE-only mode guard so the bot keeps fleeing even if it was in
+         *  FOLLOW / GUARD / PATROL etc. when the hit landed. Cleared on
+         *  {@link #stopFleeing}. */
+        boolean forcedByDamage;
     }
 
     /**
@@ -417,7 +423,12 @@ public final class BotFleeService {
     public static boolean tickFlee(ServerPlayerEntity bot, MinecraftServer server,
                                    List<Entity> hostiles, BotEventHandler.Mode mode) {
         if (bot == null || server == null) return false;
-        if (mode != BotEventHandler.Mode.IDLE) return false;
+        // Damage-seeded flees from the named-hostile pacifism path bypass the
+        // IDLE-only mode guard — otherwise a bot in FOLLOW / GUARD / PATROL would
+        // never continue fleeing after the initial damage impulse.
+        FleeState modeBypass = FLEE_STATES.get(bot.getUuid());
+        boolean damageOverride = modeBypass != null && modeBypass.forcedByDamage && modeBypass.isFleeing;
+        if (mode != BotEventHandler.Mode.IDLE && !damageOverride) return false;
         // Bot is in a tactical shelter — don't flee unless shelter is compromised
         if (isInShelter(bot.getUuid())) {
             if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(), 40)) {
@@ -652,6 +663,12 @@ public final class BotFleeService {
         FleeState state = FLEE_STATES.computeIfAbsent(bot.getUuid(), id -> new FleeState());
         if (state.isFleeing) return;
         startFleeing(bot, state, List.of(attacker), currentTick);
+        // Mark this flee as damage-seeded so tickFlee bypasses the IDLE-only mode guard.
+        // Only set after startFleeing so we know flee actually launched (not blocked at
+        // computeTraversableFleeDirection — that path leaves isFleeing == false).
+        if (state.isFleeing) {
+            state.forcedByDamage = true;
+        }
     }
 
     private static void startFleeing(ServerPlayerEntity bot, FleeState state,
@@ -813,6 +830,7 @@ public final class BotFleeService {
         state.isFleeing = false;
         state.fleeDirection = null;
         state.emergencyTacticAttempted = false;
+        state.forcedByDamage = false;
         state.fleeCooldownUntilTick = currentTick + COOLDOWN_TICKS;
     }
 
