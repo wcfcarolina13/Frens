@@ -2,6 +2,25 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Drop-sweep cobblestone loop: per-bot TTL self-drop suppression (2026-05-06, 1.1.70)
+
+Closes the long-standing 2026-03-28 backlog item. The bug: when a bot's inventory fills up during patrol/idle, [DropSweeper.ensureSpaceForDropSweep](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java) tries bundle-pack → chest-store → drop-cheap-stack as a fallback chain. In environments with no reachable chest and no leather, the bot reaches the drop step and dumps 64x cobblestone "to free space." But it's still standing there, so the next sweep tick (~7s later) finds the freshly-dropped cobblestone, walks to it, picks it back up — full inventory again. Repeat forever.
+
+There was an earlier partial fix at the call site ([DropSweeper.java:278](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L278)) that gated the drop on `chestStoreSucceeded`, but it didn't catch the inter-call loop and didn't apply to the 3 other callers of `dropCheapStackForSpace` in `BotMutualAidService`. The user's framing was right: this is a problem with **anything the bot drops to make space**, not just cobblestone.
+
+The fix moves the suppression into [CraftingHelper.dropCheapStackForSpace](src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java) itself so all 4 callers benefit:
+
+1. The drop call now captures the spawned `ItemEntity`: `ItemEntity dropped = bot.dropItem(removed, false, false);`
+2. New `registerSelfDrop(bot, dropped)` adds the entity UUID to a per-bot map with a 5-minute (`SELF_DROP_TTL_TICKS = 6000L`) expiry — slightly longer than vanilla's 6000-tick item-entity despawn, so the suppression outlives the dropped item naturally.
+3. New public `isRecentlySelfDropped(bot, item)` query, with self-evicting reads (an expired entry is removed on lookup, and per-bot maps are removed when empty).
+4. [DropSweeper.findClosestDrop](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L200) gets a new stream filter that rejects items recently self-dropped by this same bot.
+
+The earlier `chestStoreSucceeded` gate is kept as defense-in-depth — it prevents the drop from happening at all when no offload exists. The TTL system addresses the inter-call loop that the gate alone couldn't.
+
+Why 5 min and not 30s: the original log showed sweeps every ~7s. A 30s TTL would lock out 4 sweeps then resume the loop. 5 min lines up with the vanilla ItemEntity despawn (6000 ticks), so by the time the suppression expires, either the item is gone naturally or the bot has moved on.
+
+Built clean on `./gradlew build -x test`. Not deployed.
+
 ## Remove dead `openSpellsMenu` method + reframe `CompanionSpellsScreen` backlog (2026-05-06, 1.1.69)
 
 Audited the 2026-04-20 backlog item that called for deleting `CompanionSpellsScreen.java` after the unified Spells tab cutover. Finding: the legacy screen is **not** dead. It's still reached via:

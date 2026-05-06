@@ -209,6 +209,12 @@ public final class DropSweeper {
                 // Back off from drops near a real player who just broke a block.
                 .filter(drop -> !net.wcfcarolina13.GameAI.services.CommanderActivityService
                         .isDropNearActiveMiner(world, drop))
+                // Skip items the bot itself dropped via dropCheapStackForSpace within
+                // the last 5 minutes — fixes the inter-sweep cobblestone loop where the
+                // bot would drop junk to make room then immediately re-acquire it on the
+                // next sweep tick. The TTL is per-bot, per-item-entity, self-evicting.
+                .filter(drop -> !net.wcfcarolina13.GameAI.services.CraftingHelper
+                        .isRecentlySelfDropped(player, drop))
                 .filter(drop -> {
                     // Skip items behind solid blocks — raycast from bot eye to item.
                     Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());

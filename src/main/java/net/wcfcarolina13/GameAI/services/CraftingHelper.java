@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
@@ -41,6 +42,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -2232,6 +2234,51 @@ public final class CraftingHelper {
         return offloadCheapItemsToNearbyChestInternal(bot, source, reservePlanks, reserveLogs, reserveItems);
     }
 
+    /** Per-bot map of item-entity UUID → expiry-tick for items the bot dropped via
+     *  {@link #dropCheapStackForSpace}. {@link DropSweeper} consults this through
+     *  {@link #isRecentlySelfDropped} so the bot's own drop-to-make-space output
+     *  isn't immediately re-acquired by the next sweep — that's the cobblestone
+     *  loop documented in the 2026-03-28 logs ("Dropped 64x Cobblestone…" → sweep
+     *  picks it up → repeat every ~7s). */
+    private static final ConcurrentHashMap<UUID, ConcurrentHashMap<UUID, Long>> RECENT_SELF_DROPS = new ConcurrentHashMap<>();
+
+    /** 5 min — slightly longer than vanilla's 6000-tick item-entity despawn so the
+     *  filter outlives the dropped item naturally. After this window any stragglers
+     *  can be re-picked legitimately (the bot has presumably moved on by then). */
+    private static final long SELF_DROP_TTL_TICKS = 6000L;
+
+    /** Returns true if {@code item} was dropped by {@code bot} via
+     *  {@link #dropCheapStackForSpace} within the last {@link #SELF_DROP_TTL_TICKS}
+     *  ticks. Reads are self-evicting: an expired entry is removed on lookup. */
+    public static boolean isRecentlySelfDropped(ServerPlayerEntity bot, ItemEntity item) {
+        if (bot == null || item == null) return false;
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) return false;
+        ConcurrentHashMap<UUID, Long> perBot = RECENT_SELF_DROPS.get(bot.getUuid());
+        if (perBot == null) return false;
+        Long expiry = perBot.get(item.getUuid());
+        if (expiry == null) return false;
+        long currentTick = server.getTicks();
+        if (currentTick > expiry) {
+            perBot.remove(item.getUuid());
+            if (perBot.isEmpty()) {
+                RECENT_SELF_DROPS.remove(bot.getUuid(), perBot);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static void registerSelfDrop(ServerPlayerEntity bot, ItemEntity item) {
+        if (bot == null || item == null) return;
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) return;
+        long expiry = server.getTicks() + SELF_DROP_TTL_TICKS;
+        RECENT_SELF_DROPS
+                .computeIfAbsent(bot.getUuid(), k -> new ConcurrentHashMap<>())
+                .put(item.getUuid(), expiry);
+    }
+
     public static boolean dropCheapStackForSpace(ServerPlayerEntity bot,
                                                  ServerCommandSource source,
                                                  Set<Item> reservedItems) {
@@ -2272,7 +2319,10 @@ public final class CraftingHelper {
         if (removed.isEmpty()) {
             return false;
         }
-        bot.dropItem(removed, false, false);
+        // Capture the spawned entity so we can register it as self-dropped — prevents
+        // DropSweeper from immediately re-acquiring it on the next sweep cycle.
+        ItemEntity dropped = bot.dropItem(removed, false, false);
+        registerSelfDrop(bot, dropped);
         String name = removed.getItem().getName().getString();
         LOGGER.info("Dropped {}x {} to free inventory space.", removed.getCount(), name);
         return bot.getInventory().getEmptySlot() != -1;
