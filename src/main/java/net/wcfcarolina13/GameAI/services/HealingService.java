@@ -5,7 +5,9 @@ import net.minecraft.component.type.FoodComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.HungerManager;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
@@ -62,6 +64,27 @@ public final class HealingService {
         "enchanted_golden_apple",
         "golden_carrot"
     );
+
+    // Raw meats that have a smelted/cooked counterpart. The bot should prefer the
+    // cooked variant when both are present — vanilla cooking is a flat upgrade
+    // (more nutrition + more saturation, no negative effects). Raw chicken
+    // additionally has a 30% food-poisoning chance, so it's also penalised here.
+    // Tropical fish has no cooked variant in vanilla (and isn't really meant to
+    // be eaten), and pufferfish is already in FORBIDDEN_FOODS.
+    private static final Set<Item> RAW_MEATS = Set.of(
+        Items.BEEF,
+        Items.PORKCHOP,
+        Items.MUTTON,
+        Items.CHICKEN,
+        Items.RABBIT,
+        Items.COD,
+        Items.SALMON
+    );
+
+    public static boolean isRawMeat(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return RAW_MEATS.contains(stack.getItem());
+    }
     
     /**
      * Returns true if the item is edible and suitable for fast-travel provisioning
@@ -315,23 +338,40 @@ public final class HealingService {
     }
     
     /**
-     * Find the cheapest safe food in inventory
+     * Find the cheapest safe food in inventory.
+     *
+     * <p>Two-pass: prefer non-raw foods (cooked meats, breads, fruits, vegetables,
+     * stews), then fall back to raw meats only if nothing cooked is available.
+     * Without this preference the cheapest-by-score logic always picks raw meat
+     * over its cooked counterpart (raw beef = 6.6, cooked beef = 33.6) — the
+     * bot would happily eat raw chicken next to a stack of cooked chicken,
+     * eating more of it for the same hunger refill and risking food poisoning.
      */
     private static OptionalInt findCheapestSafeFood(PlayerInventory inventory) {
+        OptionalInt cooked = findCheapestSafeFood(inventory, false);
+        if (cooked.isPresent()) return cooked;
+        return findCheapestSafeFood(inventory, true);
+    }
+
+    /**
+     * @param allowRaw if true, raw meats (beef, porkchop, mutton, chicken, rabbit,
+     *                 cod, salmon) are eligible. If false, they are skipped.
+     */
+    private static OptionalInt findCheapestSafeFood(PlayerInventory inventory, boolean allowRaw) {
         int bestSlot = -1;
         double bestScore = Double.POSITIVE_INFINITY;
-        
+
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) {
                 continue;
             }
-            
+
             FoodComponent food = getFoodComponent(stack);
             if (food == null) {
                 continue;
             }
-            
+
             // Skip forbidden foods (items with known negative effects)
             String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
             boolean forbidden = FORBIDDEN_FOODS.stream().anyMatch(itemId::contains);
@@ -344,15 +384,19 @@ public final class HealingService {
                 continue;
             }
 
+            if (!allowRaw && isRawMeat(stack)) {
+                continue;
+            }
+
             // Calculate nutrition value (lower = cheaper/less valuable)
             double score = food.nutrition() + (food.saturation() * 2.0);
-            
+
             if (score < bestScore) {
                 bestScore = score;
                 bestSlot = i;
             }
         }
-        
+
         return bestSlot >= 0 ? OptionalInt.of(bestSlot) : OptionalInt.empty();
     }
 

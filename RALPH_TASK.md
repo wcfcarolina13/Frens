@@ -379,7 +379,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
 - [ ] **Farm irrigation leak patching**: Detection partially shipped — [FarmSkill.java:741](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L741) (`irrigationLeakReason`) flags leaks; the *patch* path (replace flowing-water cells with source / plug missing edges) is still open.
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
-- [ ] **HealingService cooked food preference**: Auto-eat should prefer cooked over raw food
+- [x] **HealingService cooked food preference**: ✅ Auto-eat now prefers cooked over raw via two-pass search in [HealingService.findCheapestSafeFood](src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java). Raw meats (`BEEF`, `PORKCHOP`, `MUTTON`, `CHICKEN`, `RABBIT`, `COD`, `SALMON`) are skipped on the first pass and admitted on a second pass only if no cooked food is available. Closes the raw-chicken food-poisoning hole and stops the bot from gnawing raw beef next to a stack of cooked beef. Same `cheapest-within-tier` ordering preserved otherwise. See changelog 2026-05-08.
 - [ ] **Smoker preference for food cooking**: resolveFurnaceTarget should prefer smokers for food-only cooking (2x faster)
 - [ ] **Fuel acquisition fallback**: If no fuel in inventory, attempt mini leaf-litter collection before giving up on cooking
 

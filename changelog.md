@@ -2,6 +2,41 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Auto-eat prefers cooked food over raw (2026-05-09, 1.1.94)
+
+Originally branched from `dafd7b8` (1.1.71) on a `cooked-food-preference` worktree; cherry-picked onto main and shipped as 1.1.94 after the worktree was cleaned up.
+
+### Bug
+
+[HealingService.findCheapestSafeFood](src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java) ranks edible inventory by `nutrition + saturation*2.0` and picks the lowest score, on the theory that the cheapest food is the right thing to spend on routine top-ups. That logic systematically prefers raw meat over cooked: raw beef scores 6.6 while cooked beef scores 33.6, so a bot with a stack of cooked beef and a stack of raw beef will eat the raw stack first. With raw chicken in the mix it's worse — same low score plus a 30% food-poisoning chance per bite.
+
+This affects all three eating paths since they all consult the same finder: `autoEat` (tick-loop hunger top-up), `stabilizeEat` (pre-shelter / in-shelter), `healBot` (`/bot heal`).
+
+### Fix
+
+Two-pass search inside `findCheapestSafeFood`: first pass excludes raw meats; if no cooked food turns up, second pass admits the raw meats. Raw meats are matched against a small `RAW_MEATS` `Set<Item>` (`BEEF`, `PORKCHOP`, `MUTTON`, `CHICKEN`, `RABBIT`, `COD`, `SALMON` — the seven vanilla raw foods that have a cooked counterpart). Tropical fish has no cooked variant; pufferfish is already in `FORBIDDEN_FOODS`.
+
+The cheapest-cooked-first policy still applies *within* the cooked tier, so a bot with bread + cooked beef will still eat bread first (low nutrition + saturation = low score = cheap routine top-up). Only the raw-vs-cooked ordering changes.
+
+`isRawMeat(ItemStack)` is exposed as a public predicate in case other services want to filter by it later.
+
+### Out of scope (follow-ups)
+
+The same `nutrition + saturation*2.0` scoring pattern is duplicated in four other places that would each need their own raw-aware variant if we want the policy applied consistently:
+
+- [HuntSkill:1372](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HuntSkill.java#L1372)
+- [NavigationArtifactService:825,843](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L825) (fast-travel provisioning — arguably correct as-is, since raw meat is fine to *carry* if the bot can cook later)
+- [BotMutualAidService:982](src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java#L982) (food-sharing)
+- [CombatInventoryManager:350](src/main/java/net/wcfcarolina13/PlayerUtils/CombatInventoryManager.java#L350)
+
+Left untouched in this commit — the user-reported symptom is "auto-eat picks raw," and the auto-eat path is HealingService only. The other sites should be audited under a separate task.
+
+### Verification
+
+Manual: spawn a bot with `give @s minecraft:beef 64` and `give @s minecraft:cooked_beef 64`, run hunger down (e.g. wait or sprint), watch which item slot decrements first. Pre-fix: raw beef. Post-fix: cooked beef. Repeat with chicken to confirm the food-poisoning surface is closed.
+
+Build: `./gradlew build -x test` clean.
+
 ## Jukebox-driven dancing + actually-working stopEmote (2026-05-08, 1.1.93)
 
 ### Stop API correction
