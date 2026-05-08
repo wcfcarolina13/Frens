@@ -129,12 +129,15 @@ public final class BotAmbientChatter {
         // Ambient / cave chatter (used when underground or in cave-like conditions).
         // Per triage retune: CAVE_DEEP is gated to deep Y only, DONT_LIKE_THIS is gated
         // to deep or hostile-near, so both are excluded from the shallow-cave pool.
+        // SMELLS_TERRIBLE was removed 2026-05-07 — it now fires from a separate gated
+        // trigger that requires actual smelly-context blocks/mobs nearby (mob spawners,
+        // zombies/slimes/witches/zombie villagers, lush-cave biome, mushrooms, rooted
+        // dirt, moss, clay, coarse dirt, mud, mycelium). See {@link #trySmellsTerrible}.
         private static final SoundEvent[] AMBIENT_CAVE_CHATTER = {
             BotDialogueSounds.LINE_AMBIENT_HEARD_SOMETHING,
             BotDialogueSounds.LINE_AMBIENT_DID_YOU_HEAR,
             BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED,
             BotDialogueSounds.LINE_AMBIENT_NOT_ALONE,
-            BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE,
             BotDialogueSounds.LINE_AMBIENT_CREEPY,
         };
 

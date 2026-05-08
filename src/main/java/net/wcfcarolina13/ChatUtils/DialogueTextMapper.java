@@ -779,6 +779,40 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Can't get through these leaves.", BotDialogueSounds.LINE_FOLIAGE_STUCK_CANT_GET_THROUGH);
         EXACT_MAP.put("Just a sec... foliage's got me.", BotDialogueSounds.LINE_FOLIAGE_STUCK_GOT_ME);
 
+        // Snowball-fight (1.1.81) — text emitted inline by BotSnowballFightService.
+        EXACT_MAP.put("Catch this!", BotDialogueSounds.LINE_SNOWBALL_PROBE_CATCH_THIS);
+        EXACT_MAP.put("Heads up!", BotDialogueSounds.LINE_SNOWBALL_PROBE_HEADS_UP);
+        EXACT_MAP.put("Hey — incoming!", BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING);
+        EXACT_MAP.put("Snowball fight!", BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT);
+        EXACT_MAP.put("Bet you can't dodge this one!", BotDialogueSounds.LINE_SNOWBALL_PROBE_BET);
+        EXACT_MAP.put("Snowball fight?", BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT_Q);
+        EXACT_MAP.put("Oh, it's ON now!", BotDialogueSounds.LINE_SNOWBALL_ESCALATE_ON_NOW);
+        EXACT_MAP.put("Hah! You're in for it!", BotDialogueSounds.LINE_SNOWBALL_ESCALATE_IN_FOR_IT);
+        EXACT_MAP.put("That's how it is, huh? Bring it!", BotDialogueSounds.LINE_SNOWBALL_ESCALATE_BRING_IT);
+        EXACT_MAP.put("Now we're playing!", BotDialogueSounds.LINE_SNOWBALL_ESCALATE_PLAYING);
+        EXACT_MAP.put("Eat snow!", BotDialogueSounds.LINE_SNOWBALL_ESCALATE_EAT_SNOW);
+        EXACT_MAP.put("Got you!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_GOT_YOU);
+        EXACT_MAP.put("Bullseye!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_BULLSEYE);
+        EXACT_MAP.put("Take that!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_TAKE_THAT);
+        EXACT_MAP.put("Can't catch me!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_CANT_CATCH);
+        EXACT_MAP.put("Is that all you got?", BotDialogueSounds.LINE_SNOWBALL_TAUNT_ALL_YOU_GOT);
+        EXACT_MAP.put("Hold still!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_HOLD_STILL);
+        EXACT_MAP.put("Almost had me!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_ALMOST);
+        EXACT_MAP.put("Gotcha!", BotDialogueSounds.LINE_SNOWBALL_TAUNT_GOTCHA);
+        EXACT_MAP.put("Whoa, close one!", BotDialogueSounds.LINE_SNOWBALL_DODGE_CLOSE_ONE);
+        EXACT_MAP.put("Missed me!", BotDialogueSounds.LINE_SNOWBALL_DODGE_MISSED);
+        EXACT_MAP.put("Nice try!", BotDialogueSounds.LINE_SNOWBALL_DODGE_NICE_TRY);
+        EXACT_MAP.put("Hah, dodged!", BotDialogueSounds.LINE_SNOWBALL_DODGE_DODGED);
+        EXACT_MAP.put("Tough crowd...", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_TOUGH_CROWD);
+        EXACT_MAP.put("Guess you don't wanna play.", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_DONT_PLAY);
+        EXACT_MAP.put("Suit yourself.", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_SUIT_YOURSELF);
+        EXACT_MAP.put("No fun, huh?", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_NO_FUN);
+        EXACT_MAP.put("Out of ammo — I yield!", BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO);
+        EXACT_MAP.put("I'm out, I'm out, truce!", BotDialogueSounds.LINE_SNOWBALL_YIELD_IM_OUT);
+        EXACT_MAP.put("No more snowballs — you win!", BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN);
+        EXACT_MAP.put("Mercy! I surrender!", BotDialogueSounds.LINE_SNOWBALL_YIELD_MERCY);
+        EXACT_MAP.put("Okay okay, you got me!", BotDialogueSounds.LINE_SNOWBALL_YIELD_GOT_ME);
+
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
 
         // Build reverse map (sound → first matching text) for overhead display.

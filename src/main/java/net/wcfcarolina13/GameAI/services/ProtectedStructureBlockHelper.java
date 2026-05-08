@@ -3,6 +3,12 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.AbstractSignBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.decoration.painting.PaintingEntity;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.world.World;
 
 /**
  * Shared predicates for structure-like blocks that recovery code must treat conservatively.
@@ -33,6 +39,9 @@ public final class ProtectedStructureBlockHelper {
         // dump or destroy the contained items. Bots have no legitimate "mine through
         // a chest" workflow; the right behavior is always to route around.
         if (isProtectedContainer(state)) return true;
+        if (isWorkstation(state)) return true;
+        if (isRedstoneComponent(state)) return true;
+        if (isCauldron(state)) return true;
         return state.isOf(Blocks.LODESTONE)
                 || state.isOf(Blocks.ENCHANTING_TABLE)
                 || state.isOf(Blocks.BEACON)
@@ -40,6 +49,127 @@ public final class ProtectedStructureBlockHelper {
                 || state.isOf(Blocks.CONDUIT)
                 || state.isOf(Blocks.END_PORTAL_FRAME)
                 || isProtectedGlassLike(state);
+    }
+
+    /**
+     * Context-aware overload: state-check plus neighbor-check plus entity-scan. Refuses
+     * to break a block if mining it would damage adjacent infrastructure even when the
+     * block itself is safe.
+     *
+     * <p>Adjacency rules (all 6 cardinal neighbors):
+     * <ul>
+     *   <li>Any neighbor is a redstone component → refuse (the component may be supported
+     *       by the target).</li>
+     *   <li>Any neighbor is a chain or lantern variant → refuse (chains/lanterns hang from
+     *       or sit on the target).</li>
+     * </ul>
+     *
+     * <p>Entity scan (3-block painting box around the target): if any painting entity is
+     * attached such that the target is the painting's support face, refuse.
+     */
+    public static boolean isNeverBreakAt(World world, BlockPos pos) {
+        if (world == null || pos == null) return false;
+        BlockState state = world.getBlockState(pos);
+        if (isNeverBreakBlock(state)) return true;
+        for (Direction dir : Direction.values()) {
+            BlockState neighbor = world.getBlockState(pos.offset(dir));
+            if (neighbor == null || neighbor.isAir()) continue;
+            if (isRedstoneComponent(neighbor)) return true;
+            if (isChainOrLantern(neighbor)) return true;
+        }
+        if (hasPaintingAttachedTo(world, pos)) return true;
+        return false;
+    }
+
+    private static boolean hasPaintingAttachedTo(World world, BlockPos pos) {
+        // Paintings are 1×1 to 4×4 in the air space adjacent to their support wall. Scan a
+        // 5-block cube to catch the largest variant whose attachment edge touches `pos`.
+        Box scanBox = new Box(pos).expand(2.5);
+        var paintings = world.getEntitiesByClass(PaintingEntity.class, scanBox, p -> true);
+        for (PaintingEntity painting : paintings) {
+            // The painting's attachment block is one step opposite its facing from the
+            // painting position. We over-approximate: if the target block is along the
+            // painting's facing axis behind the painting bounding box, treat as attached.
+            Direction facing = painting.getHorizontalFacing();
+            if (facing == null) continue;
+            Box paintBox = painting.getBoundingBox();
+            // Walk one block behind the painting (opposite of facing) and check overlap.
+            Box behind = paintBox.offset(-facing.getOffsetX(), -facing.getOffsetY(), -facing.getOffsetZ());
+            if (behind.intersects(new Box(pos).expand(0.01))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isChainOrLantern(BlockState state) {
+        if (state == null || state.isAir()) return false;
+        String key = state.getBlock().getTranslationKey();
+        if (key == null) return false;
+        return key.endsWith("_chain") || key.equals("block.minecraft.chain")
+                || key.endsWith("_lantern") || key.equals("block.minecraft.lantern");
+    }
+
+    /**
+     * Crafting workstations and decorative-but-functional player infrastructure. Anything
+     * that holds inventory is in {@link #isProtectedContainer}; this list is the rest.
+     */
+    public static boolean isWorkstation(BlockState state) {
+        if (state == null || state.isAir()) return false;
+        return state.isOf(Blocks.CRAFTING_TABLE)
+                || state.isOf(Blocks.SMITHING_TABLE)
+                || state.isOf(Blocks.LOOM)
+                || state.isOf(Blocks.ANVIL)
+                || state.isOf(Blocks.CHIPPED_ANVIL)
+                || state.isOf(Blocks.DAMAGED_ANVIL)
+                || state.isOf(Blocks.GRINDSTONE)
+                || state.isOf(Blocks.FLETCHING_TABLE)
+                || state.isOf(Blocks.CARTOGRAPHY_TABLE)
+                || state.isOf(Blocks.STONECUTTER)
+                || state.isOf(Blocks.LECTERN)
+                || state.isOf(Blocks.COMPOSTER)
+                || state.isOf(Blocks.JUKEBOX)
+                || state.isOf(Blocks.NOTE_BLOCK);
+    }
+
+    /**
+     * Redstone components — wiring, signal sources, signal modifiers, and motion blocks.
+     * Mining any of these in a player base destroys signal paths, so the bot refuses
+     * blanket. Includes hopper/dispenser/dropper for completeness even though those are
+     * also matched by {@link #isProtectedContainer}.
+     */
+    public static boolean isRedstoneComponent(BlockState state) {
+        if (state == null || state.isAir()) return false;
+        if (state.isIn(BlockTags.BUTTONS)) return true;
+        if (state.isIn(BlockTags.PRESSURE_PLATES)) return true;
+        return state.isOf(Blocks.REDSTONE_WIRE)
+                || state.isOf(Blocks.REDSTONE_TORCH)
+                || state.isOf(Blocks.REDSTONE_WALL_TORCH)
+                || state.isOf(Blocks.REDSTONE_BLOCK)
+                || state.isOf(Blocks.REDSTONE_LAMP)
+                || state.isOf(Blocks.REPEATER)
+                || state.isOf(Blocks.COMPARATOR)
+                || state.isOf(Blocks.OBSERVER)
+                || state.isOf(Blocks.PISTON)
+                || state.isOf(Blocks.STICKY_PISTON)
+                || state.isOf(Blocks.PISTON_HEAD)
+                || state.isOf(Blocks.MOVING_PISTON)
+                || state.isOf(Blocks.LEVER)
+                || state.isOf(Blocks.DAYLIGHT_DETECTOR)
+                || state.isOf(Blocks.TARGET)
+                || state.isOf(Blocks.TRIPWIRE)
+                || state.isOf(Blocks.TRIPWIRE_HOOK)
+                || state.isOf(Blocks.DISPENSER)
+                || state.isOf(Blocks.DROPPER)
+                || state.isOf(Blocks.HOPPER)
+                || state.isOf(Blocks.CRAFTER);
+    }
+
+    /** Cauldron variants — empty, water, lava, powder-snow. */
+    public static boolean isCauldron(BlockState state) {
+        if (state == null || state.isAir()) return false;
+        return state.isOf(Blocks.CAULDRON)
+                || state.isOf(Blocks.WATER_CAULDRON)
+                || state.isOf(Blocks.LAVA_CAULDRON)
+                || state.isOf(Blocks.POWDER_SNOW_CAULDRON);
     }
 
     /**
@@ -95,9 +225,8 @@ public final class ProtectedStructureBlockHelper {
                 || key.equals("block.minecraft.glass_pane")
                 || key.equals("block.minecraft.tinted_glass")
                 || key.equals("block.minecraft.iron_bars")
-                || key.equals("block.minecraft.chain")
-                || key.equals("block.minecraft.lantern")
-                || key.equals("block.minecraft.soul_lantern")
+                || key.endsWith("_chain") || key.equals("block.minecraft.chain")
+                || key.endsWith("_lantern") || key.equals("block.minecraft.lantern")
                 || key.endsWith("_stained_glass")
                 || key.endsWith("_stained_glass_pane")
                 || key.endsWith("_pressure_plate");

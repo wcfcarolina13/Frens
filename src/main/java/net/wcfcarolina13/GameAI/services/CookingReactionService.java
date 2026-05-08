@@ -195,8 +195,12 @@ public final class CookingReactionService {
     /**
      * Returns true if there is a lit furnace/smoker/blast furnace that currently has a food
      * item in its input slot, or a lit campfire with food items on it, within scan radius.
+     *
+     * <p>Public so other dialogue services (e.g. {@code CompanionContextReactionService.tryCookingNearby})
+     * can gate "smells good"-style lines on edible food specifically, rather than firing on any
+     * lit furnace which might be smelting cobblestone or sand.</p>
      */
-    private static boolean isNearActivelyCookingFood(ServerWorld world, BlockPos center) {
+    public static boolean isNearActivelyCookingFood(ServerWorld world, BlockPos center) {
         int r = COOKING_BLOCK_SCAN_RADIUS;
         for (int dx = -r; dx <= r; dx++) {
             for (int dy = -r; dy <= r; dy++) {

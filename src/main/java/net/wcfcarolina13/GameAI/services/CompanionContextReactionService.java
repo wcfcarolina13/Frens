@@ -26,16 +26,21 @@ import net.minecraft.entity.passive.GlowSquidEntity;
 import net.minecraft.entity.passive.OcelotEntity;
 import net.minecraft.entity.passive.PandaEntity;
 import net.minecraft.entity.passive.ParrotEntity;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.passive.IronGolemEntity;
 import net.minecraft.entity.passive.PigEntity;
 import net.minecraft.entity.passive.RabbitEntity;
 import net.minecraft.entity.passive.SheepEntity;
 import net.minecraft.entity.passive.SnifferEntity;
+import net.minecraft.entity.passive.SnowGolemEntity;
 import net.minecraft.entity.passive.SquidEntity;
 import net.minecraft.entity.passive.TurtleEntity;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.wcfcarolina13.Entity.LookController;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
@@ -121,6 +126,8 @@ public final class CompanionContextReactionService {
         int tntSequenceIndex = -1;
         /** Tick when the last TNT plea line was fired; used to space lines ~1 s apart. */
         long tntLastLineTick = 0L;
+        /** Iron golems already gifted a flower by this bot — one-shot per golem. */
+        final Set<UUID> giftedGolems = new HashSet<>();
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -155,6 +162,45 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] PIG_STARING_LINES = new WeightedLine[] {
             new WeightedLine("pig_staring", "That pig has been looking at me for a long time. It's getting weird.", BotDialogueSounds.LINE_PIG_STARING, WEIGHT_COMMON)
+    };
+
+    // Snow golem nearby — fires near a vanilla snow golem (pumpkin-stack-on-snow construction).
+    // Pool kept light and friendly; one of the rarer pools so it doesn't drown out other reactions
+    // when the player has built a snow-golem army.
+    private static final WeightedLine[] SNOW_GOLEM_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("snow_golem_friend", "Hey, snow buddy.", BotDialogueSounds.LINE_SNOW_GOLEM_FRIEND, WEIGHT_COMMON),
+            new WeightedLine("snow_golem_buddy", "Look at this little guy.", BotDialogueSounds.LINE_SNOW_GOLEM_BUDDY, WEIGHT_COMMON),
+            new WeightedLine("snow_golem_ammo", "He makes the ammo, I do the throwing.", BotDialogueSounds.LINE_SNOW_GOLEM_AMMO, WEIGHT_UNCOMMON),
+            new WeightedLine("snow_golem_hug", "He looks like he could use a hug. He probably can't hug back.", BotDialogueSounds.LINE_SNOW_GOLEM_HUG, WEIGHT_RARE)
+    };
+
+    // Iron golem with daisy — fires when the bot is near an iron golem and has a poppy or oxeye
+    // daisy in its inventory. The bot drops the flower at the golem's feet (modeled on villager
+    // children offering poppies in vanilla). One-shot per golem UUID so the bot doesn't keep
+    // dumping its entire flower inventory on the same golem.
+    private static final WeightedLine[] IRON_GOLEM_DAISY_LINES = new WeightedLine[] {
+            new WeightedLine("iron_golem_daisy_here", "Hold on big guy, I've got something for you.", BotDialogueSounds.LINE_IRON_GOLEM_DAISY_HERE, WEIGHT_COMMON),
+            new WeightedLine("iron_golem_daisy_earned", "Here, you've earned this.", BotDialogueSounds.LINE_IRON_GOLEM_DAISY_EARNED, WEIGHT_COMMON),
+            new WeightedLine("iron_golem_daisy_cute", "Iron golem with a flower. Cute, right?", BotDialogueSounds.LINE_IRON_GOLEM_DAISY_CUTE, WEIGHT_UNCOMMON)
+    };
+
+    // "Smells terrible." — moved from the generic AMBIENT_CAVE_CHATTER pool 2026-05-07. Now
+    // only fires when there's a contextually-coherent smelly source nearby (rotting mobs,
+    // dungeon spawners, lush-cave moss/mushrooms, mud/clay, mycelium). Reuses the existing
+    // LINE_AMBIENT_SMELLS_TERRIBLE audio asset.
+    private static final WeightedLine[] SMELLS_TERRIBLE_LINES = new WeightedLine[] {
+            new WeightedLine("ambient_smells_terrible", "Smells terrible.", BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE, WEIGHT_COMMON)
+    };
+
+    // Warden proximity — fear/avoidance dialogue. Wardens are rare/special so this gets a
+    // long cooldown. Existing isScaryNearby() detection covers warden too via SCARY_LINES,
+    // but those are generic ("I hate that sound."); these are warden-specific.
+    private static final WeightedLine[] WARDEN_NEARBY_LINES = new WeightedLine[] {
+            new WeightedLine("warden_leave_now", "We need to leave. Now.", BotDialogueSounds.LINE_WARDEN_LEAVE_NOW, WEIGHT_COMMON),
+            new WeightedLine("warden_not_a_sound", "Not a sound. Not a single sound.", BotDialogueSounds.LINE_WARDEN_NOT_A_SOUND, WEIGHT_COMMON),
+            new WeightedLine("warden_dont_peep", "Don't make a peep. I'm serious.", BotDialogueSounds.LINE_WARDEN_DONT_PEEP, WEIGHT_COMMON),
+            new WeightedLine("warden_not_what_think", "Please tell me that's not what I think it is.", BotDialogueSounds.LINE_WARDEN_NOT_WHAT_THINK, WEIGHT_UNCOMMON),
+            new WeightedLine("warden_sneak", "Sneak. Don't sneak loudly. Just sneak.", BotDialogueSounds.LINE_WARDEN_SNEAK, WEIGHT_UNCOMMON)
     };
 
     private static final WeightedLine[] UNDERGROUND_LINES = new WeightedLine[] {
@@ -549,7 +595,10 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("player_hurt", 60_000L);
         TRIGGER_COOLDOWN_MS.put("player_hungry", COOLDOWN_90S_MS);
         TRIGGER_COOLDOWN_MS.put("weather_change", 5L * 60L * 1000L);
-        TRIGGER_COOLDOWN_MS.put("wake_up", COOLDOWN_MEME_MS);
+        // Wake-up is not a meme — the 10-minute service-level cooldown in
+        // BotWakeUpDialogueService is the real gate. Keep this short so successive
+        // sleep cycles within a play session each get a chance to fire.
+        TRIGGER_COOLDOWN_MS.put("wake_up", 30_000L);
         TRIGGER_COOLDOWN_MS.put("cooking_nearby", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("pig_staring", COOLDOWN_180S_MS);
         TRIGGER_COOLDOWN_MS.put("underground_mines", COOLDOWN_180S_MS);
@@ -593,6 +642,13 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("elder_guardian_nearby", 8L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("mob_crusher", 10L * 60L * 1000L);
         TRIGGER_COOLDOWN_MS.put("redstone_machine_nearby", COOLDOWN_90S_MS);
+        // May 2026 — golem proximity reactions
+        TRIGGER_COOLDOWN_MS.put("snow_golem_nearby", 5L * 60L * 1000L);
+        TRIGGER_COOLDOWN_MS.put("iron_golem_daisy", 30L * 60L * 1000L);
+        // May 2026 — gated smells-terrible (moved out of generic cave chatter pool)
+        TRIGGER_COOLDOWN_MS.put("smells_terrible", 5L * 60L * 1000L);
+        // May 2026 — warden-specific avoidance dialogue (warden encounters are rare/special)
+        TRIGGER_COOLDOWN_MS.put("warden_nearby", 3L * 60L * 1000L);
     }
 
     private CompanionContextReactionService() {
@@ -712,6 +768,19 @@ public final class CompanionContextReactionService {
             if (tryRedstoneMachineNearby(bot, world, state)) {
                 continue;
             }
+            if (trySnowGolemNearby(bot, world, state)) {
+                continue;
+            }
+            if (tryIronGolemDaisy(bot, world, state)) {
+                continue;
+            }
+            // Warden first — it's the highest-priority bail-out line.
+            if (tryWardenNearby(bot, world, state)) {
+                continue;
+            }
+            if (trySmellsTerrible(bot, world, state)) {
+                continue;
+            }
             if (tryEndShipSequence(bot, world, state, nowTick)) {
                 continue;
             }
@@ -731,6 +800,14 @@ public final class CompanionContextReactionService {
     /** Call from sleep/wake-up code when the bot wakes up from a bed. */
     public static boolean playWakeUp(ServerPlayerEntity bot) {
         return tryTrigger(bot, "wake_up", WAKE_LINES, null, false);
+    }
+
+    /** Wake-up variant that bypasses the global {@code isRecentlyShown} suppression.
+     *  Used by {@link BotWakeUpDialogueService} after its 40-tick scheduling delay —
+     *  the schedule was set on the wake edge specifically, so it should win over any
+     *  unrelated ambient line that happened to fire during the sleep-screen fade. */
+    public static boolean playWakeUpForced(ServerPlayerEntity bot) {
+        return tryTrigger(bot, "wake_up", WAKE_LINES, null, true);
     }
 
     public static boolean debugTrigger(ServerPlayerEntity bot, String triggerKey, String lineId) {
@@ -800,9 +877,12 @@ public final class CompanionContextReactionService {
             }
             if (!triggered) {
                 Box dolphinBox = bot.getBoundingBox().expand(20.0D, 8.0D, 20.0D);
-                boolean hasDolphin = !world.getEntitiesByClass(DolphinEntity.class, dolphinBox, d -> d != null && d.isAlive()).isEmpty();
+                boolean hasDolphin = world.getEntitiesByClass(
+                        DolphinEntity.class, dolphinBox, d -> d != null && d.isAlive())
+                        .stream().anyMatch(d -> EntityVisibilityUtil.canSee(bot, d));
                 if (hasDolphin && RNG.nextDouble() < 0.28D
                         && tryTrigger(bot, "in_boat_dolphin_nearby", BOAT_DOLPHIN_LINES, null, false)) {
+                    EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
                     triggered = true;
                 }
             }
@@ -957,25 +1037,10 @@ public final class CompanionContextReactionService {
         if (inCombat) {
             return false;
         }
-        BlockPos botPos = bot.getBlockPos();
-        boolean nearCooking = false;
-        for (int dx = -4; dx <= 4 && !nearCooking; dx++) {
-            for (int dy = -2; dy <= 2 && !nearCooking; dy++) {
-                for (int dz = -4; dz <= 4 && !nearCooking; dz++) {
-                    BlockPos check = botPos.add(dx, dy, dz);
-                    var blockState = world.getBlockState(check);
-                    var block = blockState.getBlock();
-                    if (block instanceof net.minecraft.block.CampfireBlock
-                            && blockState.get(net.minecraft.block.CampfireBlock.LIT)) {
-                        nearCooking = true;
-                    } else if (block instanceof net.minecraft.block.AbstractFurnaceBlock
-                            && blockState.get(net.minecraft.block.AbstractFurnaceBlock.LIT)) {
-                        nearCooking = true;
-                    }
-                }
-            }
-        }
-        if (!nearCooking) {
+        // Edible-food gate: only fire "smells good"-style lines when the nearby lit furnace/
+        // smoker/blast-furnace actually has a food item in its input or output, or the lit
+        // campfire has food on it. Smelting cobblestone or sand should not trigger food lines.
+        if (!CookingReactionService.isNearActivelyCookingFood(world, bot.getBlockPos())) {
             return false;
         }
         if (RNG.nextDouble() > 0.10D) {
@@ -1033,14 +1098,17 @@ public final class CompanionContextReactionService {
                                       String triggerKey,
                                       WeightedLine[] pool,
                                       String forcedLineId,
-                                      boolean debugPath) {
+                                      boolean bypassSuppression) {
         if (bot == null || triggerKey == null || pool == null || pool.length == 0) {
             return false;
         }
         UUID botId = bot.getUuid();
 
         // Don't overwrite a line recently shown by another system (cooking, food-giving, etc.).
-        if (CompanionOverheadDialogueService.isRecentlyShown(botId)) {
+        // Bypass for debug-triggered lines and for scheduled wake-up lines (where the schedule
+        // was set on the wake edge specifically and should win over any unrelated ambient line
+        // that happened to fire during the sleep-screen fade).
+        if (!bypassSuppression && CompanionOverheadDialogueService.isRecentlyShown(botId)) {
             return false;
         }
 
@@ -1284,13 +1352,179 @@ public final class CompanionContextReactionService {
                 e -> e != null && e.getType() == EntityType.PIG && e.isAlive());
         if (pigs.isEmpty()) return false;
         for (Entity pig : pigs) {
-            if (isEntityFacing(pig, bot)) {
+            if (isEntityFacing(pig, bot) && EntityVisibilityUtil.canSee(bot, pig)) {
                 if (RNG.nextDouble() < 0.015D) {
                     return tryTrigger(bot, "pig_staring", PIG_STARING_LINES, null, false);
                 }
                 break;
             }
         }
+        return false;
+    }
+
+    /** Snow golem proximity — fires occasionally when a vanilla snow golem is within 12 blocks
+     *  with line of sight. Cooldown 5 min so a snow-golem army doesn't drown out other reactions. */
+    private static boolean trySnowGolemNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(12.0D, 4.0D, 12.0D);
+        List<Entity> snowmen = world.getOtherEntities(bot, box,
+                e -> e instanceof SnowGolemEntity && e.isAlive());
+        if (snowmen.isEmpty()) return false;
+        for (Entity sm : snowmen) {
+            if (EntityVisibilityUtil.canSee(bot, sm)) {
+                if (RNG.nextDouble() < 0.020D) {
+                    return tryTrigger(bot, "snow_golem_nearby", SNOW_GOLEM_NEARBY_LINES, null, false);
+                }
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** Iron golem with daisy — bot offers a poppy or oxeye daisy if it has one. Models the
+     *  vanilla villager-children-give-poppies-to-iron-golems behavior: bot turns toward the
+     *  golem, removes one flower from inventory, spawns it as an item entity at the golem's
+     *  feet, and fires a dialogue line. One-shot per golem UUID. Skipped on angry golems —
+     *  approaching one with a flower right now is poor judgment.
+     *
+     *  We don't make the golem visually "hold" the flower — that's hardcoded vanilla AI tied
+     *  to villager goals and isn't reachable without mixins. The dropped flower at the
+     *  golem's feet is the visual payoff. */
+    private static boolean tryIronGolemDaisy(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle() || bot.isSneaking()) return false;
+        Box box = bot.getBoundingBox().expand(5.0D, 3.0D, 5.0D);
+        List<Entity> golems = world.getOtherEntities(bot, box,
+                e -> e instanceof IronGolemEntity g && g.isAlive() && !g.hasAngerTime());
+        if (golems.isEmpty()) return false;
+
+        // Pick the closest un-gifted golem
+        IronGolemEntity target = null;
+        double bestSq = Double.MAX_VALUE;
+        for (Entity e : golems) {
+            if (state.giftedGolems.contains(e.getUuid())) continue;
+            double sq = e.squaredDistanceTo(bot);
+            if (sq < bestSq) {
+                bestSq = sq;
+                target = (IronGolemEntity) e;
+            }
+        }
+        if (target == null) return false;
+
+        // Find a poppy or oxeye daisy in inventory
+        int slot = -1;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack s = bot.getInventory().getStack(i);
+            if (!s.isEmpty() && (s.isOf(Items.POPPY) || s.isOf(Items.OXEYE_DAISY))) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) return false;
+
+        // Low per-tick chance — this is a special, memorable interaction; don't make it routine.
+        if (RNG.nextDouble() > 0.04D) return false;
+
+        LookController.faceEntity(bot, target);
+
+        ItemStack stack = bot.getInventory().getStack(slot);
+        ItemStack offering = stack.split(1);
+        Vec3d goPos = target.getEntityPos();
+        ItemEntity itemEntity = new ItemEntity(world,
+                goPos.x, goPos.y + 0.4, goPos.z, offering);
+        itemEntity.setVelocity(0.0, 0.15, 0.0);
+        itemEntity.setPickupDelay(40); // small delay so the moment reads as "given"
+        world.spawnEntity(itemEntity);
+
+        state.giftedGolems.add(target.getUuid());
+        return tryTrigger(bot, "iron_golem_daisy", IRON_GOLEM_DAISY_LINES, null, false);
+    }
+
+    /** Warden proximity — fires fear/avoidance lines when a warden is within 32 blocks.
+     *  Warden encounters are rare and tense, so this gets a long 3-min cooldown and a low
+     *  per-tick probability — the line should land at most a couple times per encounter. */
+    private static boolean tryWardenNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        Box box = bot.getBoundingBox().expand(32.0D, 16.0D, 32.0D);
+        boolean hasWarden = !world.getEntitiesByClass(WardenEntity.class, box,
+                w -> w != null && w.isAlive()).isEmpty();
+        if (!hasWarden) return false;
+        if (RNG.nextDouble() > 0.04D) return false;
+        return tryTrigger(bot, "warden_nearby", WARDEN_NEARBY_LINES, null, false);
+    }
+
+    /** Gated "smells terrible" — fires only when there's a contextually-coherent source of
+     *  the smell nearby. Was previously firing as part of the generic cave-chatter pool any
+     *  time the bot transitioned underground. New constraints (any one of):
+     *  <ul>
+     *    <li>zombies / slimes / witches / zombie villagers within 12 blocks</li>
+     *    <li>mob spawner block within 8 blocks (dungeon vibes)</li>
+     *    <li>lush_caves biome at the bot's position (musty moss smell)</li>
+     *    <li>mushroom block (small or large), rooted dirt, moss block, moss carpet, clay,
+     *        coarse dirt, mud, mycelium within 6 blocks</li>
+     *  </ul>
+     *  RNG-first to keep block scans cheap on the 99.5% bail path. */
+    private static boolean trySmellsTerrible(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        if (bot.hasVehicle()) return false;
+        // Cheap RNG bail before the expensive scans (tick rate ~1 Hz per bot here).
+        if (RNG.nextDouble() > 0.005D) return false;
+        if (!hasSmellyContextNearby(bot, world)) return false;
+        return tryTrigger(bot, "smells_terrible", SMELLS_TERRIBLE_LINES, null, false);
+    }
+
+    /** Returns true if at least one smelly source is in scanning range of the bot.
+     *  Scans are layered cheapest→most expensive: biome lookup, then 12-block mob scan,
+     *  then 8-block spawner scan, then 6-block block-type scan. Bails on first hit. */
+    private static boolean hasSmellyContextNearby(ServerPlayerEntity bot, ServerWorld world) {
+        BlockPos origin = bot.getBlockPos();
+
+        // Biome check (cheapest)
+        try {
+            RegistryEntry<Biome> biomeEntry = world.getBiome(origin);
+            if (biomeEntry != null) {
+                String biomeKey = biomeEntry.getKey().map(k -> k.getValue().toString()).orElse("").toLowerCase(Locale.ROOT);
+                if (biomeKey.contains("lush_caves")) return true;
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Mob scan — 12 blocks. Zombies, slimes, witches, zombie villagers all rotting/foul.
+        Box mobBox = bot.getBoundingBox().expand(12.0D, 4.0D, 12.0D);
+        if (!world.getOtherEntities(bot, mobBox, e ->
+                e.isAlive() && (
+                    e instanceof net.minecraft.entity.mob.ZombieEntity         // includes ZombieVillagerEntity, HuskEntity, DrownedEntity
+                    || e instanceof net.minecraft.entity.mob.SlimeEntity       // includes MagmaCubeEntity
+                    || e instanceof net.minecraft.entity.mob.WitchEntity)).isEmpty()) {
+            return true;
+        }
+
+        // Spawner scan — 8 blocks (dungeon-y dank smell).
+        for (BlockPos pos : BlockPos.iterate(
+                origin.add(-8, -4, -8),
+                origin.add(8, 4, 8))) {
+            if (!world.isChunkLoaded(pos)) continue;
+            if (world.getBlockState(pos).isOf(Blocks.SPAWNER)) return true;
+        }
+
+        // Block-type scan — 6 blocks. Mushrooms (small + large), rooted dirt, moss, clay,
+        // coarse dirt, mud, mycelium. Mushroom_stem too since players harvest huge mushrooms.
+        for (BlockPos pos : BlockPos.iterate(
+                origin.add(-6, -3, -6),
+                origin.add(6, 3, 6))) {
+            if (!world.isChunkLoaded(pos)) continue;
+            BlockState s = world.getBlockState(pos);
+            if (s.isOf(Blocks.RED_MUSHROOM) || s.isOf(Blocks.BROWN_MUSHROOM)
+                    || s.isOf(Blocks.RED_MUSHROOM_BLOCK) || s.isOf(Blocks.BROWN_MUSHROOM_BLOCK)
+                    || s.isOf(Blocks.MUSHROOM_STEM)
+                    || s.isOf(Blocks.ROOTED_DIRT)
+                    || s.isOf(Blocks.MOSS_BLOCK) || s.isOf(Blocks.MOSS_CARPET)
+                    || s.isOf(Blocks.CLAY)
+                    || s.isOf(Blocks.COARSE_DIRT)
+                    || s.isOf(Blocks.MUD)
+                    || s.isOf(Blocks.MYCELIUM)) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -1427,6 +1661,7 @@ public final class CompanionContextReactionService {
         if (!tryTrigger(bot, "end_ship_look_at_me", END_SHIP_LOOK_AT_ME_LINES, null, false)) {
             return false;
         }
+        EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.HERE);
         state.endShipSolicitedAtTick = nowTick;
         state.endShipLookingTicks = 0;
         return true;
@@ -1441,16 +1676,20 @@ public final class CompanionContextReactionService {
         List<EndermanEntity> endermen = world.getEntitiesByClass(
                 EndermanEntity.class, box, e -> e != null && e.isAlive());
         if (endermen.isEmpty()) return false;
-        boolean anyInForwardCone = false;
+        boolean anySpotted = false;
         for (EndermanEntity end : endermen) {
-            if (isEntityFacing(bot, end)) {
-                anyInForwardCone = true;
+            if (isEntityFacing(bot, end) && EntityVisibilityUtil.canSee(bot, end)) {
+                anySpotted = true;
                 break;
             }
         }
-        if (!anyInForwardCone) return false;
+        if (!anySpotted) return false;
         if (RNG.nextDouble() > 0.06D) return false;
-        return tryTrigger(bot, "enderman_spotted", ENDERMAN_SPOTTED_LINES, null, false);
+        if (tryTrigger(bot, "enderman_spotted", ENDERMAN_SPOTTED_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Fires sniffer_dinosaur when a live sniffer is within 12 blocks. Sniffers
@@ -1459,11 +1698,16 @@ public final class CompanionContextReactionService {
     private static boolean trySnifferNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
-        boolean any = !world.getEntitiesByClass(
-                SnifferEntity.class, box, s -> s != null && s.isAlive()).isEmpty();
+        boolean any = world.getEntitiesByClass(
+                SnifferEntity.class, box, s -> s != null && s.isAlive())
+                .stream().anyMatch(s -> EntityVisibilityUtil.canSee(bot, s));
         if (!any) return false;
         if (RNG.nextDouble() > 0.08D) return false;
-        return tryTrigger(bot, "sniffer_nearby", SNIFFER_NEARBY_LINES, null, false);
+        if (tryTrigger(bot, "sniffer_nearby", SNIFFER_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Fires the appropriate Nether-neighbour line when a piglin brute / hoglin /
@@ -1474,24 +1718,30 @@ public final class CompanionContextReactionService {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
 
-        boolean hasBrute = !world.getEntitiesByClass(
-                PiglinBruteEntity.class, box, p -> p != null && p.isAlive()).isEmpty();
+        boolean hasBrute = world.getEntitiesByClass(
+                PiglinBruteEntity.class, box, p -> p != null && p.isAlive())
+                .stream().anyMatch(p -> EntityVisibilityUtil.canSee(bot, p));
         if (hasBrute && RNG.nextDouble() <= 0.08D
                 && tryTrigger(bot, "piglin_brute_nearby", PIGLIN_BRUTE_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
-        boolean hasHoglin = !world.getEntitiesByClass(
-                HoglinEntity.class, box, h -> h != null && h.isAlive()).isEmpty();
+        boolean hasHoglin = world.getEntitiesByClass(
+                HoglinEntity.class, box, h -> h != null && h.isAlive())
+                .stream().anyMatch(h -> EntityVisibilityUtil.canSee(bot, h));
         if (hasHoglin && RNG.nextDouble() <= 0.06D
                 && tryTrigger(bot, "hoglin_nearby", HOGLIN_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
-        boolean hasZpiglin = !world.getEntitiesByClass(
-                ZombifiedPiglinEntity.class, box, z -> z != null && z.isAlive()).isEmpty();
+        boolean hasZpiglin = world.getEntitiesByClass(
+                ZombifiedPiglinEntity.class, box, z -> z != null && z.isAlive())
+                .stream().anyMatch(z -> EntityVisibilityUtil.canSee(bot, z));
         if (hasZpiglin && RNG.nextDouble() <= 0.06D
                 && tryTrigger(bot, "zombified_piglin_nearby", ZOMBIFIED_PIGLIN_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
         return false;
@@ -1506,40 +1756,44 @@ public final class CompanionContextReactionService {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
 
-        boolean hasGlow = !world.getEntitiesByClass(
-                GlowSquidEntity.class, box, g -> g != null && g.isAlive()).isEmpty();
+        boolean hasGlow = world.getEntitiesByClass(
+                GlowSquidEntity.class, box, g -> g != null && g.isAlive())
+                .stream().anyMatch(g -> EntityVisibilityUtil.canSee(bot, g));
         if (hasGlow && RNG.nextDouble() <= 0.08D
                 && tryTrigger(bot, "glow_squid_nearby", GLOW_SQUID_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
         // Squid scan filters out the GlowSquidEntity subclass so the priority
         // above isn't double-counted as a "regular squid" sighting.
-        boolean hasSquid = !world.getEntitiesByClass(
+        boolean hasSquid = world.getEntitiesByClass(
                 SquidEntity.class, box,
-                s -> s != null && s.isAlive() && !(s instanceof GlowSquidEntity)
-        ).isEmpty();
+                s -> s != null && s.isAlive() && !(s instanceof GlowSquidEntity))
+                .stream().anyMatch(s -> EntityVisibilityUtil.canSee(bot, s));
         if (hasSquid && RNG.nextDouble() <= 0.05D
                 && tryTrigger(bot, "squid_nearby", SQUID_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
-        // Dolphin sighting — uses the existing forward-cone helper so it fires
-        // when the bot is actually facing a dolphin (matches the "Did you SEE
-        // that dolphin?" framing — implies the bot noticed it).
+        // Dolphin sighting — uses the existing forward-cone helper + a strict LOS
+        // raycast so it fires only when the bot is actually facing AND can see a
+        // dolphin (matches the "Did you SEE that dolphin?" framing).
         List<DolphinEntity> dolphins = world.getEntitiesByClass(
                 DolphinEntity.class, box.expand(4.0D, 0.0D, 4.0D),
                 d -> d != null && d.isAlive());
         if (!dolphins.isEmpty()) {
-            boolean anyInForwardCone = false;
+            boolean anySpotted = false;
             for (DolphinEntity d : dolphins) {
-                if (isEntityFacing(bot, d)) {
-                    anyInForwardCone = true;
+                if (isEntityFacing(bot, d) && EntityVisibilityUtil.canSee(bot, d)) {
+                    anySpotted = true;
                     break;
                 }
             }
-            if (anyInForwardCone && RNG.nextDouble() <= 0.08D
+            if (anySpotted && RNG.nextDouble() <= 0.08D
                     && tryTrigger(bot, "dolphin_sighted", DOLPHIN_SIGHTED_LINES, null, false)) {
+                EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
                 return true;
             }
         }
@@ -1554,20 +1808,27 @@ public final class CompanionContextReactionService {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
 
-        boolean hasFoxOrOcelot = !world.getEntitiesByClass(
-                FoxEntity.class, box, f -> f != null && f.isAlive()).isEmpty();
+        boolean hasFoxOrOcelot = world.getEntitiesByClass(
+                FoxEntity.class, box, f -> f != null && f.isAlive())
+                .stream().anyMatch(f -> EntityVisibilityUtil.canSee(bot, f));
         if (!hasFoxOrOcelot) {
-            hasFoxOrOcelot = !world.getEntitiesByClass(
-                    OcelotEntity.class, box, o -> o != null && o.isAlive()).isEmpty();
+            hasFoxOrOcelot = world.getEntitiesByClass(
+                    OcelotEntity.class, box, o -> o != null && o.isAlive())
+                    .stream().anyMatch(o -> EntityVisibilityUtil.canSee(bot, o));
         }
         if (!hasFoxOrOcelot) return false;
 
-        boolean hasChicken = !world.getEntitiesByClass(
-                ChickenEntity.class, box, c -> c != null && c.isAlive()).isEmpty();
+        boolean hasChicken = world.getEntitiesByClass(
+                ChickenEntity.class, box, c -> c != null && c.isAlive())
+                .stream().anyMatch(c -> EntityVisibilityUtil.canSee(bot, c));
         if (!hasChicken) return false;
 
         if (RNG.nextDouble() > 0.10D) return false;
-        return tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false);
+        if (tryTrigger(bot, "fox_ocelot_near_chickens", FOX_OCELOT_CHICKEN_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Redstone-machine proximity detection. Counts redstone-component blocks in
@@ -1653,16 +1914,19 @@ public final class CompanionContextReactionService {
         Box box = bot.getBoundingBox().expand(16.0D, 8.0D, 16.0D);
 
         // Elder guardian wins first if present.
-        boolean hasElder = !world.getEntitiesByClass(
-                ElderGuardianEntity.class, box, e -> e != null && e.isAlive()).isEmpty();
+        boolean hasElder = world.getEntitiesByClass(
+                ElderGuardianEntity.class, box, e -> e != null && e.isAlive())
+                .stream().anyMatch(e -> EntityVisibilityUtil.canSee(bot, e));
         if (hasElder && RNG.nextDouble() <= 0.20D
                 && tryTrigger(bot, "elder_guardian_nearby", ELDER_GUARDIAN_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
         List<GuardianEntity> guardians = world.getEntitiesByClass(
                 GuardianEntity.class, box,
-                g -> g != null && g.isAlive() && !(g instanceof ElderGuardianEntity));
+                g -> g != null && g.isAlive() && !(g instanceof ElderGuardianEntity))
+                .stream().filter(g -> EntityVisibilityUtil.canSee(bot, g)).toList();
         if (guardians.isEmpty()) return false;
 
         // Charging branch — fires when a guardian's beam target is the bot or commander.
@@ -1679,12 +1943,15 @@ public final class CompanionContextReactionService {
         }
         if (chargingAtUs && RNG.nextDouble() <= 0.30D
                 && tryTrigger(bot, "guardian_charging", GUARDIAN_CHARGING_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
 
         // Plain proximity branch.
-        if (RNG.nextDouble() <= 0.10D) {
-            return tryTrigger(bot, "guardian_proximity", GUARDIAN_PROXIMITY_LINES, null, false);
+        if (RNG.nextDouble() <= 0.10D
+                && tryTrigger(bot, "guardian_proximity", GUARDIAN_PROXIMITY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
         }
         return false;
     }
@@ -1698,7 +1965,7 @@ public final class CompanionContextReactionService {
     private static boolean tryCuteAnimalNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
-        boolean any = !world.getOtherEntities(bot, box, e -> {
+        boolean any = world.getOtherEntities(bot, box, e -> {
             if (e == null || !e.isAlive()) return false;
             if (e instanceof FoxEntity) return true;
             if (e instanceof OcelotEntity) return true;
@@ -1709,10 +1976,14 @@ public final class CompanionContextReactionService {
             if (e instanceof PandaEntity) return true;
             if (e instanceof ParrotEntity p) return !p.isTamed();
             return false;
-        }).isEmpty();
+        }).stream().anyMatch(e -> EntityVisibilityUtil.canSee(bot, e));
         if (!any) return false;
         if (RNG.nextDouble() > 0.05D) return false;
-        return tryTrigger(bot, "cute_animal_nearby", CUTE_ANIMAL_LINES, null, false);
+        if (tryTrigger(bot, "cute_animal_nearby", CUTE_ANIMAL_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Variant-keyed panda proximity reactions. Iterates all pandas in a 12-block
@@ -1725,7 +1996,8 @@ public final class CompanionContextReactionService {
         if (bot.hasVehicle()) return false;
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
         List<PandaEntity> pandas = world.getEntitiesByClass(
-                PandaEntity.class, box, p -> p != null && p.isAlive());
+                PandaEntity.class, box, p -> p != null && p.isAlive())
+                .stream().filter(p -> EntityVisibilityUtil.canSee(bot, p)).toList();
         if (pandas.isEmpty()) return false;
 
         // Walk the list once to find the highest-priority gene present.
@@ -1745,18 +2017,22 @@ public final class CompanionContextReactionService {
 
         if (hasBrown && RNG.nextDouble() <= 0.20D
                 && tryTrigger(bot, "panda_brown", PANDA_BROWN_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
         if (hasAggressive && RNG.nextDouble() <= 0.10D
                 && tryTrigger(bot, "panda_aggressive", PANDA_AGGRESSIVE_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
         if (hasWorried && RNG.nextDouble() <= 0.08D
                 && tryTrigger(bot, "panda_worried", PANDA_WORRIED_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
         if (hasLazy && RNG.nextDouble() <= 0.06D
                 && tryTrigger(bot, "panda_lazy", PANDA_LAZY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
         return false;
@@ -1767,11 +2043,16 @@ public final class CompanionContextReactionService {
      *  ambient pools — bot should react promptly when one shows up. */
     private static boolean tryVexNearby(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
         Box box = bot.getBoundingBox().expand(12.0D, 6.0D, 12.0D);
-        boolean any = !world.getEntitiesByClass(
-                VexEntity.class, box, v -> v != null && v.isAlive()).isEmpty();
+        boolean any = world.getEntitiesByClass(
+                VexEntity.class, box, v -> v != null && v.isAlive())
+                .stream().anyMatch(v -> EntityVisibilityUtil.canSee(bot, v));
         if (!any) return false;
         if (RNG.nextDouble() > 0.12D) return false;
-        return tryTrigger(bot, "vex_nearby", VEX_NEARBY_LINES, null, false);
+        if (tryTrigger(bot, "vex_nearby", VEX_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Fires topic_trader_* or topic_llama_* when a wandering trader or llama is
@@ -1787,7 +2068,7 @@ public final class CompanionContextReactionService {
             return t == EntityType.WANDERING_TRADER
                     || t == EntityType.TRADER_LLAMA
                     || t == EntityType.LLAMA;
-        });
+        }).stream().filter(e -> EntityVisibilityUtil.canSee(bot, e)).toList();
         if (nearby.isEmpty()) return false;
 
         boolean hasTrader = false;
@@ -1801,9 +2082,17 @@ public final class CompanionContextReactionService {
 
         if (RNG.nextDouble() > 0.015D) return false;
         if (hasTrader) {
-            return tryTrigger(bot, "trader_nearby", TRADER_NEARBY_LINES, null, false);
+            if (tryTrigger(bot, "trader_nearby", TRADER_NEARBY_LINES, null, false)) {
+                EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+                return true;
+            }
+            return false;
         }
-        return tryTrigger(bot, "llama_nearby", LLAMA_NEARBY_LINES, null, false);
+        if (tryTrigger(bot, "llama_nearby", LLAMA_NEARBY_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        return false;
     }
 
     /** Fires meta_stop_looking only after the commander has been staring at the
@@ -1836,44 +2125,110 @@ public final class CompanionContextReactionService {
     }
 
     /**
-     * Called from the server-wide block-break hook. Fans out to dig-down, tree-punch,
-     * and dirt-dig reactions when the broken block matches.
+     * Called from the server-wide block-break hook for any player. Fans out to:
+     *
+     * <ul>
+     *   <li><b>Bot breaker:</b> tree-punch / dirt-dig self-narration ("Time to punch some
+     *       trees" / "Diggy diggy hole"). Skips the dig-down warning — bots routinely
+     *       mine the block beneath their feet during woodcut column descent and stump
+     *       clearing, and the line text ("Never dig straight down! Are you new here?")
+     *       is admonitory, not self-mockery.</li>
+     *   <li><b>Real-player breaker:</b> when the broken block was directly under the
+     *       player's feet, a nearby registered bot with line-of-sight reacts with the
+     *       dig-down warning. The bot has to be able to see the player — no warnings
+     *       through walls.</li>
+     * </ul>
      */
-    public static void onBotBlockBreak(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, BlockState state) {
-        if (bot == null || world == null || pos == null || state == null) return;
-        if (!BotEventHandler.isRegisteredBot(bot)) return;
+    public static void onBotBlockBreak(ServerPlayerEntity player, ServerWorld world, BlockPos pos, BlockState state) {
+        if (player == null || world == null || pos == null || state == null) return;
 
-        BlockPos feet = bot.getBlockPos();
-        if (pos.getX() == feet.getX() && pos.getZ() == feet.getZ() && pos.getY() == feet.getY() - 1) {
-            if (RNG.nextDouble() < 0.35D) {
-                tryTrigger(bot, "dig_straight_down", DIG_DOWN_LINES, null, false);
+        BlockPos feet = player.getBlockPos();
+        boolean directlyBelowFeet = pos.getX() == feet.getX()
+                && pos.getZ() == feet.getZ()
+                && pos.getY() == feet.getY() - 1;
+
+        boolean isBot = BotEventHandler.isRegisteredBot(player);
+        if (isBot) {
+            // Bot self-narration. Dig-down line is excluded — see method docstring.
+            if (directlyBelowFeet) return;
+
+            if (state.isIn(BlockTags.LOGS)) {
+                if (RNG.nextDouble() < 0.30D) {
+                    tryTrigger(player, "tree_punch_first", TREE_PUNCH_LINES, null, false);
+                }
+                return;
+            }
+
+            if (state.isOf(Blocks.DIRT)
+                    || state.isOf(Blocks.COARSE_DIRT)
+                    || state.isOf(Blocks.ROOTED_DIRT)
+                    || state.isOf(Blocks.GRASS_BLOCK)
+                    || state.isOf(Blocks.PODZOL)
+                    || state.isOf(Blocks.MYCELIUM)) {
+                if (RNG.nextDouble() < 0.08D) {
+                    tryTrigger(player, "dirt_dig", DIRT_DIG_LINES, null, false);
+                }
             }
             return;
         }
 
-        if (state.isIn(BlockTags.LOGS)) {
-            if (RNG.nextDouble() < 0.30D) {
-                tryTrigger(bot, "tree_punch_first", TREE_PUNCH_LINES, null, false);
+        // Real player breaker — companion bots react.
+        // High-value ore: nearby bot claps. Pure emote, no voice line. 60s per-bot
+        // cooldown via the bridge so a vein of diamonds doesn't trigger a clapping
+        // frenzy.
+        boolean isHighValueOre = state.isOf(Blocks.DIAMOND_ORE)
+                || state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE)
+                || state.isOf(Blocks.EMERALD_ORE)
+                || state.isOf(Blocks.DEEPSLATE_EMERALD_ORE)
+                || state.isOf(Blocks.ANCIENT_DEBRIS);
+        if (isHighValueOre) {
+            ServerPlayerEntity clapper = findNearestVisibleBot(player, world, 16.0D);
+            if (clapper != null) {
+                EmotecraftBridge.playEmote(clapper, EmotecraftBridge.EmoteId.CLAP);
             }
-            return;
         }
 
-        if (state.isOf(Blocks.DIRT)
-                || state.isOf(Blocks.COARSE_DIRT)
-                || state.isOf(Blocks.ROOTED_DIRT)
-                || state.isOf(Blocks.GRASS_BLOCK)
-                || state.isOf(Blocks.PODZOL)
-                || state.isOf(Blocks.MYCELIUM)) {
-            if (RNG.nextDouble() < 0.08D) {
-                tryTrigger(bot, "dirt_dig", DIRT_DIG_LINES, null, false);
-            }
+        if (!directlyBelowFeet) return;
+        if (RNG.nextDouble() >= 0.35D) return;
+
+        ServerPlayerEntity reactingBot = findNearestVisibleBot(player, world, 16.0D);
+        if (reactingBot == null) return;
+        if (tryTrigger(reactingBot, "dig_straight_down", DIG_DOWN_LINES, null, false)) {
+            EmotecraftBridge.playEmote(reactingBot, EmotecraftBridge.EmoteId.PALM);
         }
+    }
+
+    /**
+     * Returns the nearest registered bot in the same world that can see {@code source}
+     * via {@link EntityVisibilityUtil#canSee}, within {@code maxDistance}, or null.
+     */
+    private static ServerPlayerEntity findNearestVisibleBot(ServerPlayerEntity source,
+                                                            ServerWorld world,
+                                                            double maxDistance) {
+        if (source == null || world == null) return null;
+        ServerPlayerEntity nearest = null;
+        double bestDistSq = maxDistance * maxDistance;
+        for (ServerPlayerEntity candidate : net.wcfcarolina13.GameAI.services.BotRegistry
+                .getPlayers(world.getServer())) {
+            if (candidate == source) continue;
+            if (candidate.getEntityWorld() != world) continue;
+            double d = candidate.squaredDistanceTo(source);
+            if (d > bestDistSq) continue;
+            if (!EntityVisibilityUtil.canSee(candidate, source)) continue;
+            nearest = candidate;
+            bestDistSq = d;
+        }
+        return nearest;
     }
 
     /** Call from /bot follow to emit a voice ack. Cooldown-throttled; safe to call often. */
     public static boolean playFollowAck(ServerPlayerEntity bot) {
         if (bot == null) return false;
-        return tryTrigger(bot, "follow_ack", FOLLOW_ACK_LINES, null, false);
+        boolean fired = tryTrigger(bot, "follow_ack", FOLLOW_ACK_LINES, null, false);
+        if (fired) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.WAVING);
+        }
+        return fired;
     }
 
     /** Call from /bot follow stop and /bot stay to emit a voice ack. Cooldown-throttled. */

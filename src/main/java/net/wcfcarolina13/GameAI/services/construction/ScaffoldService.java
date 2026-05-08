@@ -12,6 +12,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
@@ -323,6 +324,15 @@ public final class ScaffoldService {
             BlockPos headSpace = targetPos.up().up();
             if (!world.getBlockState(headSpace).isAir()
                     && !world.getBlockState(headSpace).getCollisionShape(world, headSpace).isEmpty()) {
+                // Refuse to mine through any user-registered base. Pillar recovery is for
+                // escaping pits in the wild, not chewing through home roofs/ceilings.
+                // Phase 2 layers this on top of the zone gate; this is the cheap belt-and-suspenders.
+                if (world.getServer() != null
+                        && BotHomeService.findBaseNearPosition(world.getServer(), world, headSpace).isPresent()) {
+                    LOGGER.info("pillarUp step {}/{}: overhead at {} is inside a registered base — aborting pillar",
+                            i, steps, headSpace.toShortString());
+                    break;
+                }
                 // Try mining the overhead block instead of giving up — works bare-handed
                 // for soft blocks (dirt, sand, gravel, leaves) and with tools for harder blocks
                 LOGGER.info("pillarUp step {}/{}: overhead blocked at {} — attempting to mine",

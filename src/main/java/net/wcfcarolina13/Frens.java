@@ -766,8 +766,27 @@ public class Frens implements ModInitializer {
                 net.wcfcarolina13.GameAI.services.LockableBlockService.loadForWorld(server, worldId);
             });
 
+            // Mirror every registered base as an auto-managed protected zone. Runs after
+            // loadZones so the in-memory map is the authoritative source; idempotent.
+            server.getWorlds().forEach(world ->
+                net.wcfcarolina13.GameAI.services.BotHomeService.syncZonesFromBases(server, world));
+
             // Restore in-flight bot travels that were persisted before shutdown.
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.loadPendingTravels(server);
+
+            // Per-world stuck-cell hazard cache: load existing entries + spin up the
+            // single-thread flush executor. Pathfinder reads no-op until load() runs.
+            net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.restartExecutors();
+            net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.load(server);
+
+            // Per-world doorway-traversal anchors. Mirrors NavHazardCache lifecycle but
+            // attracts paths through known-good doors instead of repelling rejected cells.
+            net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.load(server);
+
+            // Emotecraft soft-dependency: probe for the mod and cache reflected handles.
+            // No-op if Emotecraft isn't installed.
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.initialize();
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -810,11 +829,18 @@ public class Frens implements ModInitializer {
                 }
             }
             BotPersistenceService.saveAll(server);
+            net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.flushSync(server);
+            net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.flushSync();
+            net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.clearSmokeSignalCache();
             net.wcfcarolina13.GameAI.services.DurabilityFallbackService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotAnimalDefenseService.reset();
             net.wcfcarolina13.GameAI.services.BotPillagerAlertService.reset();
             net.wcfcarolina13.GameAI.services.BotRespawnPromptService.clearAll();
+            net.wcfcarolina13.GameAI.services.BotTorchHoldService.reset();
+            net.wcfcarolina13.GameAI.services.BotRandomDanceService.reset();
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.reset();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -927,6 +953,16 @@ public class Frens implements ModInitializer {
                                 serverPlayer, serverPlayer.getCommandSource().getServer().getTicks());
                         // Hostile damage clears shelter — bot needs to fight back
                         net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(serverPlayer.getUuid());
+                    }
+
+                    // Snowball-fight reactions: snowball-from-player escalates a probe to ACTIVE,
+                    // any other attack mid-fight forces a flee or aborts the probe.
+                    {
+                        net.minecraft.server.MinecraftServer sbServer = serverPlayer.getCommandSource().getServer();
+                        if (sbServer != null) {
+                            net.wcfcarolina13.GameAI.services.BotSnowballFightService.notifyBotDamaged(
+                                    serverPlayer, source, sbServer.getTicks());
+                        }
                     }
 
                     // Named-mob pacifism: if a name-tagged mob (hostile or peaceful) damages
@@ -1050,6 +1086,19 @@ public class Frens implements ModInitializer {
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onKill(killer2, dead);
                     }
                 }
+
+                // Crying emote: real-player (commander) death OR tamed pet death.
+                // Soft-dependency on Emotecraft; silent no-op when absent.
+                triggerNearbyBotCryingForDeath(dead);
+
+                // Clap emote: commander defeats a high-value hostile (warden, elder
+                // guardian, wither, ender dragon, ravager). Bot kills don't count
+                // (bot already gets its own combat callout system).
+                if (attacker instanceof ServerPlayerEntity killer3
+                        && !BotEventHandler.isRegisteredBot(killer3)
+                        && isCelebrationWorthyKill(dead)) {
+                    triggerNearbyBotClappingForKill(killer3, dead);
+                }
             }
         });
 
@@ -1077,6 +1126,11 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAnimalDefenseService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotHazardService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.navigation.NavHazardCache::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotTorchHoldService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotRandomDanceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotSnowballFightService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
@@ -1442,6 +1496,68 @@ public class Frens implements ModInitializer {
         SPAWN_ESCAPE_CHECKS.put(bot.getUuid(), new SpawnEscapeCheck());
     }
     
+    /**
+     * Fires the crying emote on nearby companion bots when a real player or a
+     * tamed pet dies. Real-player check excludes registered bots so a bot's
+     * own death doesn't make the rest of the squad cry (death already has its
+     * own dialogue path). Tamed-pet check uses {@link net.minecraft.entity.passive.TameableEntity}
+     * so any owned wolf/cat/parrot/etc. counts.
+     */
+    private static void triggerNearbyBotCryingForDeath(net.minecraft.entity.LivingEntity dead) {
+        if (dead == null || dead.getEntityWorld() == null) return;
+        boolean isRealPlayer = dead instanceof ServerPlayerEntity sp
+                && !BotEventHandler.isRegisteredBot(sp);
+        boolean isTamedPet = dead instanceof net.minecraft.entity.passive.TameableEntity tame
+                && tame.getOwner() != null;
+        if (!isRealPlayer && !isTamedPet) return;
+        if (!(dead.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld)) return;
+
+        double radius = isRealPlayer ? 32.0D : 16.0D;
+        double radiusSq = radius * radius;
+        for (ServerPlayerEntity bot : net.wcfcarolina13.GameAI.services.BotRegistry
+                .getPlayers(serverWorld.getServer())) {
+            if (bot == dead) continue;
+            if (bot.getEntityWorld() != serverWorld) continue;
+            if (bot.squaredDistanceTo(dead) > radiusSq) continue;
+            if (!net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, dead)) continue;
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
+                    bot, net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.CRYING);
+        }
+    }
+
+    /**
+     * Returns {@code true} if the given dead entity is a high-value hostile whose
+     * defeat by the commander warrants a celebratory clap from nearby bots.
+     */
+    private static boolean isCelebrationWorthyKill(net.minecraft.entity.LivingEntity dead) {
+        if (dead == null) return false;
+        return dead instanceof net.minecraft.entity.boss.WitherEntity
+                || dead instanceof net.minecraft.entity.boss.dragon.EnderDragonEntity
+                || dead instanceof net.minecraft.entity.mob.WardenEntity
+                || dead instanceof net.minecraft.entity.mob.ElderGuardianEntity
+                || dead instanceof net.minecraft.entity.mob.RavagerEntity;
+    }
+
+    /**
+     * Plays the {@code CLAP} emote on every registered bot within 24 blocks of the
+     * killer that has line-of-sight. No voice line — pure body language.
+     */
+    private static void triggerNearbyBotClappingForKill(ServerPlayerEntity killer,
+                                                        net.minecraft.entity.LivingEntity dead) {
+        if (killer == null || dead == null) return;
+        if (!(killer.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld)) return;
+        double radiusSq = 24.0D * 24.0D;
+        for (ServerPlayerEntity bot : net.wcfcarolina13.GameAI.services.BotRegistry
+                .getPlayers(serverWorld.getServer())) {
+            if (bot == killer) continue;
+            if (bot.getEntityWorld() != serverWorld) continue;
+            if (bot.squaredDistanceTo(killer) > radiusSq) continue;
+            if (!net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, killer)) continue;
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
+                    bot, net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.CLAP);
+        }
+    }
+
     /**
      * Processes pending spawn escape checks. Called every server tick.
      */

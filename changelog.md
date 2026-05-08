@@ -2,6 +2,741 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Partial-block-aware arrival check (2026-05-08, 1.1.91)
+
+Defense-in-depth for the long-standing "bot oscillates / appears stuck on carpets, pressure plates, soul sand, slabs" symptom. The 2026-04-10 doorway-stall autopsy fixed the *passability* side (`WalkablePartialBlocks.isPathable` returns true for these) but the *position-reporting* side was never addressed — `bot.getBlockPos()` floors the entity Y, so on partial-height floors the bot's reported cell is the floor block itself rather than the cell above.
+
+| Floor type at Y=N | bot.getY() | floor(Y) | expected feet cell |
+|---|---|---|---|
+| Full block (dirt) | N + 1.0+ | N + 1 | N + 1 ✓ matches |
+| Soul sand / mud | N + 0.875 | N | N + 1 ✗ off by 1 |
+| Slab bottom / snow8 | N + 0.5 | N | N + 1 ✗ off by 1 |
+| Carpet / plate / snow1 | N + 0.0625 | N | N + 1 ✗ off by 1 |
+
+Pathfinder waypoints live at `floor + 1`, so a 1-block phantom Y delta makes the bot appear "not arrived" even when it is physically there. Most user-visible bite point: [MovementService.nudgeTowardExactBlock](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java#L1198) was timing out (1.1–1.6 s) and oscillating because `bot.squaredDistanceTo(targetCenter)` couldn't drop below `reachSq=0.64` when the bot's actual Y was ~1.4 below the target center.
+
+### Fix
+
+New helper [BotPositionUtil.effectiveFootCell](src/main/java/net/wcfcarolina13/GameAI/services/BotPositionUtil.java) — promotes the reported foot cell upward by one when the bot is overlapping with a partial-height block (top collision &lt; 1.0). Full-collision overlaps (closed door, fence, wall) still return the literal cell so genuine "stuck inside a block" cases are still detected.
+
+Two targeted updates in [MovementService](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java):
+
+1. **`nudgeTowardExactBlock`** (post-loop arrival check): replace `bot.getBlockPos().equals(target)` with `BotPositionUtil.isAt(bot, target)`. Catches the case where the loop times out but the bot is actually at the target cell.
+2. **`nudgeTowardUntilClose`** (inner spin loop): add a per-iteration foot-cell-match short-circuit alongside the existing `distSq <= reachSq` exit. The bot now bails as soon as it's at the target cell instead of spinning until timeout.
+
+### Why this is "partial sweep" not "full sweep"
+
+The same `getBlockPos().equals(target)` brittleness exists in ~15 other arrival sites (FishingSkill stand check, CollectDirtSkill stair-foot, FlowerPickSkill search center, FortifyVillageSkill approach, etc.). None of them are on the per-tick movement hot path the way `MovementService` is — most are skill-internal and pair with retry/distance fallbacks, so the user-visible impact is "skill takes one extra retry" rather than "bot oscillates visibly." Sweeping those is straightforward when a specific skill turns up the failure pattern. Helper is in place; future updates are one-line swaps.
+
+### Caveat
+
+`canAcceptMovementImpulse`'s same-cell short-circuit ([BotActions.java:1886](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L1886)) intentionally uses raw `getBlockPos().equals(...)` because it wants literal cell sameness, not effective-foot semantics. Helper is documented to call out which kind of check the caller actually wants.
+
+## Anchor cell validation on bonus read (2026-05-08, 1.1.90)
+
+Tightening for the "world has changed" failure mode in [PassageAnchorService.bonusFor](src/main/java/net/wcfcarolina13/GameAI/services/navigation/PassageAnchorService.java).
+
+Before this change, an anchor whose door was replaced with a non-passable, non-door block (e.g. door demolished, stone block placed in the gap) would sit in the cache pulling paths until 7 in-game days of disuse decayed it past the eviction threshold. The pathfinder's passability gate kept things *correct* — the wasted bonus couldn't route the bot through a wall — but iterations were spent expanding into the dead anchor before routing around.
+
+The fix adds one block-state read on the primary-anchor lookup path:
+
+```java
+if (entry != null && entry.score > 0.0F) {
+    if (isAnchorCellValid(serverWorld, x, y, z)) {
+        primary = Math.min(BONUS_CAP, entry.score * BONUS_SCALE);
+    } else {
+        synchronized (entry) { entry.score = 0.0F; }
+        DIRTY.set(true);
+    }
+}
+```
+
+`isAnchorCellValid` accepts `DoorBlock` / `FenceGateBlock` / `TrapdoorBlock` *or* air. Air is allowed because "door removed but opening preserved" is a legitimate state — the bot can still walk through. Anything else is stale → score zeroed → next prune-and-flush at +30s evicts the entry.
+
+Halo neighbors (the 6-cardinal expansion that gives 0.7× of an anchor's bonus to its immediate neighbors) intentionally *skip* validation — fractional contribution is bounded at `BONUS_CAP × NEIGHBOR_BONUS_FRACTION = 4.2`, and the staleness self-corrects when the halo cell is queried directly. Saves 6 extra block reads per neighbor expansion.
+
+Net cost: one block-state read per anchor hit (which is rare — most pathfinder neighbor lookups miss the cache entirely). Net benefit: stale anchors die in one tick instead of seven days.
+
+## Passage anchors + button-direction cleanup (2026-05-08, 1.1.89)
+
+### Dead-code removal: button-direction mining hint
+
+The `scanForButtonDirection` / `isButtonBlock` / `horizontalFromVector` helpers in [StripMineSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/StripMineSkill.java) and [CollectDirtSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/CollectDirtSkill.java) — which let the player drop a button next to the bot to indicate which way it should mine — are gone. Modern callers pass `issuerYaw` / `issuerFacing` directly when invoking the skill, so the fallback was already redundant. The new `isRedstoneComponent` protection (1.1.88) would have fought this code anyway since the bot now refuses to break ANY block adjacent to a button. Same pass also removed an unread `"buttonDirection"` shared-state lookup in CollectDirtSkill.
+
+### Passage anchor system
+
+New service [PassageAnchorService](src/main/java/net/wcfcarolina13/GameAI/services/navigation/PassageAnchorService.java) — the inverse of `NavHazardCache`. Where NavHazard punishes cells that rejected movement, PassageAnchor *rewards* cells where movement succeeded through a doorway, biasing future paths through known-good corridors over time.
+
+#### Detection
+
+`PassageAnchorService.onBotTick` is called from [BotActions.applyMovementInput:273](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L273), one cheap fast-path check per movement tick:
+
+1. Look up `LAST_FOOT_CELL[botId]`. If unchanged from current cell → return immediately (hot path).
+2. On change, probe both endpoints (foot + head, since doors are 2-tall) for `DoorBlock` / `FenceGateBlock` / `TrapdoorBlock`.
+3. If found, increment that cell's anchor score (`TRAVERSE_INCREMENT=1.0`, capped at `MAX_SCORE=30`).
+
+No mode-gating — any traversal counts (follow, return, hobby, manual `/bot come`). The user's "follow me out of the basement" scenario is the strongest signal but not the only one.
+
+#### Pathfinder bonus
+
+[BaritoneStylePathFinder.java:380](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java#L380) and [PathFinder.java:152, 186](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java#L152) subtract `PassageAnchorService.bonusFor(world, x, y, z)` from each neighbor's `tentativeG`. The bonus has two layers:
+
+- **Direct hit** on an anchor cell: `min(BONUS_CAP=6.0, score × BONUS_SCALE=0.6)` — up to 6 cost units off, vs `NavHazardCache.PENALTY_CAP=12` for rejection.
+- **6-neighbor halo**: any cardinal neighbor that's an anchor donates `bonus × NEIGHBOR_BONUS_FRACTION=0.7`. This widens the attractor band so a path one block off-center still feels the pull.
+
+The anchor pull is intentionally smaller than the rejection penalty — it nudges paths, doesn't override navigation logic. A door used twice barely registers; a door used 30 times pulls strongly.
+
+#### Decay and persistence
+
+- `DECAY_PER_TICK=1/4000` (≈0.005/sec) — slower than `NavHazardCache` (0.05/sec). Anchors are durable knowledge, not transient hazards. An unused anchor decays past the eviction threshold over ~7 in-game days.
+- Eviction: `score < 0.05 && age > 7 in-game days`.
+- Persistence: `<configDir>/frens/passage_anchors.json`, partitioned `worldKey -> dimensionId -> "x,y,z"`. Mirrors `NavHazardCache` storage layout.
+- Async flush every 30s via dedicated `frens-passage-anchor-flush` thread; sync flush on `SERVER_STOPPING`.
+
+Lifecycle wired into [Frens.java](src/main/java/net/wcfcarolina13/Frens.java): `restartExecutors` + `load` on server start, `onServerTick` for decay/flush, `flushSync` + `shutdownExecutors` on stop.
+
+## Block protection list expansion (2026-05-08, 1.1.88)
+
+Extended [ProtectedStructureBlockHelper](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedStructureBlockHelper.java) to cover everything the user asked to keep bots away from. The list was previously narrow (lodestone/beacon/conduit/glass-like/containers); it now covers entire categories.
+
+### New predicates
+
+- `isWorkstation` — crafting table, smithing table, loom, anvil/chipped/damaged anvil, grindstone, fletching table, cartography table, stonecutter, lectern, composter, jukebox, note block.
+- `isRedstoneComponent` — redstone wire, redstone torch (standing + wall), redstone block, redstone lamp, repeater, comparator, observer, piston/sticky piston/piston head/moving piston, lever, daylight detector, target block, tripwire + tripwire hook, dispenser, dropper, hopper, crafter, all `BlockTags.BUTTONS`, all `BlockTags.PRESSURE_PLATES`.
+- `isCauldron` — empty / water / lava / powder-snow.
+
+### Context-aware overload
+
+`isNeverBreakAt(World, BlockPos)` adds neighbor and entity scans on top of the state-only check:
+
+- 6-cardinal-neighbor scan: refuse if any neighbor is a redstone component (stops the bot from mining a wall block that holds up a wire/repeater) or a chain/lantern variant (so removing the support drops the chain).
+- Painting entity scan: 5-block expand-box around the target; if any painting's "behind" face overlaps the target, refuse. Catches all 1×1 → 4×4 painting variants.
+
+### Glass-like extended
+
+`isProtectedGlassLikeTranslationKey` now suffix-matches `_lantern` and `_chain` so 1.21.11 copper-lantern and copper-chain variants (plus any future `*_lantern`/`*_chain` blocks) are caught without per-block listing. Tinted glass / iron bars / stained glass + panes / pressure plates suffix were already covered.
+
+### Wire-up
+
+[MiningTool.mineBlock](src/main/java/net/wcfcarolina13/PlayerUtils/MiningTool.java) now calls `isNeverBreakAt(world, targetBlockPos)` at both the pre-mining gate (line 150) and the per-tick mid-mining check (line 254). This is the single chokepoint for every mining caller (skills, break-free, surface recovery, pillar overhead-mining), so the new categories block everything from hobby pickaxe-swings to stuck-recovery digging.
+
+## Base-aware pillar defense + auto-zones from bases (2026-05-08, 1.1.87)
+
+Three layered fixes for the failure where Jake — sitting at the home base coord underground — broke through the user's roof during a hobby pre-flight surface escape (see `latest.log` 21:51 in 1.21.11 instance: pillar mining at 274/272/270, y=64–73 around base center 273,48,1294).
+
+### 1. Pillar refuses to chew through registered bases ([ScaffoldService.java:331](src/main/java/net/wcfcarolina13/GameAI/services/construction/ScaffoldService.java#L331))
+
+Before `MiningTool.mineBlock(headSpace)` in `pillarUpWithPositions`, check `BotHomeService.findBaseNearPosition`. If the overhead block is inside any registered base's protection radius, log and `break` — pillar abandoned with whatever blocks were placed so far. Cheap belt-and-suspenders that fires even if zones aren't loaded yet.
+
+### 2. Bases auto-mirror as `ProtectedZoneService` zones ([BotHomeService.java:84](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java#L84), [Frens.java:769](src/main/java/net/wcfcarolina13/Frens.java#L769))
+
+The "base" feature previously only seeded behaviors (linger, animal-defense scope, fast-travel range) and had **zero** block protection. Closing that gap:
+
+- New label scheme `base:<normalized>` for auto-zones — separate keyspace from user-created zones (no collision risk).
+- Hooks in `addBase` / `removeBase` / `renameBase` / `setBaseRadius` upsert/remove/rename/resize the matching zone.
+- New system-level APIs in `ProtectedZoneService` (`upsertZoneInternal`, `removeZoneInternal`, `renameZoneInternal`, `isLoaded`) — bypass the player-actor permission gate that the user-facing `createZone` requires. `LOADED_WORLDS` set marks worlds whose zone file has been read so eager writes don't get clobbered when `loadZones` runs later.
+- Owner mapping: player UUID is parsed and stored on the zone so `BotTerritoryAuthorizationService` recognizes the bot's commander as authorized. Server-owned bases (sentinel `SERVER`) map to a null-owner zone — protects all bot mutations including the owner's own bots, which is correct for spawn.
+- Migration: `BotHomeService.syncZonesFromBases(server, world)` runs once at server start (after `ProtectedZoneService.loadZones`) and back-fills zones for every existing base. Idempotent — re-runs upsert the same data. This is what fixes existing worlds (like Nirn) where the zones folder is empty but bases exist.
+
+Zone size uses the base's stored radius if non-zero, otherwise `DEFAULT_BASE_PROTECTION_RADIUS=40` — same default already used by all other "near base" decisions, so the protection footprint matches what the user already mentally associates with the base.
+
+### 3. Hobby pre-flight skips when bot is underground inside its own base ([BotFleeService.java:2336](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L2336))
+
+`shouldSuppressHobbyEscape` now checks `BotHomeService.findBaseNearPosition` and returns `true` if the bot is sitting inside any registered base. This branch only fires when the bot is **already** underground (caller gates on `!isAtSurface`), so "underground + inside base" means the bot is in its own basement/storage — surfacing requires breaking through walls, not navigating a door. Better to skip the hobby than chew through the structure. The other suppression conditions (commander nearby, nighttime, post-task grace) still fire first.
+
+### Diagnosis notes
+
+`NavHazardCache` (the rejection-cost cache that pathfinders consult) is loading and pruning correctly — 278 rejection events recorded in the failure session. It just can't help here: the cache only steers *future* paths, the current Baritone plan doesn't replan when one node fails, and pillar recovery bypasses pathfinding entirely. The penalty (`PENALTY_SCALE=0.4`, capped at 12) is also too small relative to a 19-block ascent for one fence to reroute the path.
+
+## Underwater dialogue suppression (2026-05-07, 1.1.86)
+
+Voiced dialogue is now suppressed while the bot's head is submerged in water, unless **both** the bot and its controller (resolved via `CompanionCommunicationPolicy.resolveController`) have `WATER_BREATHING` or `CONDUIT_POWER`. Implemented as a single gate in [BotDialoguePlayer.playSoundInternal](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java) — the chokepoint for both `tryPlayDialogueDetailed` (chat → sound) and `playSoundForBotDetailed` (direct ambient/programmatic sound). Returns `PlayResult.DISABLED` when suppressed, so callers don't fall back to chat spam. `forcePlaySound` (the `/bot sound_test` debug bypass) is intentionally not gated.
+
+Villager-specific dialogue gating was already in place: [VillageProximityReactionService.hasNearbyVisibleVillagers](src/main/java/net/wcfcarolina13/GameAI/services/VillageProximityReactionService.java) requires an actual `VillagerEntity` within 40 blocks with line-of-sight before villager lines fire — not just village structure proximity.
+
+## Audio handoff integration (2026-05-07, 1.1.85)
+
+Integrated the audio batch from [/Users/roti/pontus/ai-player-dialogue/audio_triage/handoff_to_mod_repo.md](file:///Users/roti/pontus/ai-player-dialogue/audio_triage/handoff_to_mod_repo.md) — covers 232 events flagged `map`. Most of those events were already in `sounds.json` from prior batches; this pass added the 53 brand-new event blocks and 31 additional sound variants on existing events, plus 94 OGG copies.
+
+### Integration tooling
+
+New helper: [tools/audio/integrate_handoff.py](tools/audio/integrate_handoff.py). Parses the handoff markdown directly (each `### bot.line.X` section's copy bullets + JSON fence), then:
+
+1. Copies referenced OGGs from `pontus/ai-player-dialogue/<batch>/output_ogg/<file>.ogg` to `src/main/resources/assets/frens/sounds/dialogue/<file>.ogg`. Skips files already present at the same byte size.
+2. Merges sounds.json — creates new event blocks for new IDs, dedupe-appends new variants to existing blocks.
+3. Reports new events / appended variants / missing sources.
+
+Idempotent — re-running fills only the gaps. Dry-run by default; `--apply` actually writes.
+
+### Snowball-fight dialogue wiring (1.1.81 → audio-ready)
+
+The 32 inline strings emitted by [BotSnowballFightService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotSnowballFightService.java) via `CompanionOverheadDialogueService.showOverheadLine()` had no SoundEvent constants registered, so the audio that just shipped wouldn't have played. Wired the full chain:
+
+1. **32 `LINE_SNOWBALL_*` SoundEvent constants** registered in [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java).
+2. **32 `EXACT_MAP` entries** in [DialogueTextMapper.java](src/main/java/net/wcfcarolina13/ChatUtils/DialogueTextMapper.java) — exact-text → SoundEvent lookup, which is how `showOverheadLine` finds the audio for inline-string lines.
+3. **32 `SUBTITLE_MAP` entries** in [BotDialoguePlayer.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java) for the closed-caption pass.
+
+Plus subtitle entries for the 5 warden + 4 snow-golem + 3 iron-golem-daisy lines that had been missed in 1.1.82/1.1.83 (the audio playback already worked via direct SoundEvent reference inside `WeightedLine`/`tryTrigger`, but closed-captions needed the map entries).
+
+3 of the 32 snowball lines have no audio yet (TTS regen pending): `snowball_probe_incoming`, `snowball_escalate_on_now`, `snowball_escalate_in_for_it`. The IDs are registered and the EXACT_MAP entries are in place, so the audio will pop into place when those OGGs land — no further mod-side changes needed for those.
+
+### Numbers
+
+- `sounds.json`: 682 → 735 events (+53), 31 new variants on existing events
+- `dialogue/`: 1440 → 1523 OGGs (+83 unique copies; 11 of the 94 source files were duplicates of OGGs already at the same name from earlier batches and were overwritten harmlessly)
+- Recent feature audio coverage: snowball 29/32, warden 5/5, snow-golem 3/4, iron-golem-daisy 2/3
+
+### Verification (manual)
+
+1. Build + boot the mod. No load-time errors should appear about missing sound events.
+2. Trigger a snowball fight (60s idle/follow with snow nearby + commander present). Bot should emit a probe line; audio should play.
+3. Approach an iron golem with a poppy in inventory. Bot should drop the poppy and a daisy line should play with audio.
+4. Approach a snow golem. Bot should emit a snow-golem line with audio (subject to the 5-min cooldown).
+5. Approach a warden (carefully). Bot should emit one of the warden avoidance lines with audio.
+6. Sleep next to a bot. Wake-up line should play with audio (per 1.1.84 fixes).
+
+## Wake-up dialogue fixes (2026-05-07, 1.1.84)
+
+User reported never hearing the bot's post-sleep lines despite the pool, sound IDs, and audio assets all being present. Three compounding bugs found:
+
+### Bug 1: 30-minute content cooldown
+
+[CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) had `wake_up` keyed to `COOLDOWN_MEME_MS` (30 min real time). Wake-up isn't a meme — that's wildly over-restrictive. Lowered to 30 seconds. The 10-min service-level cooldown in `BotWakeUpDialogueService.COOLDOWN_TICKS` is the real per-sleep gate, so the content cooldown only needs to prevent same-tick double-firing.
+
+### Bug 2: Random-suppression burned the service cooldown
+
+[BotWakeUpDialogueService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotWakeUpDialogueService.java) updated `LAST_WAKE_LINE_TICK = nowTick` on the 60% speak-chance roll *even when the roll said "stay silent"*. The line never played, but the bot was now locked out for 10 minutes — so the next sleep cycle would also be silent if the previous random roll lost. Combined with the 60% gate, that compounds to ~36% silence streaks of 20+ minutes (two losing rolls in a row). Fix: only update the cooldown when the line actually fires.
+
+### Bug 3: Global "recently shown" suppression races the 2 s fade-out delay
+
+The wake line is scheduled 40 ticks (2s) after the wake edge so the sleep-screen fade-out finishes. During that 2s, *any* other ambient line on the same bot blocks the wake-up via `CompanionOverheadDialogueService.isRecentlyShown` (4s window) inside `tryTrigger`. Fixed by:
+
+1. Wiring up the previously-no-op `bypassSuppression` parameter on `tryTrigger` (it was declared as `debugPath` and never consulted). Existing debug-command callers already pass `true` and bypassing suppression is correct for those too.
+2. Adding `CompanionContextReactionService.playWakeUpForced(bot)` that passes `bypassSuppression=true`.
+3. `BotWakeUpDialogueService` now calls `playWakeUpForced` from its scheduled task — the wake schedule was set on the wake edge specifically and should win over any unrelated ambient line.
+
+### Diagnostics
+
+Promoted the wake-up scheduling and fire-or-not logs from `debug` to `info` in `BotWakeUpDialogueService`, so the user can verify in `latest.log` whether the schedule is firing. Log lines:
+
+- `Scheduled voiced wake-up line for bot {} in 40 ticks` — schedule was set
+- `Wake-up dialogue suppressed (random silence) for bot {}` — 40% silence roll
+- `Wake-up line for bot {}: fired` / `not fired (cooldown)` — what `playWakeUpForced` returned
+
+### Files touched
+
+- [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — cooldown lowered, `playWakeUpForced` added, `tryTrigger` parameter renamed `debugPath` → `bypassSuppression` and wired into the recently-shown check.
+- [BotWakeUpDialogueService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotWakeUpDialogueService.java) — random-suppression no longer burns cooldown; calls `playWakeUpForced`; logs at `info` level.
+
+### Verification (manual)
+
+1. Sleep with a bot nearby (within 16 blocks). On wake, you should now hear one of the four lines: "You know you snore like a piglin?" / "I had the strangest dream..." / "A good night's rest." / "Seize the day!" Roughly 60% of wakes should fire (40% silent by design).
+2. Check `latest.log` for the `Scheduled voiced wake-up line` and `Wake-up line for bot ...: fired` info entries to confirm the path runs.
+3. Sleep two consecutive nights. Both should be eligible to fire (subject only to the 60% roll and the 10-min service-level cooldown — no longer the 30-min content cooldown).
+
+## Smell-trigger constraints + warden avoidance dialogue (2026-05-07, 1.1.83)
+
+Three dialogue-pool refinements based on user-noted overuse + a new pool.
+
+### "Something smells good" — gated on actually-edible food
+
+[CompanionContextReactionService.tryCookingNearby](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) previously fired on any lit furnace/campfire — including a furnace cooking cobblestone or sand. Now delegates to [CookingReactionService.isNearActivelyCookingFood](src/main/java/net/wcfcarolina13/GameAI/services/CookingReactionService.java#L199), which inspects the input + output slots of furnaces/smokers/blast furnaces (must contain a food item) and the 4 campfire cooking slots (must be non-empty). Same scan radius (6 blocks). Smokers were already covered via `instanceof AbstractFurnaceBlock`. Made the helper public for reuse.
+
+### "Smells terrible" — relocated to a contextually-gated trigger
+
+The line was firing as part of [BotAmbientChatter](src/main/java/net/wcfcarolina13/ChatUtils/BotAmbientChatter.java) `AMBIENT_CAVE_CHATTER` any time the bot transitioned overworld → underground. Now removed from that pool and given a dedicated trigger in `CompanionContextReactionService.trySmellsTerrible` that only fires when at least one of the following is in scanning range:
+
+- **Mobs (within 12 blocks):** zombies, slimes, witches, zombie villagers. `ZombieEntity` covers `ZombieVillagerEntity`/`HuskEntity`/`DrownedEntity`; `SlimeEntity` covers `MagmaCubeEntity`.
+- **Mob spawner block** within 8 blocks (dungeon vibes).
+- **Lush caves biome** at the bot's position (musty moss smell).
+- **Block triggers within 6 blocks:** mushroom (small + large + stem), rooted dirt, moss block, moss carpet, clay, coarse dirt, mud, mycelium.
+
+RNG-first gating (~0.5% per ~1 Hz check) so the expensive block scan only runs when we're about to fire. 5-min per-bot cooldown. The existing `LINE_AMBIENT_SMELLS_TERRIBLE` audio is unchanged — only the trigger logic moved.
+
+This means a bot underground with no smelly source will no longer randomly mutter "Smells terrible." — it'll only fire when there's a contextually-coherent reason for it (you're in a damp lush cave, or near a dungeon spawner, or near a rotting mob, etc.).
+
+### Warden avoidance dialogue (new)
+
+5 new SoundEvent constants in [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) and a new `WARDEN_NEARBY_LINES` pool. Fires when a `WardenEntity` is within 32 blocks. 3-min per-bot cooldown, ~4% per-tick fire rate so most encounters land 1–2 lines rather than a stream.
+
+The existing `isScaryNearby` already routed warden into the generic `SCARY_LINES` ("I hate that sound."); these new lines are warden-specific avoidance/fear:
+
+- "We need to leave. Now."
+- "Not a sound. Not a single sound."
+- "Don't make a peep. I'm serious."
+- "Please tell me that's not what I think it is."
+- "Sneak. Don't sneak loudly. Just sneak."
+
+Audio for these is **Pending** — IDs registered but no OGGs yet. Tracked in [AUDIO_NEEDED.md](AUDIO_NEEDED.md) under "Warden proximity (1.1.83)".
+
+### Backlog audit — all 14 user-noted dialogue items already shipped
+
+User asked to double-check 14 dialogue ideas. All confirmed shipped before this session — only annotations needed:
+
+| Item | Where it ships |
+|---|---|
+| "Can we keep it?" — cute animals | `cute_animal_*` (1.1.61) |
+| Pandas variants (worried/lazy/brown/aggressive) | `panda_*` (1.1.60) |
+| Foxes/ocelots near chickens | `fox_ocelot_near_chickens` (1.1.60) |
+| "Meow" — cats | `cat_meow` (1.1.59) |
+| "What's up, porkchop?" — zombified piglins | `zombified_piglin_porkchop` (1.1.58) |
+| "Bacon spree" — hoglins | `hoglin_bacon_spree` (1.1.58) |
+| "Bigger than the others" — piglin brutes | `piglin_brute_bigger` (1.1.58) — note: user said "hoglin brute"; that mob doesn't exist, code targets `PiglinBruteEntity` |
+| "Dinosaur" — sniffer | `sniffer_dinosaur` (1.1.58) |
+| "Goblins with wings" — vexes | `vex_goblins_wings` (1.1.59) |
+| Tech-o-no-lo-hee-ah / hell and back — redstone | `redstone_machine_*` (1.1.64) |
+| Mob-crusher anti-cruelty | `mob_crusher_*` (1.1.63) |
+| "Did you see that dolphin?" | `dolphin_did_you_see` (1.1.59) |
+| Tamed/untamed nautilus | `nautilus_ride` / `nautilus_ocean_never` (1.1.57) |
+| "Quality animal" scope-down (donkeys/camels/llamas/horses) | `MOUNT_QUALITY_LINES` + `hasNearbyMountAnimal` ([PetProximityReactionService.java:213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232)). `AbstractHorseEntity.class` covers donkeys (subclass), llamas, trader llamas, horses. `CamelEntity` checked separately. 5-min cooldown |
+
+### Files touched
+
+- New cooking-helper visibility: [CookingReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CookingReactionService.java) — `isNearActivelyCookingFood` made public.
+- Smells-good gate: [CompanionContextReactionService.tryCookingNearby](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java).
+- Smells-terrible relocation: [BotAmbientChatter.java](src/main/java/net/wcfcarolina13/ChatUtils/BotAmbientChatter.java) `AMBIENT_CAVE_CHATTER` (line removed); [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — new `SMELLS_TERRIBLE_LINES`, `trySmellsTerrible`, `hasSmellyContextNearby`, cooldown entry, dispatch hook.
+- Warden pool: [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) — 5 new `LINE_WARDEN_*` constants; [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — new `WARDEN_NEARBY_LINES`, `tryWardenNearby`, cooldown, dispatch hook.
+- [AUDIO_NEEDED.md](AUDIO_NEEDED.md) — 5 warden lines added as Pending; smells-terrible relocation note.
+
+## Snowman + iron-golem-daisy dialogue + Base Manager polish (2026-05-07, 1.1.82)
+
+Three small features + a backlog audit pass.
+
+### Snowman proximity dialogue
+
+New `SNOW_GOLEM_NEARBY_LINES` pool in [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) fires when a `SnowGolemEntity` is within 12 blocks with line of sight. 5-min per-bot cooldown so a snow-golem army doesn't drown out other reactions. Lines reference the snowball-fight feature shipped in 1.1.81: "He makes the ammo, I do the throwing." Sound IDs registered in [BotDialogueSounds.java:912-916](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java#L912-L916) (OGGs not yet recorded — overhead text + chat fall-through fires regardless).
+
+### Iron golem with daisy
+
+When the bot is within 5 blocks of a non-angry `IronGolemEntity` and has a `Items.POPPY` or `Items.OXEYE_DAISY` in inventory, it offers the flower at low per-tick chance (~4%). Models the vanilla villager-children-give-poppies-to-iron-golems behavior:
+
+1. Closest un-gifted golem selected (one-shot per golem UUID, tracked in `TriggerState.giftedGolems`).
+2. `LookController.faceEntity` turns the bot toward the golem.
+3. One flower removed from inventory via `stack.split(1)`.
+4. `ItemEntity` spawned at the golem's feet with a 40-tick pickup delay so the moment reads as "given," not just dropped.
+5. `IRON_GOLEM_DAISY_LINES` pool fires ("Hold on big guy, I've got something for you." / "Iron golem with a flower. Cute, right?").
+
+Note: we don't make the golem visually *hold* the flower — that's hardcoded vanilla AI tied to villager goals and isn't reachable without mixins. The dropped flower at the golem's feet is the visual payoff. 30-min cooldown per trigger so the bot doesn't dump its entire flower inventory on the same village.
+
+Anger gate uses the `Angerable.hasAngerTime()` interface method (not `isAngry()` which doesn't exist on `IronGolemEntity` in 1.21.11 — first compile attempt caught this).
+
+### Base Manager UX polish (carry-forward from 2026-04-20)
+
+[BaseManagerScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BaseManagerScreen.java) — full spec landed:
+
+- **Sort:** registered bases (Base/Wall/Village kinds) first, lodestones second. Stable sort in `applyBasesJson` preserves server-supplied order within each group.
+- **In-list section headers:** new `DisplayRow` record represents either a header or a base; `buildDisplayRows` inserts "⌂ Registered Bases" + "◆ Lodestone Compasses" headers when both groups have entries (single-group lists get no header to avoid clutter). Headers are non-clickable rows that take ROW_H pixels with their own subtle stripe + underline.
+- **Hit-test math:** `mouseClicked` now maps display-row index → base index via the same `buildDisplayRows` helper, skipping headers.
+- **Per-row hover tooltip:** new `setHomeTooltipFor(BaseDto, alias)` helper returns kind-specific text. Captured during the list rendering pass into `hoverTooltip`/`hoverTooltipX`/`hoverTooltipY` fields, then drawn via `context.drawTooltip` after `disableScissor` so the tooltip box isn't clipped.
+- **Chat echo on Set Home:** new `echoToChat(msg)` helper sends a client-only message (`player.sendMessage(text, false)`) confirming the action ("Jake will treat 'home' as home." / "Jake's home compass → home."). Visible to the clicker only, not broadcast — appears in chat outside the menu so the user can verify the action took.
+
+The `contentHeight()` and `listRect()` calculations also derive from `buildDisplayRows().size()` rather than the raw bases list, so the scrollbar and click-area math include the new header rows correctly.
+
+### Backlog audit pass — 5 items flipped to ✅
+
+Pre-implementation audit caught these as already shipped, just unchecked:
+
+| Item | Where it lives |
+|---|---|
+| Pig staring at bot | [CompanionContextReactionService.tryPigStaring():1283-1298](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L1283-L1298) |
+| Diggy diggy hole | [CompanionContextReactionService.onBotBlockBreak()](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — DIRT_DIG_LINES at 8% on dirt-family blocks |
+| Going-for-walkies / Who's-a-good-dog voiced | [BotDogWalkingHobbyService.playSessionStartLine():176-188](src/main/java/net/wcfcarolina13/GameAI/services/BotDogWalkingHobbyService.java#L176-L188) (1.1.65) |
+| Drop-sweep cobblestone loop | [DropSweeper.ensureSpaceForDropSweep:284-286](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L284-L286) + per-bot TTL self-drop suppression at [216-217](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L216-L217) (1.1.70) |
+| "Quality animal" scope-down | [PetProximityReactionService.MOUNT_QUALITY_LINES + hasNearbyMountAnimal():213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232) |
+
+Backlogs updated in [RALPH_TASK.md](RALPH_TASK.md) and the personal vault `Feature Backlog March 2026.md` with implementation pointers.
+
+### Files touched
+
+- New dialogue + interaction logic: [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — added `SnowGolemEntity` + `IronGolemEntity` + `ItemEntity` + `ItemStack` + `LookController` imports, `SNOW_GOLEM_NEARBY_LINES` and `IRON_GOLEM_DAISY_LINES` pools, `trySnowGolemNearby` and `tryIronGolemDaisy` methods, `giftedGolems` field on TriggerState, dispatch hooks in `onServerTick`, cooldown entries.
+- New sound IDs: [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) — 4 snow-golem + 3 iron-golem-daisy entries.
+- Base Manager UX: [BaseManagerScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BaseManagerScreen.java) — `DisplayRow` record, `buildDisplayRows`/`setHomeTooltipFor` helpers, sort in `applyBasesJson`, render-loop rewrite, mouseClicked hit-test rewrite, `contentHeight`/`listRect` row-count fixes, `echoToChat` helper, hoverTooltip fields, post-scissor tooltip render.
+
+### Verification (manual)
+
+1. Build a snow golem near a bot. Wait. Bot eventually says one of the snowman lines. Verify ~5min cooldown.
+2. Pick a poppy or oxeye daisy from a flower forest, give it to a bot. Approach a non-angry iron golem. Bot turns to face it, drops the flower at its feet, says a daisy line. Try the same golem again — bot doesn't re-gift. Try a different golem with a remaining flower — bot gifts that one too.
+3. Open Base Manager with a mix of registered bases + lodestones. Confirm rows are sorted (bases first, lodestones below), section headers visible, list scrolls correctly. Hover any row — tooltip shows kind-specific Set Home description. Click Set Home on a base — chat shows "[Bases] Jake will treat 'home' as home." Repeat with a lodestone — chat shows "[Bases] Jake's home compass → home."
+
+## Snowball-fight idle hobby (2026-05-07, 1.1.81)
+
+A new playful idle behavior. After a sustained period (60s) of being in `Mode.IDLE` or `Mode.FOLLOW` with snow available (snowballs in inventory or `Blocks.SNOW`/`SNOW_BLOCK` within 6 blocks), a bot may throw a single snowball at the nearest non-bot player. If the player reciprocates **with their own snowball**, the bot escalates to a sustained snowball fight. Otherwise it drops back to idle with a 5-minute cooldown so it doesn't pester.
+
+### Eligibility gating
+
+Initiation requires *all* of the following on both bot and commander:
+
+- Mode in {IDLE, FOLLOW}, no active task ([TaskService.hasActiveTask](src/main/java/net/wcfcarolina13/GameAI/services/TaskService.java)), not in [BotFleeService.isInShelter](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java), no recent hostile damage in the last 200 ticks ([BotCombatCalloutService.wasRecentlyDamagedByHostile](src/main/java/net/wcfcarolina13/GameAI/services/BotCombatCalloutService.java#L1068))
+- Commander within 16 blocks, same world
+- Health ≥ 40% of max on both ("not dire" — bot doesn't pester wounded players, won't initiate when itself wounded)
+- Hunger ≥ 6 on both (vanilla loses sprint/regen below 6, that's the "dire" threshold)
+- Neither in the `hurtTime > 0` red-flash damage window
+- Neither in `entity.inPowderSnow` (the field is naturally false when a player is wearing leather boots — they stand *on top* of powder snow rather than sinking in, so the leather-boots immunity falls out for free)
+- Not at night with combined light ≤ 7 *and* either party wearing zero armor (`PlayerEntity.getArmor() == 0`)
+- No `HostileEntity` within 16 blocks of either party
+
+The 60-second eligibility timer resets every time *any* condition fails, so transient threats (a phantom flying overhead, a dip into hunger, a brief hurt flash) cleanly defer initiation.
+
+### State machine
+
+- **IDLE** — eligibility evaluated each tick. Sustained 60s + has snowball → throw probe + transition to PROBING. PROBE_LINES emitted with the throw.
+- **PROBING** — bot threw the initiation snowball. Watches a 16-block radius for any `SnowballEntity` whose `getOwner()` is the commander. If detected within 30s → ACTIVE. Damage hook also escalates if the commander's snowball lands directly on the bot. Real attack (mob, or commander hits with a non-snowball) → abort + cooldown. Window timeout → TIMEOUT_LINES ("Tough crowd…", "Guess you don't wanna play.") then cooldown.
+- **ACTIVE** — entered with an ESCALATE_LINES line ("Oh, it's ON now!"). Throws every 30–50 ticks at the commander. ~10% chance of a TAUNT_LINES quip per throw. When a commander snowball is detected near the bot, ~25% chance of a DODGE_LINES line (rate-limited to once per 2s). Hostile mob hit during ACTIVE → bot flees via existing [BotFleeService.fleeFromEntity](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L661) but the throw cadence keeps running, fulfilling the "throws snowballs while fleeing like a provoked peaceful mob" spec. Commander leaves 24-block range → fight ends with cooldown.
+- **YIELDED** — entered when ACTIVE bot runs out of snowballs. YIELD_LINES emitted ("Out of ammo — I yield!", "Mercy! I surrender!"). 3-second grace; during that window any attacker triggers `BotFleeService.fleeFromEntity` (vanilla peaceful-mob flee). Then drops to IDLE with the 5min cooldown applied.
+
+### Throw mechanism — vanilla path
+
+Throws route through the same code real players use:
+
+1. [BotActions.ensureHotbarItem](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L836) moves a snowball stack into a hotbar slot and selects it (no-op if already in hand).
+2. `aimAt()` sets `bot.setYaw/setHeadYaw/setBodyYaw/setPitch` to face the target's eye, with an upward bias of `horiz · 0.12` to compensate for gravity drop on the snowball arc — the same correction a player intuits.
+3. `stack.use(world, bot, Hand.MAIN_HAND)` triggers vanilla [SnowballItem.use](https://github.com/) which plays the throw sound, spawns a `SnowballEntity` with velocity from the bot's pitch/yaw (POWER 1.5, divergence 1.0), increments the USED stat, and decrements the stack.
+4. On `ActionResult.isAccepted()`, `bot.swingHand(MAIN_HAND, true)` for the arm animation.
+
+This means the snowballs the bot throws are indistinguishable from player throws: same trajectory physics, same `getOwner()`, same `Stats.USED` increment, same sound, same collision behavior — anything that listens to vanilla snowball events sees the bot the same way it sees a player.
+
+### Dialogue pools
+
+Six pools, all emitted via [CompanionOverheadDialogueService.showOverheadLine](src/main/java/net/wcfcarolina13/GameAI/services/CompanionOverheadDialogueService.java#L172) (overhead nameplate hologram, 3.5s):
+
+- **PROBE_LINES** — initiation throw ("Catch this!", "Wanna play?", "Snowball fight?")
+- **ESCALATE_LINES** — fight just became ACTIVE ("Oh, it's ON now!", "Eat snow!")
+- **TAUNT_LINES** — random 10% chance per throw during ACTIVE ("Bullseye!", "Hold still!")
+- **DODGE_LINES** — commander snowball flying near bot during ACTIVE ("Whoa, close one!", "Missed me!")
+- **TIMEOUT_LINES** — probe expired without reciprocation ("Tough crowd…", "Suit yourself.")
+- **YIELD_LINES** — ran out of ammo in ACTIVE ("Out of ammo — I yield!", "Mercy! I surrender!")
+
+### Powder-snow handling
+
+`Entity.inPowderSnow` is set when an entity's bounding box overlaps a `POWDER_SNOW` block. Vanilla rule: leather boots prevent the fall-through, so a booted player stands on top of powder snow without their bbox overlapping the block — `inPowderSnow` stays false. We rely on this behavior directly instead of explicitly checking the boots slot, which keeps the gate aligned with whatever vanilla does in future patches.
+
+### Files touched
+
+- New: [BotSnowballFightService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotSnowballFightService.java) (~390 lines).
+- [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) — `BotSnowballFightService::onServerTick` registration; damage hook calls `notifyBotDamaged` from inside the existing `ServerLivingEntityEvents.ALLOW_DAMAGE` registered bot branch so reciprocation by snowball, mid-fight mob attacks, and post-yield retaliation all route through one entry point.
+
+### Verification (manual)
+
+1. Stand near a bot in `/bot follow`. Wait ~60s on a snow biome (or hand the bot snowballs). Bot throws a single snowball with a PROBE_LINES line. If you ignore it, no further throws — at 30s, bot says a TIMEOUT_LINES line and returns to normal.
+2. Throw a snowball back at the bot. Bot transitions to ACTIVE with an ESCALATE_LINES line, then throws every ~1.5–2.5s. Occasional TAUNT_LINES and DODGE_LINES.
+3. Empty the bot's snowballs while ACTIVE. Bot says a YIELD_LINES line, stops throwing, enters 5-min cooldown.
+4. While ACTIVE, hit the bot with bare fists or sword. Bot flees (existing `BotFleeService` movement) while continuing to throw snowballs at the commander on cadence — provoked-peaceful-mob behavior.
+5. Damage the bot with a real mob (zombie, skeleton). Same flee-while-throwing behavior.
+6. Drop bot health below 40% with `/damage` or fall damage. No initiation. Heal. Wait the gate window again.
+7. Drop hunger below 6 with `/bot set hunger 5 <bot>`. No initiation. Restore.
+8. Stand on powder snow without leather boots. No initiation. Equip leather boots — bot now stands on top, `inPowderSnow` clears, initiation resumes after the gate window.
+9. Try at night in a dark area with no armor. No initiation. Add a single piece of armor. Allowed.
+
+## Emotecraft: wire remaining 7 emotes (clap / here / kazotsky_kick / 4 random dances) (2026-05-06, 1.1.80)
+
+Wires up the seven Emotecraft emotes that 1.1.79 left dormant. All hooks are soft-dependency through [EmotecraftBridge](src/main/java/net/wcfcarolina13/GameAI/services/EmotecraftBridge.java); silent no-op when Emotecraft isn't installed.
+
+| Emote | Trigger |
+|---|---|
+| `clap` | Commander breaks a high-value ore (`DIAMOND_ORE`, `DEEPSLATE_DIAMOND_ORE`, `EMERALD_ORE`, `DEEPSLATE_EMERALD_ORE`, `ANCIENT_DEBRIS`) → nearest visible bot within 16 blocks claps. **Also**: commander kills a high-value hostile (warden, elder guardian, wither, ender dragon, ravager) → every visible bot within 24 blocks claps. Pure emote, no voice line |
+| `here` | Bot fires the `end_ship_look_at_me` line (existing 1-stage of the captain-now bit) → bot does the "come here" gesture. Also: bot announces "Waiting by the opening" at a follow drop-off → `here` overhead-gesture so the commander can spot them visually |
+| `kazotsky_kick` | Skill completes successfully AND the skill name is in the celebratory set (`woodcut`, `farm`, `fortify`, `mining`, `hunt`, `fishing`, `shelter`, `wool`, `harvest`, `collectdirt`). Wired in [SkillManager.runSkill](src/main/java/net/wcfcarolina13/GameAI/skills/SkillManager.java#L256) finally block right after `TaskService.complete(ticket, success)` |
+| `backflip`, `twerk`, `club_penguin_dance`, `roblox_potion_dance` | Rare random idle from the new [BotRandomDanceService](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java). One of the four picked at random when a bot has been calmly idle for an extended period |
+
+### BotRandomDanceService details
+
+- Per-bot evaluation every 200 ticks (10 s).
+- Eligibility: `Mode.IDLE`, no active task, not using item, not in vehicle, not sleeping, no hostile within 16 blocks LOS or 8 blocks regardless of LOS (same combat-suppression model as `BotTorchHoldService`).
+- 2% sample probability per evaluation. Hard cooldown of 6000 ticks (5 minutes) between dances per bot. Combined avg interval is ~10 minutes of eligible idle time.
+- Uses `force=true` on the bridge `playEmote` call so the per-bridge 30 s emote cooldown doesn't gate dance picks (the per-bot 5 min cooldown is the actual rate-limiter).
+
+### CompanionContextReactionService.onBotBlockBreak — clap insertion point
+
+The high-value-ore branch runs BEFORE the `directlyBelowFeet` palm/dig-down branch, so a commander mining diamond ore *while standing on top of it* gets both reactions: clap (for the ore) and palm (for the dig-down). The bridge's per-emote 30 s cooldown ensures the bot doesn't try to play both at the same instant.
+
+### Files touched
+
+- New: [BotRandomDanceService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java) (~120 lines).
+- [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) — `BotRandomDanceService::onServerTick` registration + reset on stop, two new private helpers (`isCelebrationWorthyKill`, `triggerNearbyBotClappingForKill`), invoked from existing `AFTER_DEATH` handler.
+- [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — high-value-ore branch in `onBotBlockBreak` non-bot path; `here` emote after `end_ship_look_at_me`.
+- [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — `here` emote in the FOLLOW wait-above announce branch.
+- [SkillManager.java](src/main/java/net/wcfcarolina13/GameAI/skills/SkillManager.java) — `kazotsky_kick` after successful completion of celebratory skills + `CELEBRATORY_SKILLS` set constant.
+
+### Verification
+
+1. **Clap (ore):** stand near a bot, mine a diamond ore. Bot claps within ~250 ms (no voice line).
+2. **Clap (kill):** spawn a warden (creative-only or via /summon) near a bot in LOS, kill it yourself. Every visible bot within 24 blocks claps.
+3. **Here (end-ship):** the existing end-ship sequence fires (rare; needs the conditions). Bot does the come-here gesture along with the line.
+4. **Here (wait-above):** lead a bot in `/bot follow` mode to a drop-off too dangerous to follow. After ~30 s the bot announces "Waiting by the opening" and gestures with `here`.
+5. **Kazotsky kick:** complete a `/bot skill woodcut` task successfully. On completion the bot kazotsky-kicks. Cancelled / failed skills do NOT trigger.
+6. **Random dance:** leave a bot fully idle in a calm area for 10+ minutes. Within average ~10 min of eligible idle time, bot performs a backflip / twerk / club_penguin_dance / roblox_potion_dance. Hostile spawn or commander activity gates it off.
+
+## Emotecraft soft-dependency bridge: bots play body-language emotes (2026-05-06, 1.1.79)
+
+User asked for Emotecraft (kosmx) integration so bots play character-animation emotes alongside voice-line reactions. Soft dependency: when Emotecraft is installed, bots emote; when it isn't, every emote call is a silent no-op.
+
+### Bridge design
+
+[EmotecraftBridge.java](src/main/java/net/wcfcarolina13/GameAI/services/EmotecraftBridge.java) (new, ~140 lines) is a reflection-based wrapper. On `SERVER_STARTED`, it checks `FabricLoader.isModLoaded("emotecraft")` and caches two `Method` handles:
+
+- `UniversalEmoteSerializer.getEmote(UUID) -> Animation`
+- `ServerEmoteAPI.playEmote(UUID, Animation, boolean force)`
+
+A volatile `AVAILABLE` flag gates every public call. Reflection chosen over `compileOnly` so Frens.jar stays self-contained — no Emotecraft / playeranimcore / NoteBlockLib in the build classpath.
+
+### Emote registry
+
+11 built-in Emotecraft 3.2.0 emotes hardcoded as an `EmoteId` enum with stable JSON-derived UUIDs:
+
+`waving`, `point`, `palm`, `clap`, `crying`, `here`, `kazotsky_kick`, `backflip`, `twerk`, `club_penguin_dance`, `roblox_potion_dance`. UUIDs are stable across Emotecraft installs (extracted from each emote's JSON `uuid` field).
+
+### Cooldown
+
+Per-bot per-emote, default 30 seconds. Voice-line triggers already gate at 60+ s; the emote cooldown is a safety net. The `force` boolean variant of `playEmote` bypasses the cooldown — used by the `/bot debug emote` test command.
+
+### Wired triggers
+
+| Emote | Trigger |
+|---|---|
+| `palm` | After [dig_down_warning](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L1900) fires (1.1.76 third-party path) — bot facepalms when commander digs straight down |
+| `point` | Paired with every entity-spotted voice line (1.1.75 LOS-gated): enderman, sniffer, piglin brute / hoglin / zombified piglin, glow squid, squid, dolphin (in-boat + sighted), fox+ocelot+chicken combo, elder guardian, guardian charging, guardian proximity, panda variants (brown / aggressive / worried / lazy), vex, trader, llama, cute animals |
+| `waving` | [`/bot follow` ack](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L1978) + bot rejoin after disconnect/death (in [BotPersistenceService.onBotJoin](src/main/java/net/wcfcarolina13/GameAI/services/BotPersistenceService.java#L186) post-restore) |
+| `crying` | Real-player death within 32 blocks LOS, OR tamed-pet (`TameableEntity` with owner) death within 16 blocks LOS — every nearby registered bot cries |
+
+The unwired emotes (`clap`, `here`, `kazotsky_kick`, `backflip`, `twerk`, `club_penguin_dance`, `roblox_potion_dance`) ship dormant — user is testing them via the manual command and will pick mappings.
+
+### Manual test command
+
+`/bot debug emote list` — print the 11 emote slugs.
+`/bot debug emote <name>` — force-play on every registered bot in the server.
+`/bot debug emote <name> <bot>` — force-play on a specific bot.
+
+Force-play bypasses cooldown so you can chain test invocations.
+
+### Files touched
+
+- New: [EmotecraftBridge.java](src/main/java/net/wcfcarolina13/GameAI/services/EmotecraftBridge.java) (~140 lines).
+- [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) — `initialize()` on SERVER_STARTED, `reset()` on SERVER_STOPPING, new private helper `triggerNearbyBotCryingForDeath` invoked from the existing `AFTER_DEATH` handler.
+- [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) — ~18 trigger sites get `EmotecraftBridge.playEmote(...)` after their successful `tryTrigger` call. `playFollowAck` adds the wave.
+- [BotPersistenceService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotPersistenceService.java) — wave on join-restore-complete.
+- [Commands/modCommandRegistry.java](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java) — `/bot debug emote` subcommand + `executeEmote` helper.
+
+### Verification
+
+1. Stand near the bot in dim conditions, dig the block under your feet → bot facepalms (palm) and says "Never dig straight down!".
+2. Spawn entities the bot can see (enderman, dolphin, panda, etc.) → bot points and speaks the line.
+3. `/bot follow` → bot waves and says the follow ack.
+4. Kill yourself near a bot → bot cries.
+5. `/bot debug emote list` → prints all 11 emote slugs. `/bot debug emote backflip` → all bots backflip.
+6. Remove Emotecraft mod, re-launch → log shows "Emotecraft not detected; bot emote bridge disabled". All Frens features still work; emote calls no-op.
+
+## BotTorchHoldService: hold torches in dim areas while idle/following (2026-05-06, 1.1.78)
+
+User requested an atmospheric service: when the bot is idle or following the commander through a dark area, put a torch in the active hand. Must yield to any other system that needs the slot — skills, combat, eating, foreign hand-swaps.
+
+### What it does
+
+[BotTorchHoldService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotTorchHoldService.java) (~210 lines, new) runs on `END_SERVER_TICK` (5-tick throttle), iterates `BotRegistry.getPlayers(server)`, and for each bot evaluates a "should hold torch" predicate. On positive transition: save current selected slot, swap to the torch slot. On negative transition: restore the saved slot. Pure hotbar selection — no inventory mutation beyond optional torch promotion (below).
+
+### Hold conditions (all must hold)
+
+- Mode is `IDLE` or `FOLLOW` (skills, guard, patrol, stay all skip).
+- `!TaskService.hasActiveTask(uuid)` — no skill running.
+- `!bot.isUsingItem()` (eating, drawing bow, blocking) and `!hasVehicle()` and `!isSleeping()`.
+- Block/sky-light at the bot's blockpos `≤ 7` (vanilla mob-spawn threshold; "this is the kind of dim where torches matter").
+- **No hostile within 16 blocks AND line-of-sight** — visible threat → bot keeps weapon out.
+- **No hostile within 8 blocks regardless of LOS** — proxy for footstep/mob-sound audibility through walls; bot keeps weapon out.
+
+LOS check reuses [EntityVisibilityUtil.canSee](src/main/java/net/wcfcarolina13/GameAI/services/EntityVisibilityUtil.java) from 1.1.75. Hostile scan uses [BotThreatService.findHostilesAround](src/main/java/net/wcfcarolina13/GameAI/services/BotThreatService.java).
+
+### Inventory promotion
+
+If a torch stack exists only in main inventory (slots 9–35), the service promotes it to a hotbar slot:
+
+1. **First pass:** empty hotbar slot.
+2. **Second pass:** non-tool / non-food / non-weapon hotbar slot, excluding the currently-selected slot (avoids round-trip churn with whatever the bot just had in hand).
+3. If neither, give up — keep tool slots intact.
+
+Once promoted the torch stays in hotbar; we don't shuffle it back. Stable layout, no thrash. Supports `Items.TORCH`, `SOUL_TORCH`, `REDSTONE_TORCH`.
+
+### Cooperation with other services
+
+Foreign-swap detection: every tick we re-find the torch hotbar slot and check if the bot's `getSelectedSlot()` matches what we expected. If something else swapped (e.g., `BotActions.selectBestTool` for combat, `ensureAxeEquipped` from a skill), our state clears and we yield. Next tick we re-evaluate from scratch — usually `shouldHoldTorch` is now false (skill ticket open, hostile detected, etc.) so we don't fight.
+
+The active-task gate is the strongest guard. Any skill that runs through `SkillManager.execute` opens a `TaskService` ticket; our predicate returns false the entire time.
+
+### Files touched
+
+- New: [BotTorchHoldService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotTorchHoldService.java) (~210 lines).
+- [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L347-L350) (+4 lines: `getModePublic` accessor since the existing `getMode` is private).
+- [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) (+2 lines: `END_SERVER_TICK` registration + `reset()` in `SERVER_STOPPING`).
+
+### Verification
+
+1. **Idle dark cave:** stand commander next to a bot in IDLE mode in a Y=30 unlit cave (light ≤ 7) with torches in inventory. Bot should equip a torch within ~250 ms.
+2. **Follow through a tunnel:** issue `/bot follow`. Walk through dark areas; bot's hand has a torch. Step into a lit room (light > 7); bot reverts to whatever was selected before.
+3. **Combat suppression — visible:** spawn a zombie 12 blocks away with LOS in a dim room. Bot does NOT pull a torch (visible threat). When zombie dies / leaves LOS, torch returns.
+4. **Combat suppression — audible through wall:** spawn a zombie 6 blocks away through a 1-block stone wall. Bot does NOT pull a torch (audible threat).
+5. **Skill in progress:** issue `/bot skill woodcut` in a dim area. Bot does NOT pull a torch (active task ticket); when skill completes, torch returns.
+6. **Eating:** give bot a steak; bot eats. During the use animation, no torch swap. After eating completes, torch returns.
+7. **Foreign swap:** while torch is held, force a manual hand swap (or trigger another service that swaps tool). Our state clears; we don't fight; next quiet tick we re-evaluate.
+8. **Inventory promotion:** put a torch stack in slot 27 (deep inventory) with all hotbar slots full of non-tool blocks. Bot in dark IDLE → torch promotes to a non-tool hotbar slot, bot equips it.
+
+## Woodcut tooling: bootstrap wooden axe + terminate on no-axe instead of pickaxe fallback (2026-05-06, 1.1.77)
+
+User reported the bot using a pickaxe to chop logs during woodcut, and noted the bot wasn't crafting a wooden axe even though it could. Two related bugs in the woodcut tool-provisioning chain.
+
+### Bug 1: wooden axe craft gated on commander history
+
+[ToolProvisionService.ensureAxe](src/main/java/net/wcfcarolina13/GameAI/services/ToolProvisionService.java#L148) gates the wooden axe branch on `(canCraft || allowWoodenFallback) && hasPlanksOrLogs`. `canCraftAxe(historyOwner)` returns true only if the commander has crafted an axe before — wooden, stone, iron, or diamond. The 3-arg `ensureAxe` overload (used by [WoodcutSkill.prepareWoodcutTooling](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L4836)) hardcoded `allowWoodenFallback=false`. So a fresh commander who's never crafted an axe before, OR a bot working autonomously without a tracked history, would skip the wooden fallback entirely — even with planks/logs in inventory.
+
+The wooden axe is the bootstrap craft; gating it on history makes no sense for the woodcut start path. Now [prepareWoodcutTooling](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L4836) and [ensureAxeOrRetrieve](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L5350) both call the 4-arg overload with `allowWoodenFallback=true`. `ensureAxe` still tries stone → iron → diamond first when materials are present (preserves existing behavior of preferring better tiers); wooden is the always-available fallback.
+
+### Bug 2: pickaxe used to chop logs
+
+After the existing chain failed (no axe, no chest retrieval, no craft due to Bug 1), `prepareWoodcutTooling` called `selectHandsOrHarmlessItem(bot)` which has a "last resort: equip slot 0" path. If slot 0 was a pickaxe — common on a survival bot — the woodcut loop proceeded to mine logs with that pickaxe.
+
+`prepareWoodcutTooling` now returns `boolean` instead of `void`. On failure to obtain an axe, the caller at [WoodcutSkill.java:699](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java#L699) returns `SkillExecutionResult.failure("I have no axe and can't make or find one. Get me an axe (or planks + sticks) and try again.")`. No more pickaxe-on-logs.
+
+`ensureAxeOrRetrieve` (the mid-task replenishment hook called from `fellTree` inner loops) now also tries crafting with wooden fallback before falling through to chest retrieval. Mid-task axe breakage gets a clean replacement when materials are around. If even that fails the existing call sites just keep the bot's currently-equipped tool — for now that's acceptable since a still-running woodcut had a working axe at start; the per-block `selectAdaptiveToolOrHands` for logs will fall to hands rather than pickaxe. (Stricter mid-task termination is a follow-up if the issue resurfaces.)
+
+### Files touched
+
+- [WoodcutSkill.java](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java) — `prepareWoodcutTooling` return type + 4-arg ensureAxe call + caller termination at L699; `ensureAxeOrRetrieve` adds a craft attempt before chest retrieval.
+
+### Verification
+
+1. **Bot with planks but no axes (no commander history):** spawn a bot, give it planks + sticks, no axes anywhere, no craft history. Issue `/bot skill woodcut`. Expect: bot crafts a wooden axe at the crafting table, then proceeds with woodcut.
+2. **Bot with no materials and no axes:** clear all axes/planks/logs from inventory + nearby chests. Issue `/bot skill woodcut`. Expect: skill terminates immediately with the failure message; no chopping starts.
+3. **Mid-task axe breakage:** start woodcut with a near-broken iron axe. When it breaks, the bot should try to craft a wooden axe from collected logs (woodcut by then has yielded plenty). It should NOT switch to pickaxe.
+4. **Sanity: existing happy path:** bot with a fresh axe in inventory still woodcuts as before.
+
+## Dig-straight-down warning fires on the wrong actor (2026-05-06, 1.1.76)
+
+User reported the bot saying `"Never dig straight down! Are you new here?"` while it was woodcutting. The line is admonitory — clearly meant as a companion warning to a player making the noob mistake — but [CompanionContextReactionService.onBotBlockBreak:1856](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L1856) was firing it on bot self-actions: when the bot's `WoodcutSkill` mines a log directly under its feet during column descent or stump clearing, the hook saw `pos == feet.down()` and triggered the warning. The bot was scolding itself for normal woodcut operations.
+
+Two parts to the fix:
+
+1. **Skip dig-down on bot self-action.** The hook still fires for bots, but `tree_punch_first` ("Time to punch some trees", "This tree owes me money") and `dirt_dig` ("Diggy diggy hole") stay — those read as self-narration and fit a bot chopping/digging. The dig-down warning is excluded from the bot-self path.
+2. **Add the third-party path.** When a real player digs straight down (block broken at `feet.down()`), the nearest registered bot within 16 blocks **with line-of-sight** to the player reacts with the warning. Reuses [EntityVisibilityUtil.canSee](src/main/java/net/wcfcarolina13/GameAI/services/EntityVisibilityUtil.java) from 1.1.75 — bots don't warn through walls. New private helper `findNearestVisibleBot(player, world, maxDistance)` iterates `BotRegistry.getPlayers(server)`, filters by world + LOS, returns the closest.
+
+The hook signature stays as `onBotBlockBreak(ServerPlayerEntity player, ...)` — name now slightly misleading (it handles both bot and non-bot breakers) but renaming would churn the registration site at [Frens.java:464](src/main/java/net/wcfcarolina13/Frens.java#L464) for no functional gain. Updated the docstring instead.
+
+**Why the warning was previously dead code from the player side:** the existing logic only proceeded if `isRegisteredBot(player) == true`. Real players' breaks short-circuited at the first guard. So before this change, the only way the line could fire was via bot self-action, which is exactly the bug the user reported. Now the line fires in its intended context.
+
+**Verification:**
+
+1. **Bot woodcut, no false warning:** issue `/bot skill woodcut` near a tree. During column descent / stump clearing, the bot will mine logs at `feet.down()`. Expect: no `dig_down_warning` line during the task. Tree-punch + dirt-dig narration may still fire as before.
+2. **Player dig-down, bot reacts:** stand near a bot in open terrain. Dig the block under your feet (e.g., punch dirt below). Expect: within ~3 attempts (35% roll, 60s cooldown), the bot says "Never dig straight down! Are you new here?".
+3. **Player dig-down behind a wall, no warning:** stand 8 blocks from the bot with a 2-block-thick wall between you. Dig down. Expect: no warning (LOS check from 1.1.75 prevents the bot from "seeing" your action).
+4. **Multiple bots:** with two bots near you, only one (the closest with LOS) speaks the warning per trigger.
+
+## Voice-line LOS gating: stop bots commenting on entities through walls (2026-05-06, 1.1.75)
+
+Followup to the 1.1.74 IdleSweep autopsy. The user reported Jake saying `enderman_spotted_dont_look` when no enderman was visible from where they were standing. The trigger at [CompanionContextReactionService.tryEndermanSpotted](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L1438) used `world.getEntitiesByClass` with a 33×17×33 detection box and an `isEntityFacing` forward-cone gate, but **no line-of-sight check**. An enderman in an adjacent dark cave or behind a wall within the box would still trigger the line — the bot was technically "facing the direction" of the enderman through solid stone.
+
+**Audit scope:** 30 entity-scan call sites across 8 services. Classification:
+
+- **20 LOS_REQUIRED** — voice-line / "I see X" reactions where the bot is commenting on something it should actually see. Endermen, sniffers, nether mobs (brute / hoglin / zombified piglin), squids, glow squids, dolphins (in-boat + standalone), pandas, vex, traders + llamas, fox+ocelot+chicken combo, guardian + elder guardian, cute animals, pig-staring, villager-noise. 19 in `CompanionContextReactionService`, 1 in `VillageProximityReactionService`.
+- **10 LOS_NOT_NEEDED** — threat / hazard / mechanical detection that correctly should NOT require LOS (creeper around the corner is still a real threat, warden audio aura penetrates walls, primed TNT, hostile-radius scans, animal-defense watch list, recruitment village counts).
+
+**Fix:** new shared utility [EntityVisibilityUtil.canSee(bot, target)](src/main/java/net/wcfcarolina13/GameAI/services/EntityVisibilityUtil.java) — strict eye-to-eye raycast using `RaycastContext.ShapeType.COLLIDER + FluidHandling.NONE`, ignoring the bot itself. Mirrors vanilla `LivingEntity.canSee` semantics. **No tolerance** — that's deliberate. The 2-block "near a surface" tolerance used for item pickup in `BotEventHandler.findNearestDrop` is for a different purpose (items physically resting on a block surface look "behind" a block to a naive ray); here we want voice lines to fire only on genuine visual sightings.
+
+**Where it's applied (20 call sites):** every LOS_REQUIRED voice-line trigger now adds `.stream().anyMatch(e -> EntityVisibilityUtil.canSee(bot, e))` (or `.filter` for List flows) to its `getEntitiesByClass` / `getOtherEntities` chain. Mob-class predicate stays unchanged; the LOS check is layered on top so the intent is explicit at every site.
+
+**Where it's deliberately NOT applied:** [BotThreatService.findHostilesAround](src/main/java/net/wcfcarolina13/GameAI/services/BotThreatService.java), [BotAnimalDefenseService.buildWatchList](src/main/java/net/wcfcarolina13/GameAI/services/BotAnimalDefenseService.java), `hasPrimedTntNear`, `tryHostileDetection` (the in-combat boolean check at [CompanionContextReactionService.java:628](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L628)), the warden / creeper threat checks in `isUnderThreat`, chicken-jockey hazard scan, recruitment village + golem counts, mob-crusher anti-cruelty detection. These services correctly need to know about threats and mechanical state regardless of occlusion.
+
+**Pig-staring (line 1283):** also gated. The voice line is literally about noticing the pig staring at you, so observation is required. Now combined with the existing `isEntityFacing(pig, bot)` forward-cone check, both conditions must hold.
+
+**Files touched:** new [EntityVisibilityUtil.java](src/main/java/net/wcfcarolina13/GameAI/services/EntityVisibilityUtil.java) (~50 lines including docstring), [CompanionContextReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java) (~25 line changes across 19 trigger methods), [VillageProximityReactionService.java](src/main/java/net/wcfcarolina13/GameAI/services/VillageProximityReactionService.java) (renamed `hasNearbyVillagers` → `hasNearbyVisibleVillagers`, +1 parameter, +1 line for the LOS filter, single caller updated).
+
+**Verification:**
+
+1. **Enderman behind a wall:** spawn an enderman in a dark cave 12 blocks horizontally from the bot, with solid stone between them. Stand near the bot for several minutes (long enough to clear cooldown). Expect: no `enderman_spotted_dont_look` line.
+2. **Enderman visible:** clear line of sight to the same enderman (e.g., open the cave wall). Within the per-tick roll window, expect the line to fire normally.
+3. **Threat persists through walls:** spawn a creeper around a corner from the bot. The bot's combat state should still register the creeper as a threat (combat callout systems still fire).
+4. **Per-trigger:** each of the 20 LOS_REQUIRED triggers can be tested by burying the relevant mob behind a 2-block-thick wall vs. having clear LOS. The line should fire only in the visible case.
+
+## IdleSweep: no-progress timeout + drop blacklist + AutoFace suppression (2026-05-06, 1.1.74)
+
+Diagnosed from a Prism log where Jake spent 67 seconds hopping in place while looking up at an enderman. Two distinct bugs converged on the same scene:
+
+**Bug 1: IdleSweep had no give-up.** [tickOpportunisticIdleSweep](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3018) committed to a target drop and called `followWaypointStep` every tick until arrival, commander move, or `/bot stop`. There was no "we haven't gotten any closer for N seconds, abandon" check. Jake locked onto a drop at `(319, 69, 1306)`, reached `(316, 69, 1304)`, hit a 3-block lateral obstacle (probably a fence post or head-clearance under tree cover), and kept auto-jumping in place forever.
+
+**Bug 2: AutoFaceEntity was not suppressed during the sweep.** Per CLAUDE.md, `AutoFaceEntity.setBotExecutingTask(true)` is set by `SkillManager.execute` only. IdleSweep runs outside the skill system, so the idle head-rotation tracker was free to swing Jake's pitch toward the most interesting nearby entity — in this case a real enderman within the 33×17×33 detection box (no LOS check) that the user couldn't see from their angle. Confirmed via the `frens:bot.line.enderman_spotted_dont_look` voiced dialogue at `(316.44, 70.00, 1304.47)` immediately after the hopping started.
+
+**Fix 1 — No-progress timeout + per-bot blacklist:**
+
+Two new state maps in [FollowStateService.java:117-126](src/main/java/net/wcfcarolina13/GameAI/services/FollowStateService.java#L117-L126):
+
+- `IDLE_SWEEP_LAST_PROGRESS_TICK` — last tick the bot got measurably closer to its target.
+- `IDLE_SWEEP_LAST_DISTANCE_SQ` — last recorded squared distance for progress comparison.
+- `IDLE_SWEEP_TARGET_BLACKLIST` — `Map<UUID, Map<BlockPos, Long>>` per-bot of unreachable drop positions with cooldown-expiry ticks. Entries auto-prune on read past their expiry tick. Persists across `clearIdleSweep` so stop/restart of the sweep doesn't reset learned-unreachable knowledge.
+
+In [tickOpportunisticIdleSweep](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3018), every tick we walk toward the committed target we now compare current `distSq` to the last recorded one. If `distSq` dropped by ≥ `IDLE_SWEEP_PROGRESS_DELTA_SQ` (= 0.25, ≈0.5 blocks closer), we update the progress tick + distance. If we go `IDLE_SWEEP_NO_PROGRESS_TIMEOUT_TICKS` (= 200 ticks / 10 s) without progress, we log an abandon line, blacklist the target's BlockPos for `IDLE_SWEEP_BLACKLIST_DURATION_TICKS` (= 1200 ticks / 60 s), clear sweep state, cancel any in-progress `DropSweepService` sweep, and return false. [findNearestDrop](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L7148) now filters out blacklisted positions, so subsequent sweeps skip the unreachable drop and pick the next nearest.
+
+**Fix 2 — AutoFaceEntity suppression:**
+
+`AutoFaceEntity.setBotExecutingTask(true)` is now called on IdleSweep activation and at every entry to the active branch; reset to `false` on every exit path that returns `false` (player moved, sweep complete, no-progress abandonment). Mirrors the existing `SkillManager` pattern. Bot's head now stays pointed at the waypoint it's walking toward instead of swinging at random nearby mobs.
+
+**Architectural composition with NavHazardCache (1.1.73):** when Jake stalls at the lateral obstacle, the `applyMovementInput-reject` calls feed `NavHazardCache.recordRejection`. The streak gate (3 rejects / 40 ticks) promotes the wedge cell to a tracked hazard with `score > 0`. So even *before* the IdleSweep abandonment timeout fires, the cells around the obstacle accumulate hazard score, and the *next* sweep target's pathfinder routes around them. The IdleSweep blacklist handles the rare case where the drop itself is unreachable (no path to it at all); the hazard cache handles the more common case of "path exists but goes through bad cells."
+
+**Files touched:** [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) (+~50 lines for progress tracking + blacklist helper + AutoFace toggles), [FollowStateService.java](src/main/java/net/wcfcarolina13/GameAI/services/FollowStateService.java) (+10 lines for new maps + clearIdleSweep update).
+
+**Verification (manual, in-game):**
+
+1. Drop an item somewhere reachable through a fence-corner chokepoint Jake's pathfinder can't easily navigate. Stand still until IdleSweep activates.
+2. Watch Jake walk toward the drop, hit the obstacle, attempt for ~10 s. Expect `[IdleSweep] Jake abandoning unreachable drop at <pos> — no progress for 10s` in the log, then sweep state clears.
+3. Drop another item nearby in a clearly reachable spot. Wait for the next sweep activation. Jake should pick the new drop (the original is blacklisted for 60 s) and ignore the previously-blocked one.
+4. After 60 s, drop a fresh item at the originally-blocked spot. Jake should still avoid attempting (entry still blacklisted until tick TTL elapses).
+5. Confirm head behavior: during the active sweep, Jake's pitch should track the waypoint, not random mobs. Bring an enderman near him during a sweep and watch his head — it should stay locked on the drop direction, not swing at the enderman.
+
+## Per-world stuck-cell navigation hazard cache (2026-05-06, 1.1.73)
+
+First step in the "let the bot get better at pathfinding over time" arc the user proposed after watching Jake oscillate on a stair-fence-door cluster (logs that drove 1.1.72). Item #2 in the four-part roadmap; items #3 (route corridor cache) and #4 (edge-cost tuner from observed traversal time) are deferred but the design accommodates them.
+
+**What it does:** [NavHazardCache.java](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) (new, ~340 lines) records every `applyMovementInput` rejection at the cell where it happened, scoped per save × per dimension. After a streak of 3 rejections within 40 ticks at one cell, the cell is "promoted" with a `score` that grows on further rejections (+1.5 each, capped at 50.0), shrinks on successful traversals (−3.0 each), and decays linearly with wall-clock time (~0.05/sec). Both pathfinders ([PathFinder.java:151,184](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java#L151) and [BaritoneStylePathFinder.java:379](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java#L379)) consult `NavHazardCache.penaltyFor(world, cell)` during cost expansion and add `min(score × 0.4, 12.0)` to the candidate's `gScore`. Saturated cells (`score=50`) cost ~12 extra blocks of detour — A* gladly routes around when alternatives exist, but won't refuse the cell when it's the only path home.
+
+**Why these constants:** Streak gate (3 rejects in 2 s) suppresses single-bump noise; today's stair stall would have promoted in ~50 ms. Linear decay (vs RLAgent's exponential epsilon) gives a deterministic "this stale entry ages out in T seconds" guarantee — saturated cells fully clear in ~17 min idle. Pathfinder cap matches the existing per-step move costs (1.0–1.8 in `BaritoneStylePathFinder.expandNeighbors`) so penalties dominate routing decisions without making cells unreachable.
+
+**Persistence:** JSON at `<configDir>/frens/nav_hazard_cache.json`, partitioned by `worldKey -> dimensionId -> "x,y,z"`. World key reuses `BotWorldStateService.currentWorldKey(server)` (level name + save-root hash). Dimension key is `world.getRegistryKey().getValue().toString()`. Loaded synchronously on `SERVER_STARTED`; pruned + flushed every 30 s (mirrors `BotPersistenceService.AUTOSAVE_INTERVAL_TICKS`) via a single-thread `ScheduledExecutorService` so disk I/O never blocks the server thread; final sync flush on `SERVER_STOPPING` before bot save.
+
+**Success signal:** Hooked into `NavHazardCache.onServerTick` via per-bot foot-cell tracking. When a bot's `BlockPos.asLong()` changes between ticks, the previous cell was definitively traversed — look it up, decrement score, increment `successes`. Chosen over hooking the `applyMovementInput` accept branch (too noisy, fires every moving tick) or `MovementService.walkTo` completion (path-level, misses interrupted-but-progressed paths).
+
+**Recording site:** [BotActions.java:272-275](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L272-L275) — between the `canAcceptMovementImpulse` gate and the throttled `diagnoseOccupancyRejection`. Recorder is *unthrottled* (true counts feed the streak gate); diagnostic stays at one log/0.5 s.
+
+**Inspection:** New `/bot debug nav-hazard` command lists the top-10 highest-scoring cells in the player's current world+dimension and prints the cache file path. Useful for confirming a stuck cell got tracked, or verifying decay returned a score to zero after the obstacle was removed.
+
+**Architectural room for #4:** The deferred edge-cost tuner records *between-cell* timings, not single-cell hazard. Same JSON top-level partitioning, same flush executor, same per-tick handler can hold both. The single penalty call site in each pathfinder becomes the home for all additive cost adjustments — the tuner just adds a second term `cellPenalty + edgeMultiplier`. No persistence-layer or pathfinder rework when #4 lands.
+
+**Files touched:** New: `NavHazardCache.java`. Modified: `BotActions.java` (+3 lines), `BaritoneStylePathFinder.java` (+1 line), `PathFinder.java` (+4 lines, two sites), `Frens.java` (+5 lines: load, restartExecutors, tick register, flushSync, shutdownExecutors), `Commands/modCommandRegistry.java` (+24 lines for the debug subcommand).
+
+**Verification (manual, in-game):**
+1. Wedge a bot at a known-bad cell (post-1.1.72 stairs are now traversable, so this needs a fresh trap such as an L-shaped fence corner). Issue `/bot follow`; expect rejection log spam for 2-3 s, then the next repath should route around the cell.
+2. `/bot debug nav-hazard` should list the cell with `rejects ≥ 3`, `score > 0`.
+3. Inspect `~/Library/Application Support/PrismLauncher/instances/1.21.11/.minecraft/config/frens/nav_hazard_cache.json` (it appears within 30 s).
+4. Break the obstructing block; route the bot through the cleared spot a few times. Score drops by 3.0 per traversal; entry vanishes from the JSON within ~10 min idle once score < 0.1.
+5. Restart server and confirm prior entries reload (minus offline decay — `lastTick` is server-tick-relative, resets at boot).
+
+## Stair-feet impulse gate: stop rejecting velocity onto stairs/slabs/snow (2026-05-06, 1.1.72)
+
+Diagnosed from a Prism log where Jake spent the better part of two minutes thrashing back and forth on a four-step cobblestone staircase flanked by oak fences and a wood door at `(266, 66, 1285)`. Every horizontal impulse onto a stair-feet cell was rejected with `feet-not-passable`:
+
+```
+applyMovementInput-reject bot=Jake from=(271.98, 61.50, 1285.52) to=(271.80, 61.50, 1285.52)
+  reason=feet-not-passable feet=271,61,1285=cobblestone_stairs head=271,62,1285=air
+```
+
+The same pattern repeated against four ascending stair cells, then drifted into the rail-fence cells `(266,66,1284)` and `(265,66,1283)`, then bashed against the door. `Door debug: stuck near door, closing anyway after 18 attempts` was the visible outcome.
+
+**Root cause:** [BotActions.applyMovementInput:272](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L272) gated impulse application through `canOccupyPosition` → `hasMovementClearance` → `isPassableForMovement`. `WalkablePartialBlocks.isPathable` deliberately excludes stairs/slabs/snow ([docstring](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java#L64)) and punts to "the path planner's step-up logic." But `applyMovementInput` has no step-up logic — it only adds horizontal velocity for vanilla physics to consume. Vanilla's auto-step (`stepHeight=0.6`) handles stair traversal natively when there's velocity to consume; our pre-gate kept the bot from ever accumulating any. Bot's velocity stayed zero, vanilla's auto-step never ran, bot oscillated.
+
+**Fix:** [BotActions.java:1810-1875](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L1810-L1875)
+
+- New `isFeetPassableForMovement` helper: passable OR `WalkablePartialBlocks.isStandable` (which already includes stairs/slabs/snow precisely because the bot stands on top of those).
+- New `canAcceptMovementImpulse` pre-gate: feet uses the permissive helper, head uses the strict one, and the strict box-clear is skipped — vanilla physics is the actual collision authority once velocity is added.
+- `applyMovementInput` swaps to `canAcceptMovementImpulse`. `moveRelative` (teleport-style mover) keeps the strict `canOccupyPosition` since it bypasses physics with `refreshPositionAndAngles`.
+- `diagnoseOccupancyRejection`'s `feetOk` now uses the new helper so the diagnostic's reported reason matches what actually rejects the move.
+
+Pathfinders (`PathFinder`, `BaritoneStylePathFinder`, `PathTracer`) were not touched — they still call `WalkablePartialBlocks.isPathable` and run their own step-up logic, which is correct for them.
+
+**Why the rail-fence rejections appeared in the same log:** symptom, not cause. Once the bot couldn't traverse the stairs forward, repeated impulse attempts drifted it laterally into the stair's flanking fences. With the impulse gate fixed, the bot should advance through the staircase before the fence collisions become an issue.
+
 ## Named-hostile pacifism: close the Phase 3 mode-guard gap (2026-05-06, 1.1.71)
 
 Closes the Phase 3 caveat that's been a `// TODO` comment in [BotFleeService.fleeFromEntity:643-648](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L643-L648) since 1.1.55. Walking through the named-hostile pacifism test plan against the current implementation surfaced this as the one real blocker for Step 2 of the test plan ("Let Bob hit the bot. Bot should flee.").

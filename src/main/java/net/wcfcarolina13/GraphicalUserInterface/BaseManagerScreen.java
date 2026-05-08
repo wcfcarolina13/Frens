@@ -101,6 +101,60 @@ public class BaseManagerScreen extends Screen {
         }
     }
 
+    /** A virtual row in the rendered list — either a section header (non-clickable) or a base. */
+    private record DisplayRow(boolean isHeader, String headerText, int headerColor, int baseIndex) {
+        static DisplayRow header(String text, int color) {
+            return new DisplayRow(true, text, color, -1);
+        }
+        static DisplayRow base(int idx) {
+            return new DisplayRow(false, null, 0, idx);
+        }
+    }
+
+    /** Build the visible-row list with section headers inserted between groups when both
+     *  groups have entries. Order: registered bases (Base/Wall/Village kinds) first,
+     *  lodestones second. The bases list is already sorted in {@link #applyBasesJson}. */
+    private static List<DisplayRow> buildDisplayRows(List<BaseDto> bases) {
+        List<DisplayRow> rows = new ArrayList<>();
+        if (bases == null || bases.isEmpty()) return rows;
+        int firstLodestone = -1;
+        for (int i = 0; i < bases.size(); i++) {
+            if (bases.get(i) != null && bases.get(i).isLodestone()) {
+                firstLodestone = i;
+                break;
+            }
+        }
+        boolean hasNonLodestones = firstLodestone != 0;
+        boolean hasLodestones = firstLodestone >= 0;
+        if (hasNonLodestones && hasLodestones) {
+            rows.add(DisplayRow.header("§e§l⌂ Registered Bases", 0xFFE6D7A3));
+            for (int i = 0; i < firstLodestone; i++) rows.add(DisplayRow.base(i));
+            rows.add(DisplayRow.header("§f§l◆ Lodestone Compasses", 0xFFE0E0E0));
+            for (int i = firstLodestone; i < bases.size(); i++) rows.add(DisplayRow.base(i));
+        } else {
+            for (int i = 0; i < bases.size(); i++) rows.add(DisplayRow.base(i));
+        }
+        return rows;
+    }
+
+    /** Tooltip text shown on row hover, describing what {@code Set Home} will do for the
+     *  hovered row's kind. The two row types take different network paths:
+     *  registered bases → {@code BaseSetHomePayload}; lodestones → {@code /bot compass home}. */
+    private static String setHomeTooltipFor(BaseDto b, String botAlias) {
+        if (b == null) return "";
+        String alias = (botAlias != null && !botAlias.isBlank()) ? botAlias : "this bot";
+        if (b.isLodestone()) {
+            return "Set Home → " + alias + "'s home compass points here (also opens fast-travel from anywhere).";
+        }
+        if (b.isWall() || b.isVillage()) {
+            return "Set Home → only registered bases (yellow §e[Base]§r rows) can be set as home.";
+        }
+        if (b.isBase()) {
+            return "Set Home → " + alias + " returns here at sunset and treats it as the home base.";
+        }
+        return "";
+    }
+
     private static List<BaseDto> LAST_BASES = List.of();
     private static String LAST_ZONE_LIST_JSON = "[]";
     private static UiPrefs CACHED_PREFS = loadUiPrefs();
@@ -160,6 +214,12 @@ public class BaseManagerScreen extends Screen {
     private TextFieldWidget nameField;
     private ButtonWidget resetLayoutButton;
     private ButtonWidget constructionButton;
+
+    /** Captured during list rendering, drawn by render() after disableScissor so the
+     *  tooltip box isn't clipped to the content area. Null = no tooltip this frame. */
+    private String hoverTooltip;
+    private int hoverTooltipX;
+    private int hoverTooltipY;
     private TextFieldWidget villagePromptField;
     private ButtonWidget villagePromptConfirmButton;
     private ButtonWidget villagePromptCancelButton;
@@ -213,7 +273,18 @@ public class BaseManagerScreen extends Screen {
         }
         try {
             List<BaseDto> parsed = GSON.fromJson(json, BASE_LIST_TYPE);
-            LAST_BASES = parsed != null ? parsed : List.of();
+            if (parsed == null) {
+                LAST_BASES = List.of();
+                return;
+            }
+            // Stable sort: registered (Base/Wall/Village) first, lodestones second. Within
+            // each group the server-supplied order is preserved.
+            parsed.sort((a, b) -> {
+                boolean aLode = a != null && a.isLodestone();
+                boolean bLode = b != null && b.isLodestone();
+                return Boolean.compare(aLode, bLode);
+            });
+            LAST_BASES = parsed;
         } catch (Exception ignored) {
             LAST_BASES = List.of();
         }
@@ -434,7 +505,8 @@ public class BaseManagerScreen extends Screen {
 
     private int contentHeight() {
         int listY = controlsBottomRelY + LIST_TOP_GAP;
-        int listH = Math.max(LIST_MIN_H, getBasesSnapshot().size() * ROW_H + 4);
+        int displayRows = buildDisplayRows(getBasesSnapshot()).size();
+        int listH = Math.max(LIST_MIN_H, displayRows * ROW_H + 4);
         return listY + listH + LIST_BOTTOM_PAD;
     }
 
@@ -448,7 +520,8 @@ public class BaseManagerScreen extends Screen {
         int listW = gridW;
         int listX = content.x + Math.max(0, (content.w - listW) / 2);
         int listY = content.y + controlsBottomRelY + LIST_TOP_GAP - (int) contentScroll;
-        int listH = Math.max(LIST_MIN_H, getBasesSnapshot().size() * ROW_H + 4);
+        int displayRows = buildDisplayRows(getBasesSnapshot()).size();
+        int listH = Math.max(LIST_MIN_H, displayRows * ROW_H + 4);
         return new Rect(listX, listY, listW, listH);
     }
 
@@ -629,13 +702,26 @@ public class BaseManagerScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, hint2, hintX2, hintY + ROW_H, 0xFF666666);
         }
 
-        for (int i = 0; i < bases.size(); i++) {
-            BaseDto b = bases.get(i);
-            int rowY = list.y + i * ROW_H;
+        List<DisplayRow> displayRows = buildDisplayRows(bases);
+        String pendingTooltip = null;
+        for (int displayIdx = 0; displayIdx < displayRows.size(); displayIdx++) {
+            DisplayRow drow = displayRows.get(displayIdx);
+            int rowY = list.y + displayIdx * ROW_H;
             if (rowY + ROW_H < content.y || rowY > content.bottom()) {
                 continue;
             }
 
+            if (drow.isHeader()) {
+                // Section header: subtle dark stripe + text + thin underline.
+                context.fill(list.x + 2, rowY + 1, list.right() - 2, rowY + ROW_H - 1, 0xFF0E0E0E);
+                context.drawTextWithShadow(this.textRenderer, drow.headerText(), list.x + 6, rowY + 2, drow.headerColor());
+                context.fill(list.x + 6, rowY + ROW_H - 2, list.right() - 6, rowY + ROW_H - 1,
+                        (drow.headerColor() & 0x00FFFFFF) | 0x55000000);
+                continue;
+            }
+
+            int i = drow.baseIndex();
+            BaseDto b = bases.get(i);
             boolean selected = i == selectedIndex;
             int bg = selected ? 0xFF3A2C14 : 0xFF1A1A1A;
             context.fill(list.x + 2, rowY + 1, list.right() - 2, rowY + ROW_H - 1, bg);
@@ -690,7 +776,16 @@ public class BaseManagerScreen extends Screen {
 
             context.drawTextWithShadow(this.textRenderer, drawLabel, labelX, rowY + 2, 0xFFEFEFEF);
             context.drawTextWithShadow(this.textRenderer, drawRightInfo, rightX, rowY + 2, 0xFFB0B0B0);
+
+            // Capture per-row hover for the post-scissor tooltip pass.
+            if (mouseX >= list.x && mouseX < list.right()
+                    && mouseY >= rowY && mouseY < rowY + ROW_H) {
+                pendingTooltip = setHomeTooltipFor(b, this.botAlias);
+            }
         }
+        this.hoverTooltip = pendingTooltip;
+        this.hoverTooltipX = mouseX;
+        this.hoverTooltipY = mouseY;
 
         // Protected zone entries
         renderZoneEntries(context, content, mouseX, mouseY);
@@ -725,6 +820,13 @@ public class BaseManagerScreen extends Screen {
 
         if (mapVillagePromptOpen) {
             renderVillagePrompt(context, mouseX, mouseY, delta);
+        }
+
+        // Per-row Set Home tooltip — captured during the list pass, drawn here so it
+        // sits above the scrollbar/scissor and follows the cursor.
+        if (this.hoverTooltip != null && !this.hoverTooltip.isBlank() && !mapVillagePromptOpen) {
+            context.drawTooltip(this.textRenderer, Text.literal(this.hoverTooltip),
+                    this.hoverTooltipX, this.hoverTooltipY);
         }
     }
 
@@ -849,10 +951,14 @@ public class BaseManagerScreen extends Screen {
         // List row click selection.
         Rect list = listRect(content);
         if (list.contains(mx, my)) {
-            int idx = (int) ((my - list.y) / ROW_H);
+            int displayIdx = (int) ((my - list.y) / ROW_H);
             List<BaseDto> bases = getBasesSnapshot();
-            if (idx >= 0 && idx < bases.size()) {
-                selectedIndex = idx;
+            List<DisplayRow> rows = buildDisplayRows(bases);
+            if (displayIdx >= 0 && displayIdx < rows.size()) {
+                DisplayRow row = rows.get(displayIdx);
+                if (!row.isHeader()) {
+                    selectedIndex = row.baseIndex();
+                }
                 return true;
             }
         }
@@ -1200,10 +1306,12 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a base first.", STATUS_WARN);
             return;
         }
+        String alias = botAlias.isBlank() ? "this bot" : botAlias;
         // Lodestone: set as home compass (must come BEFORE isBase check)
         if (selected.isLodestone()) {
             sendChatCommand(this.client, "bot compass home " + botAlias + " " + selected.label);
             showStatus("Setting home compass...", STATUS_OK);
+            echoToChat(alias + "'s home compass → " + selected.label);
             requestRefresh();
             return;
         }
@@ -1218,8 +1326,18 @@ public class BaseManagerScreen extends Screen {
         if (ClientPlayNetworking.canSend(BaseSetHomePayload.ID)) {
             ClientPlayNetworking.send(new BaseSetHomePayload(botAlias, selected.label));
             showStatus("Setting home...", STATUS_OK);
+            echoToChat(alias + " will treat '" + selected.label + "' as home.");
         }
         requestRefresh();
+    }
+
+    /** Sends a client-only chat message — visible only to the player who clicked, not
+     *  broadcast. Used to confirm Set Home actions outside the BaseManager menu so the
+     *  user can verify the action took effect. */
+    private void echoToChat(String msg) {
+        if (this.client != null && this.client.player != null && msg != null) {
+            this.client.player.sendMessage(Text.literal("§7[Bases] §e" + msg), false);
+        }
     }
 
     private void sendGoToSelected() {

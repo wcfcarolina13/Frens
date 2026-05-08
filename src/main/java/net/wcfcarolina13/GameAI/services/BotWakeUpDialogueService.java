@@ -132,24 +132,28 @@ public final class BotWakeUpDialogueService {
                 continue;
             }
 
-            // Random chance to stay silent.
+            // Random chance to stay silent. Don't burn the service-level cooldown when the
+            // line never actually plays — let the next sleep cycle have a chance to fire.
             if (ThreadLocalRandom.current().nextDouble() >= SPEAK_CHANCE) {
-                LOGGER.debug("Wake-up dialogue suppressed (random silence) for bot {}", bot.getName().getString());
-                LAST_WAKE_LINE_TICK.put(botId, nowTick);
+                LOGGER.info("Wake-up dialogue suppressed (random silence) for bot {}", bot.getName().getString());
                 continue;
             }
 
             LAST_WAKE_LINE_TICK.put(botId, nowTick);
 
             // Schedule the voiced line a couple seconds later so the player hears it after the
-            // sleep screen fades out.
+            // sleep screen fades out. Use the *Forced variant so an unrelated ambient line that
+            // fires during the 2 s fade-out doesn't suppress the wake-up via the global
+            // recently-shown check.
             long dueTick = nowTick + DISPLAY_DELAY_TICKS;
             server.send(new net.minecraft.server.ServerTask((int) dueTick, () -> {
                 if (bot == null || bot.isRemoved()) return;
-                CompanionContextReactionService.playWakeUp(bot);
+                boolean fired = CompanionContextReactionService.playWakeUpForced(bot);
+                LOGGER.info("Wake-up line for bot {}: {}",
+                        bot.getName().getString(), fired ? "fired" : "not fired (cooldown)");
             }));
 
-            LOGGER.debug("Scheduled voiced wake-up line for bot {} in {} ticks", bot.getName().getString(), DISPLAY_DELAY_TICKS);
+            LOGGER.info("Scheduled voiced wake-up line for bot {} in {} ticks", bot.getName().getString(), DISPLAY_DELAY_TICKS);
         }
     }
 

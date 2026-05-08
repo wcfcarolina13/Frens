@@ -2332,6 +2332,16 @@ public final class BotFleeService {
             LOGGER.info("Bot {} hobby-escape: suppressed — post-task grace", name);
             return true;
         }
+        // Bot is underground (caller already gated on !isAtSurface) AND inside a registered base.
+        // Surfacing from here means routing UP through the user's structure — Baritone has no
+        // notion of doors as exits, so the staging tile lands on the roof and the escape ladder
+        // ends in pillar-mining through walls. Skip the hobby; bot stays put until they're
+        // moved outside the base or the situation changes.
+        if (server != null
+                && BotHomeService.findBaseNearPosition(server, world, bot.getBlockPos()).isPresent()) {
+            LOGGER.info("Bot {} hobby-escape: suppressed — underground inside a registered base", name);
+            return true;
+        }
         return false;
     }
 

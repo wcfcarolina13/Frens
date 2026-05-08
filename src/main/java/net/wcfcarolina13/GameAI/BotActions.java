@@ -269,7 +269,12 @@ public final class BotActions {
             // feet cell indefinitely (a closed door fails the OPEN-property gate), and the
             // bot freezes until wolf-teleport or /rescue fires. Throttled per-bot.
             maybeAutoOpenCurrentDoor(bot, world);
-            if (!canOccupyPosition(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z)) {
+            // Observe doorway traversals: cheap fast-path inside the service (returns
+            // immediately when the bot's foot cell is unchanged from last tick).
+            net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.onBotTick(bot, world);
+            if (!canAcceptMovementImpulse(world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z)) {
+                net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.recordRejection(
+                        world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z);
                 diagnoseOccupancyRejection(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z);
                 return;
             }
@@ -1825,6 +1830,42 @@ public final class BotActions {
         return false;
     }
 
+    /**
+     * Permissive feet-cell check used by {@link #canAcceptMovementImpulse}: returns true for
+     * everything {@link #isPassableForMovement} returns true for, plus stairs/slabs/snow —
+     * because the bot stands ON those (its blockpos floors into the partial cell). Adding
+     * horizontal velocity from a stair-feet position is safe; vanilla physics will auto-step
+     * via {@code stepHeight=0.6} and arbitrate the actual collision. The stricter
+     * {@link #canOccupyPosition} stays in use for teleport-style movers like
+     * {@code moveRelative}.
+     */
+    private static boolean isFeetPassableForMovement(BlockState state, ServerWorld world, BlockPos pos) {
+        if (isPassableForMovement(state, world, pos)) {
+            return true;
+        }
+        return net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isStandable(state, world, pos);
+    }
+
+    /**
+     * Pre-gate for adding movement impulse to the bot's velocity. Vanilla entity physics
+     * does the authoritative collision + auto-step on the next tick, so this check only
+     * needs to confirm the destination cell is broadly navigable: feet may be a stair/slab/
+     * snow (bot stands on top); head must be passable. Strictly box-clearing here would
+     * reject every stair traversal because the stair's upper-half collision intersects the
+     * bot's bbox before vanilla's auto-step lifts it (see 2026-05-06 stair-stuck autopsy).
+     */
+    private static boolean canAcceptMovementImpulse(ServerWorld world, double x, double y, double z) {
+        if (world == null) {
+            return false;
+        }
+        BlockPos feet = BlockPos.ofFloored(x, y, z);
+        BlockPos head = feet.up();
+        BlockState feetState = world.getBlockState(feet);
+        BlockState headState = world.getBlockState(head);
+        return isFeetPassableForMovement(feetState, world, feet)
+                && isPassableForMovement(headState, world, head);
+    }
+
     private static boolean canOccupyPosition(ServerPlayerEntity bot,
                                              ServerWorld world,
                                              double x,
@@ -1929,7 +1970,7 @@ public final class BotActions {
         BlockPos head = feet.up();
         BlockState feetState = world.getBlockState(feet);
         BlockState headState = world.getBlockState(head);
-        boolean feetOk = isPassableForMovement(feetState, world, feet);
+        boolean feetOk = isFeetPassableForMovement(feetState, world, feet);
         boolean headOk = isPassableForMovement(headState, world, head);
 
         String reason;

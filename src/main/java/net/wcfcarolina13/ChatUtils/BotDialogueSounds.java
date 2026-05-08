@@ -908,6 +908,61 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_WALK_DOGS_GOOD_DOG = register("bot.line.walk_dogs_good_dog");
     public static final SoundEvent LINE_WALK_DOGS_WALKIES = register("bot.line.walk_dogs_walkies");
 
+    // Snow golem nearby — proximity dialogue for vanilla snow golems.
+    public static final SoundEvent LINE_SNOW_GOLEM_FRIEND = register("bot.line.snow_golem_friend");
+    public static final SoundEvent LINE_SNOW_GOLEM_BUDDY = register("bot.line.snow_golem_buddy");
+    public static final SoundEvent LINE_SNOW_GOLEM_AMMO = register("bot.line.snow_golem_ammo");
+    public static final SoundEvent LINE_SNOW_GOLEM_HUG = register("bot.line.snow_golem_hug");
+
+    // Iron golem with daisy — fires when the bot offers a poppy/daisy to a nearby iron golem.
+    public static final SoundEvent LINE_IRON_GOLEM_DAISY_HERE = register("bot.line.iron_golem_daisy_here");
+    public static final SoundEvent LINE_IRON_GOLEM_DAISY_EARNED = register("bot.line.iron_golem_daisy_earned");
+    public static final SoundEvent LINE_IRON_GOLEM_DAISY_CUTE = register("bot.line.iron_golem_daisy_cute");
+
+    // Warden proximity — avoidance/fear dialogue. Long cooldown (warden encounters are rare & special).
+    public static final SoundEvent LINE_WARDEN_LEAVE_NOW = register("bot.line.warden_leave_now");
+    public static final SoundEvent LINE_WARDEN_NOT_A_SOUND = register("bot.line.warden_not_a_sound");
+    public static final SoundEvent LINE_WARDEN_DONT_PEEP = register("bot.line.warden_dont_peep");
+    public static final SoundEvent LINE_WARDEN_NOT_WHAT_THINK = register("bot.line.warden_not_what_think");
+    public static final SoundEvent LINE_WARDEN_SNEAK = register("bot.line.warden_sneak");
+
+    // Snowball-fight idle hobby (1.1.81). Lines fired by BotSnowballFightService via the
+    // CompanionOverheadDialogueService.showOverheadLine path; audio is resolved by exact-text
+    // lookup in DialogueTextMapper.EXACT_MAP. Three IDs (probe_incoming, escalate_on_now,
+    // escalate_in_for_it) have no audio yet — TTS regen pending.
+    public static final SoundEvent LINE_SNOWBALL_PROBE_CATCH_THIS = register("bot.line.snowball_probe_catch_this");
+    public static final SoundEvent LINE_SNOWBALL_PROBE_HEADS_UP = register("bot.line.snowball_probe_heads_up");
+    public static final SoundEvent LINE_SNOWBALL_PROBE_INCOMING = register("bot.line.snowball_probe_incoming");
+    public static final SoundEvent LINE_SNOWBALL_PROBE_FIGHT = register("bot.line.snowball_probe_fight");
+    public static final SoundEvent LINE_SNOWBALL_PROBE_BET = register("bot.line.snowball_probe_bet");
+    public static final SoundEvent LINE_SNOWBALL_PROBE_FIGHT_Q = register("bot.line.snowball_probe_fight_q");
+    public static final SoundEvent LINE_SNOWBALL_ESCALATE_ON_NOW = register("bot.line.snowball_escalate_on_now");
+    public static final SoundEvent LINE_SNOWBALL_ESCALATE_IN_FOR_IT = register("bot.line.snowball_escalate_in_for_it");
+    public static final SoundEvent LINE_SNOWBALL_ESCALATE_BRING_IT = register("bot.line.snowball_escalate_bring_it");
+    public static final SoundEvent LINE_SNOWBALL_ESCALATE_PLAYING = register("bot.line.snowball_escalate_playing");
+    public static final SoundEvent LINE_SNOWBALL_ESCALATE_EAT_SNOW = register("bot.line.snowball_escalate_eat_snow");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_GOT_YOU = register("bot.line.snowball_taunt_got_you");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_BULLSEYE = register("bot.line.snowball_taunt_bullseye");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_TAKE_THAT = register("bot.line.snowball_taunt_take_that");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_CANT_CATCH = register("bot.line.snowball_taunt_cant_catch");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_ALL_YOU_GOT = register("bot.line.snowball_taunt_all_you_got");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_HOLD_STILL = register("bot.line.snowball_taunt_hold_still");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_ALMOST = register("bot.line.snowball_taunt_almost");
+    public static final SoundEvent LINE_SNOWBALL_TAUNT_GOTCHA = register("bot.line.snowball_taunt_gotcha");
+    public static final SoundEvent LINE_SNOWBALL_DODGE_CLOSE_ONE = register("bot.line.snowball_dodge_close_one");
+    public static final SoundEvent LINE_SNOWBALL_DODGE_MISSED = register("bot.line.snowball_dodge_missed");
+    public static final SoundEvent LINE_SNOWBALL_DODGE_NICE_TRY = register("bot.line.snowball_dodge_nice_try");
+    public static final SoundEvent LINE_SNOWBALL_DODGE_DODGED = register("bot.line.snowball_dodge_dodged");
+    public static final SoundEvent LINE_SNOWBALL_TIMEOUT_TOUGH_CROWD = register("bot.line.snowball_timeout_tough_crowd");
+    public static final SoundEvent LINE_SNOWBALL_TIMEOUT_DONT_PLAY = register("bot.line.snowball_timeout_dont_play");
+    public static final SoundEvent LINE_SNOWBALL_TIMEOUT_SUIT_YOURSELF = register("bot.line.snowball_timeout_suit_yourself");
+    public static final SoundEvent LINE_SNOWBALL_TIMEOUT_NO_FUN = register("bot.line.snowball_timeout_no_fun");
+    public static final SoundEvent LINE_SNOWBALL_YIELD_OUT_OF_AMMO = register("bot.line.snowball_yield_out_of_ammo");
+    public static final SoundEvent LINE_SNOWBALL_YIELD_IM_OUT = register("bot.line.snowball_yield_im_out");
+    public static final SoundEvent LINE_SNOWBALL_YIELD_YOU_WIN = register("bot.line.snowball_yield_you_win");
+    public static final SoundEvent LINE_SNOWBALL_YIELD_MERCY = register("bot.line.snowball_yield_mercy");
+    public static final SoundEvent LINE_SNOWBALL_YIELD_GOT_ME = register("bot.line.snowball_yield_got_me");
+
     private BotDialogueSounds() {
     }
 

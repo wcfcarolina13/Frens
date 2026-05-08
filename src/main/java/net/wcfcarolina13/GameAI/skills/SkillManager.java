@@ -250,8 +250,21 @@ public final class SkillManager {
             }
             boolean success = result != null && result.success() && !abortRequested;
             TaskService.complete(ticket, success);
+            if (success && botPlayer != null && name != null
+                    && CELEBRATORY_SKILLS.contains(name.toLowerCase())) {
+                net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
+                        botPlayer,
+                        net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.KAZOTSKY_KICK);
+            }
         }
     }
+
+    /** Skills whose successful completion warrants a celebratory dance. Trivial / utility
+     *  skills are excluded so the bot doesn't kazotsky-kick after every drop pickup. */
+    private static final java.util.Set<String> CELEBRATORY_SKILLS = java.util.Set.of(
+            "woodcut", "farm", "fortify", "mining", "hunt", "fishing", "shelter", "wool",
+            "harvest", "collectdirt"
+    );
 
     public static boolean shouldAbortSkill(ServerPlayerEntity botPlayer) {
         UUID botUuid = botPlayer != null ? botPlayer.getUuid() : null;

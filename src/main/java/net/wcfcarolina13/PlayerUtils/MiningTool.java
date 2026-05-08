@@ -147,7 +147,8 @@ public class MiningTool {
         // Initialize targeting and tool selection directly (avoid server-thread join deadlock)
         try {
             BlockState initialState = bot.getEntityWorld().getBlockState(targetBlockPos);
-            if (isNeverMineBlock(initialState)) {
+            if (ProtectedStructureBlockHelper.isNeverBreakAt(bot.getEntityWorld(), targetBlockPos)
+                    || isNeverMineBlock(initialState)) {
                 miningResult.complete("⚠️ Refusing to mine a protected block.");
                 return miningResult;
             }
@@ -251,7 +252,8 @@ public class MiningTool {
                 
                 try {
                     BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
-                    if (isNeverMineBlock(currentState)) {
+                    if (ProtectedStructureBlockHelper.isNeverBreakAt(bot.getEntityWorld(), targetBlockPos)
+                            || isNeverMineBlock(currentState)) {
                         miningResult.complete("⚠️ Refusing to mine a protected block.");
                         return;
                     }

@@ -148,7 +148,9 @@ public class PathFinder {
             for (BlockPos neighbor : getNeighbors(currentForward.position, world)) {
                 if (closedForward.containsKey(neighbor)) continue;
 
-                double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor);
+                double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor)
+                        + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(world, neighbor)
+                        - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(world, neighbor);
 
                 if (openMapForward.containsKey(neighbor)) {
                     Node existing = openMapForward.get(neighbor);
@@ -181,7 +183,9 @@ public class PathFinder {
             for (BlockPos neighbor : getNeighbors(currentBackward.position, world)) {
                 if (closedBackward.containsKey(neighbor)) continue;
 
-                double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor);
+                double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor)
+                        + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(world, neighbor)
+                        - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(world, neighbor);
 
                 if (openMapBackward.containsKey(neighbor)) {
                     Node existing = openMapBackward.get(neighbor);

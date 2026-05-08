@@ -376,7 +376,9 @@ public class BaritoneStylePathFinder {
         BlockState bodyState = cache.getBlockState(nx, ny, nz);
         if (bodyState.getBlock() instanceof CampfireBlock && bodyState.get(CampfireBlock.LIT)) return;
 
-        double tentativeG = parent.gScore + moveCost;
+        double tentativeG = parent.gScore + moveCost
+                + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(cache.world, nx, ny, nz)
+                - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(cache.world, nx, ny, nz);
         double h = heuristic(nx, ny, nz, tx, ty, tz);
 
         Node existing = openMap.get(packed);

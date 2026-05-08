@@ -445,8 +445,7 @@ public final class StripMineSkill implements Skill {
         } else if (explicit != null) {
             workDirection = explicit;
         } else {
-            Direction buttonDir = scanForButtonDirection(player);
-            workDirection = buttonDir != null ? buttonDir : player.getHorizontalFacing();
+            workDirection = player.getHorizontalFacing();
         }
         if (workDirection == null) {
             workDirection = player.getHorizontalFacing();
@@ -481,50 +480,6 @@ public final class StripMineSkill implements Skill {
             return Boolean.parseBoolean(str);
         }
         return defaultValue;
-    }
-
-    private Direction scanForButtonDirection(ServerPlayerEntity player) {
-        if (player == null) return null;
-        net.minecraft.server.world.ServerWorld world = (net.minecraft.server.world.ServerWorld) player.getEntityWorld();
-        BlockPos origin = player.getBlockPos();
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dy = -1; dy <= 2; dy++) {
-                for (int dz = -3; dz <= 3; dz++) {
-                    BlockPos pos = origin.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(pos);
-                    if (state.isAir()) continue;
-                    Block block = state.getBlock();
-                    if (isButtonBlock(block)) {
-                        Direction facing = null;
-                        if (state.contains(net.minecraft.state.property.Properties.HORIZONTAL_FACING)) {
-                            facing = state.get(net.minecraft.state.property.Properties.HORIZONTAL_FACING);
-                        } else {
-                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getX(), player.getY(), player.getZ());
-                            facing = horizontalFromVector(to);
-                        }
-                        if (facing != null) return facing;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private boolean isButtonBlock(Block block) {
-        return block == Blocks.STONE_BUTTON || block == Blocks.OAK_BUTTON || block == Blocks.BIRCH_BUTTON ||
-               block == Blocks.SPRUCE_BUTTON || block == Blocks.JUNGLE_BUTTON || block == Blocks.DARK_OAK_BUTTON ||
-               block == Blocks.ACACIA_BUTTON || block == Blocks.CHERRY_BUTTON || block == Blocks.MANGROVE_BUTTON ||
-               block == Blocks.CRIMSON_BUTTON || block == Blocks.WARPED_BUTTON || block == Blocks.POLISHED_BLACKSTONE_BUTTON;
-    }
-
-    private Direction horizontalFromVector(Vec3d v) {
-        if (v == null) return null;
-        double ax = Math.abs(v.x); double az = Math.abs(v.z);
-        if (ax >= az) {
-            return v.x > 0 ? Direction.EAST : Direction.WEST;
-        } else {
-            return v.z > 0 ? Direction.SOUTH : Direction.NORTH;
-        }
     }
 
     private Direction parseDirection(String name) {

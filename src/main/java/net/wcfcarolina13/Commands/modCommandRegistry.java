@@ -369,6 +369,60 @@ public class modCommandRegistry {
                                                     return 1;
                                                 })
                                             )
+                                            .then(literal("nav-hazard")
+                                                .executes(context -> {
+                                                    var src = context.getSource();
+                                                    var server = src.getServer();
+                                                    var world = src.getWorld();
+                                                    var rows = net.wcfcarolina13.GameAI.services.navigation.NavHazardCache
+                                                            .debugTopCells(server, world, 10);
+                                                    if (rows.isEmpty()) {
+                                                        ChatUtils.sendSystemMessage(src, "nav-hazard: no entries for current world+dimension");
+                                                    } else {
+                                                        ChatUtils.sendSystemMessage(src, "nav-hazard top " + rows.size() + " cells:");
+                                                        for (var r : rows) {
+                                                            ChatUtils.sendSystemMessage(src, String.format(
+                                                                    "  (%d,%d,%d) score=%.2f rejects=%d successes=%d ageTicks=%d",
+                                                                    r.cell().getX(), r.cell().getY(), r.cell().getZ(),
+                                                                    r.score(), r.rejects(), r.successes(), r.ageTicks()));
+                                                        }
+                                                    }
+                                                    ChatUtils.sendSystemMessage(src, "file: "
+                                                            + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.stateFilePath());
+                                                    return 1;
+                                                })
+                                            )
+                                        )
+                                        // Manual emote test: /bot emote list -> print available names.
+                                        // /bot emote <name> -> force-play on every nearby registered bot.
+                                        // /bot emote <name> <bot> -> force-play on a specific bot.
+                                        .then(literal("emote")
+                                            .then(literal("list")
+                                                .executes(context -> {
+                                                    var src = context.getSource();
+                                                    if (!net.wcfcarolina13.GameAI.services.EmotecraftBridge.isAvailable()) {
+                                                        ChatUtils.sendSystemMessage(src, "Emotecraft not detected on this instance.");
+                                                        return 0;
+                                                    }
+                                                    StringBuilder sb = new StringBuilder("Emotes: ");
+                                                    var values = net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.values();
+                                                    for (int i = 0; i < values.length; i++) {
+                                                        if (i > 0) sb.append(", ");
+                                                        sb.append(values[i].slug);
+                                                    }
+                                                    ChatUtils.sendSystemMessage(src, sb.toString());
+                                                    return 1;
+                                                })
+                                            )
+                                            .then(CommandManager.argument("name", StringArgumentType.string())
+                                                .executes(context -> executeEmote(context, null))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                    .executes(context -> {
+                                                        ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                        return executeEmote(context, bot);
+                                                    })
+                                                )
+                                            )
                                         )
                                 // Operator helper: quickly give yourself the Wizard's Tome quest item.
                                 .then(literal("wizard_tome")
@@ -1747,6 +1801,35 @@ public class modCommandRegistry {
                                     .executes(context -> executeFeedConfirm(context, false))))
                 );
         });
+    }
+
+    private static int executeEmote(CommandContext<ServerCommandSource> context, ServerPlayerEntity targetBot) {
+        var src = context.getSource();
+        if (!net.wcfcarolina13.GameAI.services.EmotecraftBridge.isAvailable()) {
+            ChatUtils.sendSystemMessage(src, "Emotecraft not detected on this instance.");
+            return 0;
+        }
+        String name = StringArgumentType.getString(context, "name");
+        var emote = net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.bySlug(name);
+        if (emote == null) {
+            ChatUtils.sendSystemMessage(src, "Unknown emote '" + name + "'. Try /bot debug emote list");
+            return 0;
+        }
+        // Manual test command: force-play, bypassing cooldown.
+        if (targetBot != null) {
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(targetBot, emote, true);
+            ChatUtils.sendSystemMessage(src, "Played '" + emote.slug + "' on " + targetBot.getName().getString());
+            return 1;
+        }
+        var server = src.getServer();
+        if (server == null) return 0;
+        int count = 0;
+        for (ServerPlayerEntity bot : net.wcfcarolina13.GameAI.services.BotRegistry.getPlayers(server)) {
+            net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(bot, emote, true);
+            count++;
+        }
+        ChatUtils.sendSystemMessage(src, "Played '" + emote.slug + "' on " + count + " bot(s)");
+        return 1;
     }
 
     private static int executeFeedConfirm(CommandContext<ServerCommandSource> context, boolean confirm) {

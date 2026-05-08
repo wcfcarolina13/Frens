@@ -114,6 +114,18 @@ public final class FollowStateService {
     public static final Map<UUID, Boolean> IDLE_SWEEP_ACTIVE = new ConcurrentHashMap<>();
     /** Current sweep target entity ID — committed for the duration of the walk. */
     public static final Map<UUID, net.minecraft.util.math.BlockPos> IDLE_SWEEP_TARGET = new ConcurrentHashMap<>();
+    /** Tick at which the bot last got measurably closer to {@link #IDLE_SWEEP_TARGET}. */
+    public static final Map<UUID, Long> IDLE_SWEEP_LAST_PROGRESS_TICK = new ConcurrentHashMap<>();
+    /** Last recorded squared distance to the sweep target (for progress comparison). */
+    public static final Map<UUID, Double> IDLE_SWEEP_LAST_DISTANCE_SQ = new ConcurrentHashMap<>();
+    /**
+     * Per-bot blacklist of unreachable drop positions with cooldown-expiry ticks.
+     * When a sweep abandons a target due to no-progress timeout, the drop's BlockPos
+     * is recorded here so subsequent sweeps skip it. Entries auto-prune on read past
+     * their expiry tick. Persists across {@link #clearIdleSweep} so stop/restart of
+     * the sweep doesn't reset learned-unreachable knowledge.
+     */
+    public static final Map<UUID, Map<net.minecraft.util.math.BlockPos, Long>> IDLE_SWEEP_TARGET_BLACKLIST = new ConcurrentHashMap<>();
 
     private FollowStateService() {}
 
@@ -285,6 +297,9 @@ public final class FollowStateService {
         IDLE_SWEEP_BOT_BLOCK.remove(botId);
         IDLE_SWEEP_ACTIVE.remove(botId);
         IDLE_SWEEP_TARGET.remove(botId);
+        IDLE_SWEEP_LAST_PROGRESS_TICK.remove(botId);
+        IDLE_SWEEP_LAST_DISTANCE_SQ.remove(botId);
+        // IDLE_SWEEP_TARGET_BLACKLIST intentionally NOT cleared — entries self-expire via tick TTL.
     }
 
     public static void reset() {

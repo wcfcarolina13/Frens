@@ -1195,7 +1195,10 @@ public final class MovementService {
         }
         long timeoutMs = stepUp ? 1600L : 1100L;
         boolean reached = nudgeTowardUntilClose(bot, target, 0.64D, timeoutMs, 0.18D, label);
-        if (bot.getBlockPos().equals(target)) {
+        // Partial-block-aware equality: bot standing on carpet/plate/soul sand has
+        // getBlockPos() = floor cell, not floor+1, so raw .equals(target) misses
+        // arrival when the path waypoint lives at floor+1. See BotPositionUtil.
+        if (BotPositionUtil.isAt(bot, target)) {
             return true;
         }
         return reached && bot.squaredDistanceTo(Vec3d.ofCenter(target)) <= 0.64D;
@@ -3020,6 +3023,16 @@ public final class MovementService {
                 if (distSq <= reachSq && (start - distSq > 0.25D || distSq <= reachSq * 0.6D)) {
                     BotActions.stop(bot);
                     LOGGER.debug("nudgeToward success [{}]: dist={}", label, Math.sqrt(distSq));
+                    return true;
+                }
+                // Partial-block-aware arrival: bot standing on carpet/plate/soul sand
+                // sinks below the target Y enough that squared distance stays above
+                // reachSq forever. If the effective foot cell matches the target, the
+                // bot is physically there — short-circuit so the loop doesn't time out.
+                if (BotPositionUtil.isAt(bot, target)) {
+                    BotActions.stop(bot);
+                    LOGGER.debug("nudgeToward success [{}] via foot-cell match: dist={}",
+                            label, Math.sqrt(distSq));
                     return true;
                 }
 

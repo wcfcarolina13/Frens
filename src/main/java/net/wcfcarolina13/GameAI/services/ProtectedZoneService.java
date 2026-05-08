@@ -31,6 +31,11 @@ public class ProtectedZoneService {
     // Map of worldId -> Map of label -> ProtectedZone
     private static final Map<String, Map<String, ProtectedZone>> zones = new ConcurrentHashMap<>();
 
+    // Worlds whose zone file has been read off disk. Used by callers (e.g. base auto-zone
+    // hooks) to know whether eager writes are safe; before load, the in-memory map is empty
+    // and a write would be clobbered when loadZones runs. Migration covers the pre-load case.
+    private static final Set<String> LOADED_WORLDS = ConcurrentHashMap.newKeySet();
+
     private static final String ZONE_ROOT_DIR = "bot_zones";
     private static final String ZONE_FILE_NAME = "protected_zones.json";
 
@@ -268,6 +273,73 @@ public class ProtectedZoneService {
         return removeZone(world, closest.getLabel(), player, isAdmin);
     }
 
+    /**
+     * Whether {@link #loadZones} has run for this world. Callers that want to upsert zones
+     * eagerly (e.g. base auto-zone hooks) check this so they don't write into an unloaded
+     * map that will get overwritten when load happens.
+     */
+    public static boolean isLoaded(String worldId) {
+        return worldId != null && LOADED_WORLDS.contains(worldId);
+    }
+
+    /**
+     * System-level upsert: create or replace a zone without an actor/owner permission check.
+     * Used by services that need to keep zone state in sync with another data structure
+     * (e.g. {@code BotHomeService} mirroring user-registered bases as auto-zones).
+     *
+     * <p>Owner is recorded directly from the supplied UUID/name so server-owned bases get
+     * a null-owner zone that rejects all bot mutations (existing behavior in
+     * {@link #isMutationAllowed}).
+     */
+    public static boolean upsertZoneInternal(ServerWorld world, String label,
+                                             BlockPos minCorner, BlockPos maxCorner,
+                                             @Nullable UUID ownerUuid, @Nullable String ownerName) {
+        if (world == null || label == null || label.isBlank() || minCorner == null || maxCorner == null) {
+            return false;
+        }
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
+        ProtectedZone existing = worldZones.get(label);
+        long created = existing != null ? existing.getCreatedTime() : System.currentTimeMillis();
+        String accessMode = existing != null ? existing.getAccessMode() : "owner_only";
+        Set<String> allowed = existing != null ? existing.getAllowedOwnerUuids() : Set.of();
+        ProtectedZone zone = new ProtectedZone(label, worldId, minCorner, maxCorner,
+                ownerUuid, ownerName, created, accessMode, allowed);
+        worldZones.put(label, zone);
+        save(world.getServer(), worldId);
+        return true;
+    }
+
+    /** System-level remove: no actor/owner check. */
+    public static boolean removeZoneInternal(ServerWorld world, String label) {
+        if (world == null || label == null) return false;
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) return false;
+        if (worldZones.remove(label) == null) return false;
+        save(world.getServer(), worldId);
+        LOGGER.info("Removed protected zone '{}' from world {} (internal)", label, worldId);
+        return true;
+    }
+
+    /** System-level rename: no actor/owner check. Returns false if oldLabel missing or newLabel taken. */
+    public static boolean renameZoneInternal(ServerWorld world, String oldLabel, String newLabel) {
+        if (world == null || oldLabel == null || newLabel == null || newLabel.isBlank()) return false;
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) return false;
+        ProtectedZone zone = worldZones.get(oldLabel);
+        if (zone == null) return false;
+        if (worldZones.containsKey(newLabel)) return false;
+        worldZones.remove(oldLabel);
+        worldZones.put(newLabel, new ProtectedZone(
+                newLabel, zone.getWorldId(), zone.getMinCorner(), zone.getMaxCorner(),
+                zone.getOwnerUuid(), zone.getOwnerName(), zone.getCreatedTime(),
+                zone.getAccessMode(), zone.getAllowedOwnerUuids()));
+        save(world.getServer(), worldId);
+        return true;
+    }
+
     public static List<ProtectedZone> listZones(ServerWorld world) {
         if (world == null) return Collections.emptyList();
         String worldId = getWorldId(world);
@@ -361,6 +433,10 @@ public class ProtectedZoneService {
     public static void loadZones(MinecraftServer server, String worldId) {
         Path zoneFile = getZoneFile(server, worldId);
         Path legacyFile = getLegacyZoneFile(server, worldId);
+
+        // Mark loaded even if the file doesn't exist — empty world is a valid load result,
+        // and post-load callers (auto-zone migration) need the green light to write.
+        LOADED_WORLDS.add(worldId);
 
         Path fileToRead = null;
         if (Files.exists(zoneFile)) {

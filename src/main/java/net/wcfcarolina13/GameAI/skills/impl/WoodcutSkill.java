@@ -696,7 +696,10 @@ public final class WoodcutSkill implements Skill {
             return SkillExecutionResult.failure("I couldn't reach the surface to cut trees.");
         }
 
-        prepareWoodcutTooling(source, bot);
+        if (!prepareWoodcutTooling(source, bot)) {
+            return SkillExecutionResult.failure(
+                    "I have no axe and can't make or find one. Get me an axe (or planks + sticks) and try again.");
+        }
 
         Set<BlockPos> visitedBases = new HashSet<>();
         Set<BlockPos> failedBases = new HashSet<>();
@@ -4833,17 +4836,29 @@ public final class WoodcutSkill implements Skill {
                 bot.getBlockPos().toShortString());
     }
 
-    private void prepareWoodcutTooling(ServerCommandSource source, ServerPlayerEntity bot) {
+    /**
+     * Equips an axe for woodcutting. Tries in order: existing inventory axe →
+     * crafting (with wooden fallback so the bootstrap path works even when the
+     * commander has no axe-crafting history) → registered chest retrieval.
+     *
+     * @return {@code true} if an axe is now equipped, {@code false} otherwise.
+     *         The caller MUST terminate the woodcut task on {@code false} —
+     *         falling through to hands lets the bot select whatever's in
+     *         hotbar slot 0 as a "last resort," which is often a pickaxe and
+     *         leads to logs being mined with the wrong tool. (2026-05-06.)
+     */
+    private boolean prepareWoodcutTooling(ServerCommandSource source, ServerPlayerEntity bot) {
         if (selectAxe(bot)) {
-            return;
+            return true;
         }
-        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer());
-        if (crafted) {
-            if (selectAxe(bot)) {
-                return;
-            }
+        // Wooden axe is the bootstrap craft — always allow it, regardless of
+        // craft-history gating. Commander/bot may have planks-and-sticks but no
+        // recorded axe craft yet, and we'd rather the bot make a wooden axe than
+        // give up on the task.
+        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer(), true);
+        if (crafted && selectAxe(bot)) {
+            return true;
         }
-        // Try retrieving from registered chests before falling back to hands
         if (bot.getEntityWorld() instanceof ServerWorld world) {
             boolean retrieved = ToolProvisionService.retrieveToolFromChests(
                     bot, world, source,
@@ -4851,16 +4866,12 @@ public final class WoodcutSkill implements Skill {
                     ToolProvisionService.allowedWoodcutAxePredicate(),
                     ToolProvisionService.axeTierComparator(),
                     32);
-            if (retrieved) {
-                if (selectAxe(bot)) {
-                    ChatUtils.sendSystemMessage(source, "Found an axe in a nearby chest.");
-                    return;
-                }
+            if (retrieved && selectAxe(bot)) {
+                ChatUtils.sendSystemMessage(source, "Found an axe in a nearby chest.");
+                return true;
             }
         }
-        // Continue with hands/non-tools so woodcut still works when no axe is available.
-        selectHandsOrHarmlessItem(bot);
-        ChatUtils.sendSystemMessage(source, "No axe available; I'll chop with my hands for now.");
+        return false;
     }
 
     private boolean selectAxe(ServerPlayerEntity bot) {
@@ -5352,6 +5363,15 @@ public final class WoodcutSkill implements Skill {
         if (isAbortRequested(bot)) return false;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
         ServerCommandSource source = bot.getCommandSource();
+        // Mid-task replenishment: if the last axe broke, try crafting a new one
+        // with the wooden fallback enabled (matches prepareWoodcutTooling at task
+        // start; without this we'd silently continue with whatever non-axe tool
+        // is currently equipped, which has been observed to cause logs being
+        // mined with pickaxes).
+        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer(), true);
+        if (crafted && ensureAxeEquipped(bot)) {
+            return true;
+        }
         boolean retrieved = ToolProvisionService.retrieveToolFromChests(
                 bot, world, source,
                 ToolProvisionService.allowedAxeSnapshotFilter(),

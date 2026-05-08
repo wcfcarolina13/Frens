@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Persisted "home" data used for returning to base.
@@ -80,6 +81,77 @@ public final class BotHomeService {
     public static final String SERVER_OWNER_UUID = "SERVER";
 
     public static final String SERVER_OWNER_NAME = "Server";
+
+    /**
+     * Label prefix for auto-zones mirroring registered bases. The suffix is the base's normalized
+     * label (same key used in {@code basesByLabel}), so each base owns exactly one zone and
+     * user-created zones (without this prefix) never collide.
+     */
+    private static final String AUTO_ZONE_LABEL_PREFIX = "base:";
+
+    private static String autoZoneLabel(String baseLabel) {
+        return AUTO_ZONE_LABEL_PREFIX + normalizeLabelKey(baseLabel);
+    }
+
+    /**
+     * Resolve owner UUID for a base into a {@link UUID} suitable for {@link ProtectedZoneService}.
+     * Server-owned bases (sentinel "SERVER") and legacy null/blank owners both map to {@code null},
+     * which {@code ProtectedZoneService.isMutationAllowed} treats as "owner_only with no owner" —
+     * i.e. all bot mutations rejected, which is what we want for spawn/admin bases.
+     */
+    private static UUID parseZoneOwner(String ownerUuid) {
+        if (ownerUuid == null || ownerUuid.isBlank()) return null;
+        if (SERVER_OWNER_UUID.equals(ownerUuid)) return null;
+        try {
+            return UUID.fromString(ownerUuid);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Upsert the auto-zone matching a base. No-op if the world's zone storage hasn't been loaded
+     * yet (the post-load migration will catch up). Caller holds no lock.
+     */
+    private static void upsertAutoZoneForBase(MinecraftServer server, ServerWorld world,
+                                              String baseLabel, BlockPos center, int storedRadius,
+                                              String ownerUuidStr, String ownerName) {
+        if (server == null || world == null || baseLabel == null || center == null) return;
+        String worldId = world.getRegistryKey().getValue().toString();
+        if (!ProtectedZoneService.isLoaded(worldId)) return;
+        int effectiveRadius = storedRadius > 0 ? storedRadius : DEFAULT_BASE_PROTECTION_RADIUS;
+        BlockPos min = center.add(-effectiveRadius, -effectiveRadius, -effectiveRadius);
+        BlockPos max = center.add(effectiveRadius, effectiveRadius, effectiveRadius);
+        UUID owner = parseZoneOwner(ownerUuidStr);
+        ProtectedZoneService.upsertZoneInternal(world, autoZoneLabel(baseLabel), min, max,
+                owner, ownerName);
+    }
+
+    /**
+     * Walk all bases registered for the given world and ensure each has a matching auto-zone.
+     * Called once at server start after {@link ProtectedZoneService#loadZones} so the in-memory
+     * zone map is the green light to write. Idempotent — re-runs harmlessly upsert the same data.
+     */
+    public static void syncZonesFromBases(MinecraftServer server, ServerWorld world) {
+        if (server == null || world == null) return;
+        String worldId = world.getRegistryKey().getValue().toString();
+        if (!ProtectedZoneService.isLoaded(worldId)) return;
+        int synced = 0;
+        for (BaseEntry base : listBases(server, world)) {
+            if (base == null || base.pos() == null) continue;
+            int effectiveRadius = base.radius() > 0 ? base.radius() : DEFAULT_BASE_PROTECTION_RADIUS;
+            BlockPos min = base.pos().add(-effectiveRadius, -effectiveRadius, -effectiveRadius);
+            BlockPos max = base.pos().add(effectiveRadius, effectiveRadius, effectiveRadius);
+            UUID owner = parseZoneOwner(base.ownerUuid());
+            if (ProtectedZoneService.upsertZoneInternal(world, autoZoneLabel(base.label()),
+                    min, max, owner, base.ownerName())) {
+                synced++;
+            }
+        }
+        if (synced > 0) {
+            LOGGER.info("Synced {} auto-zones from registered bases for world {}", synced, worldId);
+        }
+    }
 
     /** Canonical label used when the server auto-creates a base at world spawn. */
     public static final String AUTO_SPAWN_BASE_LABEL = "Spawn";
@@ -869,13 +941,17 @@ public final class BotHomeService {
         String normalized = normalizeLabelKey(label);
         String trimmed = label.trim();
         WorldData wd = worldData(server, world);
+        int storedRadius;
         synchronized (LOCK) {
             if (wd.basesByLabel == null) {
                 wd.basesByLabel = new HashMap<>();
             }
             wd.basesByLabel.put(normalized, new SavedBase(trimmed, SavedPos.from(pos), ownerUuid, ownerName));
+            SavedBase saved = wd.basesByLabel.get(normalized);
+            storedRadius = saved != null ? saved.radius : 0;
         }
         flush();
+        upsertAutoZoneForBase(server, world, trimmed, pos, storedRadius, ownerUuid, ownerName);
         return true;
     }
 
@@ -1030,13 +1106,26 @@ public final class BotHomeService {
         }
         String normalized = normalizeLabelKey(label);
         WorldData wd = worldData(server, world);
+        BlockPos pos;
+        int newRadius;
+        String displayLabel;
+        String ownerUuid;
+        String ownerName;
         synchronized (LOCK) {
             if (wd.basesByLabel == null) return false;
             SavedBase base = wd.basesByLabel.get(normalized);
             if (base == null) return false;
             base.radius = Math.max(0, radius);
+            pos = base.pos != null ? base.pos.toBlockPos() : null;
+            newRadius = base.radius;
+            displayLabel = base.label;
+            ownerUuid = base.ownerUuid;
+            ownerName = base.ownerName;
         }
         flush();
+        if (pos != null && displayLabel != null) {
+            upsertAutoZoneForBase(server, world, displayLabel, pos, newRadius, ownerUuid, ownerName);
+        }
         return true;
     }
 
@@ -1166,6 +1255,7 @@ public final class BotHomeService {
         }
         if (removed) {
             flush();
+            ProtectedZoneService.removeZoneInternal(world, autoZoneLabel(label));
         }
         return removed;
     }
@@ -1221,6 +1311,31 @@ public final class BotHomeService {
 
         if (changed) {
             flush();
+            if (!oldNorm.equals(newNorm)) {
+                // Try fast-path rename of the existing auto-zone. If no zone exists yet
+                // (e.g. zones weren't loaded when the base was first created), drop the
+                // old label silently and upsert under the new label.
+                boolean renamed = ProtectedZoneService.renameZoneInternal(world,
+                        AUTO_ZONE_LABEL_PREFIX + oldNorm, AUTO_ZONE_LABEL_PREFIX + newNorm);
+                if (!renamed) {
+                    ProtectedZoneService.removeZoneInternal(world, AUTO_ZONE_LABEL_PREFIX + oldNorm);
+                    BlockPos pos;
+                    int storedRadius;
+                    String displayLabel;
+                    String ownerUuid;
+                    String ownerName;
+                    synchronized (LOCK) {
+                        SavedBase moved = wd.basesByLabel.get(newNorm);
+                        if (moved == null || moved.pos == null) return true;
+                        pos = moved.pos.toBlockPos();
+                        storedRadius = moved.radius;
+                        displayLabel = moved.label;
+                        ownerUuid = moved.ownerUuid;
+                        ownerName = moved.ownerName;
+                    }
+                    upsertAutoZoneForBase(server, world, displayLabel, pos, storedRadius, ownerUuid, ownerName);
+                }
+            }
         }
         return changed;
     }

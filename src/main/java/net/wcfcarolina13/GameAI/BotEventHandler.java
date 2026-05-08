@@ -343,6 +343,11 @@ public class BotEventHandler {
         return state != null ? state.mode : Mode.IDLE;
     }
 
+    /** Public accessor for {@link #getMode}. */
+    public static Mode getModePublic(ServerPlayerEntity bot) {
+        return getMode(bot);
+    }
+
     /**
      * Force the bot into {@link Mode#IDLE}.
      *
@@ -2802,6 +2807,8 @@ public class BotEventHandler {
                     FollowStateService.FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.put(botId, nowTick);
                     CompanionOverheadDialogueService.showOverheadLine(bot,
                             "Waiting by the opening.", 4_000, 48.0, "follow-wait-above", null);
+                    net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
+                            bot, net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.HERE);
                     // Check auto-regroup config to tailor the message.
                     boolean autoRegroupEnabled = false;
                     if (net.wcfcarolina13.Frens.CONFIG != null) {
@@ -3007,6 +3014,12 @@ public class BotEventHandler {
     private static final long IDLE_SWEEP_DELAY_TICKS = 300L;
     /** Maximum distance the bot will walk for an idle sweep. */
     private static final double IDLE_SWEEP_RADIUS = 20.0D;
+    /** No-progress timeout: abandon a sweep target the bot can't get closer to within 10 s. */
+    private static final long IDLE_SWEEP_NO_PROGRESS_TIMEOUT_TICKS = 200L;
+    /** Squared-distance delta that counts as "made progress" toward the target. */
+    private static final double IDLE_SWEEP_PROGRESS_DELTA_SQ = 0.25D;
+    /** Cooldown for an unreachable drop position (60 s). */
+    private static final long IDLE_SWEEP_BLACKLIST_DURATION_TICKS = 1200L;
 
     /**
      * Opportunistic idle drop-sweep.  When the player and bot are standing still for 15 s,
@@ -3067,6 +3080,12 @@ public class BotEventHandler {
         // ===== ACTIVE SWEEP: bot is walking to / collecting drops =====
         Boolean active = FollowStateService.IDLE_SWEEP_ACTIVE.get(botId);
         if (active != null && active) {
+            // Suppress idle head-rotation while we're driving a non-skill waypoint —
+            // otherwise AutoFaceEntity points the bot's head at random nearby mobs
+            // (the "Jake hopping while looking up at an enderman" autopsy from
+            // 2026-05-06). Reset to false on every exit path that returns false.
+            net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(true);
+
             // Cancel if player moved >1 block (FOLLOW mode).
             if (mode == Mode.FOLLOW && commander != null) {
                 BlockPos snapPlayer = FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.get(botId);
@@ -3077,6 +3096,7 @@ public class BotEventHandler {
                         LOGGER.debug("[IdleSweep] {} cancelled — player moved", bot.getName().getString());
                         FollowStateService.clearIdleSweep(botId);
                         DropSweepService.requestCancel(bot, "player-moved");
+                        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
                         return false;
                     }
                 }
@@ -3094,6 +3114,8 @@ public class BotEventHandler {
                 if (distSq <= 2.25D) {
                     // Arrived — start formal pickup and look for the next item.
                     FollowStateService.IDLE_SWEEP_TARGET.remove(botId);
+                    FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.remove(botId);
+                    FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.remove(botId);
                     if (!DropSweepService.isInProgress()) {
                         collectNearbyDrops(bot, IDLE_SWEEP_RADIUS);
                         if (DropSweepService.isInProgressFor(bot)) {
@@ -3101,6 +3123,29 @@ public class BotEventHandler {
                         }
                     }
                 } else {
+                    // Progress check: if the bot hasn't gotten measurably closer to the
+                    // committed target within the timeout window, the path is unreachable
+                    // (typically a fence/wall/head-clearance block we can't auto-step).
+                    // Blacklist the position so subsequent sweeps skip it, then exit.
+                    Long lastProgress = FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.get(botId);
+                    Double lastDistSq = FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.get(botId);
+                    if (lastProgress == null || lastDistSq == null) {
+                        FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.put(botId, nowTick);
+                        FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.put(botId, distSq);
+                    } else if (distSq + IDLE_SWEEP_PROGRESS_DELTA_SQ < lastDistSq) {
+                        FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.put(botId, nowTick);
+                        FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.put(botId, distSq);
+                    } else if (nowTick - lastProgress > IDLE_SWEEP_NO_PROGRESS_TIMEOUT_TICKS) {
+                        LOGGER.info("[IdleSweep] {} abandoning unreachable drop at {} — no progress for {}s",
+                                bot.getName().getString(), target.toShortString(),
+                                (nowTick - lastProgress) / 20L);
+                        blacklistIdleSweepTarget(botId, target,
+                                nowTick + IDLE_SWEEP_BLACKLIST_DURATION_TICKS);
+                        FollowStateService.clearIdleSweep(botId);
+                        DropSweepService.requestCancel(bot, "no-progress");
+                        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
+                        return false;
+                    }
                     // Still walking to the target.
                     FollowMovementService.followWaypointStep(bot, target, distSq,
                             64.0D, () -> lowerShieldTracking(bot));
@@ -3115,6 +3160,8 @@ public class BotEventHandler {
                 double distSq = bot.squaredDistanceTo(nearDrop);
                 if (distSq > 2.25D) {
                     FollowStateService.IDLE_SWEEP_TARGET.put(botId, dropBlock);
+                    FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.put(botId, nowTick);
+                    FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.put(botId, distSq);
                     FollowMovementService.followWaypointStep(bot, dropBlock, distSq,
                             64.0D, () -> lowerShieldTracking(bot));
                     return true;
@@ -3132,6 +3179,7 @@ public class BotEventHandler {
             // Nothing left — sweep done.
             LOGGER.debug("[IdleSweep] {} complete — no more drops", bot.getName().getString());
             FollowStateService.clearIdleSweep(botId);
+            net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
             return false;
         }
 
@@ -3195,9 +3243,13 @@ public class BotEventHandler {
             FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.put(botId, commander.getBlockPos());
         }
 
-        // Start moving toward the drop.
+        // Start moving toward the drop. Seed progress trackers + suppress idle
+        // head-rotation so the bot keeps eyes on the waypoint.
         BlockPos dropBlock = nearDrop.getBlockPos();
         double distSq = bot.squaredDistanceTo(nearDrop);
+        FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.put(botId, nowTick);
+        FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.put(botId, distSq);
+        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(true);
         FollowMovementService.followWaypointStep(bot, dropBlock, distSq,
                 64.0D, () -> lowerShieldTracking(bot));
         return true;
@@ -7146,11 +7198,15 @@ public class BotEventHandler {
         double verticalRange = Math.max(6.0D, radius);
         Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
         Vec3d eyePos = bot.getEyePos();
+        long nowTick = world.getTime();
+        Map<BlockPos, Long> blacklist = pruneAndGetIdleSweepBlacklist(bot.getUuid(), nowTick);
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         searchBox,
                         drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
                 .stream()
+                // Skip drops the bot has previously failed to reach (per-bot, time-bounded).
+                .filter(drop -> blacklist == null || !blacklist.containsKey(drop.getBlockPos()))
                 // Back off from drops near a real player who just broke a block — avoids shoving
                 // the commander while they're mining a tunnel.
                 .filter(drop -> !net.wcfcarolina13.GameAI.services.CommanderActivityService
@@ -7175,6 +7231,29 @@ public class BotEventHandler {
                 })
                 .min(Comparator.comparingDouble(bot::squaredDistanceTo))
                 .orElse(null);
+    }
+
+    /**
+     * Returns the bot's active idle-sweep blacklist after pruning entries whose
+     * cooldown ticks have elapsed. Returns {@code null} when the bot has nothing
+     * blacklisted (avoids creating an empty inner map).
+     */
+    private static Map<BlockPos, Long> pruneAndGetIdleSweepBlacklist(UUID botId, long nowTick) {
+        Map<BlockPos, Long> map = FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST.get(botId);
+        if (map == null || map.isEmpty()) return null;
+        map.entrySet().removeIf(entry -> entry.getValue() <= nowTick);
+        if (map.isEmpty()) {
+            FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST.remove(botId);
+            return null;
+        }
+        return map;
+    }
+
+    private static void blacklistIdleSweepTarget(UUID botId, BlockPos target, long expiryTick) {
+        if (botId == null || target == null) return;
+        FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST
+                .computeIfAbsent(botId, k -> new ConcurrentHashMap<>())
+                .put(target.toImmutable(), expiryTick);
     }
 
     private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {

@@ -185,6 +185,9 @@ public final class BotPersistenceService {
                 }
                 MountPersistenceService.onBotJoin(bot);
                 LAST_APPLIED_RESTORE_SEQUENCE.put(bot.getUuid(), restoreSeq);
+                // Greet the commander on rejoin. Soft-dependency: silent no-op when
+                // Emotecraft isn't installed.
+                EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.WAVING);
                 LOGGER.info("[PersistCheck] join-restore-complete bot={} tick={} pos={} vitals={}",
                         bot.getName().getString(),
                         server.getTicks(),

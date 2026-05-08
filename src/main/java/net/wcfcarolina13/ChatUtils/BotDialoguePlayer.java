@@ -1,5 +1,7 @@
 package net.wcfcarolina13.ChatUtils;
 
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -8,6 +10,7 @@ import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -726,6 +729,58 @@ public final class BotDialoguePlayer {
         // Walking-dogs hobby — session-start lines
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WALK_DOGS_GOOD_DOG, "Who's a good dog?");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_WALK_DOGS_WALKIES, "Going for walkies.");
+
+        // Snow golem proximity (1.1.82)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOW_GOLEM_FRIEND, "Hey, snow buddy.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOW_GOLEM_BUDDY, "Look at this little guy.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOW_GOLEM_AMMO, "He makes the ammo, I do the throwing.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOW_GOLEM_HUG, "He looks like he could use a hug. He probably can't hug back.");
+
+        // Iron golem with daisy (1.1.82)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IRON_GOLEM_DAISY_HERE, "Hold on big guy, I've got something for you.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IRON_GOLEM_DAISY_EARNED, "Here, you've earned this.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IRON_GOLEM_DAISY_CUTE, "Iron golem with a flower. Cute, right?");
+
+        // Warden proximity (1.1.83)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARDEN_LEAVE_NOW, "We need to leave. Now.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARDEN_NOT_A_SOUND, "Not a sound. Not a single sound.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARDEN_DONT_PEEP, "Don't make a peep. I'm serious.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARDEN_NOT_WHAT_THINK, "Please tell me that's not what I think it is.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARDEN_SNEAK, "Sneak. Don't sneak loudly. Just sneak.");
+
+        // Snowball-fight (1.1.81) — text emitted inline by BotSnowballFightService
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_CATCH_THIS, "Catch this!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_HEADS_UP, "Heads up!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING, "Hey — incoming!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT, "Snowball fight!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_BET, "Bet you can't dodge this one!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT_Q, "Snowball fight?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_ESCALATE_ON_NOW, "Oh, it's ON now!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_ESCALATE_IN_FOR_IT, "Hah! You're in for it!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_ESCALATE_BRING_IT, "That's how it is, huh? Bring it!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_ESCALATE_PLAYING, "Now we're playing!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_ESCALATE_EAT_SNOW, "Eat snow!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_GOT_YOU, "Got you!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_BULLSEYE, "Bullseye!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_TAKE_THAT, "Take that!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_CANT_CATCH, "Can't catch me!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_ALL_YOU_GOT, "Is that all you got?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_HOLD_STILL, "Hold still!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_ALMOST, "Almost had me!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TAUNT_GOTCHA, "Gotcha!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_DODGE_CLOSE_ONE, "Whoa, close one!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_DODGE_MISSED, "Missed me!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_DODGE_NICE_TRY, "Nice try!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_DODGE_DODGED, "Hah, dodged!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_TOUGH_CROWD, "Tough crowd...");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_DONT_PLAY, "Guess you don't wanna play.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_SUIT_YOURSELF, "Suit yourself.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_NO_FUN, "No fun, huh?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO, "Out of ammo — I yield!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_IM_OUT, "I'm out, I'm out, truce!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN, "No more snowballs — you win!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_MERCY, "Mercy! I surrender!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_GOT_ME, "Okay okay, you got me!");
     }
 
     private BotDialoguePlayer() {
@@ -859,6 +914,32 @@ public final class BotDialoguePlayer {
         }
     }
 
+    private static boolean isSuppressedByUnderwater(ServerPlayerEntity bot) {
+        if (bot == null || !bot.isSubmergedInWater()) {
+            return false;
+        }
+        if (!hasWaterBreathing(bot)) {
+            return true;
+        }
+        MinecraftServer server = bot.getEntityWorld() instanceof ServerWorld sw ? sw.getServer() : null;
+        if (server == null) {
+            return true;
+        }
+        ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(server, bot);
+        if (controller == null || controller.isRemoved()) {
+            return true;
+        }
+        return !hasWaterBreathing(controller);
+    }
+
+    private static boolean hasWaterBreathing(ServerPlayerEntity p) {
+        if (p == null) {
+            return false;
+        }
+        return p.hasStatusEffect(StatusEffects.WATER_BREATHING)
+                || p.hasStatusEffect(StatusEffects.CONDUIT_POWER);
+    }
+
     private static DialogueCategory categoryFor(SoundEvent sound) {
         if (sound == null || sound.id() == null) {
             return DialogueCategory.OTHER;
@@ -908,6 +989,12 @@ public final class BotDialoguePlayer {
     private static PlayResult playSoundInternal(ServerPlayerEntity bot, SoundEvent sound, boolean showSubtitle) {
         if (bot == null || sound == null) {
             return PlayResult.FAILED;
+        }
+
+        if (isSuppressedByUnderwater(bot)) {
+            LOGGER.debug("[VoicedDialogue] Suppressed (underwater, no shared water breathing): {} for bot {}",
+                    sound.id(), bot.getName().getString());
+            return PlayResult.DISABLED;
         }
 
         long now = System.currentTimeMillis();

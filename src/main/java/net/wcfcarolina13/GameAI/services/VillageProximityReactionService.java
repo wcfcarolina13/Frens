@@ -88,7 +88,7 @@ public final class VillageProximityReactionService {
             UUID botId = bot.getUuid();
             live.add(botId);
 
-            boolean nearVillagers = hasNearbyVillagers(world, bot.getBlockPos());
+            boolean nearVillagers = hasNearbyVisibleVillagers(bot, world, bot.getBlockPos());
             boolean wasNearVillagers = LAST_NEAR_VILLAGERS.getOrDefault(botId, false);
             LAST_NEAR_VILLAGERS.put(botId, nearVillagers);
 
@@ -160,12 +160,13 @@ public final class VillageProximityReactionService {
         };
     }
 
-    private static boolean hasNearbyVillagers(ServerWorld world, BlockPos anchor) {
-        if (world == null || anchor == null) {
+    private static boolean hasNearbyVisibleVillagers(ServerPlayerEntity bot, ServerWorld world, BlockPos anchor) {
+        if (bot == null || world == null || anchor == null) {
             return false;
         }
         Box box = new Box(anchor).expand(RADIUS_XZ, RADIUS_Y, RADIUS_XZ);
-        return !world.getEntitiesByClass(VillagerEntity.class, box, v -> v != null && v.isAlive()).isEmpty();
+        return world.getEntitiesByClass(VillagerEntity.class, box, v -> v != null && v.isAlive())
+                .stream().anyMatch(v -> EntityVisibilityUtil.canSee(bot, v));
     }
 
     private static boolean playVillagerNoise(ServerPlayerEntity bot, String forcedLineId) {
