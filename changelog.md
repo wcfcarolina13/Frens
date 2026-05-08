@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Stop runaway dance emotes (2026-05-08, 1.1.92)
+
+Bug: bot started a random dance and never stopped — dancing through sleep, follow, combat. The Emotecraft dance emotes (`backflip`, `twerk`, `club_penguin_dance`, `roblox_potion_dance`) are looping animations; once dispatched they animate indefinitely until explicitly cancelled. [BotRandomDanceService](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java)'s 5-minute cooldown only prevented re-triggering, and [EmotecraftBridge](src/main/java/net/wcfcarolina13/GameAI/services/EmotecraftBridge.java) had no `stopEmote` wrapper.
+
+### Fix
+
+- **`EmotecraftBridge.stopEmote(bot)`** — reflection on `ServerEmoteAPI.stopEmote(UUID)`. Probed in `initialize()` with a `NoSuchMethodException` fallback that logs a warning so the bridge stays usable if the API surface ever changes name (looping dances would just stop being cancellable, the rest of the bridge keeps working).
+- **`BotRandomDanceService.tickStopCheck`** — runs every server tick (no eval throttle, since stops need to react fast when the bot enters a bed or mounts up). Tracks `ACTIVE_DANCE_SINCE` per bot; cancels via `stopEmote` when:
+  - `bot.isSleeping()`, `hasVehicle()`, `isUsingItem()` → user state changed.
+  - `Mode != IDLE`, `TaskService.hasActiveTask()` → bot picked up work.
+  - Hostile within audible/visible radius → combat suppression.
+  - `MAX_DANCE_DURATION_TICKS = 400` (≈20 s) → hard cap. Long enough to look intentional, short enough that a mistimed trigger can't dominate behaviour.
+- **`tickStartCheck`** — split out from the old `tickBot`. Same eligibility + 5-min cooldown gates as before, plus a new "no concurrent dance" guard so a new dance can't kick off before the stop check has cleared the previous one.
+
+### Reset hook
+
+`BotRandomDanceService.reset()` now clears `ACTIVE_DANCE_SINCE` alongside the other maps so server restarts don't leave a stale "still dancing" flag that would block the next start.
+
 ## Partial-block-aware arrival check (2026-05-08, 1.1.91)
 
 Defense-in-depth for the long-standing "bot oscillates / appears stuck on carpets, pressure plates, soul sand, slabs" symptom. The 2026-04-10 doorway-stall autopsy fixed the *passability* side (`WalkablePartialBlocks.isPathable` returns true for these) but the *position-reporting* side was never addressed — `bot.getBlockPos()` floors the entity Y, so on partial-height floors the bot's reported cell is the floor block itself rather than the cell above.

@@ -66,6 +66,7 @@ public final class EmotecraftBridge {
     private static volatile boolean AVAILABLE = false;
     private static volatile Method GET_EMOTE_METHOD;     // UniversalEmoteSerializer.getEmote(UUID) -> Animation
     private static volatile Method PLAY_EMOTE_METHOD;    // ServerEmoteAPI.playEmote(UUID, Animation, boolean) -> void
+    private static volatile Method STOP_EMOTE_METHOD;    // ServerEmoteAPI.stopEmote(UUID) -> void (optional)
 
     private static final ConcurrentHashMap<UUID, Map<EmoteId, Long>> LAST_PLAYED_MS = new ConcurrentHashMap<>();
 
@@ -89,12 +90,21 @@ public final class EmotecraftBridge {
             Class<?> api = Class.forName("io.github.kosmx.emotes.api.events.server.ServerEmoteAPI");
             Class<?> animationClass = Class.forName("com.zigythebird.playeranimcore.animation.Animation");
             Method playEmote = api.getMethod("playEmote", UUID.class, animationClass, boolean.class);
+            // stopEmote is optional — if the API surface ever changes name we still
+            // ship without it (looping dances just won't stop early).
+            Method stopEmote = null;
+            try {
+                stopEmote = api.getMethod("stopEmote", UUID.class);
+            } catch (NoSuchMethodException ignored) {
+                LOGGER.warn("Emotecraft.stopEmote(UUID) not found; long-running emotes will not be cancelable");
+            }
 
             GET_EMOTE_METHOD = getEmote;
             PLAY_EMOTE_METHOD = playEmote;
+            STOP_EMOTE_METHOD = stopEmote;
             AVAILABLE = true;
-            LOGGER.info("Emotecraft detected; bot emote bridge enabled ({} emotes registered)",
-                    EmoteId.values().length);
+            LOGGER.info("Emotecraft detected; bot emote bridge enabled ({} emotes registered, stopEmote={})",
+                    EmoteId.values().length, stopEmote != null ? "yes" : "no");
         } catch (Throwable t) {
             LOGGER.warn("Emotecraft detected but API failed to load: {}", t.toString());
         }
@@ -128,6 +138,25 @@ public final class EmotecraftBridge {
         } catch (Throwable t) {
             LOGGER.debug("Emote play failed bot={} emote={}: {}",
                     bot.getName().getString(), emote.slug, t.toString());
+            return false;
+        }
+    }
+
+    /**
+     * Cancels any active emote on the bot. Returns {@code true} if the stop
+     * call was dispatched, {@code false} if Emotecraft is unavailable, the
+     * stopEmote API isn't present, or the call threw. Looping dances
+     * (backflip, twerk, club_penguin_dance, roblox_potion_dance) animate
+     * indefinitely once started — callers must invoke this to stop them.
+     */
+    public static boolean stopEmote(ServerPlayerEntity bot) {
+        if (!AVAILABLE || bot == null || STOP_EMOTE_METHOD == null) return false;
+        try {
+            STOP_EMOTE_METHOD.invoke(null, bot.getUuid());
+            return true;
+        } catch (Throwable t) {
+            LOGGER.debug("Emote stop failed bot={}: {}",
+                    bot.getName().getString(), t.toString());
             return false;
         }
     }
