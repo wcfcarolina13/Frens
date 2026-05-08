@@ -2,6 +2,37 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Jukebox-driven dancing + actually-working stopEmote (2026-05-08, 1.1.93)
+
+### Stop API correction
+
+**1.1.92's `stopEmote` was a silent no-op.** The deployed-1.1.92 log showed `Emotecraft.stopEmote(UUID) not found; long-running emotes will not be cancelable` — the API method I probed for doesn't exist in Emotecraft 3.2.0-b.149. `javap`-ing `ServerEmoteAPI.class` from the installed jar confirmed: there is no `stopEmote`, but `setPlayerPlayingEmote(UUID, Animation)` accepts `null` as the "stop" signal. The bridge now resolves that method instead, and `EmotecraftBridge.stopEmote(bot)` invokes it as `setPlayerPlayingEmote(uuid, null)`. The 1.1.92 duration cap, jukebox-stop, and all state-broken stops finally take effect.
+
+Renamed the cached field from `STOP_EMOTE_METHOD` to `SET_EMOTE_METHOD` to reflect what we're actually calling. Same `NoSuchMethodException` fallback semantics — bridge stays usable if the method ever gets renamed again.
+
+### Jukebox-driven dancing
+
+Bots now dance when a music disc is playing in a nearby jukebox. Builds on the 1.1.92 dance-stop infrastructure — same eligibility gates, same active-dance bookkeeping, but adds a second trigger path that bypasses the cooldown and roll, and suppresses the duration cap for as long as the music keeps playing.
+
+### New trigger path
+
+[BotRandomDanceService.tickJukeboxStart](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java) runs every server tick (no eval throttle, since we want the bot to react visibly when a song starts):
+
+- Probes for a `JukeboxBlock` with `Properties.HAS_RECORD=true` within `JUKEBOX_HEAR_RADIUS=12` blocks horizontally / `JUKEBOX_VERTICAL_RANGE=3` blocks vertically. Cached for 10 ticks (0.5 s) per bot to keep the cost off the hot path.
+- If no dance is currently active and the bot passes the standard eligibility gates (IDLE mode, no task, not using item / mounted / sleeping, no nearby hostile), picks a random dance from the 4-emote pool and fires it. Marks `JUKEBOX_DRIVEN` so the stop check knows to skip the duration cap.
+
+### Stop semantics for jukebox dances
+
+`tickStopCheck` already runs every tick. When the active dance is jukebox-driven, the duration cap is skipped for as long as `isJukeboxPlayingNear` still returns true. When the user pops the record (or the song ends and HAS_RECORD flips false), the dance stops on the next tick — logged as `reason=music-ended`. State-broken stops (sleep / mount / aggro / task) still apply identically.
+
+### Why HAS_RECORD as the proxy
+
+The block-state property is the cheapest reliable "music playing" signal in 1.21.11. A record sitting in a finished jukebox keeps the bot dancing past actual song end, but only until the user extracts the record (HAS_RECORD → false → stop). Combined with the per-bot 10-tick scan cache and the hostile/state stop conditions, the bot's behaviour stays bounded.
+
+### Random idle is unchanged
+
+`tickRandomStart` was renamed from `tickStartCheck` and otherwise untouched. Same 200-tick eval, 2% probability roll, 5-min cooldown, 20-second duration cap. Jukebox-driven and random-idle paths are mutually exclusive — the start guard `ACTIVE_DANCE_SINCE.containsKey(id)` prevents both from firing concurrently.
+
 ## Stop runaway dance emotes (2026-05-08, 1.1.92)
 
 Bug: bot started a random dance and never stopped — dancing through sleep, follow, combat. The Emotecraft dance emotes (`backflip`, `twerk`, `club_penguin_dance`, `roblox_potion_dance`) are looping animations; once dispatched they animate indefinitely until explicitly cancelled. [BotRandomDanceService](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java)'s 5-minute cooldown only prevented re-triggering, and [EmotecraftBridge](src/main/java/net/wcfcarolina13/GameAI/services/EmotecraftBridge.java) had no `stopEmote` wrapper.

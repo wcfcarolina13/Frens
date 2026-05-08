@@ -1,9 +1,13 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
+import net.minecraft.block.JukeboxBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.state.property.Properties;
+import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.BotEventHandler.Mode;
 import org.slf4j.Logger;
@@ -15,29 +19,32 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Atmospheric "rare meme idle" service that occasionally has bots play one of
- * the four pure-meme Emotecraft dances ({@code backflip}, {@code twerk},
- * {@code club_penguin_dance}, {@code roblox_potion_dance}) during truly calm
- * idle moments.
+ * Drives the four meme Emotecraft dances ({@code backflip}, {@code twerk},
+ * {@code club_penguin_dance}, {@code roblox_potion_dance}) on bots. Two trigger
+ * paths share the same eligibility gates and the same active-dance bookkeeping:
  *
- * <p>Conditions (all must hold):
- * <ul>
- *   <li>Mode is {@link Mode#IDLE} (not following, not on a task).</li>
- *   <li>No active {@link TaskService} ticket.</li>
- *   <li>{@code !isUsingItem() && !hasVehicle() && !isSleeping()}.</li>
- *   <li>No hostile within 16 blocks LOS, no hostile within 8 blocks regardless
- *       of LOS (same combat-suppression model as
- *       {@link BotTorchHoldService}).</li>
- * </ul>
+ * <ol>
+ *   <li><b>Random idle:</b> rare atmospheric trigger during truly calm idle
+ *       moments. Per-bot eval every 200 ticks (10 s), 2% roll, 5-minute
+ *       cooldown between rolls, capped at {@value #MAX_DANCE_DURATION_TICKS}
+ *       ticks (~20 s) per dance.</li>
+ *   <li><b>Jukebox-driven:</b> a {@link JukeboxBlock} with
+ *       {@link Properties#HAS_RECORD HAS_RECORD=true} within
+ *       {@value #JUKEBOX_HEAR_RADIUS} blocks fires a dance immediately,
+ *       no cooldown or roll. The duration cap is suppressed for as long as
+ *       the jukebox is still detected so the bot keeps dancing through the
+ *       whole song.</li>
+ * </ol>
  *
- * <p>Cadence: per-bot evaluation every 200 ticks (10 s). When eligible, a 2%
- * roll per evaluation fires a dance. Hard cooldown of 6000 ticks (5 minutes)
- * between dances per bot prevents back-to-back triggers. Combined avg interval
- * is ~10 minutes of eligible idle time before a dance.
+ * <p>Eligibility (both paths): mode is {@link Mode#IDLE}, no active
+ * {@link TaskService} ticket, {@code !isUsingItem() && !hasVehicle() &&
+ * !isSleeping()}, no hostile within 16 blocks LOS, no hostile within 8 blocks
+ * regardless of LOS. Same combat-suppression model as
+ * {@link BotTorchHoldService}.
  *
  * <p>Soft-dependency on Emotecraft via {@link EmotecraftBridge} — when
- * Emotecraft is missing, every {@code playEmote} call is a no-op so this
- * service silently does nothing.
+ * Emotecraft is missing, every {@code playEmote}/{@code stopEmote} call is a
+ * no-op so this service silently does nothing.
  */
 public final class BotRandomDanceService {
     private static final Logger LOGGER = LoggerFactory.getLogger("random-dance");
@@ -53,6 +60,12 @@ public final class BotRandomDanceService {
     private static final double DANCE_PROBABILITY = 0.02D;
     private static final double VISIBLE_HOSTILE_RADIUS = 16.0D;
     private static final double AUDIBLE_HOSTILE_RADIUS = 8.0D;
+    /** Block radius within which a playing jukebox triggers an immediate dance. */
+    private static final int JUKEBOX_HEAR_RADIUS = 12;
+    /** Vertical search depth around the bot for jukebox scans (jukeboxes are floor blocks). */
+    private static final int JUKEBOX_VERTICAL_RANGE = 3;
+    /** Cache TTL for the jukebox-nearby probe so we don't scan O(r³) cells every tick. */
+    private static final long JUKEBOX_SCAN_INTERVAL_TICKS = 10L;
 
     private static final EmotecraftBridge.EmoteId[] DANCES = new EmotecraftBridge.EmoteId[]{
             EmotecraftBridge.EmoteId.BACKFLIP,
@@ -66,6 +79,11 @@ public final class BotRandomDanceService {
     // Bots with an active dance the bridge has fired but not yet stopped. Used by
     // the per-tick stop check to know which bots need state-validity scrutiny.
     private static final ConcurrentHashMap<UUID, Long> ACTIVE_DANCE_SINCE = new ConcurrentHashMap<>();
+    // Whether the active dance was kicked off by a jukebox (suppresses duration cap).
+    private static final java.util.Set<UUID> JUKEBOX_DRIVEN = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // Per-bot cache for the jukebox-nearby probe. Refreshed on JUKEBOX_SCAN_INTERVAL_TICKS.
+    private static final ConcurrentHashMap<UUID, Long> JUKEBOX_SCAN_TICK = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Boolean> JUKEBOX_SCAN_RESULT = new ConcurrentHashMap<>();
     private static final Random RNG = new Random();
 
     private BotRandomDanceService() {}
@@ -78,8 +96,10 @@ public final class BotRandomDanceService {
                 // Stop check runs every tick — Emotecraft dance emotes loop, so we
                 // need to react fast when the bot enters bed / mounts / aggros.
                 tickStopCheck(bot);
-                // Start check is throttled to EVAL_INTERVAL_TICKS.
-                tickStartCheck(bot);
+                // Jukebox-driven start runs every tick (no throttle): the bot should
+                // visibly react when a song starts. Random idle start is throttled.
+                tickJukeboxStart(bot);
+                tickRandomStart(bot);
             } catch (Exception e) {
                 LOGGER.debug("random-dance tick failed for {}: {}",
                         bot.getName().getString(), e.getMessage());
@@ -96,7 +116,6 @@ public final class BotRandomDanceService {
         if (since == null) return;
 
         long nowTick = world.getTime();
-        boolean expired = nowTick - since >= MAX_DANCE_DURATION_TICKS;
         boolean stateBroken = bot.isSleeping()
                 || bot.hasVehicle()
                 || bot.isUsingItem()
@@ -104,16 +123,54 @@ public final class BotRandomDanceService {
                 || TaskService.hasActiveTask(id)
                 || hasNearbyHostile(bot);
 
+        // Jukebox-driven dances suppress the duration cap for as long as a jukebox
+        // is still playing nearby — bot dances through the whole song. If the music
+        // stops (HAS_RECORD turns false / record extracted), drop back to standard
+        // cap behaviour and stop on the next eligible check.
+        boolean jukeboxDriven = JUKEBOX_DRIVEN.contains(id);
+        boolean musicStillNearby = jukeboxDriven && isJukeboxPlayingNear(bot, world, nowTick);
+        boolean expired = !musicStillNearby && nowTick - since >= MAX_DANCE_DURATION_TICKS;
+
         if (expired || stateBroken) {
             EmotecraftBridge.stopEmote(bot);
             ACTIVE_DANCE_SINCE.remove(id);
+            JUKEBOX_DRIVEN.remove(id);
             LOGGER.debug("Dance stopped bot={} reason={}",
-                    bot.getName().getString(), expired ? "duration-cap" : "state-broken");
+                    bot.getName().getString(),
+                    stateBroken ? "state-broken" : (jukeboxDriven ? "music-ended" : "duration-cap"));
         }
     }
 
-    /** Throttled to EVAL_INTERVAL_TICKS: roll for a new dance when conditions allow. */
-    private static void tickStartCheck(ServerPlayerEntity bot) {
+    /** Per-tick: if a jukebox is playing within range, fire a dance immediately. */
+    private static void tickJukeboxStart(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved()) return;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
+        UUID id = bot.getUuid();
+        long nowTick = world.getTime();
+
+        // Already dancing — nothing to do (existing dance carries through, including
+        // the "jukebox suppresses cap" behaviour handled by tickStopCheck).
+        if (ACTIVE_DANCE_SINCE.containsKey(id)) return;
+
+        if (!isJukeboxPlayingNear(bot, world, nowTick)) return;
+
+        if (BotEventHandler.getModePublic(bot) != Mode.IDLE) return;
+        if (TaskService.hasActiveTask(id)) return;
+        if (bot.isUsingItem() || bot.hasVehicle() || bot.isSleeping()) return;
+        if (hasNearbyHostile(bot)) return;
+
+        EmotecraftBridge.EmoteId emote = DANCES[RNG.nextInt(DANCES.length)];
+        if (EmotecraftBridge.playEmote(bot, emote, true)) {
+            LAST_DANCE_TICK.put(id, nowTick);
+            ACTIVE_DANCE_SINCE.put(id, nowTick);
+            JUKEBOX_DRIVEN.add(id);
+            LOGGER.debug("Jukebox dance fired bot={} emote={}",
+                    bot.getName().getString(), emote.slug);
+        }
+    }
+
+    /** Throttled to EVAL_INTERVAL_TICKS: roll for a new random dance when conditions allow. */
+    private static void tickRandomStart(ServerPlayerEntity bot) {
         if (bot == null || bot.isRemoved()) return;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
         UUID id = bot.getUuid();
@@ -147,6 +204,43 @@ public final class BotRandomDanceService {
         }
     }
 
+    /**
+     * Cached probe for "is a jukebox with a record loaded within hearing range?"
+     * Refreshed on {@link #JUKEBOX_SCAN_INTERVAL_TICKS}; iterates a
+     * {@code (2r+1) × (2v+1) × (2r+1)} block box around the bot with early exit
+     * on first match. Uses {@code HAS_RECORD=true} as the proxy for "playing":
+     * a record sitting in a finished jukebox keeps the bot dancing slightly
+     * past song-end, but the {@link #MAX_DANCE_DURATION_TICKS} cap still applies
+     * once the user pops the record (HAS_RECORD flips false → music-ended stop).
+     */
+    private static boolean isJukeboxPlayingNear(ServerPlayerEntity bot, ServerWorld world, long nowTick) {
+        UUID id = bot.getUuid();
+        Long lastScan = JUKEBOX_SCAN_TICK.get(id);
+        Boolean cached = JUKEBOX_SCAN_RESULT.get(id);
+        if (cached != null && lastScan != null && nowTick - lastScan < JUKEBOX_SCAN_INTERVAL_TICKS) {
+            return cached;
+        }
+        JUKEBOX_SCAN_TICK.put(id, nowTick);
+
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dy = -JUKEBOX_VERTICAL_RANGE; dy <= JUKEBOX_VERTICAL_RANGE; dy++) {
+            for (int dx = -JUKEBOX_HEAR_RADIUS; dx <= JUKEBOX_HEAR_RADIUS; dx++) {
+                for (int dz = -JUKEBOX_HEAR_RADIUS; dz <= JUKEBOX_HEAR_RADIUS; dz++) {
+                    cursor.set(botPos.getX() + dx, botPos.getY() + dy, botPos.getZ() + dz);
+                    BlockState state = world.getBlockState(cursor);
+                    if (!(state.getBlock() instanceof JukeboxBlock)) continue;
+                    if (state.contains(Properties.HAS_RECORD) && state.get(Properties.HAS_RECORD)) {
+                        JUKEBOX_SCAN_RESULT.put(id, true);
+                        return true;
+                    }
+                }
+            }
+        }
+        JUKEBOX_SCAN_RESULT.put(id, false);
+        return false;
+    }
+
     /** Combat suppression — same model as BotTorchHoldService. */
     private static boolean hasNearbyHostile(ServerPlayerEntity bot) {
         List<Entity> hostiles = BotThreatService.findHostilesAround(bot, VISIBLE_HOSTILE_RADIUS);
@@ -162,5 +256,8 @@ public final class BotRandomDanceService {
         LAST_DANCE_TICK.clear();
         LAST_EVAL_TICK.clear();
         ACTIVE_DANCE_SINCE.clear();
+        JUKEBOX_DRIVEN.clear();
+        JUKEBOX_SCAN_TICK.clear();
+        JUKEBOX_SCAN_RESULT.clear();
     }
 }
