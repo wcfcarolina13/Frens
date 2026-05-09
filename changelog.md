@@ -2,6 +2,41 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dangerous-pursuit gate (2026-05-09, 1.1.97)
+
+User report: bot dives into dark caves full of mobs to fetch XP orbs and item drops, accepts fall damage to chase non-aggroed mobs, etc. New shared gate composes four rules at the two relevant call sites.
+
+### The gate
+
+[DangerousPursuitGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) (95 LOC, two static methods):
+
+- `isLocationSafeForPursuit(bot, targetPos, world)` — environment rules:
+  1. Target sits more than 4 blocks below bot's Y → reject (fall-damage threshold).
+  2. Combined sky+block light at target ≤ 0 → reject (pitch-black target; mobs spawn there and bot can't see).
+  3. 2+ visible hostile mobs (`HostileEntity` or `Monster`) within 5 blocks of target → reject (cluster danger).
+- `shouldEngageNonAggro(bot, candidate)` — combat rule:
+  4. Mob is targeting bot (`mob.getTarget() == bot`) → engage. Otherwise require ranged weapon (`BotActions.hasRangedWeapon`). Wandering hostiles that haven't spotted the bot don't get rushed with a melee weapon.
+
+### Wiring
+
+[DropSweepService.collectNearbyDrops](src/main/java/net/wcfcarolina13/GameAI/services/DropSweepService.java) — added inside the per-drop iterator filter, alongside the existing retry-cooldown check. Rejected drops are stamped into `dropRetryTimestamps` so they're skipped for the cooldown window.
+
+[BotEventHandler.engageHostiles](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — added inside the hostile-filter loop next to the `BotCombatPolicyService.shouldBotAttack` check. Self-defense (mob targeting bot) always passes. Initiating combat against a wandering mob requires a long-range weapon.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+### Out of scope (next session)
+
+- Path-based fall analysis: currently rule 1 only checks vertical distance to the target, not the actual route. A target at the same Y as bot but reachable only by descending a 6-block shaft would still pass. A real route check would need a pathfinder probe.
+- Light-level rule rejects the *target* tile but doesn't check the route. A bright target reached via a dark corridor still passes. Probably fine for now — the route brightness will be reflected by the bot already being there or the target naturally being unreachable to the pathfinder.
+- Charged-creeper detection in pursuit cluster (rule 3) treats a single charged creeper the same as a single normal creeper. Could weight charged creepers as 2 toward the cluster threshold.
+
+### Backlog item filed alongside
+
+- **BotTorchHoldService not visibly firing** — service deployed in 1.1.72-1.1.91, registered, but user reports torch never goes into hand in dim follow situations. Likely caused by overly-strict combat suppression + foreign-swap detection cycling against other selected-slot mutators. Diagnostic-first: bump key state transitions to INFO-level logs and re-test. Possible fix: drop the 8-block audible-hostile gate, keep only the 16-block visible-LOS gate. Don't touch until the user confirms the diagnostic approach.
+
 ## Creeper handling: charged escalation + shield-when-stuck + guide/HUD exposure for stand-down (2026-05-09, 1.1.96)
 
 Three threads in one bump:

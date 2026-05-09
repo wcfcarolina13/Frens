@@ -230,6 +230,12 @@ public final class DropSweepService {
                 }
                 dropRetryTimestamps.remove(pos);
             }
+            // Dangerous-pursuit gate: predicted fall, pitch-black target, multi-mob cluster.
+            // Don't yank the bot into a cave hole or a 4+ block drop chasing a single drop.
+            if (!DangerousPursuitGate.isLocationSafeForPursuit(bot, pos, world)) {
+                dropRetryTimestamps.put(pos, now);
+                iterator.remove();
+            }
         }
         if (drops.isEmpty()) {
             return;

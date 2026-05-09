@@ -3715,6 +3715,12 @@ public class BotEventHandler {
                     // Name-tagged mob — bot is forbidden from engaging.
                     continue;
                 }
+                // Dangerous-pursuit gate: don't initiate combat against a non-aggroed
+                // mob unless the bot has a long-range weapon. Self-defense (mob is
+                // already targeting the bot) always passes through.
+                if (!net.wcfcarolina13.GameAI.services.DangerousPursuitGate.shouldEngageNonAggro(bot, e)) {
+                    continue;
+                }
                 filtered.add(e);
             }
             hostileEntities = filtered;
