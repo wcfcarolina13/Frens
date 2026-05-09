@@ -74,7 +74,52 @@ public final class DangerousPursuitGate {
                 }
             }
         }
+        // Rule 5: locked-gate enclosure. Sample the bot→target line; if any
+        // sampled cell is a tracked locked door/gate/trapdoor, reject. This
+        // catches the common case "drop is inside the user's locked enclosure,
+        // bot is outside" without needing the lock service to model zones.
+        if (rayCrossesLockedGate(bot, targetPos, serverWorld)) {
+            return false;
+        }
         return true;
+    }
+
+    /**
+     * Sample the bot→target line; return true if any sampled cell is a
+     * tracked locked door/gate/trapdoor. Used by drop-sweep AND combat
+     * targeting to keep the bot out of locked enclosures it's not supposed
+     * to enter (e.g. user's animal pen, crop garden behind a locked gate).
+     */
+    public static boolean crossesLockedGate(ServerPlayerEntity bot, BlockPos targetPos, World world) {
+        if (bot == null || targetPos == null || !(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+        return rayCrossesLockedGate(bot, targetPos, serverWorld);
+    }
+
+    private static boolean rayCrossesLockedGate(ServerPlayerEntity bot, BlockPos targetPos, ServerWorld world) {
+        double ax = bot.getX();
+        double ay = bot.getY() + bot.getStandingEyeHeight() * 0.5D;
+        double az = bot.getZ();
+        double bx = targetPos.getX() + 0.5D;
+        double by = targetPos.getY() + 0.5D;
+        double bz = targetPos.getZ() + 0.5D;
+        double dx = bx - ax;
+        double dy = by - ay;
+        double dz = bz - az;
+        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist < 0.5D) {
+            return false;
+        }
+        int steps = Math.max(2, (int) Math.ceil(dist));
+        for (int i = 1; i < steps; i++) {
+            double t = (double) i / steps;
+            BlockPos sample = BlockPos.ofFloored(ax + dx * t, ay + dy * t, az + dz * t);
+            if (LockableBlockService.isLocked(world, sample)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

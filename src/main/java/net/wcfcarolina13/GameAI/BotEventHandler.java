@@ -3721,6 +3721,13 @@ public class BotEventHandler {
                 if (!net.wcfcarolina13.GameAI.services.DangerousPursuitGate.shouldEngageNonAggro(bot, e)) {
                     continue;
                 }
+                // Locked-gate enclosure respect: don't run through a locked
+                // gate (or under a locked trapdoor) to fight a mob on the
+                // far side. Same predicate the drop-sweep filter uses.
+                if (net.wcfcarolina13.GameAI.services.DangerousPursuitGate
+                        .crossesLockedGate(bot, e.getBlockPos(), bot.getEntityWorld())) {
+                    continue;
+                }
                 filtered.add(e);
             }
             hostileEntities = filtered;

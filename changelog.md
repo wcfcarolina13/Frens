@@ -2,6 +2,29 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Locked-gate enclosure respect + torch-hold diagnostic logs (2026-05-09, 1.1.98)
+
+Two small wins.
+
+### Locked-gate enclosure respect
+
+User report: marking a gate as locked already blocked pathfinding ([LockableBlockService](src/main/java/net/wcfcarolina13/GameAI/services/LockableBlockService.java) memory entry from 2026-04-06), but the bot still ran into locked enclosures to fetch item drops, got stuck against the inside wall, and left mobs free to escape past it. New ray-cast helper [DangerousPursuitGate.crossesLockedGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java): samples ~1 cell per block along the bot→target line and returns true if any sampled cell is a tracked locked door / fence gate / trapdoor.
+
+Wired into:
+
+- [DangerousPursuitGate.isLocationSafeForPursuit](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) as Rule 5 — drop-sweep candidates whose line crosses a locked gate are rejected and stamped into the retry-cooldown so they're skipped for the cooldown window.
+- [BotEventHandler.engageHostiles](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — combat target acceptance loop. The bot won't run through a locked gate to fight a mob on the far side. Self-defense is preserved because a hostile that's already past the gate (`mob.getTarget() == bot`) would already be on the bot's side.
+
+Known caveat: ray-cast over-rejects when there's a wall containing both a locked gate AND an unlocked gap, since the line could cross the locked cell while a legitimate path goes around. Acceptable trade — under-rejection (current behavior) was the actual user complaint.
+
+### Torch-hold diagnostic logs
+
+User reported [BotTorchHoldService](src/main/java/net/wcfcarolina13/GameAI/services/BotTorchHoldService.java) "doesn't seem to be working." Service is deployed (1.1.93+) and registered, but the only log line was a `LOGGER.debug` that never surfaces at default levels. Refactored `shouldHoldTorch` → `evalHoldRejection` returning a stable reason string (`mode-IDLE`, `light-15`, `audible-hostile-zombie`, etc.). On reason change OR successful hold/yield, log at INFO. New `LAST_REJECT_REASON` map suppresses repeat lines so the log doesn't drown in identical entries. Next deploy will tell us what's actually gating the service in dim follow situations.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
 ## Dangerous-pursuit gate (2026-05-09, 1.1.97)
 
 User report: bot dives into dark caves full of mobs to fetch XP orbs and item drops, accepts fall damage to chase non-aggroed mobs, etc. New shared gate composes four rules at the two relevant call sites.

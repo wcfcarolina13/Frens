@@ -60,6 +60,8 @@ public final class BotTorchHoldService {
     /** Slot the bot had selected before we put the torch in hand. -1 = no override. */
     private static final ConcurrentHashMap<UUID, Integer> SAVED_SELECTED_SLOT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_EVAL_TICK = new ConcurrentHashMap<>();
+    /** Last reason we declined to hold a torch — only re-logged when the reason changes. */
+    private static final ConcurrentHashMap<UUID, String> LAST_REJECT_REASON = new ConcurrentHashMap<>();
 
     private BotTorchHoldService() {}
 
@@ -99,48 +101,79 @@ public final class BotTorchHoldService {
             }
         }
 
-        boolean shouldHold = shouldHoldTorch(bot, world, id);
+        String rejectReason = evalHoldRejection(bot, world, id);
+        boolean shouldHold = rejectReason == null;
 
         if (shouldHold) {
             int torchSlot = findTorchHotbarSlot(bot);
+            boolean promoted = false;
             if (torchSlot < 0) {
                 torchSlot = promoteTorchToHotbar(bot);
+                promoted = torchSlot >= 0;
             }
-            if (torchSlot < 0) return;  // no torch available anywhere
+            if (torchSlot < 0) {
+                logRejectIfChanged(bot, id, "no-torch-in-inventory");
+                return;
+            }
             if (currentSlot != torchSlot) {
                 if (savedSlot == null) {
                     SAVED_SELECTED_SLOT.put(id, currentSlot);
                 }
                 BotActions.selectHotbarSlot(bot, torchSlot);
+                LAST_REJECT_REASON.remove(id);
+                LOGGER.info("torch-hold: {} {} torch in slot {} (savedSlot={})",
+                        bot.getName().getString(),
+                        promoted ? "promoted+held" : "held",
+                        torchSlot, currentSlot);
             }
         } else if (savedSlot != null) {
             BotActions.selectHotbarSlot(bot, savedSlot);
             SAVED_SELECTED_SLOT.remove(id);
+            LOGGER.info("torch-hold: {} yielded back to slot {} ({})",
+                    bot.getName().getString(), savedSlot, rejectReason);
+            LAST_REJECT_REASON.put(id, rejectReason);
+        } else {
+            logRejectIfChanged(bot, id, rejectReason);
         }
     }
 
-    private static boolean shouldHoldTorch(ServerPlayerEntity bot, ServerWorld world, UUID id) {
-        Mode mode = BotEventHandler.getModePublic(bot);
-        if (mode != Mode.IDLE && mode != Mode.FOLLOW) return false;
-        if (TaskService.hasActiveTask(id)) return false;
-        if (bot.isUsingItem() || bot.hasVehicle() || bot.isSleeping()) return false;
+    private static void logRejectIfChanged(ServerPlayerEntity bot, UUID id, String reason) {
+        if (reason == null) return;
+        String prev = LAST_REJECT_REASON.get(id);
+        if (!reason.equals(prev)) {
+            LAST_REJECT_REASON.put(id, reason);
+            LOGGER.info("torch-hold: {} not holding ({})", bot.getName().getString(), reason);
+        }
+    }
 
-        // Light gate: only bother in dim places.
-        if (world.getLightLevel(bot.getBlockPos()) > LIGHT_THRESHOLD) return false;
+    /**
+     * Returns null if the bot should hold a torch right now, otherwise a short
+     * reason string for diagnostic logging. Reasons are stable so we can
+     * cheaply suppress repeat lines on the rejection-changed path.
+     */
+    private static String evalHoldRejection(ServerPlayerEntity bot, ServerWorld world, UUID id) {
+        Mode mode = BotEventHandler.getModePublic(bot);
+        if (mode != Mode.IDLE && mode != Mode.FOLLOW) return "mode-" + mode;
+        if (TaskService.hasActiveTask(id)) return "active-task";
+        if (bot.isUsingItem()) return "using-item";
+        if (bot.hasVehicle()) return "mounted";
+        if (bot.isSleeping()) return "sleeping";
+
+        int light = world.getLightLevel(bot.getBlockPos());
+        if (light > LIGHT_THRESHOLD) return "light-" + light;
 
         // Combat suppression — visible OR audible hostile.
         List<Entity> visible = BotThreatService.findHostilesAround(bot, VISIBLE_HOSTILE_RADIUS);
         for (Entity hostile : visible) {
             double distSq = hostile.squaredDistanceTo(bot);
             if (distSq <= AUDIBLE_HOSTILE_RADIUS * AUDIBLE_HOSTILE_RADIUS) {
-                // Audible — close enough to "hear footsteps" through walls.
-                return false;
+                return "audible-hostile-" + hostile.getType().toString();
             }
             if (EntityVisibilityUtil.canSee(bot, hostile)) {
-                return false;
+                return "visible-hostile-" + hostile.getType().toString();
             }
         }
-        return true;
+        return null;
     }
 
     /** Returns the hotbar slot (0–8) holding a torch, or -1 if none. */
@@ -233,5 +266,6 @@ public final class BotTorchHoldService {
     public static void reset() {
         SAVED_SELECTED_SLOT.clear();
         LAST_EVAL_TICK.clear();
+        LAST_REJECT_REASON.clear();
     }
 }
