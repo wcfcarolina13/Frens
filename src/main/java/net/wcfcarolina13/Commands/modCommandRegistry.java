@@ -492,6 +492,7 @@ public class modCommandRegistry {
 	                                .then(literal("reset")
 	                                        .executes(modCommandRegistry::executeWorldModeReset)))
 	                        .then(BotLifecycleCommands.buildStop())
+	                        .then(BotLifecycleCommands.buildStandDown())
 	                        .then(BotLifecycleCommands.buildResume())
                             .then(BotLifecycleCommands.buildResumeShort())
 	                        .then(BotLifecycleCommands.buildHeal())
@@ -6244,6 +6245,11 @@ public class modCommandRegistry {
         LOGGER.info("Stop command invoked: caller={} targetBot={} trainingMode={}", caller, alias, isTrainingMode);
         // Cancel any in-flight drop sweep so it doesn't keep driving movement after /stop.
         net.wcfcarolina13.GameAI.services.DropSweepService.requestCancel(bot, "command-stop");
+        // 60s drop-sweep cooldown — after the user explicitly halted the bot, don't let it
+        // immediately re-enter sweep (logs showed 48 sweep restarts in 33s on 2026-05-09).
+        net.wcfcarolina13.GameAI.services.DropSweepService.suppressFor(bot.getUuid(), 60_000L);
+        // Also clear any pending stand-down timer so an old auto-resume doesn't fire after stop.
+        net.wcfcarolina13.GameAI.services.BotStandDownService.cancel(bot.getUuid());
         // Suppress the join-enclosure check that stopFollowing→registerBot will schedule,
         // so stopping a bot underground doesn't launch an unwanted break-free.
         net.wcfcarolina13.GameAI.BotEventHandler.noteStopCommand(bot.getUuid());
@@ -6380,6 +6386,29 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " stopped.");
         }
         return successes;
+    }
+
+    static int executeStandDownTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : targets) {
+            successes += executeStandDown(context, bot);
+        }
+        if (!targets.isEmpty()) {
+            String summary = formatBotList(targets, isAll);
+            String verb = (isAll || targets.size() > 1) ? "are" : "is";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " standing down for 60s.");
+        }
+        return successes;
+    }
+
+    private static int executeStandDown(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        if (bot == null) {
+            return 0;
+        }
+        net.wcfcarolina13.GameAI.services.BotStandDownService.beginStandDown(bot, 60_000L);
+        return 1;
     }
 
     static int executeResumeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {

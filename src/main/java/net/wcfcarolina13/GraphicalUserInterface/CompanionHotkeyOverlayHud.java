@@ -26,7 +26,7 @@ public final class CompanionHotkeyOverlayHud {
     };
 
     private static final String[] LABELS = {
-            "1 🛑 Stop",
+            "1 🪖 Stand Down (60s)",
             "2 ▶ Resume",
             "3 ✨ Spells",
             "4 🏠 Home",

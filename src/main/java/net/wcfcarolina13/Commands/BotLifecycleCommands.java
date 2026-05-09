@@ -35,6 +35,14 @@ final class BotLifecycleCommands {
                                 StringArgumentType.getString(context, "target"))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildStandDown() {
+        return CommandManager.literal("standdown")
+                .executes(context -> modCommandRegistry.executeStandDownTargets(context, (String) null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeStandDownTargets(context,
+                                StringArgumentType.getString(context, "target"))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildResume() {
         return CommandManager.literal("resume")
                 .executes(context -> modCommandRegistry.executeResumeTargets(context, (String) null))

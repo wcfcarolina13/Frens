@@ -1132,6 +1132,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotRandomDanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotSnowballFightService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotStandDownService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFoodGivingService::onServerTick);

@@ -2,6 +2,53 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Stand-down hotkey + stop→drop-sweep cooldown (2026-05-09, 1.1.95)
+
+Two halves of one feature, paired because they share infrastructure (per-bot drop-sweep suppression timestamps). Both target the same daily friction: bot grabs XP/items the user wanted, or re-enters drop-sweep seconds after a `/bot stop`.
+
+### Bug 1 — Stop didn't actually stop the sweep loop
+
+Today's logs showed 48 `Drop sweep approach failed (direct: aborted)` lines clustered between 13:08:21 and 13:08:54 — a 33-second window where the bot kept restarting sweeps almost immediately after each abort. [DropSweepService.collectNearbyDrops](src/main/java/net/wcfcarolina13/GameAI/services/DropSweepService.java) had a 4 s global cooldown but no per-bot suppression after an explicit user-driven stop. So `/bot stop` would cancel the in-flight sweep, but the next opportunistic decision tick (a few seconds later) would happily start a new one.
+
+### Bug 2 — "Stop" hotkey was duplicated
+
+Two stop paths existed: tap `\` (calls `handleStopLook`), and hold `\` → companion overlay → slot 1 (also `handleStopLook`). The slot-1 duplicate is now repurposed as **Stand Down**: the bot stops following + drop-sweeping for 60 s and then auto-resumes follow against the same target. Closes the "I sniped a mob, now my bot is running into a cave to grab the orbs" loop.
+
+### Fix
+
+New per-bot suppression layer in `DropSweepService`:
+
+- `suppressFor(UUID, long durationMs)` / `isSuppressedFor(UUID)` / `getSuppressionRemainingMs(UUID)` — `ConcurrentHashMap<UUID, Long>` of expiry timestamps. `merge(Math::max)` so a longer suppression isn't shortened by a later shorter one.
+- `collectNearbyDrops` short-circuits on `isSuppressedFor` before any other gating.
+
+[modCommandRegistry.executeStop](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java) now calls `DropSweepService.suppressFor(bot.getUuid(), 60_000L)` after `requestCancel`. Also calls `BotStandDownService.cancel` so a stale stand-down auto-resume doesn't fire after the user explicitly halted.
+
+New service [BotStandDownService](src/main/java/net/wcfcarolina13/GameAI/services/BotStandDownService.java) (94 LOC):
+
+- `beginStandDown(bot, durationMs)` — snapshots current follow target via `BotEventHandler.getFollowTargetUuid`, calls `stopFollowing(bot, false)` (silent — we'll send our own message), registers drop-sweep suppression for the same window.
+- `onServerTick(server)` — when timer expires, re-issues `setFollowMode(bot, target, false)` and posts a "Back in formation." chat line. If the saved follow target is offline, leaves the bot idle (no fallback target).
+- Tick handler registered in `Frens.java` next to `BotAutoHuntService::onServerTick`.
+
+New brigadier command `bot standdown [target]` in [BotLifecycleCommands.buildStandDown](src/main/java/net/wcfcarolina13/Commands/BotLifecycleCommands.java); wired into the `bot` literal next to `buildStop()`. Targets via the standard `resolveTargetBots` helper, so `/bot standdown all` works.
+
+Client side: [CompanionHotkeyOverlayHud](src/main/java/net/wcfcarolina13/GraphicalUserInterface/CompanionHotkeyOverlayHud.java) slot 1 label flipped from `🛑 Stop` to `🪖 Stand Down (60s)`. [FrensClient.executeOverlayHotkeySelection](src/main/java/net/wcfcarolina13/FrensClient.java) slot 1 now calls a new `handleStandDownLook` helper that resolves the looked-at bot and sends `bot standdown <name>`. Tap `\` still does the regular stop.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Have bot following you. Press and hold `\`, release on slot 1. Bot should announce stop-follow, then 60 s later say "Back in formation." and resume follow.
+- Snipe a mob within 8 blocks of a stood-down bot. Drops should sit unmolested for the duration of the timer.
+- `/bot stop bob` while a sweep is in flight: sweep cancels and no new sweep starts for 60 s. Verify by watching `Drop sweep approach failed` cadence in the log — should drop to zero for the cooldown window.
+
+### Out of scope (next session)
+
+- Visual countdown timer over the bot's head during stand-down (could overload existing overhead-line system).
+- A "stand down all" broadcast hotkey (current path requires looking at one bot at a time). The `/bot standdown all` chat command works.
+- Stand down should also cancel an in-flight pursuit/combat target — currently only follow + drop-sweep are gated. If the bot is mid-attack on a mob when the hotkey fires, it'll keep swinging until that mob is resolved, then the stand-down kicks in.
+
 ## Auto-eat prefers cooked food over raw (2026-05-09, 1.1.94)
 
 Originally branched from `dafd7b8` (1.1.71) on a `cooked-food-preference` worktree; cherry-picked onto main and shipped as 1.1.94 after the worktree was cleaned up.

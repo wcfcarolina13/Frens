@@ -47,7 +47,51 @@ public final class DropSweepService {
     private static final ConcurrentHashMap<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
     private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
 
+    /** Per-bot drop-sweep suppression timestamps (set by /bot stop and stand-down). */
+    private static final ConcurrentHashMap<UUID, Long> suppressUntilMs = new ConcurrentHashMap<>();
+
     private DropSweepService() {}
+
+    /**
+     * Suppress drop-sweeps for {@code bot} for {@code durationMs} milliseconds. Used by
+     * /bot stop (60s cooldown) and stand-down to stop the bot re-entering sweep
+     * immediately after the user explicitly halted it.
+     *
+     * <p>If a longer suppression is already active, it is preserved.
+     */
+    public static void suppressFor(UUID botId, long durationMs) {
+        if (botId == null || durationMs <= 0L) {
+            return;
+        }
+        long until = System.currentTimeMillis() + durationMs;
+        suppressUntilMs.merge(botId, until, Math::max);
+    }
+
+    public static boolean isSuppressedFor(UUID botId) {
+        if (botId == null) {
+            return false;
+        }
+        Long until = suppressUntilMs.get(botId);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            suppressUntilMs.remove(botId);
+            return false;
+        }
+        return true;
+    }
+
+    public static long getSuppressionRemainingMs(UUID botId) {
+        if (botId == null) {
+            return 0L;
+        }
+        Long until = suppressUntilMs.get(botId);
+        if (until == null) {
+            return 0L;
+        }
+        return Math.max(0L, until - System.currentTimeMillis());
+    }
 
     public static boolean isInProgress() {
         return dropSweepInProgress.get();
@@ -118,6 +162,11 @@ public final class DropSweepService {
                                           BooleanSupplier isExternalOverrideActive,
                                           Consumer<Boolean> setExternalOverrideActive) {
         if (bot == null) {
+            return;
+        }
+        // Explicit suppression from /bot stop or stand-down — user told the bot to quit, don't
+        // re-enter sweep until the timer clears.
+        if (isSuppressedFor(bot.getUuid())) {
             return;
         }
         // Hard suppression: if a real player is actively mining near the bot, don't start ANY

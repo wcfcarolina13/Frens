@@ -2091,7 +2091,7 @@ public class FrensClient implements ClientModInitializer {
         String formattedTarget = target != null ? formatBotTarget(target) : null;
 
         switch (slot) {
-            case 1 -> handleStopLook(client);
+            case 1 -> handleStandDownLook(client);
             case 2 -> {
                 if (resumeDecisionActive) {
                     sendResumeDecision(client, true);
@@ -2853,6 +2853,21 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         sendResumeDecision(client, true);
+    }
+
+    private static void handleStandDownLook(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        CompanionHotkeyOverlayHud.hide();
+        String name = findLookedAtBotName(client);
+        if (name == null || name.isBlank()) {
+            if (isGameplayTipsEnabled()) {
+                client.player.sendMessage(Text.literal("Look at a bot to stand it down (within 16 blocks)."), true);
+            }
+            return;
+        }
+        sendChatCommand(client, "bot standdown " + formatBotTarget(name));
     }
 
     private static void handleStopLook(MinecraftClient client) {
