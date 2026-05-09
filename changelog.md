@@ -2,6 +2,48 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Protected-zone override via Resume (2026-05-09, 1.1.99)
+
+User report: bot rejected `/bot skill stripmine` because the worksite was inside a registered base zone. Bot's caution was correct (zones are there to prevent the bot from accidentally griefing the user's build), but the user — being the zone's owner — should be able to *confirm and proceed* without yanking the entire zone or memorizing a flag. New flow reuses the existing Resume hotkey instead of inventing a new command.
+
+### Flow
+
+1. User runs `/bot skill stripmine` inside a protected zone.
+2. Bot rejects with the existing protected-zone hazard message; rejection text now appends "Press Resume to override."
+3. The skill calls `SkillResumeService.flagManualResume(bot)` (existing) AND `SkillResumeService.flagZoneOverridePending(bot)` (new).
+4. User presses the Resume hotkey (or `/bot resume`).
+5. The resume path detects the zone-override-pending flag → calls `ProtectedZoneOverrideService.grantOverride(uuid, 60_000L)` → re-issues the original skill command.
+6. The re-run hits the same zone check, but `ProtectedZoneService.isProtectedForBot(uuid, pos, world, owner)` short-circuits to `false` because the override is active → skill proceeds.
+7. Override is consumed by `SkillResumeService.clear(uuid)` (which fires on completion / `/bot stop` / death / new skill) or by the 60 s expiry — whichever comes first.
+
+### What's where
+
+- New [ProtectedZoneOverrideService](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedZoneOverrideService.java) — per-bot `Map<UUID, Long>` of expiry timestamps. `grantOverride`, `hasActiveOverride`, `clearOverride`, `getRemainingMs`. ~70 LOC.
+- New [ProtectedZoneService.isProtectedForBot](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedZoneService.java) — bot-aware variant that short-circuits to "not protected" when the override is active, otherwise delegates to the existing anonymous `isProtected`.
+- [MiningHazardDetector.inspectBlock](src/main/java/net/wcfcarolina13/GameAI/skills/support/MiningHazardDetector.java) — signature gained `UUID botUuid` and now uses `isProtectedForBot`. The two `detect()` call sites pass `bot.getUuid()`; `collectAdjacentHazards` already had `bot` so trivially threads through.
+- New helper [MiningHazardDetector.isProtectedZoneHazard(hazard)](src/main/java/net/wcfcarolina13/GameAI/skills/support/MiningHazardDetector.java) — checks the failure-message prefix so callers can distinguish "this hazard is the zone gate" from "this hazard is lava / a drop / etc." String-based for now to avoid a wider Hazard-record refactor; the message prefix is stable.
+- [SkillResumeService](src/main/java/net/wcfcarolina13/GameAI/services/SkillResumeService.java) — new `ZONE_OVERRIDE_PENDING` set, new `flagZoneOverridePending(bot)` API. `resume()` consumes the flag and grants the override. `clear()` drops both the flag and any active override so a /bot stop / death / new skill cleans up reliably.
+- [StripMineSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/StripMineSkill.java) — at the existing protected-zone reject branch, calls `flagZoneOverridePending(player)` alongside the existing `flagManualResume(player)`. Other skills consuming `MiningHazardDetector` will need the same one-line addition when their zone-rejection path becomes user-actionable.
+
+### Scope and trade-offs
+
+- **One-shot**: each rejection grants a single 60 s window. No persistent "ignore zones" toggle — that would defeat the purpose of zones.
+- **Bot-wide for the window**: the grant covers any zone the bot enters during the 60 s, not strictly the zone(s) it was rejected from. Rationale: a stripmine path can wander, and tracking the exact zone-set up front is complex. Window is short enough that this is acceptable.
+- **String-tag for hazard kind**: `isProtectedZoneHazard` matches on `failureMessage` prefix. Stable today; if more hazard kinds need this discrimination, refactor `Hazard` to include a `kind` field (out of scope here).
+- **Other skill paths**: only StripMineSkill is wired this round. Other skills that detect the protected-zone hazard via `MiningHazardDetector` (anything calling `MiningHazardDetector.detect`) get the bot-aware check for free, but won't queue the override-on-Resume flag until they call `flagZoneOverridePending`. Add as needed.
+- **Non-MiningHazardDetector zone checks** ([BotActions.java:1423](src/main/java/net/wcfcarolina13/GameAI/BotActions.java#L1423), [FeedAnimalsSkill.java:59](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FeedAnimalsSkill.java#L59)) still call the anonymous `isProtected(pos, world, null)` path. These continue to reject regardless of override. Migrate when the user encounters a friction case there.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Stand inside a registered protected zone with bot following. Run `/bot skill stripmine`. Bot should refuse with "...Press Resume to override."
+- Press Resume hotkey. Chat should say `<botName> will ignore protected-zone refusals for the next 60s.` Skill resumes and now mines.
+- Run `/bot stop` mid-mine. Override should be cleared (next stripmine in the same zone refuses again with the prompt).
+- Wait 60 s without pressing Resume after a refusal. Pressing Resume after the timer should still re-run the skill but the bot will refuse again (override grant happens at Resume time but the re-run also hits the now-expired check).
+
 ## Locked-gate enclosure respect + torch-hold diagnostic logs (2026-05-09, 1.1.98)
 
 Two small wins.

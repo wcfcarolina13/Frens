@@ -202,7 +202,7 @@ public final class MiningHazardDetector {
             if (isBlockerAcknowledged(bot, target)) {
                 continue;
             }
-            Hazard found = inspectBlock(world, target, ignoreTorchHazards);
+            Hazard found = inspectBlock(bot.getUuid(), world, target, ignoreTorchHazards);
             if (found != null) {
                 acknowledgeBlocker(bot, target);
                 blocking = found;
@@ -215,7 +215,7 @@ public final class MiningHazardDetector {
                     continue;
                 }
                 if (!isBlockerAcknowledged(bot, foot)) {
-                    Hazard hazard = inspectBlock(world, foot, ignoreTorchHazards);
+                    Hazard hazard = inspectBlock(bot.getUuid(), world, foot, ignoreTorchHazards);
                     if (hazard != null) {
                         acknowledgeBlocker(bot, foot);
                         blocking = hazard;
@@ -247,18 +247,21 @@ public final class MiningHazardDetector {
         return new DetectionResult(Optional.empty(), adjacentWarnings);
     }
 
-    private static Hazard inspectBlock(ServerWorld world, BlockPos pos, boolean ignoreTorchHazards) {
+    private static Hazard inspectBlock(UUID botUuid, ServerWorld world, BlockPos pos, boolean ignoreTorchHazards) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
             return null;
         }
-        
-        // Check if position is in a protected zone
-        if (ProtectedZoneService.isProtected(pos, world, null)) {
+
+        // Check if position is in a protected zone — bot-aware so that an
+        // active ProtectedZoneOverride grant lets the user-confirmed skill
+        // through. Without bot UUID context (no override possible) this
+        // degrades to the original anonymous check.
+        if (ProtectedZoneService.isProtectedForBot(botUuid, pos, world, null)) {
             ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
             String zoneName = zone != null ? zone.getLabel() : "protected area";
-            return hazard(pos, "This is a protected zone (" + zoneName + ").", true, 
-                    "Cannot break blocks in protected zone: " + zoneName);
+            return hazard(pos, "This is a protected zone (" + zoneName + ").", true,
+                    "Cannot break blocks in protected zone: " + zoneName + ". Press Resume to override.");
         }
         
         // Check if this is a torch (protect torches from accidental breaking)
@@ -445,7 +448,7 @@ public final class MiningHazardDetector {
             if (isBlockerAcknowledged(bot, neighbor)) {
                 continue;
             }
-            Hazard hazard = inspectBlock(world, neighbor, ignoreTorchHazards);
+            Hazard hazard = inspectBlock(bot.getUuid(), world, neighbor, ignoreTorchHazards);
             if (hazard == null) {
                 continue;
             }
@@ -562,6 +565,12 @@ public final class MiningHazardDetector {
             }
         }
         return false;
+    }
+
+    /** True iff the hazard came from the protected-zone gate (eligible for /bot resume override). */
+    public static boolean isProtectedZoneHazard(Hazard hazard) {
+        return hazard != null && hazard.failureMessage() != null
+                && hazard.failureMessage().startsWith("Cannot break blocks in protected zone:");
     }
 
     public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {

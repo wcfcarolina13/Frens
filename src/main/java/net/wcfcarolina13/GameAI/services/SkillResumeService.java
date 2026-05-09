@@ -25,6 +25,9 @@ public final class SkillResumeService {
     private static final Map<UUID, Boolean> AWAITING_DECISION = new ConcurrentHashMap<>();
     private static final Set<UUID> AUTO_RESUME_PENDING = ConcurrentHashMap.newKeySet();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
+    /** Bots whose last pending skill was paused for a protected-zone refusal — Resume should grant a 60s zone override. */
+    private static final Set<UUID> ZONE_OVERRIDE_PENDING = ConcurrentHashMap.newKeySet();
+    private static final long ZONE_OVERRIDE_DURATION_MS = 60_000L;
 
     // ── Sunrise resume: generic skill resume after sunset interruption ────
     private static final long SUNRISE_RESUME_EXPIRY_TICKS = 24000L; // 1 in-game day
@@ -68,6 +71,8 @@ public final class SkillResumeService {
         LAST_SKILL_BY_BOT.remove(botUuid);
         AWAITING_DECISION.remove(botUuid);
         AUTO_RESUME_PENDING.remove(botUuid);
+        ZONE_OVERRIDE_PENDING.remove(botUuid);
+        ProtectedZoneOverrideService.clearOverride(botUuid);
         PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(botUuid));
         // Any explicit intent-reset (/bot stop, /bot follow) should also drop the
         // pending sunrise-resume record. Without this, a fishing skill that aborts
@@ -185,6 +190,22 @@ public final class SkillResumeService {
         return pending != null ? pending.rawArgs() : null;
     }
 
+    /**
+     * Marks the bot's pending skill as zone-override-eligible: when the user
+     * presses Resume next, the resume path will grant a 60 s
+     * {@link ProtectedZoneOverrideService} window so the same skill re-runs
+     * without being refused by zone protection. Call this immediately
+     * alongside {@link #flagManualResume} when a skill is paused specifically
+     * because of a protected-zone hazard.
+     */
+    public static void flagZoneOverridePending(ServerPlayerEntity bot) {
+        if (bot == null) return;
+        UUID uuid = bot.getUuid();
+        if (uuid != null) {
+            ZONE_OVERRIDE_PENDING.add(uuid);
+        }
+    }
+
     public static void flagManualResume(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
@@ -257,6 +278,13 @@ public final class SkillResumeService {
         }
         notifyDecision(pending, false);
         RESUME_INTENT.add(pending.botUuid());
+        // If this pending skill was paused by a protected-zone refusal,
+        // grant the bot a 60s zone-override window so the re-run gets through.
+        if (ZONE_OVERRIDE_PENDING.remove(pending.botUuid())) {
+            ProtectedZoneOverrideService.grantOverride(pending.botUuid(), ZONE_OVERRIDE_DURATION_MS);
+            ChatUtils.sendSystemMessage(source, pending.alias()
+                    + " will ignore protected-zone refusals for the next 60s.");
+        }
         StringBuilder command = new StringBuilder("bot skill ")
                 .append(pending.skillName());
         if (pending.rawArgs() != null && !pending.rawArgs().isBlank()) {

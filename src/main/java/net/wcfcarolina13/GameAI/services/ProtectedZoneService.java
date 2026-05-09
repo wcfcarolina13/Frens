@@ -153,6 +153,19 @@ public class ProtectedZoneService {
     }
 
     /**
+     * Bot-aware variant: short-circuits to "not protected" when the bot has
+     * an active {@link ProtectedZoneOverrideService} grant. Use this from
+     * skill / hazard-detection paths so the user-pressed Resume override
+     * actually takes effect.
+     */
+    public static boolean isProtectedForBot(@Nullable UUID botUuid, BlockPos pos, ServerWorld world, @Nullable UUID botOwner) {
+        if (botUuid != null && ProtectedZoneOverrideService.hasActiveOverride(botUuid)) {
+            return false;
+        }
+        return isProtected(pos, world, botOwner);
+    }
+
+    /**
      * Check if a position is protected in a specific world.
      */
     public static boolean isProtected(BlockPos pos, ServerWorld world, @Nullable UUID botOwner) {
