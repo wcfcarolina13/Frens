@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## NavHazardCache learning surfaced (2026-05-09, 1.1.101)
+
+User report: "Bot doesn't seem to be getting better at pathfinding from the cache learning system we implemented." Investigation: the [NavHazardCache](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) is wired and recording (today's logs had 903 `applyMovementInput-reject` events — recording site is firing) but its only diagnostic log was a throttled `LOGGER.debug` invisible at default log levels. Hard to tell whether the cache is broken, ineffective, or working but only helping in scenarios with route alternatives.
+
+Architectural note for the user's perception: the cache penalizes cells, biasing the pathfinder toward alternates. In tight bottlenecks (one-block-wide doorway with no alternative route) the bot still has to go through; the cache doesn't help there even when working perfectly. Today's stuck reports were dominated by doorways and pressure plates — exactly the no-alternative case. So "no perceived improvement" is partly architectural, not a bug.
+
+### What changed
+
+- Penalty hits at `NavHazardCache.penaltyFor` are now logged at INFO (throttled to 1/s, only when penalty ≥ 1.0). Previously `LOGGER.debug` invisible at default levels.
+- New periodic learning summary every 5 minutes (`SUMMARY_LOG_INTERVAL_TICKS = 6_000L`) at INFO: `nav-hazard summary: cells=N active-penalty=M top=[(x,y,z)(score=S,rejects=R,successes=U), ...]`. Silent when the cache is empty (fresh server / pristine world).
+- Promotion-to-score events still need work (next session): currently the `score += REJECT_INCREMENT` line is silent. If we want to see a cell graduate from "noise" to "tracked hazard," that transition should log too. Backlog item.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+After deploy: walk a bot through a few problem doorways, then watch the log over ~10 min. Should see periodic summary lines listing the top scoring cells. If summary stays at zero cells while rejections are firing, the streak-promotion threshold is too strict (`STREAK_PROMOTION_THRESHOLD = 3` rejections within `STREAK_WINDOW_TICKS = 40L` ≈ 2 s) — tune down. If summary populates but pathfinder never logs a penalty hit, it means pathfinding requests aren't going through cells with score (likely because the bot's stuck spots have no alternate routes for the pathfinder to weigh against).
+
+### Out of scope (next session)
+
+- Surface the cache state via a chat command (e.g. `/bot debug nav-hazard`) using the existing `debugTopCells` API, so the user can pull current state on demand instead of waiting for the periodic summary.
+- Log score promotions at INFO when a cell first crosses the streak threshold ("cell X promoted to tracked hazard, score=1.5").
+- Tune `STREAK_PROMOTION_THRESHOLD` / `STREAK_WINDOW_TICKS` once we have real data on whether they're starving the cache.
+
 ## Bed selection: skip occupied + prefer claimed bed (2026-05-09, 1.1.100)
 
 User report: (a) bot sleeps in the user's same bed instead of its own; (b) when the user is asleep and only one bed (the user's) is nearby, the bot doesn't place its own bed from inventory.

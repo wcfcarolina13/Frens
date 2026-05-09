@@ -66,6 +66,7 @@ public final class NavHazardCache {
     static final long DECAY_INTERVAL_TICKS = 200L;              // 10 s
     static final long FLUSH_INTERVAL_TICKS = 600L;              // 30 s, mirrors BotPersistenceService
     static final long DIAGNOSTIC_PENALTY_LOG_THROTTLE_MS = 1000L;
+    static final long SUMMARY_LOG_INTERVAL_TICKS = 6_000L;      // 5 min: periodic learning summary
 
     private static final ConcurrentHashMap<String,
             ConcurrentHashMap<String,
@@ -77,6 +78,7 @@ public final class NavHazardCache {
     private static volatile ScheduledExecutorService FLUSH_EXEC = null;
     private static long lastDecayTick = 0L;
     private static long lastFlushTick = 0L;
+    private static long lastSummaryTick = 0L;
     private static volatile long lastPenaltyLogMs = 0L;
 
     private NavHazardCache() {}
@@ -136,9 +138,12 @@ public final class NavHazardCache {
         if (entry == null || entry.score <= 0.0F) return 0.0D;
         double penalty = Math.min(PENALTY_CAP, entry.score * PENALTY_SCALE);
         long now = System.currentTimeMillis();
-        if (LOGGER.isDebugEnabled() && now - lastPenaltyLogMs > DIAGNOSTIC_PENALTY_LOG_THROTTLE_MS) {
+        // Throttled INFO so the user can verify cache penalties are reaching
+        // the pathfinder. Only logs cells with a meaningful penalty (>= 1.0)
+        // to avoid drowning the log in low-score noise.
+        if (penalty >= 1.0D && now - lastPenaltyLogMs > DIAGNOSTIC_PENALTY_LOG_THROTTLE_MS) {
             lastPenaltyLogMs = now;
-            LOGGER.debug("nav-hazard penalty cell=({},{},{}) score={} penalty={}",
+            LOGGER.info("nav-hazard penalty cell=({},{},{}) score={} penalty={}",
                     x, y, z, entry.score, penalty);
         }
         return penalty;
@@ -160,6 +165,46 @@ public final class NavHazardCache {
             pruneAndFlushAsync(server, tick);
             lastFlushTick = tick;
         }
+        if (tick - lastSummaryTick >= SUMMARY_LOG_INTERVAL_TICKS) {
+            logLearningSummary(server);
+            lastSummaryTick = tick;
+        }
+    }
+
+    /**
+     * Periodic INFO-level summary so the user can see the cache is actually
+     * learning without crawling debug logs. Reports total cell count, the top
+     * 5 hottest cells, and how many cells crossed the penalty threshold.
+     * Silent when the cache is empty (server just started or fresh world).
+     */
+    private static void logLearningSummary(MinecraftServer server) {
+        ServerWorld overworld = server.getOverworld();
+        if (overworld == null) return;
+        List<DebugRow> top = debugTopCells(server, overworld, 5);
+        int totalCells = 0;
+        int penaltyCells = 0;
+        String worldKey = BotWorldStateService.currentWorldKey(server);
+        ConcurrentHashMap<String, ConcurrentHashMap<Long, HazardEntry>> worldMap = CACHE.get(worldKey);
+        if (worldMap != null) {
+            for (ConcurrentHashMap<Long, HazardEntry> dimMap : worldMap.values()) {
+                totalCells += dimMap.size();
+                for (HazardEntry e : dimMap.values()) {
+                    if (e.score * PENALTY_SCALE >= 1.0D) penaltyCells++;
+                }
+            }
+        }
+        if (totalCells == 0) return;
+        StringBuilder topStr = new StringBuilder();
+        for (DebugRow row : top) {
+            if (topStr.length() > 0) topStr.append(", ");
+            topStr.append(row.cell().toShortString())
+                    .append("(score=").append(String.format("%.1f", row.score()))
+                    .append(",rejects=").append(row.rejects())
+                    .append(",successes=").append(row.successes())
+                    .append(")");
+        }
+        LOGGER.info("nav-hazard summary: cells={} active-penalty={} top=[{}]",
+                totalCells, penaltyCells, topStr);
     }
 
     private static void recordSuccessSignals(MinecraftServer server) {
