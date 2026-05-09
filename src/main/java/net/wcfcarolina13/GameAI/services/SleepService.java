@@ -72,8 +72,10 @@ public final class SleepService {
 
         boolean canSleepNow = canSleepNow(world);
 
-        // 1) Try existing nearby beds (all candidates, not just the closest bed block).
-        List<BlockPos> nearbyBeds = findNearbyBedFeet(world, bot.getBlockPos(), 24);
+        // 1) Try existing nearby beds (filtered to skip occupied; sorted with the
+        // bot's previously-claimed bed first). If every nearby bed is occupied,
+        // findNearbyBedFeet returns empty and the placement branch fires below.
+        List<BlockPos> nearbyBeds = findNearbyBedFeet(bot, world, bot.getBlockPos(), 24);
         LOGGER.info("sleep: nearbyBeds={}", nearbyBeds.size());
         for (BlockPos bedFoot : nearbyBeds) {
             BedUseResult res = tryUseBed(source, bot, bedFoot, true);
@@ -88,7 +90,10 @@ public final class SleepService {
         }
 
         if (!nearbyBeds.isEmpty() && canSleepNow) {
-            ChatUtils.sendSystemMessage(source, "I couldn't get into the bed (blocked or unsafe).");
+            ChatUtils.sendSystemMessage(source, "I couldn't get into a nearby bed (blocked or unsafe). Trying to set my own.");
+        } else if (nearbyBeds.isEmpty() && canSleepNow && hasAnyBed(bot)) {
+            // All nearby beds were filtered (likely all occupied) AND we have our own — explicit handoff message.
+            ChatUtils.sendSystemMessage(source, "Nearby bed is taken. Setting up my own.");
         }
 
         // If we can't sleep right now, avoid crafting/placing beds.
@@ -131,6 +136,13 @@ public final class SleepService {
             return BedUseResult.FAIL_OTHER;
         }
         BedGeometry bed = geomOpt.get();
+        // Late occupancy check — if the user climbed into bed between filter
+        // and use, bail before walking to it. Keeps the bot from idling next to
+        // an occupied bed waiting on a trySleep that's guaranteed to fail.
+        BlockState footState = world.getBlockState(bed.foot);
+        if (footState.contains(BedBlock.OCCUPIED) && footState.get(BedBlock.OCCUPIED)) {
+            return BedUseResult.FAIL_OTHER;
+        }
 
         List<BlockPos> stands = findStandPositionsForBed(world, bed);
         LOGGER.info("tryUseBed bedFoot={} standCandidates={}", bed.foot.toShortString(), stands.size());
@@ -341,13 +353,14 @@ public final class SleepService {
         return Optional.of(new BedGeometry(foot.toImmutable(), head.toImmutable(), facing));
     }
 
-    private static List<BlockPos> findNearbyBedFeet(ServerWorld world, BlockPos origin, int radius) {
+    private static List<BlockPos> findNearbyBedFeet(ServerPlayerEntity bot, ServerWorld world, BlockPos origin, int radius) {
         List<BlockPos> beds = new ArrayList<>();
         if (world == null || origin == null) {
             return beds;
         }
         Set<BlockPos> seenFeet = new HashSet<>();
         int vertical = Math.max(12, radius / 2);
+        int occupiedCount = 0;
         for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
             if (!world.isChunkLoaded(pos)) {
                 continue;
@@ -357,11 +370,34 @@ public final class SleepService {
                 continue;
             }
             BlockPos foot = canonicalizeBedFoot(pos, state);
-            if (foot != null && seenFeet.add(foot)) {
-                beds.add(foot.toImmutable());
+            if (foot == null || !seenFeet.add(foot)) {
+                continue;
             }
+            // Skip beds another player or villager is currently sleeping in.
+            // Without this, the bot would try the user's bed first if it was
+            // the closest, get rejected by trySleep on OCCUPIED, and then
+            // sometimes still pick a sub-optimal candidate.
+            BlockState footState = world.getBlockState(foot);
+            if (footState.contains(BedBlock.OCCUPIED) && footState.get(BedBlock.OCCUPIED)) {
+                occupiedCount++;
+                continue;
+            }
+            beds.add(foot.toImmutable());
         }
-        beds.sort((a, b) -> Double.compare(origin.getSquaredDistance(a.up()), origin.getSquaredDistance(b.up())));
+
+        // Sort: bot's previously-claimed bed first (if not occupied), then by distance.
+        BlockPos claimed = bot != null ? BotHomeService.getLastSleep(bot).orElse(null) : null;
+        beds.sort((a, b) -> {
+            boolean aClaimed = claimed != null && a.equals(claimed);
+            boolean bClaimed = claimed != null && b.equals(claimed);
+            if (aClaimed != bClaimed) {
+                return aClaimed ? -1 : 1;
+            }
+            return Double.compare(origin.getSquaredDistance(a.up()), origin.getSquaredDistance(b.up()));
+        });
+        if (occupiedCount > 0) {
+            LOGGER.info("findNearbyBedFeet: filtered {} occupied bed(s); {} candidate(s) remain", occupiedCount, beds.size());
+        }
         return beds;
     }
 

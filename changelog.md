@@ -2,6 +2,45 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Bed selection: skip occupied + prefer claimed bed (2026-05-09, 1.1.100)
+
+User report: (a) bot sleeps in the user's same bed instead of its own; (b) when the user is asleep and only one bed (the user's) is nearby, the bot doesn't place its own bed from inventory.
+
+### Root causes
+
+[SleepService.findNearbyBedFeet](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) returned every bed in a 24-block / vertical-12 box, sorted purely by squared distance to bot. Two problems:
+
+- **No occupancy filter.** A bed where another player or villager is already sleeping (`BedBlock.OCCUPIED == true`) was still returned as a candidate. The loop would walk over to it, call `bot.trySleep`, get an `OCCUPIED` rejection mapped to `FAIL_OTHER`, and try the next bed. In a household with 1–2 beds this often left the bot idling next to the user's occupied bed, occasionally succeeding into a contested state.
+- **No claim memory.** The bot's previously-recorded "last sleep" bed (via `BotHomeService.recordLastSleep` → `getLastSleep`) was tracked but never preferred during candidate sorting. Bot picked whichever bed was closest to its current position, which after a long day might be the user's bed.
+
+### Fix
+
+`findNearbyBedFeet` now takes the bot, filters out beds with `BedBlock.OCCUPIED == true` (logging the filtered count), and sorts candidates with the bot's claimed bed first (when present and not occupied), then by distance. Defensive late-occupancy guard added inside `tryUseBed` so a state change between filter and use also bails cleanly.
+
+When all nearby beds are filtered (only occupied beds existed) and the bot has a bed item, the placement branch now fires with an explicit "Nearby bed is taken. Setting up my own." message, so the user sees the handoff. The existing `placeBedNearby` flow handles the rest — finds a 2-block-clear footprint within 4 blocks, swings the bed item, and beds down.
+
+### What's where
+
+- [SleepService.findNearbyBedFeet](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) — signature gained `ServerPlayerEntity bot`. Reads `BotHomeService.getLastSleep(bot)` for claim priority. Filters `BedBlock.OCCUPIED`. New log: `findNearbyBedFeet: filtered N occupied bed(s); M candidate(s) remain` when at least one is filtered.
+- [SleepService.tryUseBed](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) — defensive occupancy check on `bed.foot` after geometry lookup. Bails to `FAIL_OTHER` instead of walking to a freshly-occupied bed.
+- [SleepService.attemptSleep](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) (the entry point) — message handoff when the only nearby beds were filtered: "Nearby bed is taken. Setting up my own."
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Single-bed household: user goes to bed first. `/bot sleep` should produce "Nearby bed is taken. Setting up my own." and the bot should place its own bed (assuming it has one in inventory or can craft).
+- Two-bed household where the bot has slept in bed-B before: `/bot sleep` from a position closer to bed-A should still send the bot to bed-B (claim memory wins over distance).
+- All beds occupied, bot has no bed item, no crafting materials: existing fallback "I couldn't craft a bed" path still fires.
+
+### Out of scope
+
+- "Reserve" semantics — this only filters momentary occupancy (`OCCUPIED == true`). If the user steps out of bed mid-night the bot may still grab it on a subsequent sleep cycle. Backlog if it becomes annoying.
+- Multi-bot bed assignment: if two bots have the same claimed bed (both slept there once), they'll race for it. Backlog.
+- Cross-day persistence of `getLastSleep` across world reloads — already exists via `BotHomeService` persistence, just leaning on it harder now.
+
 ## Protected-zone override via Resume (2026-05-09, 1.1.99)
 
 User report: bot rejected `/bot skill stripmine` because the worksite was inside a registered base zone. Bot's caution was correct (zones are there to prevent the bot from accidentally griefing the user's build), but the user — being the zone's owner — should be able to *confirm and proceed* without yanking the entire zone or memorizing a flag. New flow reuses the existing Resume hotkey instead of inventing a new command.
