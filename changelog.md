@@ -2,6 +2,40 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Creeper handling: charged escalation + shield-when-stuck + guide/HUD exposure for stand-down (2026-05-09, 1.1.96)
+
+Three threads in one bump:
+
+### Charged-creeper escalation
+
+Vanilla charged creepers (lightning-powered) have roughly 2× the blast radius of a normal creeper, but [BotEventHandler](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) was treating them identically: 6-block engagement radius, 4.5-block shield radius, 12-block flee target. The bot would be in *certain* lethal range while still doing the "block + shield" trick that's only viable against a small-blast creeper. New thresholds when `CreeperEntity.isCharged()` is true:
+
+- Engagement radius: 12 blocks (was 6)
+- Shield radius: 8 blocks (was 4.5)
+- Flee-target distance: 24 blocks (was 12)
+- Block-and-shield trick **disabled** for charged — a single block barrier doesn't survive a charged blast at point-blank range, so the bot just flees + shields.
+
+### Shield-when-can't-make-distance
+
+User report: "be sure it uses its shield when it can't make distance from the creeper, if it has a shield." Added per-bot tracking via a new `CREEPER_FLEE_STATE` map keyed on bot UUID, holding `CreeperFleeMemory(creeperUuid, lastDistance, lastTick, stuckTicks)`. Each flee tick, if distance hasn't improved by ≥0.3 blocks since last sample, the stuck counter accumulates ticks. Once it reaches 20 (≈1 s of zero progress) AND the bot has a shield in main- or off-hand, the shield raises even when outside the normal shield radius. State is dropped when the bot exits engagement range so a future approach gets a clean slate. Pattern matches existing shield detection at [BotFleeService.java:593](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L593).
+
+### Stand-down: guide entry + HUD hint
+
+User noted yesterday's 1.1.95 stand-down hotkey isn't discoverable. Added:
+
+- **Guide topic** "Stand Down" in [BotGuideScreen.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotGuideScreen.java) Basics section, between Stop and Resume. Documents that hold-`\` → 1 is the access path, that drop-sweep is suppressed for the full 60 s, and that any other command cancels the auto-resume.
+- **Looking-at-bot HUD hint** in [FrensClient.renderLookedAtBotStatusHint](src/main/java/net/wcfcarolina13/FrensClient.java) gets a second line — `Hold [\] for Stand Down (60s pause + auto-resume follow).` — only when the bot is following or actively working (not when paused/returning home, since stand-down doesn't fit those contexts). Existing line 1 unchanged. Box now scales for 1 or 2 lines.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+### Out of scope (next session)
+
+- Visual countdown for the stand-down timer over the bot's head.
+- Charged-creeper detection currently checks `isCharged()` on the closest threat only. If multiple creepers are nearby and only one is charged, the radii currently reflect the closest. Probably fine — by the time you're getting murdered by a non-closest charged creeper, the closest one has already detonated — but worth a follow-up if it turns out to matter.
+- "Can't make distance" only triggers shield raise. Could also abandon flee and dig in / wall up if shield isn't available, but that requires a place-block action against a path the bot is desperately trying to flee down — risk of self-trapping is high.
+
 ## Stand-down hotkey + stop→drop-sweep cooldown (2026-05-09, 1.1.95)
 
 Two halves of one feature, paired because they share infrastructure (per-bot drop-sweep suppression timestamps). Both target the same daily friction: bot grabs XP/items the user wanted, or re-enters drop-sweep seconds after a `/bot stop`.

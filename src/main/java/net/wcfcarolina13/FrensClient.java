@@ -2639,6 +2639,7 @@ public class FrensClient implements ClientModInitializer {
         }
 
         String line;
+        boolean offerStandDown = false;
         if (lookedAtBotStatus.paused()) {
             line = alias + " is paused. Press [" + resumeKey + "] to resume or [" + stopKey + "] to stop.";
         } else if (lookedAtBotStatus.returningHome()) {
@@ -2648,6 +2649,7 @@ public class FrensClient implements ClientModInitializer {
                     ? lookedAtBotStatus.taskLabel()
                     : "working";
             line = alias + " is " + task + ". Press [" + stopKey + "] to stop.";
+            offerStandDown = true;
         } else {
             String mode = lookedAtBotStatus.modeName();
             if (mode != null && !mode.isBlank()) {
@@ -2659,17 +2661,34 @@ public class FrensClient implements ClientModInitializer {
                     default -> mode.toLowerCase(java.util.Locale.ROOT);
                 };
                 line = alias + " is " + modeLabel + ". Press [" + stopKey + "] to stop.";
+                offerStandDown = "FOLLOW".equals(mode);
             } else {
                 return;
             }
         }
+        // Second line: stand-down hint, only when contextually useful (following or active task).
+        // Hold [stopKey] opens the overlay; slot 1 is Stand Down.
+        String secondLine = offerStandDown
+                ? "Hold [" + stopKey + "] for Stand Down (60s pause + auto-resume follow)."
+                : null;
 
-        int w = client.textRenderer.getWidth(line);
-        int x = (context.getScaledWindowWidth() - w) / 2;
-        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
-
-        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
-        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+        int fh = client.textRenderer.fontHeight;
+        int w1 = client.textRenderer.getWidth(line);
+        int w2 = secondLine != null ? client.textRenderer.getWidth(secondLine) : 0;
+        int boxW = Math.max(w1, w2);
+        int rowCount = secondLine != null ? 2 : 1;
+        int reserveH = fh * rowCount + (rowCount > 1 ? 2 : 0) + 9;
+        int y = reserveTopTipY(TopTipLane.CENTER, reserveH);
+        int boxLeft = (context.getScaledWindowWidth() - boxW) / 2 - 6;
+        int boxRight = boxLeft + boxW + 12;
+        int boxBottom = y + fh * rowCount + (rowCount > 1 ? 2 : 0) + 4;
+        context.fill(boxLeft, y - 4, boxRight, boxBottom, 0xAA101010);
+        context.drawTextWithShadow(client.textRenderer, line,
+                (context.getScaledWindowWidth() - w1) / 2, y, 0xFFE6D7A3);
+        if (secondLine != null) {
+            context.drawTextWithShadow(client.textRenderer, secondLine,
+                    (context.getScaledWindowWidth() - w2) / 2, y + fh + 2, 0xFFB8A878);
+        }
     }
 
     private static void renderLookedAtBotInventoryHint(DrawContext context) {

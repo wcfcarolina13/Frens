@@ -236,6 +236,11 @@ public class BotEventHandler {
 
     // Stage-2 refactor: per-bot command state moved to BotCommandStateService.
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
+
+    /** Per-bot creeper-flee progress tracking — when distance isn't improving, force shield. */
+    private record CreeperFleeMemory(UUID creeperUuid, double lastDistance, long lastTick, int stuckTicks) {}
+    private static final Map<UUID, CreeperFleeMemory> CREEPER_FLEE_STATE = new ConcurrentHashMap<>();
+
     private static final Map<UUID, Long> FOLLOW_LAST_VERTICAL_ASSIST_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> FOLLOW_VERTICAL_DOOR_LOOP_STREAK = new ConcurrentHashMap<>();
@@ -3821,43 +3826,81 @@ public class BotEventHandler {
         }
 
         // Creeper handling: block-and-shield if armed and creeper is the only threat;
-        // otherwise flee as before.
-        if (creeperThreat && distance <= 6.0D) {
-            boolean onlyCreepers = actionable.stream()
-                    .allMatch(e -> e.getType() == EntityType.CREEPER);
-            boolean hasMelee = BotActions.hasMeleeWeapon(bot);
-            if (onlyCreepers && hasMelee && distance <= 4.5D
-                    && SkillPreferences.emergencyTactics(bot)) {
-                // Place a block between bot and creeper, then shield.
-                // The block absorbs most of the blast; the shield handles the rest.
-                double cdx = closest.getX() - bot.getX();
-                double cdz = closest.getZ() - bot.getZ();
-                double clen = Math.sqrt(cdx * cdx + cdz * cdz);
-                if (clen > 0.01) {
-                    BlockPos blockPos = bot.getBlockPos().add(
-                            (int) Math.round(cdx / clen),
-                            0,
-                            (int) Math.round(cdz / clen));
-                    BotActions.placeBlockAt(bot, blockPos);
+        // otherwise flee. Charged (lightning-powered) creepers get larger thresholds
+        // because their blast radius is roughly 2x normal; the bot needs to bail
+        // earlier and shield from further away. If the bot can't make distance
+        // (cornered, blocked, hitting a wall), force the shield up regardless.
+        if (creeperThreat) {
+            boolean chargedCreeper = closest instanceof net.minecraft.entity.mob.CreeperEntity creeperEntity
+                    && creeperEntity.isCharged();
+            double creeperEngagementRadius = chargedCreeper ? 12.0D : 6.0D;
+            double creeperShieldRadius = chargedCreeper ? 8.0D : 4.5D;
+            double fleeMoveDist = chargedCreeper ? 24.0D : 12.0D;
+
+            if (distance <= creeperEngagementRadius) {
+                boolean onlyCreepers = actionable.stream()
+                        .allMatch(e -> e.getType() == EntityType.CREEPER);
+                boolean hasMelee = BotActions.hasMeleeWeapon(bot);
+                // Block-and-shield trick is only sane against normal creepers — a single
+                // block barrier doesn't survive a charged blast at point-blank range.
+                if (!chargedCreeper && onlyCreepers && hasMelee && distance <= 4.5D
+                        && SkillPreferences.emergencyTactics(bot)) {
+                    double cdx = closest.getX() - bot.getX();
+                    double cdz = closest.getZ() - bot.getZ();
+                    double clen = Math.sqrt(cdx * cdx + cdz * cdz);
+                    if (clen > 0.01) {
+                        BlockPos blockPos = bot.getBlockPos().add(
+                                (int) Math.round(cdx / clen),
+                                0,
+                                (int) Math.round(cdz / clen));
+                        BotActions.placeBlockAt(bot, blockPos);
+                    }
+                    BotActions.raiseShieldFacing(bot, closest);
+                    return true;
                 }
-                BotActions.raiseShieldFacing(bot, closest);
+
+                // Track flee progress per bot. If the bot doesn't gain ground over
+                // ~1s, treat it as "can't make distance" and force the shield even
+                // if we're outside the normal shield radius.
+                long nowTick = server.getTicks();
+                UUID botId = bot.getUuid();
+                CreeperFleeMemory mem = CREEPER_FLEE_STATE.get(botId);
+                boolean cantMakeDistance = false;
+                if (mem != null && mem.creeperUuid().equals(closest.getUuid())
+                        && nowTick - mem.lastTick() <= 30L) {
+                    int stuck = mem.stuckTicks();
+                    if (distance - mem.lastDistance() < 0.3D) {
+                        stuck += (int) Math.max(1L, nowTick - mem.lastTick());
+                    } else {
+                        stuck = 0;
+                    }
+                    cantMakeDistance = stuck >= 20;
+                    CREEPER_FLEE_STATE.put(botId, new CreeperFleeMemory(closest.getUuid(), distance, nowTick, stuck));
+                } else {
+                    CREEPER_FLEE_STATE.put(botId, new CreeperFleeMemory(closest.getUuid(), distance, nowTick, 0));
+                }
+
+                boolean hasShield = bot.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD)
+                        || bot.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
+                if (distance <= creeperShieldRadius || (cantMakeDistance && hasShield)) {
+                    BotActions.raiseShieldFacing(bot, closest);
+                }
+                double dx = bot.getX() - closest.getX();
+                double dz = bot.getZ() - closest.getZ();
+                double len = Math.sqrt(dx * dx + dz * dz);
+                if (len < 0.01) { dx = 1; dz = 0; len = 1; }
+                Vec3d fleeTarget = new Vec3d(
+                        bot.getX() + (dx / len) * fleeMoveDist,
+                        bot.getY(),
+                        bot.getZ() + (dz / len) * fleeMoveDist);
+                BotActions.sprint(bot, true);
+                FollowMovementService.moveToward(bot, fleeTarget, 1.0, true, null);
                 return true;
+            } else {
+                // Out of engagement range — drop any stale flee memory so we don't
+                // misattribute "no progress" once the creeper closes in again.
+                CREEPER_FLEE_STATE.remove(bot.getUuid());
             }
-            // Default creeper flee: sprint away within 6 blocks, shield within 4.5.
-            if (distance <= 4.5D) {
-                BotActions.raiseShieldFacing(bot, closest);
-            }
-            double dx = bot.getX() - closest.getX();
-            double dz = bot.getZ() - closest.getZ();
-            double len = Math.sqrt(dx * dx + dz * dz);
-            if (len < 0.01) { dx = 1; dz = 0; len = 1; }
-            Vec3d fleeTarget = new Vec3d(
-                    bot.getX() + (dx / len) * 12,
-                    bot.getY(),
-                    bot.getZ() + (dz / len) * 12);
-            BotActions.sprint(bot, true);
-            FollowMovementService.moveToward(bot, fleeTarget, 1.0, true, null);
-            return true;
         }
 
         // Ghast handling: never melee approach — use ranged or take cover.

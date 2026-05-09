@@ -739,6 +739,21 @@ public final class BotGuideScreen extends Screen {
                         "cancel halt panic"
                 ),
                 new GuideTopic(
+                        "basics_stand_down",
+                        "Basics",
+                        "Stand Down",
+                        "Bot pauses follow + drop-sweep for 60s, then auto-resumes follow.",
+                        List.of(
+                                "Use when you're sniping mobs and don't want the bot running out to grab XP, drops, or chase.",
+                                "Different from Stop: Stop clears all state. Stand Down keeps the follow target so the bot rejoins formation when the timer expires.",
+                                "Drop-sweep is suppressed for the full 60s — drops on the ground are left alone.",
+                                "Issuing any other command (stop, follow, come) cancels the auto-resume."
+                        ),
+                        "bot standdown " + target,
+                        "Shortcut: hold \\ → press 1 (Stand Down looked-at bot)",
+                        "stand down hold position pause follow xp orb drop"
+                ),
+                new GuideTopic(
                         "basics_resume",
                         "Basics",
                         "Resume",
