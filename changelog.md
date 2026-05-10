@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Rescue-nudge destination validation — actual root cause of suffocation drift (2026-05-10, 1.1.104)
+
+User asked whether the deferred items from 1.1.103 were worth doing. Investigation surfaced a different actual root cause for the suffocation incident: the rescue itself was contributing to the encasement.
+
+### Root cause
+
+The 22:42:23 incident logs show alternating "nudged away from wall west" / "nudged away from wall east" lines firing repeatedly BEFORE full encasement was reported. The `rescueFromBurial` nudge paths at [BotRescueService:304](src/main/java/net/wcfcarolina13/GameAI/services/BotRescueService.java#L304) and [:703](src/main/java/net/wcfcarolina13/GameAI/services/BotRescueService.java#L703) call `bot.setPosition` with a 0.4-block offset *away from one detected wall*, but never validate that the destination cell is itself clear. In a 1-block-wide corridor (walls on both sides), nudging "away from west wall" pushes the bot 0.4 deeper into the EAST wall. The rescue tick alternates between the two wall directions, drilling the bot through walls instead of out of them. Once the bot's center crosses a wall boundary, it's fully encased — and the rescue logic that depends on `bot.getBlockPos()` reading correctly is now operating on a totally bogus cell.
+
+This is the actual mechanism behind the 1.1.103 incident. The 1.1.103 fix (gating `attemptEscapeMovement` on `!fullyEncased`) is the safety net that catches the resulting encasement and starts mining. This 1.1.104 fix prevents the encasement from happening in the first place.
+
+### Fix
+
+New helper `isNudgeDestinationSafe(world, x, y, z)` — checks both feet and head cells at the candidate position have empty collision (or climbable / fluid). Called from both nudge sites before `setPosition`. If the candidate is itself in a wall, skip that direction and try the next; if no direction has a clear destination, fall through to `attemptEscapeMovement` (which still returns false for fully-encased bots after the 1.1.103 gate).
+
+The leftover velocity case (route lands bot in a validated cell, vanilla physics carries it sideways into an adjacent unvalidated cell on the next tick) — still possible in theory, but no longer the primary failure mode now that the nudge can't compound the drift.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Repro setup from 1.1.103 incident: walk bot into a 1-block-wide cobblestone corridor with you. Wait for any clip-collision rescue trigger. Should NOT see alternating "nudged west / nudged east" log spam any more — only one direction at most, then fall through to mining if needed.
+- Regression check: bot's normal "stuck against a single wall" rescue should still nudge correctly (only one wall, opposite direction is air, destination check passes).
+
+### Out of scope (next)
+
+- The deeper `leavesTrap=true` route-planner heuristic question is still open. The IdleSweep gate from 1.1.103 protects ONE call site; the same planner runs during follow + active drop-sweep + generic `MovementService.execute(DIRECT)`. A route-end-state validator + post-arrival-stability check is the comprehensive fix. Deferred again — the nudge fix should significantly reduce the symptom even when the planner picks a marginal route, so we want test data on whether that's "good enough" before doing the larger rewrite.
+
 ## Suffocation regression fix + IdleSweep cave guard + captain voice line + horse stale-state auto-clear (2026-05-10, 1.1.103)
 
 Test data from 1.1.102 surfaced four regressions or long-standing bugs that the user flagged. All four fixed.
