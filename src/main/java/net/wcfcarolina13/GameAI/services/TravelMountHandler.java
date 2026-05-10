@@ -381,7 +381,30 @@ public final class TravelMountHandler {
         if (state == null) {
             return;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld sourceWorld)) {
+        // Resolve the mount's CURRENT world from the saved state, not from the
+        // bot. The bot may already be in the destination world (fast-travel
+        // post-spawn) or in a different dimension (cross-dim follow handoff).
+        // Vanilla-friendly: the saved state's worldId is authoritative for
+        // where the mount entity lives right now.
+        net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null
+                ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        ServerWorld sourceWorld;
+        try {
+            RegistryKey<World> sourceKey = RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD,
+                    net.minecraft.util.Identifier.of(state.worldId()));
+            sourceWorld = server.getWorld(sourceKey);
+        } catch (Exception ignored) {
+            sourceWorld = null;
+        }
+        if (sourceWorld == null) {
+            // Fallback to bot's current world — handles legacy state with a
+            // stale or unparseable worldId.
+            sourceWorld = bot.getEntityWorld() instanceof ServerWorld bw ? bw : null;
+        }
+        if (sourceWorld == null) {
             return;
         }
         Entity mount = MountPersistenceService.findRecordedMount(sourceWorld, state);

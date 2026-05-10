@@ -2,6 +2,52 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Deferred work cleared: fast-travel mount, cross-dim mount, post-arrival stability (2026-05-10, 1.1.106)
+
+User asked: "work on the deferred stuff but work with vanilla, not against it." Three deferred items resolved using vanilla's own APIs (`Entity.teleport`, `Entity.isInsideWall`, `MountPersistenceService.findRecordedMount` which already loads chunks via vanilla's `ChunkManager`).
+
+### 1. Fast-travel co-teleport (despawn/respawn cycle)
+
+[NavigationArtifactService](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java) discards the bot entity at the source and creates a fresh one at the destination — passengers and vehicles can't follow that. The saved mount state survives the discard (it's keyed by alias in `MountPersistenceService.STATE`, not by entity reference), so the recovery path is straightforward: after the new bot is in place, look up the recorded mount and teleport it.
+
+The `coTeleportSavedMount` helper from 1.1.105 was refactored to resolve the mount's source world from the saved `state.worldId()` (instead of `bot.getEntityWorld()`). That single change makes the helper work uniformly across same-world teleport, cross-dim teleport, AND fast-travel respawn — the only contract is "saved state survived." Wired into [completePostSpawnSetup](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java) right after the destination teleport.
+
+### 2. Cross-dimension follow handoff
+
+[BotEventHandler:2504](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L2504) — bot follows commander into the Nether or End. Vanilla cross-dim teleport for an entity preserves passengers IF the vehicle is the one teleported, but the existing code teleports the bot directly, which strips the vehicle relationship. With the refactored `coTeleportSavedMount`, calling it before `bot.teleport(...)` brings the mount across the dim boundary too. No changes to vanilla's cross-dim physics or chunk-loading needed — the helper uses `Entity.teleport(destWorld, ...)` which is the standard vanilla cross-dim method.
+
+### 3. Post-arrival stability check (vanilla `Entity.isInsideWall`)
+
+The route-end-state validator from the 1.1.104 deferral. Per-step route validation already exists (`isValidLocalEscapeMove` checks `isSolidStandable`), so the gap isn't pre-route — it's that vanilla physics can drift the bot off-route mid-step. Pre-route validation can't catch that.
+
+Vanilla-friendly fix: at every teleport / snap call site, after positioning, check `player.isInsideWall()` (the same method vanilla uses to gate suffocation damage). If true, immediately call `BotRescueService.rescueFromBurial` — the rescue is already correct after the 1.1.103/1.1.104 fixes, the issue was just that it ran on the next tick, leaving a 50ms window of damage. Now it runs synchronously.
+
+Wired into:
+
+- [MovementService.moveTo teleport-fallback](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java) — when walk fails and we teleport to destination.
+- [MovementService.snapTo](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java) — internal snap repositioning.
+
+Both use `findNearbyStandable` to pick the destination but fall back to the raw destination when no standable spot is found within the search radius — that's the case the post-arrival check catches.
+
+### Why "work with vanilla" matters
+
+All three fixes use vanilla APIs as the source of truth: `Entity.teleport` for cross-world transit (handles chunk loading, dimension change, and entity sync correctly), `Entity.isInsideWall` for stuck detection (matches the same logic vanilla uses to apply suffocation damage), and `MountPersistenceService.findRecordedMount` which uses vanilla's `ChunkManager.getChunk(...)` to load the mount's chunk before the entity lookup. No reimplementation of collision, physics, or chunk-loading logic.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Mount bot on horse, fast-travel via lodestone compass to a distant base. Bot should arrive WITH the horse, not without.
+- Mount bot on horse, follow commander into the Nether. Bot should arrive in the Nether with the horse alongside.
+- Stand bot in a tight corner, force the movement teleport-fallback. If the destination ends up being a wall, the rescue should fire on the same tick — no audible suffocation damage.
+
+### Out of scope (remains deferred)
+
+- **Pre-route bbox check**: in `isValidLocalEscapeCandidate`, additionally check `World.isSpaceEmpty(bot.getBoundingBox().offset(...))` for the candidate cell. Marginal value over per-step `isSolidStandable` and would require threading the bot through the route-search call chain. Not worth the surface change unless we see a specific case where standable-ground-but-bbox-clipping cells slip through.
+- **Velocity-drift mid-step**: vanilla physics can carry the bot horizontally past a validated cell into an unvalidated one due to leftover velocity. The post-arrival check at teleport/snap sites doesn't address this because no teleport happens. The 1.1.104 nudge fix mitigates the consequence; preventing the drift itself would require physics-level intervention which goes against "work with vanilla."
+
 ## Co-teleport mount on far-distance bot teleports — keep horse paired (2026-05-10, 1.1.105)
 
 User report: "the bot's horse disappeared twice. The first time it seems to have appeared out of nowhere, and when we got off our horses again, it disappeared for good." User asked the horses-disappearing problem be fixed properly, not just auto-cleared.

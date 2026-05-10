@@ -1382,6 +1382,13 @@ public final class NavigationArtifactService {
         // Force position + send position packet to ALL clients in the dimension.
         bot.setPosition(dx, dy, dz);
         bot.setVelocity(Vec3d.ZERO);
+        // Co-teleport the bot's recorded mount so the horse arrives with the
+        // bot at the fast-travel destination. The saved state survived the
+        // discard/recreate cycle (it's keyed by alias in MountPersistenceService),
+        // and the helper resolves the mount's source world from the saved
+        // state's worldId — works across same-dim and cross-dim travel.
+        TravelMountHandler.coTeleportSavedMount(bot, ps.world(),
+                BlockPos.ofFloored(dx, dy, dz));
 
         // ── Hunger drain proportional to travel distance ─────────────
         // Direct food/saturation set — drain food level FIRST (visible on HUD), then saturation.

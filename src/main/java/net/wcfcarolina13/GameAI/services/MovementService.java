@@ -820,6 +820,18 @@ public final class MovementService {
         BlockPos safe = findNearbyStandable(world, destination, 2, 2);
         if (safe == null) safe = destination;
         player.teleport(world, safe.getX() + 0.5, safe.getY(), safe.getZ() + 0.5, java.util.Set.of(), player.getYaw(), player.getPitch(), true);
+        // Post-arrival stability: if the teleport landed the bot inside a wall
+        // (findNearbyStandable returned null and we fell back to the raw
+        // destination), trigger the burial rescue immediately. Vanilla's
+        // own isInsideWall() is the source of truth here — no reinventing
+        // collision logic. Without this, the bot would have to wait for the
+        // next BotRescueService tick and could take suffocation damage in the
+        // meantime.
+        if (player.isInsideWall()) {
+            LOGGER.warn("Movement teleport landed {} inside a wall at {} — triggering immediate rescue",
+                    player.getName().getString(), safe.toShortString());
+            net.wcfcarolina13.GameAI.services.BotRescueService.rescueFromBurial(player);
+        }
         boolean success = true;
         String rawResult = "Teleported successfully";
 
@@ -3905,6 +3917,15 @@ public final class MovementService {
         player.setVelocity(Vec3d.ZERO);
         player.velocityDirty = true;
         LOGGER.info("Snap repositioned {} to {}", player.getName().getString(), target.toShortString());
+        // Post-arrival stability: snapTo doesn't validate the destination cell,
+        // so if the snap lands the bot in a wall, hand off to rescue right
+        // away. Same reasoning as the teleport-fallback site above — using
+        // vanilla's isInsideWall() instead of duplicating collision logic.
+        if (player.isInsideWall()) {
+            LOGGER.warn("Snap landed {} inside a wall at {} — triggering immediate rescue",
+                    player.getName().getString(), target.toShortString());
+            net.wcfcarolina13.GameAI.services.BotRescueService.rescueFromBurial(player);
+        }
     }
 
     private static boolean inputStepToward(ServerPlayerEntity player,

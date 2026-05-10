@@ -2501,6 +2501,13 @@ public class BotEventHandler {
                     targetWorld.getRegistryKey().getValue(),
                     target.getName().getString());
 
+            // Bring the bot's mount along across the dimension boundary.
+            // Vanilla cross-dim teleport on a vehicle handles passenger
+            // transfer; we explicitly do the bot-then-mount pair here so
+            // the mount arrives near the bot's destination rather than
+            // staying behind in the source dimension.
+            net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(
+                    bot, targetWorld, target.getBlockPos());
             bot.teleport(targetWorld,
                     target.getX(), target.getY(), target.getZ(),
                     EnumSet.noneOf(PositionFlag.class),
