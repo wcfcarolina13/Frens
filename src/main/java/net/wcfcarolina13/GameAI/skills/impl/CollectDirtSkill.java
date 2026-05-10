@@ -346,6 +346,15 @@ public class CollectDirtSkill implements Skill {
                     outcome = SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
                     break;
                 }
+                // Hunger-aware interruption: don't grind a CollectDirt/Mining loop until death.
+                if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(loopPlayer)) {
+                    net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(loopPlayer);
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendChatMessages(
+                            loopPlayer.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                            "I'm starving and out of food. Paused — feed me, then /bot resume.");
+                    outcome = SkillExecutionResult.failure(skillName + " paused: starving with no food.");
+                    break;
+                }
                 List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(loopPlayer, 10.0D)
                         .stream()
                         .filter(EntityUtil::isHostile)

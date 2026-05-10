@@ -142,7 +142,21 @@ public final class HealingService {
     public static boolean isEmergencyHungry(ServerPlayerEntity bot) {
         return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_EMERGENCY;
     }
-    
+
+    /**
+     * Iteration-boundary helper for long-running skills. Returns true iff the bot is
+     * starving AND a single autoEat pass couldn't fix it (no food in inventory or only
+     * forbidden food). When true, the skill should bail out (and typically flag for
+     * manual resume) so the bot doesn't grind itself to death on a stripmine/farm/etc.
+     * Skills that already do their own hunger handling (HuntSkill, FishingSkill,
+     * GrassSeedSkill) keep their existing logic; this helper is for the rest.
+     */
+    public static boolean shouldPauseForStarvation(ServerPlayerEntity bot) {
+        if (!isStarving(bot)) return false;
+        if (autoEat(bot)) return false;
+        return true;
+    }
+
     /**
      * Automatic hunger/health monitoring. Call from tick loops.
      * Eats when hungry or health is low.

@@ -92,6 +92,16 @@ public final class StripMineSkill implements Skill {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
+            // Hunger-aware interruption: if the bot is starving and can't eat from
+            // inventory, pause the skill instead of mining itself to death. Resume
+            // re-runs after the bot eats (manual /bot resume or auto-feed).
+            if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(player)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                        "I'm starving and out of food. Stripmine paused — feed me, then /bot resume.");
+                return SkillExecutionResult.failure("Stripmine paused: starving with no food.");
+            }
 
             BlockPos footTarget = player.getBlockPos().offset(tunnelDirection);
 

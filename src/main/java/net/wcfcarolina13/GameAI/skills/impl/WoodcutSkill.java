@@ -738,6 +738,14 @@ public final class WoodcutSkill implements Skill {
                     abortRequested = true;
                     break;
                 }
+                // Hunger-aware interruption: don't fell trees until starvation kills the bot.
+                if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(bot)) {
+                    net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(bot);
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendChatMessages(
+                            bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                            "I'm starving and out of food. Woodcut paused — feed me, then /bot resume.");
+                    return SkillExecutionResult.failure("Woodcut paused: starving with no food.");
+                }
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                     if (requestedBounds != null) {
                         LOGGER.info("Woodcut: bounded work area exhausted at {}; not relocating outside requested bounds {}", bot.getBlockPos().toShortString(), requestedBounds);

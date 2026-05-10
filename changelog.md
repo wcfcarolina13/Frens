@@ -2,6 +2,56 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Smoker preference + hunger-aware skill pause + Tier-1 backlog audit (2026-05-09, 1.1.102)
+
+Two small features plus a backlog audit pass.
+
+### Smoker preference for food cooking
+
+User report (Tier-1 backlog): `resolveFurnaceTarget` was generic — picked any furnace-like (FURNACE / BLAST_FURNACE / SMOKER) by distance. Smokers cook food 2× as fast as regular furnaces; blast furnaces can't cook food at all. Now the resolver takes a `FurnacePreference` enum (`FOOD` / `ORE` / `ANY`) and:
+
+- Filters out incompatible stations (BLAST_FURNACE rejected for FOOD; SMOKER rejected for ORE).
+- Two-pass selection: prefer the specialized type first (SMOKER for FOOD, BLAST_FURNACE for ORE), fall back to plain FURNACE.
+- Applied at every selection step: commander look-at, shared tactical registry, nearest-placed scan, inventory placement.
+- Crafting fallback (step 5) keeps using the universal FURNACE recipe — smoker requires logs + cobblestone in a different layout, out of scope for this pass.
+
+Wired: `cookAllFoodSync` always passes `FOOD`. `startBatchCookInternal` passes `FOOD` when `foodOnly=true`, else `ANY` (mixed-mode caller — preserves the current "accept any station" behavior so the user isn't locked out of cooking when only a blast furnace is nearby).
+
+### Hunger-aware skill pause
+
+User report (Tier-1 backlog): "bot works until death." Verified — only `HuntSkill`, `FishingSkill`, and `GrassSeedSkill` had starving checks; the long-running mining/woodcut/stripmine paths grinded until the bot starved.
+
+New helper `HealingService.shouldPauseForStarvation(bot)`: returns true iff the bot is starving (`foodLevel ≤ HUNGER_CRITICAL`) AND a single `autoEat` pass couldn't fix it (no food in inventory or only forbidden food). Skills that already do their own hunger handling keep their existing logic; this helper is for the rest.
+
+Wired into:
+
+- [StripMineSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/StripMineSkill.java) main loop — pauses at iteration boundary, calls `flagManualResume`, sends "feed me, then /bot resume."
+- [CollectDirtSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/CollectDirtSkill.java) main loop — covers `MiningSkill` (which extends it) too.
+- [WoodcutSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java) main `while` loop.
+
+### Tier-1 backlog audit (already-done items)
+
+User flagged that some Tier-1 items might already be done. Verified:
+
+- ✅ **Add shelves and containers to no-break list** — `ProtectedStructureBlockHelper.isProtectedContainer` already covers bookshelves (incl. chiseled), all chest variants, barrels, hoppers, dispensers, droppers, decorated pots, crafters, brewing stands, furnaces, blast furnaces, smokers, all 17 shulker box variants. Wired through `isNeverBreakBlock` and consulted from `BotStuckService` + `MovementService`. Backlog flipped to `[x]`.
+- ✅ **Craft chest from wood** — `ToolProvisionService.ensureChest` exists and crafts an 8-plank chest when planks/logs are available; wired into `ChestStoreService` offload path, `HuntSkill` camp-build, `FishingSkill`. Backlog flipped to `[x]`.
+
+### Out of scope (next session)
+
+- Furnace offload fallback (Tier-1 #3) — when no chest is available, dump fuel-eligibles into the fuel slot. Genuinely missing but moderate surface (needs furnace screen-handler interactions). Backlog item retained.
+- Hunger pause in `FarmSkill` — main loop is complex enough that the safe insertion point isn't obvious. Other skills (BridgeScaffoldService, ShelterSkill body, FortifyVillageSkill) also unhandled. If the user hits the symptom in those paths we add them; not blanket-applying to avoid breaking subtle skill interactions.
+- Smoker crafting recipe wiring — would need `CraftingHelper` to know about the smoker recipe (logs + cobblestone in non-grid layout). Generic furnace remains the crafting fallback.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Place a smoker near the bot (no other furnace types nearby). Run `/bot cook beef`. Bot should target the smoker. Place a regular furnace closer; bot should still prefer the smoker.
+- Cook with only a blast furnace nearby: bot should report "I need a furnace (or similar) placed nearby" because BLAST_FURNACE is rejected for FOOD.
+- Run `/bot skill stripmine 50` with hunger near zero and no food in inventory. Bot should mine 1-2 blocks then announce "I'm starving and out of food. Stripmine paused — feed me, then /bot resume." Feed bot, /bot resume, mining continues.
+
 ## NavHazardCache learning surfaced (2026-05-09, 1.1.101)
 
 User report: "Bot doesn't seem to be getting better at pathfinding from the cache learning system we implemented." Investigation: the [NavHazardCache](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) is wired and recording (today's logs had 903 `applyMovementInput-reject` events — recording site is firing) but its only diagnostic log was a throttled `LOGGER.debug` invisible at default log levels. Hard to tell whether the cache is broken, ineffective, or working but only helping in scenarios with route alternatives.

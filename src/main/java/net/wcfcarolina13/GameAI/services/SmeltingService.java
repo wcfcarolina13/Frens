@@ -74,8 +74,9 @@ public final class SmeltingService {
             return false;
         }
 
-        // Resolve furnace (null commander = bot-only, no commander look-at)
-        StationTarget station = resolveFurnaceTarget(bot, null, world);
+        // Resolve furnace (null commander = bot-only, no commander look-at).
+        // cookAllFoodSync is food-only by definition, so prefer SMOKER.
+        StationTarget station = resolveFurnaceTarget(bot, null, world, FurnacePreference.FOOD);
         if (station == null) {
             LOGGER.info("cookAllFoodSync: no furnace available for {}", bot.getName().getString());
             return false;
@@ -378,7 +379,10 @@ public final class SmeltingService {
             return false;
         }
         var commander = source.getPlayer();
-        StationTarget station = resolveFurnaceTarget(bot, commander, world);
+        // foodOnly variants explicitly want SMOKER preference; mixed-mode (food + ore)
+        // stays ANY since we'd otherwise reject the only available station.
+        FurnacePreference pref = foodOnly ? FurnacePreference.FOOD : FurnacePreference.ANY;
+        StationTarget station = resolveFurnaceTarget(bot, commander, world, pref);
         if (station == null) {
             ChatUtils.sendSystemMessage(source, "I need a furnace (or similar) placed nearby.");
             return false;
@@ -705,16 +709,53 @@ public final class SmeltingService {
 
     private record StationTarget(BlockPos pos, BlockPos approach) {}
 
+    /**
+     * Caller-side preference for furnace selection. SMOKER smelts only food (2× faster
+     * than a regular furnace); BLAST_FURNACE smelts only ores/metals (also 2× faster);
+     * regular FURNACE handles both. We use this to bias selection to the appropriate
+     * specialized station when one exists, falling back to FURNACE otherwise.
+     */
+    private enum FurnacePreference {
+        /** Cooking food: prefer SMOKER, fall back to FURNACE; reject BLAST_FURNACE (can't cook food). */
+        FOOD,
+        /** Smelting ores/metals: prefer BLAST_FURNACE, fall back to FURNACE; reject SMOKER (can't smelt ores). */
+        ORE,
+        /** No preference; accept any furnace-like station. */
+        ANY
+    }
+
+    private static boolean stationMatchesPreference(net.minecraft.block.BlockState state, FurnacePreference pref) {
+        if (state == null) return false;
+        if (pref == FurnacePreference.FOOD) {
+            return state.isOf(Blocks.FURNACE) || state.isOf(Blocks.SMOKER);
+        }
+        if (pref == FurnacePreference.ORE) {
+            return state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE);
+        }
+        return state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER);
+    }
+
+    private static net.minecraft.block.Block preferredBlock(FurnacePreference pref) {
+        if (pref == FurnacePreference.FOOD) return Blocks.SMOKER;
+        if (pref == FurnacePreference.ORE) return Blocks.BLAST_FURNACE;
+        return null;
+    }
+
     private static StationTarget resolveFurnaceTarget(ServerPlayerEntity bot, ServerPlayerEntity commander, ServerWorld world) {
+        return resolveFurnaceTarget(bot, commander, world, FurnacePreference.ANY);
+    }
+
+    private static StationTarget resolveFurnaceTarget(ServerPlayerEntity bot, ServerPlayerEntity commander, ServerWorld world, FurnacePreference pref) {
         if (bot == null || world == null) return null;
         BlockPos botPos = bot.getBlockPos();
 
-        // 1) Commander look (extended range)
+        // 1) Commander look (extended range) — must match preference (e.g. don't
+        // route a food cook to a blast furnace just because the user looked at it).
         if (commander != null) {
             var hit = commander.raycast(COMMANDER_LOOK_RANGE, 1.0F, false);
             if (hit instanceof net.minecraft.util.hit.BlockHitResult bhr) {
                 BlockPos p = bhr.getBlockPos();
-                if (isFurnaceLike(world, p)) {
+                if (isFurnaceLike(world, p) && stationMatchesPreference(world.getBlockState(p), pref)) {
                     BlockPos approach = chooseApproach(world, p);
                     if (approach != null) {
                         return new StationTarget(p, approach);
@@ -723,16 +764,29 @@ public final class SmeltingService {
             }
         }
 
-        // 2) Search shared tactical furnaces first (same-owner memory)
+        // 2) Search shared tactical furnaces first (same-owner memory).
+        // Two-pass: prefer the specialized station type (smoker for food,
+        // blast furnace for ore), then fall back to any pref-acceptable one.
+        net.minecraft.block.Block preferred = preferredBlock(pref);
+        if (preferred != null) {
+            for (BlockPos shared : BotFurnaceRegistryService.listValidSharedFurnacePositions(bot, world, botPos, 64.0D * 64.0D)) {
+                if (!world.getBlockState(shared).isOf(preferred)) continue;
+                BlockPos approach = chooseApproach(world, shared);
+                if (approach != null) {
+                    return new StationTarget(shared, approach);
+                }
+            }
+        }
         for (BlockPos shared : BotFurnaceRegistryService.listValidSharedFurnacePositions(bot, world, botPos, 64.0D * 64.0D)) {
+            if (!stationMatchesPreference(world.getBlockState(shared), pref)) continue;
             BlockPos approach = chooseApproach(world, shared);
             if (approach != null) {
                 return new StationTarget(shared, approach);
             }
         }
 
-        // 3) Search nearby placed stations
-        BlockPos nearest = findNearestFurnace(world, botPos, 24, 4);
+        // 3) Search nearby placed stations — two-pass for the same reason.
+        BlockPos nearest = findNearestFurnace(world, botPos, 24, 4, pref);
         if (nearest != null) {
             double distSq = botPos.getSquaredDistance(nearest);
             if (distSq <= COMMANDER_LOOK_RANGE * COMMANDER_LOOK_RANGE) {
@@ -745,8 +799,8 @@ public final class SmeltingService {
             }
         }
 
-        // 4) Place from inventory if available
-        ItemStack invFurnace = findInventoryFurnace(bot);
+        // 4) Place from inventory if available — biased to the preferred station type
+        ItemStack invFurnace = findInventoryFurnace(bot, pref);
         if (invFurnace != null) {
             BlockPos placeAt = chooseTacticalPlacementTarget(bot, world);
             boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(invFurnace.getItem()));
@@ -829,18 +883,35 @@ public final class SmeltingService {
     }
 
     private static BlockPos findNearestFurnace(ServerWorld world, BlockPos origin, int radius, int ySpan) {
-        BlockPos nearest = null;
-        double best = Double.MAX_VALUE;
+        return findNearestFurnace(world, origin, radius, ySpan, FurnacePreference.ANY);
+    }
+
+    /**
+     * Two-pass search: first finds the nearest preferred-type station (e.g. SMOKER for FOOD),
+     * then falls back to any preference-compatible station (e.g. plain FURNACE).
+     */
+    private static BlockPos findNearestFurnace(ServerWorld world, BlockPos origin, int radius, int ySpan, FurnacePreference pref) {
+        net.minecraft.block.Block preferred = preferredBlock(pref);
+        BlockPos nearestPreferred = null;
+        BlockPos nearestFallback = null;
+        double bestPreferred = Double.MAX_VALUE;
+        double bestFallback = Double.MAX_VALUE;
         for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius))) {
-            if (isFurnaceLike(world, pos)) {
-                double dist = origin.getSquaredDistance(pos);
-                if (dist < best) {
-                    best = dist;
-                    nearest = pos.toImmutable();
+            if (!isFurnaceLike(world, pos)) continue;
+            net.minecraft.block.BlockState state = world.getBlockState(pos);
+            if (!stationMatchesPreference(state, pref)) continue;
+            double dist = origin.getSquaredDistance(pos);
+            if (preferred != null && state.isOf(preferred)) {
+                if (dist < bestPreferred) {
+                    bestPreferred = dist;
+                    nearestPreferred = pos.toImmutable();
                 }
+            } else if (dist < bestFallback) {
+                bestFallback = dist;
+                nearestFallback = pos.toImmutable();
             }
         }
-        return nearest;
+        return nearestPreferred != null ? nearestPreferred : nearestFallback;
     }
 
     private static BlockPos chooseApproach(ServerWorld world, BlockPos station) {
@@ -966,14 +1037,39 @@ public final class SmeltingService {
     }
 
     private static ItemStack findInventoryFurnace(ServerPlayerEntity bot) {
+        return findInventoryFurnace(bot, FurnacePreference.ANY);
+    }
+
+    /**
+     * Two-pass inventory scan: prefer SMOKER for FOOD or BLAST_FURNACE for ORE,
+     * fall back to plain FURNACE. Reject incompatible stations (smoker for ORE,
+     * blast furnace for FOOD).
+     */
+    private static ItemStack findInventoryFurnace(ServerPlayerEntity bot, FurnacePreference pref) {
         if (bot == null) return null;
+        net.minecraft.item.Item preferredItem = null;
+        if (pref == FurnacePreference.FOOD) preferredItem = Items.SMOKER;
+        else if (pref == FurnacePreference.ORE) preferredItem = Items.BLAST_FURNACE;
+
+        ItemStack fallback = null;
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack s = bot.getInventory().getStack(i);
-            if (s.isOf(Items.FURNACE) || s.isOf(Items.BLAST_FURNACE) || s.isOf(Items.SMOKER)) {
+            if (s.isEmpty()) continue;
+            boolean isFurnace = s.isOf(Items.FURNACE);
+            boolean isSmoker = s.isOf(Items.SMOKER);
+            boolean isBlast = s.isOf(Items.BLAST_FURNACE);
+            if (!isFurnace && !isSmoker && !isBlast) continue;
+            // Reject incompatible specialized stations.
+            if (pref == FurnacePreference.FOOD && isBlast) continue;
+            if (pref == FurnacePreference.ORE && isSmoker) continue;
+            if (preferredItem != null && s.isOf(preferredItem)) {
                 return s;
             }
+            if (fallback == null) {
+                fallback = s;
+            }
         }
-        return null;
+        return fallback;
     }
 
     private static boolean craftFurnace(ServerPlayerEntity bot, ServerPlayerEntity commander, ServerWorld world) {
