@@ -5124,6 +5124,8 @@ public class modCommandRegistry {
 
         // goal is a *feet* position (2-block headroom); teleport using feet Y.
         Vec3d center = new Vec3d(goal.getX() + 0.5D, goal.getY(), goal.getZ() + 0.5D);
+        // Bring the bot's mount along — /bot come otherwise orphans the horse.
+        net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, commanderWorld, goal);
         bot.teleport(commanderWorld,
                 center.x, center.y, center.z,
             EnumSet.noneOf(net.minecraft.network.packet.s2c.play.PositionFlag.class),

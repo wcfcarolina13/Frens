@@ -356,6 +356,63 @@ public final class TravelMountHandler {
     // ════════════════════════════════════════════════════════════════════
 
     /**
+     * Co-teleport the bot's recorded mount to a new destination. Called from
+     * far-distance teleport sites (fast travel, follow-teleport catch-up,
+     * emergency rescue, /bot come) so the bot's horse/mount comes along
+     * instead of being orphaned at the source. Without this, the saved
+     * mount state drifts >400 blocks from the bot, RideSyncService rejects
+     * with "state-too-far" forever, and the user reports "the horse
+     * disappeared."
+     *
+     * <p>Looks up the mount in the bot's <em>current</em> world (i.e. before
+     * the bot's own teleport completes), so the typical call order is:
+     * <pre>
+     *   TravelMountHandler.coTeleportSavedMount(bot, destWorld, destination);
+     *   bot.teleport(destWorld, destX, destY, destZ, ...);
+     * </pre>
+     * No-op when the bot has no recorded mount or the mount entity isn't
+     * currently loaded in the source world.
+     */
+    public static void coTeleportSavedMount(ServerPlayerEntity bot, ServerWorld destWorld, BlockPos destination) {
+        if (bot == null || destWorld == null || destination == null) {
+            return;
+        }
+        MountPersistenceService.MountState state = MountPersistenceService.getRecordedState(bot);
+        if (state == null) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld sourceWorld)) {
+            return;
+        }
+        Entity mount = MountPersistenceService.findRecordedMount(sourceWorld, state);
+        if (mount == null || mount.isRemoved()) {
+            return;
+        }
+        BlockPos animalPos = findSafeAnimalSpot(destWorld, destination, mount);
+        if (animalPos == null) {
+            animalPos = destination;
+        }
+        // Dismount cleanly first so vanilla doesn't desync rider/vehicle.
+        if (bot.getVehicle() == mount) {
+            bot.stopRiding();
+        }
+        mount.teleport(destWorld,
+                animalPos.getX() + 0.5,
+                animalPos.getY(),
+                animalPos.getZ() + 0.5,
+                java.util.Set.of(),
+                mount.getYaw(),
+                mount.getPitch(),
+                true);
+        ensureMountPersistence(mount);
+        // Refresh saved state — wasMounted=false because we just dismounted the
+        // bot to keep entity sync clean across the teleport.
+        MountPersistenceService.recordMount(bot, mount, false);
+        LOGGER.info("Co-teleported mount {} to {} alongside bot {}",
+                mount.getName().getString(), animalPos.toShortString(), bot.getName().getString());
+    }
+
+    /**
      * Mark a mount entity as persistent so it won't despawn.
      * Should be called at every entry point that touches mounts.
      */

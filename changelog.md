@@ -2,6 +2,48 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Co-teleport mount on far-distance bot teleports — keep horse paired (2026-05-10, 1.1.105)
+
+User report: "the bot's horse disappeared twice. The first time it seems to have appeared out of nowhere, and when we got off our horses again, it disappeared for good." User asked the horses-disappearing problem be fixed properly, not just auto-cleared.
+
+### Root mechanism
+
+The 1.1.103 fix (auto-clear stale state after 5 stale rejections) lets the bot re-pair with a fresh mount, but doesn't prevent the disappearance in the first place. The agent investigation in 1.1.103 showed the saved mount position drifts >400 blocks from the bot. That happens because:
+
+1. Bot is mounted on horse at position A.
+2. Bot teleports to position B (fast travel, follow-teleport catch-up, /bot come, rescue, etc.).
+3. Vanilla teleport dismounts the bot but doesn't carry the vehicle.
+4. Saved state still references position A (recorded on the dismount).
+5. Bot is at B; horse is at A (often in unloaded chunk after the bot leaves).
+6. From the user's perspective: "the horse disappeared."
+
+### Fix
+
+New `TravelMountHandler.coTeleportSavedMount(bot, destWorld, destination)` helper — looks up the bot's recorded mount, finds a safe spot for it near the destination via the existing `findSafeAnimalSpot`, dismounts the bot cleanly, teleports the mount, refreshes the saved state. No-op when the bot has no recorded mount or the mount entity isn't currently loaded in the source world.
+
+Wired into three high-impact teleport sites (called BEFORE `bot.teleport` so the source-world lookup still works):
+
+- [BotEventHandler.followTeleport](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) — the catch-up teleport during follow when commander gets too far. Highest frequency of any teleport.
+- [modCommandRegistry.executeCome](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java) — `/bot come` summons.
+- [BotEmergencyRescueService](src/main/java/net/wcfcarolina13/GameAI/services/BotEmergencyRescueService.java) — emergency rescue teleport.
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Mount bot on horse, ride out 100+ blocks from base. Press follow-teleport scenario (let bot fall behind so the catch-up teleport fires). Bot should arrive WITH the horse beside it, not stranded at the start.
+- Same setup with `/bot come` — bot teleports and horse follows.
+- Same with the rescue teleport keybind — horse co-teleports.
+- Dismount bot near a horse, walk away ~50 blocks. Return. Horse should still be there (unaffected by this fix; existing `setPersistent()` flag in `recordMount` already covers despawn).
+
+### Out of scope (next)
+
+- **Fast travel co-teleport**: NavigationArtifactService uses a despawn-respawn cycle (the bot entity is fully discarded and recreated at destination). Adding mount-co-teleport requires capturing the saved-state pre-discard and restoring in `completePostSpawnSetup`, with cross-dimension considerations. Worth doing — the user uses fast travel — but the despawn/respawn flow is moderate surface; defer to a focused next session.
+- **Route-end-state validator + post-arrival stability check**: still open from 1.1.104 deferral. Independent work; horse fixes don't help routing. Defer until test data on 1.1.104 nudge fix shows whether the suffocation symptom recurs.
+- **Dimension handoff teleport** (BotEventHandler:2504): bot follows commander to nether/end. Should also co-teleport mount, but cross-dimension entity teleport is finicky (vanilla strips passengers/leashes on dim transit). Worth a careful pass but not in this commit.
+
 ## Rescue-nudge destination validation — actual root cause of suffocation drift (2026-05-10, 1.1.104)
 
 User asked whether the deferred items from 1.1.103 were worth doing. Investigation surfaced a different actual root cause for the suffocation incident: the rescue itself was contributing to the encasement.

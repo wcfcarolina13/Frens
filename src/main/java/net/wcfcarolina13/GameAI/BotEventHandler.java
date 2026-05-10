@@ -7134,6 +7134,8 @@ public class BotEventHandler {
         }
         // BlockPos here represents a *feet* position (2-block headroom checked); teleport using feet Y.
         Vec3d center = new Vec3d(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
+        // Bring the bot's mount along — without this, the horse is orphaned at the source.
+        net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, world, safe);
         bot.teleport(world,
                 center.x, center.y, center.z,
                 EnumSet.noneOf(PositionFlag.class),

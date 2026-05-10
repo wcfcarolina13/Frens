@@ -383,6 +383,8 @@ public final class BotEmergencyRescueService {
         }
 
         Vec3d center = Vec3d.ofBottomCenter(anchor.pos());
+        // Bring the bot's mount along — without this, rescue strands the horse.
+        TravelMountHandler.coTeleportSavedMount(rescued, targetWorld, anchor.pos());
         rescued.teleport(targetWorld, center.x, center.y, center.z,
                 java.util.EnumSet.noneOf(net.minecraft.network.packet.s2c.play.PositionFlag.class),
                 rescued.getYaw(),
