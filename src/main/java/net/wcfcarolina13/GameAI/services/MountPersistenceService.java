@@ -114,6 +114,39 @@ public final class MountPersistenceService {
                 alias, mount.getUuid(), mountType, (int)x, (int)y, (int)z, wasMounted, heldByBot);
     }
 
+    /**
+     * Drop the saved mount-state for this bot in the current world. Used by
+     * {@link RideSyncService} when the saved state has been rejected as stale
+     * for long enough that holding onto it just blocks future re-pairing.
+     * Without this, the rejection logged every 3 s in resolvePreferredMount
+     * would loop forever — even if the bot eventually wandered into range,
+     * the saved state would already be pointing at an entity that was
+     * unloaded out of the world or stranded by a teleport.
+     */
+    public static void clearRecordedState(ServerPlayerEntity bot, String reason) {
+        if (bot == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        ensureLoaded();
+        String alias = bot.getName().getString().toLowerCase();
+        String saveWorldKey = BotWorldStateService.currentWorldKey(server);
+        Map<String, MountState> worldMap = STATE.get(alias);
+        if (worldMap == null) {
+            return;
+        }
+        MountState removed = worldMap.remove(saveWorldKey);
+        if (removed != null) {
+            flush();
+            LOGGER.info("Cleared stale mount state for {} ({}): mountUuid={} savedPos=({},{},{})",
+                    bot.getName().getString(), reason, removed.mountUuid(),
+                    (int) removed.x(), (int) removed.y(), (int) removed.z());
+        }
+    }
+
     public static void onBotJoin(ServerPlayerEntity bot) {
         if (bot == null) {
             return;

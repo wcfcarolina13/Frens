@@ -1759,6 +1759,35 @@ public final class RideSyncService {
     private static final Map<UUID, Long> LAST_PREFERRED_REJECT_LOG_TICK = new HashMap<>();
     private static final long PREFERRED_REJECT_LOG_INTERVAL_TICKS = 60L; // ~3s
 
+    /** Per-bot consecutive-rejection counters for "stale" reasons that warrant
+     *  auto-clearing the saved state after repeated failures. The horse-disappearing
+     *  bug stems from the saved state pointing at an unreachable / unloaded entity;
+     *  without auto-clear, the bot is permanently locked out of pairing with a
+     *  fresh mount until the user manually intervenes. */
+    private static final Map<UUID, Integer> STALE_REJECT_STREAK = new HashMap<>();
+    private static final int STALE_REJECT_CLEAR_THRESHOLD = 5;  // ~15s of repeated rejections at 3s log cadence
+
+    /**
+     * Reset the streak when the bot successfully pairs with its preferred mount,
+     * or when the bot has no saved state at all. Called from the resolver
+     * happy-path so a brief blip of rejections doesn't accumulate forever.
+     */
+    static void noteSuccessfulMountResolve(UUID botId) {
+        if (botId != null) {
+            STALE_REJECT_STREAK.remove(botId);
+        }
+    }
+
+    /** True iff the rejection reason indicates the saved state is irrecoverable
+     *  in the current run (vs. a transient mismatch like "category-mismatch"). */
+    private static boolean isStaleRejectReason(String reason) {
+        if (reason == null) return false;
+        return reason.startsWith("state-too-far")
+                || reason.startsWith("mount-not-found-in-world")
+                || reason.startsWith("world-mismatch")
+                || reason.startsWith("outside-combined-radius");
+    }
+
     private static void logPreferredReject(ServerPlayerEntity bot,
                                            MountPersistenceService.MountState state,
                                            String reason) {
@@ -1780,6 +1809,24 @@ public final class RideSyncService {
                 state.mountUuid(),
                 (int) state.x(), (int) state.y(), (int) state.z(),
                 reason);
+
+        // Auto-clear after enough consecutive stale rejections so the bot can
+        // pair with a fresh mount instead of being permanently locked onto an
+        // unreachable saved entity. Non-stale rejections (transient races,
+        // category mismatches, etc.) reset the streak — they don't indicate a
+        // broken saved state.
+        UUID botId = bot.getUuid();
+        if (isStaleRejectReason(reason)) {
+            int streak = STALE_REJECT_STREAK.getOrDefault(botId, 0) + 1;
+            if (streak >= STALE_REJECT_CLEAR_THRESHOLD) {
+                STALE_REJECT_STREAK.remove(botId);
+                MountPersistenceService.clearRecordedState(bot, "stale-rejects=" + streak + " lastReason=" + reason);
+            } else {
+                STALE_REJECT_STREAK.put(botId, streak);
+            }
+        } else {
+            STALE_REJECT_STREAK.remove(botId);
+        }
     }
 
     private static void maybeApproachMount(ServerPlayerEntity bot, Entity mount, ServerPlayerEntity commander) {

@@ -338,8 +338,16 @@ public final class BotRescueService {
             }
         }
 
-        // FIRST: Try to move out of suffocating position in all directions
-        if (attemptEscapeMovement(bot, world, feet, head)) {
+        // FIRST: try a velocity-based escape, BUT only when at least one of
+        // feet/head is air. When both are solid (fully encased), vanilla physics
+        // rejects horizontal velocity into the same solid block; the bot will
+        // sit still and take damage while we falsely "succeed". Falling through
+        // to the mining branch is the only thing that actually frees the bot.
+        // This was the regression the user reported on 2026-05-10: bot stuck in
+        // cobblestone, repeatedly logging "attempting escape movement" while
+        // suffocating, never mining out. See changelog 1.1.103.
+        boolean fullyEncased = headBlocked && feetBlocked;
+        if (!fullyEncased && attemptEscapeMovement(bot, world, feet, head)) {
             LOGGER.info("Bot {} attempting to move out of suffocating position", bot.getName().getString());
             return true;
         }

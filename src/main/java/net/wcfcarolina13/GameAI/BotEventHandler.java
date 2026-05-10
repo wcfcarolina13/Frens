@@ -3231,6 +3231,24 @@ public class BotEventHandler {
             return false;
         }
 
+        // Non-functional-position guard. The underground-linger decision tree
+        // already tells the bot "stay put" when sky isn't visible and the bot
+        // isn't near the terrain surface — that's the same condition that
+        // led to the 2026-05-09 incident where IdleSweep dragged the bot
+        // through a narrow cobblestone cave and ended up encased and
+        // suffocating. Reject sweep activation in those cells; the
+        // commander-nearby detector elsewhere already keeps the bot
+        // calm there.
+        if (bot.getEntityWorld() instanceof ServerWorld idleSweepWorld) {
+            net.wcfcarolina13.GameAI.services.SafePositionService.SurfaceCandidateAssessment posCheck =
+                    net.wcfcarolina13.GameAI.services.SafePositionService.analyzeSurfaceCandidate(idleSweepWorld, botBlock);
+            if (!posCheck.openSky() && !posCheck.nearSurface()) {
+                LOGGER.debug("[IdleSweep] {} suppressed — non-functional underground position",
+                        bot.getName().getString());
+                return false;
+            }
+        }
+
         // Threshold reached — check for nearby drops.
         Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS);
         if (nearDrop == null) {

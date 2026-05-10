@@ -2,6 +2,66 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Suffocation regression fix + IdleSweep cave guard + captain voice line + horse stale-state auto-clear (2026-05-10, 1.1.103)
+
+Test data from 1.1.102 surfaced four regressions or long-standing bugs that the user flagged. All four fixed.
+
+### 1. Suffocation regression — bot dying in walls (CRITICAL)
+
+User reported: "bot got jammed into walls and suffocating again" — caused one death and several near-deaths. Confirmed in [logs/2026-05-09-3.log.gz at 22:42:23-30](file:///Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.11/minecraft/logs/2026-05-09-3.log.gz): bot fully encased in cobblestone (head AND feet = cobblestone) with `takingSuffocationDamage=true` for ~7 seconds, repeatedly logging `attempting escape movement toward north` while never mining out.
+
+**Root cause.** [BotRescueService.rescueFromBurial:341](src/main/java/net/wcfcarolina13/GameAI/services/BotRescueService.java#L341) called `attemptEscapeMovement` first as the "try to nudge out before mining" optimization. But the helper returns `true` whenever ANY adjacent cell has air for both feet+head levels — regardless of whether a velocity-based escape can actually work. When the bot is fully encased in solid blocks, vanilla physics rejects horizontal velocity into the same solid block; the bot stays put while we falsely "succeed" the rescue. The mining branch at line 354 (with its 60-tick cooldown) was unreachable.
+
+**Fix.** Gate the velocity-escape call on `!fullyEncased` (where `fullyEncased = headBlocked && feetBlocked`). When both are solid, skip straight to mining. Single-block-encased cases still try velocity first since that's what the optimization was designed for.
+
+### 2. IdleSweep dragged bot into the encasement (root cause of #1)
+
+The user's deeper question — "why did the bot end up fully encased to begin with?" — surfaced via log reconstruction. At 22:42:20 [IdleSweep](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) activated targeting an item drop 4 blocks away in a narrow cobblestone cave. The route planner committed to `route=282,50,1294 -> 281,50,1295 -> 280,49,1295 -> 279,48,1294`, descending the bot through a tight passage. The bot ended up at (278, 48, 1297) — fully encased in cobblestone — within seconds.
+
+The [BotFleeService underground-linger decision tree](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java) was already saying "non-functional position but commander nearby — staying put" for this same cell. IdleSweep wasn't consulting that signal, so it activated anyway. The two systems disagreed and IdleSweep won.
+
+**Fix.** Before activating IdleSweep in [tickOpportunisticIdleSweep](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java), call `SafePositionService.analyzeSurfaceCandidate(world, botBlock)`. If `!openSky() && !nearSurface()` — same gate the linger tree uses — reject sweep activation. The bot stays put exactly where the linger tree already wanted it to stay.
+
+### 3. "Hey hey look at me" + captain-now sequence broken
+
+User reported: (a) "hey, hey, look at me" line firing whether bot is on a horse or on land — basically random. (b) "I'm the captain now" never fires when the user looks at the bot, only "that ruined the joke."
+
+**Root cause for (a).** Stage 1 entry condition `elevated = bot.getY() >= 70.0 && world.isSkyVisible(bot.getBlockPos().up())` evaluates to true everywhere outdoors above sea level. Walking around the overworld surface with the user → fires randomly.
+
+**Fix for (a).** `elevated` now requires `bot.getY() >= commander.getY() + 3.0` AND sky access AND bot not currently following the commander. Real semantic: dramatically above the commander, stationary. Won't trigger during normal follow.
+
+**Root cause for (b).** Stage 2 required 60 ticks (3 s) of *continuous* commander-looking-at-bot. A single tick of `commanderLookingNow=false` reset the streak to 0. Natural human looking pattern (glance, look back, reposition) means 3 s continuous never accumulates — so the captain line never fires, only the 14 s timeout fires "ruined joke."
+
+**Fix for (b).** New `endShipLookAwayStreak` counter. Brief blinks (≤20 ticks of non-look) are tolerated; only ~1 s of continuous non-look resets the streak. Looking-tick accumulator stays at 60 (3 s) total looking time.
+
+### 4. Horse disappearing — recurring (and previously dismissed)
+
+User noted I dismissed this before. Reinvestigated with log evidence this time. [Background-agent investigation summary](https://example.invalid):
+
+- Horse UUID `fd5c19b3-3fe0-4bac-a0ab-b29ff03b1672` saved at (243, 66, 1303) while bot was riding it. Subsequent `RideSyncTick` shows the horse position drifting 435+ blocks from the bot.
+- [RideSyncService.resolvePreferredMount:1710](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java#L1710) rejects with `state-too-far` (over the 48-block search radius). Repeats every 3 s forever.
+- Without auto-clear, the bot is permanently locked onto the unreachable saved entity. Even when the bot wanders into a fresh horse, the saved state blocks fresh pairing.
+
+**Fix.** New per-bot rejection-streak counter `STALE_REJECT_STREAK` in [RideSyncService](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java). After 5 consecutive stale rejections (`state-too-far`, `mount-not-found-in-world`, `world-mismatch`, `outside-combined-radius`) — about 15 s at the existing 3 s log cadence — the saved state is auto-cleared via new `MountPersistenceService.clearRecordedState(bot, reason)`. Non-stale rejections (transient mismatches) reset the streak. Successful resolves also reset (via `noteSuccessfulMountResolve` — wired separately when the call site is touched next).
+
+### Verification
+
+Build: `./gradlew build -x test` clean.
+
+Manual:
+
+- Stand-alongside test for #1: trap bot in 1×1 cobblestone column (place blocks around bot). Bot should mine its way out within 3-6 s, not loop on nudges. Watch for `Bot Jake clearing headspace by mining Cobblestone` log line.
+- Test for #2: descend with bot through a tight cave. Stop. Wait 15 s. Bot should NOT activate IdleSweep on items in the cave — it should stay put per the linger decision.
+- Test for #3a: walk on flat ground with bot in follow. The "hey hey look at me" line should NOT fire.
+- Test for #3b: provoke the joke (have bot riding a horse, look away, wait for the line, then look at bot for ~3 s). The captain line should fire reliably now even with normal head movement.
+- Test for #4: lose the horse (let it wander or unload by distance). Within ~15 s of repeated `state-too-far` rejections in the log, see `Cleared stale mount state for Jake (stale-rejects=5 ...)` followed by free re-pairing on the next horse the bot mounts.
+
+### Out of scope (next)
+
+- The deeper question for #1 — how the route planner committed to a path that ended in a fully-encased cell. The `leavesTrap=true` route annotation suggests the planner KNEW it was leaving a trap, which is the wrong direction. Root-cause that planner heuristic in a follow-up pass.
+- Wire `noteSuccessfulMountResolve(botId)` into the resolver's happy-path return — currently only declared. The auto-clear still works because non-stale rejections reset the streak; this is just defensive.
+- Voice-line tightening: 1 s glance tolerance is generous; could expose as a Behavior tab toggle.
+
 ## Smoker preference + hunger-aware skill pause + Tier-1 backlog audit (2026-05-09, 1.1.102)
 
 Two small features plus a backlog audit pass.

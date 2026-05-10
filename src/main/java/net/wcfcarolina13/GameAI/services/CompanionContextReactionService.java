@@ -122,6 +122,9 @@ public final class CompanionContextReactionService {
         /** Accumulated ticks of continuous commander-looking-at-bot since solicitation.
          *  Reaches 60 (3 s) → fires "I'm the captain now." */
         int endShipLookingTicks = 0;
+        /** Continuous-non-look streak. Used to allow brief glances away (≤1 s)
+         *  without nuking the look-streak; a real look-away (≥20 ticks) resets. */
+        int endShipLookAwayStreak = 0;
         /** TNT-proximity plea sequence. -1 = idle; 0..3 = next line index to fire. */
         int tntSequenceIndex = -1;
         /** Tick when the last TNT plea line was fired; used to space lines ~1 s apart. */
@@ -1626,19 +1629,32 @@ public final class CompanionContextReactionService {
             ServerPlayerEntity commander = findNearbyCommander(bot, world, 32.0);
             boolean commanderLookingNow = commander != null && isEntityFacing(commander, bot);
             if (commanderLookingNow) {
+                // Looking now — accumulate. Also clear the grace counter so a
+                // brief look-away doesn't keep counting down past a re-look.
                 state.endShipLookingTicks++;
+                state.endShipLookAwayStreak = 0;
                 if (state.endShipLookingTicks >= 60) {  // 3 s at 20 TPS
                     state.endShipSolicitedAtTick = -1L;
                     state.endShipLookingTicks = 0;
+                    state.endShipLookAwayStreak = 0;
                     return tryTrigger(bot, "end_ship_captain", END_SHIP_CAPTAIN_LINES, null, false);
                 }
             } else {
-                // Reset the streak — the 3 s needs to be continuous.
-                state.endShipLookingTicks = 0;
+                // Look-away grace: a single-tick blink/glance (or the look-direction
+                // jitter that comes from natural mouse movement) shouldn't nuke the
+                // streak. Only reset after ~1 s of continuous non-looking. Without
+                // this, the captain line could only fire if the commander stared
+                // perfectly still for 3 s, which the user almost never does.
+                state.endShipLookAwayStreak++;
+                if (state.endShipLookAwayStreak >= 20) {
+                    state.endShipLookingTicks = 0;
+                    state.endShipLookAwayStreak = 0;
+                }
             }
             if (elapsed >= 280L) {  // 14 s at 20 TPS
                 state.endShipSolicitedAtTick = -1L;
                 state.endShipLookingTicks = 0;
+                state.endShipLookAwayStreak = 0;
                 return tryTrigger(bot, "end_ship_ruined_joke", END_SHIP_RUINED_JOKE_LINES, null, false);
             }
             return true;  // still in flight; don't let other triggers steal the turn
@@ -1649,11 +1665,19 @@ public final class CompanionContextReactionService {
         if (commander == null) return false;
         if (isEntityFacing(commander, bot)) return false;  // joke needs the look-away setup
 
-        // Bot should be "perched" — riding something, OR in The End, OR elevated.
+        // Bot should be "perched" — riding something, OR in The End, OR genuinely
+        // elevated above the commander. The previous "elevated = Y>=70 + sky visible"
+        // was true everywhere outdoors above sea level, which is why the line was
+        // firing at random while the user walked through the overworld. The real
+        // semantic is "bot is dramatically above the commander" — require ≥3 blocks
+        // of vertical lead AND sky access AND the bot stationary (no follow chase).
         boolean ridingSomething = bot.hasVehicle();
         String dim = world.getRegistryKey().getValue().toString();
         boolean inEnd = dim.contains("the_end");
-        boolean elevated = !ridingSomething && bot.getY() >= 70.0 && world.isSkyVisible(bot.getBlockPos().up());
+        boolean elevated = !ridingSomething
+                && bot.getY() >= commander.getY() + 3.0
+                && world.isSkyVisible(bot.getBlockPos().up())
+                && !net.wcfcarolina13.GameAI.BotEventHandler.isFollowingPlayer(bot);
         if (!ridingSomething && !inEnd && !elevated) return false;
 
         if (RNG.nextDouble() > 0.0008D) return false;  // very rare
