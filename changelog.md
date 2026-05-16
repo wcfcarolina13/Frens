@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Magma block added to mining-contraindicated hazards (2026-05-16, 1.1.112)
+
+Extension of 1.1.111's `isMiningContraindicatedHazard` classifier. Per user rule: magma deposits in the Nether stack vertically (multi-block layers), and even on a single magma layer the revealed surface below the mined block is typically more magma or lava. Mining as rescue drops the bot onto another burning floor, not safe ground. Same reasoning as lava — better to displace than dig.
+
+Solid hazards that *do* still get mined out for rescue (mining them reveals safe ground): cactus, pointed dripstone, sweet berry bush, wither rose, cobweb.
+
+File: `GameAI/services/BotHazardService.java`.
+
 ## Hazard classifier tag/class-based; burial rescue refuses to mine through lava or fire (2026-05-16, 1.1.111)
 
 Continuation of the 1.1.110 mod-block-compat work, broadening the same pattern to `BotHazardService`. Two changes:

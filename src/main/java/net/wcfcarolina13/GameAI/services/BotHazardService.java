@@ -112,20 +112,32 @@ public final class BotHazardService {
 
     /**
      * Subset of {@link #isDeadlyBlock} where mining the block out as a "rescue"
-     * is contraindicated: lava (a source block flows back from neighbours into
-     * the dug cell — bot stays in lava) and fire variants (the burning ground
-     * beneath, e.g. netherrack or any infiniburn block, re-ignites immediately).
+     * is contraindicated:
+     *
+     * <ul>
+     *   <li><b>Lava</b> (via {@link FluidTags#LAVA}) — a mined source block
+     *       refills from neighbour cells, bot stays in lava.</li>
+     *   <li><b>Fire variants</b> (via {@code instanceof FireBlock}) — the
+     *       burning ground beneath (netherrack or any infiniburn block)
+     *       re-ignites the bot immediately.</li>
+     *   <li><b>Magma block</b> — magma deposits in the Nether stack vertically,
+     *       and even on a single magma layer the revealed surface beneath is
+     *       typically more magma or lava. Mining drops the bot onto another
+     *       burning floor, not safe ground.</li>
+     * </ul>
      *
      * <p>Used by {@link BotRescueService#rescueFromBurial} to short-circuit its
      * three mining branches and redirect to displacement-based escape. Other
-     * deadly blocks (magma, cactus, dripstone, sweet berry, wither rose, powder
-     * snow, cobweb) are solid/minable and mining them out reveals safe ground
-     * — those keep the original mine-to-escape behaviour.</p>
+     * deadly blocks (cactus, dripstone, sweet berry, wither rose, cobweb) are
+     * solid/minable and mining them out reveals safe ground — those keep the
+     * original mine-to-escape behaviour. Powder snow has its own dedicated
+     * handler ({@code BotPowderSnowRescueService}) — see [[project-powder-snow-rescue]].</p>
      */
     public static boolean isMiningContraindicatedHazard(BlockState state) {
         if (state == null || state.isAir()) return false;
         if (state.getFluidState().isIn(FluidTags.LAVA)) return true;
         if (state.getBlock() instanceof FireBlock) return true;
+        if (state.isOf(Blocks.MAGMA_BLOCK)) return true;
         return false;
     }
 
