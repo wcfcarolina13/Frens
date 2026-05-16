@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## TreeStuck escape clears stale abort latch (2026-05-10, 1.1.108)
+
+Follow-up audit of the same 1.1.107 log surfaced the *actual* reason the bot didn't catch up after the misfired teleport detector. Sequence:
+
+1. Bot wolf-teleports 32 blocks at 13:55:46.
+2. Pre-1.1.107 detector misfires at 13:55:47 — `TaskService.forceAbort` sets `ABORT_LATCH` even though no skill ticket existed (the latch is intentionally set so survival actions like break-free see it).
+3. Bot continues following commander on horse until 13:56:12, when it gets stuck on oak_leaves at (569,158,2254) — a real navigation stuck, unrelated to the earlier misfire.
+4. `TreeStuckEscapeService` activates, tries safe-drop (unreachable), then falls through to leaf-mining.
+5. **Every leaf-mine attempt aborts** because `MiningTool` checks `SkillManager.shouldAbortSkill` → `TaskService.isAbortRequested` → the stale `ABORT_LATCH` from step 2. The bot is now trapped in a 6-minute "try-mine, abort, retry" loop while the commander rides 468 blocks away.
+
+1.1.107 fixed step 2 (wolf-tp self-notify), so the latch shouldn't get set in the normal case. But TreeStuck is autonomous bot self-recovery — it should not be vulnerable to a stale latch from *any* source (a real external teleport, a prior `/bot stop`, a fast-travel arrival edge case). Per `feedback_abort_latch_ownership.md`, non-skill operations that bypass `beginSkill` must call `TaskService.clearAbortLatch(UUID)` to avoid inheriting stale state.
+
+Fix: `TreeStuckEscapeService#startLeafMine` calls `TaskService.clearAbortLatch(botId)` before `MiningTool.mineBlock`. The escape recovery now runs unconditionally regardless of latch state — appropriate, because if the bot is physically stuck in foliage, self-recovery is what we want regardless of what triggered an abort earlier.
+
+File: `GameAI/services/TreeStuckEscapeService.java`.
+
 ## Follow + sleep recovery: wolf-tp self-notify, co-sleep cooldown clears on failure, wider bed placement (2026-05-10, 1.1.107)
 
 User session log surfaced three coupled regressions during a long-distance follow + sleep flow:

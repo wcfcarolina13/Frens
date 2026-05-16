@@ -413,6 +413,12 @@ public final class TreeStuckEscapeService {
 
     private static void startLeafMine(ServerPlayerEntity bot, BlockPos leafPos) {
         UUID botId = bot.getUuid();
+        // Tree-stuck escape is autonomous bot self-recovery, not a user skill. If a stale
+        // ABORT_LATCH is present (e.g. from a misfired teleport detector or a prior /bot stop),
+        // every leaf-mine tick aborts on SkillManager.shouldAbortSkill and the bot is trapped
+        // in the canopy until something external moves it. Per `feedback_abort_latch_ownership.md`,
+        // non-skill operations need to clear the latch to avoid inheriting stale state.
+        TaskService.clearAbortLatch(botId);
         CompletableFuture<String> future = MiningTool.mineBlock(bot, leafPos);
         LEAF_MINE_INFLIGHT.put(botId, future);
         future.whenComplete((result, error) -> {
