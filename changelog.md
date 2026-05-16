@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Burial rescue trusts vanilla physics; sinkable surface detector handles mod blocks (2026-05-16, 1.1.110)
+
+Wet Sand mod's "Soaked Sand" was tripping two false-positive paths: `BotRescueService.rescueFromBurial` flagged the bot as buried (and started mining its own feet with "I'm stuck in Soaked sand at feet! Mining with Iron Shovel..." chat spam), and `BotActions.applyMovementInput` rejected horizontal movement with `reason=feet-not-passable`. Both used hardcoded vanilla allowlists (Soul Sand / Mud / Muddy Mangrove Roots / Farmland / Dirt Path / Honey Block) — no mod variant was ever going to slot in cleanly.
+
+Per user direction: adapt to *any* mod block that behaves similarly, not just Soaked Sand. Two layers, no per-mod allowlist entries:
+
+1. **Vanilla-physics short-circuit in `BotRescueService.rescueFromBurial`.** If `!takingSuffocationDamage && bot.isOnGround() && !bot.isInsideWall()`, return early. `isOnGround` means vanilla seated the bot on a valid surface; `isInsideWall` is the same check vanilla uses to apply suffocation damage; no recent damage = no actual stuck. Any mod block that lets the bot stand normally now passes without needing a hardcoded entry. Same pattern as 1.1.106's post-arrival stability check.
+
+2. **`WalkablePartialBlocks.isSinkableSurface` classifier**, called from `isStandable`. Recognizes Soul Sand-equivalents by three layers:
+   - Explicit vanilla allowlist (Soul Sand, Soul Soil, Mud, Muddy Mangrove Roots, Honey Block, Farmland, Dirt Path).
+   - Defensive fence/wall/gate exclusion via tags so real burials in those cells still trigger rescue.
+   - **Collision-shape heuristic:** non-empty shape with `maxY ∈ (0.5, 1.0)`. Catches mod blocks that don't tag themselves at all. The bot logged at Y=62.92 on a Soaked Sand block at Y=62, which means Soaked Sand has partial-height collision like Soul Sand (0.875) and falls inside this window.
+
+The shape heuristic deliberately excludes full-cell sand (vanilla SAND/RED_SAND maxY=1.0) — those sit BELOW the bot's feet blockpos and don't trigger the rescue path anyway. Slabs and thinner partials are handled by existing class checks / `isPathable`'s 0.125 fallback.
+
+Files: `GameAI/services/WalkablePartialBlocks.java`, `GameAI/services/BotRescueService.java`.
+
 ## Species-specific "nice X" lines gated on proximity + LoS (2026-05-16, 1.1.109)
 
 The bot was shouting "nice camel" / "nice bird" / "nice horse" / "good dog!" / "I love dogs" / skinwalker callouts at random during surface daytime regardless of whether any such animal was nearby or visible. Root cause: the six species-specific lines authored in the April 2026 handoff were wired into `BotAmbientChatter.WILDLIFE_CHATTER`, a blind random pool that fires on a 20% roll whenever the bot is on the surface during the day — no entity-presence check, no LoS check.

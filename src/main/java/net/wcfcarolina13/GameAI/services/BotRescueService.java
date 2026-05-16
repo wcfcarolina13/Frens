@@ -240,6 +240,23 @@ public final class BotRescueService {
             } catch (Exception ignored) {
             }
         }
+
+        // Vanilla physics short-circuit. If the bot is on the ground (vanilla seated
+        // it on a valid surface), not clipping into any wall (the same check vanilla
+        // uses to apply suffocation damage), and not taking suffocation damage, the
+        // "feet not in our hardcoded allowlist" heuristic below is a false positive
+        // on an unknown mod block. Trust vanilla. This auto-handles Soul Sand-style
+        // sinkable surfaces from any mod (e.g. Wet Sand's "Soaked Sand") without
+        // requiring per-mod entries in the allowlist at line ~260.
+        if (!takingSuffocationDamage && bot.isOnGround() && !bot.isInsideWall()) {
+            DebugToggleService.debug(LOGGER,
+                    "rescueFromBurial: bot={} on-ground, not inside-wall, no suffocation — vanilla physics OK, skipping",
+                    bot.getName().getString());
+            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+            LAST_STUCK_LOG_MS.remove(bot.getUuid());
+            return false;
+        }
+
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
 

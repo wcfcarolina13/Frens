@@ -9,6 +9,7 @@ import net.minecraft.block.CarpetBlock;
 import net.minecraft.block.SlabBlock;
 import net.minecraft.block.SnowBlock;
 import net.minecraft.block.StairsBlock;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.BlockView;
@@ -115,6 +116,73 @@ public final class WalkablePartialBlocks {
         if (block instanceof SlabBlock) return true;
         if (block instanceof StairsBlock) return true;
         if (block instanceof SnowBlock) return true;
+        if (isSinkableSurface(state, world, pos)) return true;
         return false;
+    }
+
+    /**
+     * "Sinkable" full-cell surface: a block where vanilla physics seats the entity
+     * slightly below the cell top, so the bot's floored {@code BlockPos.Y} lands on
+     * the cell rather than above it. Soul Sand (collision maxY=0.875), Mud (0.9),
+     * Muddy Mangrove Roots, Honey Block (0.9375), Farmland (0.9375), Dirt Path
+     * (0.9375), plus third-party mod variants like Wet Sand's "Soaked Sand".
+     *
+     * <p>The bug this fixes: {@link BotRescueService#rescueFromBurial} and the
+     * movement-impulse gate both classify the bot as "stuck in blocks" whenever
+     * its feet blockpos coincides with a non-empty-collision block that isn't on
+     * a hardcoded allowlist. Hardcoding every mod's sinkable variant doesn't
+     * scale. This method classifies by property, with three layers:</p>
+     *
+     * <ol>
+     *   <li><b>Vanilla explicit allowlist</b> (fast path for the cases we know).</li>
+     *   <li><b>Block-tag inclusion</b> ({@code BlockTags.SAND}, {@code BlockTags.DIRT})
+     *       — auto-covers any mod block whose author tagged it correctly. Wet
+     *       Sand's "Soaked Sand" likely lives here.</li>
+     *   <li><b>Collision-shape heuristic</b> — non-empty shape with top face in
+     *       {@code (0.5, 1.0)} that isn't a slab/stair/fence/wall. Catches mods
+     *       that ship blocks without proper tags. Excludes fence/wall/gate tags
+     *       defensively so a real burial in a fence cell still triggers rescue.</li>
+     * </ol>
+     *
+     * <p>Note: vanilla {@code SAND}/{@code RED_SAND} themselves are full-cell
+     * (maxY=1.0); they don't seat the entity inside the cell, so they aren't and
+     * shouldn't be sinkable. Soaked Sand from the Wet Sand mod IS sinkable
+     * (entity logged at Y=62.92 on a block at Y=62 — partial collision).</p>
+     */
+    public static boolean isSinkableSurface(BlockState state, BlockView world, BlockPos pos) {
+        if (state == null || world == null || pos == null) {
+            return false;
+        }
+
+        // Vanilla sinkable surfaces.
+        if (state.isOf(Blocks.SOUL_SAND)) return true;
+        if (state.isOf(Blocks.SOUL_SOIL)) return true;
+        if (state.isOf(Blocks.MUD)) return true;
+        if (state.isOf(Blocks.MUDDY_MANGROVE_ROOTS)) return true;
+        if (state.isOf(Blocks.HONEY_BLOCK)) return true;
+        if (state.isOf(Blocks.FARMLAND)) return true;
+        if (state.isOf(Blocks.DIRT_PATH)) return true;
+
+        // Defensive: never call a fence/wall/gate "standable", even if its shape
+        // happens to fall in our heuristic window. A real burial in those cells
+        // should keep triggering the rescue path.
+        if (state.isIn(BlockTags.FENCES)) return false;
+        if (state.isIn(BlockTags.FENCE_GATES)) return false;
+        if (state.isIn(BlockTags.WALLS)) return false;
+
+        // Heuristic: non-empty collision with top face in (0.5, 1.0) means vanilla
+        // seats the entity inside the cell rather than on top of it. The < 1.0 cap
+        // rules out full-cell sand/dirt (vanilla SAND/RED_SAND themselves are
+        // BlockTags.SAND but full-cell, so they sit BELOW the bot's feet blockpos
+        // and never trip the rescue). The > 0.5 floor rules out slabs and thinner
+        // partials already covered by isPathable's 0.125 fallback or the explicit
+        // SlabBlock class check above. Catches Soul Sand-equivalent mod variants
+        // (Wet Sand's "Soaked Sand", custom mud, etc.) without per-block allowlists.
+        var shape = state.getCollisionShape(world, pos);
+        if (shape.isEmpty()) {
+            return false;
+        }
+        double maxY = shape.getMax(Direction.Axis.Y);
+        return maxY > 0.5D && maxY < 1.0D;
     }
 }
