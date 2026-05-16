@@ -2,7 +2,9 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.FireBlock;
 import net.minecraft.entity.passive.PufferfishEntity;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -75,13 +77,24 @@ public final class BotHazardService {
      * because the bot's planning should treat those cells as no-go regardless —
      * standing on a dripstone tip impales on landing and walking into the tip
      * damages on contact.</p>
+     *
+     * <p>Lava is checked via {@link FluidTags#LAVA} (covers vanilla lava AND any
+     * mod-registered fluid that opts into the lava tag). Fire is checked via
+     * {@code instanceof FireBlock} (covers vanilla fire + soul fire AND any mod
+     * fire-block that extends the vanilla class). Other entries stay explicit
+     * because vanilla offers no clean tag/class abstraction for them — mod
+     * variants of magma / cactus / sweet berry / etc. will need to be added if
+     * they show up, and {@link [[feedback-mod-block-compat-pattern]]} is the
+     * playbook.</p>
      */
     public static boolean isDeadlyBlock(BlockState state) {
         if (state == null || state.isAir()) return false;
-        return state.isOf(Blocks.FIRE)
-                || state.isOf(Blocks.SOUL_FIRE)
-                || state.isOf(Blocks.LAVA)
-                || state.isOf(Blocks.MAGMA_BLOCK)
+        // Fluid-tag check — auto-includes any mod whose lava fluid opts into FluidTags.LAVA.
+        if (state.getFluidState().isIn(FluidTags.LAVA)) return true;
+        // Fire class check — covers vanilla FIRE + SOUL_FIRE (SoulFireBlock extends FireBlock)
+        // and any mod fire that extends FireBlock.
+        if (state.getBlock() instanceof FireBlock) return true;
+        return state.isOf(Blocks.MAGMA_BLOCK)
                 || state.isOf(Blocks.CAMPFIRE)
                 || state.isOf(Blocks.SOUL_CAMPFIRE)
                 || state.isOf(Blocks.CACTUS)
@@ -95,6 +108,25 @@ public final class BotHazardService {
                 // sentence: the bot becomes a sitting target for skeleton arrows and zombies.
                 // Also a trap near raids and pillager patrols.
                 || state.isOf(Blocks.COBWEB);
+    }
+
+    /**
+     * Subset of {@link #isDeadlyBlock} where mining the block out as a "rescue"
+     * is contraindicated: lava (a source block flows back from neighbours into
+     * the dug cell — bot stays in lava) and fire variants (the burning ground
+     * beneath, e.g. netherrack or any infiniburn block, re-ignites immediately).
+     *
+     * <p>Used by {@link BotRescueService#rescueFromBurial} to short-circuit its
+     * three mining branches and redirect to displacement-based escape. Other
+     * deadly blocks (magma, cactus, dripstone, sweet berry, wither rose, powder
+     * snow, cobweb) are solid/minable and mining them out reveals safe ground
+     * — those keep the original mine-to-escape behaviour.</p>
+     */
+    public static boolean isMiningContraindicatedHazard(BlockState state) {
+        if (state == null || state.isAir()) return false;
+        if (state.getFluidState().isIn(FluidTags.LAVA)) return true;
+        if (state.getBlock() instanceof FireBlock) return true;
+        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

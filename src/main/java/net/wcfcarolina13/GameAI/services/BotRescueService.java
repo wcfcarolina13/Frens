@@ -400,6 +400,14 @@ public final class BotRescueService {
             if (isRescueProtectedBlock(headState)) {
                 return attemptEscapeMovement(bot, world, feet, head);
             }
+            // Mining-contraindicated hazards (lava / fire variants): digging would only
+            // dig the bot deeper into danger — lava flows back into the dug cell, fire's
+            // burning ground re-ignites. Redirect to displacement-based escape.
+            if (BotHazardService.isMiningContraindicatedHazard(headState)) {
+                LOGGER.info("Bot {} headspace is {} — refusing to mine, redirecting to escape",
+                        bot.getName().getString(), headState.getBlock().getName().getString());
+                return attemptEscapeMovement(bot, world, feet, head);
+            }
             String keyword = preferredToolKeyword(headState);
             if (keyword != null) {
                 BotActions.selectHarvestToolOrHands(bot, keyword);
@@ -447,6 +455,14 @@ public final class BotRescueService {
                 if (isRescueProtectedBlock(targetState)) {
                     return attemptEscapeMovement(bot, world, feet, head);
                 }
+                // Mining-contraindicated hazard (lava / fire) in the escape direction:
+                // refuse to mine through it. Fall through to vertical displacement so
+                // we don't pick another direction that might be equally bad either.
+                if (BotHazardService.isMiningContraindicatedHazard(targetState)) {
+                    LOGGER.info("Bot {} escape-direction is {} — refusing to mine, redirecting to escape",
+                            bot.getName().getString(), targetState.getBlock().getName().getString());
+                    return attemptEscapeMovement(bot, world, feet, head);
+                }
                 String keyword = preferredToolKeyword(targetState);
                 if (keyword != null) {
                     BotActions.selectHarvestToolOrHands(bot, keyword);
@@ -481,6 +497,16 @@ public final class BotRescueService {
                 return false;
             }
             if (isRescueProtectedBlock(feetState)) {
+                return attemptEscapeMovement(bot, world, feet, head);
+            }
+            // Mining-contraindicated hazard at feet (lava / fire): the user's rule is
+            // that mining out of these just digs the bot deeper. Lava flows back from
+            // adjacent cells; fire's burning ground re-ignites. Redirect to the
+            // displacement-based escape, which BotHazardService's per-tick ring-search
+            // will also keep trying to refine on subsequent ticks.
+            if (BotHazardService.isMiningContraindicatedHazard(feetState)) {
+                LOGGER.info("Bot {} feet are in {} — refusing to mine, redirecting to escape",
+                        bot.getName().getString(), feetState.getBlock().getName().getString());
                 return attemptEscapeMovement(bot, world, feet, head);
             }
             String keyword = preferredToolKeyword(feetState);

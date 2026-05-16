@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Hazard classifier tag/class-based; burial rescue refuses to mine through lava or fire (2026-05-16, 1.1.111)
+
+Continuation of the 1.1.110 mod-block-compat work, broadening the same pattern to `BotHazardService`. Two changes:
+
+1. **`isDeadlyBlock` is now tag- and class-based for the fluid/fire categories.** Lava check switched from `state.isOf(Blocks.LAVA)` to `state.getFluidState().isIn(FluidTags.LAVA)` — auto-includes any mod fluid that opts into the vanilla lava tag (most do). Fire check switched from `state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)` to `state.getBlock() instanceof FireBlock` — auto-covers vanilla `SoulFireBlock` (which extends `FireBlock`) and any mod fire-block that extends the vanilla class. Magma / cactus / dripstone / sweet berry / wither rose / powder snow / cobweb stay explicit because vanilla offers no clean tag or class abstraction for them — mod variants will need to be added if they show up, per [[feedback-mod-block-compat-pattern]].
+
+2. **`BotRescueService.rescueFromBurial` no longer mines through lava or fire.** Per user rule: "Fire and lava are to be avoided; mining out of them would just dig the bot deeper into danger." Lava: a mined source block refills from neighboring lava flow — bot stays in lava. Fire: the burning ground beneath (netherrack, any infiniburn block) re-ignites the bot immediately. The fix adds a new `BotHazardService.isMiningContraindicatedHazard(state)` classifier (subset of `isDeadlyBlock` — only lava + fire-class) and short-circuits all three rescue mining branches (headspace mining, horizontal escape direction, feet mining) to `attemptEscapeMovement` when the target is mining-contraindicated. Other deadly blocks (magma, cactus, dripstone, etc.) still get mined out — those are solid/minable and mining them reveals safe ground.
+
+Per-tick displacement-based escape via `BotHazardService.tryEscapeHazardBlockAtFeet` continues to run independently, giving the bot multiple displacement attempts per second when stuck in lava/fire.
+
+Files: `GameAI/services/BotHazardService.java`, `GameAI/services/BotRescueService.java`.
+
 ## Burial rescue trusts vanilla physics; sinkable surface detector handles mod blocks (2026-05-16, 1.1.110)
 
 Wet Sand mod's "Soaked Sand" was tripping two false-positive paths: `BotRescueService.rescueFromBurial` flagged the bot as buried (and started mining its own feet with "I'm stuck in Soaked sand at feet! Mining with Iron Shovel..." chat spam), and `BotActions.applyMovementInput` rejected horizontal movement with `reason=feet-not-passable`. Both used hardcoded vanilla allowlists (Soul Sand / Mud / Muddy Mangrove Roots / Farmland / Dirt Path / Honey Block) — no mod variant was ever going to slot in cleanly.
