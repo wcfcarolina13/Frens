@@ -265,14 +265,10 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_WILDLIFE_CHICKEN,
             BotDialogueSounds.LINE_WILDLIFE_NICE_DAY,
             BotDialogueSounds.LINE_WILDLIFE_HEARD_WOLF,
-            // April 2026 handoff — animal-proximity reactions.
+            // Generic "I love animals" mood line — fires on surface daytime regardless
+            // of nearby fauna. Species-specific lines ("nice horse" etc.) live in
+            // PetProximityReactionService where they are gated on proximity + LoS.
             BotDialogueSounds.LINE_ANIMAL_NEARBY_LOVE_ANIMALS,
-            BotDialogueSounds.LINE_PARROT_NEARBY_NICE_BIRD,
-            BotDialogueSounds.LINE_HORSE_NEARBY_NICE_HORSE,
-            BotDialogueSounds.LINE_CAMEL_NEARBY_NICE_CAMEL,
-            BotDialogueSounds.LINE_WOLF_NEARBY_GOOD_DOG,
-            BotDialogueSounds.LINE_WOLF_NEARBY_LOVE_DOGS,
-            BotDialogueSounds.LINE_WOLF_NEARBY_SKINWALKER,
         };
 
         // Nether ambience (used when in the Nether)

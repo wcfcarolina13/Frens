@@ -5,6 +5,7 @@ import net.minecraft.entity.passive.AbstractNautilusEntity;
 import net.minecraft.entity.passive.CamelEntity;
 import net.minecraft.entity.passive.CatEntity;
 import net.minecraft.entity.passive.NautilusEntity;
+import net.minecraft.entity.passive.ParrotEntity;
 import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.server.MinecraftServer;
@@ -36,6 +37,10 @@ public final class PetProximityReactionService {
     private static final long MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L;
     private static final long NAUTILUS_COOLDOWN_MS = 10L * 60_000L;
     private static final long CAT_COOLDOWN_MS = 5L * 60_000L;
+    private static final long PARROT_COOLDOWN_MS = 5L * 60_000L;
+    private static final long CAMEL_COOLDOWN_MS = 5L * 60_000L;
+    private static final long HORSE_COOLDOWN_MS = 5L * 60_000L;
+    private static final long WOLF_OBSERVATION_COOLDOWN_MS = 5L * 60_000L;
 
     // Rarity weights: COMMON=10, UNCOMMON=5
     private static final int WEIGHT_COMMON = 10;
@@ -50,6 +55,10 @@ public final class PetProximityReactionService {
     private static final ConcurrentHashMap<UUID, Long> LAST_NAUTILUS_UNTAMED_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_NAUTILUS_TAMED_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_CAT_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_PARROT_NICE_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_CAMEL_NICE_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_HORSE_NICE_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_WOLF_OBSERVATION_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Float> WOLF_LAST_HEALTH = new ConcurrentHashMap<>();
 
     private static final class WeightedLine {
@@ -101,6 +110,30 @@ public final class PetProximityReactionService {
             new WeightedLine("cat_meow", "Meow.", BotDialogueSounds.LINE_CAT_MEOW, WEIGHT_UNCOMMON)
     };
 
+    // Species-specific "I see one right now" lines. Gated on proximity + LoS so the bot
+    // doesn't shout "nice camel" when there's no camel anywhere near or one is behind a wall.
+    // Audio was authored in the April 2026 handoff but originally wired into the blind
+    // WILDLIFE_CHATTER pool, which fired randomly on surface daytime regardless of fauna.
+    private static final WeightedLine[] PARROT_NICE_LINES = new WeightedLine[] {
+            new WeightedLine("parrot_nice_bird", "Nice bird!", BotDialogueSounds.LINE_PARROT_NEARBY_NICE_BIRD, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] CAMEL_NICE_LINES = new WeightedLine[] {
+            new WeightedLine("camel_nice_camel", "Nice camel.", BotDialogueSounds.LINE_CAMEL_NEARBY_NICE_CAMEL, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] HORSE_NICE_LINES = new WeightedLine[] {
+            new WeightedLine("horse_nice_horse", "Nice horse.", BotDialogueSounds.LINE_HORSE_NEARBY_NICE_HORSE, WEIGHT_UNCOMMON)
+    };
+
+    // Independent from WOLF_NEARBY_LINES (which is tamed-only "guard dog on duty" /
+    // "who's a menace"). These three fire on any visible wolf, wild or tame.
+    private static final WeightedLine[] WOLF_OBSERVATION_LINES = new WeightedLine[] {
+            new WeightedLine("wolf_good_dog", "Good dog!", BotDialogueSounds.LINE_WOLF_NEARBY_GOOD_DOG, WEIGHT_UNCOMMON),
+            new WeightedLine("wolf_love_dogs", "I love dogs.", BotDialogueSounds.LINE_WOLF_NEARBY_LOVE_DOGS, WEIGHT_UNCOMMON),
+            new WeightedLine("wolf_skinwalker", "Wait — that's not a dog.", BotDialogueSounds.LINE_WOLF_NEARBY_SKINWALKER, WEIGHT_UNCOMMON)
+    };
+
     private PetProximityReactionService() {
     }
 
@@ -133,6 +166,20 @@ public final class PetProximityReactionService {
 
             if (hasNearbyTamedCat(world, bot)) {
                 maybeCatNearby(bot);
+            }
+
+            // Species-specific "I see one right now" scans — proximity + LoS gated.
+            if (hasNearbyVisibleParrot(world, bot)) {
+                maybeParrotNice(bot);
+            }
+            if (hasNearbyVisibleCamel(world, bot)) {
+                maybeCamelNice(bot);
+            }
+            if (hasNearbyVisibleHorseLike(world, bot)) {
+                maybeHorseNice(bot);
+            }
+            if (hasNearbyVisibleWolf(world, bot)) {
+                maybeWolfObservation(bot);
             }
 
             // Nautilus scans run independent of the broad pet pool above; the broad pool
@@ -171,6 +218,11 @@ public final class PetProximityReactionService {
             case "nautilus_untamed", "nautilus_wild" -> playLine(bot, NAUTILUS_UNTAMED_LINES, lineId, LAST_NAUTILUS_UNTAMED_MS, 0L);
             case "nautilus_tamed" -> playLine(bot, NAUTILUS_TAMED_LINES, lineId, LAST_NAUTILUS_TAMED_MS, 0L);
             case "cat_nearby", "cat_meow" -> playLine(bot, CAT_NEARBY_LINES, lineId, LAST_CAT_MS, 0L);
+            case "parrot_nice", "parrot_nearby" -> playLine(bot, PARROT_NICE_LINES, lineId, LAST_PARROT_NICE_MS, 0L);
+            case "camel_nice", "camel_nearby" -> playLine(bot, CAMEL_NICE_LINES, lineId, LAST_CAMEL_NICE_MS, 0L);
+            case "horse_nice", "horse_nearby" -> playLine(bot, HORSE_NICE_LINES, lineId, LAST_HORSE_NICE_MS, 0L);
+            case "wolf_observation", "wolf_nearby_observation" ->
+                    playLine(bot, WOLF_OBSERVATION_LINES, lineId, LAST_WOLF_OBSERVATION_MS, 0L);
             default -> false;
         };
     }
@@ -249,6 +301,42 @@ public final class PetProximityReactionService {
         ).isEmpty();
     }
 
+    private static boolean hasNearbyVisibleParrot(ServerWorld world, ServerPlayerEntity bot) {
+        Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
+        return !world.getEntitiesByClass(
+                ParrotEntity.class,
+                box,
+                p -> p != null && p.isAlive() && EntityVisibilityUtil.canSee(bot, p)
+        ).isEmpty();
+    }
+
+    private static boolean hasNearbyVisibleCamel(ServerWorld world, ServerPlayerEntity bot) {
+        Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
+        return !world.getEntitiesByClass(
+                CamelEntity.class,
+                box,
+                c -> c != null && c.isAlive() && EntityVisibilityUtil.canSee(bot, c)
+        ).isEmpty();
+    }
+
+    private static boolean hasNearbyVisibleHorseLike(ServerWorld world, ServerPlayerEntity bot) {
+        Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
+        return !world.getEntitiesByClass(
+                AbstractHorseEntity.class,
+                box,
+                h -> h != null && h.isAlive() && EntityVisibilityUtil.canSee(bot, h)
+        ).isEmpty();
+    }
+
+    private static boolean hasNearbyVisibleWolf(ServerWorld world, ServerPlayerEntity bot) {
+        Box box = bot.getBoundingBox().expand(PET_RADIUS, 6.0D, PET_RADIUS);
+        return !world.getEntitiesByClass(
+                WolfEntity.class,
+                box,
+                w -> w != null && w.isAlive() && EntityVisibilityUtil.canSee(bot, w)
+        ).isEmpty();
+    }
+
     private static void maybeWolfNearby(ServerPlayerEntity bot) {
         if (RNG.nextDouble() > 0.20D) {
             return;
@@ -305,6 +393,34 @@ public final class PetProximityReactionService {
             return;
         }
         playLine(bot, CAT_NEARBY_LINES, null, LAST_CAT_MS, CAT_COOLDOWN_MS);
+    }
+
+    private static void maybeParrotNice(ServerPlayerEntity bot) {
+        if (RNG.nextDouble() > 0.20D) {
+            return;
+        }
+        playLine(bot, PARROT_NICE_LINES, null, LAST_PARROT_NICE_MS, PARROT_COOLDOWN_MS);
+    }
+
+    private static void maybeCamelNice(ServerPlayerEntity bot) {
+        if (RNG.nextDouble() > 0.20D) {
+            return;
+        }
+        playLine(bot, CAMEL_NICE_LINES, null, LAST_CAMEL_NICE_MS, CAMEL_COOLDOWN_MS);
+    }
+
+    private static void maybeHorseNice(ServerPlayerEntity bot) {
+        if (RNG.nextDouble() > 0.20D) {
+            return;
+        }
+        playLine(bot, HORSE_NICE_LINES, null, LAST_HORSE_NICE_MS, HORSE_COOLDOWN_MS);
+    }
+
+    private static void maybeWolfObservation(ServerPlayerEntity bot) {
+        if (RNG.nextDouble() > 0.20D) {
+            return;
+        }
+        playLine(bot, WOLF_OBSERVATION_LINES, null, LAST_WOLF_OBSERVATION_MS, WOLF_OBSERVATION_COOLDOWN_MS);
     }
 
     private static boolean playLine(ServerPlayerEntity bot,

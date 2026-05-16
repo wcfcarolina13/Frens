@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Species-specific "nice X" lines gated on proximity + LoS (2026-05-16, 1.1.109)
+
+The bot was shouting "nice camel" / "nice bird" / "nice horse" / "good dog!" / "I love dogs" / skinwalker callouts at random during surface daytime regardless of whether any such animal was nearby or visible. Root cause: the six species-specific lines authored in the April 2026 handoff were wired into `BotAmbientChatter.WILDLIFE_CHATTER`, a blind random pool that fires on a 20% roll whenever the bot is on the surface during the day — no entity-presence check, no LoS check.
+
+Fix:
+
+1. Removed the six species-specific entries from `WILDLIFE_CHATTER` (kept the generic `LINE_ANIMAL_NEARBY_LOVE_ANIMALS` mood line — that one is a "fauna in general" statement and is fine as ambient).
+2. Added four new species-gated trigger paths in `PetProximityReactionService` reusing the existing weighted-pool / cooldown / `playLine` infrastructure: `PARROT_NICE_LINES`, `CAMEL_NICE_LINES`, `HORSE_NICE_LINES` (each one-line), and `WOLF_OBSERVATION_LINES` (three lines). Each scans within `PET_RADIUS = 10` and applies `EntityVisibilityUtil.canSee` so the line only fires when the bot has an unobstructed eye-to-eye line of sight to the target. 5-minute per-pool cooldown so it stays a remark, not background chatter.
+3. `WOLF_OBSERVATION_LINES` is independent from the existing `WOLF_NEARBY_LINES` (which is tamed-only "guard dog on duty" / "who's a menace"). The observation pool fires on any visible wolf, wild or tamed, with its own cooldown so both can fire on the same scan tick.
+4. Debug triggers added: `/bot debug trigger parrot_nice|camel_nice|horse_nice|wolf_observation <bot>` plays each line on demand, bypassing cooldown.
+
+Horse-like scan uses `AbstractHorseEntity` with no `isTame()` filter — the line is "nice horse", not "well-trained horse", so wild horses/donkeys/mules/llamas qualify too.
+
+Files: `ChatUtils/BotAmbientChatter.java`, `GameAI/services/PetProximityReactionService.java`.
+
 ## TreeStuck escape clears stale abort latch (2026-05-10, 1.1.108)
 
 Follow-up audit of the same 1.1.107 log surfaced the *actual* reason the bot didn't catch up after the misfired teleport detector. Sequence:
