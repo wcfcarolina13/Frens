@@ -516,24 +516,34 @@ public final class SleepService {
         Item bedItem = bedItemOpt.get();
         BlockPos origin = bot.getBlockPos();
 
-        // Try a few placements around the bot. Ensure 2-block clearance for the bed footprint.
-        for (Direction facing : Direction.Type.HORIZONTAL) {
-            for (int r = 1; r <= radius; r++) {
-                BlockPos foot = origin.offset(facing, r);
-                if (!isPlaceableBedFoot(world, foot, facing)) {
-                    continue;
-                }
+        // Sweep a small grid around the bot rather than only the 4 cardinal axes. A bed needs
+        // two adjacent cells, so we test every horizontal cell in range and every horizontal
+        // facing for each — the original cardinal-only sweep failed when commander's bed
+        // blocked the cardinal lane (see 2026-05-10 sleep audit).
+        int rejected = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                BlockPos foot = origin.add(dx, 0, dz);
                 if (origin.getSquaredDistance(foot) > STAND_REACH_SQ) {
                     continue;
                 }
-                boolean placed = tryPlaceBed(bot, world, foot, facing, bedItem);
-                if (placed && world.getBlockState(foot).isIn(BlockTags.BEDS) && world.getBlockState(foot.offset(facing)).isIn(BlockTags.BEDS)) {
-                    LOGGER.info("Placed bed at {}", foot.toShortString());
-                    ChatUtils.sendSystemMessage(source, "Placed a bed.");
-                    return foot.toImmutable();
+                for (Direction facing : Direction.Type.HORIZONTAL) {
+                    if (!isPlaceableBedFoot(world, foot, facing)) {
+                        rejected++;
+                        continue;
+                    }
+                    boolean placed = tryPlaceBed(bot, world, foot, facing, bedItem);
+                    if (placed && world.getBlockState(foot).isIn(BlockTags.BEDS) && world.getBlockState(foot.offset(facing)).isIn(BlockTags.BEDS)) {
+                        LOGGER.info("Placed bed at {} facing {}", foot.toShortString(), facing);
+                        ChatUtils.sendSystemMessage(source, "Placed a bed.");
+                        return foot.toImmutable();
+                    }
                 }
             }
         }
+        LOGGER.info("placeBedNearby: no usable spot near {} (rejected {} candidate(s))",
+                origin.toShortString(), rejected);
         return null;
     }
 
@@ -598,10 +608,13 @@ public final class SleepService {
         BlockPos footBelow = foot.down();
         BlockPos headBelow = head.down();
 
-        if (!world.getBlockState(footBelow).isSolidBlock(world, footBelow)) return false;
-        if (!world.getBlockState(headBelow).isSolidBlock(world, headBelow)) return false;
-        if (!world.getBlockState(foot).isAir()) return false;
-        if (!world.getBlockState(head).isAir()) return false;
+        // Vanilla beds need a non-empty collision below (any full-or-partial top face),
+        // and a replaceable cell at foot/head — not strictly air, so we accept tall grass,
+        // snow layers, vines, etc. (see [feedback_isSolidBlock_footing_trap.md]).
+        if (world.getBlockState(footBelow).getCollisionShape(world, footBelow).isEmpty()) return false;
+        if (world.getBlockState(headBelow).getCollisionShape(world, headBelow).isEmpty()) return false;
+        if (!world.getBlockState(foot).isReplaceable()) return false;
+        if (!world.getBlockState(head).isReplaceable()) return false;
         if (!world.getBlockState(foot.up()).getCollisionShape(world, foot.up()).isEmpty()) return false;
         if (!world.getBlockState(head.up()).getCollisionShape(world, head.up()).isEmpty()) return false;
         return true;

@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Follow + sleep recovery: wolf-tp self-notify, co-sleep cooldown clears on failure, wider bed placement (2026-05-10, 1.1.107)
+
+User session log surfaced three coupled regressions during a long-distance follow + sleep flow:
+
+1. **Follow chain breaking on wolf-teleport.** When the bot caught up via wolf-teleport (~32-block jump), the external-teleport detector in `BotEventHandler#handleTick` saw the same-tick position delta exceed its 16-block threshold and called `TaskService.forceAbort` + cleared `state.followFixedGoal`. The bot then stopped chasing the commander. Fix: after `bot.teleport(...)` in `tryWolfTeleport`, prime the detector via the existing `notifyTravelArrival(uuid, pos, tick)` helper (the same one fast-travel uses). The detector treats the next-tick large delta as expected.
+
+2. **Co-sleep cooldown trapping the bot after a failed attempt.** `BotWakeUpDialogueService#triggerCoSleep` stamped `CO_SLEEP_QUEUED_TICK` *before* dispatching the sleep skill and never cleared it on failure. After one failed `SleepService.sleep` (e.g. no safe placement spot), the bot was locked out for 5 minutes — even though the commander kept laying beds nearby. Fix: in `scheduleCoSleep`'s `finally` block, when `success == false`, remove the cooldown stamp so the commander's next sleep edge re-queues the bot.
+
+3. **`SleepService.placeBedNearby` rejecting valid spots.** Two issues stacked: (a) the placement sweep only iterated 4 cardinal directions × 4 distances from the bot's exact tile, so a bed nestled near the commander's bed left every cardinal lane blocked; (b) `isPlaceableBedFoot` required `isSolidBlock` under the bed (rejecting top slabs, stairs, dirt paths, farmland) and required `isAir` at the bed cells (rejecting tall grass, snow layers, vines — all replaceable). Fix: sweep the full -radius..+radius grid around the bot and try every facing per cell; replace `isSolidBlock` with a non-empty top-collision check and replace `isAir` with `isReplaceable`. Per `feedback_isSolidBlock_footing_trap.md` — `isSolidBlock` keeps trapping us into rejecting legitimate floors.
+
+Files: `GameAI/BotEventHandler.java`, `GameAI/services/BotWakeUpDialogueService.java`, `GameAI/services/SleepService.java`.
+
 ## Deferred work cleared: fast-travel mount, cross-dim mount, post-arrival stability (2026-05-10, 1.1.106)
 
 User asked: "work on the deferred stuff but work with vanilla, not against it." Three deferred items resolved using vanilla's own APIs (`Entity.teleport`, `Entity.isInsideWall`, `MountPersistenceService.findRecordedMount` which already loads chunks via vanilla's `ChunkManager`).

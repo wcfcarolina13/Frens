@@ -7151,6 +7151,10 @@ public class BotEventHandler {
                 true);
         bot.setVelocity(Vec3d.ZERO);
         FOLLOW_LAST_TELEPORT_TICK.put(id, nowTick);
+        // Self-teleport: prime the external-teleport detector so next tick's >16-block delta
+        // isn't mistaken for a console teleport. Without this, the detector clears the follow
+        // goal and the bot stops chasing the commander mid-pursuit (see 1.1.107 log audit).
+        notifyTravelArrival(id, center, nowTick);
         LOGGER.info("Follow wolf-teleport: bot={} -> {} (near {})",
                 bot.getName().getString(),
                 safe.toShortString(),

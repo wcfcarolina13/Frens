@@ -298,6 +298,13 @@ public final class BotWakeUpDialogueService {
                 LOGGER.warn("Co-sleep failed for {}: {}", bot.getName().getString(), e.getMessage());
             } finally {
                 TaskService.complete(ticket, success);
+                if (!success) {
+                    // Clear the cooldown stamp set in triggerCoSleep so the commander's
+                    // next sleep edge re-queues the bot. Otherwise the bot is locked out
+                    // for 5 minutes after a single placement/path failure — and the user
+                    // manually laying beds nearby can't rescue the attempt.
+                    CO_SLEEP_QUEUED_TICK.remove(botUuid);
+                }
             }
         });
     }
