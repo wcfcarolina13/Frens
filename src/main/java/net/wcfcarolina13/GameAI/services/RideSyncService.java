@@ -93,12 +93,66 @@ public final class RideSyncService {
      * perform any world mutations — the actual interactEntity to reattach the
      * lead happens on the next {@link #maybeMaintainLeash} tick once the
      * mount entity is loaded.
+     *
+     * <p><b>Multi-leash handling:</b> if the bot already had a different mount
+     * UUID tracked, attempt to secure the previous one (tether to fence) before
+     * accepting the new. Without this guard the previous mount was silently
+     * orphaned — only the most-recently-leashed mount survived rejoin. Vanilla
+     * allows a player to leash multiple mobs, so we have to be defensive.</p>
      */
     public static void setLeashTarget(java.util.UUID botId, java.util.UUID mountId) {
         if (botId == null || mountId == null) {
             return;
         }
+        UUID previousMountId = LEASH_TARGET.get(botId);
+        if (previousMountId != null && !previousMountId.equals(mountId)) {
+            maybeSecureOrphanedLeash(botId, previousMountId, mountId);
+        }
         LEASH_TARGET.put(botId, mountId);
+    }
+
+    /**
+     * Called when {@link #setLeashTarget} is about to overwrite a previous
+     * mount UUID. Tries to tether the previous mount to a nearby fence so it
+     * doesn't drift off untracked. Best-effort — if the bot isn't currently
+     * in a server world, or the previous mount entity isn't loaded, just
+     * warns and lets the overwrite proceed.
+     */
+    private static void maybeSecureOrphanedLeash(UUID botId, UUID previousMountId, UUID newMountId) {
+        // Iterate registered bots to find the one being overwritten — we can't get
+        // a direct MinecraftServer handle from a UUID in this scope, so we walk the
+        // bot registry which carries its own server reference.
+        ServerPlayerEntity bot = null;
+        for (ServerPlayerEntity candidate : BotEventHandler.getRegisteredBots(null)) {
+            if (candidate != null && botId.equals(candidate.getUuid())) {
+                bot = candidate;
+                break;
+            }
+        }
+        if (bot == null || bot.isRemoved()) {
+            LOGGER.warn("LEASH_TARGET overwrite: bot={} previousMount={} newMount={} — bot not online, can't secure previous mount, it will be orphaned",
+                    botId, previousMountId, newMountId);
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
+        Entity previousMount = world.getEntity(previousMountId);
+        if (previousMount == null || previousMount.isRemoved()) {
+            LOGGER.info("LEASH_TARGET overwrite: bot={} previousMount={} not loaded — assuming already untracked",
+                    bot.getName().getString(), previousMountId);
+            return;
+        }
+        boolean secured = secureMountForTravel(bot, previousMount);
+        LOGGER.info("LEASH_TARGET overwrite auto-secure: bot={} previousMount={} newMount={} secured={}",
+                bot.getName().getString(), previousMountId, newMountId, secured);
+        if (!secured) {
+            // Couldn't tether the previous mount — at least record it persistently
+            // so it doesn't despawn before the player can retrieve it. The bot's
+            // own MountPersistenceService record won't track it anymore (about to
+            // be overwritten by the new mount), but setPersistent prevents despawn.
+            if (previousMount instanceof net.minecraft.entity.mob.MobEntity mob) {
+                mob.setPersistent();
+            }
+        }
     }
 
     /** Clear any LEASH_TARGET for the given bot (used on bot removal / death). */

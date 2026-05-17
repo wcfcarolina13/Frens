@@ -42,6 +42,16 @@ public final class MountPersistenceService {
     private static final int MAX_RESTORE_ATTEMPTS = 10;
     private static final long RESTORE_RETRY_TICKS = 20L;
 
+    /**
+     * Per-tick set of mount UUIDs already claimed by SOME bot during this tick's
+     * restore pass. Prevents two bots that rejoin together from fuzzy-matching to
+     * the same nearby entity (a real bug: Bot A and Bot B both lose their saved
+     * UUIDs, both fuzzy-match to the same horse, both record the same UUID, one
+     * bot ends up with an orphaned saved state pointing nowhere). Cleared at the
+     * end of each restore tick by {@link #onServerTick}.
+     */
+    private static final java.util.Set<UUID> RESTORE_CLAIMED_THIS_TICK = new java.util.HashSet<>();
+
     private MountPersistenceService() {}
 
     public static void recordMount(ServerPlayerEntity bot, Entity mount) {
@@ -178,33 +188,43 @@ public final class MountPersistenceService {
 
     public static void onServerTick(MinecraftServer server) {
         if (server == null || PENDING_RESTORE.isEmpty()) {
+            // No active restores, no need for the dedup set. Clear defensively in
+            // case stale state lingered from a prior tick that exited via exception.
+            RESTORE_CLAIMED_THIS_TICK.clear();
             return;
         }
         long now = server.getTicks();
-        PENDING_RESTORE.entrySet().removeIf(entry -> {
-            PendingRestore pending = entry.getValue();
-            if (pending == null) {
-                return true;
-            }
-            if (now < pending.nextTick()) {
+        try {
+            PENDING_RESTORE.entrySet().removeIf(entry -> {
+                PendingRestore pending = entry.getValue();
+                if (pending == null) {
+                    return true;
+                }
+                if (now < pending.nextTick()) {
+                    return false;
+                }
+                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(entry.getKey());
+                if (bot == null || bot.isRemoved()) {
+                    return true;
+                }
+                boolean restored = restoreMount(server, bot, pending.alias(), pending.saveWorldKey(), pending.state(), pending.attempt());
+                if (restored) {
+                    return true;
+                }
+                int nextAttempt = pending.attempt() + 1;
+                if (nextAttempt >= MAX_RESTORE_ATTEMPTS) {
+                    return true;
+                }
+                pending.attempt = nextAttempt;
+                pending.nextTick = now + RESTORE_RETRY_TICKS;
                 return false;
-            }
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(entry.getKey());
-            if (bot == null || bot.isRemoved()) {
-                return true;
-            }
-            boolean restored = restoreMount(server, bot, pending.alias(), pending.saveWorldKey(), pending.state(), pending.attempt());
-            if (restored) {
-                return true;
-            }
-            int nextAttempt = pending.attempt() + 1;
-            if (nextAttempt >= MAX_RESTORE_ATTEMPTS) {
-                return true;
-            }
-            pending.attempt = nextAttempt;
-            pending.nextTick = now + RESTORE_RETRY_TICKS;
-            return false;
-        });
+            });
+        } finally {
+            // Clear cross-bot claim set so the next tick's restore pass starts fresh.
+            // Claims are tick-scoped — once one bot has remounted/registered a UUID,
+            // subsequent ticks read the persisted state, not the in-memory claim.
+            RESTORE_CLAIMED_THIS_TICK.clear();
+        }
     }
 
     public static MountState getRecordedState(ServerPlayerEntity bot) {
@@ -275,13 +295,26 @@ public final class MountPersistenceService {
             }
         }
         Entity entity = world.getEntity(state.mountUuid());
+        // Vanilla rarely reuses UUIDs, but it CAN happen across long sessions or after
+        // entity NBT corruption / mod respawn cycles. If we got back an entity whose
+        // type doesn't match what we saved, treat it as a UUID collision: fall through
+        // to fuzzy-match (which IS type-filtered) so we find the right horse instead
+        // of silently mounting the wrong species. Without this gate, a bot could
+        // remount a llama or a cow that happened to be assigned the saved UUID.
+        if (entity != null && !entityTypeMatches(entity, state.mountType())) {
+            LOGGER.warn("Mount restore: UUID {} resolved to {} but saved type was {} — treating as collision, fuzzy-matching",
+                    state.mountUuid(), Registries.ENTITY_TYPE.getId(entity.getType()), state.mountType());
+            entity = null;
+        }
         if (entity instanceof MobEntity mob) {
             mob.setPersistent();
+            RESTORE_CLAIMED_THIS_TICK.add(entity.getUuid());
             LOGGER.info("Mount restore: found {} at {}", state.mountType(), pos.toShortString());
             maybeSecureOnRejoin(bot, entity, alias, saveWorldKey, state);
             return true;
         }
         if (entity != null) {
+            RESTORE_CLAIMED_THIS_TICK.add(entity.getUuid());
             LOGGER.info("Mount restore: found non-mob {} at {}", state.mountType(), pos.toShortString());
             maybeSecureOnRejoin(bot, entity, alias, saveWorldKey, state);
             return true;
@@ -306,6 +339,7 @@ public final class MountPersistenceService {
         }
         if (nearby instanceof MobEntity mob) {
             mob.setPersistent();
+            RESTORE_CLAIMED_THIS_TICK.add(nearby.getUuid());
             MountState updated = new MountState(nearby.getUuid(), state.worldId(), nearby.getX(), nearby.getY(),
                     nearby.getZ(), state.mountType(), state.saddled(), state.health(), state.wasMounted(), state.heldByBot());
             STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
@@ -334,10 +368,31 @@ public final class MountPersistenceService {
                 entity -> entity != null
                         && entity.isAlive()
                         && entity.getType() == type
+                        // Cross-bot dedup: skip any entity another bot already claimed
+                        // during this tick's restore pass. Without this, two bots
+                        // rejoining together with the same mount type nearby would
+                        // both pick the SAME closest entity and stomp each other's
+                        // saved state.
+                        && !RESTORE_CLAIMED_THIS_TICK.contains(entity.getUuid())
                         && (!needsSaddle || (entity instanceof MobEntity mob && mob.hasSaddleEquipped())));
         matches.sort((a, b) -> Double.compare(a.squaredDistanceTo(Vec3d.ofCenter(pos)),
                 b.squaredDistanceTo(Vec3d.ofCenter(pos))));
         return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    /**
+     * Returns true if the entity's actual type matches the saved type string.
+     * Used at rejoin to guard against UUID collisions (vanilla can reuse UUIDs
+     * after entity removal + new spawn — rare but observed in long sessions).
+     */
+    private static boolean entityTypeMatches(Entity entity, String savedTypeId) {
+        if (entity == null || savedTypeId == null) return false;
+        // Match either the full id ("minecraft:horse") or the trimmed alternate form
+        // ("EntityType{minecraft:horse}") that older saves might contain.
+        Identifier savedId = parseTypeId(savedTypeId);
+        if (savedId == null) return false;
+        Identifier actualId = Registries.ENTITY_TYPE.getId(entity.getType());
+        return actualId.equals(savedId);
     }
 
     private static Identifier parseTypeId(String raw) {

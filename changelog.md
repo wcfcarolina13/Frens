@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Multi-bot multi-mount hardening: type validation + cross-bot dedup + multi-leash auto-secure (2026-05-17, 1.1.125)
+
+Three coupled gaps in the multi-bot/multi-mount data flow, all on the rejoin/server-restart path. Failure modes: bot remounts wrong species when UUID is reused, two bots claim the same horse during simultaneous rejoin fuzzy-match, second-leashed mount silently orphaned on overwrite.
+
+**1. Type validation on direct UUID rejoin lookup.** [MountPersistenceService.restoreMount](src/main/java/net/wcfcarolina13/GameAI/services/MountPersistenceService.java#L277) was trusting `world.getEntity(state.mountUuid())` unconditionally. Vanilla can reuse UUIDs after entity removal + new spawn (rare but observed). New `entityTypeMatches` helper checks the resolved entity's type against the saved type id. On mismatch, treat as collision and fall through to fuzzy-match (which IS type-filtered) so the bot finds the right species instead of silently mounting a llama where a horse was expected.
+
+**2. Cross-bot fuzzy-match dedup.** Two bots both losing their saved UUIDs during the same restore pass could fall through to `findNearbyMount` and both pick the same nearest matching entity. New per-tick `RESTORE_CLAIMED_THIS_TICK` UUID set claimed by every successful restore (direct UUID hit OR fuzzy match) and consulted in `findNearbyMount`'s predicate. Cleared in `onServerTick`'s finally block so a thrown exception doesn't leave stale claims. Tick-scoped because subsequent ticks read the persisted state, not in-memory claims.
+
+**3. Multi-leash auto-secure on overwrite.** `RideSyncService.setLeashTarget` silently overwrote the previous mount UUID — vanilla allows a player to leash multiple mobs, so the previous mount was getting orphaned. New `maybeSecureOrphanedLeash` runs when an overwrite is about to happen: if the bot is online and the previous mount entity is loaded, try `secureMountForTravel` (tether to nearby fence). If that fails, at least call `setPersistent` so the mount doesn't despawn before the player can retrieve it. The new mount UUID then takes the slot cleanly.
+
+Three other items checked and confirmed already-solid (not part of this commit but worth documenting): per-bot per-world `STATE` isolation (`Map<botAlias, Map<worldKey, MountState>>` — never collides across bots), `BotPersistenceService.saveBotsBeforeShutdown` (enumerates all fake-players and persists mount state pre-shutdown), and chunk force-load on rejoin (`restoreMount` force-loads a 3×3 chunk box around the saved mount position before lookup, so persistent mounts in unloaded chunks reload reliably).
+
+Files: `GameAI/services/MountPersistenceService.java`, `GameAI/services/RideSyncService.java`.
+
 ## Mount tether-at-source before traveling alone; dismount invariant documented (2026-05-17, 1.1.124)
 
 Follow-up to the 1.1.116-119 mount-safety work. User pointed out that "refuse the whole travel if the mount can't fit at destination" is too harsh — if there's a fence nearby (or a fence can be placed), we should be able to tether the mount in place and let the bot proceed alone, just like the cross-dim path already does. Also: as a defensive invariant, any code path that teleports the bot without the mount must dismount first so there's no dangling rider/vehicle state.
