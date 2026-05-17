@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fence-tie reliability: reach-bounded fence search + verify + retry (2026-05-17, 1.1.118)
+
+User report: "Bot has trouble tying animals to fences, seems to just drop the lead when it tries." Cause: [secureMountIfPossible](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java#L3448) was picking fences up to 10 blocks from the vehicle, but vanilla `interactBlock` reach is ~4.5 blocks. The bot would call `interactFence` on an out-of-reach fence, vanilla's `LeadItem.attachHeldMobsToBlock` would silently no-op (no error, no knot, lead stays in hand), and the function returned `TETHERED_TO_FENCE` — caller thought success while the mob was still on the bot's lead. Subsequent state changes then "dropped" the lead (or it auto-broke at 10-block range).
+
+Three fixes:
+
+1. **Reach-bounded fence search.** New `findReachableFence` requires the fence to be within 4 blocks of the bot (interaction reach) AND within 7 blocks of the mob (the radius `attachHeldMobsToBlock` actually scans). Both constraints are required for the tether to succeed — picking a fence that satisfies only one was the silent-fail trap.
+2. **Verify post-interact.** New `tieToFenceWithVerify` runs `interactFence` then checks that the mob is no longer leashed to the bot. The leash should have transferred to a LeashKnotEntity at the fence; if it didn't, the attempt failed.
+3. **Retry once, then honest reporting.** On verification failure, re-select the lead and try one more time. If still failing, downgrade to `HELD_BY_BOT` (not `TETHERED_TO_FENCE`) and announce honestly to the player: "I tried to tie it but the lead won't take. Holding it instead." Player now knows the animal isn't secured.
+
+File: `GameAI/services/RideSyncService.java`.
+
 ## Horse safety: real-bbox placement + proactive in-wall rescue (2026-05-17, 1.1.117)
 
 Two fixes for "horse suffocates in tree after teleport."

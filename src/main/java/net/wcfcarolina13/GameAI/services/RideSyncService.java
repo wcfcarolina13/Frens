@@ -3470,9 +3470,13 @@ public final class RideSyncService {
             maybeAnnounceLeashIssue(bot, "I couldn't secure the lead on the horse.");
             return SecureResult.CANNOT_SECURE;
         }
-        // 10-block radius: wide enough to catch fences just outside a small
-        // pen corner but still close enough to be "walking distance".
-        BlockPos fencePos = findNearbyFence(world, vehicle.getBlockPos(), 10);
+        // Restrict to fences within vanilla interaction reach (~4.5 blocks) of the
+        // bot — and within attachHeldMobsToBlock's 7-block radius of the mob.
+        // Previously 10 blocks: the bot would pick a fence it couldn't actually
+        // reach, interactFence would silently no-op, and the function returned
+        // TETHERED_TO_FENCE while the mob stayed on the bot's lead — user-visible
+        // as "the bot tried to tie the horse but just kept the lead."
+        BlockPos fencePos = findReachableFence(world, bot, mob);
         if (fencePos == null) {
             fencePos = tryPlaceFenceNear(bot, vehicle.getBlockPos());
         }
@@ -3481,9 +3485,54 @@ public final class RideSyncService {
             LEASH_TARGET.put(bot.getUuid(), mob.getUuid());
             return SecureResult.HELD_BY_BOT;
         }
-        interactFence(bot, fencePos);
+        // Attempt + verify + retry. Vanilla LeadItem.attachHeldMobsToBlock is
+        // silent on failure (no error if mob isn't within 7 blocks of the fence
+        // or the lead's hotbar selection got dropped mid-interaction).
+        if (!tieToFenceWithVerify(bot, mob, fencePos)) {
+            // Retry once after re-selecting the lead and re-facing the fence.
+            BotActions.ensureHotbarItem(bot, Items.LEAD);
+            if (!tieToFenceWithVerify(bot, mob, fencePos)) {
+                maybeAnnounceLeashIssue(bot, pickRandom("I tried to tie it but the lead won't take. Holding it instead.", "Couldn't get the lead onto the fence. I'll keep hold of it."));
+                LEASH_TARGET.put(bot.getUuid(), mob.getUuid());
+                return SecureResult.HELD_BY_BOT;
+            }
+        }
         LEASH_TARGET.remove(bot.getUuid());
         return SecureResult.TETHERED_TO_FENCE;
+    }
+
+    /**
+     * Single attach attempt + verification. After {@link #interactFence}, the
+     * mob must no longer be leashed to the bot (the lead transferred to a
+     * LeashKnotEntity at the fence). Returns true iff the tether actually took.
+     */
+    private static boolean tieToFenceWithVerify(ServerPlayerEntity bot, MobEntity mob, BlockPos fencePos) {
+        interactFence(bot, fencePos);
+        return !mob.isLeashed() || mob.getLeashHolder() != bot;
+    }
+
+    /**
+     * Find the closest fence within vanilla interaction reach of the bot
+     * AND within attachHeldMobsToBlock's 7-block radius of the mob — both
+     * constraints are required for the tether to succeed.
+     */
+    private static BlockPos findReachableFence(ServerWorld world, ServerPlayerEntity bot, MobEntity mob) {
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        // Search a 4-block radius of the bot — vanilla reach is ~4.5, so
+        // anything beyond this won't accept an interactBlock call.
+        for (BlockPos pos : BlockPos.iterate(botPos.add(-4, -2, -4), botPos.add(4, 2, 4))) {
+            if (!world.getBlockState(pos).isIn(BlockTags.FENCES)) continue;
+            // Vanilla's attachHeldMobsToBlock requires the mob to be within 7 of the fence.
+            if (mob.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 49.0D) continue;
+            double dist = botPos.getSquaredDistance(pos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = pos.toImmutable();
+            }
+        }
+        return best;
     }
 
     /**
