@@ -20,6 +20,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -139,8 +140,16 @@ public final class BotPowderSnowRescueService {
 
         // Step 4: emergency teleport. Only fires after the bot is visibly freezing
         // (vanilla TicksFrozen reaches 140 → damage begins) and we've already tried
-        // the cheaper steps for the full sustained window.
+        // the cheaper steps for the full sustained window. Gated on
+        // SkillPreferences.teleportDuringSkills per the mod's rule that autonomous
+        // bot teleports must be explicitly enabled per-bot (or globally) — see
+        // [[project-powder-snow-rescue]]. If the toggle is off, the bot will keep
+        // trying the cheaper steps (leather, jump, bucket, mine) and die only if
+        // none of those resolve the situation.
         if (sustainedTicks >= TELEPORT_AFTER_TICKS && bot.getFrozenTicks() >= 140) {
+            if (!SkillPreferences.teleportDuringSkills(bot)) {
+                return;
+            }
             UUID id = bot.getUuid();
             long lastTp = LAST_TELEPORT_TICK.getOrDefault(id, -1L);
             if (lastTp < 0 || tick - lastTp >= TELEPORT_COOLDOWN_TICKS) {

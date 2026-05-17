@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Powder snow emergency teleport gated on teleportDuringSkills (2026-05-16, 1.1.114)
+
+Follow-up to 1.1.113. Per the mod's existing convention: autonomous bot teleports must be opt-in via `SkillPreferences.teleportDuringSkills` (per-bot setting with a global override, default OFF). The new powder-snow last-resort teleport was firing unconditionally — adding the same gate as every other autonomous teleport path.
+
+If the toggle is OFF (default), the rescue ladder still runs all the cheaper steps: equip leather armor, hold jump, empty-bucket scoop, water-bucket placement, mine-with-shovel-or-bare-hands. The emergency teleport simply doesn't fire. The bot only dies in powder snow if **all four** of: no leather armor in inventory, no empty bucket, no water bucket, can't mine out vertically (sealed by a roof or deep column with no breakable side), AND the teleport toggle is off. Rare combination, and the user can either enable the toggle or rescue manually.
+
+File: `GameAI/services/BotPowderSnowRescueService.java`.
+
 ## Powder snow rescue ladder: equip leather → jump → bucket/water/dig → teleport (2026-05-16, 1.1.113)
 
 Bot was getting trapped in powder snow and nearly freezing to death. Root cause: `BotRescueService.rescueFromBurial` doesn't fire on powder snow (no suffocation, empty collision shape), and `BotHazardService.tryEscapeHazardBlockAtFeet` does fire but its velocity-kick (0.45 horizontal + 0.15 upward) gets eaten by powder snow's ~15% movement multiplier. Bot barely moves while freezing.
