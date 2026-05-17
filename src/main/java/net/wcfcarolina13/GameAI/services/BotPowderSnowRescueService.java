@@ -74,6 +74,10 @@ public final class BotPowderSnowRescueService {
     private static final long TELEPORT_AFTER_TICKS = 200L;
     /** Per-bot cooldown between emergency teleports. */
     private static final long TELEPORT_COOLDOWN_TICKS = 200L;
+    /** Horizontal velocity applied when a safe lateral exit is detected. Powder snow's
+     *  ~15% movement multiplier eats most of this — the integrated drift across a few
+     *  ticks is what carries the bot out. */
+    private static final double LATERAL_ESCAPE_SPEED = 0.35D;
 
     private static final ConcurrentHashMap<UUID, Long> IN_POWDER_SNOW_SINCE_TICK = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_ESCALATION_TICK = new ConcurrentHashMap<>();
@@ -120,8 +124,23 @@ public final class BotPowderSnowRescueService {
             LOGGER.info("PowderSnow: bot={} equipped leather armor while inside powder snow", bot.getName().getString());
         }
 
-        // Step 2: hold jump. With leather boots → scaffolding-style climb. Without → slow
-        // swim up. Either way, the right vertical direction.
+        // Step 2: lateral walk-out if any horizontal neighbour at the same Y is a safe
+        // step-out (air with footing, not another hazard). Often the bot only sank into
+        // a 1-block snow pit and air is right next door — no climbing or mining needed.
+        // Vanilla physics still applies powder snow's cobweb-like drag (~15% multiplier),
+        // so the lateral drift is slow but reliable over a few ticks.
+        Direction lateralExit = findLateralWalkExit(world, feet);
+        if (lateralExit != null) {
+            bot.setVelocity(
+                    lateralExit.getOffsetX() * LATERAL_ESCAPE_SPEED,
+                    Math.max(bot.getVelocity().y, 0.15D),
+                    lateralExit.getOffsetZ() * LATERAL_ESCAPE_SPEED);
+            bot.velocityDirty = true;
+        }
+
+        // Step 3: hold jump. With leather boots → scaffolding-style climb. Without → slow
+        // swim up. Either way, the right vertical direction. Combines with lateral velocity
+        // above so the bot escapes via whichever path vanilla physics resolves first.
         bot.setJumping(true);
 
         // Step 3: sustained-failure escalation.
@@ -211,6 +230,52 @@ public final class BotPowderSnowRescueService {
     // ─────────────────────────────────────────────────────────────────────────
     // Step 3: active block removal
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns a cardinal direction the bot can walk out toward, or {@code null} if the
+     * powder snow cell is fully enclosed by walls / hazards / more powder snow.
+     *
+     * <p>"Walk out" requires the neighbour cell at the bot's current Y to be passable
+     * (air or thin walkable partial), the head cell above it to be passable, the cell
+     * below to provide footing, and neither the neighbour nor its head to be a hazard
+     * (don't escape from powder snow into lava — same {@link BotHazardService#isDeadlyBlock}
+     * gate the pathfinders use).</p>
+     */
+    private static Direction findLateralWalkExit(ServerWorld world, BlockPos feet) {
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos nFeet = feet.offset(dir);
+            BlockPos nHead = nFeet.up();
+            BlockPos nBelow = nFeet.down();
+            var fState = world.getBlockState(nFeet);
+            var hState = world.getBlockState(nHead);
+            var bState = world.getBlockState(nBelow);
+
+            // Don't trade powder snow for a worse hazard.
+            if (BotHazardService.isDeadlyBlock(fState)) continue;
+            if (BotHazardService.isDeadlyBlock(hState)) continue;
+            // Powder snow specifically — even though it's already on the deadly list,
+            // an explicit check makes the intent obvious for future readers.
+            if (fState.isOf(Blocks.POWDER_SNOW)) continue;
+            if (hState.isOf(Blocks.POWDER_SNOW)) continue;
+
+            if (!isCellPassable(world, nFeet, fState)) continue;
+            if (!isCellPassable(world, nHead, hState)) continue;
+
+            // Footing requirement: non-empty collision below OR a standable partial.
+            boolean hasFooting = !bState.getCollisionShape(world, nBelow).isEmpty()
+                    || WalkablePartialBlocks.isStandable(bState, world, nBelow);
+            if (!hasFooting) continue;
+
+            return dir;
+        }
+        return null;
+    }
+
+    private static boolean isCellPassable(ServerWorld world, BlockPos pos, net.minecraft.block.BlockState state) {
+        if (state.isAir()) return true;
+        if (state.getCollisionShape(world, pos).isEmpty()) return true;
+        return WalkablePartialBlocks.isPathable(state, world, pos);
+    }
 
     private static boolean tryEmptyBucketScoop(ServerPlayerEntity bot, ServerWorld world, BlockPos feet) {
         int slot = findInventorySlot(bot, Items.BUCKET);

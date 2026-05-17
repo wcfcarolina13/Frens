@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Powder snow rescue: walk out laterally when an open neighbor exists (2026-05-16, 1.1.115)
+
+Missed scenario in the 1.1.113 ladder: if the bot is in a shallow powder snow pit (or near the edge of any column) with a normal walkable cell at the same Y next door, "just walk out" is the cheapest and least disruptive recovery. No leather needed, no buckets consumed, no blocks destroyed, no teleport.
+
+New `findLateralWalkExit` step inserted between leather-equip and jump. Checks the four horizontal neighbours: each must have a passable feet cell (air or thin walkable partial), a passable head cell, real footing below, and neither cell can be deadly (don't escape powder snow into lava — same `BotHazardService.isDeadlyBlock` gate the pathfinders use, plus an explicit powder-snow check so we don't drift into more snow). If any direction qualifies, apply a 0.35-block/tick lateral velocity with a small upward kick. Powder snow's ~15% movement multiplier eats most of the impulse, but the integrated drift across a few ticks carries the bot out.
+
+`setJumping(true)` still runs in parallel — both attempts proceed simultaneously, and vanilla physics resolves whichever exit is faster. Bot in a 1-deep depression: drifts sideways onto the open ground. Bot in a deep column with no lateral exit: lateral helper returns null, falls through to climb-up via jump. Bot with leather boots: collision-shape change pops it onto the top of the column on the next tick anyway, so lateral velocity then just nudges it off the column edge if commanded somewhere.
+
+File: `GameAI/services/BotPowderSnowRescueService.java`.
+
 ## Powder snow emergency teleport gated on teleportDuringSkills (2026-05-16, 1.1.114)
 
 Follow-up to 1.1.113. Per the mod's existing convention: autonomous bot teleports must be opt-in via `SkillPreferences.teleportDuringSkills` (per-bot setting with a global override, default OFF). The new powder-snow last-resort teleport was firing unconditionally — adding the same gate as every other autonomous teleport path.
