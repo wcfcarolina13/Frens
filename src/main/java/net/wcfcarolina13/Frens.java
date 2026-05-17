@@ -1134,6 +1134,8 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotSnowballFightService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotStandDownService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotZzzSleepService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotPressurePlateDiagnosticService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFoodGivingService::onServerTick);
@@ -1185,6 +1187,16 @@ public class Frens implements ModInitializer {
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
+
+            // "zzz" chat trigger — fire as early as possible so the sleep attempt isn't
+            // delayed by other heavier chat handlers (LLM, quest matcher, etc.).
+            // Per-bot debouncing inside the service prevents duplicate triggers from
+            // multiple players spamming or repeated messages.
+            try {
+                net.wcfcarolina13.GameAI.services.BotZzzSleepService.handleChatTrigger(sender, raw);
+            } catch (Throwable t) {
+                LOGGER.warn("zzz handler threw: {}", t.toString());
+            }
 
             // Quest usability: allow a bare "quest"/"mission" ask to target the nearest bot.
             // This keeps the feature discoverable without requiring "<botname> quest".

@@ -1609,6 +1609,15 @@ public class BotEventHandler {
         }
         BotArrowRecoveryService.tickArrowTracking(bot, server, !augmentedHostiles.isEmpty());
 
+        // ---- Creeper fuse backoff (all modes, pre-empts skills + follow) ----
+        // Always-on defensive interrupt: if any ignited creeper is within range,
+        // back the bot off to a safe distance before doing ANYTHING else this
+        // tick. Owns its own ABORT_LATCH lifecycle so worker-thread skills stop
+        // fighting our movement inputs. See BotCreeperDefenseService.
+        if (net.wcfcarolina13.GameAI.services.BotCreeperDefenseService.tickBackoff(bot, server)) {
+            return true;
+        }
+
         // ---- Post-combat drop/arrow sweep (all modes) ----
         if (augmentedHostiles.isEmpty()) {
             BotCombatCalloutService.noteHostilesCleared(bot, server.getTicks());

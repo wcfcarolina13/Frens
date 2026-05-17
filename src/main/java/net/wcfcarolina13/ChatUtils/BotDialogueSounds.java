@@ -858,6 +858,7 @@ public final class BotDialogueSounds {
 
     // Sniffer sighting — rare cute mob.
     public static final SoundEvent LINE_SNIFFER_DINOSAUR = register("bot.line.sniffer_dinosaur");
+    public static final SoundEvent LINE_SNIFFER_CUTEST_THING = register("bot.line.sniffer_cutest_thing");
 
     // Nether-mob proximity reactions.
     public static final SoundEvent LINE_ZOMBIFIED_PIGLIN_PORKCHOP = register("bot.line.zombified_piglin_porkchop");
@@ -878,6 +879,8 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_PANDA_LAZY = register("bot.line.panda_lazy");
     public static final SoundEvent LINE_PANDA_BROWN = register("bot.line.panda_brown");
     public static final SoundEvent LINE_PANDA_AGGRESSIVE = register("bot.line.panda_aggressive");
+    public static final SoundEvent LINE_PANDA_PLAYFUL = register("bot.line.panda_playful");
+    public static final SoundEvent LINE_PANDA_WEAK = register("bot.line.panda_weak");
 
     // Cute-animal "can we keep it?" pool — fires near various untamed cute mobs.
     public static final SoundEvent LINE_CUTE_ANIMAL_KEEP_IT = register("bot.line.cute_animal_keep_it");

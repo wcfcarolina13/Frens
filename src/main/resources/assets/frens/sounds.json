@@ -10352,6 +10352,10 @@
       }
     ]
   },
+  "bot.line.sniffer_cutest_thing": {
+    "category": "voice",
+    "sounds": []
+  },
   "bot.line.zombified_piglin_porkchop": {
     "category": "voice",
     "sounds": [
@@ -10452,6 +10456,14 @@
     ]
   },
   "bot.line.panda_aggressive": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_playful": {
+    "category": "voice",
+    "sounds": []
+  },
+  "bot.line.panda_weak": {
     "category": "voice",
     "sounds": []
   },

@@ -221,9 +221,10 @@ public final class CompanionContextReactionService {
             new WeightedLine("enderman_spotted_dont_look", "Don't look at it.", BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, WEIGHT_COMMON)
     };
 
-    // Sniffer — rare cute mob, "Dinosaur." reaction.
+    // Sniffer — rare cute mob, "Dinosaur." reaction + alternate "cutest thing" line.
     private static final WeightedLine[] SNIFFER_NEARBY_LINES = new WeightedLine[] {
-            new WeightedLine("sniffer_dinosaur", "Dinosaur.", BotDialogueSounds.LINE_SNIFFER_DINOSAUR, WEIGHT_COMMON)
+            new WeightedLine("sniffer_dinosaur", "Dinosaur.", BotDialogueSounds.LINE_SNIFFER_DINOSAUR, WEIGHT_COMMON),
+            new WeightedLine("sniffer_cutest_thing", "That's the cutest thing I've ever seen.", BotDialogueSounds.LINE_SNIFFER_CUTEST_THING, WEIGHT_COMMON)
     };
 
     // Nether neighbours — three separate pools, each its own cooldown so the bot
@@ -280,6 +281,14 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] PANDA_AGGRESSIVE_LINES = new WeightedLine[] {
             new WeightedLine("panda_aggressive", "That one looks angry. Give it space.", BotDialogueSounds.LINE_PANDA_AGGRESSIVE, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PANDA_PLAYFUL_LINES = new WeightedLine[] {
+            new WeightedLine("panda_playful", "Look at it go!", BotDialogueSounds.LINE_PANDA_PLAYFUL, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PANDA_WEAK_LINES = new WeightedLine[] {
+            new WeightedLine("panda_weak", "Aw, that little one looks fragile.", BotDialogueSounds.LINE_PANDA_WEAK, WEIGHT_COMMON)
     };
 
     // Guardian (regular) — proximity vs laser-charging are split into two pools.
@@ -2058,13 +2067,17 @@ public final class CompanionContextReactionService {
         boolean hasAggressive = false;
         boolean hasWorried = false;
         boolean hasLazy = false;
+        boolean hasPlayful = false;
+        boolean hasWeak = false;
         for (PandaEntity p : pandas) {
             switch (p.getMainGene()) {
                 case BROWN -> hasBrown = true;
                 case AGGRESSIVE -> hasAggressive = true;
                 case WORRIED -> hasWorried = true;
                 case LAZY -> hasLazy = true;
-                default -> { /* NORMAL / PLAYFUL / WEAK don't have lines */ }
+                case PLAYFUL -> hasPlayful = true;
+                case WEAK -> hasWeak = true;
+                default -> { /* NORMAL gene is unremarkable */ }
             }
         }
 
@@ -2078,8 +2091,18 @@ public final class CompanionContextReactionService {
             EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }
+        if (hasWeak && RNG.nextDouble() <= 0.10D
+                && tryTrigger(bot, "panda_weak", PANDA_WEAK_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
         if (hasWorried && RNG.nextDouble() <= 0.08D
                 && tryTrigger(bot, "panda_worried", PANDA_WORRIED_LINES, null, false)) {
+            EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
+            return true;
+        }
+        if (hasPlayful && RNG.nextDouble() <= 0.07D
+                && tryTrigger(bot, "panda_playful", PANDA_PLAYFUL_LINES, null, false)) {
             EmotecraftBridge.playEmote(bot, EmotecraftBridge.EmoteId.POINT);
             return true;
         }

@@ -9,5 +9,6 @@
   "key.frens.recruit_contact": "Frens: Initiate Contact (village)",
   "key.frens.zone_confirm": "Frens: Confirm Zone / Toggle View",
   "key.frens.rescue_teleport": "Frens: Rescue Teleport (un-stick bot)",
+  "key.frens.stand_down_look": "Frens: Stand Down (look target — 60s pause)",
   "item.frens.wizard_tome": "Wizard's Tome"
 }

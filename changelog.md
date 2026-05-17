@@ -2,6 +2,97 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Pressure-plate stuck observability (2026-05-17, 1.1.130)
+
+The "bot still gets stuck for too long at doorways and pressure plates" complaint from the Notes-list audit. Doorway side was already handled by [MovementService.java:2389-2410](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java#L2389-L2410) (stuck-near-door auto-close after 8+ attempts within 4 blocks). Pressure-plate side had no instrumentation — plates were just marked walkable in [WalkablePartialBlocks.java:78](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java#L78) with no stuck-detection or oscillation tracking.
+
+Without a confirmed reproduction it would be reckless to ship a speculative fix that might regress the cases where the pathfinder already handles plates correctly (most of the time it does — plates are passable, you just walk over them). Two suspected failure modes:
+
+1. **Plate-controlled door / gate / piston ahead** — bot pathfinds a route that crosses a plate but doesn't model the plate as "I need to STAND on this to keep the iron door open" or "stepping past this plate closes the gate behind me." Pathfinder treats the plate as a normal walkable cell.
+2. **Oscillation** — bot steps on plate → door opens → bot walks past → door closes behind it → bot turns back for a drop / mob / commander → re-steps on plate → repeat. Classic A* + redstone-state-blind interaction.
+
+Shipping pure observability so the next time the user hits it, the logs tell us which failure mode it is and we fix the right thing instead of guessing.
+
+New [BotPressurePlateDiagnosticService](src/main/java/net/wcfcarolina13/GameAI/services/BotPressurePlateDiagnosticService.java) ticked from [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) at 10-tick cadence. Two signals:
+
+- **`[plate-stuck]`** — bot's block position hasn't changed for ≥60 ticks (3 s) AND an `AbstractPressurePlateBlock` is within 2 blocks of its feet. Logs once per bot per 30 s.
+- **`[plate-osc]`** — bot transitioned on/off a pressure plate ≥3 times within a 100-tick (5 s) sliding window. Logs once per bot per 30 s.
+
+Both signals include the bot name, plate position, feet position, and dimension so a single log line is enough to repro. Throttled to prevent flood. **No behavior change** — purely a diagnostic feed.
+
+When a log entry appears in the field, the next pass becomes a targeted fix (likely either pathfinder-side plate-controlled-blocker awareness for case 1, or a short anti-oscillation cooldown that prevents re-stepping the same plate within N ticks for case 2). Same approach the [NavHazardCache visibility surfacing](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) used in 1.1.101 — instrument first, fix from data.
+
+Files: `GameAI/services/BotPressurePlateDiagnosticService.java` (new, ~175 lines), `Frens.java` (1-line tick registration).
+
+## zzz refuses mounted bots with a hint (2026-05-17, 1.1.129)
+
+Follow-up to 1.1.128. User asked: how does zzz handle a bot mounted on horse/boat/minecart? Investigation:
+
+- **Vanilla normal-player path** (verified via Yarn 1.21.11 mappings — `Entity.readRootVehicle` / `writeRootVehicle` exist on `net.minecraft.entity.Entity`, and the [Player.dat format wiki page](https://minecraft.wiki/w/Player.dat_format) documents the `RootVehicle` NBT compound): vanilla serializes the entire vehicle (with full Entity NBT, not just a reference) INSIDE the player's .dat file on disconnect, and recreates+remounts the vehicle on reconnect. Works for horses, boats, minecarts, nested passenger chains.
+- **Fake-player divergence** (per the load-bearing comment at [BotPersistenceService.java:222-228](src/main/java/net/wcfcarolina13/GameAI/services/BotPersistenceService.java#L222-L228)): vanilla's `savePlayerData` does NOT write RootVehicle for fake players — verified empirically by scanning a saved bot .dat file. Frens compensates via [MountPersistenceService](src/main/java/net/wcfcarolina13/GameAI/services/MountPersistenceService.java) which dismounts on disconnect, calls `setPersistent()` on mob mounts so they don't despawn, records UUID-keyed state, and on rejoin force-loads chunks → finds entity by UUID → remounts. The non-mob branch at [L318](src/main/java/net/wcfcarolina13/GameAI/services/MountPersistenceService.java#L318) handles boats and minecarts too.
+
+So the existing dismount-respawn-remount machinery handles all three vehicle types correctly. The only awkward part of the zzz flow with a mounted bot was the doomed 20-second `WAITING_LOGOFF` wait — vanilla refuses sleep while mounted, so the sleep attempt was guaranteed to fail. The bot would sit there for 20 s, then log off, then respawn, then auto-remount. Functional but jarring.
+
+**Fix**: skip the whole attempt when the bot has a vehicle. Send the user a clear hint matching vanilla's semantics — "{bot} can't sleep while mounted — dismount them first." User dismounts via the `'` hotkey (or by getting the bot to stand on land), then re-types zzz. Single-line check in [BotZzzSleepService.handleChatTrigger](src/main/java/net/wcfcarolina13/GameAI/services/BotZzzSleepService.java) at the per-bot loop, BEFORE the ACTIVE map is touched so debounce semantics are unaffected.
+
+Files: `GameAI/services/BotZzzSleepService.java` (6-line insert in `handleChatTrigger`).
+
+## Chat "zzz" sleep trigger + failure-driven bot logoff/respawn (2026-05-17, 1.1.128)
+
+User-requested QoL flow: when any player types "zzz" (3+ z's, case-insensitive, nothing else) in chat, every Frens bot in the sender's dimension within 48 blocks tries to sleep. If a bot can't sleep AND the sender is themselves sleeping 20 s later, the bot "logs off" — its fake-player entity is removed from the world (state persisted) and it waits until either daytime or no same-world non-bot player is sleeping, then respawns at the spot where it logged off.
+
+New service [BotZzzSleepService](src/main/java/net/wcfcarolina13/GameAI/services/BotZzzSleepService.java) owns the whole state machine. Three coupled pieces:
+
+**1. Chat hook with per-bot debounce.** Wired into the existing `ServerMessageEvents.CHAT_MESSAGE` block in [Frens.java:1188-1198](src/main/java/net/wcfcarolina13/Frens.java#L1188-L1198), positioned BEFORE the LLM/quest handlers so a zzz never gets eaten by another consumer. Regex `^z{3,}$` case-insensitive on trimmed text — strict so "zzz lol" or "zz" don't match. Per-bot ACTIVE map keys on UUID: any bot already in ATTEMPTING / WAITING_LOGOFF state, or currently `isSleeping()`, ignores further triggers. Multiple players spamming "zzzzz" or one player mashing the same message → exactly one sleep attempt per bot, no stacking. The 48-block radius scopes "your zzz" to the bots actually at your base, not every bot on the server.
+
+**2. Failure → logoff state machine.** `tryAttemptSleep` runs the existing [SleepService.sleep](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java#L58) via `server.execute` to stay on the server thread. On success the entry clears. On failure the bot transitions to `WAITING_LOGOFF(deadlineTick = nowTick + 400)`. Two early-exits prevent dumb logoff: if the bot is in Nether/End (`SleepService.dimensionAllowsBeds` will never return true there) we clear immediately, and at the deadline if the sender isn't `isSleeping()` we cancel — no point logging off if the player isn't actually committed to the sleep cycle.
+
+**3. Logoff/respawn cycle.** `beginLogoff` mirrors the proven disconnect path from [NavigationArtifactService.respawnBotAtDestination](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L1300): `BotPersistenceService.onBotDisconnect` → `removeFromPlayerManager` → `bot.discard()`. Bot pos/yaw/pitch/dimension/gamemode + name go into a `LoggedOff` record persisted to `<configDir>/frens/sleep_logoff_state.json` so the cycle survives server restart. Wake monitor ticks every 40 ticks (2 s — fast enough, not noisy): for each logged-off bot, checks the target world's time-of-day; if `tod ∈ [0, 12000)` (daytime) → respawn via [createFakePlayer.createFake](src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java#L63). Otherwise checks if any non-bot player in the SAME dimension is currently sleeping; if no human is sleeping AND at least one human is in that world, respawns. (If no human is in the dim at all, the bot waits for time to tick naturally to dawn.)
+
+**Dimension philosophy** matches the rest of the mod (see [SleepService.java:456-461](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java#L456-L461), [BotAutoReturnSunsetService.java:260-265](src/main/java/net/wcfcarolina13/GameAI/services/BotAutoReturnSunsetService.java#L260-L265)): the wake check only counts players in the bot's own dimension. A commander in the Nether (where sleep is impossible) doesn't block an Overworld bot's wake conditions. Confirmed during the audit that this composes correctly with the existing dimension gates — bot in Overworld + commander in Nether → existing autonomous-sleep path lets the bot sleep on its own, no change needed.
+
+**Edge cases handled:** bot is removed mid-cycle → entry purged on next tick. Bot succeeds in sleeping after a delayed bed opens up → entry purged via `bot.isSleeping()` check. Sender disconnects before deadline → at deadline the sleeping check finds `sender == null` → no logoff. Server shutdown with logged-off bots → state survives; on restart, `diskLoaded` guard triggers `loadFromDisk()` on first tick and the wake monitor picks up where it left off. Multiple bots near the same sender → each independent ACTIVE entry, each independent logoff/respawn decision.
+
+Files: `GameAI/services/BotZzzSleepService.java` (new, ~390 lines), `Frens.java` (chat hook + tick registration, 6-line + 1-line inserts).
+
+## Notes-list cleanup pass: panda/sniffer dialogue gaps, sleep-share gating, stand-down hotkey (2026-05-17, 1.1.127)
+
+Three small follow-ups from the 2026-05-17 Notes-list audit, bundled because they don't share code paths but each is too small for its own release. None of them touch shared runtime state.
+
+**1. Panda variant dialogue + sniffer alt line.** `tryPandaNearby` in [CompanionContextReactionService.java:2050-2110](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L2050-L2110) previously had a fallthrough comment `NORMAL / PLAYFUL / WEAK don't have lines`. Added lines for two of the three:
+
+- `panda_playful` → "Look at it go!" (7% trigger weight)
+- `panda_weak` → "Aw, that little one looks fragile." (10% trigger weight, slotted in priority above WORRIED since fragile cubs are more visually distinctive than worried adults)
+- `sniffer_cutest_thing` → "That's the cutest thing I've ever seen." (added alongside the existing `sniffer_dinosaur` line so the pool picks one or the other)
+
+NORMAL gene intentionally stays unremarked — too common to comment on every time. New SoundEvents registered in [BotDialogueSounds.java](src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java) and stub `sounds.json` entries added with empty `sounds: []` arrays, matching the same pattern `panda_aggressive` already uses while awaiting voice recording. Until OGGs are recorded, lines fall through to chat + overhead bubble — same UX as the silent panda_aggressive line that's already shipping.
+
+**2. Sleep-share gating in [SleepService.java](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java).** User complaint: "Bot doesn't put down beds that are in its inventory if the player sleeps and there is only one bed nearby." The prior logic ([L78-97](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java#L78-L97)) filtered occupied beds out of `findNearbyBedFeet`, then fell into the craft+place branch if none remained — so a base with one bed that the player was sleeping in would trigger the bot to set up a second redundant bed. Added a short-circuit: if any non-bot player within 32 blocks is currently sleeping AND it's a valid sleep time, suppress the placement entirely and report "Someone's already sleeping — I'll wait it out." The sleeping player's bed advances time for the bot anyway, so a second bed is wasted work. New helper `isAnyPlayerSleepingNearby` skips other Frens bots via `BotRegistry.isRegistered` so a follower bot's sleep doesn't also suppress.
+
+**3. Stand-down hotkey.** [BotStandDownService](src/main/java/net/wcfcarolina13/GameAI/services/BotStandDownService.java) and the `/bot standdown` command have existed since 2026-04-10 but were only reachable via slot 1 of the hotkey overlay (`executeOverlayHotkeySelection`). Added a dedicated unbound keybind `KEY_STAND_DOWN_LOOK` in [FrensClient.java](src/main/java/net/wcfcarolina13/FrensClient.java) that calls `handleStandDownLook(client)` directly — same look-target logic, no overlay round-trip. Unbound by default (like rescue teleport) so users opt in via Controls without keybind collisions. Lang key added: `key.frens.stand_down_look = "Frens: Stand Down (look target — 60s pause)"`.
+
+Files: `ChatUtils/BotDialogueSounds.java`, `GameAI/services/CompanionContextReactionService.java`, `GameAI/services/SleepService.java`, `FrensClient.java`, `resources/assets/frens/sounds.json`, `resources/assets/frens/lang/en_us.json`.
+
+## Creeper fuse backoff: always-on defensive interrupt (2026-05-17, 1.1.126)
+
+The bot had no defensive logic against ignited creepers outside of an inline block in [BotEventHandler.engageHostiles](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3877) which only fires once combat is already engaged. While mining, drop-sweeping, following, or idling, the bot would happily continue what it was doing while a creeper swelled next to it. The existing [BotCombatCalloutService](src/main/java/net/wcfcarolina13/GameAI/services/BotCombatCalloutService.java) only emitted audio reactions to creepers, not defensive movement. Audit notes from the 2026-05-17 Notes-list pass confirmed this as the highest-impact remaining safety gap.
+
+New [BotCreeperDefenseService](src/main/java/net/wcfcarolina13/GameAI/services/BotCreeperDefenseService.java) is a per-bot defensive interrupt invoked early in [BotEventHandler.updateBehavior](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L1611) (which runs every tick per bot via `AutoFaceEntity`). When `tickBackoff` returns true, the caller short-circuits and the bot is driven directly away from the closest ignited creeper at sprint speed.
+
+Detection: per-tick scan via `world.getEntitiesByClass(CreeperEntity.class, ±16, c -> c.isAlive() && c.isIgnited())`. The `isIgnited()` gate flips true for BOTH flint/steel ignition AND vanilla `CreeperIgniteGoal` proximity swell, so it covers every path. Distant creepers (≥4 blocks) require line-of-sight via `bot.canSee(creeper)` — walls block both vanilla ignition and explosion damage, so wall-blocked creepers don't need a panic response.
+
+Pre-emption: on first engagement the service force-aborts any active task via `TaskService.forceAbort(uuid, "creeper-fuse")`, cancels and suppresses drop-sweep for 3 s via `DropSweepService.requestCancel` + `suppressFor`, lowers any raised shield (to allow movement), and dismounts if mounted. The abort-latch ownership is tracked per-bot and cleared via `TaskService.clearAbortLatch` when backoff resolves, per [[feedback-abort-latch-ownership]].
+
+Backoff target distance: **9 blocks for a normal creeper, 17 for a charged (powered) one** — vanilla explosion damage radius is `2 × power − distance`, so normal blast damages out to ~7 blocks and charged out to ~14; the extra margin covers travel time during the ~1.5 s fuse window. Movement uses `FollowMovementService.moveToward(bot, fleeTarget, 1.0, sprint, null)` — the same primitive the inline engage-hostiles flee already uses.
+
+Release conditions (any): creeper UUID no longer resolves, creeper dies/un-ignites, safe distance held for ≥10 ticks (hysteresis to prevent oscillation), or hard 60-tick timeout (vanilla fuse is ~30 ticks; doubled for safety). On release `BotActions.stop` is called and the abort latch is cleared if we owned it.
+
+Edge cases handled: charged creepers (larger safe distance), wall LOS (skip distant blocked threats), submerged in water (skip sprint), mounted (dismount before backoff), cornered (stuck detection via `bestDistance` not growing ≥0.3 over 20 ticks → raise shield via `BotActions.raiseShieldFacing`). Skill resume is the user's job after backoff (force-abort is intentional — pause-and-resume across a 1.5 s creeper emergency is too brittle).
+
+The existing inline creeper flee at [BotEventHandler.engageHostiles:3877-3948](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3877-L3948) stays in place — it still handles the not-yet-ignited but in-combat case (bot fighting a creeper that hasn't started swelling). The new service handles the ignited-or-about-to-blow case and runs strictly earlier in the per-tick dispatch.
+
+Files: `GameAI/services/BotCreeperDefenseService.java` (new, 240 lines), `GameAI/BotEventHandler.java` (8-line insert).
+
 ## Multi-bot multi-mount hardening: type validation + cross-bot dedup + multi-leash auto-secure (2026-05-17, 1.1.125)
 
 Three coupled gaps in the multi-bot/multi-mount data flow, all on the rejoin/server-restart path. Failure modes: bot remounts wrong species when UUID is reused, two bots claim the same horse during simultaneous rejoin fuzzy-match, second-leashed mount silently orphaned on overwrite.

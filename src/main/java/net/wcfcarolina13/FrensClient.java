@@ -76,6 +76,7 @@ public class FrensClient implements ClientModInitializer {
     private static KeyBinding KEY_RECRUIT_CONTACT;
     private static KeyBinding KEY_ZONE_CONFIRM;
     private static KeyBinding KEY_RESCUE_TELEPORT;
+    private static KeyBinding KEY_STAND_DOWN_LOOK;
 
     /** Set at mod init if the upstream "ai-player" mod is also installed. Triggers a
      *  one-shot chat warning once the player joins — see onInitializeClient for details. */
@@ -565,6 +566,16 @@ public class FrensClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        // Unbound by default — stand-down pauses follow + drop-sweep for 60s without
+        // canceling the active task. Useful when sniping mobs and you don't want the
+        // bot running out to fetch the XP orbs / drops. Already reachable as slot 1 in
+        // the hotkey overlay; this gives users a direct keybind option.
+        KEY_STAND_DOWN_LOOK = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.frens.stand_down_look",
+            GLFW.GLFW_KEY_UNKNOWN,
+            KeyBinding.Category.MISC
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
                 modeSelectionRequired = false;
@@ -662,6 +673,9 @@ public class FrensClient implements ClientModInitializer {
             }
             if (KEY_RESUME.wasPressed()) {
                 handleResumeKey(client);
+            }
+            if (KEY_STAND_DOWN_LOOK.wasPressed()) {
+                handleStandDownLook(client);
             }
             handlePendingPreviewControls(client);
             tickStopHoldBehavior(client);

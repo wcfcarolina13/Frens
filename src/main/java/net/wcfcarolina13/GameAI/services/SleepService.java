@@ -89,6 +89,16 @@ public final class SleepService {
             }
         }
 
+        // Suppress own-bed crafting/placement when a nearby player is already
+        // sleeping. The sleeping player will advance time to morning, so a
+        // second bed would be wasted work AND clutter the base. This handles
+        // the "only one bed nearby + commander is in it" case where filtering
+        // the occupied bed would otherwise drop us into the craft+place branch.
+        if (canSleepNow && isAnyPlayerSleepingNearby(bot, world, 32)) {
+            ChatUtils.sendSystemMessage(source, "Someone's already sleeping — I'll wait it out.");
+            return false;
+        }
+
         if (!nearbyBeds.isEmpty() && canSleepNow) {
             ChatUtils.sendSystemMessage(source, "I couldn't get into a nearby bed (blocked or unsafe). Trying to set my own.");
         } else if (nearbyBeds.isEmpty() && canSleepNow && hasAnyBed(bot)) {
@@ -399,6 +409,22 @@ public final class SleepService {
             LOGGER.info("findNearbyBedFeet: filtered {} occupied bed(s); {} candidate(s) remain", occupiedCount, beds.size());
         }
         return beds;
+    }
+
+    /** True if any non-bot player within {@code radius} blocks of the given
+     *  bot is currently sleeping. Used to suppress the bot's own bed
+     *  placement — the sleeping player's bed advances time for the bot too. */
+    private static boolean isAnyPlayerSleepingNearby(ServerPlayerEntity bot, ServerWorld world, int radius) {
+        if (bot == null || world == null) return false;
+        double radiusSq = (double) radius * (double) radius;
+        for (ServerPlayerEntity p : world.getPlayers()) {
+            if (p == null || p == bot || !p.isAlive() || p.isRemoved()) continue;
+            // Skip other Frens bots — only commander-class players "own" the bed-skip.
+            if (net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(p.getUuid())) continue;
+            if (!p.isSleeping()) continue;
+            if (p.squaredDistanceTo(bot) <= radiusSq) return true;
+        }
+        return false;
     }
 
     private static Optional<BlockPos> findNearestBed(ServerWorld world, BlockPos origin, int radius) {
