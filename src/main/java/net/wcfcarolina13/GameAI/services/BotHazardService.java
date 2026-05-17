@@ -172,9 +172,15 @@ public final class BotHazardService {
         boolean feetIsCampfire = feetState.isOf(Blocks.CAMPFIRE) || feetState.isOf(Blocks.SOUL_CAMPFIRE);
         boolean belowIsCampfire = belowState.isOf(Blocks.CAMPFIRE) || belowState.isOf(Blocks.SOUL_CAMPFIRE);
 
+        // Skip powder snow — BotPowderSnowRescueService owns the rescue ladder
+        // (equip leather → jump → bucket/water/dig → emergency teleport). The
+        // generic velocity-kick below is too weak to overcome powder snow's
+        // ~15% movement multiplier.
+        boolean feetIsPowderSnow = feetState.isOf(Blocks.POWDER_SNOW);
+
         BlockPos hazardPos = null;
         String label = null;
-        if (isDeadlyBlock(feetState) && !feetIsCampfire) {
+        if (isDeadlyBlock(feetState) && !feetIsCampfire && !feetIsPowderSnow) {
             hazardPos = feet;
             label = feetState.getBlock().getName().getString();
         } else if (belowState.isOf(Blocks.MAGMA_BLOCK) && !belowIsCampfire) {

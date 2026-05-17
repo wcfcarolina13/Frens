@@ -2,6 +2,33 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Powder snow rescue ladder: equip leather → jump → bucket/water/dig → teleport (2026-05-16, 1.1.113)
+
+Bot was getting trapped in powder snow and nearly freezing to death. Root cause: `BotRescueService.rescueFromBurial` doesn't fire on powder snow (no suffocation, empty collision shape), and `BotHazardService.tryEscapeHazardBlockAtFeet` does fire but its velocity-kick (0.45 horizontal + 0.15 upward) gets eaten by powder snow's ~15% movement multiplier. Bot barely moves while freezing.
+
+Wiki research (1.21 mechanics) drove the design:
+
+- **No suffocation, but freezing damage** starts at 140 ticks (7s) — 1 HP every 2s thereafter. Ample warning window.
+- **Any leather armor piece** stops freezing AND reverses accumulated freezing effect, even if equipped while already inside.
+- **Leather boots specifically** turn powder snow into scaffolding — jumping climbs the column fast.
+- **Water or lava destroys powder snow.** Burning entities also break it on contact.
+- **No tool speeds up mining.** Bare hands = shovel = 0.4s. (User still prefers shovel-when-available for player intuition; honoured.)
+- Pathfinder audit: both `BaritoneStylePathFinder` and `PathFinder` already gate via `BotHazardService.isDeadlyBlock`, which includes powder snow. No fix needed.
+
+New `BotPowderSnowRescueService` runs per-tick when a bot's feet block is powder snow:
+
+1. **Equip leather armor** (any piece in inventory, boots first since they unlock scaffolding climb).
+2. **Set `setJumping(true)`** every tick — fast climb with boots, slow swim-up without.
+3. **After 60 ticks sustained**, escalate to active block removal (priority order):
+   - Empty bucket → `useOnBlock` to scoop the feet block.
+   - Water bucket (Overworld/End only — water evaporates in the Nether) → `useOnBlock` to destroy.
+   - Select shovel (if present) or bare hands → `MiningTool.mineBlock` at feet.
+4. **After 200 ticks AND `getFrozenTicks() >= 140`** (visible freezing damage), `SafePositionService.findAlternativeSafeNear` + `snapTo` for emergency teleport. Cooldown-gated.
+
+`BotHazardService.tryEscapeHazardBlockAtFeet` now skips powder snow so the dedicated service has exclusive ownership — same pattern as the existing campfire skip.
+
+Files: `GameAI/services/BotPowderSnowRescueService.java` (new), `GameAI/services/BotHazardService.java`, `Frens.java`.
+
 ## Magma block added to mining-contraindicated hazards (2026-05-16, 1.1.112)
 
 Extension of 1.1.111's `isMiningContraindicatedHazard` classifier. Per user rule: magma deposits in the Nether stack vertically (multi-block layers), and even on a single magma layer the revealed surface below the mined block is typically more magma or lava. Mining as rescue drops the bot onto another burning floor, not safe ground. Same reasoning as lava — better to displace than dig.
