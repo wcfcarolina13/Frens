@@ -22,6 +22,8 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -54,6 +56,12 @@ public final class BotSnowballFightService {
     private static final int FIGHT_COOLDOWN_TICKS = 6000;
     /** YIELDED grace period: bot stays in yield state long enough to be hit and flee (3s). */
     private static final int YIELDED_GRACE_TICKS = 60;
+    /** Sustained-pelting yield threshold: this many incoming commander snowball hits
+     *  within {@link #OVERWHELMED_WINDOW_TICKS} causes the bot to yield gracefully
+     *  even with ammo remaining. Counters the "I threw 50 snowballs at it and it
+     *  never gave up" user report. */
+    private static final int OVERWHELMED_HIT_THRESHOLD = 8;
+    private static final long OVERWHELMED_WINDOW_TICKS = 200L;
 
     private static final int RECIPROCATE_SCAN_RADIUS = 16;
     private static final int SNOW_RADIUS = 6;
@@ -132,6 +140,10 @@ public final class BotSnowballFightService {
         long yieldedClearAtTick = 0;
         long lastDodgeLineTick = -1000;
         UUID partnerUuid;
+        /** Sliding window of recent incoming-commander-snowball hit timestamps,
+         *  pruned to {@link #OVERWHELMED_WINDOW_TICKS}. Used for the
+         *  overwhelmed-yield trigger. */
+        final Deque<Long> snowballHitTicks = new ArrayDeque<>();
     }
 
     private BotSnowballFightService() {}
@@ -150,6 +162,16 @@ public final class BotSnowballFightService {
                                 MinecraftServer server, long tick) {
         State s = STATES.computeIfAbsent(bot.getUuid(), id -> new State());
         ServerPlayerEntity commander = nearestNonBotPlayer(bot, server);
+
+        // /bot stop hook: if the user just issued /bot stop, drop out of any
+        // active fight immediately. Without this gate, the bot ignored stop
+        // commands during a snowball fight (user-reported).
+        if (s.phase != Phase.IDLE && BotEventHandler.isInStopCommandGrace(bot.getUuid())) {
+            LOGGER.info("Bot {} snowball-fight ended by /bot stop", bot.getName().getString());
+            sayLine(bot, YIELD_LINES, "snowball-fight-stop-cmd");
+            endFight(s, tick);
+            return;
+        }
 
         switch (s.phase) {
             case IDLE -> tickIdle(bot, world, server, s, commander, tick);
@@ -194,6 +216,27 @@ public final class BotSnowballFightService {
             case ACTIVE -> {
                 if (!fromSnowball && attacker instanceof HostileEntity) {
                     BotFleeService.fleeFromEntity(bot, attacker, tick);
+                }
+                // Overwhelmed-yield: the user pelting the bot with sustained snowballs
+                // should be able to make it give up even when its own ammo is full.
+                // Prior behavior only yielded on inventory-empty, so a player throwing
+                // a stack of snowballs at the bot had no effect.
+                if (fromSnowball && attacker instanceof ServerPlayerEntity sp
+                        && s.partnerUuid != null && s.partnerUuid.equals(sp.getUuid())) {
+                    s.snowballHitTicks.addLast(tick);
+                    while (!s.snowballHitTicks.isEmpty()
+                            && tick - s.snowballHitTicks.peekFirst() > OVERWHELMED_WINDOW_TICKS) {
+                        s.snowballHitTicks.pollFirst();
+                    }
+                    if (s.snowballHitTicks.size() >= OVERWHELMED_HIT_THRESHOLD) {
+                        LOGGER.info("Bot {} yields snowball fight (overwhelmed: {} hits in {} ticks)",
+                                bot.getName().getString(), s.snowballHitTicks.size(), OVERWHELMED_WINDOW_TICKS);
+                        sayLine(bot, YIELD_LINES, "snowball-fight-yield-overwhelmed");
+                        s.phase = Phase.YIELDED;
+                        s.yieldedClearAtTick = tick + YIELDED_GRACE_TICKS;
+                        s.fightCooldownUntilTick = tick + FIGHT_COOLDOWN_TICKS;
+                        s.snowballHitTicks.clear();
+                    }
                 }
             }
             case YIELDED -> {
@@ -316,6 +359,7 @@ public final class BotSnowballFightService {
         s.nextThrowInterval = ACTIVE_THROW_INTERVAL_MIN
                 + ThreadLocalRandom.current().nextInt(
                         ACTIVE_THROW_INTERVAL_MAX - ACTIVE_THROW_INTERVAL_MIN + 1);
+        s.snowballHitTicks.clear();
         sayLine(bot, ESCALATE_LINES, "snowball-fight-escalate");
         LOGGER.info("Bot {} — snowball fight ACTIVE", bot.getName().getString());
     }
@@ -325,6 +369,7 @@ public final class BotSnowballFightService {
         s.partnerUuid = null;
         s.eligibleSinceTick = -1;
         s.fightCooldownUntilTick = tick + FIGHT_COOLDOWN_TICKS;
+        s.snowballHitTicks.clear();
     }
 
     // ── eligibility ──────────────────────────────────────────────────────

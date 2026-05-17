@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Snowball fight: /bot stop ends it + overwhelmed-yield on sustained pelting (2026-05-17, 1.1.123)
+
+User report: "When bot starts snowball fight, it doesn't stop, even if you manually command to stop. I threw lots of snowballs at it and it never gave up, either."
+
+Two coupled bugs in [BotSnowballFightService](src/main/java/net/wcfcarolina13/GameAI/services/BotSnowballFightService.java):
+
+1. **No `/bot stop` hook.** The service never checked `BotEventHandler.isInStopCommandGrace`. Adding a gate at the top of `tickBot`: if the bot is non-IDLE and within the 60-tick stop-command grace window, fire a YIELD line and `endFight` immediately. /bot stop now ends the fight on the next tick.
+2. **No overwhelmed-yield from sustained pelting.** The only natural yield trigger was the bot's own ammo running out. A player throwing a stack of snowballs at the bot had no effect because vanilla snowballs deal 0 damage to fake players. Added a sliding-window hit counter (`Deque<Long> snowballHitTicks` on the per-bot State) populated in the ACTIVE-phase damage hook. After 8 commander snowball hits within a 200-tick (10s) window, bot yields gracefully via the existing YIELDED phase + 5-minute fight cooldown. Hit log cleared on entry to ACTIVE and on `endFight` so a stale tally doesn't carry between fights.
+
+File: `GameAI/services/BotSnowballFightService.java`.
+
 ## "It's cold down here" requires low sky-light, not just low Y (2026-05-17, 1.1.122)
 
 User report: "Bot was saying 'it's cold down here' when we were above ground, probably a canopy cover thing."
