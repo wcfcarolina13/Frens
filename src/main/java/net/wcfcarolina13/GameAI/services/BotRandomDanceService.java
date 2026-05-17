@@ -2,11 +2,11 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.JukeboxBlock;
+import net.minecraft.block.entity.JukeboxBlockEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.BotEventHandler.Mode;
@@ -205,13 +205,17 @@ public final class BotRandomDanceService {
     }
 
     /**
-     * Cached probe for "is a jukebox with a record loaded within hearing range?"
+     * Cached probe for "is a jukebox actually playing music within hearing range?"
      * Refreshed on {@link #JUKEBOX_SCAN_INTERVAL_TICKS}; iterates a
      * {@code (2r+1) × (2v+1) × (2r+1)} block box around the bot with early exit
-     * on first match. Uses {@code HAS_RECORD=true} as the proxy for "playing":
-     * a record sitting in a finished jukebox keeps the bot dancing slightly
-     * past song-end, but the {@link #MAX_DANCE_DURATION_TICKS} cap still applies
-     * once the user pops the record (HAS_RECORD flips false → music-ended stop).
+     * on first match.
+     *
+     * <p>Uses {@link JukeboxBlockEntity#getManager()}{@code .isPlaying()} as the
+     * play-state authority — vanilla 1.21's actual playing/idle flag, distinct
+     * from the {@code HAS_RECORD} block-state property (which stays true while
+     * a finished disc sits in the jukebox). Previously this method used
+     * {@code HAS_RECORD}, which kept the bot dancing forever after the song
+     * ended until the player popped the disc.</p>
      */
     private static boolean isJukeboxPlayingNear(ServerPlayerEntity bot, ServerWorld world, long nowTick) {
         UUID id = bot.getUuid();
@@ -230,7 +234,8 @@ public final class BotRandomDanceService {
                     cursor.set(botPos.getX() + dx, botPos.getY() + dy, botPos.getZ() + dz);
                     BlockState state = world.getBlockState(cursor);
                     if (!(state.getBlock() instanceof JukeboxBlock)) continue;
-                    if (state.contains(Properties.HAS_RECORD) && state.get(Properties.HAS_RECORD)) {
+                    if (!(world.getBlockEntity(cursor) instanceof JukeboxBlockEntity jbe)) continue;
+                    if (jbe.getManager() != null && jbe.getManager().isPlaying()) {
                         JUKEBOX_SCAN_RESULT.put(id, true);
                         return true;
                     }

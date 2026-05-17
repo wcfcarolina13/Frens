@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dance stops when the song ends, not when the disc is removed (2026-05-17, 1.1.120)
+
+User report: "I played a jukebox disc and the bot danced, but the bot never stopped dancing, long after the track was over. It didn't stop until I took the disc out of the jukebox."
+
+Cause: [BotRandomDanceService.isJukeboxPlayingNear](src/main/java/net/wcfcarolina13/GameAI/services/BotRandomDanceService.java#L216) was using the block-state property `Properties.HAS_RECORD` as the play-state authority. That property is `true` whenever a disc *sits in* the jukebox, regardless of whether music is currently playing. The author flagged this in a comment ("keeps the bot dancing slightly past song-end") but it was actually the dominant failure mode — once a track ends in vanilla, the disc stays in the jukebox until manually removed, so the bot kept dancing for the full duration of the user's session until they popped the disc.
+
+Fix: use `JukeboxBlockEntity.getManager().isPlaying()` — vanilla 1.21's actual play-state flag (verified in `net/minecraft/block/jukebox/JukeboxManager` via Yarn mappings). Stops the moment the song ends.
+
+Bonus: bed-placement task ([RALPH_TASK.md P1](RALPH_TASK.md)) marked user-verified in-game 2026-05-17 — the bot now places and uses its own bed from inventory when no nearby bed is available, as shipped in 1.1.100.
+
+File: `GameAI/services/BotRandomDanceService.java`.
+
 ## Bot teleport defers when mount can't be safely placed (2026-05-17, 1.1.119)
 
 Follow-up to 1.1.117. Previously, when `coTeleportSavedMount` couldn't find a safe placement for the bot's mount at the destination, it skipped the animal teleport but still let the bot teleport — orphaning the horse at the source. User's correction: "skipping animal teleport should skip bot teleport too, until you're in a safe place for them to teleport."
