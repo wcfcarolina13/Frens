@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## "Walked past this tree" gated on actual nearby tree (2026-05-17, 1.1.121)
+
+User report: "Bot says it walked past the same tree but there are no trees around."
+
+Cause: [CompanionContextReactionService.tryOutdoorAmbient](src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java#L980) gated the `OUTDOOR_AMBIENT_LINES` pool only on `isSkyVisible` — no actual tree check. Pool included `ambient_same_tree` ("I swear I've walked past this exact tree three times now"), which fired in any outdoor biome regardless of fauna.
+
+Fix: split the pool into two — `OUTDOOR_AMBIENT_LINES` (both lines) and `OUTDOOR_AMBIENT_SKY_ONLY_LINES` (just "saw a bird"). New `hasNearbyLog` helper does an early-exit scan within 12 blocks for any block in `BlockTags.LOGS`. Picks the full pool when a log is nearby, the sky-only subset otherwise. "Saw a bird" still fires in any outdoor biome since birds (parrots, chickens) appear in plains/savannah/swamp too.
+
+File: `GameAI/services/CompanionContextReactionService.java`.
+
 ## Dance stops when the song ends, not when the disc is removed (2026-05-17, 1.1.120)
 
 User report: "I played a jukebox disc and the bot danced, but the bot never stopped dancing, long after the track was over. It didn't stop until I took the disc out of the jukebox."

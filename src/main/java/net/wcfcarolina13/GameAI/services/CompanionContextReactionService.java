@@ -156,11 +156,18 @@ public final class CompanionContextReactionService {
     };
 
     // Lines that only make sense with the sky overhead (surface overworld / nether open
-    // roof / end island top). "Walked past this tree" is nonsensical underground, and
-    // "I think I saw a bird" was firing everywhere including caves.
+    // roof / end island top). The "same tree" line additionally requires an actual log
+    // nearby — it was firing in deserts/plains/beaches where the bot has never seen a
+    // tree, making the line nonsensical.
     private static final WeightedLine[] OUTDOOR_AMBIENT_LINES = new WeightedLine[] {
             new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_VERY_RARE),
             new WeightedLine("ambient_same_tree", "I swear I've walked past this exact tree three times now. I am definitely lost.", BotDialogueSounds.LINE_AMBIENT_SAME_TREE, WEIGHT_RARE)
+    };
+
+    // Sky-only subset for use when no log/tree is nearby — drops the "same tree" line
+    // so the bot doesn't claim to recognise a tree in a treeless biome.
+    private static final WeightedLine[] OUTDOOR_AMBIENT_SKY_ONLY_LINES = new WeightedLine[] {
+            new WeightedLine("ambient_saw_bird", "I think I saw a bird.", BotDialogueSounds.LINE_AMBIENT_SAW_BIRD, WEIGHT_VERY_RARE)
     };
 
     private static final WeightedLine[] PIG_STARING_LINES = new WeightedLine[] {
@@ -979,13 +986,35 @@ public final class CompanionContextReactionService {
 
     /** Outdoor-only ambient pool: lines like "I saw a bird" and "walked past this tree"
      *  only make sense with the sky overhead. Gated on sky-visible, hasSkyLight (so it
-     *  doesn't fire in nether/end), and rarer than AMBIENT_LINES to curb overuse. */
+     *  doesn't fire in nether/end), and rarer than AMBIENT_LINES to curb overuse.
+     *  The "walked past this tree" line additionally requires a log within 12 blocks —
+     *  it was firing in deserts/plains/beaches where the bot had never seen a tree. */
     private static boolean tryOutdoorAmbient(ServerPlayerEntity bot, ServerWorld world, TriggerState state, boolean inCombat) {
         if (inCombat || bot.hasVehicle()) return false;
         if (!world.getDimension().hasSkyLight()) return false;
         if (!world.isSkyVisible(bot.getBlockPos().up())) return false;
         if (RNG.nextDouble() > 0.008D) return false;
-        return tryTrigger(bot, "outdoor_ambient", OUTDOOR_AMBIENT_LINES, null, false);
+        WeightedLine[] pool = hasNearbyLog(world, bot.getBlockPos(), 12)
+                ? OUTDOOR_AMBIENT_LINES
+                : OUTDOOR_AMBIENT_SKY_ONLY_LINES;
+        return tryTrigger(bot, "outdoor_ambient", pool, null, false);
+    }
+
+    /** Early-exit scan for any block in {@link BlockTags#LOGS} within {@code radius}
+     *  of the bot. Cheap enough to call on the rare outdoor-ambient roll path. */
+    private static boolean hasNearbyLog(ServerWorld world, BlockPos center, int radius) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dy = -2; dy <= 6; dy++) {
+            for (int dx = -radius; dx <= radius; dx += 2) {
+                for (int dz = -radius; dz <= radius; dz += 2) {
+                    cursor.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    if (world.getBlockState(cursor).isIn(BlockTags.LOGS)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean tryWeather(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
