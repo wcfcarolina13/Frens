@@ -372,6 +372,17 @@ public final class TravelMountHandler {
      * </pre>
      * No-op when the bot has no recorded mount or the mount entity isn't
      * currently loaded in the source world.
+     *
+     * <p><b>Stowaway gate:</b> only co-teleports if the bot is actually
+     * connected to the mount — either riding it ({@code wasMounted}) or
+     * holding its lead ({@code heldByBot}). Without this gate, every
+     * teleport callsite (5 of them) silently dragged the recorded mount
+     * along even after the bot had dismounted and stopped tracking it,
+     * dropping the abandoned animal wherever the bot landed and frequently
+     * suffocating it. The recorded state intentionally outlives dismount so
+     * the rejoin path can put the horse back under the bot — but rejoin and
+     * teleport-with-mount are different operations and this gate keeps them
+     * separate.</p>
      */
     public static void coTeleportSavedMount(ServerPlayerEntity bot, ServerWorld destWorld, BlockPos destination) {
         if (bot == null || destWorld == null || destination == null) {
@@ -379,6 +390,12 @@ public final class TravelMountHandler {
         }
         MountPersistenceService.MountState state = MountPersistenceService.getRecordedState(bot);
         if (state == null) {
+            return;
+        }
+        // Stowaway gate — see Javadoc above.
+        if (!state.wasMounted() && !state.heldByBot()) {
+            LOGGER.debug("coTeleportSavedMount skip: bot={} mount={} reason=not-actively-connected (wasMounted=false heldByBot=false)",
+                    bot.getName().getString(), state.mountUuid());
             return;
         }
         // Resolve the mount's CURRENT world from the saved state, not from the

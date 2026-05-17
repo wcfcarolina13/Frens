@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Stowaway-mount gate: skip co-teleport when bot has dismounted (2026-05-17, 1.1.116)
+
+Animals (horses, donkeys) were being silently dragged along on every bot teleport even after the bot had dismounted and stopped tracking them, often suffocating where the bot landed. Logs showed `resolvePreferredMount reject: bot=Jake savedMount=53095a7e-... reason=prepare-vehicle-failed` followed by the saved mount continuing to be co-teleported.
+
+Cause: [TravelMountHandler.coTeleportSavedMount](src/main/java/net/wcfcarolina13/GameAI/services/TravelMountHandler.java#L376) gated only on `state == null` and `mount.isRemoved()`. The MountPersistenceService state intentionally outlives a dismount so the on-rejoin remount can put the horse back under the bot — but every teleport callsite (follow catch-up, /bot come, fast-travel, emergency rescue, NavArtifact lodestone) was treating that persisted state as "drag this animal along," which is wrong.
+
+Fix: short-circuit if neither `state.wasMounted()` nor `state.heldByBot()` — i.e. the bot isn't actively riding or leading the animal. Single check, no other behavior changes. All five callsites benefit automatically. Rejoin remount is unaffected (different code path on MountPersistenceService).
+
+File: `GameAI/services/TravelMountHandler.java`.
+
 ## Powder snow rescue: walk out laterally when an open neighbor exists (2026-05-16, 1.1.115)
 
 Missed scenario in the 1.1.113 ladder: if the bot is in a shallow powder snow pit (or near the edge of any column) with a normal walkable cell at the same Y next door, "just walk out" is the cheapest and least disruptive recovery. No leather needed, no buckets consumed, no blocks destroyed, no teleport.
