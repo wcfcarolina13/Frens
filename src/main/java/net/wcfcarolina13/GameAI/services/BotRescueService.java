@@ -218,10 +218,13 @@ public final class BotRescueService {
 
         // Vehicles (especially boats) frequently cause false "feet in block" signals due to how
         // the passenger's block position is quantized near shore / terrain edges.
-        // Never start burial-mining while mounted unless we are actually taking suffocation damage.
+        // Never start burial-mining while mounted unless we are actually taking suffocation damage
+        // OR the vehicle itself is in a wall (proactive horse-stuck-in-tree rescue — wait-for-damage
+        // would catch it ~5s after the first IN_WALL tick, often too late for low-health mounts).
         if (bot.hasVehicle()) {
-            if (!takingSuffocationDamage) {
-                var vehicle = bot.getVehicle();
+            var vehicle = bot.getVehicle();
+            boolean vehicleInWall = vehicle != null && vehicle.isInsideWall();
+            if (!takingSuffocationDamage && !vehicleInWall) {
                 LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=not-suffocating",
                         bot.getName().getString(),
                         vehicle == null ? "<null>" : vehicle.getType().toString());
@@ -231,6 +234,10 @@ public final class BotRescueService {
                 LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
                 LAST_STUCK_LOG_MS.remove(bot.getUuid());
                 return false;
+            }
+            if (vehicleInWall) {
+                LOGGER.info("[FollowAssert] mounted-rescue-proactive bot={} vehicle={} reason=vehicle-in-wall",
+                        bot.getName().getString(), vehicle.getType().toString());
             }
 
             // If we are suffocating while mounted, dismount first; otherwise mining can destabilize

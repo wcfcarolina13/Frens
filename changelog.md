@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Horse safety: real-bbox placement + proactive in-wall rescue (2026-05-17, 1.1.117)
+
+Two fixes for "horse suffocates in tree after teleport."
+
+**1. Stricter placement.** `findSafeAnimalSpot` now uses the animal's real bounding box via `ServerWorld.isSpaceEmpty(animal, box)` instead of the prior per-cell collision-shape iteration. The per-cell test correctly rejected leaves at the candidate's column, but missed bbox-width collisions — a horse is 1.4 blocks wide and a column-clear placement could still clip the corner of an adjacent tree trunk. Same-Y candidates are now preferred over vertical drift so the animal stays close to the intended landing height when a flush spot exists. Also removed the silent fallback to `destination` in both `teleportAnimalWithBot` and `coTeleportSavedMount` — if no safe spot is found in the ±3/±2 search, log a warning and skip the animal teleport. Leaving the animal at source is better than placing it in a wall.
+
+**2. Proactive in-wall rescue.** `BotRescueService.rescueFromBurial` previously skipped mounted bots unless the bot itself was actively taking suffocation damage (`[FollowAssert] mounted-rescue-skip reason=not-suffocating`). The horse, with a different bbox, could be in a wall long before the bot's IN_WALL counter fired. Now the rescue also fires when `vehicle.isInsideWall()` — same check vanilla uses for the IN_WALL damage source. Bot dismounts and the standard rescue ladder takes over, freeing the horse before the first damage tick.
+
+Files: `GameAI/services/TravelMountHandler.java`, `GameAI/services/BotRescueService.java`.
+
 ## Stowaway-mount gate: skip co-teleport when bot has dismounted (2026-05-17, 1.1.116)
 
 Animals (horses, donkeys) were being silently dragged along on every bot teleport even after the bot had dismounted and stopped tracking them, often suffocating where the bot landed. Logs showed `resolvePreferredMount reject: bot=Jake savedMount=53095a7e-... reason=prepare-vehicle-failed` followed by the saved mount continuing to be co-teleported.

@@ -230,8 +230,17 @@ public final class TravelMountHandler {
     }
 
     /**
-     * Find a safe position near {@code destination} with enough headroom for the animal.
-     * Searches a 3-block horizontal radius and ±2 vertical range.
+     * Find a safe position near {@code destination} where the animal's actual
+     * bounding box fits without colliding with any block. Searches a 3-block
+     * horizontal radius and ±2 vertical range. Prefers the destination cell and
+     * same-Y candidates first so we don't drift the animal up/down when a flush
+     * placement is available.
+     *
+     * <p>Uses {@link ServerWorld#isSpaceEmpty(Entity, net.minecraft.util.math.Box)}
+     * with the animal's real bbox instead of per-cell collision-shape testing —
+     * the per-cell approach was missing animal-bbox-width collisions (e.g. a
+     * horse is 1.4 blocks wide and clips the corner of an adjacent tree trunk
+     * even when its own cell is clear).</p>
      *
      * @return a safe BlockPos, or null if none found
      */
@@ -239,14 +248,22 @@ public final class TravelMountHandler {
         if (world == null || destination == null || animal == null) {
             return null;
         }
-        int needed = requiredHeadroom(animal);
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                for (int dy = -2; dy <= 2; dy++) {
-                    BlockPos candidate = destination.add(dx, dy, dz);
-                    if (hasHeadroom(world, candidate, needed)) {
-                        return candidate;
+        // Try destination first, then spiral outward by manhattan distance so we
+        // pick the closest safe cell rather than the lexicographically first one.
+        for (int r = 0; r <= 3; r++) {
+            for (int dy = 0; dy <= 2; dy++) {
+                for (int sign : new int[] { 1, -1 }) {
+                    int y = dy * sign;
+                    for (int dx = -r; dx <= r; dx++) {
+                        for (int dz = -r; dz <= r; dz++) {
+                            if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
+                            BlockPos candidate = destination.add(dx, y, dz);
+                            if (isSafeAnimalSpot(world, candidate, animal)) {
+                                return candidate;
+                            }
+                        }
                     }
+                    if (dy == 0) break; // (+0) and (-0) are the same
                 }
             }
         }
@@ -256,10 +273,11 @@ public final class TravelMountHandler {
     /**
      * Returns the number of clear blocks above ground needed for this entity.
      * Tall mounts (horses, camels, donkeys, mules, llamas): 3 blocks.
-     * Short mounts (pigs, striders): 2 blocks.
+     * Short mounts (pigs, striders): 2 blocks. Used only for user-facing
+     * messages — actual placement check uses the entity's real bbox via
+     * {@link #isSafeAnimalSpot}.
      */
     private static int requiredHeadroom(Entity animal) {
-        // AbstractHorseEntity covers horse, donkey, mule, skeleton horse, zombie horse, llama, trader llama
         if (animal instanceof AbstractHorseEntity || animal instanceof CamelEntity) {
             return 3;
         }
@@ -267,20 +285,33 @@ public final class TravelMountHandler {
     }
 
     /**
-     * Check if a position has solid floor and {@code height} clear blocks above it.
+     * True if the animal can be placed at {@code feet} without clipping into
+     * any block and with solid footing beneath. Uses the animal's actual bbox
+     * via {@link ServerWorld#isSpaceEmpty}.
      */
-    private static boolean hasHeadroom(ServerWorld world, BlockPos feet, int height) {
-        // Need solid floor below feet
-        if (world.getBlockState(feet.down()).getCollisionShape(world, feet.down()).isEmpty()) {
+    private static boolean isSafeAnimalSpot(ServerWorld world, BlockPos feet, Entity animal) {
+        // Need solid floor below feet.
+        BlockPos below = feet.down();
+        if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
             return false;
         }
-        // Need 'height' clear blocks starting at feet
-        for (int y = 0; y < height; y++) {
-            BlockPos check = feet.up(y);
-            if (!world.getBlockState(check).getCollisionShape(world, check).isEmpty()) {
-                return false;
-            }
-            if (!world.getFluidState(check).isEmpty()) {
+        // Build the bbox the animal would occupy standing at (feet.x+0.5, feet.y, feet.z+0.5).
+        double w = animal.getWidth();
+        double h = animal.getHeight();
+        double cx = feet.getX() + 0.5;
+        double cy = feet.getY();
+        double cz = feet.getZ() + 0.5;
+        net.minecraft.util.math.Box box = new net.minecraft.util.math.Box(
+                cx - w / 2.0, cy, cz - w / 2.0,
+                cx + w / 2.0, cy + h, cz + w / 2.0);
+        // Exclude the animal itself so its current position doesn't count as a collision.
+        if (!world.isSpaceEmpty(animal, box)) {
+            return false;
+        }
+        // Reject fluid cells (no swimming the horse into source-block water/lava).
+        int hCeil = (int) Math.ceil(h);
+        for (int y = 0; y < hCeil; y++) {
+            if (!world.getFluidState(feet.up(y)).isEmpty()) {
                 return false;
             }
         }
@@ -328,11 +359,15 @@ public final class TravelMountHandler {
             return;
         }
 
-        // Find a safe position near the destination for the animal
+        // Find a safe position near the destination for the animal. If none
+        // exists in the search radius, skip the animal teleport rather than
+        // placing it in a wall — better to leave the animal at source than
+        // suffocate it at destination.
         BlockPos animalPos = findSafeAnimalSpot(destWorld, destination, animal);
         if (animalPos == null) {
-            // Fallback: place at destination anyway (room was checked in evaluateTravel)
-            animalPos = destination;
+            LOGGER.warn("teleportAnimalWithBot: no safe spot for {} near {} — skipping animal teleport",
+                    animal.getName().getString(), destination.toShortString());
+            return;
         }
 
         // Dismount if still riding
@@ -430,7 +465,9 @@ public final class TravelMountHandler {
         }
         BlockPos animalPos = findSafeAnimalSpot(destWorld, destination, mount);
         if (animalPos == null) {
-            animalPos = destination;
+            LOGGER.warn("coTeleportSavedMount: no safe spot for {} near {} — leaving mount at source",
+                    mount.getName().getString(), destination.toShortString());
+            return;
         }
         // Dismount cleanly first so vanilla doesn't desync rider/vehicle.
         if (bot.getVehicle() == mount) {
