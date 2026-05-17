@@ -5125,7 +5125,13 @@ public class modCommandRegistry {
         // goal is a *feet* position (2-block headroom); teleport using feet Y.
         Vec3d center = new Vec3d(goal.getX() + 0.5D, goal.getY(), goal.getZ() + 0.5D);
         // Bring the bot's mount along — /bot come otherwise orphans the horse.
-        net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, commanderWorld, goal);
+        // If the mount can't fit at the destination, refuse rather than strand it
+        // or kill it by placement-in-wall.
+        if (!net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, commanderWorld, goal)) {
+            ChatUtils.sendSystemMessage(source,
+                    "Can't safely bring " + alias + "'s mount here. Try a more open spot or dismount first.");
+            return 0;
+        }
         bot.teleport(commanderWorld,
                 center.x, center.y, center.z,
             EnumSet.noneOf(net.minecraft.network.packet.s2c.play.PositionFlag.class),

@@ -2505,9 +2505,15 @@ public class BotEventHandler {
             // Vanilla cross-dim teleport on a vehicle handles passenger
             // transfer; we explicitly do the bot-then-mount pair here so
             // the mount arrives near the bot's destination rather than
-            // staying behind in the source dimension.
-            net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(
-                    bot, targetWorld, target.getBlockPos());
+            // staying behind in the source dimension. If the mount can't
+            // be safely placed, abort the bot teleport too — better to stay
+            // with the horse than strand the pair.
+            if (!net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(
+                    bot, targetWorld, target.getBlockPos())) {
+                LOGGER.info("Cross-dim follow teleport deferred: bot={} target={} reason=mount-no-safe-spot",
+                        bot.getName().getString(), target.getName().getString());
+                return false;
+            }
             bot.teleport(targetWorld,
                     target.getX(), target.getY(), target.getZ(),
                     EnumSet.noneOf(PositionFlag.class),
@@ -7142,7 +7148,11 @@ public class BotEventHandler {
         // BlockPos here represents a *feet* position (2-block headroom checked); teleport using feet Y.
         Vec3d center = new Vec3d(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
         // Bring the bot's mount along — without this, the horse is orphaned at the source.
-        net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, world, safe);
+        // If the mount can't be placed safely (e.g. target spot in dense forest), defer
+        // the wolf-teleport entirely; next tick may pick a clearer follow spot.
+        if (!net.wcfcarolina13.GameAI.services.TravelMountHandler.coTeleportSavedMount(bot, world, safe)) {
+            return false;
+        }
         bot.teleport(world,
                 center.x, center.y, center.z,
                 EnumSet.noneOf(PositionFlag.class),

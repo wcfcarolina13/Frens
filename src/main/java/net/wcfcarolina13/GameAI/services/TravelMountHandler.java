@@ -402,36 +402,42 @@ public final class TravelMountHandler {
      * <p>Looks up the mount in the bot's <em>current</em> world (i.e. before
      * the bot's own teleport completes), so the typical call order is:
      * <pre>
-     *   TravelMountHandler.coTeleportSavedMount(bot, destWorld, destination);
-     *   bot.teleport(destWorld, destX, destY, destZ, ...);
+     *   if (TravelMountHandler.coTeleportSavedMount(bot, destWorld, destination)) {
+     *       bot.teleport(destWorld, destX, destY, destZ, ...);
+     *   }
      * </pre>
-     * No-op when the bot has no recorded mount or the mount entity isn't
-     * currently loaded in the source world.
+     *
+     * <p><b>Return value:</b> {@code true} if the bot's teleport may proceed
+     * (no mount to bring, stowaway-gated, or mount placed successfully).
+     * {@code false} if the mount needed placement but no safe spot was found
+     * within the search radius — the caller MUST skip its own
+     * {@code bot.teleport(...)} so the bot doesn't strand at a destination
+     * unsuitable for its mount. Without this gate, the user-visible failure
+     * mode was the bot teleporting alone while the horse stayed at source,
+     * or (pre-1.1.117) the horse being placed in a wall and suffocating.</p>
      *
      * <p><b>Stowaway gate:</b> only co-teleports if the bot is actually
      * connected to the mount — either riding it ({@code wasMounted}) or
      * holding its lead ({@code heldByBot}). Without this gate, every
-     * teleport callsite (5 of them) silently dragged the recorded mount
-     * along even after the bot had dismounted and stopped tracking it,
-     * dropping the abandoned animal wherever the bot landed and frequently
-     * suffocating it. The recorded state intentionally outlives dismount so
-     * the rejoin path can put the horse back under the bot — but rejoin and
-     * teleport-with-mount are different operations and this gate keeps them
-     * separate.</p>
+     * teleport callsite silently dragged the recorded mount along even after
+     * the bot had dismounted and stopped tracking it. The recorded state
+     * intentionally outlives dismount so the rejoin path can put the horse
+     * back under the bot — but rejoin and teleport-with-mount are different
+     * operations and this gate keeps them separate.</p>
      */
-    public static void coTeleportSavedMount(ServerPlayerEntity bot, ServerWorld destWorld, BlockPos destination) {
+    public static boolean coTeleportSavedMount(ServerPlayerEntity bot, ServerWorld destWorld, BlockPos destination) {
         if (bot == null || destWorld == null || destination == null) {
-            return;
+            return true;
         }
         MountPersistenceService.MountState state = MountPersistenceService.getRecordedState(bot);
         if (state == null) {
-            return;
+            return true;
         }
         // Stowaway gate — see Javadoc above.
         if (!state.wasMounted() && !state.heldByBot()) {
             LOGGER.debug("coTeleportSavedMount skip: bot={} mount={} reason=not-actively-connected (wasMounted=false heldByBot=false)",
                     bot.getName().getString(), state.mountUuid());
-            return;
+            return true;
         }
         // Resolve the mount's CURRENT world from the saved state, not from the
         // bot. The bot may already be in the destination world (fast-travel
@@ -441,7 +447,7 @@ public final class TravelMountHandler {
         net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null
                 ? bot.getCommandSource().getServer() : null;
         if (server == null) {
-            return;
+            return true;
         }
         ServerWorld sourceWorld;
         try {
@@ -457,17 +463,24 @@ public final class TravelMountHandler {
             sourceWorld = bot.getEntityWorld() instanceof ServerWorld bw ? bw : null;
         }
         if (sourceWorld == null) {
-            return;
+            return true;
         }
         Entity mount = MountPersistenceService.findRecordedMount(sourceWorld, state);
         if (mount == null || mount.isRemoved()) {
-            return;
+            // Mount already despawned/gone — nothing to co-teleport, bot may proceed.
+            return true;
         }
         BlockPos animalPos = findSafeAnimalSpot(destWorld, destination, mount);
         if (animalPos == null) {
-            LOGGER.warn("coTeleportSavedMount: no safe spot for {} near {} — leaving mount at source",
+            // CRITICAL: no safe placement for the mount at the destination. Refuse
+            // the whole teleport — placing the mount in a wall kills it, leaving
+            // it at source orphans it. The caller MUST skip bot.teleport on false
+            // so the bot stays with the mount until a clearer destination is
+            // available. Follow-catch-up re-fires next tick; one-shot callers
+            // (/bot come, fast travel, emergency rescue) surface a message.
+            LOGGER.info("coTeleportSavedMount: no safe spot for {} near {} — aborting bot teleport so the pair stays together",
                     mount.getName().getString(), destination.toShortString());
-            return;
+            return false;
         }
         // Dismount cleanly first so vanilla doesn't desync rider/vehicle.
         if (bot.getVehicle() == mount) {
@@ -487,6 +500,7 @@ public final class TravelMountHandler {
         MountPersistenceService.recordMount(bot, mount, false);
         LOGGER.info("Co-teleported mount {} to {} alongside bot {}",
                 mount.getName().getString(), animalPos.toShortString(), bot.getName().getString());
+        return true;
     }
 
     /**

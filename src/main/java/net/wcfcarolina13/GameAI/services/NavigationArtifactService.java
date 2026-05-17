@@ -1387,8 +1387,17 @@ public final class NavigationArtifactService {
         // discard/recreate cycle (it's keyed by alias in MountPersistenceService),
         // and the helper resolves the mount's source world from the saved
         // state's worldId — works across same-dim and cross-dim travel.
-        TravelMountHandler.coTeleportSavedMount(bot, ps.world(),
+        //
+        // Bot has already teleported above (line 1380) so we can't abort the
+        // bot teleport on mount-placement failure here. If it fails, log the
+        // partial-arrival so the player knows the mount stayed behind — they
+        // can /bot come once they're somewhere clearer, or walk the bot back.
+        boolean mountPlaced = TravelMountHandler.coTeleportSavedMount(bot, ps.world(),
                 BlockPos.ofFloored(dx, dy, dz));
+        if (!mountPlaced) {
+            LOGGER.warn("Fast-travel arrived but mount couldn't be safely placed for bot={} at ({},{},{}) — mount left at source",
+                    bot.getName().getString(), (int) dx, (int) dy, (int) dz);
+        }
 
         // ── Hunger drain proportional to travel distance ─────────────
         // Direct food/saturation set — drain food level FIRST (visible on HUD), then saturation.

@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Bot teleport defers when mount can't be safely placed (2026-05-17, 1.1.119)
+
+Follow-up to 1.1.117. Previously, when `coTeleportSavedMount` couldn't find a safe placement for the bot's mount at the destination, it skipped the animal teleport but still let the bot teleport — orphaning the horse at the source. User's correction: "skipping animal teleport should skip bot teleport too, until you're in a safe place for them to teleport."
+
+Changed `coTeleportSavedMount` from `void` to `boolean` — returns `true` when the bot's teleport may proceed (no mount, stowaway-gated, or mount placed successfully), `false` when mount placement failed. Callers gate their own `bot.teleport(...)` on the return value.
+
+Per-callsite behavior:
+
+- **Cross-dim follow handoff** ([BotEventHandler:2509](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L2509)): aborts on false, returns from the handoff method. Next follow tick re-attempts.
+- **Wolf-teleport catch-up** ([BotEventHandler:7145](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L7145)): aborts on false, returns from the wolf-tp method. Self-correcting — next tick may pick a clearer follow spot.
+- **`/bot come`** ([modCommandRegistry:5128](src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java#L5128)): aborts and tells the player: "Can't safely bring [bot]'s mount here. Try a more open spot or dismount first."
+- **Emergency-rescue spell** ([BotEmergencyRescueService:387](src/main/java/net/wcfcarolina13/GameAI/services/BotEmergencyRescueService.java#L387)): aborts and HUD-notifies. Also reordered: mount placement is now checked BEFORE reagent consumption, so a failed rescue doesn't burn Ender Pearls + Chorus Fruits. Message is honest: "Reagents not consumed — try a more open anchor."
+- **Lodestone fast-travel** ([NavigationArtifactService:1390](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L1390)): bot has already teleported by the time the mount call runs (different ordering), so can't abort retroactively. Logs the partial-arrival; player can `/bot come` later or walk the bot back. Restructuring to pre-check is bigger scope — deferred.
+
+Files: `GameAI/services/TravelMountHandler.java`, `GameAI/BotEventHandler.java`, `Commands/modCommandRegistry.java`, `GameAI/services/BotEmergencyRescueService.java`, `GameAI/services/NavigationArtifactService.java`.
+
 ## Fence-tie reliability: reach-bounded fence search + verify + retry (2026-05-17, 1.1.118)
 
 User report: "Bot has trouble tying animals to fences, seems to just drop the lead when it tries." Cause: [secureMountIfPossible](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java#L3448) was picking fences up to 10 blocks from the vehicle, but vanilla `interactBlock` reach is ~4.5 blocks. The bot would call `interactFence` on an out-of-reach fence, vanilla's `LeadItem.attachHeldMobsToBlock` would silently no-op (no error, no knot, lead stays in hand), and the function returned `TETHERED_TO_FENCE` — caller thought success while the mob was still on the bot's lead. Subsequent state changes then "dropped" the lead (or it auto-broke at 10-block range).

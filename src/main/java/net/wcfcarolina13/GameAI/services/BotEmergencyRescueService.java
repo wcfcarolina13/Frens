@@ -375,16 +375,25 @@ public final class BotEmergencyRescueService {
             return false;
         }
 
+        Vec3d center = Vec3d.ofBottomCenter(anchor.pos());
+        // Bring the bot's mount along — without this, rescue strands the horse.
+        // Check mount placement BEFORE consuming reagents so a refused rescue
+        // doesn't burn the spell cost. If no safe spot for the mount at the
+        // rescue anchor, refuse the rescue: teleporting the bot alone would
+        // leave its mount in whatever danger prompted the rescue.
+        if (!TravelMountHandler.coTeleportSavedMount(rescued, targetWorld, anchor.pos())) {
+            sendOwnerHud(server, ownerUuid,
+                    "Rescue aborted: no safe spot for " + rescued.getName().getString() + "'s mount at the destination. Reagents not consumed — try a more open anchor.", true);
+            return false;
+        }
+
+        // Mount safely placed (or no mount to bring). Now consume reagents and proceed.
         if (itemPaid && !helperHasWizardTome) {
             consumeItemCount(rescued, Items.ENDER_PEARL, 2);
             consumeItemCount(rescued, Items.CHORUS_FRUIT, 2);
             consumeItemCount(helper, Items.ENDER_PEARL, 2);
             consumeItemCount(helper, Items.CHORUS_FRUIT, 2);
         }
-
-        Vec3d center = Vec3d.ofBottomCenter(anchor.pos());
-        // Bring the bot's mount along — without this, rescue strands the horse.
-        TravelMountHandler.coTeleportSavedMount(rescued, targetWorld, anchor.pos());
         rescued.teleport(targetWorld, center.x, center.y, center.z,
                 java.util.EnumSet.noneOf(net.minecraft.network.packet.s2c.play.PositionFlag.class),
                 rescued.getYaw(),
