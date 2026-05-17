@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## "It's cold down here" requires low sky-light, not just low Y (2026-05-17, 1.1.122)
+
+User report: "Bot was saying 'it's cold down here' when we were above ground, probably a canopy cover thing."
+
+Cause: `isDeepUnderground = y < 0` in [BotAmbientChatter](src/main/java/net/wcfcarolina13/ChatUtils/BotAmbientChatter.java). Modern Overworld terrain extends below Y=0 in deep mountain valleys — the player can walk above-ground at Y < 0 with the sky directly overhead. The Y check satisfied, deepslate chatter pool fires.
+
+Fix: tighten `isDeepUnderground = y < 0 && skyLight <= 3` in both scopes (line 665 in event-driven pickup, line 1471 in area-pickup). Real deepslate caves have skyLight=0; valleys have skyLight 12-15 even with leaf canopy overhead — gate now correctly rejects them.
+
+File: `ChatUtils/BotAmbientChatter.java`.
+
 ## "Walked past this tree" gated on actual nearby tree (2026-05-17, 1.1.121)
 
 User report: "Bot says it walked past the same tree but there are no trees around."

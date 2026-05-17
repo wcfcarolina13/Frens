@@ -662,7 +662,10 @@ public final class BotAmbientChatter {
         boolean isLowLight = blockLight <= 4;
         boolean isDarkNow = blockLight <= DARK_BLOCK_LIGHT_MAX && skyLight <= DARK_SKY_LIGHT_MAX;
         boolean darkForEvents = updateAndCheckSustainedDarkness(state, nowTick, isDarkNow);
-        boolean isDeepUnderground = y < 0;
+        // See pickAmbientForArea: y<0 alone false-positives in deep valleys; require
+        // low sky-light too so the "It's cold down here" line truly only fires when
+        // the bot is buried.
+        boolean isDeepUnderground = y < 0 && skyLight <= 3;
 
         var worldKey = world.getRegistryKey();
         boolean isOverworld = worldKey == World.OVERWORLD;
@@ -1468,7 +1471,11 @@ public final class BotAmbientChatter {
         boolean isLowLight = blockLight <= 4;
         boolean isDarkNow = blockLight <= DARK_BLOCK_LIGHT_MAX && skyLight <= DARK_SKY_LIGHT_MAX;
         boolean darkLongEnough = updateAndCheckSustainedDarkness(state, nowTick, isDarkNow);
-        boolean isDeepUnderground = y < 0; // Below Y=0 (deepslate layer)
+        // Deep-underground gate: y < 0 alone false-positived in deep mountain valleys
+        // where the player walks above-ground at Y < 0 with the sky directly overhead.
+        // Require low sky-light too — real deepslate caves have skyLight=0, valleys
+        // have skyLight 12-15 even with leaf canopy.
+        boolean isDeepUnderground = y < 0 && skyLight <= 3;
 
         // Check for special environment blocks nearby (higher priority, lower chance)
         
