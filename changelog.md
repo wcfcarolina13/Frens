@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Mount tether-at-source before traveling alone; dismount invariant documented (2026-05-17, 1.1.124)
+
+Follow-up to the 1.1.116-119 mount-safety work. User pointed out that "refuse the whole travel if the mount can't fit at destination" is too harsh — if there's a fence nearby (or a fence can be placed), we should be able to tether the mount in place and let the bot proceed alone, just like the cross-dim path already does. Also: as a defensive invariant, any code path that teleports the bot without the mount must dismount first so there's no dangling rider/vehicle state.
+
+Three changes:
+
+1. **New `tryTetherAtSourceForSameDim`** ([TravelMountHandler.java](src/main/java/net/wcfcarolina13/GameAI/services/TravelMountHandler.java)) — modeled exactly on `tryTetherForCrossDim`. Calls `bot.stopRiding()`, then `RideSyncService.secureMountForTravel` which leashes the mount, finds/places a fence within reach, and ties it off. On success: returns `TETHERED_AT_SOURCE` and the bot proceeds alone. On failure: returns `REFUSE_NO_ROOM_AT_DEST` with a clearer message ("no fence within reach, no lead, or no spot to place a fence — build a fence nearby, equip a lead, or pick a more open destination").
+2. **`evaluateTravel` rewired** — the same-dim "no room at destination" branch now calls the new helper instead of immediately refusing. Both consumers (lodestone fast-travel via `NavigationArtifactService:1063` and chorus-recall via `SpellNavigationNetworkManager:185`) already handled the tethered decision correctly by falling through to bot-only travel, so they pick up the new behavior automatically.
+3. **Enum rename**: `TETHERED_CROSS_DIM` → `TETHERED_AT_SOURCE` since the decision now covers both cross-dim and same-dim cases. `tetherDimName` field renamed to `tetherLocation`. Two consumer switch-cases updated.
+
+Plus the **dismount invariant** is now documented at the top of `evaluateTravel`'s Javadoc with the load-bearing rationale and the list of decisions it applies to. Future contributors who add new decisions know they must dismount first if the path teleports without bringing the mount.
+
+The previously-queued backlog item ([RALPH_TASK.md P2 Navigation & Movement](RALPH_TASK.md)) for "lodestone fast-travel mount-placement pre-check" is now marked `[x]` — this fix achieves the same goal via a richer mechanism.
+
+Files: `GameAI/services/TravelMountHandler.java`, `GameAI/services/NavigationArtifactService.java`, `network/SpellNavigationNetworkManager.java`, `RALPH_TASK.md`.
+
 ## Snowball fight: /bot stop ends it + overwhelmed-yield on sustained pelting (2026-05-17, 1.1.123)
 
 User report: "When bot starts snowball fight, it doesn't stop, even if you manually command to stop. I threw lots of snowballs at it and it never gave up, either."

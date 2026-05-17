@@ -182,7 +182,7 @@ public final class SpellNavigationNetworkManager {
                     commander.sendMessage(Text.literal("\u00A7c" + mountResult.message()), false);
                     return;
                 }
-                case TETHERED_CROSS_DIM -> {
+                case TETHERED_AT_SOURCE -> {
                     commander.sendMessage(Text.literal("\u00A7e" + mountResult.message()), false);
                 }
                 default -> {}

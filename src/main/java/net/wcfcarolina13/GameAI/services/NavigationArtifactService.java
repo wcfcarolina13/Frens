@@ -1060,7 +1060,7 @@ public final class NavigationArtifactService {
                 notifyOwner(server, ownerUuid, "\u00A7c" + mountResult.message() + "\u00A7r");
                 return false; // Abort travel
             }
-            case TETHERED_CROSS_DIM -> {
+            case TETHERED_AT_SOURCE -> {
                 notifyOwner(server, ownerUuid, "\u00A7e" + mountResult.message() + "\u00A7r");
                 // Fall through — travel proceeds without animal
             }

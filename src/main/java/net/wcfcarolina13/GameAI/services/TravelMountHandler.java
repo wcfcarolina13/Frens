@@ -42,7 +42,9 @@ public final class TravelMountHandler {
         REFUSE_FULL_INVENTORY,
         REFUSE_NO_ROOM_AT_DEST,
         REFUSE_CROSS_DIM_ANIMAL,
-        TETHERED_CROSS_DIM
+        /** Mount tethered at source (cross-dim or same-dim with too-tight destination);
+         *  bot proceeds alone, mount waits to be retrieved. */
+        TETHERED_AT_SOURCE
     }
 
     public record MountTravelResult(
@@ -50,7 +52,7 @@ public final class TravelMountHandler {
         String message,
         Entity mountEntity,
         BlockPos tetherPos,
-        String tetherDimName
+        String tetherLocation
     ) {
         static MountTravelResult proceed() {
             return new MountTravelResult(MountTravelDecision.PROCEED_NO_MOUNT, null, null, null, null);
@@ -76,8 +78,8 @@ public final class TravelMountHandler {
             return new MountTravelResult(MountTravelDecision.REFUSE_CROSS_DIM_ANIMAL, msg, null, null, null);
         }
 
-        static MountTravelResult tethered(Entity animal, BlockPos fencePos, String dimName, String msg) {
-            return new MountTravelResult(MountTravelDecision.TETHERED_CROSS_DIM, msg, animal, fencePos, dimName);
+        static MountTravelResult tethered(Entity animal, BlockPos fencePos, String location, String msg) {
+            return new MountTravelResult(MountTravelDecision.TETHERED_AT_SOURCE, msg, animal, fencePos, location);
         }
     }
 
@@ -87,6 +89,25 @@ public final class TravelMountHandler {
 
     /**
      * Evaluate what should happen with the bot's current mount before travel.
+     *
+     * <p><b>Dismount invariant — load-bearing across all decisions:</b> any decision
+     * that results in the bot teleporting <em>without</em> bringing the mount must
+     * dismount the bot first ({@code bot.stopRiding()}) so there's no dangling
+     * rider/vehicle state pointing at a mount that won't follow. Code paths today:</p>
+     *
+     * <ul>
+     *   <li>{@code PROCEED_WITH_ANIMAL} — caller dismounts before discarding the mount
+     *       entity (see {@code NavigationArtifactService.completePostSpawnSetup} which
+     *       recreates the mount at destination).</li>
+     *   <li>{@code TETHERED_AT_SOURCE} — {@code tryTetherForCrossDim} and
+     *       {@code tryTetherAtSourceForSameDim} both call {@code bot.stopRiding()}
+     *       unconditionally before the secure attempt.</li>
+     *   <li>{@code PROCEED_VEHICLE_COLLECTED} — non-living vehicle is converted to an
+     *       inventory item; rider relationship is implicitly cleared.</li>
+     *   <li>Refusals ({@code REFUSE_*}) — bot doesn't teleport, stays mounted.</li>
+     * </ul>
+     *
+     * <p>If you add a new decision that proceeds without the mount, dismount first.</p>
      *
      * @param bot           the traveling bot
      * @param destination   target block position
@@ -127,10 +148,12 @@ public final class TravelMountHandler {
                 return MountTravelResult.withAnimal(vehicle,
                         "Your mount " + name + " will travel with you.");
             }
-            int needed = requiredHeadroom(vehicle);
-            return MountTravelResult.refuseNoRoom(
-                    "Not enough room at the destination for your mount (" + needed + " blocks of headroom needed). " +
-                    "Dismount first or choose a more open destination.");
+            // Destination too tight for the mount. Rather than refusing outright,
+            // try to secure the mount at source first: tether to a nearby fence (or
+            // place one) so the bot can travel alone with the mount safely behind.
+            // Only refuse if even that fails (no lead, no nearby leashable mob, or
+            // no place to put a fence).
+            return tryTetherAtSourceForSameDim(bot, vehicle);
         }
 
         // Unknown vehicle type — proceed without it
@@ -321,6 +344,44 @@ public final class TravelMountHandler {
     // ════════════════════════════════════════════════════════════════════
     //  Cross-dimension tethering
     // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Same-dim variant of {@link #tryTetherForCrossDim}. Called when the destination
+     * doesn't have room for the mount and we'd otherwise have to refuse the travel
+     * outright. Tries to secure the mount at the current location (tether to nearby
+     * fence, or place one); if successful, the bot proceeds alone and the mount waits
+     * to be retrieved. If we can't tether (no lead, no fence, can't place one), falls
+     * back to the original refuse.
+     *
+     * <p><b>Dismount invariant:</b> {@code bot.stopRiding()} runs unconditionally at
+     * the top of this helper. Every code path that teleports the bot without bringing
+     * the mount must dismount first — there must be no dangling rider/vehicle state
+     * pointing at a mount that won't follow.</p>
+     */
+    private static MountTravelResult tryTetherAtSourceForSameDim(ServerPlayerEntity bot, Entity vehicle) {
+        bot.stopRiding();
+        boolean tethered = RideSyncService.secureMountForTravel(bot, vehicle);
+        if (tethered) {
+            BlockPos pos = vehicle.getBlockPos();
+            ensureMountPersistence(vehicle);
+            MountPersistenceService.recordMount(bot, vehicle, false);
+            LOGGER.info("{}'s mount tethered at {} (destination too tight for co-teleport)",
+                    bot.getName().getString(), pos.toShortString());
+            return MountTravelResult.tethered(vehicle, pos, "current location",
+                    "Your mount has been tethered at " + formatPos(pos) + ". " +
+                    "Pick them up when you return — the destination was too tight for them to come along.");
+        }
+        // Couldn't tether — refuse the travel. Bot is already dismounted at this point
+        // (stopRiding above), so it's safe for the user to either manually remount or
+        // pick a clearer destination.
+        int needed = requiredHeadroom(vehicle);
+        ensureMountPersistence(vehicle);
+        MountPersistenceService.recordMount(bot, vehicle, false);
+        return MountTravelResult.refuseNoRoom(
+                "Not enough room at the destination for your mount (" + needed + " blocks of headroom needed) " +
+                "and I couldn't tether it (no fence within reach, no lead, or no spot to place a fence). " +
+                "Build a fence nearby, equip a lead, or pick a more open destination.");
+    }
 
     private static MountTravelResult tryTetherForCrossDim(ServerPlayerEntity bot, Entity vehicle) {
         bot.stopRiding();
