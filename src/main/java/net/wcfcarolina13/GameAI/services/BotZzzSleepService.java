@@ -163,19 +163,42 @@ public final class BotZzzSleepService {
         if (nearbyBots.isEmpty()) return true;
 
         long nowTick = server.getTicks();
+        // Pre-check world-level sleep eligibility ONCE — same for every bot in the world.
+        // If it's daytime and not thundering, sleep is fundamentally impossible until
+        // night. No point entering WAITING_LOGOFF — just tell the user and skip.
+        boolean canSleepInWorld = !senderWorld.isDay() || senderWorld.isThundering();
+
         for (ServerPlayerEntity bot : nearbyBots) {
             UUID botId = bot.getUuid();
-            // Debounce: ignore if this bot is already in any zzz-state OR currently sleeping.
-            if (ACTIVE.containsKey(botId)) continue;
-            if (bot.isSleeping()) continue;
-            // Vanilla refuses sleep while mounted. Skip the doomed 20s WAITING_LOGOFF wait
-            // and send the user a clear hint instead, mirroring vanilla's "you can't sleep
-            // while riding a horse" semantics. The bot's own mount-persistence path (used
-            // by fast-travel logoff) handles boats / minecarts / horses uniformly, so the
-            // hint applies to any vehicle type.
+            String botName = bot.getName().getString();
+            ServerCommandSource source = sender.getCommandSource();
+
+            // Verbose debounce feedback: tell the user WHY the second zzz is ignored
+            // instead of silently dropping it. State-aware so they know if it's mid-attempt
+            // or mid-logoff-wait.
+            StateEntry existing = ACTIVE.get(botId);
+            if (existing != null) {
+                String msg = switch (existing.state()) {
+                    case ATTEMPTING -> botName + " is already trying to sleep — give them a moment.";
+                    case WAITING_LOGOFF -> botName + " already tried — waiting to see if you sleep.";
+                };
+                ChatUtils.sendSystemMessage(source, "§7" + msg + "§r");
+                continue;
+            }
+            if (bot.isSleeping()) {
+                ChatUtils.sendSystemMessage(source, "§7" + botName + " is already asleep.§r");
+                continue;
+            }
+            // Vanilla refuses sleep while mounted. Skip the doomed 20s WAITING_LOGOFF wait.
             if (bot.hasVehicle()) {
-                ChatUtils.sendSystemMessage(sender.getCommandSource(),
-                        "§7" + bot.getName().getString() + " can't sleep while mounted — dismount them first.§r");
+                ChatUtils.sendSystemMessage(source,
+                        "§7" + botName + " can't sleep while mounted — dismount them first.§r");
+                continue;
+            }
+            // Not night / no thunder → vanilla refuses. Don't waste 20s; tell user clearly.
+            if (!canSleepInWorld) {
+                ChatUtils.sendSystemMessage(source,
+                        "§7" + botName + " can't sleep right now — it's not night yet.§r");
                 continue;
             }
             // Mark ATTEMPTING before invoking SleepService so a re-fire mid-attempt is debounced.
@@ -211,9 +234,16 @@ public final class BotZzzSleepService {
                 ACTIVE.remove(botId);
                 return;
             }
+            // Deadline anchors on NOW (when SleepService returned), not startedTick. The
+            // sleep attempt can block the server thread for tens of seconds in pathological
+            // cases (obstructed bed retry loop, slow pathfinding). If we anchored on
+            // startedTick, the 20s deadline could already be in the past by the time we
+            // get here, firing the logoff check immediately instead of giving the user the
+            // promised 20s window to get into bed.
+            long deadlineAnchor = server.getTicks();
             ACTIVE.put(botId, new StateEntry(
-                    State.WAITING_LOGOFF, startedTick,
-                    startedTick + FAILURE_DEADLINE_TICKS, sender.getUuid()));
+                    State.WAITING_LOGOFF, deadlineAnchor,
+                    deadlineAnchor + FAILURE_DEADLINE_TICKS, sender.getUuid()));
             LOGGER.info("[zzz] {} couldn't sleep; will check logoff conditions in {}s",
                     bot.getName().getString(), FAILURE_DEADLINE_TICKS / 20);
         });
@@ -258,16 +288,22 @@ public final class BotZzzSleepService {
             ServerPlayerEntity sender = server.getPlayerManager().getPlayer(st.senderUuid());
             boolean senderSleeping = sender != null && !sender.isRemoved() && sender.isSleeping();
             ACTIVE.remove(botId);
+            String botName = bot.getName().getString();
             if (!senderSleeping) {
-                LOGGER.info("[zzz] {} deadline reached but sender isn't sleeping — staying online",
-                        bot.getName().getString());
+                LOGGER.info("[zzz] {} deadline reached but sender isn't sleeping — staying online", botName);
+                // Tell the user — otherwise the 20s wait just looks like nothing happened.
+                if (sender != null && !sender.isRemoved()) {
+                    ChatUtils.sendSystemMessage(sender.getCommandSource(),
+                            "§7" + botName + " couldn't sleep, and you're not in bed either — staying online.§r");
+                }
                 continue;
             }
-            beginLogoff(server, bot);
+            beginLogoff(server, bot, sender);
         }
     }
 
-    private static void beginLogoff(MinecraftServer server, ServerPlayerEntity bot) {
+    private static void beginLogoff(MinecraftServer server, ServerPlayerEntity bot,
+                                    ServerPlayerEntity sender) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
         String name = bot.getName().getString();
         Vec3d pos = bot.getEntityPos();
@@ -300,9 +336,15 @@ public final class BotZzzSleepService {
         LOGGED_OFF.put(name, entry);
         saveToDisk();
 
-        // Friendly chat for the commander.
-        ChatUtils.sendSystemMessage(server.getCommandSource(),
-                "§7" + name + " went to sleep — they'll be back when the cycle's done.§r");
+        // Friendly chat to the sender who initiated. Send directly to the player —
+        // routing through server.getCommandSource() loses the recipient and silently
+        // drops the message (verified in 1.1.132 latest.log audit: "No recipient
+        // resolved for system message; dropping: '... went to sleep...'").
+        if (sender != null && !sender.isRemoved()) {
+            sender.sendMessage(net.minecraft.text.Text.literal(
+                    "§7" + name + " went to sleep — they'll be back when the cycle's done.§r"),
+                    false);
+        }
     }
 
     private static void tickWakeMonitor(MinecraftServer server) {

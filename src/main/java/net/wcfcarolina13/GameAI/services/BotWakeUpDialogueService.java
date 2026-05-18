@@ -191,8 +191,17 @@ public final class BotWakeUpDialogueService {
                 LOGGER.info("Co-sleep: {} skipped — different world", botName);
                 continue;
             }
-
+            // Skip if the bot is already mid-zzz-cycle (chat trigger). The zzz service
+            // owns its own attempt + logoff state machine, and a redundant co-sleep call
+            // here would fire a duplicate SleepService.sleep on a worker thread,
+            // producing the "Someone's already sleeping — I'll wait it out" chat spam
+            // observed in the 1.1.132 latest.log audit (3 duplicate messages per bot).
             UUID botId = bot.getUuid();
+            if (BotZzzSleepService.isInSleepCycle(botId)
+                    || BotZzzSleepService.isLoggedOff(botName)) {
+                LOGGER.info("Co-sleep: {} skipped — already in zzz-cycle", botName);
+                continue;
+            }
 
             // Cooldown: don't re-queue co-sleep within 5 minutes.
             // Use -1 as sentinel (not Long.MIN_VALUE which overflows on subtraction).

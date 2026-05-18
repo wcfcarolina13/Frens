@@ -155,8 +155,17 @@ public final class SleepService {
         }
 
         List<BlockPos> stands = findStandPositionsForBed(world, bed);
-        LOGGER.info("tryUseBed bedFoot={} standCandidates={}", bed.foot.toShortString(), stands.size());
+        // Cap stand attempts: each one runs a full pathfind + walk loop that can take
+        // ~10s in pathological cases. 2 attempts is plenty in practice — if the first
+        // two reachable candidates don't work, the bed almost certainly isn't usable
+        // from any direction (vanilla bed.obstructed / bed.not_safe are bed-area
+        // properties, not stand-position properties).
+        int maxStandAttempts = Math.min(stands.size(), 2);
+        LOGGER.info("tryUseBed bedFoot={} standCandidates={} (cap={})",
+                bed.foot.toShortString(), stands.size(), maxStandAttempts);
+        int attempt = 0;
         for (BlockPos stand : stands) {
+            if (attempt++ >= maxStandAttempts) break;
             // Door assist BEFORE walking: the stand tile can be behind a doorway.
             // Doing this pre-move reduces "door oscillation" and avoids false crafting fallbacks.
             MovementService.tryOpenDoorToward(bot, stand);
@@ -187,13 +196,31 @@ public final class SleepService {
                     sleepFuture.complete("exception: " + t.getMessage());
                 }
             });
+            String resultString = null;
             try {
-                String result = sleepFuture.get(1, java.util.concurrent.TimeUnit.SECONDS);
+                resultString = sleepFuture.get(1, java.util.concurrent.TimeUnit.SECONDS);
                 LOGGER.info("trySleep {} at bed {}: {}", bot.getName().getString(),
-                        bed.foot.toShortString(), result);
+                        bed.foot.toShortString(), resultString);
             } catch (Exception e) {
                 LOGGER.warn("trySleep timed out for {} at bed {}", bot.getName().getString(),
                         bed.foot.toShortString());
+            }
+            // Early-exit on bed-area properties that won't improve with a different stand
+            // position. Without this, the bot burns ~10s/candidate × 3 candidates × N beds
+            // walking to fresh stand spots and getting rejected for the same reason every
+            // time. Saw 57s of server-thread lag on an obstructed bed in latest.log
+            // (1.1.131 audit). Report once per bed to user chat so the failure mode is
+            // visible instead of mystery silence.
+            if (resultString != null && (resultString.contains("obstructed")
+                    || resultString.contains("not_safe"))) {
+                String reasonLabel = resultString.contains("obstructed")
+                        ? "blocks too close" : "monsters nearby";
+                if (!quietFailures) {
+                    ChatUtils.sendSystemMessage(source,
+                            bot.getName().getString() + " can't use the bed at "
+                                    + bed.foot.toShortString() + " — " + reasonLabel + ".");
+                }
+                return BedUseResult.FAIL_OTHER;
             }
             if (bot.isSleeping()) {
                 // Verify the server updated the player's sleeping position to be on/near the bed.

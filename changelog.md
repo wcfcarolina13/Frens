@@ -2,6 +2,63 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## zzz logoff feedback to sender; co-sleep skips zzz-active bots (2026-05-17, 1.1.133)
+
+Two user-visible polish fixes from the 1.1.132 success-trace audit ([latest.log](logs) 18:05:20–18:06:02).
+
+**1. "Went to sleep" chat message was being dropped.** [BotZzzSleepService.beginLogoff](src/main/java/net/wcfcarolina13/GameAI/services/BotZzzSleepService.java) was sending the friendly logoff line via `ChatUtils.sendSystemMessage(server.getCommandSource(), ...)`. The server command source has no recipient, so the [ChatUtils router](src/main/java/net/wcfcarolina13/ChatUtils/ChatUtils.java) logged `"No recipient resolved for system message; dropping: '... went to sleep ...'"` and silently dropped it. The user saw nothing in chat when their bots logged off — just the vanilla "Jake left the game" line. Fix: pass the `sender` (the player who typed zzz, already tracked in the StateEntry) through to `beginLogoff` and call `sender.sendMessage(Text.literal(...), false)` directly. Mirrors the `notifyOwner` pattern at [NavigationArtifactService.java:1697](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L1697).
+
+**2. Co-sleep service was firing redundantly on zzz-active bots.** When the user got into bed at 18:05:54, [BotWakeUpDialogueService.triggerCoSleep](src/main/java/net/wcfcarolina13/GameAI/services/BotWakeUpDialogueService.java#L178) (which auto-makes nearby bots sleep when the commander does) ran for both bots — but they were already in `WAITING_LOGOFF` state from the zzz trigger. The co-sleep call ran `SleepService.sleep` on a worker thread, hit my 1.1.127 bed-share gate ("Someone's already sleeping — I'll wait it out"), and produced three duplicate chat lines per cycle. Fix: skip co-sleep when `BotZzzSleepService.isInSleepCycle(botId) || BotZzzSleepService.isLoggedOff(botName)` — the zzz service owns the bot's sleep state machine, no need for co-sleep to second-guess it. Adds one log line: `"Co-sleep: {bot} skipped — already in zzz-cycle"`.
+
+Not fixed in this release (flagged for later):
+
+- The `"Fakeplayer 'Jake' still present after removal attempt"` warning during logoff. The bot IS removed eventually (respawn works) but `removeFromPlayerManager` returns false via the reflection fallback. Investigative — not currently breaking anything.
+- The 19s sleep-attempt window is still long because the bot walks to the bed before vanilla rejects with `bed.obstructed`. A pre-walk vanilla-rules check (1-block air above head + foot) could cut that to ~0.1s but requires careful mirroring of vanilla's `BedBlock.canBeUsedToSleep` logic — defer until repro shows it as a real pain point.
+
+Files: `GameAI/services/BotZzzSleepService.java` (beginLogoff signature + chat fix), `GameAI/services/BotWakeUpDialogueService.java` (co-sleep skip guard).
+
+## SleepService doesn't thrash on obstructed beds; zzz deadline math uses now-anchor (2026-05-17, 1.1.132)
+
+Root-cause fix for the user's "zzz didn't do anything" report from the 1.1.131 latest.log audit. The previous diagnosis (1.1.131) added user-facing feedback but didn't fix the actual freeze. Re-reading the log past line 3110 revealed the real story:
+
+User typed `zzz` at 17:46:29. SleepService thrashed for 57 seconds on a bed at -17, 63, 2 that vanilla was rejecting with `block.minecraft.bed.obstructed` (bed-area property — not enough headroom or other geometry vanilla refuses). The loop walked the bot through 3 stand candidates × 2 beds × ~10s/pathfind = 57s of server-thread saturation, ending with `"Can't keep up! Running 57366ms or 1147 ticks behind"`. Bob's queued attempt then took another 56s. User paused the game before either bot's WAITING_LOGOFF could fire — the feature LOOKED dead because the server was dead.
+
+Three coupled fixes:
+
+1. **Early-exit on bed-area failures** ([SleepService.java:175-210](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java#L175-L210)). When `trySleep` rejects with `block.minecraft.bed.obstructed` or `block.minecraft.bed.not_safe`, those are properties of the bed area, not the stand position — different stand candidates won't fix them. Return `FAIL_OTHER` immediately so caller moves on to the next bed (or to the placement branch). Also surface a clear per-bed chat line so the user knows WHICH bed and WHY: `"{bot} can't use the bed at {pos} — blocks too close."` / `"— monsters nearby."`
+
+2. **Stand-candidate cap** ([SleepService.java:157-167](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java#L157-L167)). Cap `tryUseBed` to max 2 stand-candidate attempts per bed regardless of failure reason. Each attempt runs a full Baritone pathfind + walk loop costing ~10s in pathological cases — 2 is enough to cover "first candidate is unreachable but second one works" while bounding total cost. Log line updated to `tryUseBed bedFoot=... standCandidates=... (cap=...)`.
+
+3. **WAITING_LOGOFF deadline anchored on now-tick** ([BotZzzSleepService.java:236-244](src/main/java/net/wcfcarolina13/GameAI/services/BotZzzSleepService.java#L236-L244)). Previously the 20s deadline was `startedTick + 400` where `startedTick` was when chat fired. If SleepService.sleep blocked the server for 57s before returning, the deadline was already 37s in the past by the time WAITING_LOGOFF was set, firing the logoff check immediately instead of giving the user the promised 20s window. Now anchors on `server.getTicks()` at the moment we transition to WAITING_LOGOFF, so the 20s timer always means 20s from "couldn't sleep" to "decision time."
+
+Net effect: an obstructed bed now fails fast in ~1s with a clear chat line per bot per bed, the user gets a real 20s window to climb into bed, and the server doesn't lock up. Future failure modes (any other vanilla `trySleep` rejection reason) still get the existing stand-candidate retry but capped at 2 attempts.
+
+Files: `GameAI/services/SleepService.java`, `GameAI/services/BotZzzSleepService.java`.
+
+## zzz feedback fix: bot-named messages, time-of-day pre-check, debounce visibility (2026-05-17, 1.1.131)
+
+User report: typed "zzz" with multiple bots around, no beds, no means to craft → "nothing happened, they appeared to just do nothing." Log analysis ([latest.log](logs) at 15:46:47–15:47:09) showed three issues:
+
+1. **The world wasn't actually night.** User was underground (`openSky=false`, Y=63), so it FELT dark, but `world.isDay()` returned true. SleepService correctly refused with "I couldn't sleep right now (not night/thunder)" but the message wasn't attributed to a bot, and the user (in cave-dark) read it as bot confusion rather than vanilla time-of-day rules.
+2. **Generic chat message** — both bots sent the identical "I couldn't sleep right now" line, no way to tell which bot from chat.
+3. **Re-zzz silently debounced** — first zzz at 15:46:47 put both bots in WAITING_LOGOFF (deadline 15:47:07). User did `/time set 13000` at 15:46:53 to actually make it night, then re-zzz at 15:46:57 — but my service's `ACTIVE.containsKey(botId) continue;` debounce skipped it with zero feedback. At 15:47:09 deadline expired with "deadline reached but sender isn't sleeping — staying online" logged to server, but again nothing to the user.
+
+Net effect: user typed zzz twice, got two confusing/missing messages, watched 20 seconds of nothing, and walked away thinking the feature was broken. It wasn't — but the UX was opaque.
+
+**Fix** — three changes to [BotZzzSleepService.handleChatTrigger](src/main/java/net/wcfcarolina13/GameAI/services/BotZzzSleepService.java):
+
+1. **Pre-check `world.isDay() && !world.isThundering()`** before calling SleepService. If sleep is fundamentally impossible right now, skip the 20s wait entirely and send `"{bot} can't sleep right now — it's not night yet."` per bot. No more pointless WAITING_LOGOFF when the only fix is for time to advance.
+2. **Bot-named feedback for all chat lines** — every response now leads with `{botName}` so multi-bot scenarios are unambiguous (`"Jake can't sleep…"`, `"Bob is already trying to sleep…"`).
+3. **Verbose debounce messages** — when re-zzz hits a bot already in ACTIVE state, send a state-aware message instead of silently dropping:
+   - ATTEMPTING: `"{bot} is already trying to sleep — give them a moment."`
+   - WAITING_LOGOFF: `"{bot} already tried — waiting to see if you sleep."`
+   - Already sleeping: `"{bot} is already asleep."`
+4. **Deadline-expired feedback to sender** — when the 20s WAITING_LOGOFF expires and the sender isn't in bed, send `"{bot} couldn't sleep, and you're not in bed either — staying online."` so the user knows the wait window is over, not silently log-only.
+
+The underlying state machine is unchanged — same trigger pattern, same debounce, same logoff/respawn cycle. Only the user-facing visibility improves. Mounted-bot refusal from 1.1.129 inherits the same chat format.
+
+Files: `GameAI/services/BotZzzSleepService.java` (handleChatTrigger rewritten, tickActiveStates deadline path adds sender chat).
+
 ## Pressure-plate stuck observability (2026-05-17, 1.1.130)
 
 The "bot still gets stuck for too long at doorways and pressure plates" complaint from the Notes-list audit. Doorway side was already handled by [MovementService.java:2389-2410](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java#L2389-L2410) (stuck-near-door auto-close after 8+ attempts within 4 blocks). Pressure-plate side had no instrumentation — plates were just marked walkable in [WalkablePartialBlocks.java:78](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java#L78) with no stuck-detection or oscillation tracking.
