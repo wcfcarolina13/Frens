@@ -51,9 +51,6 @@ public final class BotWakeUpDialogueService {
     /** Co-sleep cooldown: don't re-queue for 5 minutes after a co-sleep attempt. */
     private static final long CO_SLEEP_COOLDOWN_TICKS = 20L * 60L * 5L;
 
-    /** Co-sleep proximity: bot must be within 16 blocks of commander. */
-    private static final double CO_SLEEP_RADIUS_SQ = 16.0 * 16.0;
-
     private BotWakeUpDialogueService() {
     }
 
@@ -214,7 +211,7 @@ public final class BotWakeUpDialogueService {
 
             // Bot must be within 16 blocks of the player.
             double distSq = bot.squaredDistanceTo(player);
-            if (distSq > CO_SLEEP_RADIUS_SQ) {
+            if (!BotSleepProximityPolicy.isWithinCommanderSleepRadius(distSq)) {
                 LOGGER.info("Co-sleep: {} skipped — too far ({} blocks)",
                         botName, String.format("%.1f", Math.sqrt(distSq)));
                 continue;
@@ -270,7 +267,7 @@ public final class BotWakeUpDialogueService {
                     long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
                     if (retryTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) continue;
                     double distSq = bot.squaredDistanceTo(retryPlayer);
-                    if (distSq > CO_SLEEP_RADIUS_SQ) continue;
+                    if (!BotSleepProximityPolicy.isWithinCommanderSleepRadius(distSq)) continue;
                     if (bot.getEntityWorld() instanceof ServerWorld sw) {
                         if (sw.isDay() && !sw.isThundering()) continue;
                     }

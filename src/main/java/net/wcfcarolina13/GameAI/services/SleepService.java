@@ -59,6 +59,9 @@ public final class SleepService {
         if (source == null || bot == null) {
             return false;
         }
+        if (shouldAbort(bot)) {
+            return false;
+        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -78,6 +81,9 @@ public final class SleepService {
         List<BlockPos> nearbyBeds = findNearbyBedFeet(bot, world, bot.getBlockPos(), 24);
         LOGGER.info("sleep: nearbyBeds={}", nearbyBeds.size());
         for (BlockPos bedFoot : nearbyBeds) {
+            if (shouldAbort(bot)) {
+                return false;
+            }
             BedUseResult res = tryUseBed(source, bot, bedFoot, true);
             if (res == BedUseResult.SUCCESS) {
                 return true;
@@ -87,6 +93,10 @@ public final class SleepService {
                 ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
                 return false;
             }
+        }
+
+        if (shouldAbort(bot)) {
+            return false;
         }
 
         // Suppress own-bed crafting/placement when a nearby player is already
@@ -137,6 +147,9 @@ public final class SleepService {
     }
 
     private static BedUseResult tryUseBed(ServerCommandSource source, ServerPlayerEntity bot, BlockPos bedFootPos, boolean quietFailures) {
+        if (shouldAbort(bot)) {
+            return BedUseResult.FAIL_OTHER;
+        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return BedUseResult.FAIL_OTHER;
         }
@@ -166,12 +179,18 @@ public final class SleepService {
         int attempt = 0;
         for (BlockPos stand : stands) {
             if (attempt++ >= maxStandAttempts) break;
+            if (shouldAbort(bot)) {
+                return BedUseResult.FAIL_OTHER;
+            }
             // Door assist BEFORE walking: the stand tile can be behind a doorway.
             // Doing this pre-move reduces "door oscillation" and avoids false crafting fallbacks.
             MovementService.tryOpenDoorToward(bot, stand);
             MovementService.tryOpenDoorToward(bot, bed.foot);
             if (!moveToStand(source, bot, stand)) {
                 continue;
+            }
+            if (shouldAbort(bot)) {
+                return BedUseResult.FAIL_OTHER;
             }
             if (!MovementService.tryOpenDoorToward(bot, bed.foot)) {
                 // ok, might not need door.
@@ -254,6 +273,14 @@ public final class SleepService {
         return BedUseResult.FAIL_NOT_SLEEP_TIME;
     }
 
+    private static boolean shouldAbort(ServerPlayerEntity bot) {
+        return bot == null
+                || bot.isRemoved()
+                || !bot.isAlive()
+                || Thread.currentThread().isInterrupted()
+                || TaskService.isAbortRequested(bot.getUuid());
+    }
+
     private static boolean canSleepNow(ServerWorld world) {
         if (world == null) {
             return false;
@@ -303,6 +330,7 @@ public final class SleepService {
         if (bot == null || bed == null) return false;
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
+            if (shouldAbort(bot)) return false;
             BlockPos cur = bot.getBlockPos();
             // Accept foot/head positions or adjacent lying positions (allow small horizontal tolerance)
             if (cur.equals(bed.foot) || cur.equals(bed.head)) return true;
@@ -407,9 +435,10 @@ public final class SleepService {
                 continue;
             }
             BlockPos foot = canonicalizeBedFoot(pos, state);
-            if (foot == null || !seenFeet.add(foot)) {
+            if (!SleepBedCandidatePolicy.addUniqueFoot(seenFeet, foot)) {
                 continue;
             }
+            foot = foot.toImmutable();
             // Skip beds another player or villager is currently sleeping in.
             // Without this, the bot would try the user's bed first if it was
             // the closest, get rejected by trySleep on OCCUPIED, and then

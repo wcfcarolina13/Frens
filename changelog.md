@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## zzz sleep no longer blocks the server or shutdown (2026-08-22, 1.1.135)
+
+The live log showed automatic co-sleep correctly skip Jake at 19.1 blocks, followed by chat `zzz` selecting him through a separate 48-block radius. The chat handler then invoked the synchronous sleep movement loop through `server.execute`, so all bed pathfinding ran on the server thread. Jake retried inaccessible beds for more than a minute, continued navigating after client shutdown began, and prevented the integrated server from closing until the game was force-quit.
+
+Chat `zzz` now uses a dedicated task-backed worker executor, registers the executing thread for `/bot stop` and shutdown interruption, and checks cancellation between beds and stand attempts. The executor participates in integrated-server start/stop lifecycle handling. Chat and automatic co-sleep now share one 16-block commander proximity policy, and chat triggers only affect bots actually controlled by the sender. Idle-hobby resume also waits until the `zzz` fallback cycle has finished.
+
+The bed scan now stores immutable canonical foot positions in its de-duplication set. Its mutable iterator previously corrupted set membership, causing both halves of a physical bed to be returned and the same bed to be tried twice. Focused regressions cover the shared distance boundary, immutable bed deduplication, worker-thread dispatch, and idle-resume suppression.
+
+Files: `Frens.java`, `GameAI/services/BotZzzSleepService.java`, `GameAI/services/BotWakeUpDialogueService.java`, `GameAI/services/BotIdleResumeService.java`, `GameAI/services/SleepService.java`, `GameAI/services/BotSleepProximityPolicy.java`, `GameAI/services/SleepBedCandidatePolicy.java`, `BotZzzSleepServiceTest.java`.
+
 ## Arrow recovery ignores impossible and underwater targets (2026-08-22, 1.1.134)
 
 The live game showed Jake repeatedly chasing arrows stuck in terrain and several blocks underwater. Inventory snapshots confirmed he was using an Infinity bow, whose fired arrows cannot be picked up in Survival. The recovery scanner nevertheless tracked every nearby arrow—including mob arrows, other players’ arrows, Infinity arrows, and wet arrows—and its ten-second chase timeout could not break the loop because the five-tick scan immediately registered the still-present projectile again.

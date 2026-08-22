@@ -21,6 +21,10 @@ public final class BotIdleResumeService {
     private BotIdleResumeService() {
     }
 
+    static boolean canResumeAfterSleepCycle(boolean zzzCycleActive) {
+        return !zzzCycleActive;
+    }
+
     public static void scheduleResumeIfEnabled(MinecraftServer server,
                                               ServerPlayerEntity bot,
                                               long delayTicks,
@@ -47,6 +51,13 @@ public final class BotIdleResumeService {
                 return;
             }
             if (TaskService.hasActiveTask(bot.getUuid())) {
+                return;
+            }
+
+            if (!canResumeAfterSleepCycle(BotZzzSleepService.isInSleepCycle(bot.getUuid()))) {
+                if (sleepAttempt < MAX_SLEEP_RETRIES) {
+                    scheduleResumeIfEnabled(server, bot, SLEEP_RETRY_DELAY_TICKS, reason, sleepAttempt + 1);
+                }
                 return;
             }
 

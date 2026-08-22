@@ -730,6 +730,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.restartExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.BotZzzSleepService.restartExecutor();
             configNetworkManager.registerServerModelNameSaveReceiver(server);
             configNetworkManager.registerServerAPIKeySaveReceiver(server);
             configNetworkManager.registerServerCustomProviderSaveReceiver(server);
@@ -801,6 +802,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.BotZzzSleepService.shutdownExecutor();
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
@@ -882,6 +884,7 @@ public class Frens implements ModInitializer {
             // false for ~12 minutes and silently blocking every /follow
             // mount attempt after reload.
             net.wcfcarolina13.GameAI.services.RideSyncService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotZzzSleepService.reset();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {

@@ -28,14 +28,19 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /**
  * Chat "zzz" sleep flow + failure-driven logoff/respawn cycle.
  *
- * <p>When any player types a "zzz" message (3+ z's, case-insensitive) in chat,
- * every Frens bot in the sender's dimension within {@link #CHAT_RADIUS}
- * blocks tries to sleep via {@link SleepService#sleep}. If the bot fails to
+ * <p>When a bot's commander types a "zzz" message (3+ z's, case-insensitive) in chat,
+ * each of their Frens bots within the shared sleep radius in the same dimension tries
+ * to sleep via {@link SleepService#sleep}. If the bot fails to
  * sleep AND the sender is themselves sleeping {@link #FAILURE_DEADLINE_TICKS}
  * ticks later, the bot "logs off" — its fake-player entity is removed from
  * the world (state persisted) and the bot waits until either daytime or no
@@ -62,10 +67,8 @@ public final class BotZzzSleepService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("zzz-sleep");
 
-    /** Per-bot chat-radius from sender (blocks). Loose enough to cover a base, tight
-     *  enough that a "zzz" in distant chat doesn't wake every bot on the server. */
-    private static final double CHAT_RADIUS = 48.0D;
-    private static final double CHAT_RADIUS_SQ = CHAT_RADIUS * CHAT_RADIUS;
+    private static final AtomicInteger SLEEP_THREAD_ID = new AtomicInteger();
+    private static volatile ExecutorService sleepExecutor = createSleepExecutor();
 
     /** How long after a failed sleep attempt before we decide whether to log off. */
     private static final int FAILURE_DEADLINE_TICKS = 400; // 20s
@@ -87,7 +90,7 @@ public final class BotZzzSleepService {
 
     private enum State { ATTEMPTING, WAITING_LOGOFF }
 
-    private record StateEntry(State state, long startedTick, long deadlineTick, UUID senderUuid) {}
+    private record StateEntry(State state, long deadlineTick, UUID senderUuid) {}
 
     /** Lightweight per-tick state for in-progress attempts and pending logoff. */
     private static final ConcurrentMap<UUID, StateEntry> ACTIVE = new ConcurrentHashMap<>();
@@ -124,6 +127,28 @@ public final class BotZzzSleepService {
 
     private BotZzzSleepService() {}
 
+    private static ExecutorService createSleepExecutor() {
+        return Executors.newCachedThreadPool(r -> {
+            Thread thread = new Thread(r, "zzz-sleep-" + SLEEP_THREAD_ID.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    static Future<?> submitSleepAttempt(Runnable attempt) {
+        return sleepExecutor.submit(attempt);
+    }
+
+    public static synchronized void restartExecutor() {
+        if (sleepExecutor.isShutdown()) {
+            sleepExecutor = createSleepExecutor();
+        }
+    }
+
+    public static void shutdownExecutor() {
+        sleepExecutor.shutdownNow();
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Public query — for other systems to defer.
     // ─────────────────────────────────────────────────────────────────────
@@ -151,13 +176,15 @@ public final class BotZzzSleepService {
         if (server == null) return true;
         if (!(sender.getEntityWorld() instanceof ServerWorld senderWorld)) return true;
 
-        // Enumerate Frens bots in the sender's world within CHAT_RADIUS.
+        // Enumerate the commander's nearby Frens bots in the sender's world.
         List<ServerPlayerEntity> nearbyBots = new ArrayList<>();
         for (UUID botId : BotRegistry.ids()) {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
             if (bot == null || bot.isRemoved() || !bot.isAlive()) continue;
             if (bot.getEntityWorld() != senderWorld) continue;
-            if (bot.squaredDistanceTo(sender) > CHAT_RADIUS_SQ) continue;
+            if (!BotSleepProximityPolicy.isWithinCommanderSleepRadius(bot.squaredDistanceTo(sender))) continue;
+            ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
+            if (commander == null || !commander.getUuid().equals(sender.getUuid())) continue;
             nearbyBots.add(bot);
         }
         if (nearbyBots.isEmpty()) return true;
@@ -202,51 +229,75 @@ public final class BotZzzSleepService {
                 continue;
             }
             // Mark ATTEMPTING before invoking SleepService so a re-fire mid-attempt is debounced.
-            ACTIVE.put(botId, new StateEntry(State.ATTEMPTING, nowTick, nowTick, sender.getUuid()));
-            tryAttemptSleep(server, bot, sender, nowTick);
+            ACTIVE.put(botId, new StateEntry(State.ATTEMPTING, nowTick, sender.getUuid()));
+            tryAttemptSleep(server, bot, sender);
         }
         return true;
     }
 
-    /** Run the actual sleep attempt off the chat-event thread to keep latency low
-     *  and avoid blocking chat dispatch. SleepService is server-thread-safe via
-     *  its internal `server.execute` use. */
+    /** Run pathfinding on a worker; SleepService marshals mutations to the server thread. */
     private static void tryAttemptSleep(MinecraftServer server, ServerPlayerEntity bot,
-                                        ServerPlayerEntity sender, long startedTick) {
+                                        ServerPlayerEntity sender) {
         UUID botId = bot.getUuid();
         ServerCommandSource source = sender.getCommandSource();
-        server.execute(() -> {
-            boolean success;
+        var ticketOpt = TaskService.beginSkill("sleep", source, botId);
+        if (ticketOpt.isEmpty()) {
+            ACTIVE.remove(botId);
+            ChatUtils.sendSystemMessage(source, "§7" + bot.getName().getString() + " is busy.§r");
+            return;
+        }
+
+        TaskService.TaskTicket ticket = ticketOpt.get();
+        try {
+            submitSleepAttempt(() -> runSleepAttempt(server, bot, sender, source, ticket));
+        } catch (RejectedExecutionException e) {
+            ACTIVE.remove(botId);
+            TaskService.complete(ticket, false);
+            LOGGER.info("[zzz] rejected sleep attempt for {} because the executor is stopped",
+                    bot.getName().getString());
+        }
+    }
+
+    private static void runSleepAttempt(MinecraftServer server,
+                                        ServerPlayerEntity bot,
+                                        ServerPlayerEntity sender,
+                                        ServerCommandSource source,
+                                        TaskService.TaskTicket ticket) {
+        UUID botId = bot.getUuid();
+        boolean success = false;
+        boolean aborted = false;
+        try {
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
             try {
                 success = SleepService.sleep(source, bot);
             } catch (Throwable t) {
                 LOGGER.warn("[zzz] sleep attempt for {} threw: {}", bot.getName().getString(), t.toString());
-                success = false;
             }
-            if (success || bot.isSleeping()) {
-                // Cleanly sleeping — leave debounce off so a future zzz post-wake works.
-                ACTIVE.remove(botId);
-                return;
-            }
-            // Failure path — transition to WAITING_LOGOFF if dimension allows beds at all.
-            // (No point waiting 20s in the Nether — the bot will never sleep there.)
-            if (!(bot.getEntityWorld() instanceof ServerWorld world) || isNoSleepDimension(world)) {
-                ACTIVE.remove(botId);
-                return;
-            }
-            // Deadline anchors on NOW (when SleepService returned), not startedTick. The
-            // sleep attempt can block the server thread for tens of seconds in pathological
-            // cases (obstructed bed retry loop, slow pathfinding). If we anchored on
-            // startedTick, the 20s deadline could already be in the past by the time we
-            // get here, firing the logoff check immediately instead of giving the user the
-            // promised 20s window to get into bed.
-            long deadlineAnchor = server.getTicks();
-            ACTIVE.put(botId, new StateEntry(
-                    State.WAITING_LOGOFF, deadlineAnchor,
-                    deadlineAnchor + FAILURE_DEADLINE_TICKS, sender.getUuid()));
-            LOGGER.info("[zzz] {} couldn't sleep; will check logoff conditions in {}s",
-                    bot.getName().getString(), FAILURE_DEADLINE_TICKS / 20);
-        });
+            aborted = TaskService.isAbortRequested(botId) || Thread.currentThread().isInterrupted();
+        } finally {
+            TaskService.complete(ticket, success && !aborted);
+        }
+
+        if (aborted || TaskService.isServerStopping() || bot.isRemoved()) {
+            ACTIVE.remove(botId);
+            return;
+        }
+        if (success || bot.isSleeping()) {
+            ACTIVE.remove(botId);
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world) || isNoSleepDimension(world)) {
+            ACTIVE.remove(botId);
+            return;
+        }
+
+        // Anchor the promised 20-second window after navigation returns.
+        long deadlineAnchor = server.getTicks();
+        ACTIVE.put(botId, new StateEntry(
+                State.WAITING_LOGOFF,
+                deadlineAnchor + FAILURE_DEADLINE_TICKS, sender.getUuid()));
+        LOGGER.info("[zzz] {} couldn't sleep; will check logoff conditions in {}s",
+                bot.getName().getString(), FAILURE_DEADLINE_TICKS / 20);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -471,5 +522,6 @@ public final class BotZzzSleepService {
     /** Called from server shutdown — flush any pending state. */
     public static void reset() {
         ACTIVE.clear();
+        diskLoaded = false;
     }
 }
