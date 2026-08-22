@@ -178,7 +178,14 @@ public final class BotRescueService {
         return false;
     }
 
-    private static boolean snapOutOfProtectedGlass(ServerPlayerEntity bot, ServerWorld world, BlockPos origin, String reason) {
+    static boolean shouldAttemptEmergencySnap(
+            boolean takingSuffocationDamage,
+            boolean headBlocked,
+            boolean feetBlocked) {
+        return takingSuffocationDamage && headBlocked && feetBlocked;
+    }
+
+    private static boolean snapToNearbySafety(ServerPlayerEntity bot, ServerWorld world, BlockPos origin, String reason) {
         if (bot == null || world == null || origin == null) {
             return false;
         }
@@ -196,7 +203,7 @@ public final class BotRescueService {
 
         BlockPos from = bot.getBlockPos();
         SafePositionService.snapTo(bot, safe);
-        LOGGER.warn("protected-glass snap recovery [{}]: bot={} from={} to={}",
+        LOGGER.warn("emergency snap recovery [{}]: bot={} from={} to={}",
                 reason,
                 bot.getName().getString(),
                 from.toShortString(),
@@ -311,7 +318,12 @@ public final class BotRescueService {
         boolean stuckInBlocks = (headBlocked || feetBlocked);
 
         if ((takingSuffocationDamage || stuckInBlocks) && protectedGlassCollision
-                && snapOutOfProtectedGlass(bot, world, feet, "burial-rescue")) {
+                && snapToNearbySafety(bot, world, feet, "protected-glass")) {
+            return true;
+        }
+
+        if (shouldAttemptEmergencySnap(takingSuffocationDamage, headBlocked, feetBlocked)
+                && snapToNearbySafety(bot, world, feet, "fully-encased-suffocation")) {
             return true;
         }
 
@@ -573,7 +585,7 @@ public final class BotRescueService {
         BlockState feetStateInitial = world.getBlockState(feet);
         BlockState headStateInitial = world.getBlockState(head);
         if (hasProtectedGlassCollision(world, feet, head, feetStateInitial, headStateInitial)
-                && snapOutOfProtectedGlass(bot, world, feet, "suffocation-check")) {
+                && snapToNearbySafety(bot, world, feet, "protected-glass-suffocation-check")) {
             return true;
         }
         if ((isRescueProtectedBlock(feetStateInitial) && feetStateInitial.blocksMovement() && !feetStateInitial.getCollisionShape(world, feet).isEmpty())
@@ -680,7 +692,7 @@ public final class BotRescueService {
         BlockState headState = world.getBlockState(head);
         BlockState feetState = world.getBlockState(feet);
         if (hasProtectedGlassCollision(world, feet, head, feetState, headState)
-                && snapOutOfProtectedGlass(bot, world, feet, "spawn-check")) {
+                && snapToNearbySafety(bot, world, feet, "protected-glass-spawn-check")) {
             return;
         }
 

@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Fully encased suffocation uses validated emergency snap (2026-08-22, unreleased)
+
+The latest play log showed Bob become fully embedded in stone at both feet and head level. Burial rescue detected the condition, but with an empty inventory it chose bare-hand stone mining; Bob died four seconds later before that recovery could complete.
+
+When recent `IN_WALL` damage coincides with solid collision at both body cells, burial rescue now first searches for a validated standable cell within six blocks and snaps the bot there. If no local position exists, it falls back to the previously recorded safe area and then to the existing mining path. Partial overlaps and ordinary stuck detection keep their existing movement/mining behavior, so this only escalates active, fully encased suffocation.
+
+Added regression coverage for the emergency threshold: recent suffocation plus both blocked cells is required.
+
+Files: `GameAI/services/BotRescueService.java`, `BotRescueEmergencySnapPolicyTest.java`.
+
 ## Unusable crossbows no longer trap bots in a suppressed melee loop (2026-08-22, unreleased)
 
 The latest play log showed Bob repeatedly switching from bare hands back to an unloaded crossbow while a skeleton attacked at close range. `selectBestMeleeWeapon` correctly rejected the crossbow, but the combat caller immediately ran `selectBestWeapon`, which equipped it again. `attackTarget` is melee-only and rejected the crossbow, so the same sequence repeated until Bob died.
