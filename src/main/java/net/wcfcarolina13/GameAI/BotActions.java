@@ -371,7 +371,7 @@ public final class BotActions {
         for (int slot = 0; slot < inventory.size(); slot++) {
             ItemStack stack = inventory.getStack(slot);
             if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
-            int score = combatWeaponScore(stack);
+            int score = combatWeaponScore(bot, stack);
             if (score > bestScore) {
                 bestScore = score;
                 bestSlot = slot;
@@ -381,7 +381,7 @@ public final class BotActions {
         if (bestSlot != -1 && bestScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
             selectHotbarSlot(bot, hotbarSlot);
-            boolean swapped = combatWeaponScore(bot.getMainHandStack()) > 0;
+            boolean swapped = combatWeaponScore(bot, bot.getMainHandStack()) > 0;
             if (swapped && priorWasFiltered) {
                 CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
             }
@@ -729,8 +729,12 @@ public final class BotActions {
                 .orElse(null);
 
         if (target != null) {
-            if (!selectBestMeleeWeapon(bot)) {
-                selectBestWeapon(bot);
+            CombatWeaponPolicy.CloseRangeChoice choice =
+                    prepareCloseRangeWeapon(bot, target instanceof LivingEntity);
+            if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
+                    && target instanceof LivingEntity living
+                    && performRangedAttack(bot, living, bot.getCommandSource().getServer().getTicks())) {
+                return;
             }
             attackTarget(bot, target);
         }
@@ -1503,7 +1507,7 @@ public final class BotActions {
         return 0;
     }
 
-    private static int combatWeaponScore(ItemStack stack) {
+    private static int combatWeaponScore(ServerPlayerEntity bot, ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return 0;
         }
@@ -1512,10 +1516,10 @@ public final class BotActions {
             return meleeScore;
         }
         if (stack.getItem() instanceof BowItem) {
-            return 55;
+            return canFire(bot, stack) ? 55 : 0;
         }
         if (stack.getItem() instanceof CrossbowItem) {
-            return 60;
+            return canFire(bot, stack) ? 60 : 0;
         }
         return 0;
     }
@@ -1587,6 +1591,31 @@ public final class BotActions {
         return false;
     }
 
+    static CombatWeaponPolicy.CloseRangeChoice prepareCloseRangeWeapon(
+            ServerPlayerEntity bot,
+            boolean allowRanged) {
+        boolean hasMelee = hasCompliantMeleeWeapon(bot);
+        boolean hasRanged = allowRanged && hasRangedWeapon(bot);
+        CombatWeaponPolicy.CloseRangeChoice choice =
+                CombatWeaponPolicy.chooseCloseRangeChoice(hasMelee, hasRanged);
+        if (choice != CombatWeaponPolicy.CloseRangeChoice.RANGED) {
+            selectBestMeleeWeapon(bot);
+        }
+        return choice;
+    }
+
+    private static boolean hasCompliantMeleeWeapon(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        PlayerInventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (!DurabilityPolicyService.shouldAvoid(bot, stack) && meleeWeaponScore(stack) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isLikelyWeapon(ItemStack stack) {
         if (stack.isEmpty()) {
             return false;
@@ -1648,9 +1677,6 @@ public final class BotActions {
         }
 
         if (selectBestMeleeWeapon(bot)) {
-            return true;
-        }
-        if (selectBestWeapon(bot) && meleeWeaponScore(bot.getMainHandStack()) > 0) {
             return true;
         }
 
@@ -2471,6 +2497,9 @@ public final class BotActions {
     }
 
     private static boolean canFire(ServerPlayerEntity bot, ItemStack weapon) {
+        if (bot == null || weapon == null || weapon.isEmpty()) {
+            return false;
+        }
         if (weapon.getItem() instanceof net.minecraft.item.TridentItem) {
             if (hasRiptide(bot, weapon)) {
                 return false;
@@ -2478,19 +2507,31 @@ public final class BotActions {
             return true;
         }
         ItemStack projectile = bot.getProjectileType(weapon);
-        return !projectile.isEmpty() || bot.getAbilities().creativeMode;
+        boolean charged = weapon.getItem() instanceof net.minecraft.item.CrossbowItem
+                && net.minecraft.item.CrossbowItem.isCharged(weapon);
+        return CombatWeaponPolicy.isUsableRangedWeapon(
+                isRangedWeapon(bot, weapon),
+                charged,
+                projectile != null && !projectile.isEmpty(),
+                bot.getAbilities().creativeMode);
     }
 
     public static boolean hasRangedWeapon(ServerPlayerEntity bot) {
         if (bot == null) return false;
         // Non-mutating check: scan inventory without equipping anything.
         // The actual weapon equip happens inside performRangedAttack() -> selectBestRangedWeapon().
-        if (isRangedWeapon(bot, bot.getMainHandStack()) || isRangedWeapon(bot, bot.getOffHandStack())) {
+        if ((!DurabilityPolicyService.shouldAvoid(bot, bot.getMainHandStack())
+                && isUsableRangedWeapon(bot, bot.getMainHandStack()))
+                || (!DurabilityPolicyService.shouldAvoid(bot, bot.getOffHandStack())
+                && isUsableRangedWeapon(bot, bot.getOffHandStack()))) {
             return true;
         }
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < inventory.size(); i++) {
-            if (isRangedWeapon(bot, inventory.getStack(i))) return true;
+            ItemStack stack = inventory.getStack(i);
+            if (!DurabilityPolicyService.shouldAvoid(bot, stack) && isUsableRangedWeapon(bot, stack)) {
+                return true;
+            }
         }
         return false;
     }
@@ -2503,7 +2544,7 @@ public final class BotActions {
         Selection best = null;
         int bestScore = Integer.MIN_VALUE;
         ItemStack main = bot.getMainHandStack();
-        if (!DurabilityPolicyService.shouldAvoid(bot, main)) {
+        if (!DurabilityPolicyService.shouldAvoid(bot, main) && canFire(bot, main)) {
             int mainScore = rangedWeaponScore(bot, main);
             if (mainScore > bestScore) {
                 best = new Selection(Hand.MAIN_HAND, main);
@@ -2512,7 +2553,7 @@ public final class BotActions {
         }
 
         ItemStack off = bot.getOffHandStack();
-        if (!DurabilityPolicyService.shouldAvoid(bot, off)) {
+        if (!DurabilityPolicyService.shouldAvoid(bot, off) && canFire(bot, off)) {
             int offScore = rangedWeaponScore(bot, off);
             if (offScore > bestScore) {
                 best = new Selection(Hand.OFF_HAND, off);
@@ -2525,6 +2566,7 @@ public final class BotActions {
             ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) continue;
             if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            if (!canFire(bot, stack)) continue;
             int score = rangedWeaponScore(bot, stack);
             if (score > bestScore) {
                 int hotbarSlot = ensureHotbarAccess(bot, inventory, i);
@@ -2585,6 +2627,10 @@ public final class BotActions {
 
     private static boolean isRangedWeapon(ServerPlayerEntity bot, ItemStack stack) {
         return rangedWeaponScore(bot, stack) > 0;
+    }
+
+    private static boolean isUsableRangedWeapon(ServerPlayerEntity bot, ItemStack stack) {
+        return isRangedWeapon(bot, stack) && canFire(bot, stack);
     }
 
     private static String describeMeleeProfile(ItemStack stack) {

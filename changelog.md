@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Unusable crossbows no longer trap bots in a suppressed melee loop (2026-08-22, unreleased)
+
+The latest play log showed Bob repeatedly switching from bare hands back to an unloaded crossbow while a skeleton attacked at close range. `selectBestMeleeWeapon` correctly rejected the crossbow, but the combat caller immediately ran `selectBestWeapon`, which equipped it again. `attackTarget` is melee-only and rejected the crossbow, so the same sequence repeated until Bob died.
+
+Ranged readiness now requires ammunition, creative mode, or an already-charged crossbow. Close-range combat uses one explicit choice: prefer a compliant melee weapon, otherwise use a genuinely fireable ranged weapon, and only then fall back to a tool or bare hands. `selectBestWeapon`, ranged inventory checks, and ranged selection all use the same readiness rule, preventing an unloaded bow or crossbow from being treated as actionable combat gear.
+
+Added focused regression coverage for unloaded, loaded, and pre-charged ranged weapons plus the close-range fallback decision.
+
+Files: `GameAI/BotActions.java`, `GameAI/BotEventHandler.java`, `GameAI/CombatWeaponPolicy.java`, `CombatWeaponPolicyTest.java`.
+
 ## zzz logoff feedback to sender; co-sleep skips zzz-active bots (2026-05-17, 1.1.133)
 
 Two user-visible polish fixes from the 1.1.132 success-trace audit ([latest.log](logs) 18:05:20–18:06:02).

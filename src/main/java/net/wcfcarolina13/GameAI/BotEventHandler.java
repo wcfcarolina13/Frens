@@ -4010,8 +4010,12 @@ public class BotEventHandler {
                 // Melee if phantom dives within reach.
                 if (diving && distance <= 3.0 && closest instanceof LivingEntity) {
                     lowerShieldTracking(bot);
-                    if (!BotActions.selectBestMeleeWeapon(bot)) {
-                        BotActions.selectBestWeapon(bot);
+                    CombatWeaponPolicy.CloseRangeChoice choice =
+                            BotActions.prepareCloseRangeWeapon(bot, hasRanged);
+                    if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
+                            && closest instanceof LivingEntity living
+                            && BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                        return true;
                     }
                     BotActions.attackTarget(bot, closest);
                     return true;
@@ -4128,8 +4132,12 @@ public class BotEventHandler {
                 }
                 // No shield available — attack with whatever we have
                 lowerShieldTracking(bot);
-                if (!BotActions.selectBestMeleeWeapon(bot)) {
-                    BotActions.selectBestWeapon(bot);
+                CombatWeaponPolicy.CloseRangeChoice choice =
+                        BotActions.prepareCloseRangeWeapon(bot, hasRanged);
+                if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
+                        && closest instanceof LivingEntity living
+                        && BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                    return true;
                 }
                 BotActions.attackTarget(bot, closest);
                 return true;
@@ -4137,8 +4145,13 @@ public class BotEventHandler {
 
             if (now - getShieldDecisionTick(bot) >= 15) {
                 lowerShieldTracking(bot);
-                if (!BotActions.selectBestMeleeWeapon(bot)) {
-                    BotActions.selectBestWeapon(bot);
+                CombatWeaponPolicy.CloseRangeChoice choice =
+                        BotActions.prepareCloseRangeWeapon(bot, hasRanged);
+                if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
+                        && closest instanceof LivingEntity living
+                        && BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                    setShieldDecisionTick(bot, now);
+                    return true;
                 }
                 BotActions.attackTarget(bot, closest);
                 setShieldDecisionTick(bot, now);
@@ -4156,17 +4169,16 @@ public class BotEventHandler {
             if (holdingSword2 && nearbyMeleeCount2 >= 2) {
                 BotActions.sprint(bot, false);
             }
-            boolean hasMelee = BotActions.selectBestMeleeWeapon(bot);
-            if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
+            CombatWeaponPolicy.CloseRangeChoice choice =
+                    BotActions.prepareCloseRangeWeapon(bot, hasRanged);
+            if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
+                    && closest instanceof LivingEntity living) {
                 BotActions.clearForceMelee(bot);
                 if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
                     return true;
                 }
                 BotActions.performRangedAttack(bot, living, server.getTicks());
             } else {
-                if (!hasMelee) {
-                    BotActions.selectBestWeapon(bot);
-                }
                 if (BotActions.shouldReopenSpearSpacing(bot, closest)) {
                     BotActions.sprint(bot, false);
                     BotActions.moveBackward(bot);
@@ -4185,7 +4197,9 @@ public class BotEventHandler {
                 // to dodge the mob's return hit, then step forward to re-engage.
                 // Only kite against 1-2 mobs — backpedaling when surrounded exposes the back.
                 float cooldown = bot.getAttackCooldownProgress(0.5f);
-                if (nearbyMeleeCount2 <= 2 && hasMelee && !BotActions.isSpear(bot.getMainHandStack())) {
+                if (nearbyMeleeCount2 <= 2
+                        && choice == CombatWeaponPolicy.CloseRangeChoice.MELEE
+                        && !BotActions.isSpear(bot.getMainHandStack())) {
                     if (cooldown < 0.3f && distance <= 2.5D) {
                         // Just swung — backpedal out of mob's reach
                         BotActions.moveBackward(bot);
