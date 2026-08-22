@@ -2,7 +2,7 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
-## Arrow recovery ignores impossible and underwater targets (2026-08-22, unreleased)
+## Arrow recovery ignores impossible and underwater targets (2026-08-22, 1.1.134)
 
 The live game showed Jake repeatedly chasing arrows stuck in terrain and several blocks underwater. Inventory snapshots confirmed he was using an Infinity bow, whose fired arrows cannot be picked up in Survival. The recovery scanner nevertheless tracked every nearby arrow—including mob arrows, other players’ arrows, Infinity arrows, and wet arrows—and its ten-second chase timeout could not break the loop because the five-tick scan immediately registered the still-present projectile again.
 
@@ -10,7 +10,7 @@ Ordinary arrow recovery now requires all three conditions: the bot fired it, its
 
 Files: `GameAI/services/BotArrowRecoveryService.java`, `BotArrowRecoveryPolicyTest.java`.
 
-## Shared-inventory tooltips show live keyboard shortcuts (2026-08-22, unreleased)
+## Shared-inventory tooltips show live keyboard shortcuts (2026-08-22, 1.1.134)
 
 Action tooltips in the shared inventory now append the player’s current world shortcut for Guide, Spells, Stop, Resume, Follow, Home, Sleep, Regroup, Cleanup, Stripmine, Ascent, and Descent. Direct bindings are shown as `[key]`; numbered hotkey-menu actions are shown as `Hold [menu key], then [number]`. If every route for an action is unavailable, the tooltip says `Unbound — configure in Controls`. Actions without a keyboard route omit the shortcut line.
 
@@ -18,7 +18,7 @@ The collapsed action grid, expanded Actions/Spells entries, and Guide/Spells hea
 
 Files: `FrensClient.java`, `GraphicalUserInterface/BotPlayerInventoryScreen.java`, `GraphicalUserInterface/CompanionHotkeyOverlayHud.java`, `FrensClientShortcutHintTest.java`.
 
-## IdleSweep refuses unsafe origins and preserves drop cooldowns (2026-08-22, unreleased)
+## IdleSweep refuses unsafe origins and preserves drop cooldowns (2026-08-22, 1.1.134)
 
 The live play log showed Jake repeatedly activating IdleSweep from a position the shared surface evaluator rated `standable=false`, with two to four steep-drop neighbors. One target was five blocks below the bot. The follow drop guard prevented a fall, but IdleSweep kept pushing toward each target for ten seconds before declaring it unreachable.
 
@@ -28,7 +28,7 @@ The cleanup pass also found mixed clocks in the blacklist: expiry values were st
 
 Files: `GameAI/BotEventHandler.java`, `GameAI/services/BackgroundSweepPolicy.java`, `BackgroundSweepPolicyTest.java`.
 
-## Fully encased suffocation uses validated emergency snap (2026-08-22, unreleased)
+## Fully encased suffocation uses validated emergency snap (2026-08-22, 1.1.134)
 
 The latest play log showed Bob become fully embedded in stone at both feet and head level. Burial rescue detected the condition, but with an empty inventory it chose bare-hand stone mining; Bob died four seconds later before that recovery could complete.
 
@@ -38,7 +38,7 @@ Added regression coverage for the emergency threshold: recent suffocation plus b
 
 Files: `GameAI/services/BotRescueService.java`, `BotRescueEmergencySnapPolicyTest.java`.
 
-## Unusable crossbows no longer trap bots in a suppressed melee loop (2026-08-22, unreleased)
+## Unusable crossbows no longer trap bots in a suppressed melee loop (2026-08-22, 1.1.134)
 
 The latest play log showed Bob repeatedly switching from bare hands back to an unloaded crossbow while a skeleton attacked at close range. `selectBestMeleeWeapon` correctly rejected the crossbow, but the combat caller immediately ran `selectBestWeapon`, which equipped it again. `attackTarget` is melee-only and rejected the crossbow, so the same sequence repeated until Bob died.
 
