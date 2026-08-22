@@ -3113,6 +3113,28 @@ public class BotEventHandler {
             // 2026-05-06). Reset to false on every exit path that returns false.
             net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(true);
 
+            BlockPos lastSafetyCheck = FollowStateService.IDLE_SWEEP_BOT_BLOCK.get(botId);
+            if (bot.isOnGround() && (lastSafetyCheck == null || !lastSafetyCheck.equals(botBlock))
+                    && bot.getEntityWorld() instanceof ServerWorld idleSweepWorld) {
+                SafePositionService.SurfaceCandidateAssessment posCheck =
+                        SafePositionService.analyzeSurfaceCandidate(idleSweepWorld, botBlock);
+                if (!BackgroundSweepPolicy.isIdleSweepOriginSafe(posCheck)) {
+                    BlockPos unsafeTarget = FollowStateService.IDLE_SWEEP_TARGET.get(botId);
+                    LOGGER.info("[IdleSweep] {} cancelled — unsafe origin {} standable={} steepDrops={} blocked={}",
+                            bot.getName().getString(), botBlock.toShortString(), posCheck.standable(),
+                            posCheck.steepDropNeighbors(), posCheck.blockedCardinals());
+                    if (unsafeTarget != null) {
+                        blacklistIdleSweepTarget(botId, unsafeTarget,
+                                nowTick + IDLE_SWEEP_BLACKLIST_DURATION_TICKS);
+                    }
+                    BackgroundSweepPolicy.clearPendingIdleSweepState(botId);
+                    DropSweepService.requestCancel(bot, "unsafe-origin");
+                    net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
+                    return false;
+                }
+                FollowStateService.IDLE_SWEEP_BOT_BLOCK.put(botId, botBlock.toImmutable());
+            }
+
             // Cancel if player moved >1 block (FOLLOW mode).
             if (mode == Mode.FOLLOW && commander != null) {
                 BlockPos snapPlayer = FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.get(botId);
@@ -3253,20 +3275,17 @@ public class BotEventHandler {
             return false;
         }
 
-        // Non-functional-position guard. The underground-linger decision tree
-        // already tells the bot "stay put" when sky isn't visible and the bot
-        // isn't near the terrain surface — that's the same condition that
-        // led to the 2026-05-09 incident where IdleSweep dragged the bot
-        // through a narrow cobblestone cave and ended up encased and
-        // suffocating. Reject sweep activation in those cells; the
-        // commander-nearby detector elsewhere already keeps the bot
-        // calm there.
+        // Avoid starting opportunistic movement from cells that are enclosed,
+        // not actually standable, or bordered by a dangerous drop.
         if (bot.getEntityWorld() instanceof ServerWorld idleSweepWorld) {
-            net.wcfcarolina13.GameAI.services.SafePositionService.SurfaceCandidateAssessment posCheck =
-                    net.wcfcarolina13.GameAI.services.SafePositionService.analyzeSurfaceCandidate(idleSweepWorld, botBlock);
-            if (!posCheck.openSky() && !posCheck.nearSurface()) {
-                LOGGER.debug("[IdleSweep] {} suppressed — non-functional underground position",
-                        bot.getName().getString());
+            SafePositionService.SurfaceCandidateAssessment posCheck =
+                    SafePositionService.analyzeSurfaceCandidate(idleSweepWorld, botBlock);
+            if (!BackgroundSweepPolicy.isIdleSweepOriginSafe(posCheck)) {
+                LOGGER.debug("[IdleSweep] {} suppressed — unsafe origin {} standable={} openSky={} nearSurface={} steepDrops={} blocked={}",
+                        bot.getName().getString(), botBlock.toShortString(), posCheck.standable(),
+                        posCheck.openSky(), posCheck.nearSurface(), posCheck.steepDropNeighbors(),
+                        posCheck.blockedCardinals());
+                FollowStateService.IDLE_SWEEP_START_TICK.put(botId, nowTick);
                 return false;
             }
         }
@@ -7318,8 +7337,9 @@ public class BotEventHandler {
         double verticalRange = Math.max(6.0D, radius);
         Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
         Vec3d eyePos = bot.getEyePos();
-        long nowTick = world.getTime();
-        Map<BlockPos, Long> blacklist = pruneAndGetIdleSweepBlacklist(bot.getUuid(), nowTick);
+        long nowTick = world.getServer().getTicks();
+        Map<BlockPos, Long> blacklist =
+                BackgroundSweepPolicy.pruneAndGetIdleSweepBlacklist(bot.getUuid(), nowTick);
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         searchBox,
@@ -7351,22 +7371,6 @@ public class BotEventHandler {
                 })
                 .min(Comparator.comparingDouble(bot::squaredDistanceTo))
                 .orElse(null);
-    }
-
-    /**
-     * Returns the bot's active idle-sweep blacklist after pruning entries whose
-     * cooldown ticks have elapsed. Returns {@code null} when the bot has nothing
-     * blacklisted (avoids creating an empty inner map).
-     */
-    private static Map<BlockPos, Long> pruneAndGetIdleSweepBlacklist(UUID botId, long nowTick) {
-        Map<BlockPos, Long> map = FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST.get(botId);
-        if (map == null || map.isEmpty()) return null;
-        map.entrySet().removeIf(entry -> entry.getValue() <= nowTick);
-        if (map.isEmpty()) {
-            FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST.remove(botId);
-            return null;
-        }
-        return map;
     }
 
     private static void blacklistIdleSweepTarget(UUID botId, BlockPos target, long expiryTick) {

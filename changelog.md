@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## IdleSweep refuses unsafe origins and preserves drop cooldowns (2026-08-22, unreleased)
+
+The live play log showed Jake repeatedly activating IdleSweep from a position the shared surface evaluator rated `standable=false`, with two to four steep-drop neighbors. One target was five blocks below the bot. The follow drop guard prevented a fall, but IdleSweep kept pushing toward each target for ten seconds before declaring it unreachable.
+
+IdleSweep now requires a standable origin that is not enclosed underground and has at most one steep-drop neighbor and two blocked cardinal directions. The same safety policy is rechecked whenever an active sweep reaches a new grounded block; if the terrain becomes unsafe, the sweep cancels immediately and blacklists its current target instead of continuing to drive movement.
+
+The cleanup pass also found mixed clocks in the blacklist: expiry values were stored using server ticks but pruned using persistent world time, so cooldowns could disappear immediately after a restart. Blacklist pruning now lives in `BackgroundSweepPolicy` and consistently uses server ticks. Focused regression coverage includes the live unsafe assessment, ravine edges, enclosed underground cells, safe terrain, and expiry-boundary behavior.
+
+Files: `GameAI/BotEventHandler.java`, `GameAI/services/BackgroundSweepPolicy.java`, `BackgroundSweepPolicyTest.java`.
+
 ## Fully encased suffocation uses validated emergency snap (2026-08-22, unreleased)
 
 The latest play log showed Bob become fully embedded in stone at both feet and head level. Burial rescue detected the condition, but with an empty inventory it chose bare-hand stone mining; Bob died four seconds later before that recovery could complete.
