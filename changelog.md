@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Arrow recovery ignores impossible and underwater targets (2026-08-22, unreleased)
+
+The live game showed Jake repeatedly chasing arrows stuck in terrain and several blocks underwater. Inventory snapshots confirmed he was using an Infinity bow, whose fired arrows cannot be picked up in Survival. The recovery scanner nevertheless tracked every nearby arrow—including mob arrows, other players’ arrows, Infinity arrows, and wet arrows—and its ten-second chase timeout could not break the loop because the five-tick scan immediately registered the still-present projectile again.
+
+Ordinary arrow recovery now requires all three conditions: the bot fired it, its vanilla pickup permission is `ALLOWED`, and it is not touching water. Ineligible projectiles are also removed from existing tracking and active chase state. Bot-owned tridents remain mandatory recovery targets even underwater; foreign tridents remain ignored. Focused policy tests cover each ownership, pickup-permission, and water branch.
+
+Files: `GameAI/services/BotArrowRecoveryService.java`, `BotArrowRecoveryPolicyTest.java`.
+
 ## Shared-inventory tooltips show live keyboard shortcuts (2026-08-22, unreleased)
 
 Action tooltips in the shared inventory now append the player’s current world shortcut for Guide, Spells, Stop, Resume, Follow, Home, Sleep, Regroup, Cleanup, Stripmine, Ascent, and Descent. Direct bindings are shown as `[key]`; numbered hotkey-menu actions are shown as `Hold [menu key], then [number]`. If every route for an action is unavailable, the tooltip says `Unbound — configure in Controls`. Actions without a keyboard route omit the shortcut line.

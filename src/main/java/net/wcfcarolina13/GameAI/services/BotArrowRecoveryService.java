@@ -6,6 +6,7 @@ import net.minecraft.entity.projectile.PersistentProjectileEntity;
 import net.minecraft.entity.projectile.TridentEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -132,6 +133,18 @@ public final class BotArrowRecoveryService {
 
     private static BotState stateFor(ServerPlayerEntity bot) {
         return STATE.computeIfAbsent(bot.getUuid(), k -> new BotState());
+    }
+
+    static boolean shouldTrackProjectile(boolean tridentProjectile,
+                                         boolean botOwned,
+                                         PersistentProjectileEntity.PickupPermission pickupType,
+                                         boolean touchingWater) {
+        if (tridentProjectile) {
+            return botOwned;
+        }
+        return botOwned
+                && pickupType == PersistentProjectileEntity.PickupPermission.ALLOWED
+                && !touchingWater;
     }
 
     /**
@@ -399,15 +412,22 @@ public final class BotArrowRecoveryService {
                 continue;
             }
 
-            // Track all arrows for QoL recovery. Tridents are only tracked when this bot owns them.
             Entity owner = p.getOwner();
             boolean botOwned = owner != null && owner.getUuid() != null
                     && owner.getUuid().equals(bot.getUuid());
-            if (tridentProjectile && !botOwned) {
+            boolean touchingWater = p.isTouchingWater()
+                    || p.isSubmergedInWater()
+                    || world.getFluidState(p.getBlockPos()).isIn(FluidTags.WATER);
+            UUID id = p.getUuid();
+            if (!shouldTrackProjectile(tridentProjectile, botOwned, p.pickupType, touchingWater)) {
+                st.tracked.remove(id);
+                if (id.equals(st.chasingArrowId)) {
+                    st.chasingArrowId = null;
+                    st.chaseStartTick = -1L;
+                }
                 continue;
             }
 
-            UUID id = p.getUuid();
             Vec3d pos = new Vec3d(p.getX(), p.getY(), p.getZ());
             TrackedArrow t = st.tracked.get(id);
             if (t == null) {
