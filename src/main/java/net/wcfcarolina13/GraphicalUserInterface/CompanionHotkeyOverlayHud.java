@@ -3,9 +3,11 @@ package net.wcfcarolina13.GraphicalUserInterface;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.InputUtil;
+import net.wcfcarolina13.FrensClient;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Lightweight non-pausing hotkey overlay for companion controls.
@@ -36,13 +38,6 @@ public final class CompanionHotkeyOverlayHud {
             "8 🪜 Ascent",
             "9 🕳 Descent",
             "0 🧹 Cleanup"
-    };
-
-    private static final String[] FOOTER_LINES = {
-            "[`] Toggle Follow",
-            "[-] Open spells / Go To Look / confirm direction",
-            "[\\] Stop",
-            "[Hold \\] Open hotkey menu"
     };
 
     private static final boolean[] LAST_DOWN = new boolean[10];
@@ -95,15 +90,16 @@ public final class CompanionHotkeyOverlayHud {
         int lineH = client.textRenderer.fontHeight + 1;
         int titleW = client.textRenderer.getWidth("Companion Hotkeys");
         int maxW = titleW;
+        List<String> footerLines = footerLines();
         for (String label : LABELS) {
             maxW = Math.max(maxW, client.textRenderer.getWidth(label));
         }
-        for (String footer : FOOTER_LINES) {
+        for (String footer : footerLines) {
             maxW = Math.max(maxW, client.textRenderer.getWidth(footer));
         }
 
         int boxW = maxW + 16;
-        int boxH = 14 + LABELS.length * lineH + 6 + FOOTER_LINES.length * lineH + 8;
+        int boxH = 14 + LABELS.length * lineH + 6 + footerLines.size() * lineH + 8;
         int x = Math.max(8, context.getScaledWindowWidth() - boxW - 8);
         int y = 12;
 
@@ -120,9 +116,24 @@ public final class CompanionHotkeyOverlayHud {
             rowY += lineH;
         }
         rowY += 2;
-        for (String footer : FOOTER_LINES) {
+        for (String footer : footerLines) {
             context.drawTextWithShadow(client.textRenderer, footer, x + 8, rowY, 0xFFB8A76A);
             rowY += lineH;
         }
+    }
+
+    private static List<String> footerLines() {
+        String follow = FrensClient.getCompanionShortcutInstruction(FrensClient.CompanionShortcut.FOLLOW);
+        String goTo = FrensClient.getCompanionShortcutInstruction(FrensClient.CompanionShortcut.GO_TO_LOOK);
+        String stop = FrensClient.getCompanionShortcutInstruction(FrensClient.CompanionShortcut.STOP);
+        String openMenu = stop.startsWith("[")
+                ? "Hold " + stop + " Open hotkey menu"
+                : stop + " (hotkey menu)";
+        return List.of(
+                follow + " Toggle Follow",
+                goTo + " Open spells / Go To Look / confirm direction",
+                stop + " Stop",
+                openMenu
+        );
     }
 }

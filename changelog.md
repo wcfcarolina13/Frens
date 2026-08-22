@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Shared-inventory tooltips show live keyboard shortcuts (2026-08-22, unreleased)
+
+Action tooltips in the shared inventory now append the player’s current world shortcut for Guide, Spells, Stop, Resume, Follow, Home, Sleep, Regroup, Cleanup, Stripmine, Ascent, and Descent. Direct bindings are shown as `[key]`; numbered hotkey-menu actions are shown as `Hold [menu key], then [number]`. If every route for an action is unavailable, the tooltip says `Unbound — configure in Controls`. Actions without a keyboard route omit the shortcut line.
+
+The collapsed action grid, expanded Actions/Spells entries, and Guide/Spells header icons all read from the same live client-keybinding source. The companion hotkey overlay footer also uses that source instead of hard-coded default keys, so rebinding Follow, Go To, or Stop is reflected consistently. Added focused regression coverage for direct, composite, and unbound formatting plus the numbered action-to-slot mapping.
+
+Files: `FrensClient.java`, `GraphicalUserInterface/BotPlayerInventoryScreen.java`, `GraphicalUserInterface/CompanionHotkeyOverlayHud.java`, `FrensClientShortcutHintTest.java`.
+
 ## IdleSweep refuses unsafe origins and preserves drop cooldowns (2026-08-22, unreleased)
 
 The live play log showed Jake repeatedly activating IdleSweep from a position the shared surface evaluator rated `standable=false`, with two to four steep-drop neighbors. One target was five blocks below the bot. The follow drop guard prevented a fall, but IdleSweep kept pushing toward each target for ten seconds before declaring it unreachable.

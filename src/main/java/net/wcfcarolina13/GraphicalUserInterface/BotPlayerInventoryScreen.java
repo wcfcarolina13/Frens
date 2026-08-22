@@ -1541,9 +1541,40 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         if (entry.toggle) {
             boolean active = isEntryActive(entry.action);
-            return java.util.List.of(name + " [" + (active ? "ON" : "OFF") + "]");
+            return withCompanionShortcut(entry, java.util.List.of(name + " [" + (active ? "ON" : "OFF") + "]"));
         }
-        return java.util.List.of(name);
+        return withCompanionShortcut(entry, java.util.List.of(name));
+    }
+
+    private java.util.List<String> withCompanionShortcut(TopicEntry entry, java.util.List<String> lines) {
+        FrensClient.CompanionShortcut shortcut = companionShortcutFor(entry != null ? entry.action : null);
+        if (shortcut == null) {
+            return lines;
+        }
+        java.util.List<String> result = new java.util.ArrayList<>(lines != null ? lines : java.util.List.of());
+        result.add(FrensClient.getCompanionShortcutTooltipLine(shortcut));
+        return java.util.List.copyOf(result);
+    }
+
+    private FrensClient.CompanionShortcut companionShortcutFor(TopicAction action) {
+        if (action == null) {
+            return null;
+        }
+        return switch (action) {
+            case OPEN_GUIDE -> FrensClient.CompanionShortcut.GUIDE;
+            case OPEN_SPELLS -> FrensClient.CompanionShortcut.SPELLS;
+            case STOP -> FrensClient.CompanionShortcut.STOP;
+            case RESUME -> FrensClient.CompanionShortcut.RESUME;
+            case FOLLOW -> FrensClient.CompanionShortcut.FOLLOW;
+            case RETURN_HOME, COMPANION_HOME -> FrensClient.CompanionShortcut.HOME;
+            case SLEEP -> FrensClient.CompanionShortcut.SLEEP;
+            case COMPANION_COME -> FrensClient.CompanionShortcut.REGROUP;
+            case DROP_SWEEP -> FrensClient.CompanionShortcut.CLEANUP;
+            case SKILL_STRIPMINE -> FrensClient.CompanionShortcut.STRIPMINE;
+            case SKILL_ASCENT -> FrensClient.CompanionShortcut.ASCENT;
+            case SKILL_DESCENT -> FrensClient.CompanionShortcut.DESCENT;
+            default -> null;
+        };
     }
 
     private void drawQuickTopicButton(DrawContext context, int x, int y, int w, int h, TopicEntry entry,
@@ -1681,7 +1712,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         String label = headerHoveredEntry.label != null ? headerHoveredEntry.label : "";
         if (!label.isBlank()) {
-            drawTooltipBox(context, mouseX, mouseY, java.util.List.of(label));
+            drawTooltipBox(context, mouseX, mouseY,
+                    withCompanionShortcut(headerHoveredEntry, java.util.List.of(label)));
         }
     }
 
@@ -3777,7 +3809,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
-        java.util.List<String> lines = getOverlayTooltipLines(overlayHoveredEntry);
+        java.util.List<String> lines = withCompanionShortcut(
+                overlayHoveredEntry,
+                getOverlayTooltipLines(overlayHoveredEntry)
+        );
         if (lines == null || lines.isEmpty()) {
             return;
         }

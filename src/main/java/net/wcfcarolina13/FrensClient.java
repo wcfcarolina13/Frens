@@ -65,6 +65,22 @@ public class FrensClient implements ClientModInitializer {
 
     // Note: overhead dialogue is best-effort UX; keep logging light.
 
+    public enum CompanionShortcut {
+        GUIDE,
+        SPELLS,
+        STOP,
+        RESUME,
+        FOLLOW,
+        GO_TO_LOOK,
+        HOME,
+        SLEEP,
+        REGROUP,
+        CLEANUP,
+        STRIPMINE,
+        ASCENT,
+        DESCENT
+    }
+
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
     private static KeyBinding KEY_OPEN_GUIDE;
@@ -1121,6 +1137,67 @@ public class FrensClient implements ClientModInitializer {
     public static String getGuideHotkeyDisplayName() {
         String keyName = keyNameOrNull(KEY_OPEN_GUIDE);
         return keyName != null ? keyName : "]";
+    }
+
+    public static String getCompanionShortcutInstruction(CompanionShortcut shortcut) {
+        if (shortcut == null) {
+            return formatCompanionShortcutInstruction(null, null, null);
+        }
+
+        String directKey = switch (shortcut) {
+            case GUIDE -> keyNameOrNull(KEY_OPEN_GUIDE);
+            case SPELLS -> keyNameOrNull(KEY_OPEN_SPELLS);
+            case STOP -> keyNameOrNull(KEY_STOP_LOOK);
+            case RESUME -> keyNameOrNull(KEY_RESUME);
+            case FOLLOW -> keyNameOrNull(KEY_FOLLOW_TOGGLE_LOOK);
+            case GO_TO_LOOK -> keyNameOrNull(KEY_GO_TO_LOOK);
+            default -> null;
+        };
+        Integer overlaySlot = overlaySlotFor(shortcut);
+        String overlayKey = overlaySlot != null ? keyNameOrNull(KEY_STOP_LOOK) : null;
+        return formatCompanionShortcutInstruction(directKey, overlayKey, overlaySlot);
+    }
+
+    public static String getCompanionShortcutTooltipLine(CompanionShortcut shortcut) {
+        return "World shortcut: " + getCompanionShortcutInstruction(shortcut);
+    }
+
+    static String formatCompanionShortcutInstruction(String directKey, String overlayKey, Integer overlaySlot) {
+        String direct = normalizeShortcutKey(directKey);
+        if (direct != null) {
+            return "[" + direct + "]";
+        }
+
+        String overlay = normalizeShortcutKey(overlayKey);
+        if (overlay != null && overlaySlot != null) {
+            return "Hold [" + overlay + "], then [" + overlaySlot + "]";
+        }
+        return "Unbound — configure in Controls";
+    }
+
+    static Integer overlaySlotFor(CompanionShortcut shortcut) {
+        if (shortcut == null) {
+            return null;
+        }
+        return switch (shortcut) {
+            case RESUME -> 2;
+            case SPELLS -> 3;
+            case HOME -> 4;
+            case SLEEP -> 5;
+            case REGROUP -> 6;
+            case STRIPMINE -> 7;
+            case ASCENT -> 8;
+            case DESCENT -> 9;
+            case CLEANUP -> 0;
+            default -> null;
+        };
+    }
+
+    private static String normalizeShortcutKey(String keyName) {
+        if (keyName == null || keyName.isBlank()) {
+            return null;
+        }
+        return keyName.trim();
     }
 
     private static boolean tryOpenModeSelectionFromContextKey(MinecraftClient client) {
