@@ -24,6 +24,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * Crash-tolerant, world-local persistence for the soul-communication domain.
@@ -102,9 +103,9 @@ public final class SoulStore {
         return submit(() -> {
             SoulTypes.SoulState state = loadState(key.botId());
             String cursorKey = cursorKey(key);
-            SoulTypes.ConversationCursor cursor = state.conversations()
-                    .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L));
-            long sequence = cursor.nextSequence();
+            SoulTypes.ConversationCursor cursor =
+                    reconciledCursor(state, key.botId(), key.playerId(), cursorKey);
+            long sequence = reconciledNextSequence(cursor, activeFile(key.botId(), key.playerId()));
 
             SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                     correlationId, cursor.epoch(), sequence, SoulTypes.TurnKind.HEARD,
@@ -151,8 +152,8 @@ public final class SoulStore {
         return submit(() -> {
             SoulTypes.SoulState state = loadState(key.botId());
             String cursorKey = cursorKey(key);
-            SoulTypes.ConversationCursor cursor = state.conversations()
-                    .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L));
+            SoulTypes.ConversationCursor cursor =
+                    reconciledCursor(state, key.botId(), key.playerId(), cursorKey);
 
             Path active = activeFile(key.botId(), key.playerId());
             Path archiveDir = archiveDir(key.botId(), key.playerId());
@@ -205,21 +206,97 @@ public final class SoulStore {
         SoulTypes.ConversationKey key = token.key();
         SoulTypes.SoulState state = loadState(key.botId());
         String cursorKey = cursorKey(key);
-        SoulTypes.ConversationCursor cursor = state.conversations().get(cursorKey);
 
-        if (cursor == null || cursor.epoch() != token.epoch()) {
-            String current = cursor == null ? "missing" : String.valueOf(cursor.epoch());
+        if (!state.conversations().containsKey(cursorKey)) {
             throw new StaleEpochException("Stale epoch for " + key + ": token epoch " + token.epoch()
-                    + " but current cursor epoch is " + current);
+                    + " but no conversation cursor exists");
         }
 
-        long sequence = cursor.nextSequence();
+        // Reconcile before comparing epochs: a crash between archiveAndReset's file move and
+        // its cursor persist can leave soul.json reporting the pre-reset epoch even though the
+        // reset already completed on disk (see reconciledCursor). Without this, a token minted
+        // before that interrupted reset would be wrongly accepted as still current.
+        SoulTypes.ConversationCursor cursor =
+                reconciledCursor(state, key.botId(), key.playerId(), cursorKey);
+
+        if (cursor.epoch() != token.epoch()) {
+            throw new StaleEpochException("Stale epoch for " + key + ": token epoch " + token.epoch()
+                    + " but current cursor epoch is " + cursor.epoch());
+        }
+
+        long sequence = reconciledNextSequence(cursor, activeFile(key.botId(), key.playerId()));
         SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                 token.correlationId(), cursor.epoch(), sequence, kind, content, Instant.now(),
                 provider, model, elapsedMillis, code);
         appendRecord(activeFile(key.botId(), key.playerId()), record);
 
         persistCursor(state, cursorKey, new SoulTypes.ConversationCursor(cursor.epoch(), sequence + 1));
+    }
+
+    /**
+     * Returns the conversation's true current cursor, self-healing an interrupted
+     * {@link #archiveAndReset} if one is detected.
+     *
+     * <p>{@code archiveAndReset} moves the active transcript into {@code archive/} and only
+     * then persists the bumped epoch to {@code soul.json}; a crash landing between those two
+     * steps leaves an archive file for the cursor's current epoch already on disk. That is an
+     * unambiguous signal the reset's move step already ran (nothing else ever creates an
+     * {@code epoch-<N>-*.jsonl} archive file for epoch N), so this reconciles the cursor to
+     * epoch+1 and persists the correction before returning it. Looped in case more than one
+     * reset was interrupted in a row.
+     */
+    private SoulTypes.ConversationCursor reconciledCursor(
+            SoulTypes.SoulState state, UUID botId, UUID playerId, String cursorKey) throws IOException {
+        SoulTypes.ConversationCursor cursor = state.conversations()
+                .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L));
+
+        Path archiveDir = archiveDir(botId, playerId);
+        if (!Files.isDirectory(archiveDir)) {
+            return cursor;
+        }
+
+        boolean healed = false;
+        while (archiveExistsForEpoch(archiveDir, cursor.epoch())) {
+            cursor = new SoulTypes.ConversationCursor(cursor.epoch() + 1, 0L);
+            healed = true;
+        }
+        if (healed) {
+            persistCursor(state, cursorKey, cursor);
+        }
+        return cursor;
+    }
+
+    private boolean archiveExistsForEpoch(Path archiveDir, long epoch) throws IOException {
+        String prefix = "epoch-" + epoch + "-";
+        try (Stream<Path> entries = Files.list(archiveDir)) {
+            return entries.anyMatch(p -> p.getFileName().toString().startsWith(prefix));
+        }
+    }
+
+    /**
+     * Returns the next sequence to allocate for {@code cursor}, reconciled against whatever is
+     * actually on disk in {@code activeFile}.
+     *
+     * <p>{@code beginHeardTurn}/{@code appendTurn} write the JSONL record and persist the
+     * advanced cursor as two separate steps. A crash between them leaves a record on disk at
+     * sequence N while {@code soul.json} still reports N as {@code nextSequence}; allocating
+     * straight from the persisted cursor would then reuse N for a second, different record.
+     * Scanning the transcript's actual max sequence for the cursor's epoch and taking
+     * {@code max(cursor.nextSequence(), scannedMax + 1)} makes this correct regardless of which
+     * side of that gap a crash landed on, without needing to reorder the two writes.
+     */
+    private long reconciledNextSequence(SoulTypes.ConversationCursor cursor, Path activeFile) throws IOException {
+        if (!Files.exists(activeFile)) {
+            return cursor.nextSequence();
+        }
+        List<SoulTypes.ConversationRecord> records = loadTranscript(activeFile, SoulTypes.ConversationRecord.class);
+        long maxSequenceForEpoch = -1L;
+        for (SoulTypes.ConversationRecord record : records) {
+            if (record.epoch() == cursor.epoch() && record.sequence() > maxSequenceForEpoch) {
+                maxSequenceForEpoch = record.sequence();
+            }
+        }
+        return Math.max(cursor.nextSequence(), maxSequenceForEpoch + 1);
     }
 
     private void persistCursor(SoulTypes.SoulState state, String cursorKey, SoulTypes.ConversationCursor cursor)

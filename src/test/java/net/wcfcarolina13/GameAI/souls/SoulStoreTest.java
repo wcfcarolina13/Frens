@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -293,5 +295,68 @@ class SoulStoreTest {
         boolean stillAlive = Thread.getAllStackTraces().keySet().stream()
                 .anyMatch(t -> threadName.equals(t.getName()) && t.isAlive());
         assertFalse(stillAlive, "executor thread should not remain alive after close()");
+    }
+
+    // === Crash-window hardening ===
+
+    @Test
+    void beginHeardTurnReconcilesSequenceAheadOfPersistedCursor() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "first", Instant.EPOCH).get(2, SECONDS);
+        // soul.json cursor is now (epoch=0, nextSequence=1).
+
+        // Simulate a crash between the JSONL append and the cursor persist: a second record
+        // (sequence=1) lands in active.jsonl, but soul.json is never advanced past sequence=1 —
+        // exactly the state a process death right after the append, before the cursor write,
+        // would leave behind.
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        SoulTypes.ConversationRecord crashedRecord = new SoulTypes.ConversationRecord(
+                UUID.randomUUID(), 0L, 1L, SoulTypes.TurnKind.HEARD, "second-crashed",
+                Instant.EPOCH, "", "", null, null);
+        Files.writeString(activeFile(bot, player),
+                mapper.writeValueAsString(crashedRecord) + System.lineSeparator(),
+                StandardOpenOption.APPEND);
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "third", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(2L, token.sequence(), "next sequence must skip the one already on disk");
+
+        List<SoulTypes.ConversationRecord> records = store.recent(key, 10, 10_000).get(2, SECONDS);
+        List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
+        assertEquals(List.of(0L, 1L, 2L), sequences, "no duplicate sequence numbers on disk");
+    }
+
+    @Test
+    void reconcilesInterruptedResetFromArchiveArtifact() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        SoulTypes.TurnToken staleToken = store.beginHeardTurn(key, UUID.randomUUID(), "hello", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        // Simulate a crash between archiveAndReset's file move and its cursor persist: move
+        // active.jsonl into archive/ by hand (as the real move would), but leave soul.json's
+        // cursor at epoch=0 — exactly the state a crash right after the move would leave behind.
+        Path active = activeFile(bot, player);
+        Path archiveDir = active.getParent().resolve("archive");
+        Files.createDirectories(archiveDir);
+        Files.move(active, archiveDir.resolve("epoch-0-20260101T000000000.jsonl"));
+
+        SoulTypes.TurnToken freshToken = store.beginHeardTurn(key, UUID.randomUUID(), "after reset", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(1L, freshToken.epoch(), "interrupted reset must resolve to the next epoch");
+
+        assertThrows(ExecutionException.class, () -> store.appendSpoken(
+                staleToken, "should be rejected", new SoulTypes.ProviderResult(
+                        true, "should be rejected", null, "ollama", "test-model",
+                        10L, null, null, null)).get(2, SECONDS));
     }
 }
