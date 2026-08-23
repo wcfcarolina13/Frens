@@ -509,6 +509,16 @@ Shelved 2026-05-06. Not on roadmap unless a long-term contributor commits to mai
 
 - [ ] **1.21.1 backport** — A user requested 1.21.1 compatibility. Real port, not a config tweak: ~10 point releases of yarn/registry/component drift between 1.21.1 and 1.21.11. High-risk surfaces are item components (`DataComponentTypes` reworked in 1.21.2), networking payload codecs, fake-player/`ServerPlayerEntity` constructor signatures, screen handler XP-sync, and any post-1.21.1 vanilla content references (e.g. rideable Nautilus). Approach if revived: fork `backport/1.21.1` branch, freeze scope to core companion + skills (no fortify-village), accept it will lag main. Alternative is Stonecutter/preprocessor multi-version build — more upfront work, sustainable long-term. Don't start without a contributor signed up to maintain it.
 
+## LoadGoverner Improvements (Backlogged — separate repo, `~/pontus/LoadGoverner`)
+
+Deliberately disabled by Bradley (config `enabled: false`) pending a proper rework. Full audit with
+root-cause trace and ranked fix plan: `~/pontus/LoadGoverner/docs/AUDIT-2026-08-23.md` (2026-08-23).
+
+- [ ] Re-enable + loud disabled-state warning; state-change-only telemetry; real DEBUG log level (S)
+- [ ] Escalation hygiene: consecutive-check confirmation + single-spike `maxMspt()` fast path (M)
+- [ ] Soul-pipeline coordination: transient stage floor while a Frens soul generation is in flight
+      (cross-mod; Frens exposes `SoulGenerationScheduler.queueDepth()`) (L)
+
 ## LLM Integration (Future)
 
 - [ ] Phase 1+: Core architecture, toggles, identity & memory, routing, performance, social awareness, integration & testing
