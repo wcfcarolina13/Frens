@@ -214,6 +214,30 @@ public final class SoulRuntime {
         return pipelineRef.get().settings().validationError();
     }
 
+    /**
+     * Submits {@code turn} to the currently installed pipeline's {@link SoulConversationService}.
+     *
+     * <p>Reads {@link #pipelineRef} at call time, the same plain-read discipline
+     * {@link #isMasterEnabled()}/{@link #safeValidationError()} already use -- this is
+     * deliberately <em>not</em> taken under {@link #lifecycleLock}, since holding that lock across
+     * an actual submit (which schedules async work) would serialize unrelated turns against every
+     * lifecycle transition for no benefit. A submit racing a concurrent {@code stop()}/
+     * {@code reloadSettings()} lands on whichever pipeline was current at the moment of this read;
+     * the queued/active call itself is still safely torn down by that pipeline's own
+     * {@code close()} (see {@link SoulGenerationScheduler#close()}) if it loses the race.
+     *
+     * <p>Fails closed with {@link SoulConversationService.Submission#FAILED} -- without touching
+     * the pipeline at all -- when the runtime is stopped or the current settings are not enabled
+     * and valid; a caller in either state has nothing live to submit to.
+     */
+    public CompletableFuture<SoulConversationService.Submission> submitTurn(SoulTypes.AcceptedTurn turn) {
+        Objects.requireNonNull(turn, "turn");
+        if (stopped || !isConversationEnabled()) {
+            return CompletableFuture.completedFuture(SoulConversationService.Submission.FAILED);
+        }
+        return pipelineRef.get().conversationService().submit(turn);
+    }
+
     // === Store passthroughs ===
 
     public Optional<SoulTypes.SoulState> cachedState(UUID botId) {

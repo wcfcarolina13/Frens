@@ -1255,6 +1255,24 @@ public class Frens implements ModInitializer {
                     }
                 }
 
+                // Exclusive soul-communication pilot: single-bot DMs only. "bots"/"all bots"
+                // broadcasts never route to souls -- they always fall through to the legacy loop
+                // below until the separately designed group channel exists.
+                if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
+                    ServerPlayerEntity soulBot = routedBots.get(0);
+                    if (soulBot != null) {
+                        try {
+                            if (net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(soulBot, sender, target.prompt())
+                                    == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED) {
+                                return;
+                            }
+                        } catch (Throwable t) {
+                            // Don't let optional soul-communication wiring break chat.
+                            LOGGER.warn("SoulChatRouter threw; falling back to legacy routing: {}", t.toString());
+                        }
+                    }
+                }
+
                 boolean handled = false;
                 for (ServerPlayerEntity bot : routedBots) {
                     if (target.prompt().isEmpty()) {
