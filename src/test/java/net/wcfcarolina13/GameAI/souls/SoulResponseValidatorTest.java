@@ -53,7 +53,7 @@ class SoulResponseValidatorTest {
     @Test
     void stripsControlCharactersButKeepsNewlineAndTab() {
         SoulResponseValidator.ValidationResult result = validator.validate(
-                "HelloWorld\nSecond\tLine", "Jake");
+                "Hello\u0007World\nSecond\tLine", "Jake");
         assertTrue(result.accepted());
         assertEquals("HelloWorld\nSecond\tLine", result.text());
     }
