@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.souls;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,15 +16,15 @@ import static org.mockito.Mockito.when;
 
 class SoulFoundationTest {
 
-    static {
-        // mockito-inline 5.2.0 bundles a Byte Buddy release that predates official Java 21
-        // (class file version 65) support. Byte Buddy reads this system property once, at
-        // net.bytebuddy.utility.OpenedClassReader's own class-init time, to opt into
-        // "experimental" support for newer bytecode versions — this is the exact workaround
-        // Byte Buddy's own exception message names ("set net.bytebuddy.experimental as a VM
-        // property"). Setting it here (rather than as a build.gradle JVM arg) keeps the fix
-        // scoped to this test; no other test in the suite uses Mockito.
-        System.setProperty("net.bytebuddy.experimental", "true");
+    /**
+     * Builds a real (non-mocked) ManualConfig instance via its private constructor.
+     * ManualConfig() only assigns selectedLanguageModel from a system property — no file I/O,
+     * no FILE_PATH resolution — so this is safe to call from a plain unit test JVM.
+     */
+    private static ManualConfig newRealConfig() throws Exception {
+        Constructor<ManualConfig> constructor = ManualConfig.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
     }
 
     @Test
@@ -207,5 +208,64 @@ class SoulFoundationTest {
     void conversationKeyRejectsNullBotId() {
         assertThrows(NullPointerException.class, () ->
                 new SoulTypes.ConversationKey(null, UUID.randomUUID(), SoulTypes.Channel.DIRECT));
+    }
+
+    // === Real ManualConfig accessor coverage ===
+    // Every test above mocks ManualConfig, so the real clamp/normalize/trim bodies never run.
+    // These exercise the actual field-backed accessors on a real instance.
+
+    @Test
+    void freshConfigHasSoulsDisabledByDefault() throws Exception {
+        ManualConfig config = newRealConfig();
+        assertFalse(config.isSoulsEnabled());
+    }
+
+    @Test
+    void realTimeoutSetterClampsBelowMinimum() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulRequestTimeoutSeconds(1);
+        assertEquals(10, config.getSoulRequestTimeoutSeconds());
+    }
+
+    @Test
+    void realTimeoutSetterClampsAboveMaximum() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulRequestTimeoutSeconds(999);
+        assertEquals(180, config.getSoulRequestTimeoutSeconds());
+    }
+
+    @Test
+    void realQueueCapacitySetterClampsBelowMinimum() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulQueueCapacity(0);
+        assertEquals(1, config.getSoulQueueCapacity());
+    }
+
+    @Test
+    void realQueueCapacitySetterClampsAboveMaximum() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulQueueCapacity(999);
+        assertEquals(32, config.getSoulQueueCapacity());
+    }
+
+    @Test
+    void realProviderSetterNormalizesBlankToOllama() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulProvider("   ");
+        assertEquals("ollama", config.getSoulProvider());
+    }
+
+    @Test
+    void realProviderSetterNormalizesNullToOllama() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulProvider(null);
+        assertEquals("ollama", config.getSoulProvider());
+    }
+
+    @Test
+    void realModelSetterTrimsWhitespace() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulModel("  llama3  ");
+        assertEquals("llama3", config.getSoulModel());
     }
 }
