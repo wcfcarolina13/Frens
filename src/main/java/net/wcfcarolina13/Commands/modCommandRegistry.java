@@ -475,6 +475,7 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
+	                        .then(BotSoulCommands.build())
 
 	                        .then(BotInventoryCommands.build())
 	                        .then(BotSkillCommands.buildSkill())

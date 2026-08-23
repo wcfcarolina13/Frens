@@ -13,6 +13,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.GameAI.souls.SoulTypes;
 
 import java.util.UUID;
 
@@ -254,5 +255,62 @@ public final class CompanionCommunicationPolicy {
             return true;
         }
         return false;
+    }
+
+    // ─────── Soul-communication grounding boundary ───────
+
+    /**
+     * Reachability classification for the soul-communication pipeline. {@code LOCAL} inside
+     * {@link #VISIBLE_RANGE_BLOCKS}; otherwise {@code REMOTE} only when the existing
+     * {@link #canBotChatToController(ServerPlayerEntity, ServerPlayerEntity)} delivery rules
+     * allow it; {@code UNREACHABLE} otherwise.
+     */
+    public static SoulTypes.Reachability classifySoulReachability(ServerPlayerEntity bot, ServerPlayerEntity player) {
+        if (bot == null || player == null || bot.isRemoved() || player.isRemoved()) {
+            return SoulTypes.Reachability.UNREACHABLE;
+        }
+        boolean sameWorld = bot.getEntityWorld() == player.getEntityWorld();
+        double distanceSquared = sameWorld ? player.squaredDistanceTo(bot) : Double.POSITIVE_INFINITY;
+        boolean remoteAllowed = canBotChatToController(bot, player);
+        return classifySoulReachability(sameWorld, distanceSquared, remoteAllowed);
+    }
+
+    /**
+     * Pure projection of {@link #classifySoulReachability(ServerPlayerEntity, ServerPlayerEntity)}.
+     * Public (rather than package-private) because the soul-communication unit tests live in
+     * {@code net.wcfcarolina13.GameAI.souls}, a different package from this policy class, and must
+     * be able to exercise this boundary without a Minecraft server.
+     */
+    public static SoulTypes.Reachability classifySoulReachability(boolean sameWorld, double distanceSquared, boolean remoteAllowed) {
+        if (sameWorld && distanceSquared <= VISIBLE_RANGE_BLOCKS * VISIBLE_RANGE_BLOCKS) {
+            return SoulTypes.Reachability.LOCAL;
+        }
+        return remoteAllowed ? SoulTypes.Reachability.REMOTE : SoulTypes.Reachability.UNREACHABLE;
+    }
+
+    /**
+     * Authorization gate for private (DIRECT) soul communication. Operators always pass;
+     * otherwise the actor must be the exact recorded owner — for that non-operator path, unlike
+     * {@link #isAllowedToControl}, an unowned bot is NOT eligible: a bot display name is not an
+     * identity boundary.
+     */
+    public static boolean isPrivateSoulAuthorized(ServerPlayerEntity actor, ServerPlayerEntity bot) {
+        if (actor == null || bot == null) {
+            return false;
+        }
+        boolean operator = Frens.isOperator(actor);
+        UUID ownerId = resolveOwnerUuid(bot);
+        return isPrivateSoulAuthorized(operator, actor.getUuid(), ownerId);
+    }
+
+    /**
+     * Pure projection of {@link #isPrivateSoulAuthorized(ServerPlayerEntity, ServerPlayerEntity)}.
+     * Public for the same cross-package testing reason as {@link #classifySoulReachability(boolean, double, boolean)}.
+     */
+    public static boolean isPrivateSoulAuthorized(boolean operator, UUID actorId, UUID ownerId) {
+        if (operator) {
+            return true;
+        }
+        return ownerId != null && ownerId.equals(actorId);
     }
 }

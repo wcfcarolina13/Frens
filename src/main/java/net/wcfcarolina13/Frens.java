@@ -735,6 +735,8 @@ public class Frens implements ModInitializer {
             configNetworkManager.registerServerAPIKeySaveReceiver(server);
             configNetworkManager.registerServerCustomProviderSaveReceiver(server);
             serverInstance = server;
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
+            net.wcfcarolina13.GameAI.souls.SoulEventObserver.initializeProduction();
             LOGGER.info("Server instance stored!");
 
             System.out.println("Server instance is " + serverInstance);
@@ -791,6 +793,9 @@ public class Frens implements ModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            // Cancel soul-communication generation and close its executors before general task
+            // teardown below -- never blocks the server thread (see SoulRuntime.stop() Javadoc).
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.stop();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
             // Shut down all mod executor services BEFORE saving — prevents worker threads
             // from submitting new server.execute() tasks that keep the shutdown loop alive.
@@ -885,6 +890,8 @@ public class Frens implements ModInitializer {
             // mount attempt after reload.
             net.wcfcarolina13.GameAI.services.RideSyncService.resetSession();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.reset();
+            // Clear soul-event-observer session baselines (dimension/sleep/quest/combat state).
+            net.wcfcarolina13.GameAI.souls.SoulEventObserver.resetSession();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -909,6 +916,15 @@ public class Frens implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.player;
             LearningModeService.onPlayerDisconnect(player);
+            // Cancel/deactivate soul-communication for whoever just disconnected before bot
+            // persistence runs below.
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.current().ifPresent(runtime -> {
+                if (BotEventHandler.isRegisteredBot(player)) {
+                    runtime.cancelBot(player.getUuid());
+                } else {
+                    runtime.cancelPlayer(player.getUuid());
+                }
+            });
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
@@ -922,12 +938,17 @@ public class Frens implements ModInitializer {
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity realPlayer && !(realPlayer instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
                 LearningModeService.onPlayerDamage(realPlayer, source, amount);
+                // Journal this damage to any owned bot that is local enough to witness it.
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onPlayerDamage(realPlayer, source, amount);
             }
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
                 // Safety net: bots should never be permanently invulnerable
                 if (serverPlayer.isInvulnerable()) {
                     serverPlayer.setInvulnerable(false);
                 }
+
+                // Journal the bot's own damage as a witnessed soul event.
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotDamage(serverPlayer, source, amount);
 
                 // Notify mood manager of damage (triggers STRESSED state)
                 BotMoodManager.noteDamage(serverPlayer);
@@ -1034,6 +1055,10 @@ public class Frens implements ModInitializer {
                         QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
                         BotEventHandler.botDied = true; // set flag for bot's death.
 
+                        // Journal the bot's death, then invalidate its soul profile so no
+                        // pending delivery survives into the respawn.
+                        net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotDeath(serverPlayer, damageSource);
+
                         // Auto-respawn gate: if the user disabled auto-respawn for this bot,
                         // skip the forced respawn and remove the entity so it can be brought
                         // back manually with /bot spawn.  Inventory is wiped by vanilla death
@@ -1114,6 +1139,7 @@ public class Frens implements ModInitializer {
                 LOGGER.info("AFTER_RESPAWN fired for bot {} (alive flag={})", newPlayer.getName().getString(), alive);
                 AutoFaceEntity.handleBotRespawn(newPlayer);
                 BotEventHandler.onBotRespawn(newPlayer);
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotRespawn(newPlayer);
             }
             BotPersistenceService.onBotRespawn(oldPlayer, newPlayer, alive);
             BotEventHandler.ensureBotPresence(newPlayer.getCommandSource().getServer());
@@ -1170,6 +1196,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.souls.SoulEventObserver::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ZoneVisualizerService::onServerTick);
 
         // Lock mode: crosshair feedback + particle visualization for admin players
@@ -1239,6 +1266,28 @@ public class Frens implements ModInitializer {
                     }
                     if (questHandled) {
                         return;
+                    }
+                }
+
+                // Exclusive soul-communication pilot: single-bot DMs only. "bots"/"all bots"
+                // broadcasts never route to souls -- they always fall through to the legacy loop
+                // below until the separately designed group channel exists. Gating on
+                // routedBots.size() == 1 alone is not enough: a broadcast keyword resolves to a
+                // size-1 list whenever the server has exactly one registered bot, so the
+                // resolver's own broadcast flag (never derived from list size) is required too.
+                if (net.wcfcarolina13.GameAI.souls.SoulChatRouter.isSingleBotAddress(routedBots.size(), target.broadcast())
+                        && !target.prompt().isEmpty()) {
+                    ServerPlayerEntity soulBot = routedBots.get(0);
+                    if (soulBot != null) {
+                        try {
+                            if (net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(soulBot, sender, target.prompt())
+                                    == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED) {
+                                return;
+                            }
+                        } catch (Throwable t) {
+                            // Don't let optional soul-communication wiring break chat.
+                            LOGGER.warn("SoulChatRouter threw; falling back to legacy routing: {}", t.toString());
+                        }
                     }
                 }
 
@@ -1364,21 +1413,22 @@ public class Frens implements ModInitializer {
 
     private static ChatTarget resolveChatTargets(String raw) {
         if (serverInstance == null || raw == null) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         String trimmed = raw.trim();
         if (trimmed.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         String[] tokens = trimmed.split("\\s+");
         if (tokens.length == 0) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
         if (bots.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         int consumed = -1;
+        boolean broadcast = false;
         List<ServerPlayerEntity> targets = new ArrayList<>();
         for (int i = 0; i < tokens.length; i++) {
             String current = normalizeToken(tokens[i]);
@@ -1388,6 +1438,7 @@ public class Frens implements ModInitializer {
             if (current.equals("allbots") || current.equals("bots")) {
                 targets.addAll(bots);
                 consumed = i + 1;
+                broadcast = true;
                 break;
             }
             if (current.equals("all") && i + 1 < tokens.length) {
@@ -1395,6 +1446,7 @@ public class Frens implements ModInitializer {
                 if (next.equals("bots")) {
                     targets.addAll(bots);
                     consumed = i + 2;
+                    broadcast = true;
                     break;
                 }
             }
@@ -1410,17 +1462,17 @@ public class Frens implements ModInitializer {
             }
         }
         if (targets.isEmpty() || consumed < 0) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         targets = dedupeTargetBots(targets);
         if (targets.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         if (consumed >= tokens.length) {
-            return new ChatTarget(targets, "");
+            return new ChatTarget(targets, "", broadcast);
         }
         String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
-        return new ChatTarget(targets, prompt);
+        return new ChatTarget(targets, prompt, broadcast);
     }
 
     private static List<ServerPlayerEntity> dedupeTargetBots(List<ServerPlayerEntity> bots) {
@@ -1624,6 +1676,14 @@ public class Frens implements ModInitializer {
         });
     }
 
-    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt) {
+    /**
+     * {@code broadcast} is true only when {@code bots} was resolved via the "bots"/"all bots"
+     * keyword branch in {@link #resolveChatTargets} -- never for an explicit single-bot name
+     * match, even when the server happens to have exactly one registered bot. Consumers that must
+     * distinguish "explicitly addressed one bot" from "broadcast keyword that resolved to one
+     * bot" (e.g. the exclusive soul-communication router) key off this flag rather than
+     * {@code bots.size()} alone.
+     */
+    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt, boolean broadcast) {
     }
 }

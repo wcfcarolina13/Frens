@@ -2,6 +2,351 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 1.1.141 — pin the soul request context window (2026-08-23)
+
+Pre-warming for the retest exposed the deeper half of the freeze: this machine's Ollama default
+context for llama3.1:8b is the model maximum (131k), so a request that doesn't pin `num_ctx`
+spawns a runner with a ~74 GB KV-cache allocation that spills 68% to CPU. The soul request now
+sends `options.num_ctx=8192` (the prompt assembler budgets ~5k tokens worst-case), keeping the
+runner small and fully on-GPU regardless of the user's Ollama app settings. Request-shape test
+extended to lock the new field.
+
+## 1.1.140 — hold the soul model resident for a play session (2026-08-23)
+
+Second in-game finding: the "crash" on first DM was not a crash — no exception anywhere in the
+log. Ollama cold-loaded llama3.1:8b while Minecraft was rendering, and the unified-memory/Metal
+contention pushed server ticks from ~20 ms to 2,700 ms (a multi-second freeze; the reply then
+arrived after world close and was correctly discarded by the delivery-guard recheck). Raised the
+Ollama request `keep_alive` from the plan's `5m` to `60m` so a session pays the model load at
+most once, and documented a pre-warm step plus the addressing surface boundary in the runbook:
+vanilla `/msg` and its aliases `/tell` and `/w` (confirmed against the Minecraft Wiki) are plain
+whispers to the fake player and intentionally do not route to the soul pipeline.
+
+## 1.1.139 — /bot soul model accepts real Ollama names (2026-08-23)
+
+First in-game finding from the acceptance run: `/bot soul model llama3.1:8b` failed at the
+Brigadier parse layer ("Expected whitespace to end one argument... at position 24") because the
+model argument used `StringArgumentType.string()`, whose unquoted form rejects `:` — present in
+every tagged Ollama name — and `/` in `hf.co/...` names. Switched to `greedyString()` (model is
+the final argument); `validatedModel` still trims and rejects blank/control/overlong input. The
+plan's mandated test exercised `validatedModel("qwen3:14b")` directly, so the unit suite could
+not catch the parse-layer mismatch — runbook updated implicitly by this note: command-syntax
+cases should be typed in-game, not only asserted through pure helpers.
+
+## 1.1.138 — soul pilot test build (2026-08-23)
+
+`mod_version` bumped to 1.1.138 and deployed to the Prism instances for the manual in-game
+acceptance run of the soul-communication pilot (`docs/testing/SOUL_COMMUNICATION_PILOT.md`).
+Everything from "Add soul communication domain model" through "Gate soul side effects on the
+master switch" below ships in this build; `soulsEnabled` remains default-off.
+
+## Gate soul side effects on the master switch (2026-08-23)
+
+Final whole-branch review fix wave for `feature/soul-communication`. Five findings, all now gated
+on `SoulRuntime.isMasterEnabled()`:
+
+1. **Souls-disabled installs wrote `soul.json` on bot death/disconnect.** `SoulStore.setActive`
+   synthesized and saved a default state even for a bot with no prior soul.json; `SoulRuntime.
+   cancelBot` (called unconditionally on every bot death/disconnect via `SoulEventObserver.
+   onBotDeath`/disconnect hooks) always called `store.setActive(botId, false)`. Fixed both
+   layers: `SoulStore.setActive` now decides, on its own single writer thread, to skip the save
+   entirely when deactivating a bot whose `soul.json` never existed; `SoulRuntime.cancelBot` now
+   also short-circuits before touching the store at all when the master switch is off AND nothing
+   is cached for the bot, so a souls-disabled install never creates `<world>/frens/`.
+2. **Event journal kept writing after the master switch was flipped off.** The production
+   `SoulEventObserver.EventSink.accepts()` checked only `hasActiveProfile`, so a bot bound+active
+   before switch-off kept having session-transition events (dimension/sleep/quest/combat)
+   journaled to disk after. Extracted the pure `SoulEventObserver.acceptsEvent(masterEnabled,
+   hasActiveProfile)` predicate (now unit tested) and wired it into the production sink.
+3. **Damage hooks did live-world reads before any soul gate.** `onBotDamage`/`onPlayerDamage`
+   computed dimension/biome/damage-source classification (and, for player damage, iterated
+   `BotRegistry` + resolved each bot's controller) on every hit in the world regardless of whether
+   souls were even enabled. Both hooks now return immediately, before any of that work, unless a
+   runtime exists and `isMasterEnabled()`.
+4. **`/bot soul enable|disable|reset|status <bot>` accepted non-bot players.** None of the four
+   bot-targeting handlers checked that the named entity was actually a registered Frens bot before
+   running owner/operator authorization. Each now rejects a non-bot target up front via
+   `BotEventHandler.isRegisteredBot(...)` with "<name> is not a Frens bot." (Minecraft-type-only
+   path; verified in-game per this repo's existing test-harness constraint on `ServerPlayerEntity`.)
+5. **Soul traffic could silently target a non-local Ollama host.** `/bot soul status` now reports
+   the resolved `host:port` (never scheme/path/credentials — there are none) via a new
+   `SoulRuntime.Status.ollamaHost()` field; `SoulRuntime.buildPipeline` (used by both `start` and
+   `reloadSettings`) now logs one `frens.souls` warning whenever enabled+valid settings resolve to
+   a non-loopback host, since that means private chat and game-context facts leave the machine.
+
+Also: scoped `CompanionCommunicationPolicy.isPrivateSoulAuthorized`'s Javadoc "unowned bot is NOT
+eligible" sentence to the non-operator path (it contradicted the preceding "operators always
+pass" sentence); moved `SoulChatRouter.tryRoute`'s `UUID.randomUUID()`/`System.nanoTime()` below
+the runtime-exists check so a no-runtime call doesn't mint them for nothing; added a `<world>/
+frens/` non-existence disk assertion to the runbook's disabled-baseline case (covering both a bot
+death and a disconnect) plus a note that `/bot soul disable` drops the bot out of no-arg `/bot
+soul status`.
+
+New/extended tests: `SoulStoreTest.setActiveFalseOnAFreshBotCreatesNoStateOnDisk`,
+`SoulRuntimeTest.cancelBotSkipsTheStoreWhenMasterDisabledAndNothingCached` +
+`cancelBotStillDeactivatesACachedProfileEvenWhenMasterDisabled`,
+`SoulEventObserverTest.acceptsEventRequiresBothTheMasterSwitchAndAnActiveProfile`. Focused suite
+(`SoulStoreTest`/`SoulRuntimeTest`/`SoulEventObserverTest`/`BotSoulCommandsTest`) and the full
+`./gradlew test` (232 tests, up from 228) both green; `./gradlew build -x test` green.
+
+## Correct soul runbook failure expectations (2026-08-23)
+
+Review follow-up to the entry below: `SOUL_COMMUNICATION_PILOT.md`'s "Local provider unavailable"
+and "HTTP 503" manual cases wrongly hedged toward `OVERLOADED`/`INVALID PIPELINE` outcomes that
+`OllamaSoulProvider`/`SoulRuntime` cannot actually produce from a stopped server or a 503 response
+(both map to `UNAVAILABLE` only); split the config-shape-only `INVALID PIPELINE` case into its own
+setup, and quoted the LOADING notice's literal text.
+
+## Document soul pilot acceptance (2026-08-23)
+
+New `docs/testing/SOUL_COMMUNICATION_PILOT.md`: the Task-12 runbook for the soul-communication
+pilot, covering every case in the design spec's "Pilot acceptance criteria" and "Manual pilot
+test matrix" sections plus the task-12 brief's additional 503/malformed-JSON/timeout/privacy
+cases. Split into an **Automated** section (cases genuinely exercised by this branch's JUnit
+suite, each citing its exact test class/method — routing decisions, reachability boundaries,
+scheduler ordering/overflow/timeout, validator rejection rules, delivery six-gate combinator,
+reset/epoch/restart persistence) and a **Manual — to be executed in-game** section (unchecked
+checkboxes; requires a live 1.21.11 client/server) for everything that needs a real socket
+disconnect, real process restart, or a live model's probabilistic output — most notably the
+remote-perception leakage probe, which is the one case where a wrong answer is a real defect
+even though it can't be asserted deterministically.
+
+`./gradlew test --rerun-tasks` (228 tests, all green) and `./gradlew build -x test` both succeed;
+artifact `build/libs/frens-1.1.137-release+1.21.11.jar`. The two brief-mandated static checks ran
+over `src/main/java/net/wcfcarolina13/GameAI/souls`: the credential-reference grep
+(`Authorization|Bearer|apiKey|...`) is clean; the privileged/legacy-reference grep
+(`FunctionCallerV2|withPermissions|LLMServiceHandler|LLMOrchestrator|MemoryStore`) surfaces one
+match — a `SoulChatRouter` class Javadoc sentence describing that soul turns do NOT route through
+`LLMOrchestrator` (prose, not a call site or import). Per the brief's exact instruction for any
+match, code was not edited; the match is reported verbatim in the runbook for controller
+adjudication. No code review, mod_version bump, or deploy performed in this task — those are
+separately scoped (code review is the controller's whole-branch pass; manual acceptance and any
+release decision are the user's).
+
+## Journal witnessed gameplay transitions (2026-08-23)
+
+New `GameAI/souls/SoulEventObserver.java` journals gameplay transitions as bounded, factual
+`SoulTypes.SoulEvent`s recorded via `SoulRuntime.recordEvent` — combat start/end, bot/owner
+damage, sleep/wake, dimension changes, quest-stage changes, death/respawn, and task lifecycle.
+Split in two: a static production surface (`initializeProduction`, `onServerTick`,
+`onBotDamage`/`onPlayerDamage`/`onBotDeath`/`onBotRespawn`, `onTaskStarted`/`onTaskPaused`/
+`onTaskFinished`) that converts live Fabric/Minecraft state into primitives, and a data-only
+instance seam (`observe`, `noteBotDamage`, `noteOwnerDamage`, `tickCombat`, static `taskOutcome`)
+that never touches a Minecraft type — same seam discipline as the rest of the soul-communication
+package, so `SoulEventObserverTest` runs without a Minecraft server.
+
+Session state per bot is intentionally small: last dimension, sleeping flag, quest signature, and
+a combat-quiet deadline. A bot's first observation only seeds this baseline — it never emits a
+synthetic transition on first sight. Combat starts on the first hit in a quiet window and ends
+once `onServerTick`'s 20-tick sampling (or a direct `tickCombat` call) sees the quiet deadline has
+passed; a second hit inside the window refreshes the deadline without re-emitting `COMBAT_STARTED`.
+Owner-damage events only fire when the bot actually witnessed it — same owner as
+`CompanionCommunicationPolicy.resolveController` resolves, and within
+`CompanionCommunicationPolicy.VISIBLE_RANGE_BLOCKS`. `onBotDeath` records the death event before
+calling `SoulRuntime.cancelBot` (order matters: cancelling first would make the sink's
+`hasActiveProfile` gate reject the death event itself). Task events never log prompt text or
+command arguments — only the ticket's fixed `name()`, its `:`-prefix category, terminal state, and
+a `sanitizeReasonCategory` bucket derived from the raw cancel reason (never the raw reason itself).
+
+`TaskService` hooks: `onTaskStarted` after each successful ticket-insertion return in `beginSkill`
+(3 paths) and `beginSystemTask` (2 paths) — `beginAmbientSkill` inherits `beginSkill`'s call since
+it delegates rather than re-inserting, so it never double-fires; `onTaskPaused` in `requestPause`
+right after `setState(PAUSED)` succeeds; `onTaskFinished` in `complete` right after `setState`,
+before the active slot is cleared. `taskOutcome` maps `COMPLETED` → `TASK_COMPLETED`, cancel-
+requested `ABORTED` → `TASK_CANCELLED`, any other `ABORTED` → `TASK_FAILED`.
+
+`Frens.java` wiring: `SoulEventObserver.initializeProduction()` right after `SoulRuntime.start`;
+`onBotDamage`/`onPlayerDamage` forwarded from `ALLOW_DAMAGE`; `onBotDeath` from `AFTER_DEATH`;
+`onBotRespawn` from `AFTER_RESPAWN`; `onServerTick` registered on `END_SERVER_TICK`;
+`resetSession()` called in `SERVER_STOPPED` alongside the other per-world session resets.
+
+TDD: `SoulEventObserverTest` covers the brief's mandated
+`damageStartsCombatOnceAndCooldownEndsItOnce` case verbatim, plus first-observation seeding,
+sleep/wake edges, dimension change, quest-stage change, owner-damage witness filtering,
+disabled/unbound sink no-op, and the `taskOutcome` mapping — 8 tests, all data-only. RED confirmed
+by temporarily removing `SoulEventObserver.java` (compile failure); GREEN after restoring it.
+228 tests pass across the full suite; `./gradlew build -x test` succeeds.
+
+## Add explicit `/bot soul` pilot controls (2026-08-23)
+
+New `Commands/BotSoulCommands.java` attaches a `literal("soul")` subtree under `/bot` (next to the
+legacy, untouched `/bot llm`): `status [bot]`, `system <on|off>`, `model <model>`, `enable <bot>`,
+`disable <bot>`, `reset <bot>`.
+
+`system`/`model` require `Frens.isOperator(source)`; they write `ManualConfig`
+(`setSoulsEnabled`/`setSoulModel`), call `save()`, then AWAIT `SoulRuntime.reloadSettings(CONFIG)`
+before reporting success, so the live pipeline never drifts from the just-persisted config. Model
+names are sanitized by the pure `validatedModel(String)` helper — trimmed, non-blank, no control
+characters, ≤128 chars.
+
+`enable`/`disable`/`reset`/`status <bot>` require the command actor be either the bot's exact
+recorded owner or an operator (`CompanionCommunicationPolicy.isPrivateSoulAuthorized`). `enable`
+always binds the pilot's one supported profile (`frens:jake`, resolved through the pure
+`profileId(String)` alias helper so `"jake"`/`"frens:jake"` are equivalent and anything else is
+rejected) via `SoulRuntime.bindJake` + `setActive(true)` — naming a bot "Jake" in-game does nothing
+by itself; only this explicit command grants the profile. `disable` calls `setActive(false)` only,
+never touching the store's on-disk files. `reset` always archives the **actor's own** direct thread
+with the target bot (`ConversationKey(botId, actor.getUuid(), DIRECT)`), reporting the new epoch —
+an operator resetting someone else's bot can never erase that other player's private conversation.
+`status` with no `[bot]` picks the actor's own soul-bound online bot (first `BotRegistry` entry
+with an active profile the actor is authorized to see); it reports master flag, provider, model,
+provider health, queue depth, bot UUID/profile/active state, and the actor's current direct epoch —
+no URLs or keys ever leave `SoulRuntime.Status`.
+
+Every `CompletableFuture` completion from `SoulRuntime` (`reloadSettings`, `bindJake`, `setActive`,
+`reset`, `status`) schedules its chat feedback back onto the server thread via
+`source.getServer().execute(...)` before touching `ServerCommandSource`/chat — these futures
+resolve on the store's writer thread or the scheduler, never the server thread.
+
+TDD: `Commands/BotSoulCommandsTest.java` covers the brief's two mandated cases plus extra coverage
+of `profileId`/`validatedModel` (case-insensitivity, blank/null, embedded control character,
+exact-128 boundary) — the only Minecraft-free pure helpers in this class; the Brigadier command
+executors themselves need `ServerCommandSource`/`MinecraftServer`/`ServerPlayerEntity`, which this
+harness's Mockito/ByteBuddy setup cannot mock (same constraint documented on `SoulChatRouterTest`),
+so they're exercised in-game per the phase gate. Verified RED (compile failure with the test
+present and the class absent) before GREEN. `./gradlew test --tests
+…Commands.BotSoulCommandsTest` — 4/4 pass; full `./gradlew test` — all pass; `./gradlew build -x
+test` — BUILD SUCCESSFUL.
+
+Files: `Commands/BotSoulCommands.java` (new), `Commands/modCommandRegistry.java` (attaches
+`.then(BotSoulCommands.build())` right after the legacy `/bot llm` block, before
+`BotInventoryCommands.build()`), `Commands/BotSoulCommandsTest.java` (new), `changelog.md`.
+
+## Keep broadcast chat out of soul routing (2026-08-23, 1.1.137)
+
+Review finding on the previous entry: `Frens.java`'s soul-routing gate checked only
+`routedBots.size() == 1`, but `resolveChatTargets`'s "bots"/"all bots" broadcast branch also
+produces a size-1 target list whenever the server has exactly one registered bot — so `bots how
+are you` with one companion silently became a soul DM, violating "`bots`/`all bots` broadcasts
+never route to souls."
+
+Fixed by adding a `broadcast` flag to the private `ChatTarget` record, set `true` only inside
+`resolveChatTargets`'s keyword-match branches (`"bots"`/`"allbots"` and the two-token `"all
+bots"`), never derived from list size and never true for an explicit bot-name match. The
+soul-routing gate now calls a new pure static `SoulChatRouter.isSingleBotAddress(int
+routedBotCount, boolean broadcastKeyword)` (`routedBotCount == 1 && !broadcastKeyword`) instead of
+inlining the size check, so the fix is unit-testable without a running server. The pre-existing,
+unrelated `handleLegacyInlineActionPrompt` fallback (also gated on `routedBots.size() == 1`,
+further down the same method) was deliberately left untouched — it isn't part of the soul pilot
+and the finding didn't implicate it.
+
+Test coverage (`SoulChatRouterTest`, +4 cases): one bot registered + broadcast keyword →
+`isSingleBotAddress` false (the exact scenario from the finding); an explicit single-bot name →
+true; a multi-bot explicit list or zero targets → false regardless of the broadcast flag.
+`./gradlew test --tests …SoulChatRouterTest` — 11/11 pass; full `./gradlew test` — 216/216 pass, 0
+failures; `./gradlew build -x test` — BUILD SUCCESSFUL.
+
+Considered adding `.exceptionally()` logging to the discarded `submitTurn` future per the review's
+optional suggestion, but confirmed it would be dead code: `SoulConversationService.submit`'s
+returned future always completes normally (`DELIVERED`/`FAILED`, never exceptionally) — every
+internal failure point is already caught by a `whenComplete`/`thenCompose` chain that routes to
+`failTurn` (which logs and notifies the player) before completing the outer future normally.
+Left unchanged.
+
+Files: `Frens.java`, `GameAI/souls/SoulChatRouter.java`, `SoulChatRouterTest.java`, `changelog.md`.
+
+## Route authorized Jake DMs exclusively to souls (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulChatRouter` gates whether an already-resolved single-target bot DM in `Frens.java`'s targeted-chat block is handled exclusively by the soul-communication pilot instead of the legacy `LLMOrchestrator` path. `decide(masterEnabled, indexReady, profileActive, pipelineAvailable, authorized, reachability)` is the pure coarse decision: master off → `NOT_SOUL`; master on but the index still loading → `CONSUMED` (profile activation is unknown until the index is warm, so this is checked before `profileActive`); master on, index ready, no active bound profile → `NOT_SOUL` ("unbound"); master on, index ready, profile active → `CONSUMED` unconditionally, since an unauthorized or unreachable turn is still exclusively consumed with its own refusal rather than silently falling through to legacy routing. `tryRoute(bot, sender, prompt)` then walks the fine-grained order the brief specifies — index-readiness, cached `hasActiveProfile`, `pipelineAvailable`, `CompanionCommunicationPolicy.isPrivateSoulAuthorized`, `CompanionCommunicationPolicy.classifySoulReachability`, server-thread `SoulSnapshotBuilder.capture`, then `SoulRuntime.submitTurn` — sending exactly one of four deterministic private notices (LOADING / INVALID PIPELINE with `safeValidationError()` / UNAUTHORIZED / UNREACHABLE) and returning `CONSUMED` without ever appending history or invoking a provider, or (only once every gate passes) capturing a grounding snapshot and submitting an `AcceptedTurn`.
+
+**Blocker found and resolved (controller-authorized correction):** `SoulRuntime` (Task 8) never wired a turn-submission entry point — no method or accessor exposed `Pipeline.conversationService()` to any caller outside the class, and Task 8's own report explicitly flagged this as deferred to "the chat/command router, a later task." Reported `NEEDS_CONTEXT` rather than guessing; the controller authorized adding one minimal method, `SoulRuntime.submitTurn(SoulTypes.AcceptedTurn)`, to the briefed file set. It reads `pipelineRef` at call time (the same plain-read discipline `isMasterEnabled()`/`safeValidationError()` already use, deliberately *not* taken under `lifecycleLock` so an unrelated turn is never serialized against every lifecycle transition) and fails closed with `SoulConversationService.Submission.FAILED` — without touching the pipeline — when the runtime is stopped or the current settings aren't enabled and valid; otherwise it delegates to `pipelineRef.get().conversationService().submit(turn)`. No other `SoulRuntime` behavior changed.
+
+`Frens.java`'s targeted-chat block (`ServerMessageEvents.CHAT_MESSAGE`, ~line 1204) gained one new block between the quest fast-path and the legacy `LLMOrchestrator` loop: when `routedBots.size() == 1` and the prompt is non-empty, `SoulChatRouter.tryRoute` runs (wrapped in try/catch, matching the file's existing "don't let optional AI wiring break chat" pattern for `FunctionCallerV2`), returning from the chat callback on `CONSUMED`. Multi-bot ("bots"/"all bots") targets skip this block entirely via the size check and always reach the legacy loop unchanged. The legacy `"Processing your message, please wait."` line was already scoped inside the per-bot legacy loop (not printed before it), so a `CONSUMED` soul turn — which returns before that loop is ever reached — was already structurally guaranteed to never emit it; no line needed to move. With souls disabled or no `SoulRuntime` installed, `tryRoute` returns `NOT_SOUL` via one `Optional`/boolean check before touching any Minecraft state, and execution falls through to the exact same legacy loop, in the same order, with the same messages as before this change.
+
+Test coverage (`SoulChatRouterTest`, 7 cases) locks in the brief's two mandated `decide()` matrix tests plus two more `decide()` branch cases (loading short-circuits ahead of profile-activation; ready+unbound is `NOT_SOUL`) and three cases against `SoulRuntime#submitTurn` — the seam `tryRoute`'s final step delegates to — proving an authorized/reachable/ready turn is submitted to the mocked `SoulConversationService` exactly once, and that a not-enabled or stopped runtime fails closed without ever calling the service. `tryRoute` itself takes `ServerPlayerEntity` parameters and calls `bot.getEntityWorld().getServer()`/`CompanionCommunicationPolicy`/`SoulSnapshotBuilder.capture`, all needing live Minecraft state; consistent with `SoulMessageDeliveryTest`'s documented hard limit (`MinecraftServer` cannot be mocked or constructed in this harness), it is left for in-game verification. RED was captured by stubbing `decide()` to always return `NOT_SOUL` and `submitTurn` to always return `FAILED` without touching the service, confirming 4 of 7 tests fail, before restoring the real implementations for GREEN.
+
+Files: `GameAI/souls/SoulChatRouter.java`, `GameAI/souls/SoulRuntime.java`, `Frens.java`, `SoulChatRouterTest.java`.
+
+## Per-server soul runtime lifecycle (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulRuntime` is the one-per-`MinecraftServer` owner of the soul-communication pipeline: a static `AtomicReference<SoulRuntime>` singleton (`start`/`stop`/`current`, mirroring `BotRegistry`/`TaskService`) wrapping a world-local `SoulStore`, an async index preload that gates `isReady()`, and a `Pipeline` record (`SoulSettings` + `SoulModelProvider` + `SoulGenerationScheduler` + `SoulConversationService`) swapped as one atomic unit by `reloadSettings`. `reloadSettings` always rebuilds the pipeline — even for disabled/invalid settings — so storage/status stay backed by a consistent object graph; only `isConversationEnabled()` (`enabled && valid`) gates whether it is ever used to generate a reply, and `pipelineAvailable()` additionally requires `isReady()`. `reset(key)` archives via `SoulStore.archiveAndReset`, then calls `conversationService.invalidate(key, newEpoch)` before the returned future completes. `stop()` cancels the current scheduler/provider and closes the store without ever calling `awaitTermination` — safe to call from the server thread. The package-private 5-arg constructor + `installForTest` are the only test seam; the class never references `MinecraftServer`/`ManualConfig` as static state and never touches `Frens`, so its test never trips `Frens`'s static initializer.
+
+`SoulStore` gained: `preloadIndex()` (walks `<world>/frens/souls/v1/<bot-uuid>/soul.json` into a `ConcurrentHashMap<UUID, SoulState>` cache — never creates `root` or any subdirectory, so a never-enabled world stays untouched on disk), a synchronous `cachedState(UUID)` read over that cache (kept current by every subsequent `saveState`), and a production `SoulStore(Path worldRoot)` factory that opens its own named daemon writer thread (`frens-soul-store`) — the existing injected-executor constructor is untouched, so `SoulStoreTest` needed no changes. `close()` now sets a `closed` flag checked by `submit()` (any write after `close()` fails fast with a `RejectedExecutionException`-backed future instead of throwing synchronously) and calls only `executor.shutdown()` — no `awaitTermination`/`shutdownNow` — so already-queued writes drain in the background instead of blocking the caller.
+
+`Frens.java` wiring: `SoulRuntime.start(server, CONFIG)` right after `serverInstance = server` in `SERVER_STARTED` (line ~738); `SoulRuntime.stop()` as the first statement in `SERVER_STOPPING`, before `TaskService.markServerStopping()` (line ~795); and in `ServerPlayConnectionEvents.DISCONNECT`, `SoulRuntime.current().ifPresent(...)` calls `cancelBot` for a registered fake player or `cancelPlayer` for a real player, before `BotPersistenceService.onBotDisconnect` (line ~918). `setActive(botId, false)` also calls `cancelBot(botId)`.
+
+**Reconciled ambiguity (`cancelBot`/`cancelPlayer` semantics):** the brief specifies the call sites but not what "cancel" does at the scheduler level, and `SoulGenerationScheduler` (not in this task's file list) only supports invalidating a *known* `ConversationKey` — there is no "cancel everything for this bot/player across all conversations" primitive, and this task doesn't yet wire a turn-submission entry point that would populate an active-keys registry (that lands with the chat/command router in a later task). `cancelBot` therefore deactivates the bot in the store (stopping future dispatch); `cancelPlayer` is a documented no-op today, since `SoulMessageDelivery.ProductionDeliveryGuard` already fails closed the instant either party stops resolving via the player manager, making an in-flight reply to a disconnected party undeliverable regardless.
+
+Test coverage (`SoulRuntimeTest`, 17 cases) locks in the brief's two mandated tests (disabled settings never call `provider.generate`; `stop()` closes the provider and clears `current()`) plus: `stop()` also closes the scheduler and store, and is idempotent with nothing installed; `isReady()`/`pipelineAvailable()` track preload completion rather than construction; `safeValidationError()` surfaces the deterministic `SoulSettings` message; `reloadSettings` swaps the pipeline and closes the previous provider/scheduler; `reset` invalidates the conversation service at the store's new epoch; `hasActiveProfile` requires both `active` and a non-blank profile id; `bindJake` binds `"frens:jake"`; `setActive(false)` routes through `cancelBot`; `status` combines live settings/store/provider-health/queue-depth; `recordEvent` appends through the store; `cancelPlayer` never touches the provider; and two cases against a *real* `SoulStore` (not mocked) confirming `preloadIndex` creates no directories for an absent root and correctly populates `cachedState` from disk across a simulated restart while `close()` makes further writes fail fast — kept in this file rather than `SoulStoreTest` per the task's exact-five-file commit list. RED was captured via `./gradlew test --tests …SoulRuntimeTest` failing to compile (`cannot find symbol: SoulRuntime`, plus the new `SoulStore` methods) before either class existed. `net.minecraft.server.MinecraftServer` still cannot be mocked in this harness, so `start()` itself is untestable at the unit level and left for in-game verification, consistent with `SoulMessageDeliveryTest`'s documented limitation.
+
+Files: `GameAI/souls/SoulRuntime.java`, `GameAI/souls/SoulStore.java`, `Frens.java`, `SoulRuntimeTest.java`.
+
+## Heard-to-spoken soul conversation lifecycle (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulConversationService` orchestrates one turn end to end with a fixed promise chain: `SoulStore.beginHeardTurn` (unconditional — a turn is always remembered as heard) → `recentBefore`/`recentEvents` fetched concurrently → `SoulPromptAssembler.assemble` → exactly one call through `SoulGenerationScheduler` → `SoulResponseValidator.validate` → (accepted only) `Delivery.deliverReply` → (delivered only) `appendSpoken` + a content-free `DIRECT_CONVERSATION` event. A reply is committed as `SPOKEN` memory only after `Delivery.deliverReply` actually completes the private send; any failure before then appends a `FAILURE` record and sends one of six deterministic, provider-detail-free status lines — except when the failure code is `CANCELLED` or `STALE_EPOCH` (a mid-flight `archiveAndReset`/`invalidate`), where the append is skipped outright since the token's epoch no longer matches the store's cursor and `SoulStore` would itself reject it as stale. `invalidate(key, newEpoch)` is a pure passthrough to `SoulGenerationScheduler.invalidate`.
+
+`GameAI/souls/SoulMessageDelivery` is the server-thread-only `Delivery` implementation: `deliverReply` schedules via `server.execute`, resolves the bot/player `ServerPlayerEntity`s, consults a `DeliveryGuard`, and only then sends `Text.literal(botName + ": " + text)` privately — it never constructs a bot command source and never touches `ChatUtils` or a voice mapper. Its nested `ProductionDeliveryGuard` requires, all at once: master enabled (a caller-supplied `BooleanSupplier`, since `SoulRuntime` doesn't exist yet), the bot's bound profile unchanged, the conversation's cursor epoch still matching the token's epoch, both parties online, `CompanionCommunicationPolicy.isPrivateSoulAuthorized` still true, and `CompanionCommunicationPolicy.classifySoulReachability` not `UNREACHABLE`. The profile/epoch recheck is a bounded (500ms), fail-closed `store.state(...)` read — the one non-purely-synchronous piece of an otherwise-synchronous guard, called from inside `server.execute`. The six-gate decision itself is factored into a Minecraft-free static `evaluate(...)` combinator so it's exhaustively unit-testable without a server.
+
+**Seam mismatch found and resolved:** the task brief's fixture constructs `SoulConversationService` with a `SoulProfileRegistry` instance argument (`new SoulConversationService(store, SoulProfileRegistry.loadBuiltIns(), ...)`), but `SoulProfileRegistry` (Task 5) is a static, non-instantiable registry (private constructor) and `loadBuiltIns()` returns `void` — passing it as a constructor argument does not compile. Resolved by dropping the `profiles` parameter from the constructor entirely and calling `SoulProfileRegistry.require(...)` statically inside `dispatchProvider`, with `loadBuiltIns()` called as its own `@BeforeEach` statement instead.
+
+**Second issue found via RED/GREEN itself (not anticipated by the brief):** both production classes originally logged through `Frens.LOGGER`. Merely referencing the `Frens` class triggers its static initializer (`resolveOperatorPermissions()`, which reflectively touches Minecraft permission classes), which throws `IllegalStateException` outside a running game — this silently aborted `SoulConversationService`'s async callback chains before they reached `outcome.complete(...)`, manifesting as `CompletableFuture.get()` timeouts in every test, not a visible exception. Fixed by giving both classes their own `LoggerFactory.getLogger("frens.souls")`, consistent with the rest of this package's documented "no Minecraft/Fabric/mod-class reference" boundary. A second, unrelated discovery during the same debugging pass: `net.minecraft.server.MinecraftServer` cannot be mocked at all in this test harness (Mockito: "Cannot instrument class ... because it or one of its supertypes could not be initialized") — no existing test in this repo mocks it either, confirming this is a hard environment limit, not a shallow-vs-deep mocking choice.
+
+Test coverage (`SoulConversationServiceTest`, 6 cases) locks in the brief's two mandated tests (`SPOKEN` recorded only after successful delivery; failed delivery never becomes `SPOKEN` memory) plus: the current inbound message appears exactly once as the final `USER` message and is excluded from its own turn's prior history while a previous turn's heard/spoken pair does appear as history; a provider failure (`TIMEOUT`) appends a typed `FAILURE` record; an invalid/rejected provider response appends a `MALFORMED` `FAILURE` record; and a conversation reset while a turn's job is still queued (`invalidate` racing a still-queued job under `SoulGenerationScheduler(1, 8)`'s single concurrency slot) fails the submission but leaves only the original `HEARD` record — no `FAILURE` append is attempted against the now-stale token. `SoulMessageDeliveryTest` (7 cases) exhaustively covers `evaluate`'s six fail-closed gates; `deliverReply`/`deliverStatus`/`ProductionDeliveryGuard`'s live entity and store resolution are documented as untestable here and left for in-game verification. RED was captured by moving both production classes aside and observing the expected `cannot find symbol` compile failure before restoring them for GREEN.
+
+Files: `GameAI/souls/SoulConversationService.java`, `GameAI/souls/SoulMessageDelivery.java`, `SoulConversationServiceTest.java`, `SoulMessageDeliveryTest.java`.
+
+## Projecting authoritative Frens state into immutable soul grounding (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulSnapshotBuilder.capture(server, bot, player, reachability)` is the server-thread-only boundary that reads live bot/player/world state and projects it into an immutable `SoulTypes.GroundingSnapshot`. It never fabricates a snapshot for a turn that already resolved to `UNREACHABLE` — calling `capture` with that reachability throws `IllegalArgumentException` rather than silently proceeding. Coordinates are rounded to 8-block increments (`roundToEight`), time-of-day is bucketed into `day`/`dusk`/`night`/`dawn` (`timePhase`, boundaries at 12000/13000/23000 ticks, matching `BotQuestService`'s existing `time_night` predicate), the player's compass position is resolved to one of 8 points (`cardinalDirection`, north = -Z / east = +X per vanilla convention), and inventory resource stacks are aggregated by display name and capped to the top 6 by count (`topResourceSummary`). REMOTE reachability always yields `player().isEmpty()` — enforced at the `assemble` seam itself (not just at the call site) so a caller can never leak the player's local surroundings into a prompt for a bot with no shared line of sight. Recruitment/permanence/companion-quest-stage fields are populated only when the authoritative `SurvivalRecruitmentState`'s configured bot alias case-insensitively matches the bot being captured, so a world-level recruitment flag can never bleed onto an unrelated bot.
+
+`CompanionCommunicationPolicy` gained the soul-communication policy boundary: `classifySoulReachability(bot, player)` returns `LOCAL` inside `VISIBLE_RANGE_BLOCKS` (32 blocks), `REMOTE` only when the existing `canBotChatToController` delivery rules allow it (comm items, wizard's tome, enchanting-table proximity), and `UNREACHABLE` otherwise — its pure projection `classifySoulReachability(sameWorld, distanceSquared, remoteAllowed)` is `public` (not package-private as the brief's pseudocode showed) because the soul unit tests live in a different package (`GameAI.souls`) than the policy (`GameAI.services`) and must exercise it without a Minecraft server. `isPrivateSoulAuthorized(actor, bot)` requires the actor be an operator or the bot's exact recorded owner UUID; unlike `isAllowedToControl`, an unowned bot is deliberately **not** eligible, and its pure seam `isPrivateSoulAuthorized(operator, actorId, ownerId)` is `public` for the same cross-package reason.
+
+`GameAI/services/BotQuestService` gained an immutable `QuestSnapshot(String id, String intent, int actionIndex, int actionCount, long expiresTick)` record and `getActiveQuestSnapshot(UUID botId)`, copying only primitives/strings out of the live `ActiveQuestRuntime`/`QuestDefinition` so the running quest state can safely cross into a `GroundingSnapshot`.
+
+Test coverage (`SoulGroundingTest`, 11 cases) locks in the brief's two mandated tests (`isPrivateSoulAuthorized` requires exact owner-or-operator, REMOTE snapshots omit player state) plus the 32-block LOCAL/REMOTE/UNREACHABLE boundary (at, just past, cross-dimension), 8-block coordinate rounding, all 4 cardinal/intercardinal directions, the 4 time-of-day phase boundaries, and the 6-entry resource-summary cap. RED was captured via `./gradlew test --tests …SoulGroundingTest` failing to compile (`cannot find symbol: SoulSnapshotBuilder`) before the class existed.
+
+Files: `GameAI/souls/SoulSnapshotBuilder.java`, `GameAI/services/CompanionCommunicationPolicy.java`, `GameAI/services/BotQuestService.java`, `SoulGroundingTest.java`.
+
+## Conversational output validation for soul dialogue (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulResponseValidator` is the last checkpoint between a provider's raw text and anything spoken by a bot: `validate(raw, botDisplayName)` returns a `ValidationResult(accepted, text, FailureCode, reason)`. It removes `<think>...</think>` and `<analysis>...</analysis>` blocks (case-insensitive, DOTALL — hidden reasoning never reaches dialogue), a leading `"<botDisplayName>:"` label the provider echoed back, Minecraft legacy `§`-formatting codes, and ISO control characters other than newline/tab; it collapses runs of more than two consecutive blank lines down to two. It rejects (always `FailureCode.MALFORMED`) blank output, any raw NUL character, a fenced ```` ``` ```` payload (providers should never be emitting tool/JSON syntax as dialogue), and cleaned output over 1,200 characters. The validator never parses or dispatches the cleaned text or the rejection reason as a command — both are inert data for the caller to speak or log, matching the pilot's plain-dialogue-only contract.
+
+Test coverage (`SoulResponseValidatorTest`, 12 cases) locks in the brief's two mandated tests (hidden-reasoning + speaker-prefix strip, tool-syntax/excessive-output rejection) plus blank/null input, `<analysis>` block stripping, control-character stripping while preserving newline/tab, NUL rejection, section-sign formatting strip, ordinary multiline prose passing through unchanged, blank-line collapsing, an unrelated speaker label (`"Steve:"`) staying untouched, and the exact 1,200-character boundary staying accepted. RED was captured by running the test against the not-yet-created `SoulResponseValidator` class (`cannot find symbol` compile failure) before implementing it for GREEN.
+
+Files: `GameAI/souls/SoulResponseValidator.java`, `SoulResponseValidatorTest.java`.
+
+## Jake's authored profile + deterministic prompt assembly (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulProfileRegistry` is a static registry (like `SkillManager`) that loads built-in `SoulTypes.SoulProfile` definitions from classpath JSON via `loadBuiltIns()` (currently `data/frens/souls/jake.json`), and exposes `register(SoulProfile)` / `require(String profileId)`. `register` rejects a blank id (`IllegalArgumentException`) or a duplicate id (`IllegalStateException`) so profiles can never silently shadow one another; `require` throws `IllegalArgumentException` on an unknown id. `loadBuiltIns()` is idempotent (a `builtInsLoaded` guard) so repeated calls across the process don't collide with themselves.
+
+`GameAI/souls/SoulPromptAssembler` (`assemble(correlationId, model, profile, grounding, priorHistory, recentEvents, currentMessage, timeout)`) deterministically builds a `ProviderRequest` in a fixed order: system contract (stable, provider-neutral, states generated prose has no action authority) → authored identity (profile identity/values/boundaries + its authored examples) → authoritative state (rendered from the `GroundingSnapshot`, never invented) → bounded prior role history (`HEARD`→USER, `SPOKEN`→ASSISTANT, `FAILURE` turns dropped; capped at 20 turns and 12,000 characters, most-recent-first budgeting then re-ordered chronologically) → bounded recent witnessed events (SYSTEM role, capped at 12 events and 4,000 characters, event `facts` map rendered key-sorted for determinism) → a `PRESENT MOMENT` marker message → the current user message exactly once as the final message. `maxOutputTokens` is fixed at 220 (four characters ≈ one token is the deterministic budget proxy documented on the char-budget constants, not computed at runtime). REMOTE grounding renders "remote communication" and its branch never reads `GroundingSnapshot.player()` at all, so a bot with no shared line of sight can't leak the player's local surroundings into the prompt even if a caller mistakenly populated that field. Conversation history and recalled events never get folded into the system contract message itself — only USER/ASSISTANT/SYSTEM messages later in the sequence carry that content — so a player's message or a replayed event can't rewrite the character's operating rules.
+
+Test coverage (`SoulPromptAssemblerTest`, 11 cases) locks in the brief's two mandated tests (`PRESENT MOMENT` immediately precedes the final current-message, REMOTE prompts omit player surroundings while still saying "remote communication") plus bound assertions (history capped at 20 turns / 12,000 chars, events capped at 12 / 4,000 chars, current message appears exactly once) and registry behavior (built-in Jake profile loads and is retrievable, unknown id throws, blank id rejected, duplicate id rejected). RED was captured by running the test against the not-yet-created `SoulPromptAssembler`/`SoulProfileRegistry` classes (`cannot find symbol` compile failure) before authoring the two production classes and `jake.json` for GREEN.
+
+Files: `GameAI/souls/SoulProfileRegistry.java`, `GameAI/souls/SoulPromptAssembler.java`, `src/main/resources/data/frens/souls/jake.json`, `SoulPromptAssemblerTest.java`.
+
+## Bounded local soul generation: provider contract, Ollama adapter, scheduler (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulModelProvider` is the provider-neutral contract: `generate(ProviderRequest)` returns a `Call` pairing a `CompletableFuture<ProviderResult>` with a `cancel` `Runnable`. A well-behaved provider never fails that future exceptionally for an ordinary generation problem — timeouts, upstream errors, malformed responses, and cancellation are all normal, successful completions carrying a typed `FailureCode`, so a caller can `.join()` without ever touching `try/catch`.
+
+`GameAI/souls/OllamaSoulProvider` implements it against local Ollama's non-streaming `/api/chat`: `stream:false`, `keep_alive:"5m"`, `options.temperature:0.7`, `options.num_predict` from `request.maxOutputTokens()`, roles serialized lowercase, and only `message.content` read back as dialogue — the raw response body is never surfaced in a result or a log. Non-2xx maps to `UNAVAILABLE`, `HttpTimeoutException` to `TIMEOUT`, a cancelled HTTP future to `CANCELLED`, and a missing/unparsable body to `MALFORMED`. `firstOutputMillis` stays `null` since a non-streaming call has no real first-token latency to report. `health()` is a 1500ms-timeout `GET <base>/api/tags`. A package-private `Transport` functional interface (`OllamaSoulProvider(URI, String, Transport, ObjectMapper)`) lets tests inject a fake HTTP layer; the public constructor builds and owns a real `HttpClient`, releasing it via the non-blocking `shutdownNow()` in `close()` rather than the blocking `close()`/`shutdown()` JDK 21 added to `HttpClient`.
+
+`GameAI/souls/SoulGenerationScheduler(maxConcurrent, queueCapacity)` is a synchronized FIFO queue over an `activeKeys` set and an `activeCalls` map, with no thread pool and no polling — every state transition is driven by a provider future's `whenComplete` calling `pump()`. Two invariants: the same `ConversationKey` never has two calls in flight, and no more than `maxConcurrent` calls run globally regardless of key. `submit(key, epoch, Supplier<Call>)` completes immediately with `OVERLOADED` (supplier never invoked) once the queue backlog reaches `queueCapacity`. `invalidate(key, newEpoch)` cancels an older active call for that key (its own future resolves however the provider maps that cancellation — normally `CANCELLED`) and immediately completes any older still-queued jobs for that key with `STALE_EPOCH`, since those never got a provider call to report anything else. `close()` cancels every active call and completes every still-queued job with `CANCELLED`, without blocking.
+
+Test coverage (`SoulProviderSchedulerTest`, 11 cases) locks in the brief's two mandated tests (same-key non-overlap, HTTP failure never leaking into dialogue text) plus queue overflow, HTTP timeout, explicit cancellation, two-key global concurrency cap, epoch invalidation, malformed-JSON mapping, the exact outbound JSON shape, and the `/api/tags` health check. RED was captured by temporarily moving the three new production files aside and confirming `SoulProviderSchedulerTest` fails to compile (`cannot find symbol` / `package does not exist`, 34 errors) before restoring them for GREEN.
+
+Files: `GameAI/souls/SoulModelProvider.java`, `GameAI/souls/OllamaSoulProvider.java`, `GameAI/souls/SoulGenerationScheduler.java`, `SoulProviderSchedulerTest.java`.
+
+## Crash-tolerant world-local soul storage (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulStore` persists the soul-communication domain model (`SoulTypes`) under `<world>/frens/souls/v1`, pure Java with no Minecraft/Fabric imports so it can be constructed and tested off the server thread. Each bot owns a `soul.json` (profile binding, active flag, per-conversation cursors keyed `DIRECT:<player-uuid>`) written temp-file + `ATOMIC_MOVE` with a `REPLACE_EXISTING` fallback, and an append-only `conversations/<player-uuid>/active.jsonl` transcript. All filesystem work funnels through an injected single-writer `ExecutorService` — every append serializes one record, a line separator, and a flush before its future completes, so the transcript never holds a half-written line.
+
+`archiveAndReset` moves the active transcript into `conversations/<player-uuid>/archive/epoch-<epoch>-<UTC timestamp>.jsonl` rather than deleting it, then bumps the conversation's epoch. `beginHeardTurn` allocates the epoch/sequence pair baked into the returned `TurnToken`; `appendSpoken`/`appendFailure` compare that epoch against the live cursor and fail the future with a `StaleEpochException` (`FailureCode.STALE_EPOCH`) on mismatch, so a reply generated against a conversation that has since been reset can never land. Load-time recovery treats a malformed *final* line in a JSONL file as an interrupted write — it's quarantined to `<filename>.corrupt-tail-<timestamp>` and the file is atomically rewritten with only its complete lines — while a malformed record anywhere *before* the final line fails the load visibly, since that pattern indicates real corruption rather than a crash mid-append. `recent`/`recentBefore` bound conversation history by both turn count and a total character budget, trimmed from the most recent turn backward.
+
+Test coverage (`SoulStoreTest`, 13 cases) locks in the brief's mandated archive/stale-epoch scenario plus corrupt-tail quarantine, malformed-mid-file rejection, restart recovery through a fresh `SoulStore` instance pointed at the same world root, exact on-disk paths, maxTurns/maxChars bounding, `recentBefore` sequence exclusion, failure-turn metadata, profile/active-state round-tripping, event append/read, and that `close()` leaves no executor thread alive. Jackson is configured with `new ObjectMapper().registerModule(new JavaTimeModule())` per the brief; despite the `jackson-datatype-jsr310` 2.8.4 / `jackson-databind` 2.17.2 version skew already present in `build.gradle`, `Instant` round-tripped through real files with no compatibility issue.
+
+Files: `GameAI/souls/SoulStore.java`, `SoulStoreTest.java`.
+
+## Soul communication domain model: immutable types and default-off settings (2026-08-23, 1.1.137)
+
+Foundation for an opt-in, local-Ollama-only conversational pilot for Jake. `GameAI/souls/SoulTypes` adds the immutable record/enum boundary (conversation identity, provider request/result, grounding snapshots, profiles, events) that every later piece of the pilot will pass across worker threads — strings, primitives, UUIDs, instants, durations, and defensively-copied collections only, never Minecraft classes. `GameAI/souls/SoulSettings` validates the new configuration into a single immutable snapshot: only the local `ollama` provider is accepted, the base URL must be HTTP/HTTPS, the request timeout is clamped to 10–180s, and the queue capacity to 1–32.
+
+`ManualConfig` gains five new non-secret fields — `soulsEnabled` (default **false**), `soulProvider` (default `"ollama"`), `soulModel`, `soulRequestTimeoutSeconds`, `soulQueueCapacity` — kept entirely separate from the legacy `defaultLlmWorldEnabled` toggle and with no API-key field of any kind; the pilot never talks to a hosted provider.
+
+`ManualConfig.FILE_PATH` was also changed from an eager `static final` field initializer to a lazily-resolved `filePath()` accessor. It previously called into `LauncherEnvironment` → `FabricLoader.getInstance().getGameDir()` at class-initialization time, which throws outside a real Fabric launch and made `ManualConfig` impossible to construct or mock in a plain JUnit JVM. Resolution now happens on first real use (`save()`/`load()`), which in practice is always after Fabric has launched, so runtime behavior is unchanged — but the config class is now unit-testable, which the new `SoulFoundationTest` mock-based coverage depends on.
+
+Files: `GameAI/souls/SoulTypes.java`, `GameAI/souls/SoulSettings.java`, `FilingSystem/ManualConfig.java`, `SoulFoundationTest.java`.
+
 ## Sleeping screen explains the zzz companion command (2026-08-22, 1.1.137)
 
 The vanilla sleeping screen now shows a compact Frens-styled hint above the Leave Bed button: companions need to sleep too, and typing bare `zzz` in chat makes every active Frens bot owned by the player in that dimension try to sleep. This documents the existing 1.1.136 behavior at the moment players need it, including when a bot is too far away for automatic co-sleep.

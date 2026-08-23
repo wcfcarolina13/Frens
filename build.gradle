@@ -186,4 +186,9 @@ tasks.withType(JavaExec).configureEach {
 
 tasks.withType(Test).configureEach {
 	useJUnitPlatform()
+	// mockito-inline's bundled Byte Buddy predates official Java 21 (class file version 65)
+	// support; this is the exact workaround Byte Buddy's own exception message names. Set once
+	// here for the whole Test task rather than per-test-class, since class-load order across a
+	// shared, unordered test JVM would otherwise decide which test "wins" the flag.
+	systemProperty 'net.bytebuddy.experimental', 'true'
 }

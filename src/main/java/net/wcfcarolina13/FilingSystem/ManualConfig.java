@@ -31,8 +31,26 @@ public class ManualConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger("ManualConfig");
     private static final String FILE_NAME = "settings.json5";
 
-    // Use a static method to get the correct, dynamically-resolved file path
-    private static final String FILE_PATH = getFilePath();
+    // Lazily-resolved file path. Deliberately NOT a static final field initializer: eager
+    // resolution here calls into LauncherEnvironment -> FabricLoader.getInstance().getGameDir(),
+    // which throws outside a real Fabric launch (e.g. class-loading ManualConfig for a plain
+    // JUnit mock). Resolving on first real use (save()/load()) keeps behavior identical in the
+    // running mod while letting the class load safely in a test JVM that never calls into it.
+    private static volatile String filePath;
+
+    private static String filePath() {
+        String resolved = filePath;
+        if (resolved == null) {
+            synchronized (ManualConfig.class) {
+                resolved = filePath;
+                if (resolved == null) {
+                    resolved = getFilePath();
+                    filePath = resolved;
+                }
+            }
+        }
+        return resolved;
+    }
 
     // --- Configuration fields (same as before) ---
     private List<String> modelList = new ArrayList<>();
@@ -77,6 +95,15 @@ public class ManualConfig {
     private boolean survivalRecruitmentMode = false;
     // Per-world (level-name key) recruitment state.
     private Map<String, SurvivalRecruitmentState> survivalRecruitment = new HashMap<>();
+
+    // === Soul communication (opt-in, local-Ollama-only conversational pilot) ===
+    // Default-off and entirely separate from the legacy defaultLlmWorldEnabled toggle.
+    // Non-secret fields only — no API keys belong here.
+    private boolean soulsEnabled = false;
+    private String soulProvider = "ollama";
+    private String soulModel = "";
+    private int soulRequestTimeoutSeconds = 60;
+    private int soulQueueCapacity = 8;
 
     /**
      * Private constructor to prevent direct instantiation.
@@ -201,7 +228,7 @@ public class ManualConfig {
     public void save() {
         synchronized (SAVE_LOCK) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            try (FileWriter writer = new FileWriter(FILE_PATH)) {
+            try (FileWriter writer = new FileWriter(filePath())) {
                 gson.toJson(this, writer);
             } catch (IOException e) {
                 LOGGER.error("Failed to save config file: {}", e.getMessage());
@@ -216,7 +243,7 @@ public class ManualConfig {
      * @return A loaded ManualConfig instance, or a new one if the file is not found.
      */
     public static ManualConfig load() {
-        File file = new File(FILE_PATH);
+        File file = new File(filePath());
         // Ensure the directory for the file exists before attempting to write.
         if (!file.getParentFile().exists()) {
             file.getParentFile().mkdirs();
@@ -731,6 +758,45 @@ public class ManualConfig {
 
     public int getUndergroundProximityBlocks() { return undergroundProximityBlocks > 0 ? undergroundProximityBlocks : 32; }
     public void setUndergroundProximityBlocks(int b) { this.undergroundProximityBlocks = b; }
+
+    // === Soul communication accessors ===
+    // Default-off, non-secret, local-Ollama-only. Kept separate from defaultLlmWorldEnabled.
+
+    public boolean isSoulsEnabled() { return soulsEnabled; }
+    public void setSoulsEnabled(boolean soulsEnabled) { this.soulsEnabled = soulsEnabled; }
+
+    public String getSoulProvider() {
+        return (soulProvider == null || soulProvider.isBlank()) ? "ollama" : soulProvider;
+    }
+
+    public void setSoulProvider(String soulProvider) {
+        this.soulProvider = (soulProvider == null || soulProvider.isBlank())
+                ? "ollama" : soulProvider.trim();
+    }
+
+    public String getSoulModel() {
+        return soulModel == null ? "" : soulModel;
+    }
+
+    public void setSoulModel(String soulModel) {
+        this.soulModel = soulModel == null ? "" : soulModel.trim();
+    }
+
+    public int getSoulRequestTimeoutSeconds() {
+        return Math.max(10, Math.min(180, soulRequestTimeoutSeconds));
+    }
+
+    public void setSoulRequestTimeoutSeconds(int soulRequestTimeoutSeconds) {
+        this.soulRequestTimeoutSeconds = Math.max(10, Math.min(180, soulRequestTimeoutSeconds));
+    }
+
+    public int getSoulQueueCapacity() {
+        return Math.max(1, Math.min(32, soulQueueCapacity));
+    }
+
+    public void setSoulQueueCapacity(int soulQueueCapacity) {
+        this.soulQueueCapacity = Math.max(1, Math.min(32, soulQueueCapacity));
+    }
 
     /** @deprecated Legacy accessor. Use {@link #getBotControlsByWorld()} or {@link #getAllBotAliases()} instead. */
     @Deprecated

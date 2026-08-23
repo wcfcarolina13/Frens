@@ -32,6 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -81,6 +82,22 @@ public final class BotQuestService {
     private static final Map<UUID, LinkedHashSet<Long>> PLAYER_VISITED_CHUNKS = new ConcurrentHashMap<>();
 
     private BotQuestService() {
+    }
+
+    /**
+     * Immutable projection of an active quest's runtime state, safe to cross into the
+     * soul-communication grounding boundary (primitives and strings only — no live runtime
+     * references).
+     */
+    public record QuestSnapshot(String id, String intent, int actionIndex,
+                                int actionCount, long expiresTick) {}
+
+    public static Optional<QuestSnapshot> getActiveQuestSnapshot(UUID botId) {
+        ActiveQuestRuntime active = botId != null ? ACTIVE.get(botId) : null;
+        if (active == null || active.quest == null) return Optional.empty();
+        int count = active.quest.actions != null ? active.quest.actions.size() : 0;
+        return Optional.of(new QuestSnapshot(active.quest.idOrEmpty(), active.quest.intent,
+                active.actionIndex, count, active.expiresTick));
     }
 
     public static void resetSession() {

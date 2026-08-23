@@ -1,0 +1,194 @@
+package net.wcfcarolina13.GameAI.souls;
+
+import net.wcfcarolina13.GameAI.services.TaskService;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.BOT_DAMAGE;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.COMBAT_ENDED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.COMBAT_STARTED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.DIMENSION_CHANGED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.OWNER_DAMAGE;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.QUEST_STAGE_CHANGED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.SLEEP;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_CANCELLED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_COMPLETED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_FAILED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.WAKE;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Exercises {@link SoulEventObserver}'s data-only instance seam ({@code observe},
+ * {@code noteBotDamage}, {@code noteOwnerDamage}, {@code tickCombat}) and the package-private
+ * static {@code taskOutcome} mapping -- none of which ever touch a Minecraft type, so this runs
+ * without a Minecraft server the same way every other soul-communication unit test does.
+ */
+class SoulEventObserverTest {
+
+    @Test
+    void damageStartsCombatOnceAndCooldownEndsItOnce() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 3.0F, "zombie", 10L);
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 2.0F, "zombie", 20L);
+        observer.tickCombat(bot, "minecraft:overworld", "plains", 109L);
+        observer.tickCombat(bot, "minecraft:overworld", "plains", 120L);
+
+        assertEquals(List.of(BOT_DAMAGE, COMBAT_STARTED, BOT_DAMAGE, COMBAT_ENDED),
+                sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+    }
+
+    @Test
+    void firstObservationSeedsWithoutEmittingTransitions() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.observe(new SoulEventObserver.Observation(bot, "minecraft:overworld", "plains",
+                false, "", 0L, Instant.now()));
+
+        assertTrue(sink.events().isEmpty());
+    }
+
+    @Test
+    void sleepWakeEdgesEmitOnce() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 0L));
+        // Same sleeping state repeated -- must not re-emit.
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 20L));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", true, "", 40L));
+        // Still asleep -- must not re-emit SLEEP again.
+        observer.observe(observation(bot, "minecraft:overworld", "plains", true, "", 60L));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 80L));
+
+        assertEquals(List.of(SLEEP, WAKE),
+                sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+    }
+
+    @Test
+    void dimensionChangeEmitsOnTransition() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 0L));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 20L));
+        observer.observe(observation(bot, "minecraft:the_nether", "nether_wastes", false, "", 40L));
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(DIMENSION_CHANGED),
+                events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals("minecraft:overworld", events.get(0).facts().get("from"));
+        assertEquals("minecraft:the_nether", events.get(0).facts().get("to"));
+    }
+
+    @Test
+    void questStageChangeEmitsOnTransition() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "quest_a:0", 0L));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "quest_a:1", 20L));
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(QUEST_STAGE_CHANGED),
+                events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals("quest_a:0", events.get(0).facts().get("from"));
+        assertEquals("quest_a:1", events.get(0).facts().get("to"));
+    }
+
+    @Test
+    void ownerDamageOnlyEmitsWhenWitnessed() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+
+        observer.noteOwnerDamage(bot, owner, false, "minecraft:overworld", "plains", 4.0F, "spider", 10L);
+        assertTrue(sink.events().isEmpty());
+
+        observer.noteOwnerDamage(bot, owner, true, "minecraft:overworld", "plains", 4.0F, "spider", 10L);
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(OWNER_DAMAGE), events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals(List.of(owner), events.get(0).participants());
+        assertEquals(SoulTypes.Witness.LOCAL, events.get(0).witness());
+    }
+
+    @Test
+    void disabledOrUnboundSinkIsANoOp() {
+        CapturingSink sink = new CapturingSink();
+        sink.setAccepts(false);
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 3.0F, "zombie", 10L);
+        observer.tickCombat(bot, "minecraft:overworld", "plains", 500L);
+        observer.noteOwnerDamage(bot, UUID.randomUUID(), true, "minecraft:overworld", "plains", 1.0F, "spider", 10L);
+        observer.observe(observation(bot, "minecraft:overworld", "plains", true, "quest:1", 0L));
+        observer.observe(observation(bot, "minecraft:the_end", "the_end", false, "quest:2", 20L));
+
+        assertTrue(sink.events().isEmpty());
+    }
+
+    /**
+     * Regression test for the production {@link SoulEventObserver.EventSink} journaling events
+     * after the master soul switch is turned off: {@code acceptsEvent} must require BOTH the
+     * master switch and an active profile, not just the profile.
+     */
+    @Test
+    void acceptsEventRequiresBothTheMasterSwitchAndAnActiveProfile() {
+        assertTrue(SoulEventObserver.acceptsEvent(true, true));
+        assertFalse(SoulEventObserver.acceptsEvent(false, true));
+        assertFalse(SoulEventObserver.acceptsEvent(true, false));
+        assertFalse(SoulEventObserver.acceptsEvent(false, false));
+    }
+
+    @Test
+    void taskOutcomeMapsSuccessCancelAndFailure() {
+        assertEquals(TASK_COMPLETED, SoulEventObserver.taskOutcome(TaskService.State.COMPLETED, false));
+        assertEquals(TASK_COMPLETED, SoulEventObserver.taskOutcome(TaskService.State.COMPLETED, true));
+        assertEquals(TASK_CANCELLED, SoulEventObserver.taskOutcome(TaskService.State.ABORTED, true));
+        assertEquals(TASK_FAILED, SoulEventObserver.taskOutcome(TaskService.State.ABORTED, false));
+    }
+
+    private static SoulEventObserver.Observation observation(UUID bot, String dimension, String biome,
+            boolean sleeping, String questSignature, long worldTick) {
+        return new SoulEventObserver.Observation(bot, dimension, biome, sleeping, questSignature,
+                worldTick, Instant.now());
+    }
+
+    private static final class CapturingSink implements SoulEventObserver.EventSink {
+        private final List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        private boolean accepts = true;
+
+        void setAccepts(boolean accepts) {
+            this.accepts = accepts;
+        }
+
+        @Override
+        public boolean accepts(UUID botId) {
+            return accepts;
+        }
+
+        @Override
+        public void append(UUID botId, SoulTypes.SoulEvent event) {
+            events.add(event);
+        }
+
+        List<SoulTypes.SoulEvent> events() {
+            return List.copyOf(events);
+        }
+    }
+}
