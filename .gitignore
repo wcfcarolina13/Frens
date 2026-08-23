@@ -119,6 +119,9 @@ Questing Development Guide.md
 # Ralph state (ephemeral, machine-local)
 .ralph/
 
+# Git worktrees (isolated feature workspaces)
+.worktrees/
+
 # Resource packs (local assets)
 Wizards_Tome_Pack_v2/
 
