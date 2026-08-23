@@ -41,12 +41,25 @@ import java.util.concurrent.atomic.AtomicReference;
  * </ul>
  *
  * <p>Session state kept per bot is intentionally small: last-seen dimension, sleeping flag, quest
- * signature, and an in-progress combat deadline. A bot's first observation only seeds this state
- * — it never emits a synthetic transition event, since there is nothing to compare against yet.
+ * signature, an in-progress combat deadline, and an active-task {@link TaskSignature} (task name
+ * + start instant, used only to dedupe a repeat {@link #onTaskStarted} for the exact same task).
+ * A bot's first observation only seeds this state — it never emits a synthetic transition event,
+ * since there is nothing to compare against yet.
  *
  * <p>Events are immutable and carry only string facts (never entity references); the sole
  * exception is {@link SoulTypes.SoulEvent#participants()}, a list of {@link UUID}s — the same
- * domain-identifier contract every other soul-communication record already uses.
+ * domain-identifier contract every other soul-communication record already uses. Session state
+ * follows the same rule: {@link TaskSignature} stores a name and an {@link Instant}, never the
+ * {@code TaskTicket} itself (which pins a {@code ServerCommandSource}, an entity/world-linked
+ * object) — every static {@code onTask*} method converts the ticket into primitives before
+ * calling into the instance seam.
+ *
+ * <p>Mixed-thread contract: task hooks ({@link #onTaskStarted}/{@link #onTaskPaused}/
+ * {@link #onTaskFinished}) arrive from whatever thread the skill or command dispatch runs on
+ * (often a skill worker thread), while tick/damage/death/respawn hooks always arrive on the
+ * server thread. All per-bot session maps are {@link ConcurrentHashMap}s, and
+ * {@code TaskService}'s single-active-slot-per-bot invariant means at most one task hook fires
+ * for a given bot at a time — so no additional synchronization is needed here.
  */
 public final class SoulEventObserver {
 
@@ -66,7 +79,15 @@ public final class SoulEventObserver {
     private final Map<UUID, Boolean> lastSleeping = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastQuestSignature = new ConcurrentHashMap<>();
     private final Map<UUID, Long> combatDeadlineTicks = new ConcurrentHashMap<>();
-    private final Map<UUID, TaskService.TaskTicket> activeTaskByBot = new ConcurrentHashMap<>();
+    private final Map<UUID, TaskSignature> activeTaskByBot = new ConcurrentHashMap<>();
+
+    /**
+     * Lightweight, data-only stand-in for "which task is active" — a name plus its start instant,
+     * never the {@code TaskTicket} itself. Two tickets for the same task name started at different
+     * instants compare unequal, so a re-begun task is still treated as a new transition.
+     */
+    private record TaskSignature(String name, Instant startedAt) {
+    }
 
     /** Delivery seam so the observer never depends on {@link SoulRuntime} directly for tests. */
     public interface EventSink {
@@ -199,7 +220,7 @@ public final class SoulEventObserver {
         if (observer == null || ticket == null) {
             return;
         }
-        observer.noteTaskStarted(ticket.botUuid(), ticket, ticket.name(), category(ticket.name()),
+        observer.noteTaskStarted(ticket.botUuid(), ticket.name(), ticket.createdAt(), category(ticket.name()),
                 worldTickOf(ticket));
     }
 
@@ -361,13 +382,14 @@ public final class SoulEventObserver {
         clearSession(botId);
     }
 
-    private void noteTaskStarted(UUID botId, TaskService.TaskTicket ticket, String taskName, String category,
+    private void noteTaskStarted(UUID botId, String taskName, Instant startedAt, String category,
                                   long worldTick) {
         if (botId == null || !sink.accepts(botId)) {
             return;
         }
-        if (activeTaskByBot.put(botId, ticket) == ticket) {
-            // Same ticket instance already notified -- never double-emit TASK_STARTED for it.
+        TaskSignature signature = new TaskSignature(nullToEmpty(taskName), startedAt);
+        if (signature.equals(activeTaskByBot.put(botId, signature))) {
+            // Same task transition already notified -- never double-emit TASK_STARTED for it.
             return;
         }
         Map<String, String> facts = factMap("task", nullToEmpty(taskName), "category", nullToEmpty(category));
@@ -413,6 +435,7 @@ public final class SoulEventObserver {
         lastSleeping.remove(botId);
         lastQuestSignature.remove(botId);
         combatDeadlineTicks.remove(botId);
+        activeTaskByBot.remove(botId);
     }
 
     private void emit(UUID botId, SoulTypes.EventType type, String dimension, String biome,
