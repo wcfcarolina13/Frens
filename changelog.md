@@ -2,6 +2,51 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Add explicit `/bot soul` pilot controls (2026-08-23)
+
+New `Commands/BotSoulCommands.java` attaches a `literal("soul")` subtree under `/bot` (next to the
+legacy, untouched `/bot llm`): `status [bot]`, `system <on|off>`, `model <model>`, `enable <bot>`,
+`disable <bot>`, `reset <bot>`.
+
+`system`/`model` require `Frens.isOperator(source)`; they write `ManualConfig`
+(`setSoulsEnabled`/`setSoulModel`), call `save()`, then AWAIT `SoulRuntime.reloadSettings(CONFIG)`
+before reporting success, so the live pipeline never drifts from the just-persisted config. Model
+names are sanitized by the pure `validatedModel(String)` helper — trimmed, non-blank, no control
+characters, ≤128 chars.
+
+`enable`/`disable`/`reset`/`status <bot>` require the command actor be either the bot's exact
+recorded owner or an operator (`CompanionCommunicationPolicy.isPrivateSoulAuthorized`). `enable`
+always binds the pilot's one supported profile (`frens:jake`, resolved through the pure
+`profileId(String)` alias helper so `"jake"`/`"frens:jake"` are equivalent and anything else is
+rejected) via `SoulRuntime.bindJake` + `setActive(true)` — naming a bot "Jake" in-game does nothing
+by itself; only this explicit command grants the profile. `disable` calls `setActive(false)` only,
+never touching the store's on-disk files. `reset` always archives the **actor's own** direct thread
+with the target bot (`ConversationKey(botId, actor.getUuid(), DIRECT)`), reporting the new epoch —
+an operator resetting someone else's bot can never erase that other player's private conversation.
+`status` with no `[bot]` picks the actor's own soul-bound online bot (first `BotRegistry` entry
+with an active profile the actor is authorized to see); it reports master flag, provider, model,
+provider health, queue depth, bot UUID/profile/active state, and the actor's current direct epoch —
+no URLs or keys ever leave `SoulRuntime.Status`.
+
+Every `CompletableFuture` completion from `SoulRuntime` (`reloadSettings`, `bindJake`, `setActive`,
+`reset`, `status`) schedules its chat feedback back onto the server thread via
+`source.getServer().execute(...)` before touching `ServerCommandSource`/chat — these futures
+resolve on the store's writer thread or the scheduler, never the server thread.
+
+TDD: `Commands/BotSoulCommandsTest.java` covers the brief's two mandated cases plus extra coverage
+of `profileId`/`validatedModel` (case-insensitivity, blank/null, embedded control character,
+exact-128 boundary) — the only Minecraft-free pure helpers in this class; the Brigadier command
+executors themselves need `ServerCommandSource`/`MinecraftServer`/`ServerPlayerEntity`, which this
+harness's Mockito/ByteBuddy setup cannot mock (same constraint documented on `SoulChatRouterTest`),
+so they're exercised in-game per the phase gate. Verified RED (compile failure with the test
+present and the class absent) before GREEN. `./gradlew test --tests
+…Commands.BotSoulCommandsTest` — 4/4 pass; full `./gradlew test` — all pass; `./gradlew build -x
+test` — BUILD SUCCESSFUL.
+
+Files: `Commands/BotSoulCommands.java` (new), `Commands/modCommandRegistry.java` (attaches
+`.then(BotSoulCommands.build())` right after the legacy `/bot llm` block, before
+`BotInventoryCommands.build()`), `Commands/BotSoulCommandsTest.java` (new), `changelog.md`.
+
 ## Keep broadcast chat out of soul routing (2026-08-23, 1.1.137)
 
 Review finding on the previous entry: `Frens.java`'s soul-routing gate checked only
