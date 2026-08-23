@@ -157,6 +157,19 @@ OpenAI-compatible local) model configured per `SoulSettings`; server started fre
 spawned/registered Frens bot. Use `/bot soul status [bot]` liberally to confirm system/provider
 state without guessing.
 
+**Surface boundary — how to address Jake:** soul routing listens on the existing Frens chat
+surface only: an ordinary chat message addressed to the bot (`Jake hi` / `@Jake hi`). The
+vanilla private-message command `/msg` and its aliases `/tell` and `/w` deliver a plain vanilla
+whisper to the fake player and do NOT reach the soul pipeline — expected result: the whisper
+line renders, nothing else happens, no provider call, no history append. (Routing vanilla
+whispers into the DIRECT thread is a possible post-pilot enhancement, not a pilot defect.)
+
+**Performance note (Apple Silicon / shared GPU):** pre-warm the model before launching the game
+(e.g. `ollama run <model> "hi"`). A cold model load while Minecraft renders saturates unified
+memory and can freeze the game for tens of seconds (observed 2.7 s server ticks). The mod holds
+the model resident for 60 minutes per request (`keep_alive=60m`) so a session pays the load at
+most once, ideally before launch.
+
 ### Baseline (feature disabled)
 
 - [ ] **Souls disabled, including existing scripted chat and commands**

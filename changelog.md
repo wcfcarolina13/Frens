@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 1.1.140 — hold the soul model resident for a play session (2026-08-23)
+
+Second in-game finding: the "crash" on first DM was not a crash — no exception anywhere in the
+log. Ollama cold-loaded llama3.1:8b while Minecraft was rendering, and the unified-memory/Metal
+contention pushed server ticks from ~20 ms to 2,700 ms (a multi-second freeze; the reply then
+arrived after world close and was correctly discarded by the delivery-guard recheck). Raised the
+Ollama request `keep_alive` from the plan's `5m` to `60m` so a session pays the model load at
+most once, and documented a pre-warm step plus the addressing surface boundary in the runbook:
+vanilla `/msg` and its aliases `/tell` and `/w` (confirmed against the Minecraft Wiki) are plain
+whispers to the fake player and intentionally do not route to the soul pipeline.
+
 ## 1.1.139 — /bot soul model accepts real Ollama names (2026-08-23)
 
 First in-game finding from the acceptance run: `/bot soul model llama3.1:8b` failed at the

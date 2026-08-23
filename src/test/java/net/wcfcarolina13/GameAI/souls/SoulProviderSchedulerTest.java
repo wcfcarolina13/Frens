@@ -162,7 +162,7 @@ class SoulProviderSchedulerTest {
 
         assertEquals("test-model", root.path("model").asText());
         assertFalse(root.path("stream").asBoolean(true));
-        assertEquals("5m", root.path("keep_alive").asText());
+        assertEquals("60m", root.path("keep_alive").asText());
         assertEquals(0.7, root.path("options").path("temperature").asDouble(), 0.0001);
         assertEquals(220, root.path("options").path("num_predict").asInt());
         assertEquals("system", root.path("messages").get(0).path("role").asText());

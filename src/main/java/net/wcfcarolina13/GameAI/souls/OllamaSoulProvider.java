@@ -134,7 +134,11 @@ public final class OllamaSoulProvider implements SoulModelProvider {
             messageNode.put("content", message.content());
         }
         root.put("stream", false);
-        root.put("keep_alive", "5m");
+        // 60m, not the Ollama-default 5m: reloading the model mid-game saturates the
+        // GPU/unified memory alongside Minecraft's renderer (observed 2.7s server ticks
+        // during a cold load in live testing). Keeping it resident across a play session
+        // trades ~5 GB RAM for never paying that load while the game is running.
+        root.put("keep_alive", "60m");
         ObjectNode options = root.putObject("options");
         options.put("temperature", TEMPERATURE);
         options.put("num_predict", request.maxOutputTokens());
