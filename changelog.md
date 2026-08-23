@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Correct soul runbook failure expectations (2026-08-23)
+
+Review follow-up to the entry below: `SOUL_COMMUNICATION_PILOT.md`'s "Local provider unavailable"
+and "HTTP 503" manual cases wrongly hedged toward `OVERLOADED`/`INVALID PIPELINE` outcomes that
+`OllamaSoulProvider`/`SoulRuntime` cannot actually produce from a stopped server or a 503 response
+(both map to `UNAVAILABLE` only); split the config-shape-only `INVALID PIPELINE` case into its own
+setup, and quoted the LOADING notice's literal text.
+
 ## Document soul pilot acceptance (2026-08-23)
 
 New `docs/testing/SOUL_COMMUNICATION_PILOT.md`: the Task-12 runbook for the soul-communication

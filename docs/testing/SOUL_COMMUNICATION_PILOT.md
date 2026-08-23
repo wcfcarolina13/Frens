@@ -34,7 +34,10 @@ issue trackers, or this document. If a failure needs a repro, describe it by out
   (`private boolean soulsEnabled = false;`).
 - [x] **Loading state consumed before profile-activation is even considered**
   `SoulChatRouterTest.notReadyIndexConsumesBeforeProfileActivationIsEvenConsidered` — index not
-  ready → `CONSUMED` (LOADING notice), regardless of profile state.
+  ready → `CONSUMED`, sending `"Jake's conversation memory is still loading. Try again in a
+  moment."` (LOADING notice), regardless of profile state. This state is timing-dependent (the
+  index preload window right after server start) and may not be reproducible on a small save
+  where preload finishes before a player can act — treat as best-effort if attempted manually.
 - [x] **Unbound bot with ready index → NOT_SOUL**
   `SoulChatRouterTest.readyIndexWithNoActiveProfileIsUnboundNotSoul`.
 - [x] **Broadcast keyword ("bots"/"all bots") never soul-routed, even at one registered bot**
@@ -212,16 +215,30 @@ state without guessing.
   bounded queue is full, additional messages get `"Jake is tied up answering something else.
   Try again in a moment."` rather than hanging or crashing the server.
 - [ ] **Local provider unavailable before a request**
-  Setup: stop the local Ollama/model server, then address Jake. Expected: deterministic
-  `"Jake's local conversation model is not ready: <reason>"` notice at the router stage
-  (`pipelineAvailable=false`), OR — if the pipeline reports itself ready but the HTTP call
-  itself then fails — `"Jake's local conversation model is unavailable."` (`UNAVAILABLE`).
-  Confirm the server does not hang or error out.
+  Setup: with a correctly-configured Ollama provider (`/bot soul status` shows `settingsValid=
+  true`), stop the local Ollama/model server, then address Jake. Expected: the router's own
+  `pipelineAvailable()` check depends only on config shape (`SoulSettings.valid()` — provider
+  name/model/URL), not server liveness, so it still reports ready; the request reaches
+  `OllamaSoulProvider`, whose HTTP call fails, and `OllamaSoulProvider.mapFailure` maps that to
+  `UNAVAILABLE`. Expected chat line: `"Jake's local conversation model is unavailable."` Confirm
+  the server does not hang or error out.
+- [ ] **Misconfigured pipeline (invalid settings) — separate from the stopped-server case above**
+  Setup: with Ollama actually running, make the persisted config itself invalid — edit
+  `settings.json5`'s `soulModel` field to blank directly (the `/bot soul model` command refuses
+  a blank value itself, so this requires editing the file — or an equivalent invalid field —
+  then restarting or otherwise causing `SoulRuntime` to re-derive `SoulSettings`). Address Jake.
+  Expected: `SoulSettings.valid()` is false purely from config shape (`SoulSettings.from`'s blank-
+  model branch sets `validationError = "Configure a local soul model first."`), so
+  `pipelineAvailable()` is false regardless of whether Ollama is reachable. Expected chat line:
+  `"Jake's local conversation model is not ready: Configure a local soul model first."`
+  (`outcome=invalid-pipeline` in the routing log).
 - [ ] **HTTP 503 from the provider**
   Setup: point the configured model at a stub/proxy returning HTTP 503, or otherwise force a
-  503. Expected: `"Jake is tied up answering something else. Try again in a moment."`
-  (`OVERLOADED`) or `"Jake's local conversation model is unavailable."` (`UNAVAILABLE`) depending
-  on how the adapter classifies 503 — record which one actually appears and the correlation ID.
+  503 response. Expected: `OllamaSoulProvider.mapResponse` maps every non-2xx status to
+  `UNAVAILABLE` before inspecting the response body — `OVERLOADED` is produced only by the
+  scheduler's separate queue-full check (see "Rapid consecutive messages and queue saturation"
+  above), never by a provider HTTP status. Expected chat line: `"Jake's local conversation model
+  is unavailable."` Record the correlation ID.
 - [ ] **Malformed JSON from the provider**
   Setup: force a non-JSON or schema-invalid response from the provider (stub/proxy). Expected:
   `"Jake couldn't form a usable reply."` (`MALFORMED`); nothing is delivered or recorded as
