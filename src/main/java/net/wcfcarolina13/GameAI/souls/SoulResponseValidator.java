@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -21,7 +22,18 @@ public final class SoulResponseValidator {
             Pattern.compile("<think>.*?</think>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern ANALYSIS_BLOCK =
             Pattern.compile("<analysis>.*?</analysis>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    // Matches an opening <think>/<analysis> tag that survived block removal above -- i.e. one
+    // with no matching close tag. A provider truncated mid-reasoning (e.g. hitting num_predict)
+    // leaves exactly this shape, and everything from the open tag onward is unreviewed reasoning
+    // that must never reach dialogue.
+    private static final Pattern UNCLOSED_REASONING_TAG =
+            Pattern.compile("<think>|<analysis>", Pattern.CASE_INSENSITIVE);
     private static final Pattern SECTION_SIGN_CODE = Pattern.compile("§.");
+    // A lone trailing section sign with nothing after it to pair with (e.g. truncated output).
+    private static final Pattern TRAILING_LONE_SECTION_SIGN = Pattern.compile("§$");
+    // Only a fence that opens at the start of a line reads as a tool/JSON payload; a triple
+    // backtick mid-sentence is ordinary prose and must not be rejected.
+    private static final Pattern FENCE_AT_LINE_START = Pattern.compile("(?m)^\\s*```");
     private static final Pattern EXCESS_BLANK_LINES = Pattern.compile("\n{4,}");
 
     public SoulResponseValidator() {
@@ -48,14 +60,16 @@ public final class SoulResponseValidator {
         String text = raw.replace("\r\n", "\n").replace('\r', '\n');
         text = THINK_BLOCK.matcher(text).replaceAll("");
         text = ANALYSIS_BLOCK.matcher(text).replaceAll("");
+        text = truncateAtUnclosedReasoningTag(text);
 
-        if (text.contains("```")) {
+        if (FENCE_AT_LINE_START.matcher(text).find()) {
             return reject("contains a fenced tool/JSON payload");
         }
 
         text = text.strip();
         text = stripSpeakerPrefix(text, botDisplayName);
         text = SECTION_SIGN_CODE.matcher(text).replaceAll("");
+        text = TRAILING_LONE_SECTION_SIGN.matcher(text).replaceAll("");
         text = stripControlCharacters(text);
         text = EXCESS_BLANK_LINES.matcher(text).replaceAll("\n\n\n");
         text = text.strip();
@@ -68,6 +82,11 @@ public final class SoulResponseValidator {
         }
 
         return accept(text);
+    }
+
+    private static String truncateAtUnclosedReasoningTag(String text) {
+        Matcher unclosed = UNCLOSED_REASONING_TAG.matcher(text);
+        return unclosed.find() ? text.substring(0, unclosed.start()) : text;
     }
 
     private static String stripSpeakerPrefix(String text, String botDisplayName) {

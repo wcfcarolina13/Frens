@@ -104,4 +104,57 @@ class SoulResponseValidatorTest {
         assertTrue(result.accepted());
         assertEquals(1200, result.text().length());
     }
+
+    // === Review follow-up: unclosed reasoning tags must not leak (Finding 1) ===
+
+    @Test
+    void rejectsUnclosedThinkTagWithNoPriorProse() {
+        SoulResponseValidator.ValidationResult result = validator.validate(
+                "<think>partial reasoning that never closes", "Jake");
+        assertFalse(result.accepted());
+        assertEquals(SoulTypes.FailureCode.MALFORMED, result.failureCode());
+    }
+
+    @Test
+    void acceptsProseBeforeUnclosedThinkTag() {
+        SoulResponseValidator.ValidationResult result = validator.validate(
+                "Fine by me. <think>truncated reasoning that never closes", "Jake");
+        assertTrue(result.accepted());
+        assertEquals("Fine by me.", result.text());
+    }
+
+    @Test
+    void rejectsUnclosedUppercaseThinkTagVariant() {
+        SoulResponseValidator.ValidationResult result = validator.validate(
+                "<THINK>partial reasoning that never closes", "Jake");
+        assertFalse(result.accepted());
+        assertEquals(SoulTypes.FailureCode.MALFORMED, result.failureCode());
+    }
+
+    // === Review follow-up: fenced payload check must not over-reject prose (Finding 2) ===
+
+    @Test
+    void acceptsInlineTripleBacktickMidSentence() {
+        SoulResponseValidator.ValidationResult result = validator.validate(
+                "That's like using ```code``` markers randomly.", "Jake");
+        assertTrue(result.accepted());
+        assertEquals("That's like using ```code``` markers randomly.", result.text());
+    }
+
+    // === Review follow-up minors ===
+
+    @Test
+    void stripsTrailingLoneSectionSign() {
+        SoulResponseValidator.ValidationResult result = validator.validate("Watch out§", "Jake");
+        assertTrue(result.accepted());
+        assertEquals("Watch out", result.text());
+    }
+
+    @Test
+    void stripsAnalysisBlockCaseInsensitiveMixedCase() {
+        SoulResponseValidator.ValidationResult result = validator.validate(
+                "<Analysis>internal notes</Analysis>\nHello there.", "Jake");
+        assertTrue(result.accepted());
+        assertEquals("Hello there.", result.text());
+    }
 }
