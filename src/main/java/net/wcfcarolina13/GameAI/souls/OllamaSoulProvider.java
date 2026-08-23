@@ -37,6 +37,7 @@ public final class OllamaSoulProvider implements SoulModelProvider {
 
     private static final Duration HEALTH_TIMEOUT = Duration.ofMillis(1500);
     private static final double TEMPERATURE = 0.7;
+    private static final int NUM_CTX = 8192;
 
     private final URI baseUri;
     private final String model;
@@ -142,6 +143,12 @@ public final class OllamaSoulProvider implements SoulModelProvider {
         ObjectNode options = root.putObject("options");
         options.put("temperature", TEMPERATURE);
         options.put("num_predict", request.maxOutputTokens());
+        // Pin the context window instead of inheriting the server default. An Ollama
+        // install configured for a model's maximum context (observed: 131k on llama3.1:8b)
+        // allocates a ~74 GB KV cache that spills to CPU and starves the game. The prompt
+        // assembler budgets ~5k tokens worst-case, so 8192 is comfortable and keeps the
+        // runner small enough to share the GPU with Minecraft.
+        options.put("num_ctx", NUM_CTX);
         try {
             return mapper.writeValueAsString(root);
         } catch (JsonProcessingException ex) {

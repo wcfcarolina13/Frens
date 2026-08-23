@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 1.1.141 — pin the soul request context window (2026-08-23)
+
+Pre-warming for the retest exposed the deeper half of the freeze: this machine's Ollama default
+context for llama3.1:8b is the model maximum (131k), so a request that doesn't pin `num_ctx`
+spawns a runner with a ~74 GB KV-cache allocation that spills 68% to CPU. The soul request now
+sends `options.num_ctx=8192` (the prompt assembler budgets ~5k tokens worst-case), keeping the
+runner small and fully on-GPU regardless of the user's Ollama app settings. Request-shape test
+extended to lock the new field.
+
 ## 1.1.140 — hold the soul model resident for a play session (2026-08-23)
 
 Second in-game finding: the "crash" on first DM was not a crash — no exception anywhere in the

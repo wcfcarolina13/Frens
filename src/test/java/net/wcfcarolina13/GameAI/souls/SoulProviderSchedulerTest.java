@@ -165,6 +165,7 @@ class SoulProviderSchedulerTest {
         assertEquals("60m", root.path("keep_alive").asText());
         assertEquals(0.7, root.path("options").path("temperature").asDouble(), 0.0001);
         assertEquals(220, root.path("options").path("num_predict").asInt());
+        assertEquals(8192, root.path("options").path("num_ctx").asInt());
         assertEquals("system", root.path("messages").get(0).path("role").asText());
         assertEquals("You are Jake.", root.path("messages").get(0).path("content").asText());
         assertEquals("user", root.path("messages").get(1).path("role").asText());
