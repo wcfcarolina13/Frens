@@ -1257,8 +1257,12 @@ public class Frens implements ModInitializer {
 
                 // Exclusive soul-communication pilot: single-bot DMs only. "bots"/"all bots"
                 // broadcasts never route to souls -- they always fall through to the legacy loop
-                // below until the separately designed group channel exists.
-                if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
+                // below until the separately designed group channel exists. Gating on
+                // routedBots.size() == 1 alone is not enough: a broadcast keyword resolves to a
+                // size-1 list whenever the server has exactly one registered bot, so the
+                // resolver's own broadcast flag (never derived from list size) is required too.
+                if (net.wcfcarolina13.GameAI.souls.SoulChatRouter.isSingleBotAddress(routedBots.size(), target.broadcast())
+                        && !target.prompt().isEmpty()) {
                     ServerPlayerEntity soulBot = routedBots.get(0);
                     if (soulBot != null) {
                         try {
@@ -1395,21 +1399,22 @@ public class Frens implements ModInitializer {
 
     private static ChatTarget resolveChatTargets(String raw) {
         if (serverInstance == null || raw == null) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         String trimmed = raw.trim();
         if (trimmed.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         String[] tokens = trimmed.split("\\s+");
         if (tokens.length == 0) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
         if (bots.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         int consumed = -1;
+        boolean broadcast = false;
         List<ServerPlayerEntity> targets = new ArrayList<>();
         for (int i = 0; i < tokens.length; i++) {
             String current = normalizeToken(tokens[i]);
@@ -1419,6 +1424,7 @@ public class Frens implements ModInitializer {
             if (current.equals("allbots") || current.equals("bots")) {
                 targets.addAll(bots);
                 consumed = i + 1;
+                broadcast = true;
                 break;
             }
             if (current.equals("all") && i + 1 < tokens.length) {
@@ -1426,6 +1432,7 @@ public class Frens implements ModInitializer {
                 if (next.equals("bots")) {
                     targets.addAll(bots);
                     consumed = i + 2;
+                    broadcast = true;
                     break;
                 }
             }
@@ -1441,17 +1448,17 @@ public class Frens implements ModInitializer {
             }
         }
         if (targets.isEmpty() || consumed < 0) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         targets = dedupeTargetBots(targets);
         if (targets.isEmpty()) {
-            return new ChatTarget(List.of(), "");
+            return new ChatTarget(List.of(), "", false);
         }
         if (consumed >= tokens.length) {
-            return new ChatTarget(targets, "");
+            return new ChatTarget(targets, "", broadcast);
         }
         String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
-        return new ChatTarget(targets, prompt);
+        return new ChatTarget(targets, prompt, broadcast);
     }
 
     private static List<ServerPlayerEntity> dedupeTargetBots(List<ServerPlayerEntity> bots) {
@@ -1655,6 +1662,14 @@ public class Frens implements ModInitializer {
         });
     }
 
-    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt) {
+    /**
+     * {@code broadcast} is true only when {@code bots} was resolved via the "bots"/"all bots"
+     * keyword branch in {@link #resolveChatTargets} -- never for an explicit single-bot name
+     * match, even when the server happens to have exactly one registered bot. Consumers that must
+     * distinguish "explicitly addressed one bot" from "broadcast keyword that resolved to one
+     * bot" (e.g. the exclusive soul-communication router) key off this flag rather than
+     * {@code bots.size()} alone.
+     */
+    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt, boolean broadcast) {
     }
 }

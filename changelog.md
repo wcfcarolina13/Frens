@@ -2,6 +2,39 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Keep broadcast chat out of soul routing (2026-08-23, 1.1.137)
+
+Review finding on the previous entry: `Frens.java`'s soul-routing gate checked only
+`routedBots.size() == 1`, but `resolveChatTargets`'s "bots"/"all bots" broadcast branch also
+produces a size-1 target list whenever the server has exactly one registered bot — so `bots how
+are you` with one companion silently became a soul DM, violating "`bots`/`all bots` broadcasts
+never route to souls."
+
+Fixed by adding a `broadcast` flag to the private `ChatTarget` record, set `true` only inside
+`resolveChatTargets`'s keyword-match branches (`"bots"`/`"allbots"` and the two-token `"all
+bots"`), never derived from list size and never true for an explicit bot-name match. The
+soul-routing gate now calls a new pure static `SoulChatRouter.isSingleBotAddress(int
+routedBotCount, boolean broadcastKeyword)` (`routedBotCount == 1 && !broadcastKeyword`) instead of
+inlining the size check, so the fix is unit-testable without a running server. The pre-existing,
+unrelated `handleLegacyInlineActionPrompt` fallback (also gated on `routedBots.size() == 1`,
+further down the same method) was deliberately left untouched — it isn't part of the soul pilot
+and the finding didn't implicate it.
+
+Test coverage (`SoulChatRouterTest`, +4 cases): one bot registered + broadcast keyword →
+`isSingleBotAddress` false (the exact scenario from the finding); an explicit single-bot name →
+true; a multi-bot explicit list or zero targets → false regardless of the broadcast flag.
+`./gradlew test --tests …SoulChatRouterTest` — 11/11 pass; full `./gradlew test` — 216/216 pass, 0
+failures; `./gradlew build -x test` — BUILD SUCCESSFUL.
+
+Considered adding `.exceptionally()` logging to the discarded `submitTurn` future per the review's
+optional suggestion, but confirmed it would be dead code: `SoulConversationService.submit`'s
+returned future always completes normally (`DELIVERED`/`FAILED`, never exceptionally) — every
+internal failure point is already caught by a `whenComplete`/`thenCompose` chain that routes to
+`failTurn` (which logs and notifies the player) before completing the outer future normally.
+Left unchanged.
+
+Files: `Frens.java`, `GameAI/souls/SoulChatRouter.java`, `SoulChatRouterTest.java`, `changelog.md`.
+
 ## Route authorized Jake DMs exclusively to souls (2026-08-23, 1.1.137)
 
 `GameAI/souls/SoulChatRouter` gates whether an already-resolved single-target bot DM in `Frens.java`'s targeted-chat block is handled exclusively by the soul-communication pilot instead of the legacy `LLMOrchestrator` path. `decide(masterEnabled, indexReady, profileActive, pipelineAvailable, authorized, reachability)` is the pure coarse decision: master off → `NOT_SOUL`; master on but the index still loading → `CONSUMED` (profile activation is unknown until the index is warm, so this is checked before `profileActive`); master on, index ready, no active bound profile → `NOT_SOUL` ("unbound"); master on, index ready, profile active → `CONSUMED` unconditionally, since an unauthorized or unreachable turn is still exclusively consumed with its own refusal rather than silently falling through to legacy routing. `tryRoute(bot, sender, prompt)` then walks the fine-grained order the brief specifies — index-readiness, cached `hasActiveProfile`, `pipelineAvailable`, `CompanionCommunicationPolicy.isPrivateSoulAuthorized`, `CompanionCommunicationPolicy.classifySoulReachability`, server-thread `SoulSnapshotBuilder.capture`, then `SoulRuntime.submitTurn` — sending exactly one of four deterministic private notices (LOADING / INVALID PIPELINE with `safeValidationError()` / UNAUTHORIZED / UNREACHABLE) and returning `CONSUMED` without ever appending history or invoking a provider, or (only once every gate passes) capturing a grounding snapshot and submitting an `AcceptedTurn`.

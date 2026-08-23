@@ -16,6 +16,8 @@ import static net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.NOT_SOU
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.Reachability.LOCAL;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.Reachability.UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -41,6 +43,12 @@ import static org.mockito.Mockito.when;
  * plus {@link SoulRuntime#installForTest} with a mocked {@link SoulConversationService} lets
  * {@code submitTurn}'s delegation be verified by invocation count without touching
  * {@code SoulRuntimeTest}.
+ *
+ * <p>Also covered: {@link SoulChatRouter#isSingleBotAddress}, the pure gate {@code Frens.java}'s
+ * chat callback consults before ever calling {@code tryRoute} -- it locks in that a "bots"/"all
+ * bots" broadcast keyword which happens to resolve to exactly one registered bot (a size-1 target
+ * list from {@code Frens#resolveChatTargets}, indistinguishable from an explicit single-bot
+ * address by list size alone) is never treated as soul-routable.
  */
 class SoulChatRouterTest {
 
@@ -96,6 +104,33 @@ class SoulChatRouterTest {
     @Test
     void readyIndexWithNoActiveProfileIsUnboundNotSoul() {
         assertEquals(NOT_SOUL, SoulChatRouter.decide(true, true, false, false, false, UNREACHABLE));
+    }
+
+    // === Own coverage: isSingleBotAddress -- broadcast keyword must never look like an explicit
+    // single-bot address just because it happened to resolve to exactly one bot ===
+
+    @Test
+    void oneRegisteredBotPlusBroadcastKeywordIsNotSoulRoutable() {
+        // "bots how are you" (or "all bots ...") with exactly one bot registered resolves to a
+        // size-1 target list from Frens#resolveChatTargets -- the resolver's own broadcast flag,
+        // not the list size, is what must gate this out.
+        assertFalse(SoulChatRouter.isSingleBotAddress(1, true));
+    }
+
+    @Test
+    void explicitSingleBotNameIsSoulRoutable() {
+        assertTrue(SoulChatRouter.isSingleBotAddress(1, false));
+    }
+
+    @Test
+    void multiBotExplicitListIsNeverSoulRoutableRegardlessOfBroadcastFlag() {
+        assertFalse(SoulChatRouter.isSingleBotAddress(2, false));
+        assertFalse(SoulChatRouter.isSingleBotAddress(2, true));
+    }
+
+    @Test
+    void zeroTargetsIsNeverSoulRoutable() {
+        assertFalse(SoulChatRouter.isSingleBotAddress(0, false));
     }
 
     // === Own coverage: SoulRuntime#submitTurn -- the seam tryRoute's final step delegates to ===

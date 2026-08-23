@@ -92,6 +92,19 @@ public final class SoulChatRouter {
     }
 
     /**
+     * True only for an explicit single-bot chat address, never a broadcast keyword
+     * ("bots"/"all bots") that happens to resolve to exactly one registered bot. The chat-target
+     * resolver's list size alone cannot distinguish the two -- a server with one bot registered
+     * produces a size-1 target list for both "Jake how are you" and "bots how are you" -- so the
+     * caller must pass the resolver's own broadcast flag (computed where the keyword list already
+     * lives), never re-derive it from the count. {@code bots}/{@code all bots} must never be
+     * routed to souls; only an explicitly-named single bot may be.
+     */
+    public static boolean isSingleBotAddress(int routedBotCount, boolean broadcastKeyword) {
+        return routedBotCount == 1 && !broadcastKeyword;
+    }
+
+    /**
      * Attempts to route one already-resolved single-target DM through the soul-communication
      * pilot. Returns {@link RouteOutcome#NOT_SOUL} the instant the coarse {@link #decide} check
      * says legacy routing should handle it (no notice sent, nothing logged beyond that check being
