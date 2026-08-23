@@ -6,6 +6,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.souls.SoulEventObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -224,6 +225,7 @@ public final class TaskService {
                 TaskTicket replaced = ACTIVE.putIfAbsent(slot, ticket);
                 if (replaced == null) {
                     LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
+                    SoulEventObserver.onTaskStarted(ticket);
                     return Optional.of(ticket);
                 }
                 existing = replaced;
@@ -245,12 +247,14 @@ public final class TaskService {
                 if (ACTIVE.replace(slot, existing, ticket)) {
                     LOGGER.warn("Replaced stale task '{}' (state={}, threadAlive={}) with '{}'",
                             existing.name(), existing.state(), !deadThread, ticket.name());
+                    SoulEventObserver.onTaskStarted(ticket);
                     return Optional.of(ticket);
                 }
             }
             return Optional.empty();
         }
         LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
+        SoulEventObserver.onTaskStarted(ticket);
         return Optional.of(ticket);
     }
 
@@ -279,12 +283,14 @@ public final class TaskService {
                 if (ACTIVE.replace(slot, existing, ticket)) {
                     LOGGER.warn("Replaced stale task '{}' (state={}, threadAlive={}) with '{}'",
                             existing.name(), existing.state(), !deadThread, ticket.name());
+                    SoulEventObserver.onTaskStarted(ticket);
                     return Optional.of(ticket);
                 }
             }
             return Optional.empty();
         }
         LOGGER.info("System task '{}' started for bot {}", taskName, botUuid);
+        SoulEventObserver.onTaskStarted(ticket);
         return Optional.of(ticket);
     }
 
@@ -358,6 +364,7 @@ public final class TaskService {
             return false;
         }
         ticket.setState(State.PAUSED);
+        SoulEventObserver.onTaskPaused(ticket);
         dispatchMessage(ticket, reason != null && !reason.isBlank()
                 ? reason
                 : "§cPausing current task due to nearby threat.");
@@ -399,6 +406,7 @@ public final class TaskService {
             finalState = State.ABORTED;
         }
         ticket.setState(finalState);
+        SoulEventObserver.onTaskFinished(ticket, finalState);
         // Only remove if the ACTIVE slot still points at this exact ticket instance.
         // This prevents stale/hung skill threads from accidentally clearing a newer task.
         ACTIVE.remove(key(ticket.botUuid()), ticket);

@@ -2,6 +2,50 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Journal witnessed gameplay transitions (2026-08-23)
+
+New `GameAI/souls/SoulEventObserver.java` journals gameplay transitions as bounded, factual
+`SoulTypes.SoulEvent`s recorded via `SoulRuntime.recordEvent` — combat start/end, bot/owner
+damage, sleep/wake, dimension changes, quest-stage changes, death/respawn, and task lifecycle.
+Split in two: a static production surface (`initializeProduction`, `onServerTick`,
+`onBotDamage`/`onPlayerDamage`/`onBotDeath`/`onBotRespawn`, `onTaskStarted`/`onTaskPaused`/
+`onTaskFinished`) that converts live Fabric/Minecraft state into primitives, and a data-only
+instance seam (`observe`, `noteBotDamage`, `noteOwnerDamage`, `tickCombat`, static `taskOutcome`)
+that never touches a Minecraft type — same seam discipline as the rest of the soul-communication
+package, so `SoulEventObserverTest` runs without a Minecraft server.
+
+Session state per bot is intentionally small: last dimension, sleeping flag, quest signature, and
+a combat-quiet deadline. A bot's first observation only seeds this baseline — it never emits a
+synthetic transition on first sight. Combat starts on the first hit in a quiet window and ends
+once `onServerTick`'s 20-tick sampling (or a direct `tickCombat` call) sees the quiet deadline has
+passed; a second hit inside the window refreshes the deadline without re-emitting `COMBAT_STARTED`.
+Owner-damage events only fire when the bot actually witnessed it — same owner as
+`CompanionCommunicationPolicy.resolveController` resolves, and within
+`CompanionCommunicationPolicy.VISIBLE_RANGE_BLOCKS`. `onBotDeath` records the death event before
+calling `SoulRuntime.cancelBot` (order matters: cancelling first would make the sink's
+`hasActiveProfile` gate reject the death event itself). Task events never log prompt text or
+command arguments — only the ticket's fixed `name()`, its `:`-prefix category, terminal state, and
+a `sanitizeReasonCategory` bucket derived from the raw cancel reason (never the raw reason itself).
+
+`TaskService` hooks: `onTaskStarted` after each successful ticket-insertion return in `beginSkill`
+(3 paths) and `beginSystemTask` (2 paths) — `beginAmbientSkill` inherits `beginSkill`'s call since
+it delegates rather than re-inserting, so it never double-fires; `onTaskPaused` in `requestPause`
+right after `setState(PAUSED)` succeeds; `onTaskFinished` in `complete` right after `setState`,
+before the active slot is cleared. `taskOutcome` maps `COMPLETED` → `TASK_COMPLETED`, cancel-
+requested `ABORTED` → `TASK_CANCELLED`, any other `ABORTED` → `TASK_FAILED`.
+
+`Frens.java` wiring: `SoulEventObserver.initializeProduction()` right after `SoulRuntime.start`;
+`onBotDamage`/`onPlayerDamage` forwarded from `ALLOW_DAMAGE`; `onBotDeath` from `AFTER_DEATH`;
+`onBotRespawn` from `AFTER_RESPAWN`; `onServerTick` registered on `END_SERVER_TICK`;
+`resetSession()` called in `SERVER_STOPPED` alongside the other per-world session resets.
+
+TDD: `SoulEventObserverTest` covers the brief's mandated
+`damageStartsCombatOnceAndCooldownEndsItOnce` case verbatim, plus first-observation seeding,
+sleep/wake edges, dimension change, quest-stage change, owner-damage witness filtering,
+disabled/unbound sink no-op, and the `taskOutcome` mapping — 8 tests, all data-only. RED confirmed
+by temporarily removing `SoulEventObserver.java` (compile failure); GREEN after restoring it.
+228 tests pass across the full suite; `./gradlew build -x test` succeeds.
+
 ## Add explicit `/bot soul` pilot controls (2026-08-23)
 
 New `Commands/BotSoulCommands.java` attaches a `literal("soul")` subtree under `/bot` (next to the
