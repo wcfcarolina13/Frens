@@ -19,11 +19,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Stream;
 
 /**
@@ -61,11 +64,30 @@ public final class SoulStore {
     private final Path root;
     private final ExecutorService executor;
     private final ObjectMapper mapper;
+    private final ConcurrentHashMap<UUID, SoulTypes.SoulState> cachedStates = new ConcurrentHashMap<>();
+    private volatile boolean closed;
 
     public SoulStore(Path worldRoot, ExecutorService executor) {
         this.root = worldRoot.resolve("frens").resolve("souls").resolve("v1");
         this.executor = executor;
         this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    }
+
+    /**
+     * Production factory: opens the world-local store on its own dedicated, named daemon writer
+     * thread ({@code frens-soul-store}) instead of requiring a caller-supplied executor. The
+     * injected-executor constructor above stays the one tests use.
+     */
+    public SoulStore(Path worldRoot) {
+        this(worldRoot, newWriterExecutor());
+    }
+
+    private static ExecutorService newWriterExecutor() {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "frens-soul-store");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     // === Public API ===
@@ -186,16 +208,38 @@ public final class SoulStore {
         });
     }
 
+    /**
+     * Loads every bot's current {@link SoulTypes.SoulState} from disk into the in-memory cache
+     * backing {@link #cachedState(UUID)}. Never creates {@code root} or any subdirectory — a
+     * world where souls have never been enabled is left completely untouched on disk.
+     */
+    public CompletableFuture<Void> preloadIndex() {
+        return submit(() -> {
+            loadIndexFromDisk();
+            return null;
+        });
+    }
+
+    /**
+     * Synchronous, non-blocking read of the last known {@link SoulTypes.SoulState} for
+     * {@code botId}: populated by {@link #preloadIndex()} and kept current by every subsequent
+     * write through this store. Empty until the bot has been preloaded or written at least once
+     * in this process — callers use that to distinguish "no state yet" from "still loading".
+     */
+    public Optional<SoulTypes.SoulState> cachedState(UUID botId) {
+        return Optional.ofNullable(cachedStates.get(botId));
+    }
+
+    /**
+     * Rejects any write submitted after this call and starts an orderly shutdown of the single
+     * writer thread. Deliberately non-blocking: each append/save is already a complete,
+     * self-contained record, so already-queued writes simply drain on their own after this
+     * returns rather than being awaited here — a caller on the server thread (e.g.
+     * {@code SoulRuntime.stop()}) is never made to wait on filesystem I/O.
+     */
     public void close() {
+        closed = true;
         executor.shutdown();
-        try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 
     // === Turn append/staleness ===
@@ -358,6 +402,29 @@ public final class SoulStore {
         Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp-" + UUID.randomUUID());
         mapper.writeValue(tmp.toFile(), state);
         atomicReplace(tmp, file);
+        cachedStates.put(state.botId(), state);
+    }
+
+    // === Index preload (disk -> cache only; never the reverse) ===
+
+    private void loadIndexFromDisk() throws IOException {
+        if (!Files.isDirectory(root)) {
+            return;
+        }
+        try (Stream<Path> entries = Files.list(root)) {
+            for (Path botDir : (Iterable<Path>) entries.filter(Files::isDirectory)::iterator) {
+                UUID botId;
+                try {
+                    botId = UUID.fromString(botDir.getFileName().toString());
+                } catch (IllegalArgumentException notABotDirectory) {
+                    continue;
+                }
+                Path soulJson = botDir.resolve("soul.json");
+                if (Files.exists(soulJson)) {
+                    cachedStates.put(botId, mapper.readValue(soulJson.toFile(), SoulTypes.SoulState.class));
+                }
+            }
+        }
     }
 
     // === JSONL append ===
@@ -472,13 +539,21 @@ public final class SoulStore {
 
     private <T> CompletableFuture<T> submit(Callable<T> task) {
         CompletableFuture<T> future = new CompletableFuture<>();
-        executor.execute(() -> {
-            try {
-                future.complete(task.call());
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        });
+        if (closed) {
+            future.completeExceptionally(new RejectedExecutionException("SoulStore is closed"));
+            return future;
+        }
+        try {
+            executor.execute(() -> {
+                try {
+                    future.complete(task.call());
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
+            });
+        } catch (RejectedExecutionException rejected) {
+            future.completeExceptionally(rejected);
+        }
         return future;
     }
 }

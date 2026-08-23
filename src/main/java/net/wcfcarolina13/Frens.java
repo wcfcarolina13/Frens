@@ -735,6 +735,7 @@ public class Frens implements ModInitializer {
             configNetworkManager.registerServerAPIKeySaveReceiver(server);
             configNetworkManager.registerServerCustomProviderSaveReceiver(server);
             serverInstance = server;
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
             LOGGER.info("Server instance stored!");
 
             System.out.println("Server instance is " + serverInstance);
@@ -791,6 +792,9 @@ public class Frens implements ModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            // Cancel soul-communication generation and close its executors before general task
+            // teardown below -- never blocks the server thread (see SoulRuntime.stop() Javadoc).
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.stop();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
             // Shut down all mod executor services BEFORE saving — prevents worker threads
             // from submitting new server.execute() tasks that keep the shutdown loop alive.
@@ -909,6 +913,15 @@ public class Frens implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.player;
             LearningModeService.onPlayerDisconnect(player);
+            // Cancel/deactivate soul-communication for whoever just disconnected before bot
+            // persistence runs below.
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.current().ifPresent(runtime -> {
+                if (BotEventHandler.isRegisteredBot(player)) {
+                    runtime.cancelBot(player.getUuid());
+                } else {
+                    runtime.cancelPlayer(player.getUuid());
+                }
+            });
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
