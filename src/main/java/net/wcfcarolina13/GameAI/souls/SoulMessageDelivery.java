@@ -7,24 +7,25 @@ import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 
 /**
  * Server-thread-only private delivery boundary for the soul-communication pipeline.
  *
- * <p>{@link #deliverReply} always schedules its work via {@link MinecraftServer#execute}: it
- * resolves the bot/player {@link ServerPlayerEntity} instances live from the player manager, asks
- * a {@link DeliveryGuard} for a final go/no-go recheck, and — only if both are online and the
- * guard approves — sends {@code Text.literal(botName + ": " + text)} privately to that one
- * player. This class never constructs a bot command source and never calls into {@code ChatUtils}
- * or a voice mapper; it is a thin, dumb pipe from validated dialogue text to one player's chat.
+ * <p>{@link #deliverReply} first asks the {@link DeliveryGuard} to
+ * {@link DeliveryGuard#prefetchState prefetch} whatever live state it needs off the server
+ * thread, then schedules the rest of the work via {@link MinecraftServer#execute}: it resolves
+ * the bot/player {@link ServerPlayerEntity} instances live from the player manager, asks the
+ * guard for a final go/no-go recheck against the already-resolved prefetch, and — only if both
+ * are online and the guard approves — sends {@code Text.literal(botName + ": " + text)} privately
+ * to that one player. If the prefetch itself fails, delivery fails closed without ever scheduling
+ * server-thread work. This class never constructs a bot command source and never calls into
+ * {@code ChatUtils} or a voice mapper; it is a thin, dumb pipe from validated dialogue text to one
+ * player's chat.
  */
 public final class SoulMessageDelivery implements SoulConversationService.Delivery {
 
@@ -38,7 +39,23 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
      * anything that changed between when generation started and when the reply is ready.
      */
     public interface DeliveryGuard {
-        boolean canDeliver(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token);
+        /**
+         * Asynchronously prefetches whatever live state this guard needs to decide, performed
+         * BEFORE any server-thread work is scheduled so {@link #canDeliver} never has to block
+         * the server thread on I/O. Must never block the calling (worker) thread either. A guard
+         * with nothing to prefetch returns an already-completed future (e.g.
+         * {@code CompletableFuture.completedFuture(Optional.empty())}).
+         */
+        CompletableFuture<Optional<SoulTypes.SoulState>> prefetchState(SoulTypes.AcceptedTurn turn,
+                                                                         SoulTypes.TurnToken token);
+
+        /**
+         * Synchronous go/no-go recheck using {@code prefetchedState} resolved by
+         * {@link #prefetchState}. Runs on the server thread; implementations must not perform
+         * blocking I/O here.
+         */
+        boolean canDeliver(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token,
+                            Optional<SoulTypes.SoulState> prefetchedState);
     }
 
     private final MinecraftServer server;
@@ -57,25 +74,35 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
         String safeText = text == null ? "" : text;
 
         CompletableFuture<Boolean> future = new CompletableFuture<>();
-        server.execute(() -> {
-            long startNanos = System.nanoTime();
-            boolean delivered = false;
-            try {
-                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(turn.key().botId());
-                ServerPlayerEntity player = server.getPlayerManager().getPlayer(turn.key().playerId());
-                if (bot != null && player != null && guard.canDeliver(turn, token)) {
-                    player.sendMessage(Text.literal(turn.botDisplayName() + ": " + safeText), false);
-                    delivered = true;
-                }
-            } catch (RuntimeException ex) {
-                // Never let a delivery-time failure escape the server tick; report it as a
-                // normal non-delivery instead.
-                delivered = false;
+        // Prefetch off the server thread first; the state is still read immediately before the
+        // tick task is scheduled, so the epoch/profile recheck stays fresh, but zero blocking
+        // reads land on the server thread itself.
+        guard.prefetchState(turn, token).whenComplete((prefetchedState, prefetchError) -> {
+            if (prefetchError != null) {
+                // Fail closed without ever touching the server thread.
+                future.complete(false);
+                return;
             }
-            long elapsedMillis = elapsedMillis(startNanos);
-            LOGGER.info("[souls] delivery correlationId={} delivered={} elapsedMs={}",
-                    token.correlationId(), delivered, elapsedMillis);
-            future.complete(delivered);
+            server.execute(() -> {
+                long startNanos = System.nanoTime();
+                boolean delivered = false;
+                try {
+                    ServerPlayerEntity bot = server.getPlayerManager().getPlayer(turn.key().botId());
+                    ServerPlayerEntity player = server.getPlayerManager().getPlayer(turn.key().playerId());
+                    if (bot != null && player != null && guard.canDeliver(turn, token, prefetchedState)) {
+                        player.sendMessage(Text.literal(turn.botDisplayName() + ": " + safeText), false);
+                        delivered = true;
+                    }
+                } catch (RuntimeException ex) {
+                    // Never let a delivery-time failure escape the server tick; report it as a
+                    // normal non-delivery instead.
+                    delivered = false;
+                }
+                long elapsedMillis = elapsedMillis(startNanos);
+                LOGGER.info("[souls] delivery correlationId={} delivered={} elapsedMs={}",
+                        token.correlationId(), delivered, elapsedMillis);
+                future.complete(delivered);
+            });
         });
         return future;
     }
@@ -121,17 +148,16 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
      * the store (to re-read the conversation's current profile/epoch), and a live master-enabled
      * probe supplied by the caller.
      *
-     * <p>The profile/epoch recheck is the one piece of this guard that is not purely
-     * synchronous: {@link SoulStore} is deliberately I/O-off-thread everywhere else in this
-     * pipeline, but this recheck runs synchronously inside {@link MinecraftServer#execute}
-     * (per {@link SoulMessageDelivery#deliverReply}'s contract), so it bounds the wait to a short
-     * timeout and fails closed (no delivery) rather than block the server thread indefinitely.
-     * {@code soul.json} is a small local file read off a normally-idle single-writer executor, so
-     * in practice this resolves in well under the timeout.
+     * <p>The profile/epoch recheck needs a live {@link SoulStore#state} read, but {@link SoulStore}
+     * is deliberately I/O-off-thread everywhere in this pipeline and {@link #canDeliver} runs on
+     * the server thread (per {@link SoulMessageDelivery#deliverReply}'s contract). So the read
+     * happens in {@link #prefetchState}, which {@link SoulMessageDelivery#deliverReply} always
+     * awaits <em>before</em> scheduling any server-thread work — the state is still fetched
+     * immediately before the tick task is scheduled, so the recheck stays fresh, but zero
+     * blocking reads ever land on the server thread. If the prefetch itself fails, delivery fails
+     * closed without the server thread being touched at all.
      */
     public static final class ProductionDeliveryGuard implements DeliveryGuard {
-
-        private static final Duration STATE_LOOKUP_TIMEOUT = Duration.ofMillis(500);
 
         private final MinecraftServer server;
         private final SoulStore store;
@@ -144,37 +170,39 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
         }
 
         @Override
-        public boolean canDeliver(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token) {
+        public CompletableFuture<Optional<SoulTypes.SoulState>> prefetchState(
+                SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token) {
+            // store.state(...) always resolves a real SoulState (never null) -- Optional here is
+            // just this interface's generic "maybe nothing to check" contract.
+            return store.state(turn.key().botId()).thenApply(Optional::ofNullable);
+        }
+
+        @Override
+        public boolean canDeliver(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token,
+                                   Optional<SoulTypes.SoulState> prefetchedState) {
             long startNanos = System.nanoTime();
-            boolean result = evaluateLive(turn, token);
+            boolean result = evaluateLive(turn, token, prefetchedState);
             long elapsedMillis = elapsedMillis(startNanos);
             LOGGER.info("[souls] delivery-recheck correlationId={} outcome={} elapsedMs={}",
                     token.correlationId(), result, elapsedMillis);
             return result;
         }
 
-        private boolean evaluateLive(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token) {
+        private boolean evaluateLive(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token,
+                                      Optional<SoulTypes.SoulState> prefetchedState) {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(turn.key().botId());
             ServerPlayerEntity player = server.getPlayerManager().getPlayer(turn.key().playerId());
             boolean bothOnline = bot != null && player != null;
 
             boolean profileUnchanged = false;
             boolean epochMatches = false;
-            if (bothOnline) {
-                try {
-                    SoulTypes.SoulState state = store.state(turn.key().botId())
-                            .get(STATE_LOOKUP_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-                    profileUnchanged = turn.profileId().equals(state.profileId());
-                    String cursorKey = turn.key().channel().name() + ":" + turn.key().playerId();
-                    long currentEpoch = state.conversations()
-                            .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L)).epoch();
-                    epochMatches = currentEpoch == token.epoch();
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                } catch (ExecutionException | TimeoutException ex) {
-                    return false;
-                }
+            if (bothOnline && prefetchedState.isPresent()) {
+                SoulTypes.SoulState state = prefetchedState.get();
+                profileUnchanged = turn.profileId().equals(state.profileId());
+                String cursorKey = turn.key().channel().name() + ":" + turn.key().playerId();
+                long currentEpoch = state.conversations()
+                        .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L)).epoch();
+                epochMatches = currentEpoch == token.epoch();
             }
 
             boolean ownershipValid = bothOnline && CompanionCommunicationPolicy.isPrivateSoulAuthorized(player, bot);
