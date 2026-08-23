@@ -12,6 +12,7 @@ import net.minecraft.text.Text;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
+import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
@@ -218,6 +219,10 @@ final class BotSoulCommands {
             ChatUtils.sendSystemMessage(source, "Soul system: runtime not currently running.");
             return 1;
         }
+        if (explicitBot != null && !BotEventHandler.isRegisteredBot(explicitBot)) {
+            source.sendError(Text.literal(explicitBot.getName().getString() + " is not a Frens bot."));
+            return 0;
+        }
         SoulRuntime runtime = maybeRuntime.get();
         MinecraftServer server = source.getServer();
         ServerPlayerEntity bot = explicitBot != null ? explicitBot : resolveDefaultBot(server, runtime, actor);
@@ -267,10 +272,11 @@ final class BotSoulCommands {
 
     private static String formatStatus(String botName, SoulRuntime.Status status) {
         return String.format(Locale.ROOT,
-                "Soul status: system=%s settingsValid=%s ready=%s provider=%s model=%s providerHealthy=%s "
-                        + "queueDepth=%d | %s uuid=%s profile=%s active=%s directEpoch=%d",
+                "Soul status: system=%s settingsValid=%s ready=%s provider=%s model=%s host=%s "
+                        + "providerHealthy=%s queueDepth=%d | %s uuid=%s profile=%s active=%s directEpoch=%d",
                 status.systemEnabled() ? "on" : "off", status.settingsValid(), status.ready(),
-                status.provider(), status.model(), status.providerHealthy(), status.queueDepth(),
+                status.provider(), status.model(), status.ollamaHost().isBlank() ? "(unknown)" : status.ollamaHost(),
+                status.providerHealthy(), status.queueDepth(),
                 botName, status.botId(), status.profileId().isBlank() ? "(none)" : status.profileId(),
                 status.profileActive(), status.conversationEpoch());
     }
@@ -282,6 +288,10 @@ final class BotSoulCommands {
         ServerPlayerEntity actor = source.getPlayer();
         if (actor == null) {
             source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            source.sendError(Text.literal(bot.getName().getString() + " is not a Frens bot."));
             return 0;
         }
         if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {
@@ -326,6 +336,10 @@ final class BotSoulCommands {
             source.sendError(Text.literal("This command must be run by a player."));
             return 0;
         }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            source.sendError(Text.literal(bot.getName().getString() + " is not a Frens bot."));
+            return 0;
+        }
         if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {
             source.sendError(Text.literal(
                     "You are not authorized to disable soul communication for " + bot.getName().getString() + "."));
@@ -359,6 +373,10 @@ final class BotSoulCommands {
         ServerPlayerEntity actor = source.getPlayer();
         if (actor == null) {
             source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            source.sendError(Text.literal(bot.getName().getString() + " is not a Frens bot."));
             return 0;
         }
         if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {

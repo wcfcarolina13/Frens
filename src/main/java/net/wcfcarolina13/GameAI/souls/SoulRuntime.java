@@ -7,7 +7,9 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -69,7 +71,7 @@ public final class SoulRuntime {
 
     /** Public API contract consumed by later tasks' chat/command routing. */
     public record Status(boolean systemEnabled, boolean settingsValid, boolean ready,
-                          String provider, String model, boolean providerHealthy,
+                          String provider, String model, String ollamaHost, boolean providerHealthy,
                           int queueDepth, UUID botId, String profileId,
                           boolean profileActive, long conversationEpoch) {
     }
@@ -290,12 +292,47 @@ public final class SoulRuntime {
     }
 
     private Pipeline buildPipeline(SoulSettings settings) {
+        warnIfNonLocalOllamaHost(settings);
         SoulModelProvider provider =
                 new OllamaSoulProvider(settings.ollamaBaseUri(), settings.model(), objectMapper);
         SoulGenerationScheduler scheduler = new SoulGenerationScheduler(1, settings.queueCapacity());
         SoulConversationService conversationService = new SoulConversationService(
                 store, promptAssembler, scheduler, provider, validator, delivery, settings);
         return new Pipeline(settings, provider, scheduler, conversationService);
+    }
+
+    /**
+     * Logs one warning when {@code settings} are enabled and valid but the configured Ollama host
+     * is not local -- soul turns (private player chat plus game-context facts) would then leave
+     * this machine over the network. Silent for disabled/invalid settings, since nothing is ever
+     * dispatched in that case regardless of host.
+     */
+    private static void warnIfNonLocalOllamaHost(SoulSettings settings) {
+        if (!settings.enabled() || !settings.valid()) {
+            return;
+        }
+        String hostPort = formatHostPort(settings.ollamaBaseUri());
+        if (!isLoopbackHost(settings.ollamaBaseUri().getHost())) {
+            LOGGER.warn("[souls] Soul conversations will be sent to non-local Ollama host {} -- "
+                    + "private chat and game context leave this machine.", hostPort);
+        }
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalized = host.toLowerCase(Locale.ROOT);
+        return normalized.equals("127.0.0.1") || normalized.equals("localhost")
+                || normalized.equals("::1") || normalized.equals("[::1]");
+    }
+
+    /** {@code host[:port]} only -- never the scheme, path, or any credentials. */
+    private static String formatHostPort(URI uri) {
+        if (uri == null || uri.getHost() == null) {
+            return "";
+        }
+        return uri.getPort() >= 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost();
     }
 
     private void closePipeline(Pipeline pipeline) {
@@ -361,7 +398,8 @@ public final class SoulRuntime {
             long epoch = state.conversations()
                     .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L)).epoch();
             return new Status(pipeline.settings().enabled(), pipeline.settings().valid(), isReady(),
-                    pipeline.settings().provider(), pipeline.settings().model(), healthy,
+                    pipeline.settings().provider(), pipeline.settings().model(),
+                    formatHostPort(pipeline.settings().ollamaBaseUri()), healthy,
                     pipeline.scheduler().queueDepth(), botId, state.profileId(), state.active(), epoch);
         });
     }
@@ -384,9 +422,21 @@ public final class SoulRuntime {
      * {@link SoulMessageDelivery.ProductionDeliveryGuard} already fails closed the moment the bot
      * no longer resolves via the player manager -- this call's job is to stop any *future* turn
      * from being dispatched to it at all.
+     *
+     * <p>Skips the store write entirely when the master switch is off AND nothing is cached for
+     * {@code botId}: a souls-disabled install (or a bot the souls system never touched) has no
+     * live pipeline work to cancel and no persisted state to deactivate, so this must not touch
+     * the store at all -- {@link SoulStore#setActive} itself refuses to synthesize a fresh
+     * soul.json on disk for exactly this case, but skipping the call here avoids even queuing the
+     * no-op write. When a profile IS cached (or the master switch is on), the store write still
+     * runs unconditionally, same as before -- this never skips deactivating a bot that actually
+     * has state to deactivate.
      */
     public void cancelBot(UUID botId) {
         Objects.requireNonNull(botId, "botId");
+        if (!isMasterEnabled() && cachedState(botId).isEmpty()) {
+            return;
+        }
         store.setActive(botId, false).exceptionally(ex -> {
             LOGGER.warn("[souls] cancelBot failed to deactivate {}: {}", botId, ex.toString());
             return null;

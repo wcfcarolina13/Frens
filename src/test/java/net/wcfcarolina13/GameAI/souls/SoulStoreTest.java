@@ -76,6 +76,23 @@ class SoulStoreTest {
         store.close();
     }
 
+    /**
+     * Regression test for a souls-disabled install writing soul.json on every bot death or
+     * disconnect: {@code setActive(botId, false)} on a bot with no persisted state must never
+     * synthesize and save a default one -- {@code frens/} must never appear on disk.
+     */
+    @Test
+    void setActiveFalseOnAFreshBotCreatesNoStateOnDisk() throws Exception {
+        UUID bot = UUID.randomUUID();
+
+        SoulTypes.SoulState result = store.setActive(bot, false).get(2, SECONDS);
+
+        assertFalse(result.active());
+        assertEquals("", result.profileId());
+        assertFalse(Files.exists(worldRoot.resolve("frens")),
+                "deactivating a never-persisted bot must not create frens/ on disk");
+    }
+
     @Test
     void corruptTailIsQuarantinedAndValidRecordsSurvive() throws Exception {
         UUID bot = UUID.randomUUID();

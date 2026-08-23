@@ -2,6 +2,55 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Gate soul side effects on the master switch (2026-08-23)
+
+Final whole-branch review fix wave for `feature/soul-communication`. Five findings, all now gated
+on `SoulRuntime.isMasterEnabled()`:
+
+1. **Souls-disabled installs wrote `soul.json` on bot death/disconnect.** `SoulStore.setActive`
+   synthesized and saved a default state even for a bot with no prior soul.json; `SoulRuntime.
+   cancelBot` (called unconditionally on every bot death/disconnect via `SoulEventObserver.
+   onBotDeath`/disconnect hooks) always called `store.setActive(botId, false)`. Fixed both
+   layers: `SoulStore.setActive` now decides, on its own single writer thread, to skip the save
+   entirely when deactivating a bot whose `soul.json` never existed; `SoulRuntime.cancelBot` now
+   also short-circuits before touching the store at all when the master switch is off AND nothing
+   is cached for the bot, so a souls-disabled install never creates `<world>/frens/`.
+2. **Event journal kept writing after the master switch was flipped off.** The production
+   `SoulEventObserver.EventSink.accepts()` checked only `hasActiveProfile`, so a bot bound+active
+   before switch-off kept having session-transition events (dimension/sleep/quest/combat)
+   journaled to disk after. Extracted the pure `SoulEventObserver.acceptsEvent(masterEnabled,
+   hasActiveProfile)` predicate (now unit tested) and wired it into the production sink.
+3. **Damage hooks did live-world reads before any soul gate.** `onBotDamage`/`onPlayerDamage`
+   computed dimension/biome/damage-source classification (and, for player damage, iterated
+   `BotRegistry` + resolved each bot's controller) on every hit in the world regardless of whether
+   souls were even enabled. Both hooks now return immediately, before any of that work, unless a
+   runtime exists and `isMasterEnabled()`.
+4. **`/bot soul enable|disable|reset|status <bot>` accepted non-bot players.** None of the four
+   bot-targeting handlers checked that the named entity was actually a registered Frens bot before
+   running owner/operator authorization. Each now rejects a non-bot target up front via
+   `BotEventHandler.isRegisteredBot(...)` with "<name> is not a Frens bot." (Minecraft-type-only
+   path; verified in-game per this repo's existing test-harness constraint on `ServerPlayerEntity`.)
+5. **Soul traffic could silently target a non-local Ollama host.** `/bot soul status` now reports
+   the resolved `host:port` (never scheme/path/credentials — there are none) via a new
+   `SoulRuntime.Status.ollamaHost()` field; `SoulRuntime.buildPipeline` (used by both `start` and
+   `reloadSettings`) now logs one `frens.souls` warning whenever enabled+valid settings resolve to
+   a non-loopback host, since that means private chat and game-context facts leave the machine.
+
+Also: scoped `CompanionCommunicationPolicy.isPrivateSoulAuthorized`'s Javadoc "unowned bot is NOT
+eligible" sentence to the non-operator path (it contradicted the preceding "operators always
+pass" sentence); moved `SoulChatRouter.tryRoute`'s `UUID.randomUUID()`/`System.nanoTime()` below
+the runtime-exists check so a no-runtime call doesn't mint them for nothing; added a `<world>/
+frens/` non-existence disk assertion to the runbook's disabled-baseline case (covering both a bot
+death and a disconnect) plus a note that `/bot soul disable` drops the bot out of no-arg `/bot
+soul status`.
+
+New/extended tests: `SoulStoreTest.setActiveFalseOnAFreshBotCreatesNoStateOnDisk`,
+`SoulRuntimeTest.cancelBotSkipsTheStoreWhenMasterDisabledAndNothingCached` +
+`cancelBotStillDeactivatesACachedProfileEvenWhenMasterDisabled`,
+`SoulEventObserverTest.acceptsEventRequiresBothTheMasterSwitchAndAnActiveProfile`. Focused suite
+(`SoulStoreTest`/`SoulRuntimeTest`/`SoulEventObserverTest`/`BotSoulCommandsTest`) and the full
+`./gradlew test` (232 tests, up from 228) both green; `./gradlew build -x test` green.
+
 ## Correct soul runbook failure expectations (2026-08-23)
 
 Review follow-up to the entry below: `SOUL_COMMUNICATION_PILOT.md`'s "Local provider unavailable"

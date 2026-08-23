@@ -20,6 +20,7 @@ import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_COMPLETED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_FAILED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.WAKE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -139,6 +140,19 @@ class SoulEventObserverTest {
         observer.observe(observation(bot, "minecraft:the_end", "the_end", false, "quest:2", 20L));
 
         assertTrue(sink.events().isEmpty());
+    }
+
+    /**
+     * Regression test for the production {@link SoulEventObserver.EventSink} journaling events
+     * after the master soul switch is turned off: {@code acceptsEvent} must require BOTH the
+     * master switch and an active profile, not just the profile.
+     */
+    @Test
+    void acceptsEventRequiresBothTheMasterSwitchAndAnActiveProfile() {
+        assertTrue(SoulEventObserver.acceptsEvent(true, true));
+        assertFalse(SoulEventObserver.acceptsEvent(false, true));
+        assertFalse(SoulEventObserver.acceptsEvent(true, false));
+        assertFalse(SoulEventObserver.acceptsEvent(false, false));
     }
 
     @Test

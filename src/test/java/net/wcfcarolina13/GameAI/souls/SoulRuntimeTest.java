@@ -340,6 +340,7 @@ class SoulRuntimeTest {
         assertEquals("frens:jake", status.profileId());
         assertTrue(status.profileActive());
         assertEquals(4L, status.conversationEpoch());
+        assertEquals("127.0.0.1:11434", status.ollamaHost());
     }
 
     @Test
@@ -356,6 +357,42 @@ class SoulRuntimeTest {
         runtime.recordEvent(bot, event);
 
         verify(store).appendEvent(bot, event);
+    }
+
+    /**
+     * Regression test for a souls-disabled install writing soul.json on every bot death or
+     * disconnect: {@code cancelBot} must not touch the store at all when the master switch is off
+     * and nothing is cached for the bot -- there is provably nothing to deactivate.
+     */
+    @Test
+    void cancelBotSkipsTheStoreWhenMasterDisabledAndNothingCached() {
+        SoulRuntime runtime = new SoulRuntime(settings(false, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        UUID bot = UUID.randomUUID();
+        when(store.cachedState(bot)).thenReturn(Optional.empty());
+
+        runtime.cancelBot(bot);
+
+        verify(store, never()).setActive(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    /**
+     * Same disabled master switch, but a profile IS cached for the bot -- cancelBot must still
+     * deactivate it; the skip only applies when there is nothing to deactivate.
+     */
+    @Test
+    void cancelBotStillDeactivatesACachedProfileEvenWhenMasterDisabled() {
+        SoulRuntime runtime = new SoulRuntime(settings(false, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        UUID bot = UUID.randomUUID();
+        when(store.cachedState(bot)).thenReturn(Optional.of(
+                new SoulTypes.SoulState(1, bot, "frens:jake", true, Map.of())));
+        when(store.setActive(bot, false)).thenReturn(CompletableFuture.completedFuture(
+                new SoulTypes.SoulState(1, bot, "frens:jake", false, Map.of())));
+
+        runtime.cancelBot(bot);
+
+        verify(store).setActive(bot, false);
     }
 
     @Test

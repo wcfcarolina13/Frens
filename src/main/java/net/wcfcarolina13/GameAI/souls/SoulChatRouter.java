@@ -116,14 +116,14 @@ public final class SoulChatRouter {
         Objects.requireNonNull(sender, "sender");
         String safePrompt = prompt == null ? "" : prompt;
 
-        UUID routingId = UUID.randomUUID();
-        long routeStartNanos = System.nanoTime();
-
         Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
         if (maybeRuntime.isEmpty()) {
             return RouteOutcome.NOT_SOUL;
         }
         SoulRuntime runtime = maybeRuntime.get();
+
+        UUID routingId = UUID.randomUUID();
+        long routeStartNanos = System.nanoTime();
 
         boolean masterEnabled = runtime.isMasterEnabled();
         boolean indexReady = runtime.isReady();

@@ -290,8 +290,9 @@ public final class CompanionCommunicationPolicy {
 
     /**
      * Authorization gate for private (DIRECT) soul communication. Operators always pass;
-     * otherwise the actor must be the exact recorded owner. Unlike {@link #isAllowedToControl},
-     * an unowned bot is NOT eligible — a bot display name is not an identity boundary.
+     * otherwise the actor must be the exact recorded owner — for that non-operator path, unlike
+     * {@link #isAllowedToControl}, an unowned bot is NOT eligible: a bot display name is not an
+     * identity boundary.
      */
     public static boolean isPrivateSoulAuthorized(ServerPlayerEntity actor, ServerPlayerEntity bot) {
         if (actor == null || bot == null) {

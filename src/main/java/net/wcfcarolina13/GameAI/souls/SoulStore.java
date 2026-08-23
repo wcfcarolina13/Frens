@@ -108,9 +108,18 @@ public final class SoulStore {
 
     public CompletableFuture<SoulTypes.SoulState> setActive(UUID botId, boolean active) {
         return submit(() -> {
+            // Decided here, on the single writer thread, so it can never race a concurrent write
+            // for the same bot: a fresh (never-persisted) bot being deactivated has nothing to
+            // deactivate, and must not synthesize a default soul.json just to report it -- that
+            // would create frens/ on disk for a souls-disabled install on every bot death or
+            // disconnect (SoulRuntime.cancelBot calls this unconditionally).
+            boolean existed = Files.exists(soulJsonFile(botId));
             SoulTypes.SoulState state = loadState(botId);
             SoulTypes.SoulState updated = new SoulTypes.SoulState(
                     state.schemaVersion(), botId, state.profileId(), active, state.conversations());
+            if (!active && !existed) {
+                return updated;
+            }
             saveState(updated);
             return updated;
         });

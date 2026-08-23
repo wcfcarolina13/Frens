@@ -104,16 +104,19 @@ public final class SoulEventObserver {
     // === Static production wiring ===
 
     /**
-     * Installs the production instance, whose {@link EventSink} requires an active soul profile
-     * (via {@link SoulRuntime#hasActiveProfile(UUID)}) and delegates accepted events to
-     * {@link SoulRuntime#recordEvent(UUID, SoulTypes.SoulEvent)}.
+     * Installs the production instance, whose {@link EventSink} requires both the master soul
+     * switch to be on (via {@link SoulRuntime#isMasterEnabled()}) and an active soul profile (via
+     * {@link SoulRuntime#hasActiveProfile(UUID)}), and delegates accepted events to
+     * {@link SoulRuntime#recordEvent(UUID, SoulTypes.SoulEvent)}. Without the master-switch check,
+     * a bot whose profile was bound and activated before the operator flipped the system off would
+     * keep having its events journaled to disk after the switch-off.
      */
     public static void initializeProduction() {
         EventSink sink = new EventSink() {
             @Override
             public boolean accepts(UUID botId) {
                 return botId != null && SoulRuntime.current()
-                        .map(runtime -> runtime.hasActiveProfile(botId))
+                        .map(runtime -> acceptsEvent(runtime.isMasterEnabled(), runtime.hasActiveProfile(botId)))
                         .orElse(false);
             }
 
@@ -123,6 +126,15 @@ public final class SoulEventObserver {
             }
         };
         PRODUCTION.set(new SoulEventObserver(sink, DEFAULT_COMBAT_QUIET_TICKS));
+    }
+
+    /**
+     * Pure predicate backing the production {@link EventSink#accepts(UUID)} check above -- split
+     * out purely so {@code SoulEventObserverTest} can exercise the master-switch gating logic
+     * without a {@link SoulRuntime} or any Minecraft type.
+     */
+    static boolean acceptsEvent(boolean masterEnabled, boolean hasActiveProfile) {
+        return masterEnabled && hasActiveProfile;
     }
 
     /** Samples every registered, soul-enabled bot every {@link #TICK_INTERVAL} ticks. */
@@ -156,6 +168,13 @@ public final class SoulEventObserver {
         if (observer == null || bot == null) {
             return;
         }
+        // Gate BEFORE any live-world read (dimension/biome/source classification): a
+        // souls-disabled install must pay nothing beyond this one check on every hit any bot
+        // takes.
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
+            return;
+        }
         observer.noteBotDamage(bot.getUuid(), dimensionOf(bot), biomeOf(bot), amount,
                 classifySource(source), worldTickOf(bot));
     }
@@ -168,6 +187,13 @@ public final class SoulEventObserver {
     public static void onPlayerDamage(ServerPlayerEntity player, DamageSource source, float amount) {
         SoulEventObserver observer = PRODUCTION.get();
         if (observer == null || player == null) {
+            return;
+        }
+        // Gate BEFORE any live-world read or BotRegistry/controller-resolution work: this hook
+        // fires on every real player taking damage regardless of whether any bot even has souls
+        // enabled, so a souls-disabled install must pay nothing beyond this one check.
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
             return;
         }
         MinecraftServer server = player.getEntityWorld().getServer();

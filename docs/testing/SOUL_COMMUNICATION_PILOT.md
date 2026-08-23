@@ -165,6 +165,10 @@ state without guessing.
   run existing `/bot` commands (spawn/follow/store/etc.) and scripted `zzz`/quest dialogue.
   Expected: Frens behaves exactly as before this branch — legacy `LLMOrchestrator`/quest/zzz
   handlers answer normally; no soul-specific chat line, no `frens.souls` routing log entries.
+  **Disk assertion:** with souls still disabled, kill a bot (`/kill <Jake>` or lethal fall/lava)
+  and separately disconnect a bot's session (or the client), then check `<world>/frens/` on
+  disk. Expected: `<world>/frens/` does not exist — a souls-disabled install must never write
+  `soul.json` for a bot as a side effect of death or disconnect cancellation.
 
 ### Activation and permissions
 
@@ -174,7 +178,10 @@ state without guessing.
   status <Jake>` shows `active=true`. Then `/bot soul disable <Jake>`. Expected: chat confirms
   `"<Jake>'s soul communication is now disabled (conversation files preserved)."`; DMing Jake
   afterward falls back to legacy routing (bot is unbound-for-routing purposes because
-  `active=false`); `soul.json`/conversation files remain on disk unchanged.
+  `active=false`); `soul.json`/conversation files remain on disk unchanged. Also: after
+  `/bot soul disable <Jake>`, Jake no longer appears in no-arg `/bot soul status` (it only
+  matches bots with an active profile) — specify Jake by name (`/bot soul status <Jake>`) to see
+  his status.
 - [ ] **Unauthorized sender attempting to address Jake**
   Setup: souls on, Jake enabled and owned by Player A. Player B (not owner, not operator) sends
   Jake a private chat message. Expected: Player B sees `"Jake's private conversation is
