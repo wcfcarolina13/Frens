@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul communication domain model: immutable types and default-off settings (2026-08-23, 1.1.137)
+
+Foundation for an opt-in, local-Ollama-only conversational pilot for Jake. `GameAI/souls/SoulTypes` adds the immutable record/enum boundary (conversation identity, provider request/result, grounding snapshots, profiles, events) that every later piece of the pilot will pass across worker threads — strings, primitives, UUIDs, instants, durations, and defensively-copied collections only, never Minecraft classes. `GameAI/souls/SoulSettings` validates the new configuration into a single immutable snapshot: only the local `ollama` provider is accepted, the base URL must be HTTP/HTTPS, the request timeout is clamped to 10–180s, and the queue capacity to 1–32.
+
+`ManualConfig` gains five new non-secret fields — `soulsEnabled` (default **false**), `soulProvider` (default `"ollama"`), `soulModel`, `soulRequestTimeoutSeconds`, `soulQueueCapacity` — kept entirely separate from the legacy `defaultLlmWorldEnabled` toggle and with no API-key field of any kind; the pilot never talks to a hosted provider.
+
+`ManualConfig.FILE_PATH` was also changed from an eager `static final` field initializer to a lazily-resolved `filePath()` accessor. It previously called into `LauncherEnvironment` → `FabricLoader.getInstance().getGameDir()` at class-initialization time, which throws outside a real Fabric launch and made `ManualConfig` impossible to construct or mock in a plain JUnit JVM. Resolution now happens on first real use (`save()`/`load()`), which in practice is always after Fabric has launched, so runtime behavior is unchanged — but the config class is now unit-testable, which the new `SoulFoundationTest` mock-based coverage depends on.
+
+Files: `GameAI/souls/SoulTypes.java`, `GameAI/souls/SoulSettings.java`, `FilingSystem/ManualConfig.java`, `SoulFoundationTest.java`.
+
 ## Sleeping screen explains the zzz companion command (2026-08-22, 1.1.137)
 
 The vanilla sleeping screen now shows a compact Frens-styled hint above the Leave Bed button: companions need to sleep too, and typing bare `zzz` in chat makes every active Frens bot owned by the player in that dimension try to sleep. This documents the existing 1.1.136 behavior at the moment players need it, including when a bot is too far away for automatic co-sleep.
