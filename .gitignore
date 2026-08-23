@@ -110,9 +110,6 @@ releases/
 # MCP config (local)
 .mcp.json
 
-# Test stubs (CI skips tests)
-src/test/
-
 # Questing dev guide (duplicate of COMPANION_QUESTING_GUIDE.md)
 Questing Development Guide.md
 
