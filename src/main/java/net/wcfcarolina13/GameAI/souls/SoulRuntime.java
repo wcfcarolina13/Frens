@@ -82,6 +82,17 @@ public final class SoulRuntime {
     private final AtomicReference<Pipeline> pipelineRef;
     private final AtomicBoolean ready = new AtomicBoolean(false);
 
+    // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
+    // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
+    // closing "the current pipeline" and `reloadSettings()` swapping in a brand-new one are two
+    // unsynchronized read-modify-write sequences on the same `pipelineRef` -- either can win the
+    // race to actually be "current" after the other's close, leaking whichever pipeline object
+    // never gets closed. Every method that touches `pipelineRef` for anything but a plain,
+    // point-in-time read (`reloadSettings`, `reset`'s invalidation, `shutdown`) takes this lock;
+    // cheap, non-blocking, no I/O ever happens while holding it.
+    private final Object lifecycleLock = new Object();
+    private volatile boolean stopped;
+
     /**
      * Package-private test seam: wires a fully-formed pipeline directly instead of going through
      * {@link #buildPipeline}, so a test can inject mocks for {@code provider}/{@code scheduler}/
@@ -165,7 +176,16 @@ public final class SoulRuntime {
     }
 
     private void shutdown() {
-        closePipeline(pipelineRef.get());
+        synchronized (lifecycleLock) {
+            if (stopped) {
+                // Only the static stop() calls this, and it already dedupes via
+                // INSTANCE.getAndSet(null) -- this guard is a defensive invariant, not a live
+                // race, but keeps shutdown() itself idempotent if that ever changes.
+                return;
+            }
+            stopped = true;
+            closePipeline(pipelineRef.get());
+        }
         store.close();
     }
 
@@ -222,11 +242,26 @@ public final class SoulRuntime {
      * the previous scheduler and provider. Runs the same way regardless of whether the new
      * settings are enabled/valid -- only {@link #isConversationEnabled()} gates whether the new
      * pipeline is ever actually used to generate a reply.
+     *
+     * <p>Building the new pipeline happens outside {@link #lifecycleLock} (no shared state
+     * touched, no reason to hold the lock across it); installing it and closing whatever it
+     * displaces happens under the lock together with a {@link #stopped} check, so a
+     * {@link #stop()} racing this call can never be left with a freshly built pipeline that
+     * nothing ever closes -- either this call sees {@code stopped} already true and closes the
+     * pipeline it just built without installing it, or it wins the lock first and installs it,
+     * in which case {@code stop()} (blocked on the same lock) closes exactly that one once it
+     * proceeds.
      */
     public CompletableFuture<Void> reloadSettings(ManualConfig config) {
         SoulSettings newSettings = SoulSettings.from(config);
-        Pipeline previous = pipelineRef.getAndSet(buildPipeline(newSettings));
-        closePipeline(previous);
+        Pipeline built = buildPipeline(newSettings);
+        synchronized (lifecycleLock) {
+            if (stopped) {
+                closePipeline(built);
+                return CompletableFuture.completedFuture(null);
+            }
+            closePipeline(pipelineRef.getAndSet(built));
+        }
         return CompletableFuture.completedFuture(null);
     }
 
@@ -270,12 +305,23 @@ public final class SoulRuntime {
         return store.setActive(botId, active);
     }
 
+    /**
+     * Archives and bumps {@code key}'s epoch, then invalidates whatever conversation service is
+     * <em>currently</em> installed at that moment -- not whichever one happened to be installed
+     * when {@code reset} was first called. The archive itself can take a while (filesystem I/O on
+     * the store's writer thread) and a live {@code reloadSettings} can swap the pipeline out from
+     * under an in-flight reset; reading {@code pipelineRef} inside {@code whenComplete}, under the
+     * same {@link #lifecycleLock} {@code reloadSettings}/{@code stop} use, guarantees the
+     * invalidation always lands on whichever service is actually live for {@code key} right now,
+     * never a stale one a concurrent reload already displaced (and closed).
+     */
     public CompletableFuture<Long> reset(SoulTypes.ConversationKey key) {
         Objects.requireNonNull(key, "key");
-        SoulConversationService conversationService = pipelineRef.get().conversationService();
         return store.archiveAndReset(key).whenComplete((newEpoch, err) -> {
             if (err == null) {
-                conversationService.invalidate(key, newEpoch);
+                synchronized (lifecycleLock) {
+                    pipelineRef.get().conversationService().invalidate(key, newEpoch);
+                }
             }
         });
     }

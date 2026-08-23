@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -171,6 +172,43 @@ class SoulRuntimeTest {
         verify(scheduler).close();
     }
 
+    /**
+     * Regression test for a stop()-vs-reloadSettings() race: without the shared lifecycle lock +
+     * {@code stopped} guard, {@code stop()} could close "the current pipeline" while a concurrent
+     * {@code reloadSettings()} was mid-flight building a replacement, and that replacement would
+     * then get installed with nothing ever closing it. {@code reloadSettings} builds a real
+     * {@code OllamaSoulProvider}/{@code SoulGenerationScheduler} internally (not mockable through
+     * this seam), so the fix is verified the other way around: after {@code stop()}, a subsequent
+     * {@code reloadSettings(config)} that would flip {@code isMasterEnabled()} to {@code true} if
+     * it were ever actually installed must instead leave the runtime reporting its original,
+     * pre-stop settings — proving the freshly built pipeline was discarded (closed, per
+     * {@code reloadSettings}'s {@code stopped} branch) rather than silently becoming "current".
+     */
+    @Test
+    void reloadSettingsAfterStopNeverInstallsANewLivePipeline() throws Exception {
+        SoulSettings initiallyDisabled = settings(false, true, "test-model");
+        SoulModelProvider provider = mock(SoulModelProvider.class);
+        SoulRuntime runtime = new SoulRuntime(initiallyDisabled, store, provider, scheduler, conversationService);
+        SoulRuntime.installForTest(runtime);
+
+        SoulRuntime.stop();
+        verify(provider).close();
+        assertTrue(SoulRuntime.current().isEmpty());
+
+        ManualConfig config = mock(ManualConfig.class);
+        when(config.isSoulsEnabled()).thenReturn(true);
+        when(config.getSoulProvider()).thenReturn("ollama");
+        when(config.getSoulModel()).thenReturn("post-stop-model");
+        when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
+        when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
+        when(config.getSoulQueueCapacity()).thenReturn(8);
+
+        runtime.reloadSettings(config).join();
+
+        assertFalse(runtime.isMasterEnabled(),
+                "reloadSettings on a stopped runtime must discard what it built, never install it");
+    }
+
     @Test
     void resetArchivesThenInvalidatesConversationServiceAtTheNewEpoch() throws Exception {
         SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
@@ -183,6 +221,48 @@ class SoulRuntimeTest {
 
         assertEquals(3L, newEpoch);
         verify(conversationService).invalidate(key, 3L);
+    }
+
+    /**
+     * Regression test for {@code reset()} capturing the conversation-service snapshot before the
+     * archive completes: a {@code reloadSettings} that lands while the archive is still in flight
+     * must not have its invalidation attempt land on the now-displaced (and closed) old service.
+     * {@code reloadSettings} always builds a real {@code SoulConversationService} internally (not
+     * mockable through this seam), so the positive half of the fix isn't directly observable via
+     * a mock -- but the negative half is: the pre-swap mock, proven closed-out by
+     * {@code reloadSettings} (its scheduler/provider get closed), must never receive
+     * {@code invalidate} at all once the swap has happened, which only holds if {@code reset}
+     * re-reads the pipeline at invalidation time rather than before the archive.
+     */
+    @Test
+    void resetInvalidatesTheCurrentlyInstalledServiceEvenWhenAReloadRacesTheArchive() throws Exception {
+        SoulModelProvider oldProvider = mock(SoulModelProvider.class);
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                oldProvider, scheduler, conversationService);
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                UUID.randomUUID(), UUID.randomUUID(), SoulTypes.Channel.DIRECT);
+        CompletableFuture<Long> archiveFuture = new CompletableFuture<>();
+        when(store.archiveAndReset(key)).thenReturn(archiveFuture);
+
+        CompletableFuture<Long> resetResult = runtime.reset(key);
+
+        // Swap the pipeline WHILE the archive is still pending -- exactly the interleaving the
+        // fix addresses.
+        ManualConfig config = mock(ManualConfig.class);
+        when(config.isSoulsEnabled()).thenReturn(true);
+        when(config.getSoulProvider()).thenReturn("ollama");
+        when(config.getSoulModel()).thenReturn("test-model");
+        when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
+        when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
+        when(config.getSoulQueueCapacity()).thenReturn(8);
+        runtime.reloadSettings(config).join();
+        verify(scheduler).close();
+        verify(oldProvider).close();
+
+        archiveFuture.complete(5L);
+        assertEquals(5L, resetResult.get(2, SECONDS));
+
+        verify(conversationService, never()).invalidate(any(), anyLong());
     }
 
     @Test
