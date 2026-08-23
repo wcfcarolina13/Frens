@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Conversational output validation for soul dialogue (2026-08-23, 1.1.137)
+
+`GameAI/souls/SoulResponseValidator` is the last checkpoint between a provider's raw text and anything spoken by a bot: `validate(raw, botDisplayName)` returns a `ValidationResult(accepted, text, FailureCode, reason)`. It removes `<think>...</think>` and `<analysis>...</analysis>` blocks (case-insensitive, DOTALL — hidden reasoning never reaches dialogue), a leading `"<botDisplayName>:"` label the provider echoed back, Minecraft legacy `§`-formatting codes, and ISO control characters other than newline/tab; it collapses runs of more than two consecutive blank lines down to two. It rejects (always `FailureCode.MALFORMED`) blank output, any raw NUL character, a fenced ```` ``` ```` payload (providers should never be emitting tool/JSON syntax as dialogue), and cleaned output over 1,200 characters. The validator never parses or dispatches the cleaned text or the rejection reason as a command — both are inert data for the caller to speak or log, matching the pilot's plain-dialogue-only contract.
+
+Test coverage (`SoulResponseValidatorTest`, 12 cases) locks in the brief's two mandated tests (hidden-reasoning + speaker-prefix strip, tool-syntax/excessive-output rejection) plus blank/null input, `<analysis>` block stripping, control-character stripping while preserving newline/tab, NUL rejection, section-sign formatting strip, ordinary multiline prose passing through unchanged, blank-line collapsing, an unrelated speaker label (`"Steve:"`) staying untouched, and the exact 1,200-character boundary staying accepted. RED was captured by running the test against the not-yet-created `SoulResponseValidator` class (`cannot find symbol` compile failure) before implementing it for GREEN.
+
+Files: `GameAI/souls/SoulResponseValidator.java`, `SoulResponseValidatorTest.java`.
+
 ## Jake's authored profile + deterministic prompt assembly (2026-08-23, 1.1.137)
 
 `GameAI/souls/SoulProfileRegistry` is a static registry (like `SkillManager`) that loads built-in `SoulTypes.SoulProfile` definitions from classpath JSON via `loadBuiltIns()` (currently `data/frens/souls/jake.json`), and exposes `register(SoulProfile)` / `require(String profileId)`. `register` rejects a blank id (`IllegalArgumentException`) or a duplicate id (`IllegalStateException`) so profiles can never silently shadow one another; `require` throws `IllegalArgumentException` on an unknown id. `loadBuiltIns()` is idempotent (a `builtInsLoaded` guard) so repeated calls across the process don't collide with themselves.
