@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Document soul pilot acceptance (2026-08-23)
+
+New `docs/testing/SOUL_COMMUNICATION_PILOT.md`: the Task-12 runbook for the soul-communication
+pilot, covering every case in the design spec's "Pilot acceptance criteria" and "Manual pilot
+test matrix" sections plus the task-12 brief's additional 503/malformed-JSON/timeout/privacy
+cases. Split into an **Automated** section (cases genuinely exercised by this branch's JUnit
+suite, each citing its exact test class/method — routing decisions, reachability boundaries,
+scheduler ordering/overflow/timeout, validator rejection rules, delivery six-gate combinator,
+reset/epoch/restart persistence) and a **Manual — to be executed in-game** section (unchecked
+checkboxes; requires a live 1.21.11 client/server) for everything that needs a real socket
+disconnect, real process restart, or a live model's probabilistic output — most notably the
+remote-perception leakage probe, which is the one case where a wrong answer is a real defect
+even though it can't be asserted deterministically.
+
+`./gradlew test --rerun-tasks` (228 tests, all green) and `./gradlew build -x test` both succeed;
+artifact `build/libs/frens-1.1.137-release+1.21.11.jar`. The two brief-mandated static checks ran
+over `src/main/java/net/wcfcarolina13/GameAI/souls`: the credential-reference grep
+(`Authorization|Bearer|apiKey|...`) is clean; the privileged/legacy-reference grep
+(`FunctionCallerV2|withPermissions|LLMServiceHandler|LLMOrchestrator|MemoryStore`) surfaces one
+match — a `SoulChatRouter` class Javadoc sentence describing that soul turns do NOT route through
+`LLMOrchestrator` (prose, not a call site or import). Per the brief's exact instruction for any
+match, code was not edited; the match is reported verbatim in the runbook for controller
+adjudication. No code review, mod_version bump, or deploy performed in this task — those are
+separately scoped (code review is the controller's whole-branch pass; manual acceptance and any
+release decision are the user's).
+
 ## Journal witnessed gameplay transitions (2026-08-23)
 
 New `GameAI/souls/SoulEventObserver.java` journals gameplay transitions as bounded, factual
