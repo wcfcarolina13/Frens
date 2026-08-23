@@ -37,6 +37,7 @@ import net.wcfcarolina13.GraphicalUserInterface.CompanionHotkeyOverlayHud;
 import net.wcfcarolina13.GraphicalUserInterface.HuntablesScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CompanionSpellsScreen;
 import net.wcfcarolina13.GraphicalUserInterface.RecruitmentDialogueScreen;
+import net.wcfcarolina13.GraphicalUserInterface.SleepCommandHintHud;
 import net.wcfcarolina13.GraphicalUserInterface.WorldModeSelectionScreen;
 import net.wcfcarolina13.network.CookablesPayload;
 import net.wcfcarolina13.network.CraftingHistoryPayload;
@@ -1043,6 +1044,7 @@ public class FrensClient implements ClientModInitializer {
                 net.wcfcarolina13.GraphicalUserInterface.StoreTargetPickerOverlay.render(context));
         HudRenderCallback.EVENT.register((context, tickDelta) ->
                 net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.render(context));
+        SleepCommandHintHud.register();
 
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(FrensClient::updateSchematicPreviewBox);

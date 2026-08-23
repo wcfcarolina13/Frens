@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Sleeping screen explains the zzz companion command (2026-08-22, 1.1.137)
+
+The vanilla sleeping screen now shows a compact Frens-styled hint above the Leave Bed button: companions need to sleep too, and typing bare `zzz` in chat makes every active Frens bot owned by the player in that dimension try to sleep. This documents the existing 1.1.136 behavior at the moment players need it, including when a bot is too far away for automatic co-sleep.
+
+The hint renders only while the local player is sleeping on the vanilla sleeping-chat screen. Its instruction wraps to fit smaller GUI widths, and focused coverage locks in the sleep-state and screen-state visibility gates.
+
+Files: `FrensClient.java`, `GraphicalUserInterface/SleepCommandHintHud.java`, `SleepCommandHintHudTest.java`.
+
 ## zzz reaches remote owned bots in the same dimension (2026-08-22, 1.1.136)
 
 The 1.1.135 freeze fix incorrectly coupled chat-command targeting to the 16-block automatic co-sleep radius. That prevented a bot near its own bed from receiving bare `zzz` whenever its commander was farther away, even though the command is ownership-gated and the bot searches for beds around its own position.
