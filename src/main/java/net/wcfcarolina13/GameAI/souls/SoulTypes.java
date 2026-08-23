@@ -203,13 +203,70 @@ public final class SoulTypes {
         }
     }
 
+    public record HostileSighting(String name, String direction, int distanceBlocks) {
+        public HostileSighting {
+            name = name == null ? "" : name;
+            direction = direction == null ? "" : direction;
+        }
+    }
+
+    public record MountSummary(String type, float health, float maxHealth, boolean saddled) {
+        public MountSummary {
+            type = type == null ? "" : type;
+        }
+    }
+
+    public record HuntSummary(String target, int kills, int goal) {
+        public HuntSummary {
+            target = target == null ? "" : target;
+        }
+    }
+
+    public record SituationSnapshot(
+            int dangerDistance,                 // blocks to nearest lava/cliff hazard; -1 = none detected
+            List<HostileSighting> hostiles,     // nearest-first, at most 5
+            boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
+            String behaviorMode,                // Mode.name(), e.g. "GUARD"
+            boolean inCombat, boolean postCombatLinger, int recentKillCount,
+            boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
+            boolean nightTravelActive,
+            int companionDays,                  // -1 = unknown
+            int deathCount,                     // -1 = unknown
+            Optional<MountSummary> mount,
+            int knownBaseCount,
+            Optional<String> lastSleepLabel,
+            Optional<HuntSummary> hunt,
+            Optional<String> lastHobby) {
+        public SituationSnapshot {
+            hostiles = hostiles == null ? List.of() : List.copyOf(hostiles);
+            behaviorMode = behaviorMode == null ? "" : behaviorMode;
+            mount = mount == null ? Optional.empty() : mount;
+            lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
+            hunt = hunt == null ? Optional.empty() : hunt;
+            lastHobby = lastHobby == null ? Optional.empty() : lastHobby;
+        }
+
+        public static SituationSnapshot empty() {
+            return new SituationSnapshot(-1, List.of(), false, false, false, "",
+                    false, false, 0, false, false, false, false,
+                    -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+        }
+    }
+
     public record GroundingSnapshot(Reachability reachability, BotSnapshot bot,
-                                     Optional<PlayerSnapshot> player, Instant capturedAt) {
+                                     Optional<PlayerSnapshot> player, SituationSnapshot situation,
+                                     Instant capturedAt) {
         public GroundingSnapshot {
             Objects.requireNonNull(reachability, "reachability");
             Objects.requireNonNull(bot, "bot");
             Objects.requireNonNull(capturedAt, "capturedAt");
             player = player == null ? Optional.empty() : player;
+            situation = situation == null ? SituationSnapshot.empty() : situation;
+        }
+
+        public GroundingSnapshot(Reachability reachability, BotSnapshot bot,
+                                  Optional<PlayerSnapshot> player, Instant capturedAt) {
+            this(reachability, bot, player, SituationSnapshot.empty(), capturedAt);
         }
     }
 

@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Add soul situation types (2026-08-23)
+
+First step of situational awareness: `SoulTypes` gains `HostileSighting`, `MountSummary`,
+`HuntSummary`, and `SituationSnapshot` (danger distance, nearby hostiles, enclosure/escape flags,
+combat and behavior-mode state, mount, known-base count, last sleep/hobby, active hunt) —
+all immutable, defensively copied/normalized records matching the existing SoulTypes style.
+`GroundingSnapshot` grows a fifth `situation` component via a new canonical 5-arg constructor;
+the old 4-arg constructor is preserved as a delegating convenience that defaults to
+`SituationSnapshot.empty()`, so every existing call site (SoulSnapshotBuilder, SoulChatRouter,
+and their tests) compiles unchanged. Record component order matches the task brief exactly since
+later tasks (populating the snapshot, wiring it into the prompt assembler) construct these
+positionally.
+
 ## 1.1.141 — pin the soul request context window (2026-08-23)
 
 Pre-warming for the retest exposed the deeper half of the freeze: this machine's Ollama default
