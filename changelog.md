@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 1.1.138 — soul pilot test build (2026-08-23)
+
+`mod_version` bumped to 1.1.138 and deployed to the Prism instances for the manual in-game
+acceptance run of the soul-communication pilot (`docs/testing/SOUL_COMMUNICATION_PILOT.md`).
+Everything from "Add soul communication domain model" through "Gate soul side effects on the
+master switch" below ships in this build; `soulsEnabled` remains default-off.
+
 ## Gate soul side effects on the master switch (2026-08-23)
 
 Final whole-branch review fix wave for `feature/soul-communication`. Five findings, all now gated
