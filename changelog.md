@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 1.1.139 — /bot soul model accepts real Ollama names (2026-08-23)
+
+First in-game finding from the acceptance run: `/bot soul model llama3.1:8b` failed at the
+Brigadier parse layer ("Expected whitespace to end one argument... at position 24") because the
+model argument used `StringArgumentType.string()`, whose unquoted form rejects `:` — present in
+every tagged Ollama name — and `/` in `hf.co/...` names. Switched to `greedyString()` (model is
+the final argument); `validatedModel` still trims and rejects blank/control/overlong input. The
+plan's mandated test exercised `validatedModel("qwen3:14b")` directly, so the unit suite could
+not catch the parse-layer mismatch — runbook updated implicitly by this note: command-syntax
+cases should be typed in-game, not only asserted through pure helpers.
+
 ## 1.1.138 — soul pilot test build (2026-08-23)
 
 `mod_version` bumped to 1.1.138 and deployed to the Prism instances for the manual in-game

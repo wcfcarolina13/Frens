@@ -74,7 +74,11 @@ final class BotSoulCommands {
                                 .executes(context -> executeSystem(context,
                                         StringArgumentType.getString(context, "mode")))))
                 .then(CommandManager.literal("model")
-                        .then(CommandManager.argument("model", StringArgumentType.string())
+                        // greedyString: Ollama model names contain ':' (tags) and '/'
+                        // (hf.co/... repos), which word()/unquoted string() reject at parse
+                        // time. Model is the final argument, so greedy is safe; validatedModel
+                        // still trims and rejects blank/control/overlong input.
+                        .then(CommandManager.argument("model", StringArgumentType.greedyString())
                                 .executes(context -> executeModel(context,
                                         StringArgumentType.getString(context, "model")))))
                 .then(CommandManager.literal("enable")
