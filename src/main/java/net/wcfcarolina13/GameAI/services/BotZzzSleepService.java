@@ -39,8 +39,8 @@ import java.util.regex.Pattern;
  * Chat "zzz" sleep flow + failure-driven logoff/respawn cycle.
  *
  * <p>When a bot's commander types a "zzz" message (3+ z's, case-insensitive) in chat,
- * each of their Frens bots within the shared sleep radius in the same dimension tries
- * to sleep via {@link SleepService#sleep}. If the bot fails to
+ * each of their Frens bots in the same dimension tries to sleep via
+ * {@link SleepService#sleep}. If the bot fails to
  * sleep AND the sender is themselves sleeping {@link #FAILURE_DEADLINE_TICKS}
  * ticks later, the bot "logs off" — its fake-player entity is removed from
  * the world (state persisted) and the bot waits until either daytime or no
@@ -176,18 +176,20 @@ public final class BotZzzSleepService {
         if (server == null) return true;
         if (!(sender.getEntityWorld() instanceof ServerWorld senderWorld)) return true;
 
-        // Enumerate the commander's nearby Frens bots in the sender's world.
-        List<ServerPlayerEntity> nearbyBots = new ArrayList<>();
+        // Chat is a direct command: route it to every bot this player controls in
+        // the same dimension. Each bot searches for a bed around its own position.
+        List<ServerPlayerEntity> controlledBots = new ArrayList<>();
         for (UUID botId : BotRegistry.ids()) {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
             if (bot == null || bot.isRemoved() || !bot.isAlive()) continue;
-            if (bot.getEntityWorld() != senderWorld) continue;
-            if (!BotSleepProximityPolicy.isWithinCommanderSleepRadius(bot.squaredDistanceTo(sender))) continue;
             ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
-            if (commander == null || !commander.getUuid().equals(sender.getUuid())) continue;
-            nearbyBots.add(bot);
+            if (!isEligibleChatTarget(
+                    bot.getEntityWorld() == senderWorld,
+                    sender.getUuid(),
+                    commander == null ? null : commander.getUuid())) continue;
+            controlledBots.add(bot);
         }
-        if (nearbyBots.isEmpty()) return true;
+        if (controlledBots.isEmpty()) return true;
 
         long nowTick = server.getTicks();
         // Pre-check world-level sleep eligibility ONCE — same for every bot in the world.
@@ -195,7 +197,7 @@ public final class BotZzzSleepService {
         // night. No point entering WAITING_LOGOFF — just tell the user and skip.
         boolean canSleepInWorld = !senderWorld.isDay() || senderWorld.isThundering();
 
-        for (ServerPlayerEntity bot : nearbyBots) {
+        for (ServerPlayerEntity bot : controlledBots) {
             UUID botId = bot.getUuid();
             String botName = bot.getName().getString();
             ServerCommandSource source = sender.getCommandSource();
@@ -233,6 +235,14 @@ public final class BotZzzSleepService {
             tryAttemptSleep(server, bot, sender);
         }
         return true;
+    }
+
+    static boolean isEligibleChatTarget(boolean sameWorld,
+                                        UUID senderUuid,
+                                        UUID commanderUuid) {
+        return sameWorld
+                && senderUuid != null
+                && senderUuid.equals(commanderUuid);
     }
 
     /** Run pathfinding on a worker; SleepService marshals mutations to the server thread. */

@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## zzz reaches remote owned bots in the same dimension (2026-08-22, 1.1.136)
+
+The 1.1.135 freeze fix incorrectly coupled chat-command targeting to the 16-block automatic co-sleep radius. That prevented a bot near its own bed from receiving bare `zzz` whenever its commander was farther away, even though the command is ownership-gated and the bot searches for beds around its own position.
+
+Bare `zzz` now targets every active bot controlled by the sender in the sender's dimension, without a commander-distance check. Bots in other dimensions and bots controlled by another player remain excluded. The worker-thread sleep execution, task cancellation, debounce state machine, and local bed selection from 1.1.135 are unchanged. The 16-block radius remains in place for automatic co-sleep behavior.
+
+Focused regression coverage locks in same-dimension owned-bot targeting and rejects bots owned by another player.
+
+Files: `GameAI/services/BotZzzSleepService.java`, `BotZzzSleepServiceTest.java`.
+
 ## zzz sleep no longer blocks the server or shutdown (2026-08-22, 1.1.135)
 
 The live log showed automatic co-sleep correctly skip Jake at 19.1 blocks, followed by chat `zzz` selecting him through a separate 48-block radius. The chat handler then invoked the synchronous sleep movement loop through `server.execute`, so all bed pathfinding ran on the server thread. Jake retried inaccessible beds for more than a minute, continued navigating after client shutdown began, and prevented the integrated server from closing until the game was force-quit.

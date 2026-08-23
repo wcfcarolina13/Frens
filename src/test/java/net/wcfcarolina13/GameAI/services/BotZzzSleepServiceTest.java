@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -22,9 +23,27 @@ class BotZzzSleepServiceTest {
     }
 
     @Test
-    void chatTriggerUsesSameSixteenBlockRadiusAsCoSleep() {
-        assertTrue(BotSleepProximityPolicy.isWithinCommanderSleepRadius(16.0D * 16.0D));
-        assertFalse(BotSleepProximityPolicy.isWithinCommanderSleepRadius(19.1D * 19.1D));
+    void zzzTargetsOwnedBotsThroughoutTheSendersDimension() {
+        UUID senderId = UUID.fromString("5e3f3580-d944-4b18-8966-57ca862604b3");
+
+        assertTrue(BotZzzSleepService.isEligibleChatTarget(
+                true, senderId, senderId));
+    }
+
+    @Test
+    void zzzDoesNotTargetOwnedBotsInAnotherDimension() {
+        UUID senderId = UUID.fromString("c9bc1da5-8959-41da-8931-7840e35b6a80");
+
+        assertFalse(BotZzzSleepService.isEligibleChatTarget(
+                false, senderId, senderId));
+    }
+
+    @Test
+    void zzzDoesNotTargetBotsControlledByAnotherPlayer() {
+        assertFalse(BotZzzSleepService.isEligibleChatTarget(
+                true,
+                UUID.fromString("e74ddc76-e47d-4d78-985f-40380380b023"),
+                UUID.fromString("b117ce61-4ee3-4756-a299-c690916c5d19")));
     }
 
     @Test
