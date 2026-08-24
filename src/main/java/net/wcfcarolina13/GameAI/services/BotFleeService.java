@@ -1968,7 +1968,6 @@ public final class BotFleeService {
             if (shouldAbortSurvival(bot)) {
                 return;
             }
-            net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot, "break-free");
 
             // Record shelter exit so the underground linger system doesn't immediately
             // re-trigger surface recovery after a shelter breakfree.

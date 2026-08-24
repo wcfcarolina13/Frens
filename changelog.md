@@ -2,6 +2,52 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Gate break-free rescue on real success (2026-08-23)
+
+Review fix round on Task 5 (commit `d63b65c`). Two findings:
+
+**Finding 1 — break-free `onSelfRescue` fired on "no abort," not success.** The hook
+added in `BotFleeService.java:1971` sat right after `breakFreeFromShelter`'s post-dig
+`shouldAbortSurvival` check, which only proves the thread wasn't interrupted — it does
+**not** prove the bot got free. All four type-specific dispatch methods
+(`breakFreeCliff`/`breakFreeDugDown`/`breakFreeVillageHouse`/`breakFreeGeneric`,
+`:2010-2111`) are `void` and can silently no-op: `breakFreeVillageHouse` returns
+immediately when `doorPos`/`interiorDir` is null, and `breakFreeGeneric`'s "protected
+ore — staying put" fallback returns having mined nothing. A sealed-in bot with either
+of those two conditions would have journaled a false rescue. Checked for a cheap,
+generically-reusable post-condition to re-run at the hook site instead: `isInShelter()`
+is unusable (`SHELTER_ACTIVE` is unconditionally cleared by both callers —
+`clearShelterAndBreakFree`/`forceBreakFree` — *before* dispatch even runs, so it always
+reads `false` by hook time, success or not); `isAtSurface()` is also unusable pre-hook
+because the follow-up `escapeToSurface(bot, world)` call (which is what actually gets a
+still-underground bot to the surface) runs *after* this point. No caller of
+`breakFreeFromShelter` shares one single stuck/enclosure predicate either — the seven
+call sites (`BotEventHandler`, `BotAutoReturnSunsetService`, `BotAutoHuntService`,
+`BotIdleHobbiesService`, `modCommandRegistry`) invoke it for varied reasons (some are
+"leave shelter for a command," not "the bot got trapped"). Per the review's documented
+fallback ("if no such check is cheaply re-runnable... REMOVE the break-free hook
+entirely... a missing event is honest, a false one is not"), removed the
+`onSelfRescue(bot, "break-free")` call from `BotFleeService.java:1971` rather than
+inventing a per-dispatch-type re-check (explicitly out of scope — no refactor of the
+four dispatch methods' signatures this round). `onSelfRescue(bot, "surface-recovery")`
+(the two `ensureAtSurface`/`ensureAtSurfaceForHobby` wrapper hooks, unaffected by this
+finding, boolean-return-gated, still success-only) remains the sole self-rescue signal
+for this release; "break-free" as a `kind` value is defined on `SoulEventObserver` but
+currently has no production emitter.
+
+**Finding 2 — cook hobby never journaled.** `BotIdleHobbiesService.java`'s special-cased
+`cook` branch (`:1003-1034`) runs `SmeltingService.cookAllFoodSync` directly and never
+reaches the generic `runSkill` completion line the original hook sat on, so cook
+sessions were invisible to `onHobbySession`. Added the same one-line call at the cook
+branch's own completion site, right after its `LAST_HOBBY_END_MS.put(...)`
+(`BotIdleHobbiesService.java:1019`) — mirrors the generic-path placement exactly,
+including firing unconditionally on `result` (success or failure), consistent with how
+the generic path already treats a "finished" session regardless of outcome. The
+surface-escape-skip branch (never actually cooked) and the crash `catch` are still not
+hooked, matching the original scope decision for the generic path.
+
+Verified: `./gradlew test` and `./gradlew build -x test` both green after both fixes.
+
 ## Hook awareness events into services (2026-08-23)
 
 Task 5 of situational awareness: one guarded call per transition wired into the four

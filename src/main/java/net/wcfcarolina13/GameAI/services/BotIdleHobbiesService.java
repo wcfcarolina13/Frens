@@ -1016,6 +1016,7 @@ public final class BotIdleHobbiesService {
                     boolean result = SmeltingService.cookAllFoodSync(bot, botSource, sw);
                     LOGGER.info("Cook hobby finished for {}: success={}", bot.getName().getString(), result);
                     LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHobbySession(botUuid, LAST_HOBBY.get(botUuid));
                     clearPreferCooking(botUuid);
                     server.execute(() -> {
                         if (TaskService.isServerStopping() || bot.isRemoved() || !bot.isAlive()) return;
