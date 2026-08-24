@@ -51,6 +51,10 @@ class SoulStoreTest {
                 .resolve(player.toString()).resolve("active.jsonl");
     }
 
+    private Path botDir(UUID bot) {
+        return worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+    }
+
     @Test
     void archivesResetEpochAndRejectsStaleSpeech() throws Exception {
         UUID bot = UUID.randomUUID();
@@ -479,5 +483,62 @@ class SoulStoreTest {
 
         assertEquals(1L, token.epoch());
         assertEquals(0L, token.sequence(), "sequence must restart at 0 in the new epoch");
+    }
+
+    /**
+     * Regression test for the review finding that {@code recordWrittenSequence} originally ran
+     * AFTER {@code persistCursor}: if {@code appendRecord} succeeds but {@code persistCursor}
+     * then throws (an ordinary same-process I/O failure -- the executor survives and keeps
+     * serving later calls; this is not a crash/restart), the old ordering left neither the
+     * persisted cursor nor the in-memory cache advanced even though the JSONL record was already
+     * durably on disk, so the very next ordinary turn would recompute and write that same
+     * sequence a second time.
+     *
+     * <p>Induces a real, same-process {@code persistCursor} failure by making the bot's
+     * {@code soul.json} directory read-only: {@code loadState}'s read of the existing file still
+     * succeeds (removing write permission from a directory doesn't block reading a file already
+     * in it), and {@code appendRecord} still succeeds too (it writes into a sibling
+     * {@code conversations/<player>/} subdirectory whose own permissions are untouched) -- but
+     * {@code persistCursor}'s {@code saveState} must create a brand-new {@code soul.json.tmp-*}
+     * file directly inside the now-read-only directory, which fails.
+     */
+    @Test
+    void persistCursorFailureAfterSuccessfulAppendDoesNotProduceDuplicateSequenceOnNextTurn() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "first", Instant.EPOCH).get(2, SECONDS);
+        // soul.json cursor is now (epoch=0, nextSequence=1); the in-memory cache holds
+        // (epoch=0, maxSequence=0).
+
+        Path botDir = botDir(bot);
+        boolean madeReadOnly = botDir.toFile().setWritable(false);
+        assertTrue(madeReadOnly, "test setup: must be able to make the bot directory read-only");
+        try {
+            ExecutionException ex = assertThrows(ExecutionException.class,
+                    () -> store.beginHeardTurn(key, UUID.randomUUID(), "second", Instant.EPOCH).get(2, SECONDS),
+                    "persistCursor must actually fail for this test to exercise the bug it guards against");
+            assertTrue(ex.getCause() instanceof IOException,
+                    "the induced failure must be persistCursor's IOException, not some other error");
+        } finally {
+            assertTrue(botDir.toFile().setWritable(true), "test cleanup: must restore write permission");
+        }
+
+        // Despite the failed call above, its JSONL append already landed on disk at sequence=1.
+        List<SoulTypes.ConversationRecord> afterFailure = store.recent(key, 10, 10_000).get(2, SECONDS);
+        assertEquals(List.of(0L, 1L), afterFailure.stream().map(SoulTypes.ConversationRecord::sequence).toList(),
+                "the failed call's own append must still have landed on disk");
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "third", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(2L, token.sequence(),
+                "the cache must have advanced past the record that landed during the failed call");
+
+        List<SoulTypes.ConversationRecord> records = store.recent(key, 10, 10_000).get(2, SECONDS);
+        List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
+        assertEquals(List.of(0L, 1L, 2L), sequences, "no duplicate sequence numbers on disk");
     }
 }
