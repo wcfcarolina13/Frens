@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## cancelPlayer implemented: disconnect cancels in-flight soul generations (2026-08-24)
+
+Second item off the deferred soul-track pile. `SoulRuntime.cancelPlayer` was an explicit no-op
+stub from the pilot ("no per-player in-flight-generation registry exists yet"); the disconnect
+hook in `Frens` has called it all along. It turned out no separate registry is needed — the
+scheduler's queue/active maps are keyed by `ConversationKey`, which carries the player id, so
+they ARE the registry. New `SoulGenerationScheduler.cancelForPlayer(UUID)` (same collect-under-
+lock / side-effect-after-release discipline as `invalidate`/`close`) cancels the player's active
+calls via `Call.cancelNow()` and completes their queued jobs with `CANCELLED`, returning the
+count; `cancelPlayer` delegates and logs `[souls] cancelPlayer player= cancelledGenerations=`
+only when something was actually stopped. Payoff beyond hygiene: a disconnected player's reply
+was already undeliverable (delivery guard fails closed), but the Ollama generation kept burning
+GPU — and, since 0.2.0, kept holding LoadGoverner's soul stage floor — until completion. Now it
+stops immediately. 3 new tests (per-player selectivity active+queued, zero-count idle path,
+runtime delegation). Suite 384/384.
+
 ## Bot places its own bed even when the commander is already asleep (2026-08-24)
 
 Bradley's field report: a bot carrying a bed, with no free placed bed in range, never attempted
