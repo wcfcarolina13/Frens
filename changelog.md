@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Journal kills, rescues, hobbies, and hunts (2026-08-23)
+
+Task 4 of situational awareness: four new event types appended to the end of
+`SoulTypes.EventType` (`MOB_KILLED`, `SELF_RESCUE`, `HOBBY_SESSION`, `HUNT_PROGRESS` — order
+preserved, nothing else in `SoulTypes.java` touched) plus matching production entry points and
+data-only note methods in `SoulEventObserver`. `onMobKilled(ServerPlayerEntity, String)` and
+`onSelfRescue(ServerPlayerEntity, String)` mirror the existing damage hooks' gate-first shape
+exactly: `PRODUCTION.get()`/entity-null check, then `SoulRuntime.current()` +
+`isMasterEnabled()`, and only after both gates pass do they read live dimension/biome/world-tick
+off the bot. `onHobbySession(UUID, String)` and `onHuntProgress(UUID, String, int, int)` take a
+bare bot UUID (no entity is guaranteed live at call time from an idle-hobby or hunt-tally
+callback), so their instance-seam counterparts emit with `""` dimension/biome and world-tick `0`
+— the same convention `noteTaskStarted` already uses for ticket-sourced events. Facts stay
+string-only: `{"mob": mobType}`, `{"kind": kind}`, `{"hobby": hobbyName}`, and
+`{"target": t, "kills": String.valueOf(k), "goal": String.valueOf(g)}`, with every nullable input
+normalized through the file's existing `nullToEmpty` helper so no fact map ever holds a null
+value. Salience: `MOB_KILLED`/`HUNT_PROGRESS` → NORMAL, `SELF_RESCUE` → HIGH, `HOBBY_SESSION` →
+LOW; witness is `SELF` for all four, matching every other self-observed event in this file.
+
+`SoulEventObserverTest` gained ten new cases (five happy-path type/salience/fact assertions, four
+null-normalization checks, one sink-rejects-everything no-op check) exercising the four new
+`note*` methods through the existing `CapturingSink` pattern — no Minecraft type touched. One test
+wrinkle: `Map.copyOf(...).containsValue(null)` throws `NullPointerException` (the JDK's immutable
+map implementation doesn't tolerate a null probe key/value), so the null-fact assertions use
+`facts.values().stream().anyMatch(Objects::isNull)` instead. RED confirmed via a compile failure
+(`cannot find symbol: noteMobKilled`/`noteSelfRescue`/`noteHobbySession`/`noteHuntProgress`) before
+implementation; GREEN confirmed via the focused test class, the full `./gradlew test` suite, and
+`./gradlew build -x test`, all passing.
+
 ## Restore companion prompt wording (2026-08-23)
 
 Fix round on the SITUATION prompt rendering task: reverted the `appendBotState` wording change
