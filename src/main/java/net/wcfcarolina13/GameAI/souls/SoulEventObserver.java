@@ -275,14 +275,17 @@ public final class SoulEventObserver {
                 sanitizeReasonCategory(ticket.cancelReason()), worldTickOf(ticket));
     }
 
+    /** The {@code TaskService} ticket name a running hunt registers under (see {@code SkillManager.runSkill} -&gt; {@code TaskService.beginSkill("hunt", ...)}, which prefixes {@code "skill:"}). */
+    private static final String HUNT_TASK_NAME = "skill:hunt";
+
     /**
      * Forwards a bot-witnessed kill (self-witnessed; the mob it just finished off).
      *
      * <p>Gated before any live-world read, including the mob-type derivation itself: the caller
      * passes the raw {@code killed} entity so the display-name/registry-path lookup only happens
-     * once souls are actually enabled. Also suppressed while a {@code HuntSessionService} session
-     * is active for this bot — {@link #onHuntProgress} already reports hunt kills at milestones,
-     * so double-journaling every individual kill here would flood the event window.
+     * once souls are actually enabled. Also suppressed while the bot's active task is a live hunt
+     * ({@link #HUNT_TASK_NAME}) — {@link #onHuntProgress} already reports hunt kills at
+     * milestones, so double-journaling every individual kill here would flood the event window.
      */
     public static void onMobKilled(ServerPlayerEntity bot, Entity killed) {
         SoulEventObserver observer = PRODUCTION.get();
@@ -295,7 +298,10 @@ public final class SoulEventObserver {
         if (runtime == null || !runtime.isMasterEnabled()) {
             return;
         }
-        if (net.wcfcarolina13.GameAI.services.HuntSessionService.getSession(bot.getUuid()) != null) {
+        boolean huntActive = TaskService.getActiveTaskInfo(bot.getUuid())
+                .map(info -> HUNT_TASK_NAME.equals(info.name()))
+                .orElse(false);
+        if (huntActive) {
             return;
         }
         String mobType = EntityType.getId(killed.getType()).getPath();
