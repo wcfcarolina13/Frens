@@ -18,7 +18,9 @@ final class SoulBlockKnowledge {
     private SoulBlockKnowledge() {
     }
 
-    private static final int MAX_FACILITY_KINDS = 6;
+    // 10, not 6: a real base room holds 8+ facility kinds (field-tested 2026-08-24), and the
+    // old cap let bed/chest multiples crowd out singleton workstations entirely.
+    private static final int MAX_FACILITY_KINDS = 10;
 
     /** Exact id-path phrases. Job-site blocks name their villager profession per vanilla POI. */
     private static final Map<String, String> PHRASES = new LinkedHashMap<>();

@@ -249,12 +249,22 @@ public final class SoulTypes {
 
     public record PlayerSnapshot(UUID playerId, String name, int distanceBlocks,
                                   String direction, float health, float maxHealth,
-                                  int hunger, String heldItem, boolean sleeping) {
+                                  int hunger, String heldItem, boolean sleeping,
+                                  String lookingAt) {
+        /** Pre-look-target shape; defaults {@code lookingAt} to unknown. */
+        public PlayerSnapshot(UUID playerId, String name, int distanceBlocks,
+                              String direction, float health, float maxHealth,
+                              int hunger, String heldItem, boolean sleeping) {
+            this(playerId, name, distanceBlocks, direction, health, maxHealth,
+                    hunger, heldItem, sleeping, "");
+        }
+
         public PlayerSnapshot {
             Objects.requireNonNull(playerId, "playerId");
             name = name == null ? "" : name;
             direction = direction == null ? "" : direction;
             heldItem = heldItem == null ? "" : heldItem;
+            lookingAt = lookingAt == null ? "" : lookingAt;
         }
     }
 
@@ -283,7 +293,10 @@ public final class SoulTypes {
             List<String> nearbyAnimals,         // non-hostile entities aggregated by name, most-numerous first, at most 4
             String standingOn,                  // block name directly under the bot's feet, "" = unknown
             List<String> nearbyBlocks,          // deduped block-type names in a small box, top 4 by count, air excluded
-            List<String> facilities,            // functional blocks nearby, described lines, at most 6 kinds
+            List<String> facilities,            // functional blocks nearby, described lines, at most 10 kinds
+            List<String> armorStands,           // "Armor stand displaying: ..." lines, at most 3
+            int blockLight,                     // block light at the bot's feet; -1 = unknown
+            int skyLight,                       // sky light at the bot's feet; -1 = unknown
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,                // Mode.name(), e.g. "GUARD"
             boolean following,                  // true only when actively following a player (not return-to-base)
@@ -298,7 +311,7 @@ public final class SoulTypes {
             Optional<String> atBase,            // label of the nearest known base within 32 blocks of the bot now
             Optional<HuntSummary> hunt,
             Optional<String> lastHobby) {
-        /** Pre-facilities shape; defaults {@code facilities} to empty. */
+        /** Pre-facilities shape; defaults {@code facilities} and later additions to empty. */
         public SituationSnapshot(int dangerDistance, List<HostileSighting> hostiles,
                                  List<String> nearbyAnimals, String standingOn, List<String> nearbyBlocks,
                                  boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
@@ -317,12 +330,34 @@ public final class SoulTypes {
                     lastSleepLabel, atBase, hunt, lastHobby);
         }
 
+        /** Pre-light/armor-stand shape; defaults {@code armorStands} empty and lights unknown. */
+        public SituationSnapshot(int dangerDistance, List<HostileSighting> hostiles,
+                                 List<String> nearbyAnimals, String standingOn, List<String> nearbyBlocks,
+                                 List<String> facilities,
+                                 boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
+                                 String behaviorMode, boolean following,
+                                 boolean inCombat, boolean postCombatLinger, int recentKillCount,
+                                 boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
+                                 boolean nightTravelActive, int companionDays, int deathCount,
+                                 Optional<MountSummary> mount, int knownBaseCount,
+                                 Optional<String> lastSleepLabel, Optional<String> atBase,
+                                 Optional<HuntSummary> hunt, Optional<String> lastHobby) {
+            this(dangerDistance, hostiles, nearbyAnimals, standingOn, nearbyBlocks, facilities,
+                    List.of(), -1, -1,
+                    enclosed, hasHeadroom, hasEscapeRoute, behaviorMode, following,
+                    inCombat, postCombatLinger, recentKillCount,
+                    inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
+                    companionDays, deathCount, mount, knownBaseCount,
+                    lastSleepLabel, atBase, hunt, lastHobby);
+        }
+
         public SituationSnapshot {
             hostiles = hostiles == null ? List.of() : List.copyOf(hostiles);
             nearbyAnimals = nearbyAnimals == null ? List.of() : List.copyOf(nearbyAnimals);
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             facilities = facilities == null ? List.of() : List.copyOf(facilities);
+            armorStands = armorStands == null ? List.of() : List.copyOf(armorStands);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;

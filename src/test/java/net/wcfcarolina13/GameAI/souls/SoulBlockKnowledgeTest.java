@@ -71,14 +71,40 @@ class SoulBlockKnowledgeTest {
     }
 
     @Test
-    void digestDropsMundaneEntriesAndCapsAtSixKinds() {
+    void digestDropsMundaneEntriesAndCapsAtTenKinds() {
         List<String> lines = SoulBlockKnowledge.digestFacilities(List.of(
                 fac("oak_sign", "Oak Sign"),
                 fac("chest", "Chest"), fac("furnace", "Furnace"), fac("barrel", "Barrel"),
                 fac("smoker", "Smoker"), fac("loom", "Loom"), fac("lectern", "Lectern"),
-                fac("bell", "Bell")));
+                fac("bell", "Bell"), fac("stonecutter", "Stonecutter"),
+                fac("enchanting_table", "Enchanting Table"), fac("grindstone", "Grindstone"),
+                fac("composter", "Composter")));
 
-        assertEquals(6, lines.size());
+        assertEquals(10, lines.size());
         assertFalse(String.join(",", lines).contains("Oak Sign"));
+    }
+
+    @Test
+    void digestKeepsSingletonWorkstationsInARealBaseRoom() {
+        // Field regression 2026-08-24: 8 beds + chests crowded the singleton stonecutter and
+        // enchanting table out of the old 6-kind cap and Jake denied seeing them.
+        List<SoulTypes.RawFacility> room = new java.util.ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            room.add(fac("white_bed", "White Bed"));
+        }
+        room.add(fac("chest", "Chest"));
+        room.add(fac("chest", "Chest"));
+        room.add(fac("barrel", "Barrel"));
+        room.add(fac("furnace", "Furnace"));
+        room.add(fac("loom", "Loom"));
+        room.add(fac("chiseled_bookshelf", "Chiseled Bookshelf"));
+        room.add(fac("lodestone", "Lodestone"));
+        room.add(fac("stonecutter", "Stonecutter"));
+        room.add(fac("enchanting_table", "Enchanting Table"));
+
+        String joined = String.join(",", SoulBlockKnowledge.digestFacilities(room));
+
+        assertTrue(joined.contains("Stonecutter"), joined);
+        assertTrue(joined.contains("Enchanting Table"), joined);
     }
 }

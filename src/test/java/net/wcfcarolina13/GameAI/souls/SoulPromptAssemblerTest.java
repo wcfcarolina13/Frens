@@ -526,6 +526,47 @@ class SoulPromptAssemblerTest {
         assertFalse(systemContent(grounding).contains("Facilities nearby"), "no facilities expected");
     }
 
+    @Test
+    void situationRendersLightLevelsAndArmorStands() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(), List.of(),
+                List.of("Armor stand displaying: Iron Helmet (Protection I), Iron Chestplate"),
+                4, 0,
+                false, false, false, "IDLE", false,
+                false, false, 0, false, false, false, false,
+                -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty());
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(localPlayer), situation, Instant.EPOCH));
+
+        assertTrue(content.contains(
+                "Light here: block light 4, sky light 0. Hostile mobs can only spawn where block light is 0."),
+                content);
+        assertTrue(content.contains(
+                "Armor stand displaying: Iron Helmet (Protection I), Iron Chestplate"), content);
+    }
+
+    @Test
+    void situationOmitsLightLineWhenUnknown() {
+        assertFalse(systemContent(grounding).contains("Light here"), "no light data expected");
+    }
+
+    @Test
+    void playerLineIncludesLookTarget() {
+        SoulTypes.PlayerSnapshot looking = new SoulTypes.PlayerSnapshot(
+                localPlayer.playerId(), "Player", 6, "north", 20.0F, 20.0F, 20,
+                "playerBiomeSecret", false, "Weathered Copper Trapdoor");
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(looking), Instant.EPOCH));
+
+        assertTrue(content.contains("looking at: Weathered Copper Trapdoor"), content);
+    }
+
+    @Test
+    void playerLineOmitsLookTargetWhenUnknown() {
+        assertFalse(systemContent(grounding).contains("looking at:"), "no look target expected");
+    }
+
     // === Salience-weighted event selection (pure seam: SoulPromptAssembler.selectEvents) ===
 
     private SoulTypes.SoulEvent event(SoulTypes.EventType type, long tick, SoulTypes.Salience salience) {

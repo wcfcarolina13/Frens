@@ -170,8 +170,11 @@ public final class SoulPromptAssembler {
           .append(", health: ").append(player.health()).append('/').append(player.maxHealth())
           .append(", hunger: ").append(player.hunger())
           .append(", held item: ").append(player.heldItem())
-          .append(", sleeping: ").append(player.sleeping())
-          .append('\n');
+          .append(", sleeping: ").append(player.sleeping());
+        if (!player.lookingAt().isEmpty()) {
+            sb.append(", looking at: ").append(player.lookingAt());
+        }
+        sb.append('\n');
     }
 
     // === SITUATION sub-block (Frens-supplied, appended inside authoritative state) ===
@@ -314,6 +317,14 @@ public final class SoulPromptAssembler {
         }
         if (!situation.facilities().isEmpty()) {
             lines.add("Facilities nearby: " + String.join(", ", situation.facilities()) + ".");
+        }
+        for (String stand : situation.armorStands()) {
+            lines.add(stand + ".");
+        }
+        if (situation.blockLight() >= 0) {
+            lines.add("Light here: block light " + situation.blockLight()
+                    + ", sky light " + situation.skyLight()
+                    + ". Hostile mobs can only spawn where block light is 0.");
         }
         if (situation.mount().isPresent()) {
             SoulTypes.MountSummary mount = situation.mount().get();

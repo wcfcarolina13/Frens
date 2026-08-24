@@ -2,6 +2,37 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Ground the situational-awareness field-test failures (2026-08-24)
+
+Bradley ran a 19-question awareness matrix in-game on 1.1.148 and "it failed most of them."
+Log + soul-store reconstruction (questions from `latest.log` chat lines, Jake's answers from the
+world-save `active.jsonl`) showed the new gear/inventory/facility features all working — the
+failures clustered into four root causes, each now fixed:
+
+- **Facility cap/radius too tight for a real base room.** The room held 8+ facility kinds; the
+  6-kind, most-numerous-first cap let bed/chest multiples push the singleton stonecutter and
+  enchanting table out entirely, and radius 8 clipped workstations he led Jake toward in FOLLOW
+  mode ("No, I don't see a Stonecutter" while standing near one). Cap 6→10, radius 8→12, and a
+  regression test that reconstructs the exact room.
+- **Light level was never captured**, so the 8B confabulated ("It's daytime, so it's bright
+  enough" — indoors, sky=false; then "light level's below 12", invented). Snapshot now carries
+  block/sky light at the bot's feet (`world.getLightLevel`, -1 = unknown) and the prompt states
+  the real spawn rule: "Hostile mobs can only spawn where block light is 0."
+- **Deixis had no grounding.** "What are these?" / "this copper trapdoor" can't be answered from
+  a bot-centric snapshot; Jake guessed ("Those are Stone Bricks"). `capturePlayer` now raycasts
+  the player's crosshair 20 blocks (`player.raycast`, block hits only) into
+  `PlayerSnapshot.lookingAt`, rendered as ", looking at: Weathered Copper Trapdoor" on the
+  player line. One capture grounds the whole question class.
+- **Armor-stand displays were invisible.** Stands are (correctly) excluded from the entity scan
+  as decoration, so "what's on the armorstands?" got a confabulated "nothing." A dedicated
+  `scanArmorStands` within the facility box describes displayed items through the same item
+  describer (enchantments and custom names included), capped at 3 stands.
+
+Still open from the matrix, deliberately not in this round: potted-flower contents (the
+look-target covers them when the player looks at a pot), and encyclopedic "what is it good for"
+knowledge ("Dripstone Powder" hallucination) — that is the knowledge-graph spec
+(`docs/superpowers/specs/2026-08-24-soul-knowledge-graph-design.md`), next up. Suite 321/321.
+
 ## Weight witnessed-event selection by salience (2026-08-24)
 
 Post-pilot backlog item. The prompt's witnessed-events block was the newest 12 journal events,

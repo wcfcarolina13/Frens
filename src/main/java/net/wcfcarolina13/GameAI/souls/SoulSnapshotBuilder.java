@@ -17,7 +17,11 @@ import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.world.LightType;
 import net.minecraft.world.poi.PointOfInterestTypes;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
 import net.wcfcarolina13.DangerZoneDetector.CliffDetector;
@@ -61,6 +65,9 @@ import java.util.stream.Collectors;
  * plain unit tests without a running Minecraft server.
  */
 public final class SoulSnapshotBuilder {
+
+    /** At most this many armor-stand lines reach a soul prompt. */
+    static final int MAX_ARMOR_STANDS = 3;
 
     private SoulSnapshotBuilder() {
     }
@@ -195,7 +202,26 @@ public final class SoulSnapshotBuilder {
 
         return new SoulTypes.PlayerSnapshot(player.getUuid(), player.getName().getString(), distanceBlocks,
                 cardinalDirection(dx, dz), player.getHealth(), player.getMaxHealth(),
-                player.getHungerManager().getFoodLevel(), heldItemName(player), player.isSleeping());
+                player.getHungerManager().getFoodLevel(), heldItemName(player), player.isSleeping(),
+                lookTargetName(player));
+    }
+
+    /**
+     * Display name of the block the player's crosshair rests on (20-block reach), "" when none.
+     * Grounds deictic questions ("what are these?", "this trapdoor") that a bot-centric snapshot
+     * can never answer -- field-tested failure class, 2026-08-24.
+     */
+    private static String lookTargetName(ServerPlayerEntity player) {
+        try {
+            HitResult hit = player.raycast(20.0D, 1.0F, false);
+            if (hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK) {
+                return player.getEntityWorld().getBlockState(blockHit.getBlockPos())
+                        .getBlock().getName().getString();
+            }
+        } catch (Throwable ignored) {
+            // Look target is best-effort context, never load-bearing for capture.
+        }
+        return "";
     }
 
     private static String heldItemName(ServerPlayerEntity player) {
@@ -203,8 +229,10 @@ public final class SoulSnapshotBuilder {
         return held.isEmpty() ? "bare hands" : SoulItemDescriber.describe(extractItemFacts(held, 0));
     }
 
+    // 12, not 8: field test 2026-08-24 — leading the bot around a base room in FOLLOW mode put
+    // real workstations just past the old radius and Jake denied their existence.
     /** Horizontal radius of the functional-block ("facilities") scan around the bot. */
-    private static final int FACILITY_SCAN_RADIUS = 8;
+    private static final int FACILITY_SCAN_RADIUS = 12;
     /** Vertical half-height of the facilities scan box. */
     private static final int FACILITY_SCAN_HEIGHT = 3;
 
@@ -232,6 +260,32 @@ public final class SoulSnapshotBuilder {
             }
         }
         return found;
+    }
+
+    /**
+     * Armor stands within the facility radius that display at least one item, described through
+     * the same item describer as inventory/gear so enchantments and custom names surface.
+     * Armor stands are excluded from the animal/entity scan as decoration; their contents are
+     * situation-relevant anyway (field-tested gap, 2026-08-24).
+     */
+    private static List<String> scanArmorStands(ServerWorld world, BlockPos center) {
+        List<String> lines = new ArrayList<>();
+        Box box = new Box(center).expand(FACILITY_SCAN_RADIUS, FACILITY_SCAN_HEIGHT, FACILITY_SCAN_RADIUS);
+        for (ArmorStandEntity stand : world.getEntitiesByClass(ArmorStandEntity.class, box, e -> true)) {
+            List<String> displayed = new ArrayList<>();
+            for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                    EquipmentSlot.LEGS, EquipmentSlot.FEET,
+                    EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND)) {
+                ItemStack stack = stand.getEquippedStack(slot);
+                if (!stack.isEmpty()) {
+                    displayed.add(SoulItemDescriber.describe(extractItemFacts(stack, 0)));
+                }
+            }
+            if (!displayed.isEmpty()) {
+                lines.add("Armor stand displaying: " + String.join(", ", displayed));
+            }
+        }
+        return lines;
     }
 
     /**
@@ -389,6 +443,21 @@ public final class SoulSnapshotBuilder {
         } catch (Throwable ignored) {
         }
 
+        int blockLight = -1;
+        int skyLight = -1;
+        try {
+            ServerWorld world = (ServerWorld) bot.getEntityWorld();
+            blockLight = world.getLightLevel(LightType.BLOCK, bot.getBlockPos());
+            skyLight = world.getLightLevel(LightType.SKY, bot.getBlockPos());
+        } catch (Throwable ignored) {
+        }
+
+        List<String> rawArmorStands = List.of();
+        try {
+            rawArmorStands = scanArmorStands((ServerWorld) bot.getEntityWorld(), bot.getBlockPos());
+        } catch (Throwable ignored) {
+        }
+
         boolean inCombat = false;
         boolean postCombatLinger = false;
         int recentKillCount = 0;
@@ -480,7 +549,7 @@ public final class SoulSnapshotBuilder {
         }
 
         SituationInputs inputs = new SituationInputs(dangerDistance, entities, ownerName, bot.getName().getString(),
-                standingOn, rawNearbyBlocks, rawFacilities,
+                standingOn, rawNearbyBlocks, rawFacilities, rawArmorStands, blockLight, skyLight,
                 enclosed, hasHeadroom, hasEscapeRoute,
                 behaviorMode, following, inCombat, postCombatLinger, recentKillCount,
                 inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
@@ -571,6 +640,8 @@ public final class SoulSnapshotBuilder {
             String standingOn,
             List<String> nearbyBlocks,          // raw scan output, duplicates expected -- see buildSituation
             List<SoulTypes.RawFacility> rawFacilities, // functional-block sightings, duplicates expected
+            List<String> armorStands,           // described armor-stand lines, uncapped
+            int blockLight, int skyLight,       // light at the bot's feet; -1 = unknown
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,
             boolean following,
@@ -591,6 +662,7 @@ public final class SoulSnapshotBuilder {
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             rawFacilities = rawFacilities == null ? List.of() : List.copyOf(rawFacilities);
+            armorStands = armorStands == null ? List.of() : List.copyOf(armorStands);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
@@ -651,6 +723,10 @@ public final class SoulSnapshotBuilder {
         return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
                 inputs.standingOn(), nearbyBlocks,
                 SoulBlockKnowledge.digestFacilities(inputs.rawFacilities()),
+                inputs.armorStands().size() > MAX_ARMOR_STANDS
+                        ? inputs.armorStands().subList(0, MAX_ARMOR_STANDS)
+                        : inputs.armorStands(),
+                inputs.blockLight(), inputs.skyLight(),
                 inputs.enclosed(), inputs.hasHeadroom(), inputs.hasEscapeRoute(),
                 inputs.behaviorMode(), inputs.following(),
                 inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
