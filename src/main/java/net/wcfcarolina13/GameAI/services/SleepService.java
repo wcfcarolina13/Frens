@@ -99,21 +99,26 @@ public final class SleepService {
             return false;
         }
 
-        // Suppress own-bed crafting/placement when a nearby player is already
-        // sleeping. The sleeping player will advance time to morning, so a
-        // second bed would be wasted work AND clutter the base. This handles
-        // the "only one bed nearby + commander is in it" case where filtering
-        // the occupied bed would otherwise drop us into the craft+place branch.
-        if (canSleepNow && isAnyPlayerSleepingNearby(bot, world, 32)) {
+        boolean hasOwnBed = hasAnyBed(bot);
+
+        // Suppress own-bed CRAFTING when a nearby player is already sleeping — burning wool and
+        // planks is wasted work when the logoff fallback exists. A bot that already carries a
+        // bed is NOT suppressed: it places its bed and sleeps too, because bots count toward the
+        // players-sleeping percentage — a bot "waiting it out" awake is exactly what keeps the
+        // nearby sleeper's night from ever advancing (the pre-fix behavior Bradley reported:
+        // bed in inventory, commander in bed, bot never attempts placement and just logs off).
+        if (SleepBedCandidatePolicy.waitOutNearbySleeper(
+                canSleepNow, isAnyPlayerSleepingNearby(bot, world, 32), hasOwnBed)) {
             ChatUtils.sendSystemMessage(source, "Someone's already sleeping — I'll wait it out.");
             return false;
         }
 
         if (!nearbyBeds.isEmpty() && canSleepNow) {
             ChatUtils.sendSystemMessage(source, "I couldn't get into a nearby bed (blocked or unsafe). Trying to set my own.");
-        } else if (nearbyBeds.isEmpty() && canSleepNow && hasAnyBed(bot)) {
-            // All nearby beds were filtered (likely all occupied) AND we have our own — explicit handoff message.
-            ChatUtils.sendSystemMessage(source, "Nearby bed is taken. Setting up my own.");
+        } else if (nearbyBeds.isEmpty() && canSleepNow && hasOwnBed) {
+            // No unoccupied bed anywhere in range (none placed, or all occupied) and we carry
+            // our own — explicit handoff message before the placement branch.
+            ChatUtils.sendSystemMessage(source, "No free bed nearby — setting up my own.");
         }
 
         // If we can't sleep right now, avoid crafting/placing beds.
@@ -123,7 +128,7 @@ public final class SleepService {
         }
 
         // 2) Ensure we have a bed item (craft if possible).
-        if (!hasAnyBed(bot)) {
+        if (!hasOwnBed) {
             ServerPlayerEntity commander = source.getPlayer();
             if (commander == null) {
                 ChatUtils.sendSystemMessage(source, "Only players can ask bots to craft a bed.");
