@@ -102,8 +102,12 @@ final class SoulKnowledgeRetriever {
 
     /** "X drops: A, B" from loot edges; a block that only drops itself is noise and suppressed. */
     private static Optional<String> dropsLine(String topic, GameKnowledgeGraph.GraphData graph) {
-        List<String> drops = graph.drops().getOrDefault(topic, List.of());
-        if (drops.isEmpty() || drops.equals(List.of(topic))) {
+        // Self-drops are noise: alone they say nothing, and next to real drops they are the
+        // silk-touch alternative ("Diamond Ore drops: Diamond Ore, Diamond" confused the model).
+        List<String> drops = graph.drops().getOrDefault(topic, List.of()).stream()
+                .filter(id -> !id.equals(topic))
+                .toList();
+        if (drops.isEmpty()) {
             return Optional.empty();
         }
         String display = graph.displayNames().getOrDefault(topic, topic);

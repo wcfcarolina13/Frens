@@ -314,17 +314,41 @@ public final class SoulSnapshotBuilder {
         return found;
     }
 
-    /** True when a block-collision raycast from the bot's eyes reaches {@code pos} itself. */
+    /**
+     * True when a sight line from the bot's eyes reaches {@code pos}. Non-opaque obstructions
+     * (glass, panes -- display cases) do not block sight: field test 2026-08-24 showed a geared
+     * armor stand behind glass LOS-filtered while its bare neighbor answered "nothing". The ray
+     * restarts just past up to {@link #MAX_TRANSPARENT_SKIPS} transparent hits.
+     */
     private static boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, BlockPos pos) {
         Vec3d eye = bot.getEyePos();
         Vec3d target = Vec3d.ofCenter(pos);
         if (eye.squaredDistanceTo(target) <= 4.0D) {
             return true; // adjacent blocks: the ray can clip its own start/target ambiguously
         }
-        BlockHitResult hit = world.raycast(new RaycastContext(eye, target,
-                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
-        return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(pos);
+        Vec3d from = eye;
+        for (int skips = 0; skips <= MAX_TRANSPARENT_SKIPS; skips++) {
+            BlockHitResult hit = world.raycast(new RaycastContext(from, target,
+                    RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
+            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(pos)) {
+                return true;
+            }
+            BlockState obstruction = world.getBlockState(hit.getBlockPos());
+            if (obstruction.isOpaque()) {
+                return false;
+            }
+            // Transparent obstruction: continue the ray from just past the hit point.
+            Vec3d direction = target.subtract(from).normalize();
+            from = hit.getPos().add(direction.multiply(0.1D));
+            if (from.squaredDistanceTo(target) <= 1.0D) {
+                return true;
+            }
+        }
+        return false;
     }
+
+    /** Sight passes through at most this many transparent blocks (glass walls, panes). */
+    private static final int MAX_TRANSPARENT_SKIPS = 4;
 
     /**
      * Armor stands within the facility radius that display at least one item, described through

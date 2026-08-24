@@ -537,6 +537,13 @@ public final class SoulPromptAssembler {
         if (situation.atBase().isPresent()) {
             rightNow.append(", at base ").append(situation.atBase().get());
         }
+        // Look-target repeated here, in the freshest position: small models over-attend to
+        // recent conversation ("the Chest again") unless the current target sits next to the
+        // current message -- field lesson 2026-08-24.
+        grounding.player()
+                .map(SoulTypes.PlayerSnapshot::lookingAt)
+                .filter(target -> !target.isEmpty())
+                .ifPresent(target -> rightNow.append("; the player is looking at ").append(target));
         rightNow.append('.');
 
         return new SoulTypes.Message(SoulTypes.Role.SYSTEM, String.join("\n",

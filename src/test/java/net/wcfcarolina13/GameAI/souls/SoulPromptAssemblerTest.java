@@ -700,4 +700,19 @@ class SoulPromptAssemblerTest {
         assertEquals(reordered, selected, "selected events must stay in journal order");
         assertTrue(selected.stream().anyMatch(e -> e.type() == SoulTypes.EventType.SELF_RESCUE));
     }
+
+    @Test
+    void presentMomentCarriesPlayerLookTargetForRecency() {
+        SoulTypes.PlayerSnapshot looking = new SoulTypes.PlayerSnapshot(
+                localPlayer.playerId(), "Player", 6, "north", 20.0F, 20.0F, 20,
+                "playerBiomeSecret", false, "Brown Carpet", "");
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(looking), Instant.EPOCH),
+                priorHistory, recentEvents, "what's this?", Duration.ofSeconds(60));
+        String presentMoment = request.messages().get(request.messages().size() - 2).content();
+
+        assertTrue(presentMoment.contains("the player is looking at Brown Carpet"), presentMoment);
+    }
 }
