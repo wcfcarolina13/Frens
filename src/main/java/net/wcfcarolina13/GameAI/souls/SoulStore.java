@@ -61,10 +61,21 @@ public final class SoulStore {
         }
     }
 
+    /**
+     * In-memory high-water mark for a conversation's sequence numbers within one epoch, backing
+     * {@link #reconciledNextSequence}. See that method's Javadoc for the caching contract.
+     */
+    private record SequenceCache(long epoch, long maxSequence) {}
+
     private final Path root;
     private final ExecutorService executor;
     private final ObjectMapper mapper;
     private final ConcurrentHashMap<UUID, SoulTypes.SoulState> cachedStates = new ConcurrentHashMap<>();
+    // Only ever read/written from inside submit() tasks, i.e. on this store's single writer
+    // thread -- a plain HashMap is race-free here the same way the rest of this class's
+    // non-cachedStates fields are, per the class Javadoc's "all filesystem work is funneled
+    // through the single-writer executor" invariant. Never exposed outside this class.
+    private final Map<String, SequenceCache> sequenceCache = new HashMap<>();
     private volatile boolean closed;
 
     public SoulStore(Path worldRoot, ExecutorService executor) {
@@ -136,13 +147,19 @@ public final class SoulStore {
             String cursorKey = cursorKey(key);
             SoulTypes.ConversationCursor cursor =
                     reconciledCursor(state, key.botId(), key.playerId(), cursorKey);
-            long sequence = reconciledNextSequence(cursor, activeFile(key.botId(), key.playerId()));
+            long sequence =
+                    reconciledNextSequence(cursorKey, cursor, activeFile(key.botId(), key.playerId()));
 
             SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                     correlationId, cursor.epoch(), sequence, SoulTypes.TurnKind.HEARD,
                     content, occurredAt, "", "", null, null);
             appendRecord(activeFile(key.botId(), key.playerId()), record);
-
+            // Advance the cache before persisting the cursor: if persistCursor itself throws
+            // (an ordinary same-process I/O failure -- the executor survives and keeps serving
+            // later calls), the JSONL record above is already durably on disk, so the cache must
+            // already reflect it or the next call would recompute this same sequence and write a
+            // real duplicate. See recordWrittenSequence's Javadoc.
+            recordWrittenSequence(cursorKey, cursor.epoch(), sequence);
             persistCursor(state, cursorKey, new SoulTypes.ConversationCursor(cursor.epoch(), sequence + 1));
 
             return new SoulTypes.TurnToken(key, correlationId, cursor.epoch(), sequence);
@@ -169,13 +186,13 @@ public final class SoulStore {
 
     public CompletableFuture<List<SoulTypes.ConversationRecord>> recent(
             SoulTypes.ConversationKey key, int maxTurns, int maxChars) {
-        return submit(() -> loadBounded(
+        return submit(() -> loadBounded(cursorKey(key),
                 activeFile(key.botId(), key.playerId()), Long.MAX_VALUE, maxTurns, maxChars));
     }
 
     public CompletableFuture<List<SoulTypes.ConversationRecord>> recentBefore(
             SoulTypes.TurnToken token, int maxTurns, int maxChars) {
-        return submit(() -> loadBounded(
+        return submit(() -> loadBounded(cursorKey(token.key()),
                 activeFile(token.key().botId(), token.key().playerId()), token.sequence(), maxTurns, maxChars));
     }
 
@@ -198,6 +215,9 @@ public final class SoulStore {
 
             long newEpoch = cursor.epoch() + 1;
             persistCursor(state, cursorKey, new SoulTypes.ConversationCursor(newEpoch, 0L));
+            // New epoch, fresh (moved-away) active file -- whatever the cache held for the prior
+            // epoch no longer applies. The next reconciledNextSequence call re-seeds from scratch.
+            sequenceCache.remove(cursorKey);
             return newEpoch;
         });
     }
@@ -277,12 +297,15 @@ public final class SoulStore {
                     + " but current cursor epoch is " + cursor.epoch());
         }
 
-        long sequence = reconciledNextSequence(cursor, activeFile(key.botId(), key.playerId()));
+        long sequence = reconciledNextSequence(cursorKey, cursor, activeFile(key.botId(), key.playerId()));
         SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                 token.correlationId(), cursor.epoch(), sequence, kind, content, Instant.now(),
                 provider, model, elapsedMillis, code);
         appendRecord(activeFile(key.botId(), key.playerId()), record);
-
+        // Same ordering rationale as beginHeardTurn: advance the cache before the cursor persist
+        // can fail, so a persistCursor IOException never leaves the cache behind what's already
+        // durably on disk.
+        recordWrittenSequence(cursorKey, cursor.epoch(), sequence);
         persistCursor(state, cursorKey, new SoulTypes.ConversationCursor(cursor.epoch(), sequence + 1));
     }
 
@@ -315,6 +338,10 @@ public final class SoulStore {
         }
         if (healed) {
             persistCursor(state, cursorKey, cursor);
+            // The epoch just moved out from under whatever the sequence cache thought was
+            // current -- reconciledNextSequence's own epoch check would catch this too, but
+            // clearing it here makes the invalidation explicit rather than incidental.
+            sequenceCache.remove(cursorKey);
         }
         return cursor;
     }
@@ -328,21 +355,61 @@ public final class SoulStore {
 
     /**
      * Returns the next sequence to allocate for {@code cursor}, reconciled against whatever is
-     * actually on disk in {@code activeFile}.
+     * actually on disk in {@code activeFile} -- backed by an in-memory {@link SequenceCache} keyed
+     * by {@code cursorKey} so this is O(1) after the first call for a given conversation+epoch in
+     * this process, instead of re-scanning the whole transcript on every turn.
      *
      * <p>{@code beginHeardTurn}/{@code appendTurn} write the JSONL record and persist the
-     * advanced cursor as two separate steps. A crash between them leaves a record on disk at
-     * sequence N while {@code soul.json} still reports N as {@code nextSequence}; allocating
-     * straight from the persisted cursor would then reuse N for a second, different record.
-     * Scanning the transcript's actual max sequence for the cursor's epoch and taking
+     * advanced cursor as two separate steps. A crash-then-restart between them leaves a record on
+     * disk at sequence N while {@code soul.json} still reports N as {@code nextSequence};
+     * allocating straight from the persisted cursor would then reuse N for a second, different
+     * record. Scanning the transcript's actual max sequence for the cursor's epoch and taking
      * {@code max(cursor.nextSequence(), scannedMax + 1)} makes this correct regardless of which
-     * side of that gap a crash landed on, without needing to reorder the two writes.
+     * side of that gap a crash landed on -- but that scan only needs to happen once per process
+     * per conversation+epoch:
+     *
+     * <ul>
+     *   <li><b>Cold path</b> (no cache entry, or a cached entry from a different epoch): this is
+     *       either the first time this conversation has been touched since this {@link SoulStore}
+     *       was opened, or the epoch just changed underneath it ({@link #archiveAndReset} or a
+     *       healed interrupted reset in {@link #reconciledCursor}, both of which explicitly clear
+     *       the stale entry). Scans the transcript exactly as before, then seeds the cache from the
+     *       result so every subsequent call in this epoch is warm.
+     *   <li><b>Warm path</b> (cached entry for the same epoch): every sequence written for this
+     *       epoch so far in this process went through {@link #recordWrittenSequence}, all on this
+     *       store's single writer thread, so the cached high-water mark is already exactly what a
+     *       fresh scan would compute -- {@code max(cursor.nextSequence(), cached.maxSequence() + 1)}
+     *       without touching the filesystem at all. {@code beginHeardTurn}/{@code appendTurn} call
+     *       {@link #recordWrittenSequence} immediately after the JSONL append and <em>before</em>
+     *       {@link #persistCursor} -- deliberately reordered from the two-step description above --
+     *       so an ordinary same-process {@code persistCursor} failure (the executor survives; this
+     *       is not a crash) can never leave the cache behind a record that is already durably on
+     *       disk.
+     * </ul>
+     *
+     * <p>Advisory for this process only: nothing here is persisted, and a fresh {@link SoulStore}
+     * (e.g. after a real restart) always starts with an empty cache, so its first touch of any
+     * conversation takes the cold path -- identical to this method's pre-caching behavior.
      */
-    private long reconciledNextSequence(SoulTypes.ConversationCursor cursor, Path activeFile) throws IOException {
+    private long reconciledNextSequence(String cursorKey, SoulTypes.ConversationCursor cursor, Path activeFile)
+            throws IOException {
+        SequenceCache cached = sequenceCache.get(cursorKey);
+        if (cached != null && cached.epoch() == cursor.epoch()) {
+            return Math.max(cursor.nextSequence(), cached.maxSequence() + 1);
+        }
+        long scannedNext = scanNextSequenceFromDisk(cursorKey, cursor, activeFile);
+        sequenceCache.put(cursorKey, new SequenceCache(cursor.epoch(), scannedNext - 1));
+        return scannedNext;
+    }
+
+    /** The pre-caching scan: {@code max(cursor.nextSequence(), scannedMax + 1)} over {@code activeFile}. */
+    private long scanNextSequenceFromDisk(String cursorKey, SoulTypes.ConversationCursor cursor, Path activeFile)
+            throws IOException {
         if (!Files.exists(activeFile)) {
             return cursor.nextSequence();
         }
-        List<SoulTypes.ConversationRecord> records = loadTranscript(activeFile, SoulTypes.ConversationRecord.class);
+        List<SoulTypes.ConversationRecord> records =
+                loadTranscript(activeFile, SoulTypes.ConversationRecord.class, cursorKey);
         long maxSequenceForEpoch = -1L;
         for (SoulTypes.ConversationRecord record : records) {
             if (record.epoch() == cursor.epoch() && record.sequence() > maxSequenceForEpoch) {
@@ -350,6 +417,18 @@ public final class SoulStore {
             }
         }
         return Math.max(cursor.nextSequence(), maxSequenceForEpoch + 1);
+    }
+
+    /**
+     * Updates the warm-path high-water mark after a record has actually been appended at
+     * {@code sequence}. Callers must invoke this immediately after the JSONL append and
+     * <em>before</em> {@link #persistCursor} -- persisting the cursor can throw (an ordinary
+     * same-process I/O failure) even though the append it followed already succeeded, and the
+     * cache must reflect what is durably on disk regardless of whether that later persist
+     * completes.
+     */
+    private void recordWrittenSequence(String cursorKey, long epoch, long sequence) {
+        sequenceCache.put(cursorKey, new SequenceCache(epoch, sequence));
     }
 
     private void persistCursor(SoulTypes.SoulState state, String cursorKey, SoulTypes.ConversationCursor cursor)
@@ -360,15 +439,23 @@ public final class SoulStore {
                 state.schemaVersion(), state.botId(), state.profileId(), state.active(), updated));
     }
 
-    private static String cursorKey(SoulTypes.ConversationKey key) {
+    /**
+     * The single source of truth for the persistence cursor-key format used throughout the soul
+     * store ({@code soul.json}'s {@code conversations} map is keyed by this string). Package-private
+     * so {@link SoulRuntime} and {@link SoulMessageDelivery} can build the exact same key instead of
+     * hand-rolling {@code channel + ":" + playerId} themselves -- any drift between independently
+     * hand-built copies would silently break the epoch checks that key format backs.
+     */
+    static String cursorKey(SoulTypes.ConversationKey key) {
         return key.channel().name() + ":" + key.playerId();
     }
 
     // === Bounded history ===
 
     private List<SoulTypes.ConversationRecord> loadBounded(
-            Path file, long beforeSequenceExclusive, int maxTurns, int maxChars) throws IOException {
-        List<SoulTypes.ConversationRecord> all = loadTranscript(file, SoulTypes.ConversationRecord.class);
+            String cursorKey, Path file, long beforeSequenceExclusive, int maxTurns, int maxChars)
+            throws IOException {
+        List<SoulTypes.ConversationRecord> all = loadTranscript(file, SoulTypes.ConversationRecord.class, cursorKey);
 
         List<SoulTypes.ConversationRecord> filtered = new ArrayList<>();
         for (SoulTypes.ConversationRecord record : all) {
@@ -455,6 +542,18 @@ public final class SoulStore {
     // === JSONL load + corrupt-tail recovery ===
 
     private <T> List<T> loadTranscript(Path file, Class<T> type) throws IOException {
+        return loadTranscript(file, type, null);
+    }
+
+    /**
+     * Same as {@link #loadTranscript(Path, Class)}, but for a conversation transcript that has a
+     * sequence-cache entry: {@code cursorKeyForInvalidation} is passed through to
+     * {@link #quarantineCorruptTail} so a corrupt-tail rewrite of {@code file} also drops any
+     * cached {@link SequenceCache} entry for that conversation. Pass {@code null} (the two-arg
+     * overload does) for files with no such entry, e.g. {@code events.jsonl}.
+     */
+    private <T> List<T> loadTranscript(Path file, Class<T> type, String cursorKeyForInvalidation)
+            throws IOException {
         if (!Files.exists(file)) {
             return List.of();
         }
@@ -478,7 +577,7 @@ public final class SoulStore {
                 records.add(mapper.readValue(line, type));
             } catch (JsonProcessingException parseError) {
                 if (i == lastNonBlank) {
-                    quarantineCorruptTail(file, lines, i);
+                    quarantineCorruptTail(file, lines, i, cursorKeyForInvalidation);
                     return records;
                 }
                 throw new IOException(
@@ -488,7 +587,8 @@ public final class SoulStore {
         return records;
     }
 
-    private void quarantineCorruptTail(Path file, List<String> lines, int corruptIndex) throws IOException {
+    private void quarantineCorruptTail(Path file, List<String> lines, int corruptIndex,
+                                        String cursorKeyForInvalidation) throws IOException {
         String corruptLine = lines.get(corruptIndex);
         String timestamp = TIMESTAMP_FORMAT.format(Instant.now());
         Path corruptFile = file.resolveSibling(file.getFileName() + ".corrupt-tail-" + timestamp);
@@ -504,6 +604,16 @@ public final class SoulStore {
         Files.writeString(tmp, rebuilt.toString(), StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         atomicReplace(tmp, file);
+
+        // The rewritten file no longer has the corrupt line at all, so whatever the sequence
+        // cache held for this conversation is best discarded rather than trusted forward -- not
+        // because a corrupt (unparseable) tail could itself have skewed a prior max-sequence
+        // computation (it never parsed, so it was never counted), but so that guarantee doesn't
+        // stay the only thing protecting a cache entry across a file rewrite it wasn't consulted
+        // for.
+        if (cursorKeyForInvalidation != null) {
+            sequenceCache.remove(cursorKeyForInvalidation);
+        }
     }
 
     private void atomicReplace(Path tmp, Path target) throws IOException {

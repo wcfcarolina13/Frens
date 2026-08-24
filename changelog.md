@@ -2,6 +2,34 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Deduplicate cursor keys and cache sequence scans (2026-08-24)
+
+Two deferred follow-ups from prior soul-store reviews, batched together since both are pure
+internal cleanup with no behavior change: (1) the persistence cursor-key format
+(`channel.name() + ":" + playerId`) was hand-built independently in `SoulStore.cursorKey`,
+`SoulRuntime.status`, and `SoulMessageDelivery.ProductionDeliveryGuard.evaluateLive` — any drift
+between the three copies would have silently broken epoch checks. `SoulStore.cursorKey` is now
+the single package-private source of truth; the other two call it. (2)
+`SoulStore.reconciledNextSequence` re-parsed the entire `active.jsonl` transcript on every
+`beginHeardTurn`/`appendTurn` call (O(n) per turn, O(n²) over a conversation) to defend against a
+narrow crash window between a JSONL append and its cursor persist. Added an in-memory
+per-conversation `Map<String, SequenceCache>` (`SequenceCache(epoch, maxSequence)`) on the
+store's single-writer thread: the first touch of a conversation still scans and seeds the cache
+exactly as before; every subsequent append in the same epoch computes the next sequence as
+`max(cursor.nextSequence(), cached.maxSequence() + 1)` with zero file I/O. `archiveAndReset` and
+the interrupted-reset heal in `reconciledCursor` explicitly clear the cache entry on an epoch
+bump; a fresh `SoulStore` (real process restart) always starts with an empty cache, so its first
+touch re-scans identically to pre-change behavior. One existing crash-window test
+(`beginHeardTurnReconcilesSequenceAheadOfPersistedCursor`) simulated its crash by hand-writing
+directly into `active.jsonl` without ever closing the store — with the cache warm from the
+in-process store's own prior write, that in-process hand-write is no longer distinguishable from
+a real crash, so the test now closes and reopens the store before the hand-write, which is the
+faithful way to simulate a process restart under the new design and is exactly the "advisory,
+same-process-only" cache contract this change documents. Three new tests cover the cached path
+(many sequential turns stay strictly increasing/duplicate-free), the cold-path seed scan (a
+hand-appended record beyond the cursor on a never-touched conversation is still picked up), and
+cache invalidation on reset (sequence restarts at 0 in the new epoch).
+
 ## Notice shoulder pets and name species first (2026-08-23, mod_version 1.1.145)
 
 Round-4 field-test fix: the user's pet parrot, sitting in the same room, went completely

@@ -51,6 +51,10 @@ class SoulStoreTest {
                 .resolve(player.toString()).resolve("active.jsonl");
     }
 
+    private Path botDir(UUID bot) {
+        return worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+    }
+
     @Test
     void archivesResetEpochAndRejectsStaleSpeech() throws Exception {
         UUID bot = UUID.randomUUID();
@@ -326,10 +330,16 @@ class SoulStoreTest {
         store.beginHeardTurn(key, UUID.randomUUID(), "first", Instant.EPOCH).get(2, SECONDS);
         // soul.json cursor is now (epoch=0, nextSequence=1).
 
-        // Simulate a crash between the JSONL append and the cursor persist: a second record
-        // (sequence=1) lands in active.jsonl, but soul.json is never advanced past sequence=1 —
-        // exactly the state a process death right after the append, before the cursor write,
-        // would leave behind.
+        // Simulate a real crash-then-restart: close this store (dropping its in-memory sequence
+        // cache, same as a process death would) before hand-writing the "lost" second record
+        // directly into active.jsonl. A second record (sequence=1) lands on disk, but soul.json
+        // is never advanced past sequence=1 -- exactly the state a process death right after the
+        // append, before the cursor write, would leave behind. Reopening a fresh SoulStore against
+        // the same worldRoot (rather than reusing `store`, whose warm cache would otherwise trust
+        // its own in-memory high-water mark over this out-of-band write) is what makes the restart
+        // realistic: only a genuinely fresh store's first touch of this conversation is required to
+        // re-scan the transcript.
+        store.close();
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         SoulTypes.ConversationRecord crashedRecord = new SoulTypes.ConversationRecord(
                 UUID.randomUUID(), 0L, 1L, SoulTypes.TurnKind.HEARD, "second-crashed",
@@ -337,6 +347,7 @@ class SoulStoreTest {
         Files.writeString(activeFile(bot, player),
                 mapper.writeValueAsString(crashedRecord) + System.lineSeparator(),
                 StandardOpenOption.APPEND);
+        store = new SoulStore(worldRoot, Executors.newSingleThreadExecutor());
 
         SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "third", Instant.EPOCH)
                 .get(2, SECONDS);
@@ -375,5 +386,159 @@ class SoulStoreTest {
                 staleToken, "should be rejected", new SoulTypes.ProviderResult(
                         true, "should be rejected", null, "ollama", "test-model",
                         10L, null, null, null)).get(2, SECONDS));
+    }
+
+    // === Sequence-cache (O(1) reconciliation) ===
+
+    /**
+     * Functional check of the cached (warm) path: many sequential turns on the same store
+     * instance, mixing heard/spoken/failure appends, must still produce strictly increasing,
+     * duplicate-free sequence numbers -- exactly what the pre-caching full-file-scan guaranteed,
+     * now backed by the in-memory high-water mark instead of a re-scan on every turn.
+     */
+    @Test
+    void manySequentialTurnsOnSameStoreProduceStrictlyIncreasingSequencesWithNoDuplicates() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+
+        for (int i = 0; i < 25; i++) {
+            SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "heard-" + i, Instant.EPOCH)
+                    .get(2, SECONDS);
+            assertEquals(i * 2L, token.sequence(), "heard turn " + i + " landed at the wrong sequence");
+            if (i % 2 == 0) {
+                store.appendSpoken(token, "spoken-" + i, new SoulTypes.ProviderResult(
+                        true, "spoken-" + i, null, "ollama", "test-model", 5L, null, null, null))
+                        .get(2, SECONDS);
+            } else {
+                store.appendFailure(token, SoulTypes.FailureCode.TIMEOUT, "ollama", "test-model", 5L)
+                        .get(2, SECONDS);
+            }
+        }
+
+        List<SoulTypes.ConversationRecord> records = store.recent(key, 100, 1_000_000).get(2, SECONDS);
+        List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
+
+        assertEquals(50, sequences.size());
+        List<Long> expected = new ArrayList<>();
+        for (long i = 0; i < 50; i++) {
+            expected.add(i);
+        }
+        assertEquals(expected, sequences, "sequences must be strictly increasing with no duplicates");
+    }
+
+    /**
+     * Seed-scan check: a record hand-appended straight to {@code active.jsonl} before this
+     * conversation has ever been touched by the store (no {@code bindProfile}, no prior turn --
+     * so nothing is cached yet) must still be picked up on the very first {@code beginHeardTurn}
+     * call. This is the cold path the sequence cache falls back to on first touch.
+     */
+    @Test
+    void beginHeardTurnOnFreshStoreSeedsFromHandAppendedRecordBeyondCursor() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+
+        Path active = activeFile(bot, player);
+        Files.createDirectories(active.getParent());
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        SoulTypes.ConversationRecord preExisting = new SoulTypes.ConversationRecord(
+                UUID.randomUUID(), 0L, 5L, SoulTypes.TurnKind.HEARD, "pre-existing",
+                Instant.EPOCH, "", "", null, null);
+        Files.writeString(active, mapper.writeValueAsString(preExisting) + System.lineSeparator());
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "first-touch", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(6L, token.sequence(), "first touch must scan and skip the pre-existing sequence");
+
+        List<SoulTypes.ConversationRecord> records = store.recent(key, 10, 10_000).get(2, SECONDS);
+        List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
+        assertEquals(List.of(5L, 6L), sequences, "no duplicate sequence numbers on disk");
+    }
+
+    /**
+     * Cache-invalidation check: after {@code archiveAndReset} bumps the epoch, the next turn must
+     * start back at sequence 0 in the new epoch, not continue from whatever the pre-reset epoch's
+     * cached high-water mark held.
+     */
+    @Test
+    void archiveAndResetThenNewTurnRestartsSequenceAtZeroInNewEpoch() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "before-reset", Instant.EPOCH).get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "before-reset-2", Instant.EPOCH).get(2, SECONDS);
+
+        long newEpoch = store.archiveAndReset(key).get(2, SECONDS);
+        assertEquals(1L, newEpoch);
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "after-reset", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(1L, token.epoch());
+        assertEquals(0L, token.sequence(), "sequence must restart at 0 in the new epoch");
+    }
+
+    /**
+     * Regression test for the review finding that {@code recordWrittenSequence} originally ran
+     * AFTER {@code persistCursor}: if {@code appendRecord} succeeds but {@code persistCursor}
+     * then throws (an ordinary same-process I/O failure -- the executor survives and keeps
+     * serving later calls; this is not a crash/restart), the old ordering left neither the
+     * persisted cursor nor the in-memory cache advanced even though the JSONL record was already
+     * durably on disk, so the very next ordinary turn would recompute and write that same
+     * sequence a second time.
+     *
+     * <p>Induces a real, same-process {@code persistCursor} failure by making the bot's
+     * {@code soul.json} directory read-only: {@code loadState}'s read of the existing file still
+     * succeeds (removing write permission from a directory doesn't block reading a file already
+     * in it), and {@code appendRecord} still succeeds too (it writes into a sibling
+     * {@code conversations/<player>/} subdirectory whose own permissions are untouched) -- but
+     * {@code persistCursor}'s {@code saveState} must create a brand-new {@code soul.json.tmp-*}
+     * file directly inside the now-read-only directory, which fails.
+     */
+    @Test
+    void persistCursorFailureAfterSuccessfulAppendDoesNotProduceDuplicateSequenceOnNextTurn() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "first", Instant.EPOCH).get(2, SECONDS);
+        // soul.json cursor is now (epoch=0, nextSequence=1); the in-memory cache holds
+        // (epoch=0, maxSequence=0).
+
+        Path botDir = botDir(bot);
+        boolean madeReadOnly = botDir.toFile().setWritable(false);
+        assertTrue(madeReadOnly, "test setup: must be able to make the bot directory read-only");
+        try {
+            ExecutionException ex = assertThrows(ExecutionException.class,
+                    () -> store.beginHeardTurn(key, UUID.randomUUID(), "second", Instant.EPOCH).get(2, SECONDS),
+                    "persistCursor must actually fail for this test to exercise the bug it guards against");
+            assertTrue(ex.getCause() instanceof IOException,
+                    "the induced failure must be persistCursor's IOException, not some other error");
+        } finally {
+            assertTrue(botDir.toFile().setWritable(true), "test cleanup: must restore write permission");
+        }
+
+        // Despite the failed call above, its JSONL append already landed on disk at sequence=1.
+        List<SoulTypes.ConversationRecord> afterFailure = store.recent(key, 10, 10_000).get(2, SECONDS);
+        assertEquals(List.of(0L, 1L), afterFailure.stream().map(SoulTypes.ConversationRecord::sequence).toList(),
+                "the failed call's own append must still have landed on disk");
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "third", Instant.EPOCH)
+                .get(2, SECONDS);
+
+        assertEquals(2L, token.sequence(),
+                "the cache must have advanced past the record that landed during the failed call");
+
+        List<SoulTypes.ConversationRecord> records = store.recent(key, 10, 10_000).get(2, SECONDS);
+        List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
+        assertEquals(List.of(0L, 1L, 2L), sequences, "no duplicate sequence numbers on disk");
     }
 }
