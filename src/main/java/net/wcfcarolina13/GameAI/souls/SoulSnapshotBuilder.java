@@ -21,6 +21,8 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.LightType;
 import net.minecraft.world.poi.PointOfInterestTypes;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
@@ -247,7 +249,8 @@ public final class SoulSnapshotBuilder {
      * lodestone, beehives). Utility phrases are attached later by {@link SoulBlockKnowledge},
      * which is free to not know a detected block.
      */
-    private static List<SoulTypes.RawFacility> scanFacilities(ServerWorld world, BlockPos center) {
+    private static List<SoulTypes.RawFacility> scanFacilities(ServerWorld world, ServerPlayerEntity bot) {
+        BlockPos center = bot.getBlockPos();
         List<SoulTypes.RawFacility> found = new ArrayList<>();
         for (BlockPos pos : BlockPos.iterate(
                 center.add(-FACILITY_SCAN_RADIUS, -FACILITY_SCAN_HEIGHT, -FACILITY_SCAN_RADIUS),
@@ -256,13 +259,33 @@ public final class SoulSnapshotBuilder {
             if (state.isAir()) {
                 continue;
             }
-            if (state.hasBlockEntity() || PointOfInterestTypes.getTypeForState(state).isPresent()) {
-                found.add(new SoulTypes.RawFacility(
-                        Registries.BLOCK.getId(state.getBlock()).getPath(),
-                        state.getBlock().getName().getString()));
+            if (!state.hasBlockEntity() && PointOfInterestTypes.getTypeForState(state).isEmpty()) {
+                continue;
             }
+            // Honest perception: only count a facility the bot could actually see -- an
+            // unobstructed sight line from its eyes. Hidden rooms and buried chests must not
+            // leak into the prompt (field ruling 2026-08-24).
+            if (!hasLineOfSight(world, bot, pos)) {
+                continue;
+            }
+            found.add(new SoulTypes.RawFacility(
+                    Registries.BLOCK.getId(state.getBlock()).getPath(),
+                    state.getBlock().getName().getString(),
+                    pos.getX(), pos.getY(), pos.getZ()));
         }
         return found;
+    }
+
+    /** True when a block-collision raycast from the bot's eyes reaches {@code pos} itself. */
+    private static boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, BlockPos pos) {
+        Vec3d eye = bot.getEyePos();
+        Vec3d target = Vec3d.ofCenter(pos);
+        if (eye.squaredDistanceTo(target) <= 4.0D) {
+            return true; // adjacent blocks: the ray can clip its own start/target ambiguously
+        }
+        BlockHitResult hit = world.raycast(new RaycastContext(eye, target,
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
+        return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(pos);
     }
 
     /**
@@ -271,10 +294,12 @@ public final class SoulSnapshotBuilder {
      * Armor stands are excluded from the animal/entity scan as decoration; their contents are
      * situation-relevant anyway (field-tested gap, 2026-08-24).
      */
-    private static List<String> scanArmorStands(ServerWorld world, BlockPos center) {
+    private static List<String> scanArmorStands(ServerWorld world, ServerPlayerEntity bot) {
+        BlockPos center = bot.getBlockPos();
         List<String> lines = new ArrayList<>();
         Box box = new Box(center).expand(FACILITY_SCAN_RADIUS, FACILITY_SCAN_HEIGHT, FACILITY_SCAN_RADIUS);
-        for (ArmorStandEntity stand : world.getEntitiesByClass(ArmorStandEntity.class, box, e -> true)) {
+        for (ArmorStandEntity stand : world.getEntitiesByClass(ArmorStandEntity.class, box,
+                stand -> hasLineOfSight(world, bot, stand.getBlockPos()))) {
             List<String> displayed = new ArrayList<>();
             for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
                     EquipmentSlot.LEGS, EquipmentSlot.FEET,
@@ -442,7 +467,7 @@ public final class SoulSnapshotBuilder {
 
         List<SoulTypes.RawFacility> rawFacilities = List.of();
         try {
-            rawFacilities = scanFacilities((ServerWorld) bot.getEntityWorld(), bot.getBlockPos());
+            rawFacilities = scanFacilities((ServerWorld) bot.getEntityWorld(), bot);
         } catch (Throwable ignored) {
         }
 
@@ -457,7 +482,7 @@ public final class SoulSnapshotBuilder {
 
         List<String> rawArmorStands = List.of();
         try {
-            rawArmorStands = scanArmorStands((ServerWorld) bot.getEntityWorld(), bot.getBlockPos());
+            rawArmorStands = scanArmorStands((ServerWorld) bot.getEntityWorld(), bot);
         } catch (Throwable ignored) {
         }
 
@@ -726,8 +751,7 @@ public final class SoulSnapshotBuilder {
         return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
                 inputs.standingOn(), nearbyBlocks,
                 SoulBlockKnowledge.digestFacilities(inputs.rawFacilities()),
-                inputs.rawFacilities().stream().map(SoulTypes.RawFacility::idPath)
-                        .filter(id -> !id.isBlank()).distinct().collect(Collectors.toList()),
+                inputs.rawFacilities(),
                 inputs.armorStands().size() > MAX_ARMOR_STANDS
                         ? inputs.armorStands().subList(0, MAX_ARMOR_STANDS)
                         : inputs.armorStands(),

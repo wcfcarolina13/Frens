@@ -30,8 +30,27 @@ final class SoulKnowledgeRetriever {
             "blast_furnace", "blast furnace",
             "campfire", "campfire");
 
+    /** Everything the retriever may consult for one turn, as plain data. */
+    record RetrievalContext(Map<String, Integer> itemCounts, List<String> facilityIds,
+                            SoulTypes.KnowledgeMemory memory, String dimension,
+                            int botX, int botY, int botZ) {
+        RetrievalContext {
+            itemCounts = itemCounts == null ? Map.of() : Map.copyOf(itemCounts);
+            facilityIds = facilityIds == null ? List.of() : List.copyOf(facilityIds);
+            memory = memory == null ? SoulTypes.KnowledgeMemory.empty() : memory;
+            dimension = dimension == null ? "" : dimension;
+        }
+    }
+
+    /** Memory-less entry point (kept for callers/tests that predate the memory layers). */
     static List<String> retrieve(String message, Map<String, Integer> itemCounts,
                                  List<String> facilityIds, GameKnowledgeGraph.GraphData graph) {
+        return retrieve(message, new RetrievalContext(itemCounts, facilityIds,
+                SoulTypes.KnowledgeMemory.empty(), "", 0, 0, 0), graph);
+    }
+
+    static List<String> retrieve(String message, RetrievalContext context,
+                                 GameKnowledgeGraph.GraphData graph) {
         if (message == null || message.isBlank() || graph.nameIndex().isEmpty()) {
             return List.of();
         }
@@ -39,21 +58,65 @@ final class SoulKnowledgeRetriever {
         List<String> lines = new ArrayList<>();
         int total = 0;
         for (String topic : topics) {
-            Optional<String> line = describeTopic(topic, itemCounts, facilityIds, graph);
-            if (line.isEmpty()) {
-                continue;
+            List<String> topicLines = new ArrayList<>();
+            describeTopic(topic, context.itemCounts(), context.facilityIds(), graph)
+                    .ifPresent(topicLines::add);
+            rememberedPlaceLine(topic, context, graph).ifPresent(topicLines::add);
+            toldFactLine(topic, context).ifPresent(topicLines::add);
+            for (String line : topicLines) {
+                if (total + line.length() > MAX_KNOWLEDGE_CHARS) {
+                    return lines;
+                }
+                total += line.length();
+                lines.add(line);
             }
-            if (total + line.get().length() > MAX_KNOWLEDGE_CHARS) {
-                break;
-            }
-            total += line.get().length();
-            lines.add(line.get());
         }
         return lines;
     }
 
+    /**
+     * "You remember a <X> about N blocks <direction>." for the nearest same-dimension sighting —
+     * suppressed while the facility is currently in sight (the Facilities line covers it).
+     */
+    private static Optional<String> rememberedPlaceLine(String topic, RetrievalContext context,
+                                                        GameKnowledgeGraph.GraphData graph) {
+        if (context.facilityIds().contains(topic)) {
+            return Optional.empty();
+        }
+        return context.memory().places().stream()
+                .filter(place -> place.idPath().equals(topic))
+                .filter(place -> place.dimension().equals(context.dimension()))
+                .min(Comparator.comparingLong(place -> squaredDistance(place, context)))
+                .map(place -> {
+                    long distance = Math.round(Math.sqrt(squaredDistance(place, context)));
+                    String display = graph.displayNames().getOrDefault(topic, topic);
+                    String article = "aeiou".indexOf(Character.toLowerCase(display.charAt(0))) >= 0
+                            ? "an " : "a ";
+                    return "You remember " + article + display + " about " + distance + " blocks "
+                            + SoulSnapshotBuilder.cardinalDirection(
+                                    place.x() - context.botX(), place.z() - context.botZ())
+                            + ".";
+                });
+    }
+
+    private static Optional<String> toldFactLine(String topic, RetrievalContext context) {
+        List<SoulTypes.ToldFact> facts = context.memory().toldFacts().getOrDefault(topic, List.of());
+        if (facts.isEmpty()) {
+            return Optional.empty();
+        }
+        SoulTypes.ToldFact newest = facts.get(facts.size() - 1);
+        return Optional.of(newest.teller() + " told you: \"" + newest.message() + "\"");
+    }
+
+    private static long squaredDistance(SoulTypes.KnownPlace place, RetrievalContext context) {
+        long dx = place.x() - context.botX();
+        long dy = place.y() - context.botY();
+        long dz = place.z() - context.botZ();
+        return dx * dx + dy * dy + dz * dz;
+    }
+
     /** Longest-name-first, word-boundary matching with plural tolerance; overlapping spans lose. */
-    private static List<String> matchTopics(String lowerMessage, GameKnowledgeGraph.GraphData graph) {
+    static List<String> matchTopics(String lowerMessage, GameKnowledgeGraph.GraphData graph) {
         List<String> names = new ArrayList<>(graph.nameIndex().keySet());
         names.sort(Comparator.comparingInt(String::length).reversed());
         List<int[]> claimed = new ArrayList<>();
@@ -112,6 +175,10 @@ final class SoulKnowledgeRetriever {
             return Optional.of(sb.toString());
         }
 
+        if (facilityIds.contains(topic)) {
+            // Currently in sight: the Facilities prompt line already names it with its phrase.
+            return Optional.empty();
+        }
         List<String> parts = new ArrayList<>();
         int carried = itemCounts.getOrDefault(topic, 0);
         if (carried > 0) {
