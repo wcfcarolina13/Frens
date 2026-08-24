@@ -2,6 +2,39 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Whisper routing + leading-name quirk fix (2026-08-24)
+
+The two remaining addressing-surface items on the soul track.
+
+- **`/msg` / `/tell` / `/w` whispers now route to the soul pipeline.** The 1.1.140 boundary
+  ("whispers are plain vanilla, souls listen on chat only") is lifted: `createFakePlayer`
+  overrides `sendChatMessage(SentMessage, boolean, MessageType.Parameters)` — the exact method
+  vanilla `MessageCommand` calls per recipient (verified in the 1.21.11 named jar, along with
+  `MessageType.MSG_COMMAND_INCOMING`, `RegistryEntry.matchesKey`, `SentMessage.Chat.message()`,
+  `SignedMessage.getSender()/getSignedContent()`). An incoming whisper whose sender resolves to
+  a live non-bot player with non-blank content is handed to the existing exclusive
+  `SoulChatRouter.tryRoute` gate — same DIRECT conversation thread as a public `Jake ...` DM
+  (continuity preserved across surfaces), and no delivery changes needed since soul replies were
+  already sent privately to the asking player. Everything else (console/command-block
+  Profileless whispers, bot-to-bot, souls off, unbound profile) leaves the whisper purely
+  vanilla. The decision table is the pure, unit-tested `SoulChatRouter.isWhisperEligible`;
+  the override exits on the message-type check first since it also fires for every broadcast
+  chat line delivered to the bot. Routing logs `[souls] whisper bot= player= outcome=`.
+- **Leading-name quirk fixed; addressing rules extracted pure.** `Frens#resolveChatTargets`'s
+  token matching + prompt extraction moved to the new pure `ChatAddressing` resolver
+  (15 unit tests; `Frens` just maps the returned name index/broadcast flag onto live bots, and
+  its private `normalizeToken` moved along). Matching is byte-identical to before (normalize,
+  first broadcast keyword or bot name wins). Prompt extraction changes only for non-leading
+  matches: a leading name still sends the tail (`Jake come here` → `come here`, so every
+  existing command phrasing is untouched), but a name matched later now sends the **full
+  trimmed message with the name in place** instead of the tail. This fixes both observed
+  quirks: `Ping, Jake` previously produced an empty tail and never routed at all; a
+  mid-sentence `can you tell Jake to come home` routed only the garbled tail `to come home`.
+  The bot knows its own name, so full-sentence prompts stay meaningful for souls, quest
+  matching, and legacy LLM routing alike.
+
+Runbook surface-boundary section rewritten accordingly. Suite 374/374 (was 354); build green.
+
 ## Item frames/displays described; memory v3 disproof-on-revisit (2026-08-24)
 
 Two items: the proactive fix for the armor-stand look-alike suspect, and the next soul-track
