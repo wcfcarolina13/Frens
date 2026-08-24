@@ -143,8 +143,8 @@ public final class SoulPromptAssembler {
           .append('\n');
         sb.append("Home: ").append(bot.homeName()).append(", owner: ").append(bot.ownerName())
           .append(", recruited: ").append(bot.recruited())
-          .append(", permanently recruited: ").append(bot.permanentCompanion())
-          .append(", recruitment quest stage: ").append(bot.companionQuestStage())
+          .append(", permanent companion: ").append(bot.permanentCompanion())
+          .append(", companion quest stage: ").append(bot.companionQuestStage())
           .append('\n');
         bot.activeQuest().ifPresent(quest -> sb.append("Active quest: ").append(quest.id())
               .append(" (").append(quest.actionIndex()).append('/').append(quest.actionCount()).append(')')

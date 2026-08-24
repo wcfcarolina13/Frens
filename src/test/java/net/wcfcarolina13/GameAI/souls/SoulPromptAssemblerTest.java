@@ -124,8 +124,8 @@ class SoulPromptAssemblerTest {
                 List.of(), List.of(), "How are we doing?", Duration.ofSeconds(60));
         String state = authoritativeStateMessage(request); // helper: find the system msg containing "SITUATION"
         assertTrue(state.contains("SITUATION"));
-        assertTrue(state.indexOf("zombie") < state.indexOf("GUARD"));      // hazards before mode
-        assertTrue(state.indexOf("GUARD") < state.indexOf("companion"));   // mode before relationship
+        assertTrue(state.indexOf("zombie") < state.indexOf("GUARD"));           // hazards before mode
+        assertTrue(state.indexOf("GUARD") < state.indexOf("companion for"));    // mode before relationship
         assertTrue(state.contains("northeast"));
     }
 

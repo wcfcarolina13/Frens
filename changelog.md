@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Restore companion prompt wording (2026-08-23)
+
+Fix round on the SITUATION prompt rendering task: reverted the `appendBotState` wording change
+from the previous entry (`"permanently recruited"` / `"recruitment quest stage"` back to
+`"permanent companion"` / `"companion quest stage"`). Review caught that `recruited` and
+`permanentCompanion` are two distinct progression milestones (the companion questline turns
+"recruited" into "permanent companion"), so `"permanently recruited: true"` sitting right next to
+`"recruited: true"` read to the LLM as the same fact restated — a prompt-quality regression, not a
+neutral rename. The actual collision this was working around (the mandated ordering test's bare
+`indexOf("companion")` finding the earlier "permanent companion" text instead of the new
+Relationship line) is fixed on the test side instead: `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`
+now searches for `"companion for"` — the literal prefix of the Relationship line's own clause —
+which cannot collide with `appendBotState`'s wording. No production rendering logic changed beyond
+the revert.
+
 ## Render Jake's situation in prompts (2026-08-23)
 
 Third step of situational awareness: `SoulPromptAssembler.authoritativeState` now appends a
@@ -17,11 +32,7 @@ lower-priority line after it, so hazards/hostiles always win a fitting slot over
 or last-sleep label. Per the Task 2 review's controller ruling, the mount line renders only the
 raw current health (`"Mount: horse, saddled, health 11."`) — never a ratio/percentage against
 `MountSummary.maxHealth`, since that field silently defaults to health when the source has no real
-max. Incidentally reworded two `appendBotState` phrases (`"permanent companion"` →
-`"permanently recruited"`, `"companion quest stage"` → `"recruitment quest stage"`) because the
-literal substring `"companion"` appearing earlier in the bot-state text was shadowing the new
-Relationship line's `"companion for N days"` clause in an ordering assertion — no test depended on
-the old wording. Added `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`,
+max. Added `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`,
 `situationBlockIsCappedAt800CharsDroppingLowestPriorityFirst`,
 `emptySituationRendersNoSituationBlock`, and `remotePromptRendersSituationWithoutPlayerSurroundings`
 (REMOTE grounding still omits `playerBiomeSecret` with a populated situation present) to
