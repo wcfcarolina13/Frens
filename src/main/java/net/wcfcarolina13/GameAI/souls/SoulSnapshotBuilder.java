@@ -1,7 +1,13 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.BundleContentsComponent;
+import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.component.type.ItemEnchantmentsComponent;
+import net.minecraft.enchantment.Enchantment;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
@@ -52,9 +58,6 @@ import java.util.stream.Collectors;
  * plain unit tests without a running Minecraft server.
  */
 public final class SoulSnapshotBuilder {
-
-    /** Grounding never exposes more than this many resource-stack summaries to a soul prompt. */
-    static final int MAX_RESOURCE_SUMMARY = 6;
 
     private SoulSnapshotBuilder() {
     }
@@ -108,16 +111,32 @@ public final class SoulSnapshotBuilder {
         long timeOfDay = Math.floorMod(world.getTimeOfDay(), 24_000L);
         String weather = world.isThundering() ? "thundering" : (world.isRaining() ? "raining" : "clear");
 
+        // Main slots only: worn armor and the offhand are reported separately as wornGear, so the
+        // carried digest never double-counts an equipped piece.
         int occupiedSlots = 0;
-        Map<String, Integer> resourceCounts = new LinkedHashMap<>();
-        int inventorySlots = bot.getInventory().size();
-        for (int slot = 0; slot < inventorySlots; slot++) {
-            ItemStack stack = bot.getInventory().getStack(slot);
+        List<SoulTypes.ItemFacts> carried = new ArrayList<>();
+        List<ItemStack> mainStacks = bot.getInventory().getMainStacks();
+        int inventorySlots = mainStacks.size();
+        for (ItemStack stack : mainStacks) {
             if (stack.isEmpty()) {
                 continue;
             }
             occupiedSlots++;
-            resourceCounts.merge(stack.getName().getString(), stack.getCount(), Integer::sum);
+            carried.add(extractItemFacts(stack, 0));
+        }
+        SoulItemDescriber.InventoryDigest inventoryDigest = SoulItemDescriber.digest(carried);
+
+        List<String> wornGear = new ArrayList<>();
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+            ItemStack piece = bot.getEquippedStack(slot);
+            if (!piece.isEmpty()) {
+                wornGear.add(SoulItemDescriber.describe(extractItemFacts(piece, 0)));
+            }
+        }
+        ItemStack offhand = bot.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (!offhand.isEmpty()) {
+            wornGear.add(SoulItemDescriber.describe(extractItemFacts(offhand, 0)) + " (offhand)");
         }
 
         Optional<TaskService.ActiveTaskInfo> taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
@@ -160,7 +179,8 @@ public final class SoulSnapshotBuilder {
                 roundToEight(pos.getX()), roundToEight(pos.getY()), roundToEight(pos.getZ()), skyVisible,
                 timePhase(timeOfDay), weather, bot.getHealth(), bot.getMaxHealth(),
                 bot.getHungerManager().getFoodLevel(), bot.getArmor(), heldItemName(bot),
-                occupiedSlots, inventorySlots, topResourceSummary(resourceCounts),
+                occupiedSlots, inventorySlots, inventoryDigest.bulk(),
+                wornGear, inventoryDigest.notable(),
                 BotMoodManager.getMoodDescription(bot), behaviorMode, activeTask, taskState,
                 homeName, ownerName, recruited, companionQuestStage, permanentCompanion, activeQuest);
     }
@@ -177,7 +197,45 @@ public final class SoulSnapshotBuilder {
 
     private static String heldItemName(ServerPlayerEntity player) {
         ItemStack held = player.getMainHandStack();
-        return held.isEmpty() ? "bare hands" : held.getName().getString();
+        return held.isEmpty() ? "bare hands" : SoulItemDescriber.describe(extractItemFacts(held, 0));
+    }
+
+    /**
+     * Projects one live stack into plain {@link SoulTypes.ItemFacts}. Component reads are generic
+     * (custom name, enchantments, bundle/shulker contents, durability) so any item that carries
+     * them -- vanilla or modded -- is picked up without per-item casework. Container contents are
+     * extracted one level deep ({@code depth} guards against pathological nesting).
+     */
+    private static SoulTypes.ItemFacts extractItemFacts(ItemStack stack, int depth) {
+        String name = stack.getName().getString();
+        String typeName = stack.getItem().getName().getString();
+
+        List<String> enchantments = new ArrayList<>();
+        ItemEnchantmentsComponent enchants = stack.getOrDefault(
+                DataComponentTypes.ENCHANTMENTS, ItemEnchantmentsComponent.DEFAULT);
+        if (enchants != null && !enchants.isEmpty()) {
+            enchants.getEnchantmentEntries().forEach(entry ->
+                    enchantments.add(Enchantment.getName(entry.getKey(), entry.getIntValue()).getString()));
+        }
+
+        List<SoulTypes.ItemFacts> contents = new ArrayList<>();
+        if (depth < 1) {
+            BundleContentsComponent bundle = stack.get(DataComponentTypes.BUNDLE_CONTENTS);
+            if (bundle != null) {
+                bundle.iterate().forEach(inner -> contents.add(extractItemFacts(inner, depth + 1)));
+            }
+            ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+            if (container != null) {
+                container.streamNonEmpty().forEach(inner -> contents.add(extractItemFacts(inner, depth + 1)));
+            }
+        }
+
+        double wear = stack.isDamageable() && stack.getMaxDamage() > 0
+                ? stack.getDamage() / (double) stack.getMaxDamage()
+                : 0.0;
+
+        return new SoulTypes.ItemFacts(name, typeName, stack.getCount(), stack.getMaxCount(),
+                enchantments, contents, wear);
     }
 
     /**
@@ -612,12 +670,4 @@ public final class SoulSnapshotBuilder {
         return "dawn";
     }
 
-    /** Formats and caps a resource-count map to at most {@link #MAX_RESOURCE_SUMMARY} entries, highest count first. */
-    static List<String> topResourceSummary(Map<String, Integer> resourceCounts) {
-        return resourceCounts.entrySet().stream()
-                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-                .limit(MAX_RESOURCE_SUMMARY)
-                .map(entry -> entry.getValue() + "x " + entry.getKey())
-                .collect(Collectors.toList());
-    }
 }

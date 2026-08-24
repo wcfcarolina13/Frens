@@ -122,25 +122,6 @@ class SoulGroundingTest {
         assertEquals("dawn", SoulSnapshotBuilder.timePhase(23_999L));
     }
 
-    // --- Resource summary cap of six entries ---
-
-    @Test
-    void resourceSummaryCapsAtSixEntries() {
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        counts.put("oak_log", 64);
-        counts.put("iron_ingot", 12);
-        counts.put("cobblestone", 200);
-        counts.put("bread", 5);
-        counts.put("stick", 30);
-        counts.put("coal", 8);
-        counts.put("string", 3);
-
-        List<String> summary = SoulSnapshotBuilder.topResourceSummary(counts);
-
-        assertEquals(6, summary.size());
-        assertTrue(summary.get(0).contains("cobblestone"));
-    }
-
     // --- Pure situation-capture seam: SoulSnapshotBuilder.buildSituation(SituationInputs) ---
 
     private static SoulSnapshotBuilder.SituationInputs baseSituationInputs() {

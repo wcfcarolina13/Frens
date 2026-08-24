@@ -157,6 +157,29 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * Plain-data facts about one item stack, extracted from Minecraft types at capture time so
+     * every downstream consumer (describer, prompt assembler, tests) stays free of game classes.
+     * {@code name} is the display name (custom name when renamed), {@code typeName} the item
+     * type's own name; {@code contents} holds the facts of items inside a bundle/shulker;
+     * {@code wearFraction} is damage/maxDamage (0 when pristine or not damageable).
+     */
+    public record ItemFacts(String name, String typeName, int count, int maxCount,
+                            List<String> enchantments, List<ItemFacts> contents,
+                            double wearFraction) {
+        public ItemFacts {
+            name = name == null ? "" : name;
+            typeName = typeName == null ? "" : typeName;
+            enchantments = enchantments == null ? List.of() : List.copyOf(enchantments);
+            contents = contents == null ? List.of() : List.copyOf(contents);
+            wearFraction = Double.isFinite(wearFraction) ? Math.max(0.0, Math.min(1.0, wearFraction)) : 0.0;
+        }
+
+        public boolean customNamed() {
+            return !name.isEmpty() && !name.equals(typeName);
+        }
+    }
+
     public record QuestSnapshot(String id, String intent, int actionIndex,
                                  int actionCount, long expiresTick) {
         public QuestSnapshot {
@@ -169,11 +192,29 @@ public final class SoulTypes {
                                int coarseX, int coarseY, int coarseZ, boolean skyVisible,
                                String timePhase, String weather, float health, float maxHealth,
                                int hunger, int armor, String heldItem, int occupiedSlots,
-                               int inventorySlots, List<String> resourceSummary, String mood,
+                               int inventorySlots, List<String> resourceSummary,
+                               List<String> wornGear, List<String> notableItems, String mood,
                                String behaviorMode, String activeTask, String taskState,
                                String homeName, String ownerName, boolean recruited,
                                int companionQuestStage, boolean permanentCompanion,
                                Optional<QuestSnapshot> activeQuest) {
+        /** Pre-gear-awareness shape; defaults {@code wornGear}/{@code notableItems} to empty. */
+        public BotSnapshot(UUID botId, String name, String dimension, String biome,
+                           int coarseX, int coarseY, int coarseZ, boolean skyVisible,
+                           String timePhase, String weather, float health, float maxHealth,
+                           int hunger, int armor, String heldItem, int occupiedSlots,
+                           int inventorySlots, List<String> resourceSummary, String mood,
+                           String behaviorMode, String activeTask, String taskState,
+                           String homeName, String ownerName, boolean recruited,
+                           int companionQuestStage, boolean permanentCompanion,
+                           Optional<QuestSnapshot> activeQuest) {
+            this(botId, name, dimension, biome, coarseX, coarseY, coarseZ, skyVisible,
+                    timePhase, weather, health, maxHealth, hunger, armor, heldItem, occupiedSlots,
+                    inventorySlots, resourceSummary, List.of(), List.of(), mood,
+                    behaviorMode, activeTask, taskState, homeName, ownerName, recruited,
+                    companionQuestStage, permanentCompanion, activeQuest);
+        }
+
         public BotSnapshot {
             Objects.requireNonNull(botId, "botId");
             name = name == null ? "" : name;
@@ -183,6 +224,8 @@ public final class SoulTypes {
             weather = weather == null ? "" : weather;
             heldItem = heldItem == null ? "" : heldItem;
             resourceSummary = resourceSummary == null ? List.of() : List.copyOf(resourceSummary);
+            wornGear = wornGear == null ? List.of() : List.copyOf(wornGear);
+            notableItems = notableItems == null ? List.of() : List.copyOf(notableItems);
             mood = mood == null ? "" : mood;
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             activeTask = activeTask == null ? "" : activeTask;
