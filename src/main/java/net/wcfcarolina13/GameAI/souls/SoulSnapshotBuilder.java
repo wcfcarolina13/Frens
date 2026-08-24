@@ -1,22 +1,26 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import net.minecraft.entity.Entity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
+import net.wcfcarolina13.DangerZoneDetector.CliffDetector;
+import net.wcfcarolina13.DangerZoneDetector.LavaDetector;
+import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.EntityDetails;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
-import net.wcfcarolina13.GameAI.State;
 import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
 import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotQuestService;
+import net.wcfcarolina13.GameAI.services.BotStuckService;
 import net.wcfcarolina13.GameAI.services.HuntSessionService;
 import net.wcfcarolina13.GameAI.services.MountPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
@@ -113,7 +117,8 @@ public final class SoulSnapshotBuilder {
         Optional<TaskService.ActiveTaskInfo> taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
         String activeTask = taskInfo.map(TaskService.ActiveTaskInfo::name).orElse("");
         String taskState = taskInfo.map(info -> info.state().name()).orElse("");
-        String behaviorMode = BotEventHandler.isFollowingPlayer(bot) ? "following" : "idle";
+        BotEventHandler.Mode currentMode = BotEventHandler.getCurrentMode(bot);
+        String behaviorMode = currentMode != null ? currentMode.name() : "";
 
         String homeName = BotHomeService.getPreferredHomeBaseLabel(bot).orElse("");
 
@@ -187,21 +192,38 @@ public final class SoulSnapshotBuilder {
         boolean hasHeadroom = false;
         boolean hasEscapeRoute = false;
         try {
-            State state = BotEventHandler.createInitialState(bot);
-            dangerDistance = state.getDistanceToDangerZone();
-            enclosed = state.isEnclosed();
-            hasHeadroom = state.hasHeadroom();
-            hasEscapeRoute = state.hasEscapeRoute();
-            List<EntityDetails> nearby = state.getNearbyEntities();
-            if (nearby != null) {
-                List<RawEntity> collected = new ArrayList<>(nearby.size());
-                for (EntityDetails e : nearby) {
-                    collected.add(new RawEntity(e.getName(), e.isHostile(),
-                            e.getX() - bot.getX(), e.getY() - bot.getY(), e.getZ() - bot.getZ(),
-                            e.getDirectionToBot()));
-                }
-                entities = collected;
+            // Read enclosure/danger/entity state directly from its underlying sources instead of
+            // BotEventHandler.createInitialState(bot): that helper side-effects
+            // BotStuckService.setLastSafePosition and pays for several fields this capture
+            // discards (hotbar, armor, hunger, risk map, ...).
+            BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
+            enclosed = environmentSnapshot.enclosed();
+            hasHeadroom = environmentSnapshot.hasHeadroom();
+            hasEscapeRoute = environmentSnapshot.hasEscapeRoute();
+
+            // Lava/cliff distance separately rather than DangerZoneDetector.detectDangerZone's
+            // lavaDistance+cliffDistance sum (meaningless once both hazards are present); take the
+            // nearer of whichever hazard(s) are actually detected.
+            double lavaDistance = LavaDetector.detectNearestLava(bot, 10, 10);
+            double cliffDistance = CliffDetector.detectCliffWithBoundingBox(bot, 5, 5);
+            boolean lavaPresent = lavaDistance > 0.0D && lavaDistance != Double.MAX_VALUE;
+            boolean cliffPresent = cliffDistance > 0.0D && cliffDistance != Double.MAX_VALUE;
+            if (lavaPresent && cliffPresent) {
+                dangerDistance = Math.min(lavaDistance, cliffDistance);
+            } else if (lavaPresent) {
+                dangerDistance = lavaDistance;
+            } else if (cliffPresent) {
+                dangerDistance = cliffDistance;
             }
+
+            List<Entity> nearby = AutoFaceEntity.detectNearbyEntities(bot, 10);
+            List<RawEntity> collected = new ArrayList<>(nearby.size());
+            for (Entity e : nearby) {
+                EntityDetails details = EntityDetails.from(bot, e);
+                collected.add(new RawEntity(details.getName(), details.isHostile(),
+                        details.getX() - bot.getX(), details.getY() - bot.getY(), details.getZ() - bot.getZ()));
+            }
+            entities = collected;
         } catch (Throwable ignored) {
             // Danger/entity/enclosure state is best-effort context, never load-bearing for capture.
         }
@@ -335,10 +357,9 @@ public final class SoulSnapshotBuilder {
     }
 
     /** Plain values pulled from live entity/EntityDetails state for one nearby entity. No Minecraft types. */
-    record RawEntity(String name, boolean hostile, double dx, double dy, double dz, String direction) {
+    record RawEntity(String name, boolean hostile, double dx, double dy, double dz) {
         RawEntity {
             name = name == null ? "" : name;
-            direction = direction == null ? "" : direction;
         }
     }
 
@@ -384,7 +405,7 @@ public final class SoulSnapshotBuilder {
 
         List<SoulTypes.HostileSighting> hostiles = inputs.entities().stream()
                 .filter(RawEntity::hostile)
-                .map(e -> new SoulTypes.HostileSighting(e.name(), e.direction(),
+                .map(e -> new SoulTypes.HostileSighting(e.name(), cardinalDirection(e.dx(), e.dz()),
                         (int) Math.round(Math.sqrt(e.dx() * e.dx() + e.dy() * e.dy() + e.dz() * e.dz()))))
                 .sorted(Comparator.comparingInt(SoulTypes.HostileSighting::distanceBlocks))
                 .limit(5)

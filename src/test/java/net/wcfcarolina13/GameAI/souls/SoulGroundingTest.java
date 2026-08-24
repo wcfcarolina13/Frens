@@ -155,13 +155,13 @@ class SoulGroundingTest {
     @Test
     void hostilesAreSortedNearestFirstAndCappedAtFive() {
         List<SoulSnapshotBuilder.RawEntity> entities = new ArrayList<>();
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie1", true, 10.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie2", true, 3.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie3", true, 7.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie4", true, 1.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie5", true, 20.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie6", true, 15.0D, 0.0D, 0.0D, "front"));
-        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie7", true, 5.0D, 0.0D, 0.0D, "front"));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie1", true, 10.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie2", true, 3.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie3", true, 7.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie4", true, 1.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie5", true, 20.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie6", true, 15.0D, 0.0D, 0.0D));
+        entities.add(new SoulSnapshotBuilder.RawEntity("Zombie7", true, 5.0D, 0.0D, 0.0D));
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
                 -1.0D, entities, false, false, false,
@@ -186,8 +186,8 @@ class SoulGroundingTest {
     @Test
     void nonHostileEntitiesAreExcludedFromHostileSightings() {
         List<SoulSnapshotBuilder.RawEntity> entities = List.of(
-                new SoulSnapshotBuilder.RawEntity("Cow", false, 2.0D, 0.0D, 0.0D, "front"),
-                new SoulSnapshotBuilder.RawEntity("Zombie", true, 4.0D, 0.0D, 0.0D, "left"));
+                new SoulSnapshotBuilder.RawEntity("Cow", false, 2.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("Zombie", true, 4.0D, 0.0D, 0.0D));
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
                 -1.0D, entities, false, false, false,
@@ -200,6 +200,28 @@ class SoulGroundingTest {
 
         assertEquals(1, situation.hostiles().size());
         assertEquals("Zombie", situation.hostiles().get(0).name());
+    }
+
+    @Test
+    void hostileDirectionIsWorldCompassBearingFromDxDz() {
+        // dx=5, dz=-5 is the compass northeast quadrant (dz negative is north, dx positive is
+        // east) — must match cardinalDirection(dx, dz)'s own convention, not a bot-relative
+        // front/left/behind/right bearing.
+        List<SoulSnapshotBuilder.RawEntity> entities = List.of(
+                new SoulSnapshotBuilder.RawEntity("Zombie", true, 5.0D, 0.0D, -5.0D));
+
+        SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
+                -1.0D, entities, false, false, false,
+                "IDLE", false, false, 0,
+                false, false, false, false,
+                0L, -1, 0L,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+
+        SoulTypes.SituationSnapshot situation = SoulSnapshotBuilder.buildSituation(inputs);
+
+        assertEquals(1, situation.hostiles().size());
+        assertEquals("northeast", situation.hostiles().get(0).direction());
+        assertEquals(SoulSnapshotBuilder.cardinalDirection(5.0D, -5.0D), situation.hostiles().get(0).direction());
     }
 
     @Test

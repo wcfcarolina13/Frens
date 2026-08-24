@@ -57,9 +57,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Mixed-thread contract: task hooks ({@link #onTaskStarted}/{@link #onTaskPaused}/
  * {@link #onTaskFinished}) arrive from whatever thread the skill or command dispatch runs on
  * (often a skill worker thread), while tick/damage/death/respawn hooks always arrive on the
- * server thread. All per-bot session maps are {@link ConcurrentHashMap}s, and
- * {@code TaskService}'s single-active-slot-per-bot invariant means at most one task hook fires
- * for a given bot at a time — so no additional synchronization is needed here.
+ * server thread. {@link #onHobbySession} and {@link #onSelfRescue} are UUID-only for the same
+ * reason as the task hooks — {@code BotIdleHobbiesService} and {@code BotFleeService.ensureAtSurface}
+ * both run their callers on worker threads, so those two hooks never read live entity/world state
+ * (dimension, biome, tick) and record empty/zero placeholders instead. All per-bot session maps
+ * are {@link ConcurrentHashMap}s, and {@code TaskService}'s single-active-slot-per-bot invariant
+ * means at most one task hook fires for a given bot at a time — so no additional synchronization
+ * is needed here.
  */
 public final class SoulEventObserver {
 
@@ -271,32 +275,49 @@ public final class SoulEventObserver {
                 sanitizeReasonCategory(ticket.cancelReason()), worldTickOf(ticket));
     }
 
-    /** Forwards a bot-witnessed kill (self-witnessed; the mob it just finished off). */
-    public static void onMobKilled(ServerPlayerEntity bot, String mobType) {
+    /**
+     * Forwards a bot-witnessed kill (self-witnessed; the mob it just finished off).
+     *
+     * <p>Gated before any live-world read, including the mob-type derivation itself: the caller
+     * passes the raw {@code killed} entity so the display-name/registry-path lookup only happens
+     * once souls are actually enabled. Also suppressed while a {@code HuntSessionService} session
+     * is active for this bot — {@link #onHuntProgress} already reports hunt kills at milestones,
+     * so double-journaling every individual kill here would flood the event window.
+     */
+    public static void onMobKilled(ServerPlayerEntity bot, Entity killed) {
         SoulEventObserver observer = PRODUCTION.get();
-        if (observer == null || bot == null) {
+        if (observer == null || bot == null || killed == null) {
             return;
         }
-        // Gate BEFORE any live-world read (dimension/biome), matching every other production hook
-        // in this file.
+        // Gate BEFORE any live-world read (dimension/biome) or the mob-type lookup, matching every
+        // other production hook in this file.
         SoulRuntime runtime = SoulRuntime.current().orElse(null);
         if (runtime == null || !runtime.isMasterEnabled()) {
             return;
         }
+        if (net.wcfcarolina13.GameAI.services.HuntSessionService.getSession(bot.getUuid()) != null) {
+            return;
+        }
+        String mobType = EntityType.getId(killed.getType()).getPath();
         observer.noteMobKilled(bot.getUuid(), dimensionOf(bot), biomeOf(bot), mobType, worldTickOf(bot));
     }
 
-    /** Forwards a bot pulling itself out of a hazard (powder snow, drowning, fire, etc.). */
-    public static void onSelfRescue(ServerPlayerEntity bot, String kind) {
+    /**
+     * Forwards a bot pulling itself out of a hazard (powder snow, drowning, fire, surface recovery,
+     * etc.). UUID-only, matching {@link #onHobbySession}: callers such as
+     * {@code BotFleeService.ensureAtSurface} run on worker threads, so this hook must never read
+     * live entity/world state (dimension, biome, tick) off-thread.
+     */
+    public static void onSelfRescue(UUID botId, String kind) {
         SoulEventObserver observer = PRODUCTION.get();
-        if (observer == null || bot == null) {
+        if (observer == null || botId == null) {
             return;
         }
         SoulRuntime runtime = SoulRuntime.current().orElse(null);
         if (runtime == null || !runtime.isMasterEnabled()) {
             return;
         }
-        observer.noteSelfRescue(bot.getUuid(), dimensionOf(bot), biomeOf(bot), kind, worldTickOf(bot));
+        observer.noteSelfRescue(botId, "", "", kind, 0L);
     }
 
     /** Forwards a completed idle-hobby session (fishing, wandering, etc.). UUID-only: no entity is guaranteed live by call time, so dimension/biome/tick are omitted. */

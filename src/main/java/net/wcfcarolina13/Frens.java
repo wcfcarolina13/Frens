@@ -1110,7 +1110,7 @@ public class Frens implements ModInitializer {
                 if (attacker instanceof ServerPlayerEntity killer2 && BotEventHandler.isRegisteredBot(killer2)) {
                     net.minecraft.util.math.Vec3d killPos = new net.minecraft.util.math.Vec3d(dead.getX(), dead.getY(), dead.getZ());
                     net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteKillPosition(killer2.getUuid(), killPos);
-                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onMobKilled(killer2, dead.getType().getName().getString());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onMobKilled(killer2, dead);
                     if (dead instanceof net.minecraft.entity.mob.HostileEntity) {
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onKill(killer2, dead);
                     }

@@ -2,6 +2,57 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Correct situational grounding fidelity (2026-08-23)
+
+Final whole-branch review fix wave on the soul situational-awareness branch (post `71f2205`).
+Two critical fixes and seven important fixes, all re-verified against 259 pre-existing tests plus
+new/updated coverage:
+
+- **SELF_RESCUE false positives (critical).** The hook moved off the `ensureAtSurface`/
+  `ensureAtSurfaceForHobby` wrappers (which fired on `recovered == true`, including the
+  already-at-surface no-op) and into the private `ensureAtSurface(bot, world, skipLingerCheck)`
+  itself, placed only at the seven `return true` sites that follow an actual recovery action
+  (dry-land move, nearby-staging move, pillar recovery ×3, step-building, post-ascent) —
+  `BotFleeService.java`. The already-at-surface early return (`logOperationalSurfaceState(...
+  "ensureAtSurface:current")`) stays unhooked.
+- **Hostile direction was bot-relative, not compass (critical).** `SoulSnapshotBuilder` dropped
+  `EntityDetails.getDirectionToBot()` (a broken front/right/behind/left bearing) from `RawEntity`
+  entirely and now derives hostile direction from the existing `cardinalDirection(dx, dz)` compass
+  helper — the same one `PlayerSnapshot` already used — so "zombie 5 blocks northeast" means what
+  it says.
+- **`onSelfRescue` made UUID-only.** `ensureAtSurface` runs on worker threads; the hook signature
+  changed to `onSelfRescue(UUID botId, String kind)` (empty dimension/biome, tick 0), matching
+  `onHobbySession`'s existing worker-thread contract. `SoulEventObserver`'s class Javadoc now
+  documents this.
+- **Death-hook vocabulary and gate ordering.** `onMobKilled` now takes the raw `Entity` and derives
+  `EntityType.getId(...).getPath()` (registry path, e.g. `zombie`) after the master-switch gate,
+  instead of `Frens.java` pre-computing a localized display name before the gate.
+- **Capture no longer mutates stuck-state or over-scans.** `SoulSnapshotBuilder.captureSituation`
+  reads `BotStuckService.analyzeEnvironment`, `LavaDetector`/`CliffDetector` directly, and
+  `AutoFaceEntity.detectNearbyEntities` instead of `BotEventHandler.createInitialState`, which
+  side-effected `BotStuckService.setLastSafePosition` and computed ~10k blocks of fields this
+  capture immediately discarded.
+- **One behavior-mode source of truth.** `BotSnapshot.behaviorMode` now comes from
+  `BotEventHandler.getCurrentMode(bot).name()`, same as the SITUATION block's `Mode:` line, instead
+  of a separate `following`/`idle` guess.
+- **Hobby name uses the in-scope skill, not a stale map read.** `onHobbySession` calls at the cook
+  branch and the generic completion path now pass `"cook"`/`skillToRun` directly; the two
+  ambient-woodcut fallback starts that previously skipped `LAST_HOBBY.put` now record it, mirroring
+  the primary decision loop.
+- **Hazard distance is a real minimum, not a meaningless sum.** Capture now calls
+  `LavaDetector.detectNearestLava` and `CliffDetector.detectCliffWithBoundingBox` separately and
+  takes the nearer of whichever hazard(s) are actually present, instead of
+  `DangerZoneDetector.detectDangerZone`'s `lavaDistance + cliffDistance`.
+- **Event-volume flooding.** `HUNT_PROGRESS` now fires only at the first kill and at goal-reached,
+  using `candidate.target.label()` for the target name; `MOB_KILLED` is suppressed while a
+  `HuntSessionService` session is active for the killer, since `HUNT_PROGRESS` already covers hunt
+  kills at milestones.
+
+Added a SELF_RESCUE manual case (negative: hobby/hunt while already safe → no record; positive:
+genuine trapped-underground recovery → exactly one record) to
+`docs/testing/SOUL_COMMUNICATION_PILOT.md`. `./gradlew test` and `./gradlew build -x test` both
+green.
+
 ## Document situational awareness acceptance (2026-08-23)
 
 Task 6, closing out the soul situational-awareness branch. Jake's DM replies now ground on a
@@ -48,9 +99,15 @@ entirely... a missing event is honest, a false one is not"), removed the
 inventing a per-dispatch-type re-check (explicitly out of scope — no refactor of the
 four dispatch methods' signatures this round). `onSelfRescue(bot, "surface-recovery")`
 (the two `ensureAtSurface`/`ensureAtSurfaceForHobby` wrapper hooks, unaffected by this
-finding, boolean-return-gated, still success-only) remains the sole self-rescue signal
-for this release; "break-free" as a `kind` value is defined on `SoulEventObserver` but
-currently has no production emitter.
+finding) remains the sole self-rescue signal for this release; "break-free" as a `kind`
+value is defined on `SoulEventObserver` but currently has no production emitter.
+**Correction (2026-08-23, later fix wave below):** describing those two wrapper hooks as
+"success-only" was itself wrong — `boolean recovered` being `true` also covers the
+already-at-surface early return inside the private `ensureAtSurface(bot, world,
+skipLingerCheck)` (no recovery action taken, just a truthy status check), so the wrappers
+fired on every no-op call, not only on genuine recoveries. Fixed by moving the hook off
+the two wrappers entirely and into the private method's real-recovery `return true` sites
+only — see "Correct situational grounding fidelity" below.
 
 **Finding 2 — cook hobby never journaled.** `BotIdleHobbiesService.java`'s special-cased
 `cook` branch (`:1003-1034`) runs `SmeltingService.cookAllFoodSync` directly and never

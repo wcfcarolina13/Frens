@@ -408,6 +408,19 @@ pre-warmed-model note as above.
   Expected: a `HOBBY_SESSION` event (salience LOW, fact `hobby=<name>`, e.g. `fishing` or `cook`)
   is journaled and the SITUATION block's `Last hobby: <name>.` logistics line reflects it; Jake's
   answer mentions the hobby.
+- [ ] **SELF_RESCUE journals only on an actual recovery, never on an already-safe check**
+  Setup (negative case): with Jake standing somewhere already open-sky/operational (not stuck),
+  run a hobby or a hunt that calls `BotFleeService.ensureAtSurface`/`ensureAtSurfaceForHobby` as
+  part of its normal pre-check. Expected: `events.jsonl` gains **no** `SELF_RESCUE` record for
+  that run — `ensureAtSurface`'s already-at-surface early return
+  (`logOperationalSurfaceState(... "ensureAtSurface:current")`) does not journal, since nothing
+  was actually recovered.
+  Setup (positive case): bury/trap Jake underground (or otherwise put him somewhere
+  `ensureAtSurface` must actually pillar/step-build/walk him out of) so the survival ladder
+  genuinely fires, then let a hobby or hunt trigger the surface-recovery call. Expected: exactly
+  one `SELF_RESCUE` event (salience HIGH, fact `kind=surface-recovery`) is journaled for that
+  recovery — one record per real recovery, not one per call, and not one for every check that
+  finds him already fine.
 - [ ] **Feature-off baseline still holds (re-run)**
   Re-run **Baseline (feature disabled) → "Souls disabled, including existing scripted chat and
   commands"** above in full, including its disk assertion (`<world>/frens/` must not exist after
