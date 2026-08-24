@@ -392,9 +392,20 @@ public final class SoulSnapshotBuilder {
             }
         }
         if (!allStands.isEmpty()) {
+            // Include look-alike entity counts: modern decor mods and datapacks dress rooms
+            // with item/block DisplayEntities or item frames that read as "armor stands with
+            // gear" to a player while the real ArmorStandEntity nearby is bare. Verified in
+            // 1.21.11 source: ArmorStandEntity extends LivingEntity and its equip() writes the
+            // same EntityEquipment that getEquippedStack reads, so vanilla-geared stands DO
+            // report their gear -- a geared-looking stand logging slots=0 means the gear
+            // belongs to one of these other entity kinds.
+            int displays = world.getEntitiesByClass(
+                    net.minecraft.entity.decoration.DisplayEntity.class, box, e -> true).size();
+            int frames = world.getEntitiesByClass(
+                    net.minecraft.entity.decoration.ItemFrameEntity.class, box, e -> true).size();
             org.slf4j.LoggerFactory.getLogger("frens-souls").info(
-                    "[souls] armorstands inBox={} visible={} described={}",
-                    allStands.size(), visibleStands.size(), lines.size());
+                    "[souls] armorstands inBox={} visible={} described={} displayEntities={} itemFrames={}",
+                    allStands.size(), visibleStands.size(), lines.size(), displays, frames);
         }
         return lines;
     }
