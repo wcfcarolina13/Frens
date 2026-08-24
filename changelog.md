@@ -2,6 +2,39 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Give souls dynamic awareness of gear and notable inventory (2026-08-24)
+
+Field feedback from the 1.1.145 sessions: Jake couldn't talk about what he was carrying beyond a
+count-sorted resource list — a bundle showed as "1x Bundle" with no color or contents, a single
+bed always lost the count sort to bulk blocks, and worn armor was only the numeric armor-bar
+value. Rather than hardcoding item categories, the fix is component-driven and allowlist-free:
+
+- **`SoulTypes.ItemFacts`** — plain-data facts for one stack (display name, type name, count,
+  max stack size, enchantment display strings, contents of bundles/shulkers one level deep,
+  wear fraction), extracted from Minecraft types only at capture time so all downstream logic
+  stays unit-testable without game classes.
+- **`SoulItemDescriber`** (new, pure) — `describe()` renders any facts into a short fragment:
+  `"Fang" (Iron Sword)`, `Iron Pickaxe (Efficiency III, badly worn)`, `Red Bundle holding
+  32x Torch, 5x Bread` (bundle color is free — it's part of the display name). `digest()`
+  partitions the inventory by salience with no per-item allowlist: items carrying data
+  components (custom name > enchantments > non-empty container) rank highest, then anything
+  inherently scarce by max stack size (1, then ≤16 — beds, buckets, pearls, boats), and plain
+  bulk ranks by count. Top 6 salient items become `notableItems`; the rest merge by name into
+  the count-sorted 6-entry bulk list (superseding `topResourceSummary`). Anything vanilla or
+  modded that carries components is picked up with zero new code — that's the dynamic part.
+- **`SoulSnapshotBuilder`** — captures the four armor slots + offhand via
+  `getEquippedStack` through the same describer into `wornGear`; scopes the carried digest to
+  the 36 main slots (`getMainStacks()`) so an equipped piece is never double-counted as carried;
+  held item is now describer-rendered, so its enchantments/wear surface too. Component APIs
+  (`BUNDLE_CONTENTS.iterate()`, `CONTAINER.streamNonEmpty()`, `ItemEnchantmentsComponent`
+  entries + static `Enchantment.getName`) match the patterns already proven in BundleService/
+  ArtifactScanner/BotActions on 1.21.11.
+- **`SoulPromptAssembler`** — state block gains `Wearing: ...` (or `Wearing: nothing`) and a
+  `Carrying: ...` line for notable items, kept prose-shaped per the 8B-attention field lessons.
+
+TDD throughout: 16 new SoulItemDescriberTest cases + 2 prompt-assembly cases; the old
+`resourceSummaryCapsAtSixEntries` test retired with its method. Full suite + `build` green.
+
 ## Deduplicate cursor keys and cache sequence scans (2026-08-24)
 
 Two deferred follow-ups from prior soul-store reviews, batched together since both are pure
