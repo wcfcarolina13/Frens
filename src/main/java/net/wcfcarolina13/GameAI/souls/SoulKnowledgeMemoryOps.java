@@ -85,7 +85,21 @@ final class SoulKnowledgeMemoryOps {
         return !INTERROGATIVE_STARTS.contains(firstWord);
     }
 
-    private static String positionKey(SoulTypes.KnownPlace place) {
+    static String positionKey(SoulTypes.KnownPlace place) {
         return place.dimension() + ':' + place.x() + ':' + place.y() + ':' + place.z();
+    }
+
+    /** Disproof-on-revisit: drops remembered places whose position keys were verified stale. */
+    static SoulTypes.KnowledgeMemory removePlaces(SoulTypes.KnowledgeMemory memory,
+                                                  java.util.Set<String> positionKeys) {
+        if (positionKeys.isEmpty()) {
+            return memory;
+        }
+        List<SoulTypes.KnownPlace> kept = memory.places().stream()
+                .filter(place -> !positionKeys.contains(positionKey(place)))
+                .toList();
+        return kept.size() == memory.places().size()
+                ? memory
+                : new SoulTypes.KnowledgeMemory(kept, memory.toldFacts());
     }
 }

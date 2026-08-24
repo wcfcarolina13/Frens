@@ -55,6 +55,17 @@ final class SoulItemDescriber {
         return Math.min(item.count() / 16, 10);
     }
 
+    /** "Clock, 2x Map" — merges repeated display names with counts, first-seen order. */
+    static String groupCounts(List<String> names) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (String name : names) {
+            counts.merge(name, 1, Integer::sum);
+        }
+        return counts.entrySet().stream()
+                .map(e -> e.getValue() == 1 ? e.getKey() : e.getValue() + "x " + e.getKey())
+                .collect(Collectors.joining(", "));
+    }
+
     static InventoryDigest digest(List<SoulTypes.ItemFacts> items) {
         List<SoulTypes.ItemFacts> notable = new ArrayList<>();
         Map<String, Integer> bulkCounts = new LinkedHashMap<>();

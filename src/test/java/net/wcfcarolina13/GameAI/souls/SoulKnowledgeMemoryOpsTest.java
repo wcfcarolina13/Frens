@@ -59,4 +59,17 @@ class SoulKnowledgeMemoryOpsTest {
         assertEquals(false, SoulKnowledgeMemoryOps.isStatement("where is the barrel"));
         assertEquals(false, SoulKnowledgeMemoryOps.isStatement("   "));
     }
+
+    @Test
+    void removePlacesByPositionKeyDropsOnlyMatches() {
+        SoulTypes.KnowledgeMemory memory = SoulKnowledgeMemoryOps.mergeSightings(
+                SoulTypes.KnowledgeMemory.empty(),
+                java.util.List.of(place("chest", 10, 1000L), place("furnace", 20, 1000L)));
+
+        SoulTypes.KnowledgeMemory pruned = SoulKnowledgeMemoryOps.removePlaces(memory,
+                java.util.Set.of(SoulKnowledgeMemoryOps.positionKey(place("chest", 10, 999L))));
+
+        assertEquals(1, pruned.places().size());
+        assertEquals("furnace", pruned.places().get(0).idPath());
+    }
 }
