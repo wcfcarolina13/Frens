@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Cross-mod soul load probe for LoadGoverner (2026-08-24)
+
+Frens half of the LoadGoverner rework (separate repo, `~/pontus/LoadGoverner`, reworked same
+session per `docs/AUDIT-2026-08-23.md`): a stable static probe
+`SoulRuntime.activeGenerations()` — soul generation calls currently queued or active, 0 when the
+runtime is off — backed by new `SoulGenerationScheduler.inFlightCount()` (queued + active under
+the scheduler lock). LoadGoverner 0.2.0 reflects that exact signature
+(`integrations/FrensSoulProbe`, no compile dependency either way) and holds a transient stage-2
+floor while the count is positive, so the game sheds load *before* the LLM contends for the GPU
+instead of reacting after ticks spike. Do not rename the method without updating the probe.
+Suite 376/376.
+
 ## Whisper routing + leading-name quirk fix (2026-08-24)
 
 The two remaining addressing-surface items on the soul track.
