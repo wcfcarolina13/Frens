@@ -1,6 +1,8 @@
 package net.wcfcarolina13.GameAI.souls;
 
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -227,6 +229,14 @@ public final class SoulSnapshotBuilder {
             List<Entity> nearby = AutoFaceEntity.detectNearbyEntities(bot, 16);
             List<RawEntity> collected = new ArrayList<>(nearby.size());
             for (Entity e : nearby) {
+                // detectNearbyEntities applies no entity-type filter (see its own Javadoc/callers
+                // in AutoFaceEntity) -- without this guard, dropped item stacks, arrows, and boats
+                // show up as fabricated "Animals nearby: Oak Planks x3" entries. Only living,
+                // non-decorative entities belong in the situation snapshot; armor stands are
+                // LivingEntity in vanilla but are decoration, not creatures.
+                if (!(e instanceof LivingEntity) || e instanceof ArmorStandEntity) {
+                    continue;
+                }
                 EntityDetails details = EntityDetails.from(bot, e);
                 collected.add(new RawEntity(details.getName(), details.isHostile(),
                         details.getX() - bot.getX(), details.getY() - bot.getY(), details.getZ() - bot.getZ()));

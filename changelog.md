@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Only living creatures count as nearby animals (2026-08-23, mod_version 1.1.144)
+
+Pre-deploy review of the Fix B radius widening (below) caught a pre-existing bug it made worse:
+`AutoFaceEntity.detectNearbyEntities` applies no entity-type filter at all -- `getOtherEntities`
+returns every `Entity` subtype in the box, filtered only by line-of-sight. Before this fix, a
+dropped item stack, arrow, or boat sitting in the bot's line of sight could reach the
+`nearbyAnimals` aggregation and render as a fabricated line like `"Animals nearby: Oak Planks
+x3."` -- indistinguishable from a real animal to the prompt. Widening the scan radius 10→16 (see
+below) made this more likely to trigger, not less.
+
+- `SoulSnapshotBuilder`'s capture loop (`captureSituation`, the `for (Entity e : nearby)` block)
+  now skips any entity that isn't a `LivingEntity`, plus `ArmorStandEntity` specifically (armor
+  stands are `LivingEntity` in vanilla but are decoration, not creatures) -- `if (!(e instanceof
+  LivingEntity) || e instanceof ArmorStandEntity) continue;` before building the `RawEntity`.
+  Imports (`net.minecraft.entity.LivingEntity`, `net.minecraft.entity.decoration.ArmorStandEntity`)
+  and the `instanceof` idiom match existing usage elsewhere in the mod (`BotEventHandler.java`,
+  `CompanionOverheadHologramService.java`).
+- `AutoFaceEntity.detectNearbyEntities` itself was deliberately left untouched -- its other callers
+  (`BotEventHandler`'s hostile-detection path) rely on its current unfiltered behavior.
+- Untestable in this harness: the filter lives in `captureSituation`'s server-thread-only capture
+  block, operating directly on live `net.minecraft.entity.Entity`/`LivingEntity` instances.
+  Per the established precedent documented on `SoulMessageDeliveryTest`'s class Javadoc,
+  Fabric/Minecraft classes in this family cannot be constructed or mocked outside a running
+  server -- Mockito's inline mock maker fails outright on the remapped/final classes involved. A
+  pure predicate extracted to take an `Entity` argument wouldn't help, since the argument itself
+  still can't be constructed in-harness. The pure aggregation tests added in 1.1.144 below (which
+  operate on already-collected `RawEntity`/`SituationInputs` values, never live `Entity`
+  instances) are unaffected and still cover the dedupe/cap/exclude logic downstream of this
+  filter. This gap is exercised in-game instead, same as `SoulChatRouter#tryRoute`.
+- Full suite (276 tests, unchanged count since this filter has no in-harness test) and
+  `./gradlew build -x test` both green.
+
 ## See blocks bases birds and follow state (2026-08-23, mod_version 1.1.144)
 
 Round-3 field-test fixes on the soul situational-awareness branch. The 1.1.143 pass fixed
