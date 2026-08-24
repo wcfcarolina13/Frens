@@ -157,12 +157,16 @@ OpenAI-compatible local) model configured per `SoulSettings`; server started fre
 spawned/registered Frens bot. Use `/bot soul status [bot]` liberally to confirm system/provider
 state without guessing.
 
-**Surface boundary — how to address Jake:** soul routing listens on the existing Frens chat
-surface only: an ordinary chat message addressed to the bot (`Jake hi` / `@Jake hi`). The
-vanilla private-message command `/msg` and its aliases `/tell` and `/w` deliver a plain vanilla
-whisper to the fake player and do NOT reach the soul pipeline — expected result: the whisper
-line renders, nothing else happens, no provider call, no history append. (Routing vanilla
-whispers into the DIRECT thread is a possible post-pilot enhancement, not a pilot defect.)
+**Surface boundary — how to address Jake:** soul routing listens on two surfaces. (1) The Frens
+chat surface: an ordinary chat message that names the bot. A leading name (`Jake hi` /
+`@Jake hi`) sends the tail after the name; a name anywhere later in the line (`Ping, Jake`,
+`can you help me build, Jake`) sends the full message with the name left in place — the bot
+knows its own name. (2) The vanilla private-message command `/msg` and its aliases `/tell` and
+`/w` (`/msg Jake how are you`): the whisper line renders as vanilla, and the content also enters
+the same exclusive soul gate as a chat DM — same DIRECT conversation thread, same private
+reply, logged as `[souls] whisper ... outcome=...`. A whisper from a non-player (console,
+command block) or with souls off/unbound stays a plain whisper with no provider call and no
+history append.
 
 **Performance note (Apple Silicon / shared GPU):** pre-warm the model before launching the game
 (e.g. `ollama run <model> "hi"`). A cold model load while Minecraft renders saturates unified

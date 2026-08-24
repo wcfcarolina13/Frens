@@ -1433,64 +1433,31 @@ public class Frens implements ModInitializer {
         if (serverInstance == null || raw == null) {
             return new ChatTarget(List.of(), "", false);
         }
-        String trimmed = raw.trim();
-        if (trimmed.isEmpty()) {
-            return new ChatTarget(List.of(), "", false);
-        }
-        String[] tokens = trimmed.split("\\s+");
-        if (tokens.length == 0) {
-            return new ChatTarget(List.of(), "", false);
-        }
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
         if (bots.isEmpty()) {
             return new ChatTarget(List.of(), "", false);
         }
-        int consumed = -1;
-        boolean broadcast = false;
-        List<ServerPlayerEntity> targets = new ArrayList<>();
-        for (int i = 0; i < tokens.length; i++) {
-            String current = normalizeToken(tokens[i]);
-            if (current.isEmpty()) {
-                continue;
-            }
-            if (current.equals("allbots") || current.equals("bots")) {
-                targets.addAll(bots);
-                consumed = i + 1;
-                broadcast = true;
-                break;
-            }
-            if (current.equals("all") && i + 1 < tokens.length) {
-                String next = normalizeToken(tokens[i + 1]);
-                if (next.equals("bots")) {
-                    targets.addAll(bots);
-                    consumed = i + 2;
-                    broadcast = true;
-                    break;
-                }
-            }
-            for (ServerPlayerEntity bot : bots) {
-                if (normalizeToken(bot.getName().getString()).equals(current)) {
-                    targets.add(bot);
-                    consumed = i + 1;
-                    break;
-                }
-            }
-            if (!targets.isEmpty()) {
-                break;
-            }
+        // Token matching + prompt extraction live in the pure, unit-tested ChatAddressing
+        // resolver; this method only maps the returned name index / broadcast flag back onto the
+        // live bot entities. A bot slot that is somehow null resolves as an empty name, which the
+        // resolver can never match.
+        List<String> names = new ArrayList<>(bots.size());
+        for (ServerPlayerEntity bot : bots) {
+            names.add(bot == null ? "" : bot.getName().getString());
         }
-        if (targets.isEmpty() || consumed < 0) {
+        java.util.Optional<ChatAddressing.Resolution> resolution = ChatAddressing.resolve(raw, names);
+        if (resolution.isEmpty()) {
             return new ChatTarget(List.of(), "", false);
         }
+        ChatAddressing.Resolution resolved = resolution.get();
+        List<ServerPlayerEntity> targets = resolved.broadcast()
+                ? new ArrayList<>(bots)
+                : new ArrayList<>(List.of(bots.get(resolved.matchedNameIndex())));
         targets = dedupeTargetBots(targets);
         if (targets.isEmpty()) {
             return new ChatTarget(List.of(), "", false);
         }
-        if (consumed >= tokens.length) {
-            return new ChatTarget(targets, "", broadcast);
-        }
-        String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
-        return new ChatTarget(targets, prompt, broadcast);
+        return new ChatTarget(targets, resolved.prompt(), resolved.broadcast());
     }
 
     private static List<ServerPlayerEntity> dedupeTargetBots(List<ServerPlayerEntity> bots) {
@@ -1565,14 +1532,6 @@ public class Frens implements ModInitializer {
         } catch (Throwable t) {
             return false;
         }
-    }
-
-    private static String normalizeToken(String token) {
-        if (token == null) {
-            return "";
-        }
-        String cleaned = token.replaceAll("[^a-zA-Z0-9]", "");
-        return cleaned.toLowerCase(Locale.ROOT);
     }
 
     /**

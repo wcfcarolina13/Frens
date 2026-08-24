@@ -49,6 +49,9 @@ import net.wcfcarolina13.GameAI.services.BotSkinService;
 
 public class createFakePlayer extends ServerPlayerEntity {
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
+    // Whisper-surface routing lines go to the shared souls logger, never the mod logger, per the
+    // souls package's logging convention (see SoulChatRouter).
+    private static final Logger SOULS_LOGGER = LoggerFactory.getLogger("frens.souls");
     public boolean isAShadow;
 
 
@@ -237,6 +240,64 @@ public class createFakePlayer extends ServerPlayerEntity {
     public String getIp()
     {
         return "127.0.0.1";
+    }
+
+    /**
+     * Private-whisper surface of the soul-communication pilot: vanilla {@code /msg} (and its
+     * aliases {@code /tell} / {@code /w}) delivers the whisper to this fake player through
+     * {@code sendChatMessage} with {@code MSG_COMMAND_INCOMING} params. Such a whisper is handed
+     * to the same exclusive {@link net.wcfcarolina13.GameAI.souls.SoulChatRouter} gate as a
+     * public {@code "<botname> ..."} DM — same DIRECT conversation thread, same private reply
+     * path — after the pure {@code isWhisperEligible} facts hold (real incoming whisper, live
+     * non-bot player sender, non-blank content). A whisper the gate or router declines stays a
+     * plain vanilla whisper with no soul side effects. This override also fires for every public
+     * chat line broadcast to the bot, so the message-type check exits first on the hot path;
+     * public chat routes through the chat callback in {@code Frens}, never through here.
+     */
+    @Override
+    public void sendChatMessage(net.minecraft.network.message.SentMessage message, boolean filterMaskEnabled,
+                                 net.minecraft.network.message.MessageType.Parameters params) {
+        super.sendChatMessage(message, filterMaskEnabled, params);
+        try {
+            routeIncomingWhisperToSoul(message, params);
+        } catch (Throwable t) {
+            // Never let optional soul wiring break message delivery to the fake player.
+            LOGGER.warn("Whisper soul routing threw; whisper stays vanilla: {}", t.toString());
+        }
+    }
+
+    private void routeIncomingWhisperToSoul(net.minecraft.network.message.SentMessage message,
+                                             net.minecraft.network.message.MessageType.Parameters params) {
+        if (message == null || params == null
+                || !params.type().matchesKey(net.minecraft.network.message.MessageType.MSG_COMMAND_INCOMING)) {
+            return;
+        }
+        if (!(message instanceof net.minecraft.network.message.SentMessage.Chat chat)
+                || chat.message().isSenderMissing()) {
+            // Profileless/senderless deliveries (console, command blocks) have no player to
+            // converse with; isWhisperEligible would reject them via senderKnown=false anyway.
+            return;
+        }
+        MinecraftServer server = this.getEntityWorld().getServer();
+        if (server == null) {
+            return;
+        }
+        ServerPlayerEntity sender = server.getPlayerManager().getPlayer(chat.message().getSender());
+        if (sender == null) {
+            // isWhisperEligible rejects senderKnown=false; exit here so the dereferences below
+            // are explicitly safe.
+            return;
+        }
+        boolean senderIsBot = sender instanceof createFakePlayer;
+        String content = chat.message().getSignedContent();
+        if (!net.wcfcarolina13.GameAI.souls.SoulChatRouter.isWhisperEligible(
+                true, true, senderIsBot, content)) {
+            return;
+        }
+        net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome outcome =
+                net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(this, sender, content.trim());
+        SOULS_LOGGER.info("[souls] whisper bot={} player={} outcome={}",
+                this.getUuid(), sender.getUuid(), outcome);
     }
 
     @Override
