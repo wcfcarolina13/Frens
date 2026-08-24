@@ -6,14 +6,20 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.BOT_DAMAGE;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.COMBAT_ENDED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.COMBAT_STARTED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.DIMENSION_CHANGED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.HOBBY_SESSION;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.HUNT_PROGRESS;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.MOB_KILLED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.OWNER_DAMAGE;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.QUEST_STAGE_CHANGED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.SELF_RESCUE;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.SLEEP;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_CANCELLED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_COMPLETED;
@@ -161,6 +167,132 @@ class SoulEventObserverTest {
         assertEquals(TASK_COMPLETED, SoulEventObserver.taskOutcome(TaskService.State.COMPLETED, true));
         assertEquals(TASK_CANCELLED, SoulEventObserver.taskOutcome(TaskService.State.ABORTED, true));
         assertEquals(TASK_FAILED, SoulEventObserver.taskOutcome(TaskService.State.ABORTED, false));
+    }
+
+    @Test
+    void mobKilledEmitsNormalSalienceWithMobFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteMobKilled(bot, "minecraft:overworld", "plains", "zombie", 10L);
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(MOB_KILLED), events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals(SoulTypes.Salience.NORMAL, events.get(0).salience());
+        assertEquals("zombie", events.get(0).facts().get("mob"));
+    }
+
+    @Test
+    void mobKilledNormalizesNullMobTypeToEmptyStringNeverANullFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteMobKilled(bot, "minecraft:overworld", "plains", null, 10L);
+
+        Map<String, String> facts = sink.events().get(0).facts();
+        assertEquals("", facts.get("mob"));
+        assertFalse(facts.values().stream().anyMatch(Objects::isNull));
+    }
+
+    @Test
+    void selfRescueEmitsHighSalienceWithKindFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteSelfRescue(bot, "minecraft:overworld", "plains", "powder_snow", 10L);
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(SELF_RESCUE), events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals(SoulTypes.Salience.HIGH, events.get(0).salience());
+        assertEquals("powder_snow", events.get(0).facts().get("kind"));
+    }
+
+    @Test
+    void selfRescueNormalizesNullKindToEmptyStringNeverANullFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteSelfRescue(bot, "minecraft:overworld", "plains", null, 10L);
+
+        Map<String, String> facts = sink.events().get(0).facts();
+        assertEquals("", facts.get("kind"));
+        assertFalse(facts.values().stream().anyMatch(Objects::isNull));
+    }
+
+    @Test
+    void hobbySessionEmitsLowSalienceWithHobbyFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteHobbySession(bot, "fishing");
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(HOBBY_SESSION), events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals(SoulTypes.Salience.LOW, events.get(0).salience());
+        assertEquals("fishing", events.get(0).facts().get("hobby"));
+    }
+
+    @Test
+    void hobbySessionNormalizesNullHobbyNameToEmptyStringNeverANullFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteHobbySession(bot, null);
+
+        Map<String, String> facts = sink.events().get(0).facts();
+        assertEquals("", facts.get("hobby"));
+        assertFalse(facts.values().stream().anyMatch(Objects::isNull));
+    }
+
+    @Test
+    void huntProgressEmitsNormalSalienceWithTargetKillsGoalFacts() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteHuntProgress(bot, "zombie", 3, 10);
+
+        List<SoulTypes.SoulEvent> events = sink.events();
+        assertEquals(List.of(HUNT_PROGRESS), events.stream().map(SoulTypes.SoulEvent::type).toList());
+        assertEquals(SoulTypes.Salience.NORMAL, events.get(0).salience());
+        Map<String, String> facts = events.get(0).facts();
+        assertEquals("zombie", facts.get("target"));
+        assertEquals("3", facts.get("kills"));
+        assertEquals("10", facts.get("goal"));
+    }
+
+    @Test
+    void huntProgressNormalizesNullTargetToEmptyStringNeverANullFact() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteHuntProgress(bot, null, 0, 5);
+
+        Map<String, String> facts = sink.events().get(0).facts();
+        assertEquals("", facts.get("target"));
+        assertFalse(facts.values().stream().anyMatch(Objects::isNull));
+    }
+
+    @Test
+    void newSituationalEventTypesAreNoOpWhenSinkRejects() {
+        CapturingSink sink = new CapturingSink();
+        sink.setAccepts(false);
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteMobKilled(bot, "minecraft:overworld", "plains", "zombie", 10L);
+        observer.noteSelfRescue(bot, "minecraft:overworld", "plains", "powder_snow", 10L);
+        observer.noteHobbySession(bot, "fishing");
+        observer.noteHuntProgress(bot, "zombie", 3, 10);
+
+        assertTrue(sink.events().isEmpty());
     }
 
     private static SoulEventObserver.Observation observation(UUID bot, String dimension, String biome,

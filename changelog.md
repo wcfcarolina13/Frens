@@ -2,6 +2,443 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Notice shoulder pets and name species first (2026-08-23, mod_version 1.1.145)
+
+Round-4 field-test fix: the user's pet parrot, sitting in the same room, went completely
+unnoticed by the soul pipeline. Two root causes, both verified against the Minecraft Wiki and the
+1.21.11 Yarn mappings (`mappings.tiny` under `~/.gradle/caches/fabric-loom/1.21.11/...`, cross-checked
+by `javap`-ing the merged-named jar under the worktree's own loom cache):
+
+- **Shoulder-perched pets aren't world entities.** A tamed parrot auto-perches on its owner's
+  shoulder, and while perched it is *not* a live `Entity` at all -- vanilla stores it as raw NBT on
+  the holding player. `AutoFaceEntity.detectNearbyEntities` (or any other entity scan) can never
+  see it, no matter the radius. Confirmed the exact 1.21.11 API by disassembling
+  `ServerPlayerEntity#mountOntoShoulder`/`#spawnShoulderEntity`: the entity is held in
+  `getLeftShoulderNbt()`/`getRightShoulderNbt()` (both `public`, both return `NbtCompound`, empty
+  when nothing is perched), and `spawnShoulderEntity` decodes it back with
+  `shoulderNbt.get("id", EntityType.CODEC)`. `captureSituation` now reads both shoulder slots on
+  the bot itself (`"parrot (on your shoulder)"`) and, when reachability is LOCAL and a player is
+  present, both of the player's shoulder slots too (`"parrot (on Bradley's shoulder)"`), folding
+  each occupied slot into the same `RawEntity` list the ground-entity scan builds -- the existing
+  aggregation (name grouping, owner/self exclusion, cap) picks them up with no further changes.
+  (Note: `PlayerEntity` separately exposes `getLeftShoulderParrotVariant()`/
+  `getRightShoulderParrotVariant()` returning `Optional<ParrotEntity.Variant>` -- that pair is a
+  rendering-only concern for the parrot's color and was not used here; the `NbtCompound` pair on
+  `ServerPlayerEntity` is the one that actually identifies *what* is perched.)
+- **Named pets hid behind their names.** `EntityDetails.getName()` returns the vanilla display
+  name, which is the custom name ("Rex") when the entity has one -- a small local model has no way
+  to map an arbitrary player-chosen name back to a species. `captureSituation`'s entity loop now
+  builds the `RawEntity` name from the entity's *type* first (`EntityType.getId(e.getType())
+  .getPath()`, e.g. `"wolf"`, `"parrot"`), confirmed via `javap` on the same merged-named jar
+  (`Entity#hasCustomName()`, `Entity#getCustomName()` returning `Text`, `Entity#getType()`), and
+  annotates a custom name onto the species instead of replacing it: `"wolf (Rex)"`. The
+  species+custom-name formatting and the shoulder-entry formatting were both extracted into small
+  pure static helpers (`formatEntityName`, `shoulderEntry`) specifically so this round's fixes are
+  unit-testable -- the enclosing loop still can't be, for the same reason documented in 1.1.144's
+  entry above (live `Entity`/`ServerPlayerEntity` can't be constructed or mocked in this harness).
+- **Diagnosability.** `SoulChatRouter`'s `[souls] routing ...` INFO line gained `hostiles=<n>
+  animals=[a, b, ...]` (capped at 6 rendered entries) sourced from the same captured
+  `GroundingSnapshot` as the existing `mode`/`following`/`sky` fields, so the next field test can
+  confirm from `latest.log` whether capture actually saw the parrot without touching player
+  message content -- these are species-level game facts, never private text.
+- 6 new pure-seam tests added to `SoulGroundingTest` (`formatEntityName`/`shoulderEntry` unit
+  cases plus one aggregation-flow test showing a pre-formatted shoulder entry passes through
+  `buildSituation`'s existing name-grouping/cap logic alongside a ground sighting); full suite
+  (281 tests) and `./gradlew build -x test` both green.
+
+## Only living creatures count as nearby animals (2026-08-23, mod_version 1.1.144)
+
+Pre-deploy review of the Fix B radius widening (below) caught a pre-existing bug it made worse:
+`AutoFaceEntity.detectNearbyEntities` applies no entity-type filter at all -- `getOtherEntities`
+returns every `Entity` subtype in the box, filtered only by line-of-sight. Before this fix, a
+dropped item stack, arrow, or boat sitting in the bot's line of sight could reach the
+`nearbyAnimals` aggregation and render as a fabricated line like `"Animals nearby: Oak Planks
+x3."` -- indistinguishable from a real animal to the prompt. Widening the scan radius 10→16 (see
+below) made this more likely to trigger, not less.
+
+- `SoulSnapshotBuilder`'s capture loop (`captureSituation`, the `for (Entity e : nearby)` block)
+  now skips any entity that isn't a `LivingEntity`, plus `ArmorStandEntity` specifically (armor
+  stands are `LivingEntity` in vanilla but are decoration, not creatures) -- `if (!(e instanceof
+  LivingEntity) || e instanceof ArmorStandEntity) continue;` before building the `RawEntity`.
+  Imports (`net.minecraft.entity.LivingEntity`, `net.minecraft.entity.decoration.ArmorStandEntity`)
+  and the `instanceof` idiom match existing usage elsewhere in the mod (`BotEventHandler.java`,
+  `CompanionOverheadHologramService.java`).
+- `AutoFaceEntity.detectNearbyEntities` itself was deliberately left untouched -- its other callers
+  (`BotEventHandler`'s hostile-detection path) rely on its current unfiltered behavior.
+- Untestable in this harness: the filter lives in `captureSituation`'s server-thread-only capture
+  block, operating directly on live `net.minecraft.entity.Entity`/`LivingEntity` instances.
+  Per the established precedent documented on `SoulMessageDeliveryTest`'s class Javadoc,
+  Fabric/Minecraft classes in this family cannot be constructed or mocked outside a running
+  server -- Mockito's inline mock maker fails outright on the remapped/final classes involved. A
+  pure predicate extracted to take an `Entity` argument wouldn't help, since the argument itself
+  still can't be constructed in-harness. The pure aggregation tests added in 1.1.144 below (which
+  operate on already-collected `RawEntity`/`SituationInputs` values, never live `Entity`
+  instances) are unaffected and still cover the dedupe/cap/exclude logic downstream of this
+  filter. This gap is exercised in-game instead, same as `SoulChatRouter#tryRoute`.
+- Full suite (276 tests, unchanged count since this filter has no in-harness test) and
+  `./gradlew build -x test` both green.
+
+## See blocks bases birds and follow state (2026-08-23, mod_version 1.1.144)
+
+Round-3 field-test fixes on the soul situational-awareness branch. The 1.1.143 pass fixed
+rendering/salience for facts the pipeline already captured; this round fixes facts the pipeline
+never captured at all -- the bot still missed FOLLOW mode, never saw birds/bats, had no idea what
+block it stood on or what surrounded it, and never recognized being at a known base.
+
+- **Follow signal, sourced correctly.** `captureSituation` now reads
+  `BotEventHandler.isFollowingPlayer(bot)` directly (true only for an active player-follow, false
+  for return-to-base, which also runs `Mode.FOLLOW` internally) into a new
+  `SituationSnapshot.following` component. `SoulPromptAssembler`'s PRESENT MOMENT dynamic line and
+  the SITUATION `Mode:` line both switched from string-comparing `bot.behaviorMode() == "FOLLOW"`
+  to reading `situation.following()` -- the previous string check couldn't distinguish an actual
+  follow from a return-to-base disguised as one.
+- **Diagnosability.** `SoulChatRouter`'s `[souls] routing ...` INFO line gained `mode=<mode>
+  following=<bool> sky=<bool>`, sourced from the captured `GroundingSnapshot` on the "submitted"
+  outcome (the five pre-capture outcomes -- loading/invalid-pipeline/unauthorized/unreachable/
+  no-server -- log the neutral defaults since no snapshot exists yet). Content-free facts only, so
+  a field test can check ground truth in `latest.log` without touching player message content.
+- **Birds and other ambient fliers.** `captureSituation`'s entity scan radius widened from 10 to 16
+  blocks for this capture only (no other `AutoFaceEntity.detectNearbyEntities` caller touched).
+  Confirmed the underlying scan was never the problem: `detectNearbyEntities`/`EntityDetails.from`
+  apply no `MobEntity`-only filter -- every `Entity` subtype in line-of-sight (parrots, chickens,
+  bats included) already reaches the nearby-animal aggregation. The miss was purely range: birds
+  and bats often perch/roost past 10 blocks. Non-`LivingEntity` types (dropped items, arrows) can
+  still reach `nearbyAnimals` if in LoS and not hostile -- pre-existing behavior, not a regression
+  from the radius change, left as-is (out of scope for this pass).
+- **Block recognition.** New `SituationSnapshot.standingOn` (block directly under the bot's feet,
+  via `world.getBlockState(pos.down())`) and `SituationSnapshot.nearbyBlocks` (deduped block-type
+  names, top 4 by count, air excluded). Capture mirrors `BotEventHandler`'s own scan exactly --
+  `new BlockDistanceLimitedSearch(bot, 3, 5).detectNearbyBlocks()` -- so the soul sees what the
+  bot's own AI already scans. Dedup/count/cap is pure logic in `buildSituation`, unit-tested
+  without a Minecraft server. Renders in the SITUATION logistics tier: `"Standing on <x>; nearby
+  blocks: a, b, c."`
+- **Base recognition.** New `SituationSnapshot.atBase`: label of the nearest known base within 32
+  blocks of the bot's *current* position. Extracted the inline nearest-base-to-a-point loop that
+  previously existed only for `lastSleepLabel` into a shared `nearestBaseLabel(bases, pos,
+  maxDistanceSq)` helper, reused for both the sleep-position and current-position lookups (same
+  32-block radius, different point). Renders in SITUATION: `You are at your base "<label>".` and
+  appends `, at base <label>` to the PRESENT MOMENT dynamic line.
+- `SituationSnapshot` grows from 21 to 25 components (four added: `standingOn`, `nearbyBlocks`,
+  `following`, `atBase` -- not the three originally estimated). Final order: `dangerDistance,
+  hostiles, nearbyAnimals, standingOn, nearbyBlocks, enclosed, hasHeadroom, hasEscapeRoute,
+  behaviorMode, following, inCombat, postCombatLinger, recentKillCount, inShelter,
+  surfaceRecoveryActive, breakingFree, nightTravelActive, companionDays, deathCount, mount,
+  knownBaseCount, lastSleepLabel, atBase, hunt, lastHobby`. `SituationInputs` (the pure-seam
+  carrier in `SoulSnapshotBuilder`) grows in parallel to 27 fields. Every positional construction
+  across `SoulSnapshotBuilder.java`, `SoulTypes.java`, `SoulGroundingTest.java`,
+  `SoulPromptAssemblerTest.java`, and `SoulSituationTypesTest.java` updated; defensive copies
+  (`List.copyOf` on `nearbyBlocks`) and null/blank normalization added to both records' canonical
+  constructors. 13 new tests (following passthrough, standingOn passthrough, nearbyBlocks
+  dedupe/cap/blank-drop, atBase passthrough and rendering, follow-mode rendering from the boolean
+  not the string, routing-log diagnostics) plus 2 tests fixed for the new render text. Full suite
+  (276 tests) and `./gradlew build -x test` both green.
+
+## Make Jake's situation legible to small models (2026-08-23, mod_version 1.1.143)
+
+Field-test on the 1.21.11 test instance surfaced four salience gaps that the pre-existing
+grounding/prompt pipeline captured correctly but rendered too tersely for an 8B model to act on:
+the bot never mentioned being underground, never reacted to having moved since the last turn,
+ignored an active FOLLOW mode, and had no way to see nearby passive mobs (horses, dogs) because
+`captureSituation`'s entity loop kept only `isHostile()` sightings. Root cause: facts were present
+in the AUTHORITATIVE STATE key-value dump but buried in undifferentiated key:value pairs an
+under-attending small model skips past, and passive entities were filtered out before they ever
+reached the prompt.
+
+- **Nearby passive/notable entities.** `SoulSnapshotBuilder.buildSituation` now aggregates every
+  non-hostile entity from the same 10-block scan by name (`"horse x3"`, `"wolf"`), most-numerous
+  first, capped at 4, excluding the owner (`SituationInputs.ownerName`) and the bot itself
+  (`SituationInputs.botName`) so a nearby commander or teammate bot never shows up as "wildlife".
+  New `SituationSnapshot.nearbyAnimals` component (inserted right after `hostiles`, the record is
+  now 21 components) flows through the existing pure `buildSituation` seam — capture stays
+  server-thread-only, aggregation stays unit-testable without a Minecraft server.
+- **Location and underground lines, prose not key-value.** `SoulPromptAssembler.situationLines`
+  now opens every non-empty SITUATION block with `"You are in <biome> at (x,y,z) in <dimension>."`,
+  and adds `"You are underground -- no sky overhead. There are no trees or open terrain down here;
+  surface features are out of sight."` whenever `!bot.skyVisible()`. Both are top-priority: they
+  render before hazards and survive the 800-char budget while lower-priority lines (last hobby,
+  last slept) get dropped first, same as before. `nearbyAnimals` renders as `"Animals nearby: horse
+  x2, wolf."` in the existing logistics tier, right after `Mode:`.
+- **PRESENT MOMENT carries a dynamic recency anchor.** `presentMoment()` was static boilerplate
+  text; it now takes the `GroundingSnapshot` and appends one compact line — `"Right now: <biome>,
+  (x,y,z), <open sky|underground>, mode <MODE>[, following your owner]."` — after the three
+  existing instruction lines, so the turn immediately preceding the player's message restates
+  current position/mode instead of trusting the model to reconstruct it from further up the prompt.
+  The block still starts with `"PRESENT MOMENT\n"`, so the mandated
+  `presentMomentImmediatelyPrecedesCurrentPlayerMessage` ordering assertion is unaffected.
+- **Contract states recency wins.** `systemContract()` gained one sentence: "The AUTHORITATIVE
+  STATE message reflects the present moment and OVERRIDES anything remembered or said earlier in
+  this conversation when they conflict." — closing the gap where a stale remembered fact (old
+  location, old mode) could outweigh the current turn's grounding in a small model's attention.
+- Every positional `SituationSnapshot`/`SituationInputs` construction across
+  `SoulSnapshotBuilder.java`, `SoulGroundingTest.java`, `SoulPromptAssemblerTest.java`, and
+  `SoulSituationTypesTest.java` was updated for the new components; `SoulSituationTypesTest`'s
+  null-normalization test now also asserts `nearbyAnimals` collapses a `null` to `List.of()`.
+  7 new tests added (location/underground/animals rendering, PRESENT MOMENT dynamic line,
+  nearby-animal aggregation and cap) plus assertions strengthened on 2 existing tests; full suite
+  (267 tests) and `./gradlew build -x test` both green.
+
+## Correct situational grounding fidelity (2026-08-23)
+
+Final whole-branch review fix wave on the soul situational-awareness branch (post `71f2205`).
+Two critical fixes and seven important fixes, all re-verified against 259 pre-existing tests plus
+new/updated coverage:
+
+- **SELF_RESCUE false positives (critical).** The hook moved off the `ensureAtSurface`/
+  `ensureAtSurfaceForHobby` wrappers (which fired on `recovered == true`, including the
+  already-at-surface no-op) and into the private `ensureAtSurface(bot, world, skipLingerCheck)`
+  itself, placed only at the seven `return true` sites that follow an actual recovery action
+  (dry-land move, nearby-staging move, pillar recovery ×3, step-building, post-ascent) —
+  `BotFleeService.java`. The already-at-surface early return (`logOperationalSurfaceState(...
+  "ensureAtSurface:current")`) stays unhooked.
+- **Hostile direction was bot-relative, not compass (critical).** `SoulSnapshotBuilder` dropped
+  `EntityDetails.getDirectionToBot()` (a broken front/right/behind/left bearing) from `RawEntity`
+  entirely and now derives hostile direction from the existing `cardinalDirection(dx, dz)` compass
+  helper — the same one `PlayerSnapshot` already used — so "zombie 5 blocks northeast" means what
+  it says.
+- **`onSelfRescue` made UUID-only.** `ensureAtSurface` runs on worker threads; the hook signature
+  changed to `onSelfRescue(UUID botId, String kind)` (empty dimension/biome, tick 0), matching
+  `onHobbySession`'s existing worker-thread contract. `SoulEventObserver`'s class Javadoc now
+  documents this.
+- **Death-hook vocabulary and gate ordering.** `onMobKilled` now takes the raw `Entity` and derives
+  `EntityType.getId(...).getPath()` (registry path, e.g. `zombie`) after the master-switch gate,
+  instead of `Frens.java` pre-computing a localized display name before the gate.
+- **Capture no longer mutates stuck-state or over-scans.** `SoulSnapshotBuilder.captureSituation`
+  reads `BotStuckService.analyzeEnvironment`, `LavaDetector`/`CliffDetector` directly, and
+  `AutoFaceEntity.detectNearbyEntities` instead of `BotEventHandler.createInitialState`, which
+  side-effected `BotStuckService.setLastSafePosition` and computed ~10k blocks of fields this
+  capture immediately discarded.
+- **One behavior-mode source of truth.** `BotSnapshot.behaviorMode` now comes from
+  `BotEventHandler.getCurrentMode(bot).name()`, same as the SITUATION block's `Mode:` line, instead
+  of a separate `following`/`idle` guess.
+- **Hobby name uses the in-scope skill, not a stale map read.** `onHobbySession` calls at the cook
+  branch and the generic completion path now pass `"cook"`/`skillToRun` directly; the two
+  ambient-woodcut fallback starts that previously skipped `LAST_HOBBY.put` now record it, mirroring
+  the primary decision loop.
+- **Hazard distance is a real minimum, not a meaningless sum.** Capture now calls
+  `LavaDetector.detectNearestLava` and `CliffDetector.detectCliffWithBoundingBox` separately and
+  takes the nearer of whichever hazard(s) are actually present, instead of
+  `DangerZoneDetector.detectDangerZone`'s `lavaDistance + cliffDistance`.
+- **Event-volume flooding.** `HUNT_PROGRESS` now fires only at the first kill and at goal-reached,
+  using `candidate.target.label()` for the target name; `MOB_KILLED` is suppressed while the
+  killer's active task is `skill:hunt` (`TaskService.getActiveTaskInfo`), since `HUNT_PROGRESS`
+  already covers hunt kills at milestones.
+
+Added a SELF_RESCUE manual case (negative: hobby/hunt while already safe → no record; positive:
+genuine trapped-underground recovery → exactly one record) to
+`docs/testing/SOUL_COMMUNICATION_PILOT.md`. `./gradlew test` and `./gradlew build -x test` both
+green.
+
+## Document situational awareness acceptance (2026-08-23)
+
+Task 6, closing out the soul situational-awareness branch. Jake's DM replies now ground on a
+live `SITUATION` sub-block (hazards/hostiles, combat, survival flags, behavior mode,
+relationship, then mount/base/hunt/hobby logistics — 800-char budget, priority-ordered, omitted
+entirely when empty) and on a bounded journal of witnessed events (kills, self-rescues, hobby
+sessions, hunt progress), both gated on the master soul switch and an active profile so a
+souls-disabled install stays byte-identical to pre-branch behavior. Added a "Situational
+awareness" manual test subsection to `docs/testing/SOUL_COMMUNICATION_PILOT.md` covering: naming
+a visible hostile and its direction, truthful `STAY`/`FOLLOW` mode reporting, a kill surfacing
+later from event memory, REMOTE DMs still carrying Jake's own situation while excluding the
+player's, hobby (including cook) sessions surfacing on ask, and a re-run of the feature-off
+baseline's disk assertion. `./gradlew test` (259 tests, 0 failures/errors — up from 228
+pre-branch) and `./gradlew build -x test` both green; artifact
+`build/libs/frens-1.1.141-release+1.21.11.jar`. No `mod_version` bump and no deploy — this is
+documentation only, pending manual acceptance and user confirmation the game is closed.
+
+## Gate break-free rescue on real success (2026-08-23)
+
+Review fix round on Task 5 (commit `d63b65c`). Two findings:
+
+**Finding 1 — break-free `onSelfRescue` fired on "no abort," not success.** The hook
+added in `BotFleeService.java:1971` sat right after `breakFreeFromShelter`'s post-dig
+`shouldAbortSurvival` check, which only proves the thread wasn't interrupted — it does
+**not** prove the bot got free. All four type-specific dispatch methods
+(`breakFreeCliff`/`breakFreeDugDown`/`breakFreeVillageHouse`/`breakFreeGeneric`,
+`:2010-2111`) are `void` and can silently no-op: `breakFreeVillageHouse` returns
+immediately when `doorPos`/`interiorDir` is null, and `breakFreeGeneric`'s "protected
+ore — staying put" fallback returns having mined nothing. A sealed-in bot with either
+of those two conditions would have journaled a false rescue. Checked for a cheap,
+generically-reusable post-condition to re-run at the hook site instead: `isInShelter()`
+is unusable (`SHELTER_ACTIVE` is unconditionally cleared by both callers —
+`clearShelterAndBreakFree`/`forceBreakFree` — *before* dispatch even runs, so it always
+reads `false` by hook time, success or not); `isAtSurface()` is also unusable pre-hook
+because the follow-up `escapeToSurface(bot, world)` call (which is what actually gets a
+still-underground bot to the surface) runs *after* this point. No caller of
+`breakFreeFromShelter` shares one single stuck/enclosure predicate either — the seven
+call sites (`BotEventHandler`, `BotAutoReturnSunsetService`, `BotAutoHuntService`,
+`BotIdleHobbiesService`, `modCommandRegistry`) invoke it for varied reasons (some are
+"leave shelter for a command," not "the bot got trapped"). Per the review's documented
+fallback ("if no such check is cheaply re-runnable... REMOVE the break-free hook
+entirely... a missing event is honest, a false one is not"), removed the
+`onSelfRescue(bot, "break-free")` call from `BotFleeService.java:1971` rather than
+inventing a per-dispatch-type re-check (explicitly out of scope — no refactor of the
+four dispatch methods' signatures this round). `onSelfRescue(bot, "surface-recovery")`
+(the two `ensureAtSurface`/`ensureAtSurfaceForHobby` wrapper hooks, unaffected by this
+finding) remains the sole self-rescue signal for this release; "break-free" as a `kind`
+value is defined on `SoulEventObserver` but currently has no production emitter.
+**Correction (2026-08-23, later fix wave below):** describing those two wrapper hooks as
+"success-only" was itself wrong — `boolean recovered` being `true` also covers the
+already-at-surface early return inside the private `ensureAtSurface(bot, world,
+skipLingerCheck)` (no recovery action taken, just a truthy status check), so the wrappers
+fired on every no-op call, not only on genuine recoveries. Fixed by moving the hook off
+the two wrappers entirely and into the private method's real-recovery `return true` sites
+only — see "Correct situational grounding fidelity" below.
+
+**Finding 2 — cook hobby never journaled.** `BotIdleHobbiesService.java`'s special-cased
+`cook` branch (`:1003-1034`) runs `SmeltingService.cookAllFoodSync` directly and never
+reaches the generic `runSkill` completion line the original hook sat on, so cook
+sessions were invisible to `onHobbySession`. Added the same one-line call at the cook
+branch's own completion site, right after its `LAST_HOBBY_END_MS.put(...)`
+(`BotIdleHobbiesService.java:1019`) — mirrors the generic-path placement exactly,
+including firing unconditionally on `result` (success or failure), consistent with how
+the generic path already treats a "finished" session regardless of outcome. The
+surface-escape-skip branch (never actually cooked) and the crash `catch` are still not
+hooked, matching the original scope decision for the generic path.
+
+Verified: `./gradlew test` and `./gradlew build -x test` both green after both fixes.
+
+## Hook awareness events into services (2026-08-23)
+
+Task 5 of situational awareness: one guarded call per transition wired into the four
+production sites Task 4's hooks needed, each purely additive (no reordering, no other
+behavior change). Two of the four true sites diverged from the task's original file list
+after reading the code, and both are documented deviations rather than blocking stops, per
+the task's own contingency guidance:
+
+- **Mob kill** — `noteKillPosition(UUID, Vec3d)` has exactly one caller, in `Frens.java`'s
+  death-detection block (not `BotCombatCalloutService.java`, which only receives the
+  killed entity for *hostile* kills behind a 10s dialogue-callout cooldown — hooking there
+  would silently under-report kills in a multi-mob fight). `onMobKilled(killer2,
+  dead.getType().getName().getString())` sits right after `noteKillPosition`, inside the
+  existing `isRegisteredBot` guard, unconditional on hostile/non-hostile.
+- **Self-rescue** — `BotFleeService.java`. Surface recovery has no single internal
+  convergence point (the private `ensureAtSurface` has ~7 `return true;` sites), so the
+  hook sits at the two public funnel wrappers (`ensureAtSurface`, `ensureAtSurfaceForHobby`)
+  that capture the boolean result and fire `onSelfRescue(bot, "surface-recovery")` only
+  when `true`. Break-free fires `onSelfRescue(bot, "break-free")` right after
+  `breakFreeFromShelter`'s post-dig abort check clears — proof the dig-out completed
+  without an abort — before the follow-up `escapeToSurface` call (which does not route
+  through the hooked wrappers, so no double-fire).
+- **Hobby session** — `BotIdleHobbiesService.java`, the generic `runSkill` completion path
+  right after `LAST_HOBBY_END_MS.put(...)`, using `LAST_HOBBY.get(botUuid)` so the emitted
+  name matches what `getLastHobby()` returns. The special-cased `cook` hobby branch (its own
+  separate completion site) is intentionally not hooked to keep this to one call per
+  transition.
+- **Hunt progress** — the actual `kills++` mutation lives in `HuntSkill.java`, not
+  `HuntSessionService.java` (that file only stores an already-computed tally via
+  `saveSession`, called once at sunset, not per kill). `onHuntProgress` fires inside the
+  same `if` that increments `kills`, target resolved via the same "first `targetIds` else
+  `zoneName`" fallback `SoulSnapshotBuilder` already uses (`selectedTargets` /
+  `huntZone.name()` here).
+
+Verified: `./gradlew test` and `./gradlew build -x test` both green; both pilot static
+checks over `GameAI/souls` clean (only the known `SoulChatRouter` Javadoc line for the
+first, zero hits for the credential grep).
+
+## Journal kills, rescues, hobbies, and hunts (2026-08-23)
+
+Task 4 of situational awareness: four new event types appended to the end of
+`SoulTypes.EventType` (`MOB_KILLED`, `SELF_RESCUE`, `HOBBY_SESSION`, `HUNT_PROGRESS` — order
+preserved, nothing else in `SoulTypes.java` touched) plus matching production entry points and
+data-only note methods in `SoulEventObserver`. `onMobKilled(ServerPlayerEntity, String)` and
+`onSelfRescue(ServerPlayerEntity, String)` mirror the existing damage hooks' gate-first shape
+exactly: `PRODUCTION.get()`/entity-null check, then `SoulRuntime.current()` +
+`isMasterEnabled()`, and only after both gates pass do they read live dimension/biome/world-tick
+off the bot. `onHobbySession(UUID, String)` and `onHuntProgress(UUID, String, int, int)` take a
+bare bot UUID (no entity is guaranteed live at call time from an idle-hobby or hunt-tally
+callback), so their instance-seam counterparts emit with `""` dimension/biome and world-tick `0`
+— the same convention `noteTaskStarted` already uses for ticket-sourced events. Facts stay
+string-only: `{"mob": mobType}`, `{"kind": kind}`, `{"hobby": hobbyName}`, and
+`{"target": t, "kills": String.valueOf(k), "goal": String.valueOf(g)}`, with every nullable input
+normalized through the file's existing `nullToEmpty` helper so no fact map ever holds a null
+value. Salience: `MOB_KILLED`/`HUNT_PROGRESS` → NORMAL, `SELF_RESCUE` → HIGH, `HOBBY_SESSION` →
+LOW; witness is `SELF` for all four, matching every other self-observed event in this file.
+
+`SoulEventObserverTest` gained ten new cases (five happy-path type/salience/fact assertions, four
+null-normalization checks, one sink-rejects-everything no-op check) exercising the four new
+`note*` methods through the existing `CapturingSink` pattern — no Minecraft type touched. One test
+wrinkle: `Map.copyOf(...).containsValue(null)` throws `NullPointerException` (the JDK's immutable
+map implementation doesn't tolerate a null probe key/value), so the null-fact assertions use
+`facts.values().stream().anyMatch(Objects::isNull)` instead. RED confirmed via a compile failure
+(`cannot find symbol: noteMobKilled`/`noteSelfRescue`/`noteHobbySession`/`noteHuntProgress`) before
+implementation; GREEN confirmed via the focused test class, the full `./gradlew test` suite, and
+`./gradlew build -x test`, all passing.
+
+## Restore companion prompt wording (2026-08-23)
+
+Fix round on the SITUATION prompt rendering task: reverted the `appendBotState` wording change
+from the previous entry (`"permanently recruited"` / `"recruitment quest stage"` back to
+`"permanent companion"` / `"companion quest stage"`). Review caught that `recruited` and
+`permanentCompanion` are two distinct progression milestones (the companion questline turns
+"recruited" into "permanent companion"), so `"permanently recruited: true"` sitting right next to
+`"recruited: true"` read to the LLM as the same fact restated — a prompt-quality regression, not a
+neutral rename. The actual collision this was working around (the mandated ordering test's bare
+`indexOf("companion")` finding the earlier "permanent companion" text instead of the new
+Relationship line) is fixed on the test side instead: `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`
+now searches for `"companion for"` — the literal prefix of the Relationship line's own clause —
+which cannot collide with `appendBotState`'s wording. No production rendering logic changed beyond
+the revert.
+
+## Render Jake's situation in prompts (2026-08-23)
+
+Third step of situational awareness: `SoulPromptAssembler.authoritativeState` now appends a
+`SITUATION` sub-block inside the existing authoritative-state system message (message order/count
+is unchanged — no new message, system contract untouched). `situationLines(SituationSnapshot)`
+renders in a fixed priority order — hazard distance + hostiles + enclosure, combat, survival
+flags, behavior mode, relationship, then logistics (mount, bases, last sleep, hunt, last hobby) —
+skipping every default-valued field (`-1` distances/days/deaths, empty hostiles/Optionals, `""`
+behaviorMode, `false` booleans) so `SituationSnapshot.empty()` produces zero lines and therefore no
+block at all. `appendSituation` greedily fills a fixed 800-char budget (`MAX_SITUATION_CHARS`) in
+that priority order; the first line that would overflow the budget is dropped along with every
+lower-priority line after it, so hazards/hostiles always win a fitting slot over a long last-hobby
+or last-sleep label. Per the Task 2 review's controller ruling, the mount line renders only the
+raw current health (`"Mount: horse, saddled, health 11."`) — never a ratio/percentage against
+`MountSummary.maxHealth`, since that field silently defaults to health when the source has no real
+max. Added `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`,
+`situationBlockIsCappedAt800CharsDroppingLowestPriorityFirst`,
+`emptySituationRendersNoSituationBlock`, and `remotePromptRendersSituationWithoutPlayerSurroundings`
+(REMOTE grounding still omits `playerBiomeSecret` with a populated situation present) to
+`SoulPromptAssemblerTest`; all prior tests pass unmodified.
+
+## Capture Jake's live situation (2026-08-23)
+
+Second step of situational awareness: `SoulSnapshotBuilder.capture` now populates the
+`SituationSnapshot` added to `GroundingSnapshot` in the prior step. Server-thread-only
+`captureSituation(server, bot)` reads danger distance and nearby entities from
+`BotEventHandler.createInitialState`, behavior mode from `getCurrentMode(bot)`, combat/lingering
+state from `BotCombatCalloutService`, shelter/recovery/break-free flags from `BotFleeService`,
+night-travel state from `BotAutoReturnSunsetService`, recruitment epoch/death-count from
+`SurvivalRecruitmentService` (alias-gated exactly like the existing recruitment read in
+`captureBot`), mount state from `MountPersistenceService`, known-base count and a nearest-base
+sleep label (within 32 blocks, else omitted — never raw coordinates) from `BotHomeService`, an
+active hunt from `HuntSessionService`, and the last idle hobby from `BotIdleHobbiesService`. Every
+source group is wrapped in its own try/catch so one throwing/absent source degrades to that
+group's defaults instead of failing the whole capture.
+
+All filtering/sorting/capping/day-floor logic lives in a new pure seam,
+`SoulSnapshotBuilder.buildSituation(SituationInputs)`: hostiles are filtered from nearby-entity
+deltas, distance-sorted nearest-first and capped at 5; `companionDays` floors from
+`recruitedAtEpochMs`/`nowEpochMs` (0 recruited-at = unknown, `-1`); danger distance `<=0` collapses
+to the snapshot's `-1` sentinel. `SituationInputs` (and its `RawEntity` component) are new
+package-private records of plain values only, so `SoulGroundingTest` exercises `buildSituation`
+directly with hand-built inputs — no Minecraft/Mockito needed. `assemble(...)` gains a 5-arg
+overload taking the situation snapshot; the old 4-arg overload now delegates with
+`SituationSnapshot.empty()`, so the two remote/local `assemble` tests from the first step still
+compile and pass unchanged.
+
+## Add soul situation types (2026-08-23)
+
+First step of situational awareness: `SoulTypes` gains `HostileSighting`, `MountSummary`,
+`HuntSummary`, and `SituationSnapshot` (danger distance, nearby hostiles, enclosure/escape flags,
+combat and behavior-mode state, mount, known-base count, last sleep/hobby, active hunt) —
+all immutable, defensively copied/normalized records matching the existing SoulTypes style.
+`GroundingSnapshot` grows a fifth `situation` component via a new canonical 5-arg constructor;
+the old 4-arg constructor is preserved as a delegating convenience that defaults to
+`SituationSnapshot.empty()`, so every existing call site (SoulSnapshotBuilder, SoulChatRouter,
+and their tests) compiles unchanged. Record component order matches the task brief exactly since
+later tasks (populating the snapshot, wiring it into the prompt assembler) construct these
+positionally.
+
 ## 1.1.141 — pin the soul request context window (2026-08-23)
 
 Pre-warming for the retest exposed the deeper half of the freeze: this machine's Ollama default

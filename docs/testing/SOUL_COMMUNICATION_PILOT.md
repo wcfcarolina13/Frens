@@ -358,6 +358,79 @@ most once, ideally before launch.
   fires, no block/inventory/entity state changes, and no action log entry appears anywhere in
   the mod's action-dispatch logging for that turn.
 
+### Situational awareness
+
+Covers the SITUATION sub-block (`SoulPromptAssembler.appendSituation`, part of the
+AUTHORITATIVE STATE system message) and the event journal (`SoulEventObserver`) added on top
+of the pilot in this branch. The SITUATION block is assembled in a fixed priority order —
+hazards/hostiles/enclosure, then combat, survival, behavior mode, relationship, then logistics
+(mount/bases/last-sleep/hunt/last-hobby) — greedily filling an 800-character budget
+(`MAX_SITUATION_CHARS`); a line that doesn't fit is dropped along with every lower-priority line
+after it, and a snapshot with nothing notable produces no `SITUATION` block at all (not an empty
+one). Setup common to all cases below: souls on, Jake enabled and owned by the tester, same
+pre-warmed-model note as above.
+
+- [ ] **Visible hostile is named with direction**
+  Setup: get a hostile mob within detection range of Jake in plain daylight/local presence (not
+  remote), then ask "what's around?" or similar. Expected: the `Hostiles nearby: <mob> <N> blocks
+  <direction>.` line is present in the SITUATION block (first-priority slot, so it always fits
+  under the 800-char cap), and Jake's reply names the mob type and gives a direction consistent
+  with it — not a vague "something's nearby" or a fabricated mob/direction.
+- [ ] **Behavior mode described truthfully — STAY vs FOLLOW**
+  Setup: run `/bot stay` on Jake, then ask what he's doing. Expected: SITUATION's `Mode:` line
+  reads `Mode: STAY.` (the full `BotEventHandler.Mode` enum name, not a paraphrase), and Jake's
+  answer is consistent with standing still/holding position. Then switch to follow (e.g. `/bot
+  follow`) and ask again. Expected: `Mode: FOLLOW.` and an answer consistent with following the
+  player. Confirm the two answers actually differ — a bot answering identically regardless of
+  mode is a defect.
+- [ ] **A kill surfaces later from event memory**
+  Setup: have Jake kill a hostile mob (hunting, defense, or any bot-initiated kill that ends in
+  the `AFTER_DEATH` event's killer-attribution branch), then some turns later — after other chat
+  — ask "what have you been up to?" or similar. Expected: a `MOB_KILLED` event (salience NORMAL,
+  fact `mob=<type>`) was journaled to `events.jsonl` for that kill; Jake's later answer references
+  having fought/killed something recently, sourced from the witnessed-events block rather than
+  invented. Note: only a bot-attributed kill journals — a mob dying from other causes (fall,
+  environment, another bot) does not go through this hook.
+- [ ] **REMOTE DM still carries Jake's own situation, never the player's**
+  Setup: establish a REMOTE conversation (beyond 32 blocks, using one of the supported remote
+  methods from "Local, remote, and unreachable DM" above). Give Jake something situational to
+  report on his end (e.g. stand him near a hostile, or run him through `/bot stay`/`/bot follow`
+  first), then ask "what's around you?" and separately ask about the player's own surroundings
+  (e.g. "what am I standing near?"). Expected: the SITUATION block is still built from Jake's own
+  `SituationSnapshot` and appears in the prompt exactly as it would locally (hazards/mode/etc. on
+  Jake's end); Jake can describe his own hazards/mode/hunting progress, but says nothing about the
+  player's location, held item, or surroundings — the REMOTE branch only suppresses
+  `GroundingSnapshot.player()`, never `situation()`.
+- [ ] **Hobby session (including cook) surfaces on ask**
+  Setup: let Jake run an idle hobby to completion while alone (fishing is easiest to time; cook
+  also counts — `BotIdleHobbiesService`'s cook branch journals on its own completion path,
+  separate from the generic hobby-skill completion line). Afterward ask what he's been doing.
+  Expected: a `HOBBY_SESSION` event (salience LOW, fact `hobby=<name>`, e.g. `fishing` or `cook`)
+  is journaled and the SITUATION block's `Last hobby: <name>.` logistics line reflects it; Jake's
+  answer mentions the hobby.
+- [ ] **SELF_RESCUE journals only on an actual recovery, never on an already-safe check**
+  Setup (negative case): with Jake standing somewhere already open-sky/operational (not stuck),
+  run a hobby or a hunt that calls `BotFleeService.ensureAtSurface`/`ensureAtSurfaceForHobby` as
+  part of its normal pre-check. Expected: `events.jsonl` gains **no** `SELF_RESCUE` record for
+  that run — `ensureAtSurface`'s already-at-surface early return
+  (`logOperationalSurfaceState(... "ensureAtSurface:current")`) does not journal, since nothing
+  was actually recovered.
+  Setup (positive case): bury/trap Jake underground (or otherwise put him somewhere
+  `ensureAtSurface` must actually pillar/step-build/walk him out of) so the survival ladder
+  genuinely fires, then let a hobby or hunt trigger the surface-recovery call. Expected: exactly
+  one `SELF_RESCUE` event (salience HIGH, fact `kind=surface-recovery`) is journaled for that
+  recovery — one record per real recovery, not one per call, and not one for every check that
+  finds him already fine.
+- [ ] **Feature-off baseline still holds (re-run)**
+  Re-run **Baseline (feature disabled) → "Souls disabled, including existing scripted chat and
+  commands"** above in full, including its disk assertion (`<world>/frens/` must not exist after
+  killing/disconnecting a bot with souls disabled). This branch adds no new gate that bypasses the
+  master switch: every situational hook (`onMobKilled`/`onSelfRescue`/`onHobbySession`/
+  `onHuntProgress`) checks `SoulRuntime.isMasterEnabled()` before any live-world read, and the
+  event sink additionally requires an active profile
+  (`SoulEventObserver.acceptsEvent(masterEnabled, hasActiveProfile)`), so a souls-disabled install
+  should be byte-identical to pre-branch behavior — this case re-confirms that hasn't regressed.
+
 ### Routine log and soul-save privacy inspection
 
 - [ ] **Log review for latency separation, correlation IDs, and secret/private-text leakage**
@@ -392,17 +465,18 @@ BUILD SUCCESSFUL in 14s
 4 actionable tasks: 4 executed
 ```
 
-228 tests collected across `build/test-results/test/*.xml`; zero `failures`/`errors` attributes
-present in any suite file.
+259 tests collected across `build/test-results/test/*.xml` (up from 228 pre-branch — Tasks 1-5's
+new situational-awareness coverage); zero `failures`/`errors` attributes present in any suite
+file.
 
 ```text
 $ ./gradlew build -x test
 ...
-BUILD SUCCESSFUL in 6s
-8 actionable tasks: 1 executed, 7 up-to-date
+BUILD SUCCESSFUL in 499ms
+8 actionable tasks: 8 up-to-date
 ```
 
-Artifact: `build/libs/frens-1.1.137-release+1.21.11.jar`.
+Artifact: `build/libs/frens-1.1.141-release+1.21.11.jar`.
 
 ## Static privacy and authority checks (Step 3)
 

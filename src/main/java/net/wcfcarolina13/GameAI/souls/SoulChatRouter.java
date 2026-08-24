@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Exclusive chat-routing gate: decides whether an already-resolved single-target bot DM belongs
@@ -193,7 +194,7 @@ public final class SoulChatRouter {
                 sender.getName().getString(), safePrompt, profileId, grounding, Instant.now());
 
         logRouting(routingId, bot, sender, "submitted", reachability, routeStartNanos, authorizationMs,
-                reachabilityMs, snapshotMs);
+                reachabilityMs, snapshotMs, grounding);
         runtime.submitTurn(turn);
         return RouteOutcome.CONSUMED;
     }
@@ -205,11 +206,41 @@ public final class SoulChatRouter {
     private static void logRouting(UUID routingId, ServerPlayerEntity bot, ServerPlayerEntity sender,
                                     String outcome, SoulTypes.Reachability reachability, long routeStartNanos,
                                     long authorizationMs, long reachabilityMs, long snapshotMs) {
+        logRouting(routingId, bot, sender, outcome, reachability, routeStartNanos, authorizationMs,
+                reachabilityMs, snapshotMs, null);
+    }
+
+    /**
+     * Extends the routing line with content-free ground-truth facts pulled straight from the
+     * captured snapshot -- {@code mode}, {@code following}, {@code sky}, {@code hostiles}, and
+     * {@code animals} -- so a field test can check what the pipeline actually saw (e.g. "was the
+     * bot really in FOLLOW mode when it missed the follow cue", or "did capture actually see the
+     * parrot on the shoulder") directly in {@code latest.log} without touching player message
+     * content. {@code hostiles}/{@code animals} are type-only names (species, "wolf (Rex)",
+     * "parrot (on your shoulder)") -- game facts, never private chat text -- and the animals list
+     * is capped at 6 rendered entries defensively, though the captured list itself is already
+     * capped at 4 (plus up to 2 shoulder pets) upstream. {@code grounding} is {@code null} for
+     * every outcome logged before snapshot capture (loading / invalid-pipeline / unauthorized /
+     * unreachable / no-server); those facts are unknown yet, so the fields render as their neutral
+     * defaults ({@code mode=} empty, {@code false}s, {@code hostiles=0}, {@code animals=[]}).
+     */
+    private static void logRouting(UUID routingId, ServerPlayerEntity bot, ServerPlayerEntity sender,
+                                    String outcome, SoulTypes.Reachability reachability, long routeStartNanos,
+                                    long authorizationMs, long reachabilityMs, long snapshotMs,
+                                    SoulTypes.GroundingSnapshot grounding) {
+        String mode = grounding != null ? grounding.situation().behaviorMode() : "";
+        boolean following = grounding != null && grounding.situation().following();
+        boolean sky = grounding != null && grounding.bot().skyVisible();
+        int hostileCount = grounding != null ? grounding.situation().hostiles().size() : 0;
+        String animals = grounding != null
+                ? grounding.situation().nearbyAnimals().stream().limit(6).collect(Collectors.joining(", "))
+                : "";
         LOGGER.info(
                 "[souls] routing routingId={} bot={} player={} reachability={} outcome={} routingMs={} "
-                        + "authorizationMs={} reachabilityMs={} snapshotMs={}",
+                        + "authorizationMs={} reachabilityMs={} snapshotMs={} mode={} following={} sky={} "
+                        + "hostiles={} animals=[{}]",
                 routingId, bot.getUuid(), sender.getUuid(), reachability, outcome, elapsedMs(routeStartNanos),
-                authorizationMs, reachabilityMs, snapshotMs);
+                authorizationMs, reachabilityMs, snapshotMs, mode, following, sky, hostileCount, animals);
     }
 
     private static long elapsedMs(long startNanos) {

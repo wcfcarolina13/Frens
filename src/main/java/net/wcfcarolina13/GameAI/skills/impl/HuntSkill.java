@@ -482,6 +482,12 @@ public final class HuntSkill implements Skill {
             // When depopulation is enabled, zombie kills don't count toward the hunt target
             if (!(depopulationEnabled && candidate.target.zombie())) {
                 kills++;
+                // Only journal milestones (first kill, goal reached) — not every kill — so a long
+                // hunt doesn't flood the bounded soul-event window with one entry per kill.
+                if (kills == 1 || kills == request.targetCount) {
+                    String huntAwarenessTarget = candidate.target.label();
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHuntProgress(bot.getUuid(), huntAwarenessTarget, kills, request.targetCount);
+                }
             }
             huntLoopStartMs = System.currentTimeMillis(); // reset no-progress timeout after each kill
             // Walk toward kill location before sweeping — mob may have fled far before dying

@@ -1,20 +1,39 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
+import net.wcfcarolina13.DangerZoneDetector.CliffDetector;
+import net.wcfcarolina13.DangerZoneDetector.LavaDetector;
+import net.wcfcarolina13.Entity.AutoFaceEntity;
+import net.wcfcarolina13.Entity.EntityDetails;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
+import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
+import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotQuestService;
+import net.wcfcarolina13.GameAI.services.BotStuckService;
+import net.wcfcarolina13.GameAI.services.HuntSessionService;
+import net.wcfcarolina13.GameAI.services.MountPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.PlayerUtils.BlockDistanceLimitedSearch;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,8 +91,10 @@ public final class SoulSnapshotBuilder {
                 (reachability == SoulTypes.Reachability.LOCAL && player != null)
                         ? capturePlayer(bot, player)
                         : null;
+        SoulTypes.SituationSnapshot situationSnapshot =
+                captureSituation(server, bot, botSnapshot.ownerName(), reachability, player);
 
-        return assemble(botSnapshot, playerSnapshot, reachability, Instant.now());
+        return assemble(botSnapshot, playerSnapshot, situationSnapshot, reachability, Instant.now());
     }
 
     private static SoulTypes.BotSnapshot captureBot(MinecraftServer server, ServerPlayerEntity bot) {
@@ -102,7 +123,8 @@ public final class SoulSnapshotBuilder {
         Optional<TaskService.ActiveTaskInfo> taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
         String activeTask = taskInfo.map(TaskService.ActiveTaskInfo::name).orElse("");
         String taskState = taskInfo.map(info -> info.state().name()).orElse("");
-        String behaviorMode = BotEventHandler.isFollowingPlayer(bot) ? "following" : "idle";
+        BotEventHandler.Mode currentMode = BotEventHandler.getCurrentMode(bot);
+        String behaviorMode = currentMode != null ? currentMode.name() : "";
 
         String homeName = BotHomeService.getPreferredHomeBaseLabel(bot).orElse("");
 
@@ -158,14 +180,383 @@ public final class SoulSnapshotBuilder {
         return held.isEmpty() ? "bare hands" : held.getName().getString();
     }
 
+    /**
+     * Reads live danger/entity/combat/survival/companion/mount/base/hunt/hobby state on the
+     * server thread and projects it into plain {@link SituationInputs}, then hands off to the
+     * pure {@link #buildSituation(SituationInputs)} seam for filtering/sorting/day-floor math.
+     *
+     * <p>Every source group is wrapped defensively: a throwing or absent source falls back to
+     * that group's neutral default rather than failing the whole capture, mirroring
+     * {@link #captureBot(MinecraftServer, ServerPlayerEntity)}'s recruitment-read style.
+     *
+     * @param ownerName the bot's already-captured {@link SoulTypes.BotSnapshot#ownerName()}, used
+     *     to exclude the owner/commander from the aggregated nearby-animal view below.
+     * @param reachability this turn's pre-classified reachability -- gates the shoulder-pet read
+     *     below to LOCAL the same way {@link #capture} gates {@code playerSnapshot} construction.
+     * @param player the local player, or {@code null} when there is no shared presence (REMOTE) --
+     *     used only to read their shoulder-pet NBT when {@code reachability} is LOCAL.
+     */
+    private static SoulTypes.SituationSnapshot captureSituation(MinecraftServer server, ServerPlayerEntity bot,
+            String ownerName, SoulTypes.Reachability reachability, ServerPlayerEntity player) {
+        long nowEpochMs = System.currentTimeMillis();
+
+        double dangerDistance = -1.0D;
+        List<RawEntity> entities = List.of();
+        boolean enclosed = false;
+        boolean hasHeadroom = false;
+        boolean hasEscapeRoute = false;
+        try {
+            // Read enclosure/danger/entity state directly from its underlying sources instead of
+            // BotEventHandler.createInitialState(bot): that helper side-effects
+            // BotStuckService.setLastSafePosition and pays for several fields this capture
+            // discards (hotbar, armor, hunger, risk map, ...).
+            BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
+            enclosed = environmentSnapshot.enclosed();
+            hasHeadroom = environmentSnapshot.hasHeadroom();
+            hasEscapeRoute = environmentSnapshot.hasEscapeRoute();
+
+            // Lava/cliff distance separately rather than DangerZoneDetector.detectDangerZone's
+            // lavaDistance+cliffDistance sum (meaningless once both hazards are present); take the
+            // nearer of whichever hazard(s) are actually detected.
+            double lavaDistance = LavaDetector.detectNearestLava(bot, 10, 10);
+            double cliffDistance = CliffDetector.detectCliffWithBoundingBox(bot, 5, 5);
+            boolean lavaPresent = lavaDistance > 0.0D && lavaDistance != Double.MAX_VALUE;
+            boolean cliffPresent = cliffDistance > 0.0D && cliffDistance != Double.MAX_VALUE;
+            if (lavaPresent && cliffPresent) {
+                dangerDistance = Math.min(lavaDistance, cliffDistance);
+            } else if (lavaPresent) {
+                dangerDistance = lavaDistance;
+            } else if (cliffPresent) {
+                dangerDistance = cliffDistance;
+            }
+
+            // Radius 16 (not the shared AutoFaceEntity/BotEventHandler default of 10) so ambient
+            // fliers (parrots, bats) and distant animals are visible to the soul prompt even when
+            // outside the bot's own combat-scan range -- this capture is the only caller widened.
+            List<Entity> nearby = AutoFaceEntity.detectNearbyEntities(bot, 16);
+            List<RawEntity> collected = new ArrayList<>(nearby.size());
+            for (Entity e : nearby) {
+                // detectNearbyEntities applies no entity-type filter (see its own Javadoc/callers
+                // in AutoFaceEntity) -- without this guard, dropped item stacks, arrows, and boats
+                // show up as fabricated "Animals nearby: Oak Planks x3" entries. Only living,
+                // non-decorative entities belong in the situation snapshot; armor stands are
+                // LivingEntity in vanilla but are decoration, not creatures.
+                if (!(e instanceof LivingEntity) || e instanceof ArmorStandEntity) {
+                    continue;
+                }
+                EntityDetails details = EntityDetails.from(bot, e);
+                // Name from the entity TYPE first ("wolf", "parrot"), not the display name --
+                // a display name is the vanilla custom name (e.g. "Rex") when one is set, and a
+                // small local model can't map an arbitrary pet name back to a species. A custom
+                // name is still surfaced, just annotated onto the species: "wolf (Rex)".
+                String typePath = EntityType.getId(e.getType()).getPath();
+                String customName = e.hasCustomName() ? e.getCustomName().getString() : null;
+                collected.add(new RawEntity(formatEntityName(typePath, customName), details.isHostile(),
+                        details.getX() - bot.getX(), details.getY() - bot.getY(), details.getZ() - bot.getZ()));
+            }
+            // A tamed parrot auto-perches on its owner's shoulder; while perched it is not a world
+            // entity at all -- it is stored as NbtCompound on the holding ServerPlayerEntity
+            // (getLeftShoulderNbt/getRightShoulderNbt), so detectNearbyEntities above can never see
+            // it. Read both shoulders on the bot itself and, when LOCAL, on the present player too,
+            // and fold them into the same collected list so the existing aggregation below (name
+            // grouping, owner/self exclusion, cap) handles them uniformly with ground sightings.
+            appendShoulderPets(collected, bot, "your shoulder");
+            if (reachability == SoulTypes.Reachability.LOCAL && player != null) {
+                appendShoulderPets(collected, player, player.getName().getString() + "'s shoulder");
+            }
+            entities = collected;
+        } catch (Throwable ignored) {
+            // Danger/entity/enclosure state is best-effort context, never load-bearing for capture.
+        }
+
+        String behaviorMode = "";
+        boolean following = false;
+        try {
+            BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+            behaviorMode = mode != null ? mode.name() : "";
+            // isFollowingPlayer excludes return-to-base (which also runs Mode.FOLLOW internally)
+            // -- it is true only when the bot is actively following a player entity.
+            following = BotEventHandler.isFollowingPlayer(bot);
+        } catch (Throwable ignored) {
+        }
+
+        String standingOn = "";
+        List<String> rawNearbyBlocks = List.of();
+        try {
+            ServerWorld world = (ServerWorld) bot.getEntityWorld();
+            standingOn = world.getBlockState(bot.getBlockPos().down()).getBlock().getName().getString();
+            // Mirrors BotEventHandler's own nearby-block scan (BlockDistanceLimitedSearch(bot, 3, 5))
+            // so the soul prompt's block awareness matches what the bot's own AI already scans.
+            rawNearbyBlocks = new BlockDistanceLimitedSearch(bot, 3, 5).detectNearbyBlocks();
+        } catch (Throwable ignored) {
+        }
+
+        boolean inCombat = false;
+        boolean postCombatLinger = false;
+        int recentKillCount = 0;
+        try {
+            inCombat = BotCombatCalloutService.isInCombat(bot.getUuid());
+            postCombatLinger = BotCombatCalloutService.isInPostCombatLingerWindow(bot);
+            recentKillCount = BotCombatCalloutService.getRecentKillPositions(bot.getUuid()).size();
+        } catch (Throwable ignored) {
+        }
+
+        boolean inShelter = false;
+        boolean surfaceRecoveryActive = false;
+        boolean breakingFree = false;
+        try {
+            inShelter = BotFleeService.isInShelter(bot.getUuid());
+            surfaceRecoveryActive = BotFleeService.isSurfaceRecoveryActive(bot.getUuid());
+            breakingFree = BotFleeService.isBreakingFree(bot.getUuid());
+        } catch (Throwable ignored) {
+        }
+
+        boolean nightTravelActive = false;
+        try {
+            nightTravelActive = BotAutoReturnSunsetService.isNightTravelSessionActive(bot.getUuid());
+        } catch (Throwable ignored) {
+        }
+
+        long recruitedAtEpochMs = 0L;
+        int deathCount = -1;
+        try {
+            if (Frens.CONFIG != null) {
+                String botAlias = bot.getName().getString();
+                ManualConfig.SurvivalRecruitmentState recruitmentState = SurvivalRecruitmentService.getState(server);
+                if (recruitmentState != null && botAlias.equalsIgnoreCase(recruitmentState.getBotAlias())) {
+                    recruitedAtEpochMs = recruitmentState.getRecruitedAtEpochMs();
+                    deathCount = recruitmentState.getCompanionDeathCount();
+                }
+            }
+        } catch (Throwable ignored) {
+            // Recruitment state is best-effort context, never load-bearing for capture.
+        }
+
+        Optional<SoulTypes.MountSummary> mount = Optional.empty();
+        try {
+            MountPersistenceService.MountState mountState = MountPersistenceService.getRecordedState(bot);
+            if (mountState != null) {
+                // MountState has no persisted maxHealth; mirror health so a consumer computing a
+                // health fraction sees "healthy" rather than dividing by zero.
+                mount = Optional.of(new SoulTypes.MountSummary(mountState.mountType(),
+                        mountState.health(), mountState.health(), mountState.saddled()));
+            }
+        } catch (Throwable ignored) {
+        }
+
+        int knownBaseCount = 0;
+        Optional<String> lastSleepLabel = Optional.empty();
+        Optional<String> atBase = Optional.empty();
+        try {
+            ServerWorld world = (ServerWorld) bot.getEntityWorld();
+            List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(server, world);
+            knownBaseCount = bases.size();
+            Optional<BlockPos> sleepPos = BotHomeService.getLastSleep(bot);
+            if (sleepPos.isPresent()) {
+                lastSleepLabel = nearestBaseLabel(bases, sleepPos.get(), 32.0D * 32.0D);
+            }
+            atBase = nearestBaseLabel(bases, bot.getBlockPos(), 32.0D * 32.0D);
+        } catch (Throwable ignored) {
+        }
+
+        Optional<SoulTypes.HuntSummary> hunt = Optional.empty();
+        try {
+            HuntSessionService.HuntSession session = HuntSessionService.getSession(bot.getUuid());
+            if (session != null) {
+                List<String> targetIds = session.targetIds();
+                String target;
+                if (targetIds != null && !targetIds.isEmpty()) {
+                    target = targetIds.get(0);
+                } else {
+                    target = session.zoneName() != null ? session.zoneName() : "";
+                }
+                hunt = Optional.of(new SoulTypes.HuntSummary(target, session.killsCompleted(), session.killsTarget()));
+            }
+        } catch (Throwable ignored) {
+        }
+
+        Optional<String> lastHobby = Optional.empty();
+        try {
+            lastHobby = Optional.ofNullable(BotIdleHobbiesService.getLastHobbyName(bot.getUuid()));
+        } catch (Throwable ignored) {
+        }
+
+        SituationInputs inputs = new SituationInputs(dangerDistance, entities, ownerName, bot.getName().getString(),
+                standingOn, rawNearbyBlocks,
+                enclosed, hasHeadroom, hasEscapeRoute,
+                behaviorMode, following, inCombat, postCombatLinger, recentKillCount,
+                inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
+                recruitedAtEpochMs, deathCount, nowEpochMs,
+                mount, knownBaseCount, lastSleepLabel, atBase, hunt, lastHobby);
+        return buildSituation(inputs);
+    }
+
+    /**
+     * Reads both shoulder slots on {@code holder} (a tamed parrot auto-perches there; while
+     * perched it is stored as {@link NbtCompound}, not a world {@link Entity} -- see the
+     * {@code captureSituation} call site) and appends one {@link RawEntity} per occupied slot to
+     * {@code out}, labeled with {@code ownerLabel} (e.g. {@code "your shoulder"} or
+     * {@code "Bradley's shoulder"}).
+     */
+    private static void appendShoulderPets(List<RawEntity> out, ServerPlayerEntity holder, String ownerLabel) {
+        appendShoulderPet(out, holder.getLeftShoulderNbt(), ownerLabel);
+        appendShoulderPet(out, holder.getRightShoulderNbt(), ownerLabel);
+    }
+
+    /**
+     * Decodes the "id" key the same way vanilla's {@code ServerPlayerEntity#spawnShoulderEntity}
+     * does when it respawns the shoulder passenger back into the world (both read
+     * {@code EntityType.CODEC} off the raw {@code "id"} string tag) -- an empty NbtCompound means
+     * that shoulder slot is unoccupied, and a present-but-undecodable id is skipped rather than
+     * fabricating a sighting.
+     */
+    private static void appendShoulderPet(List<RawEntity> out, NbtCompound shoulderNbt, String ownerLabel) {
+        if (shoulderNbt == null || shoulderNbt.isEmpty()) {
+            return;
+        }
+        shoulderNbt.get("id", EntityType.CODEC).ifPresent(type -> out.add(new RawEntity(
+                shoulderEntry(EntityType.getId(type).getPath(), ownerLabel), false, 0.0D, 0.0D, 0.0D)));
+    }
+
+    /**
+     * Nearest {@link BotHomeService.BaseEntry#label()} to {@code pos} among {@code bases}, within
+     * {@code maxDistanceSq} blocks squared. Shared by the last-sleep-location and current-position
+     * ("am I at a base right now") lookups above -- both are "nearest known base to some point"
+     * with the same 32-block radius, differing only in which point they measure from.
+     */
+    private static Optional<String> nearestBaseLabel(List<BotHomeService.BaseEntry> bases, BlockPos pos,
+            double maxDistanceSq) {
+        double bestDistanceSq = maxDistanceSq;
+        String bestLabel = null;
+        for (BotHomeService.BaseEntry base : bases) {
+            double distanceSq = pos.getSquaredDistance(base.pos());
+            if (distanceSq <= bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                bestLabel = base.label();
+            }
+        }
+        return Optional.ofNullable(bestLabel);
+    }
+
     // ─────── Pure projection seam (no Minecraft classes touched) ───────
 
     static SoulTypes.GroundingSnapshot assemble(SoulTypes.BotSnapshot bot, SoulTypes.PlayerSnapshot player,
-            SoulTypes.Reachability reachability, Instant capturedAt) {
+            SoulTypes.SituationSnapshot situation, SoulTypes.Reachability reachability, Instant capturedAt) {
         Optional<SoulTypes.PlayerSnapshot> playerOpt = reachability == SoulTypes.Reachability.REMOTE
                 ? Optional.empty()
                 : Optional.ofNullable(player);
-        return new SoulTypes.GroundingSnapshot(reachability, bot, playerOpt, capturedAt);
+        return new SoulTypes.GroundingSnapshot(reachability, bot, playerOpt, situation, capturedAt);
+    }
+
+    static SoulTypes.GroundingSnapshot assemble(SoulTypes.BotSnapshot bot, SoulTypes.PlayerSnapshot player,
+            SoulTypes.Reachability reachability, Instant capturedAt) {
+        return assemble(bot, player, SoulTypes.SituationSnapshot.empty(), reachability, capturedAt);
+    }
+
+    /** Plain values pulled from live entity/EntityDetails state for one nearby entity. No Minecraft types. */
+    record RawEntity(String name, boolean hostile, double dx, double dy, double dz) {
+        RawEntity {
+            name = name == null ? "" : name;
+        }
+    }
+
+    /**
+     * Plain-value carrier for {@link #buildSituation(SituationInputs)}. No Minecraft/Fabric
+     * classes — every field is a primitive, String, or an already-pure {@code SoulTypes} record
+     * — so the pure seam can be exercised by plain unit tests without a running Minecraft server.
+     */
+    record SituationInputs(
+            double dangerDistance,
+            List<RawEntity> entities,
+            String ownerName,
+            String botName,
+            String standingOn,
+            List<String> nearbyBlocks,          // raw scan output, duplicates expected -- see buildSituation
+            boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
+            String behaviorMode,
+            boolean following,
+            boolean inCombat, boolean postCombatLinger, int recentKillCount,
+            boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
+            boolean nightTravelActive,
+            long recruitedAtEpochMs, int deathCount, long nowEpochMs,
+            Optional<SoulTypes.MountSummary> mount,
+            int knownBaseCount,
+            Optional<String> lastSleepLabel,
+            Optional<String> atBase,
+            Optional<SoulTypes.HuntSummary> hunt,
+            Optional<String> lastHobby) {
+        SituationInputs {
+            entities = entities == null ? List.of() : List.copyOf(entities);
+            ownerName = ownerName == null ? "" : ownerName;
+            botName = botName == null ? "" : botName;
+            standingOn = standingOn == null ? "" : standingOn;
+            nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
+            behaviorMode = behaviorMode == null ? "" : behaviorMode;
+            mount = mount == null ? Optional.empty() : mount;
+            lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
+            atBase = atBase == null ? Optional.empty() : atBase;
+            hunt = hunt == null ? Optional.empty() : hunt;
+            lastHobby = lastHobby == null ? Optional.empty() : lastHobby;
+        }
+    }
+
+    /**
+     * Pure transform: filters to hostiles, computes rounded 3D distance, sorts nearest-first and
+     * caps at 5; aggregates non-hostile entities (excluding the owner and the bot itself) by name,
+     * most-numerous first, capped at 4; floors {@code companionDays} from epoch millis; passes
+     * every other group through unchanged. Contains all filtering/sorting/capping/day-floor/default
+     * logic for the situation snapshot — {@link #captureSituation(MinecraftServer, ServerPlayerEntity, String)}
+     * only reads and forwards.
+     */
+    static SoulTypes.SituationSnapshot buildSituation(SituationInputs inputs) {
+        int dangerDistance = inputs.dangerDistance() <= 0.0D
+                ? -1
+                : (int) Math.round(inputs.dangerDistance());
+
+        List<SoulTypes.HostileSighting> hostiles = inputs.entities().stream()
+                .filter(RawEntity::hostile)
+                .map(e -> new SoulTypes.HostileSighting(e.name(), cardinalDirection(e.dx(), e.dz()),
+                        (int) Math.round(Math.sqrt(e.dx() * e.dx() + e.dy() * e.dy() + e.dz() * e.dz()))))
+                .sorted(Comparator.comparingInt(SoulTypes.HostileSighting::distanceBlocks))
+                .limit(5)
+                .collect(Collectors.toList());
+
+        List<String> nearbyAnimals = inputs.entities().stream()
+                .filter(e -> !e.hostile())
+                .filter(e -> !e.name().isBlank())
+                .filter(e -> !e.name().equalsIgnoreCase(inputs.ownerName()))
+                .filter(e -> !e.name().equalsIgnoreCase(inputs.botName()))
+                .collect(Collectors.groupingBy(RawEntity::name, LinkedHashMap::new, Collectors.counting()))
+                .entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(4)
+                .map(entry -> entry.getValue() == 1L ? entry.getKey() : entry.getKey() + " x" + entry.getValue())
+                .collect(Collectors.toList());
+
+        // Dedupe the raw (possibly duplicate-heavy) block scan by type name, most-numerous first,
+        // capped at 4. Air is already excluded upstream by BlockDistanceLimitedSearch.canReachBlock.
+        List<String> nearbyBlocks = inputs.nearbyBlocks().stream()
+                .filter(name -> name != null && !name.isBlank())
+                .collect(Collectors.groupingBy(name -> name, LinkedHashMap::new, Collectors.counting()))
+                .entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(4)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+
+        int companionDays = inputs.recruitedAtEpochMs() <= 0L
+                ? -1
+                : (int) Math.floorDiv(inputs.nowEpochMs() - inputs.recruitedAtEpochMs(), 86_400_000L);
+
+        return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
+                inputs.standingOn(), nearbyBlocks,
+                inputs.enclosed(), inputs.hasHeadroom(), inputs.hasEscapeRoute(),
+                inputs.behaviorMode(), inputs.following(),
+                inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
+                inputs.inShelter(), inputs.surfaceRecoveryActive(), inputs.breakingFree(),
+                inputs.nightTravelActive(), companionDays, inputs.deathCount(),
+                inputs.mount(), inputs.knownBaseCount(), inputs.lastSleepLabel(), inputs.atBase(),
+                inputs.hunt(), inputs.lastHobby());
     }
 
     // ─────── Pure helpers (unit-testable without a Minecraft server) ───────
@@ -173,6 +564,25 @@ public final class SoulSnapshotBuilder {
     /** Rounds a coordinate to the nearest 8-block increment. */
     static int roundToEight(int value) {
         return (int) Math.round(value / 8.0D) * 8;
+    }
+
+    /**
+     * Species-first entity label: {@code typePath} alone ("wolf", "parrot") when the entity has
+     * no custom name, or {@code "wolf (Rex)"} when it does. A small local model can classify a
+     * species reliably but can't map an arbitrary player-chosen name back to one, so the species
+     * always leads and the custom name is annotated onto it rather than replacing it.
+     */
+    static String formatEntityName(String typePath, String customNameOrNull) {
+        String base = typePath == null ? "" : typePath;
+        if (customNameOrNull == null || customNameOrNull.isBlank()) {
+            return base;
+        }
+        return base + " (" + customNameOrNull + ")";
+    }
+
+    /** Formats one shoulder-perched pet sighting, e.g. {@code "parrot (on your shoulder)"}. */
+    static String shoulderEntry(String species, String ownerLabel) {
+        return species + " (on " + ownerLabel + ")";
     }
 
     /** Resolves the compass direction of {@code (dx, dz)} to its nearest of 8 points. North is -Z, east is +X. */

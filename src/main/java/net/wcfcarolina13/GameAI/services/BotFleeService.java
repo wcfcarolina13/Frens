@@ -2577,6 +2577,7 @@ public final class BotFleeService {
                     SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
                     SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
                     if (isAtSurface(bot, world) || !BotWaterEscapeService.isInWater(bot)) {
+                        net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                         return true;
                     }
                 }
@@ -2625,6 +2626,7 @@ public final class BotFleeService {
                 if (moveToOperationalSurface(bot, world, nearby.pos(), "surface-staging")) {
                     LOGGER.info("ensureAtSurface: {} reached operational surface via nearby staging",
                             bot.getName().getString());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                     return true;
                 }
                 // Movement failed — pillar up first (fast escape from surface pits/overhangs)
@@ -2633,6 +2635,7 @@ public final class BotFleeService {
                     SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
                     LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
                             bot.getName().getString());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                     return true;
                 }
                 // Pillar didn't work — try building scaffold steps toward the staging area
@@ -2641,6 +2644,7 @@ public final class BotFleeService {
                             bot.getName().getString());
                     SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
                     SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                     return true;
                 }
             } else {
@@ -2654,6 +2658,7 @@ public final class BotFleeService {
                 SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
                 LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
                         bot.getName().getString());
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                 return true;
             }
 
@@ -2666,6 +2671,7 @@ public final class BotFleeService {
             if (logOperationalSurfaceState(bot, world, "ensureAtSurface:post-ascent")) {
                 SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
                 SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                 return true;
             }
 
@@ -2674,6 +2680,7 @@ public final class BotFleeService {
                 SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
                 LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
                         bot.getName().getString());
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                 return true;
             }
 

@@ -1016,6 +1016,7 @@ public final class BotIdleHobbiesService {
                     boolean result = SmeltingService.cookAllFoodSync(bot, botSource, sw);
                     LOGGER.info("Cook hobby finished for {}: success={}", bot.getName().getString(), result);
                     LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHobbySession(botUuid, "cook");
                     clearPreferCooking(botUuid);
                     server.execute(() -> {
                         if (TaskService.isServerStopping() || bot.isRemoved() || !bot.isAlive()) return;
@@ -1078,6 +1079,7 @@ public final class BotIdleHobbiesService {
                 LOGGER.info("Idle hobby '{}' finished for {}: success={} msg='{}'",
                         skillToRun, bot.getName().getString(), result != null && result.success(), result != null ? result.message() : "null");
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHobbySession(botUuid, skillToRun);
 
                 // Schedule the next decision relative to completion time.
                 // - Success: wait a bit so hobbies feel “occasional”, not spammy.
@@ -1184,6 +1186,7 @@ public final class BotIdleHobbiesService {
             if (canStartFallbackWoodcut(world, bot)) {
                 NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS);
                 LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+                LAST_HOBBY.put(botUuid, "woodcut");
                 startAmbientSkill(server, bot, "woodcut");
                 LOGGER.info("Idle wooden fallback: starting one-tree woodcut for {}", bot.getName().getString());
                 return true;
@@ -1474,6 +1477,7 @@ public final class BotIdleHobbiesService {
 
         if (!canStartFallbackWoodcut(world, bot)) return false;
 
+        LAST_HOBBY.put(bot.getUuid(), "woodcut");
         startAmbientSkill(server, bot, "woodcut");
         LOGGER.info("Idle resource woodcut: {} needs tools but has no wood — starting woodcut",
                 bot.getName().getString());

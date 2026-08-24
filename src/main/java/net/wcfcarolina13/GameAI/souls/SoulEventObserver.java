@@ -57,9 +57,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Mixed-thread contract: task hooks ({@link #onTaskStarted}/{@link #onTaskPaused}/
  * {@link #onTaskFinished}) arrive from whatever thread the skill or command dispatch runs on
  * (often a skill worker thread), while tick/damage/death/respawn hooks always arrive on the
- * server thread. All per-bot session maps are {@link ConcurrentHashMap}s, and
- * {@code TaskService}'s single-active-slot-per-bot invariant means at most one task hook fires
- * for a given bot at a time — so no additional synchronization is needed here.
+ * server thread. {@link #onHobbySession} and {@link #onSelfRescue} are UUID-only for the same
+ * reason as the task hooks — {@code BotIdleHobbiesService} and {@code BotFleeService.ensureAtSurface}
+ * both run their callers on worker threads, so those two hooks never read live entity/world state
+ * (dimension, biome, tick) and record empty/zero placeholders instead. All per-bot session maps
+ * are {@link ConcurrentHashMap}s, and {@code TaskService}'s single-active-slot-per-bot invariant
+ * means at most one task hook fires for a given bot at a time — so no additional synchronization
+ * is needed here.
  */
 public final class SoulEventObserver {
 
@@ -271,6 +275,83 @@ public final class SoulEventObserver {
                 sanitizeReasonCategory(ticket.cancelReason()), worldTickOf(ticket));
     }
 
+    /** The {@code TaskService} ticket name a running hunt registers under (see {@code SkillManager.runSkill} -&gt; {@code TaskService.beginSkill("hunt", ...)}, which prefixes {@code "skill:"}). */
+    private static final String HUNT_TASK_NAME = "skill:hunt";
+
+    /**
+     * Forwards a bot-witnessed kill (self-witnessed; the mob it just finished off).
+     *
+     * <p>Gated before any live-world read, including the mob-type derivation itself: the caller
+     * passes the raw {@code killed} entity so the display-name/registry-path lookup only happens
+     * once souls are actually enabled. Also suppressed while the bot's active task is a live hunt
+     * ({@link #HUNT_TASK_NAME}) — {@link #onHuntProgress} already reports hunt kills at
+     * milestones, so double-journaling every individual kill here would flood the event window.
+     */
+    public static void onMobKilled(ServerPlayerEntity bot, Entity killed) {
+        SoulEventObserver observer = PRODUCTION.get();
+        if (observer == null || bot == null || killed == null) {
+            return;
+        }
+        // Gate BEFORE any live-world read (dimension/biome) or the mob-type lookup, matching every
+        // other production hook in this file.
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
+            return;
+        }
+        boolean huntActive = TaskService.getActiveTaskInfo(bot.getUuid())
+                .map(info -> HUNT_TASK_NAME.equals(info.name()))
+                .orElse(false);
+        if (huntActive) {
+            return;
+        }
+        String mobType = EntityType.getId(killed.getType()).getPath();
+        observer.noteMobKilled(bot.getUuid(), dimensionOf(bot), biomeOf(bot), mobType, worldTickOf(bot));
+    }
+
+    /**
+     * Forwards a bot pulling itself out of a hazard (powder snow, drowning, fire, surface recovery,
+     * etc.). UUID-only, matching {@link #onHobbySession}: callers such as
+     * {@code BotFleeService.ensureAtSurface} run on worker threads, so this hook must never read
+     * live entity/world state (dimension, biome, tick) off-thread.
+     */
+    public static void onSelfRescue(UUID botId, String kind) {
+        SoulEventObserver observer = PRODUCTION.get();
+        if (observer == null || botId == null) {
+            return;
+        }
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
+            return;
+        }
+        observer.noteSelfRescue(botId, "", "", kind, 0L);
+    }
+
+    /** Forwards a completed idle-hobby session (fishing, wandering, etc.). UUID-only: no entity is guaranteed live by call time, so dimension/biome/tick are omitted. */
+    public static void onHobbySession(UUID botId, String hobbyName) {
+        SoulEventObserver observer = PRODUCTION.get();
+        if (observer == null || botId == null) {
+            return;
+        }
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
+            return;
+        }
+        observer.noteHobbySession(botId, hobbyName);
+    }
+
+    /** Forwards a hunt tally update (kills so far vs. goal). UUID-only, same rationale as {@link #onHobbySession}. */
+    public static void onHuntProgress(UUID botId, String target, int kills, int goal) {
+        SoulEventObserver observer = PRODUCTION.get();
+        if (observer == null || botId == null) {
+            return;
+        }
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (runtime == null || !runtime.isMasterEnabled()) {
+            return;
+        }
+        observer.noteHuntProgress(botId, target, kills, goal);
+    }
+
     /** Clears all in-memory session state; called on {@code SERVER_STOPPED} (world reload). */
     public static void resetSession() {
         SoulEventObserver observer = PRODUCTION.get();
@@ -375,6 +456,51 @@ public final class SoulEventObserver {
         combatDeadlineTicks.remove(botId);
         emit(botId, SoulTypes.EventType.COMBAT_ENDED, dimension, biome, Map.of(), SoulTypes.Witness.SELF,
                 worldTick, SoulTypes.Salience.LOW, List.of());
+    }
+
+    /** Records a mob the bot just killed. */
+    void noteMobKilled(UUID botId, String dimension, String biome, String mobType, long worldTick) {
+        if (botId == null || !sink.accepts(botId)) {
+            return;
+        }
+        Map<String, String> facts = factMap("mob", nullToEmpty(mobType));
+        emit(botId, SoulTypes.EventType.MOB_KILLED, dimension, biome, facts, SoulTypes.Witness.SELF,
+                worldTick, SoulTypes.Salience.NORMAL, List.of());
+    }
+
+    /** Records the bot rescuing itself from a hazard (e.g. powder snow, drowning). */
+    void noteSelfRescue(UUID botId, String dimension, String biome, String kind, long worldTick) {
+        if (botId == null || !sink.accepts(botId)) {
+            return;
+        }
+        Map<String, String> facts = factMap("kind", nullToEmpty(kind));
+        emit(botId, SoulTypes.EventType.SELF_RESCUE, dimension, biome, facts, SoulTypes.Witness.SELF,
+                worldTick, SoulTypes.Salience.HIGH, List.of());
+    }
+
+    /**
+     * Records a completed idle-hobby session. UUID-only source data (no live entity guaranteed at
+     * call time), so dimension/biome/worldTick are omitted the same way {@link #noteTaskStarted}
+     * omits dimension/biome for ticket-sourced events.
+     */
+    void noteHobbySession(UUID botId, String hobbyName) {
+        if (botId == null || !sink.accepts(botId)) {
+            return;
+        }
+        Map<String, String> facts = factMap("hobby", nullToEmpty(hobbyName));
+        emit(botId, SoulTypes.EventType.HOBBY_SESSION, "", "", facts, SoulTypes.Witness.SELF, 0L,
+                SoulTypes.Salience.LOW, List.of());
+    }
+
+    /** Records a hunt tally update (kills so far vs. goal). UUID-only, same rationale as {@link #noteHobbySession}. */
+    void noteHuntProgress(UUID botId, String target, int kills, int goal) {
+        if (botId == null || !sink.accepts(botId)) {
+            return;
+        }
+        Map<String, String> facts = factMap("target", nullToEmpty(target), "kills", String.valueOf(kills),
+                "goal", String.valueOf(goal));
+        emit(botId, SoulTypes.EventType.HUNT_PROGRESS, "", "", facts, SoulTypes.Witness.SELF, 0L,
+                SoulTypes.Salience.NORMAL, List.of());
     }
 
     /** Maps a finished ticket's terminal state to the coarse outcome event type. */
