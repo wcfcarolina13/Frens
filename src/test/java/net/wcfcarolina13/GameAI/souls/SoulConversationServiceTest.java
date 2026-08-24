@@ -206,6 +206,23 @@ class SoulConversationServiceTest {
                 true, "irrelevant", null, "test", "test-model", 1L, null, null, null));
     }
 
+    // === Additional coverage: routing-id adoption ===
+
+    @Test
+    void turnRoutingIdBecomesTheCorrelationIdEndToEnd() throws Exception {
+        // The router's routingId must survive as the correlation id of the provider request and
+        // the delivery token — one id joining every [souls] log line for the turn.
+        UUID routingId = UUID.randomUUID();
+        SoulTypes.AcceptedTurn routedTurn = new SoulTypes.AcceptedTurn(key, "Jake", "Player",
+                "How are we doing?", "frens:jake", localGrounding(), Instant.EPOCH, routingId);
+        delivery.completeNext(true);
+
+        service.submit(routedTurn).get(2, SECONDS);
+
+        assertEquals(routingId, provider.requests().get(0).correlationId());
+        assertEquals(routingId, delivery.lastToken.correlationId());
+    }
+
     // === Fixtures (verbatim from the task brief, with additive, non-modifying test-only helpers) ===
 
     private static final class FakeProvider implements SoulModelProvider {
@@ -245,6 +262,8 @@ class SoulConversationServiceTest {
 
     private static final class FakeDelivery implements SoulConversationService.Delivery {
         private final Deque<Boolean> results = new ArrayDeque<>();
+        /** Test-only: the token of the most recent deliverReply, for correlation-id assertions. */
+        private SoulTypes.TurnToken lastToken;
 
         void completeNext(boolean result) {
             results.addLast(result);
@@ -254,6 +273,7 @@ class SoulConversationServiceTest {
         public CompletableFuture<Boolean> deliverReply(SoulTypes.AcceptedTurn turn,
                                                         SoulTypes.TurnToken token,
                                                         String text) {
+            lastToken = token;
             return CompletableFuture.completedFuture(results.removeFirst());
         }
 

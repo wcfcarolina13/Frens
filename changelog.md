@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Thin sleep hint + one correlation id per soul turn (2026-08-24)
+
+- **Sleep hint restyled (Bradley: "gets in the way, noisy").** The in-bed "Frens need to sleep"
+  notice was a bordered two-line box floating above the Leave Bed button; it is now a single
+  thin translucent strip pinned across the very top of the screen — one line ("Your Frens need
+  to sleep too — type zzz in chat to send them to bed.", with a compact fallback for narrow
+  scaled widths), ~17 px tall, softer alpha, no border box. Same `shouldRender` gating
+  (sleeping + SleepingChatScreen), test unchanged.
+- **routingId on AcceptedTurn (first of the deferred soul-track pile).** The router's
+  `routingId` now travels inside `AcceptedTurn` (new trailing component; old 7-arg constructor
+  delegates with a fresh id, so existing call sites compile unchanged) and
+  `SoulConversationService.submit` adopts it as the turn's correlation id instead of minting a
+  second one. Every `[souls]` line for one turn — `routing`, `turn`, `knowledge`, generation,
+  `delivery`/`delivery-recheck` — now joins on a single id, ending the timestamp-matching
+  exercise in log reconstruction. New end-to-end test asserts the id survives into the provider
+  request and the delivery token. Suite 377/377.
+
 ## Cross-mod soul load probe for LoadGoverner (2026-08-24)
 
 Frens half of the LoadGoverner rework (separate repo, `~/pontus/LoadGoverner`, reworked same
