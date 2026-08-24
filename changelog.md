@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Armor stands round 3: canSee visibility + per-stand diagnostics (2026-08-24)
+
+Bradley refuted the glass-display-case theory (no glass near those stands), and a closer read of
+the timeline agrees: the log showed `visible=2` around the question and Jake still said
+"Nothing" — so the LOS filter was not the cause and the earlier "solved" call was premature.
+Two changes: entity sight now uses the codebase's proven `EntityVisibilityUtil.canSee`
+(eye-to-eye; the feet-block raycast graded stands invisible from angles where the body was
+plainly in view — likely the intermittent visible=1), and each visible stand now logs
+`[souls] armorstand pos=… slots=N line=…`. Next session's log decisively splits the remaining
+mystery: slots=0 on a stand the player calls "geared" means the displayed gear is not real
+armor-stand equipment (suspect: a decor mod rendering display entities over bare stands —
+several are installed); slots>0 with a line means the 8B ignored good prompt data.
+
 ## Field-test 3 fixes: glass sight lines, cap 16, drop noise, look-target recency (2026-08-24)
 
 Third field test on 1.1.153. Confirmed working: graph built (1255 craftable / 1583 drop tables in
