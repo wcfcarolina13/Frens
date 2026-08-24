@@ -193,7 +193,7 @@ public final class SoulChatRouter {
                 sender.getName().getString(), safePrompt, profileId, grounding, Instant.now());
 
         logRouting(routingId, bot, sender, "submitted", reachability, routeStartNanos, authorizationMs,
-                reachabilityMs, snapshotMs);
+                reachabilityMs, snapshotMs, grounding);
         runtime.submitTurn(turn);
         return RouteOutcome.CONSUMED;
     }
@@ -205,11 +205,31 @@ public final class SoulChatRouter {
     private static void logRouting(UUID routingId, ServerPlayerEntity bot, ServerPlayerEntity sender,
                                     String outcome, SoulTypes.Reachability reachability, long routeStartNanos,
                                     long authorizationMs, long reachabilityMs, long snapshotMs) {
+        logRouting(routingId, bot, sender, outcome, reachability, routeStartNanos, authorizationMs,
+                reachabilityMs, snapshotMs, null);
+    }
+
+    /**
+     * Extends the routing line with content-free ground-truth facts pulled straight from the
+     * captured snapshot -- {@code mode}, {@code following}, and {@code sky} -- so a field test can
+     * check what the pipeline actually saw (e.g. "was the bot really in FOLLOW mode when it missed
+     * the follow cue") directly in {@code latest.log} without touching player message content.
+     * {@code grounding} is {@code null} for every outcome logged before snapshot capture (loading /
+     * invalid-pipeline / unauthorized / unreachable / no-server); those facts are unknown yet, so
+     * the three fields render as their neutral defaults ({@code mode=} empty, {@code false}s).
+     */
+    private static void logRouting(UUID routingId, ServerPlayerEntity bot, ServerPlayerEntity sender,
+                                    String outcome, SoulTypes.Reachability reachability, long routeStartNanos,
+                                    long authorizationMs, long reachabilityMs, long snapshotMs,
+                                    SoulTypes.GroundingSnapshot grounding) {
+        String mode = grounding != null ? grounding.situation().behaviorMode() : "";
+        boolean following = grounding != null && grounding.situation().following();
+        boolean sky = grounding != null && grounding.bot().skyVisible();
         LOGGER.info(
                 "[souls] routing routingId={} bot={} player={} reachability={} outcome={} routingMs={} "
-                        + "authorizationMs={} reachabilityMs={} snapshotMs={}",
+                        + "authorizationMs={} reachabilityMs={} snapshotMs={} mode={} following={} sky={}",
                 routingId, bot.getUuid(), sender.getUuid(), reachability, outcome, elapsedMs(routeStartNanos),
-                authorizationMs, reachabilityMs, snapshotMs);
+                authorizationMs, reachabilityMs, snapshotMs, mode, following, sky);
     }
 
     private static long elapsedMs(long startNanos) {

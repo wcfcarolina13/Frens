@@ -92,8 +92,14 @@ class SoulPromptAssemblerTest {
 
     @Test
     void presentMomentReflectsUndergroundAndFollowMode() {
+        SoulTypes.SituationSnapshot followingSituation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(), false, false, false, "FOLLOW", true,
+                false, false, 0, false, false, false, false,
+                -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty());
         SoulTypes.GroundingSnapshot followGrounding = new SoulTypes.GroundingSnapshot(
-                SoulTypes.Reachability.LOCAL, followBot, Optional.of(localPlayer), Instant.EPOCH);
+                SoulTypes.Reachability.LOCAL, followBot, Optional.of(localPlayer), followingSituation,
+                Instant.EPOCH);
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile, followGrounding,
                 List.of(), List.of(), "Where are we going?", Duration.ofSeconds(60));
@@ -112,6 +118,41 @@ class SoulPromptAssemblerTest {
     }
 
     @Test
+    void presentMomentDoesNotClaimFollowingFromModeNameAlone() {
+        // followBot's behaviorMode is the string "FOLLOW", but its grounding carries no situation
+        // (defaults to SituationSnapshot.empty(), following=false) -- return-to-base also renders
+        // Mode.FOLLOW, so the "following your owner" clause must come from the situation's own
+        // following flag, never from string-matching bot.behaviorMode() == "FOLLOW".
+        SoulTypes.GroundingSnapshot followGroundingWithoutSituation = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, followBot, Optional.of(localPlayer), Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, followGroundingWithoutSituation,
+                List.of(), List.of(), "Where are we going?", Duration.ofSeconds(60));
+        String presentMomentContent = request.messages().get(request.messages().size() - 2).content();
+        assertTrue(presentMomentContent.contains("mode FOLLOW."), presentMomentContent);
+        assertFalse(presentMomentContent.contains("following your owner"), presentMomentContent);
+    }
+
+    @Test
+    void presentMomentAppendsAtBaseWhenPresent() {
+        SoulTypes.SituationSnapshot atBaseSituation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(), false, false, false, "IDLE", false,
+                false, false, 0, false, false, false, false,
+                -1, -1, Optional.empty(), 1, Optional.empty(), Optional.of("Workshop"), Optional.empty(),
+                Optional.empty());
+        SoulTypes.GroundingSnapshot atBaseGrounding = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(localPlayer), atBaseSituation, Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, atBaseGrounding,
+                List.of(), List.of(), "Where are we?", Duration.ofSeconds(60));
+        String presentMomentContent = request.messages().get(request.messages().size() - 2).content();
+        // PRESENT MOMENT's mode name comes from BotSnapshot.behaviorMode() ("idle", the bot
+        // fixture's lowercase value), not the situation's own behaviorMode ("IDLE") -- only the
+        // atBase clause is sourced from the situation snapshot here.
+        assertTrue(presentMomentContent.contains("mode idle, at base Workshop."), presentMomentContent);
+    }
+
+    @Test
     void remotePromptDoesNotContainPlayerSurroundings() {
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile, remoteGrounding,
@@ -125,11 +166,11 @@ class SoulPromptAssemblerTest {
     @Test
     void remotePromptRendersSituationWithoutPlayerSurroundings() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
-                false, true, true, "GUARD", false, true, 2,
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(), "", List.of(),
+                false, true, true, "GUARD", false, false, true, 2,
                 false, false, false, false, 14, 1,
                 Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
-                3, Optional.of("Workshop"), Optional.empty(), Optional.of("fishing"));
+                3, Optional.of("Workshop"), Optional.empty(), Optional.empty(), Optional.of("fishing"));
         SoulTypes.GroundingSnapshot remoteGroundingWithSituation = new SoulTypes.GroundingSnapshot(
                 SoulTypes.Reachability.REMOTE, bot, Optional.empty(), situation, Instant.EPOCH);
         SoulTypes.ProviderRequest request = assembler.assemble(
@@ -156,11 +197,11 @@ class SoulPromptAssemblerTest {
     @Test
     void situationBlockRendersInsideAuthoritativeStateInPriorityOrder() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
-                false, true, true, "GUARD", false, true, 2,
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(), "", List.of(),
+                false, true, true, "GUARD", false, false, true, 2,
                 false, false, false, false, 14, 1,
                 Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
-                3, Optional.of("Workshop"), Optional.empty(), Optional.of("fishing"));
+                3, Optional.of("Workshop"), Optional.empty(), Optional.empty(), Optional.of("fishing"));
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile,
                 new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
@@ -178,10 +219,11 @@ class SoulPromptAssemblerTest {
         String longSleepLabel = "S".repeat(400);
         String longHobby = "H".repeat(400);
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                5, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
-                false, false, false, "GUARD", false, false, 0,
+                5, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(), "", List.of(),
+                false, false, false, "GUARD", false, false, false, 0,
                 false, false, false, false, 14, 1,
-                Optional.empty(), 0, Optional.of(longSleepLabel), Optional.empty(), Optional.of(longHobby));
+                Optional.empty(), 0, Optional.of(longSleepLabel), Optional.empty(), Optional.empty(),
+                Optional.of(longHobby));
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile,
                 new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
@@ -202,10 +244,10 @@ class SoulPromptAssemblerTest {
     @Test
     void situationBlockAlwaysOpensWithLocationLineWhenNonEmpty() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
-                false, false, false, "", false, false, 0,
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(), "", List.of(),
+                false, false, false, "", false, false, false, 0,
                 false, false, false, false, -1, -1,
-                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile,
                 new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
@@ -224,10 +266,10 @@ class SoulPromptAssemblerTest {
     @Test
     void undergroundLineAppearsWhenSkyNotVisible() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
-                false, false, false, "", false, false, 0,
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(), "", List.of(),
+                false, false, false, "", false, false, false, 0,
                 false, false, false, false, -1, -1,
-                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile,
                 new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, undergroundBot,
@@ -241,10 +283,10 @@ class SoulPromptAssemblerTest {
     @Test
     void nearbyAnimalsRenderInSituationBlockWithLogistics() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                -1, List.of(), List.of("horse x2", "wolf"),
-                false, false, false, "IDLE", false, false, 0,
+                -1, List.of(), List.of("horse x2", "wolf"), "", List.of(),
+                false, false, false, "IDLE", false, false, false, 0,
                 false, false, false, false, -1, -1,
-                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile,
                 new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
@@ -254,6 +296,41 @@ class SoulPromptAssemblerTest {
         assertTrue(state.contains("Animals nearby: horse x2, wolf."));
         assertTrue(state.indexOf("Mode: IDLE") < state.indexOf("Animals nearby"),
                 "nearby-animals line renders with logistics, after mode");
+    }
+
+    @Test
+    void standingOnAndNearbyBlocksRenderInSituationBlockWithLogistics() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "Grass Block", List.of("Oak Log", "Stone", "Dirt", "Water"),
+                false, false, false, "IDLE", false, false, false, 0,
+                false, false, false, false, -1, -1,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "What's around?", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        assertTrue(state.contains("Standing on Grass Block; nearby blocks: Oak Log, Stone, Dirt, Water."),
+                state);
+        assertTrue(state.indexOf("Mode: IDLE") < state.indexOf("Standing on"),
+                "standing-on/nearby-blocks line renders with logistics, after mode");
+    }
+
+    @Test
+    void atBaseRendersInSituationBlockWhenPresent() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(),
+                false, false, false, "IDLE", false, false, false, 0,
+                false, false, false, false, -1, -1,
+                Optional.empty(), 1, Optional.empty(), Optional.of("Workshop"), Optional.empty(), Optional.empty());
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "Are we home?", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        assertTrue(state.contains("You are at your base \"Workshop\"."), state);
     }
 
     @Test

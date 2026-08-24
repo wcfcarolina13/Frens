@@ -25,6 +25,7 @@ import net.wcfcarolina13.GameAI.services.HuntSessionService;
 import net.wcfcarolina13.GameAI.services.MountPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.PlayerUtils.BlockDistanceLimitedSearch;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -220,7 +221,10 @@ public final class SoulSnapshotBuilder {
                 dangerDistance = cliffDistance;
             }
 
-            List<Entity> nearby = AutoFaceEntity.detectNearbyEntities(bot, 10);
+            // Radius 16 (not the shared AutoFaceEntity/BotEventHandler default of 10) so ambient
+            // fliers (parrots, bats) and distant animals are visible to the soul prompt even when
+            // outside the bot's own combat-scan range -- this capture is the only caller widened.
+            List<Entity> nearby = AutoFaceEntity.detectNearbyEntities(bot, 16);
             List<RawEntity> collected = new ArrayList<>(nearby.size());
             for (Entity e : nearby) {
                 EntityDetails details = EntityDetails.from(bot, e);
@@ -233,9 +237,24 @@ public final class SoulSnapshotBuilder {
         }
 
         String behaviorMode = "";
+        boolean following = false;
         try {
             BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
             behaviorMode = mode != null ? mode.name() : "";
+            // isFollowingPlayer excludes return-to-base (which also runs Mode.FOLLOW internally)
+            // -- it is true only when the bot is actively following a player entity.
+            following = BotEventHandler.isFollowingPlayer(bot);
+        } catch (Throwable ignored) {
+        }
+
+        String standingOn = "";
+        List<String> rawNearbyBlocks = List.of();
+        try {
+            ServerWorld world = (ServerWorld) bot.getEntityWorld();
+            standingOn = world.getBlockState(bot.getBlockPos().down()).getBlock().getName().getString();
+            // Mirrors BotEventHandler's own nearby-block scan (BlockDistanceLimitedSearch(bot, 3, 5))
+            // so the soul prompt's block awareness matches what the bot's own AI already scans.
+            rawNearbyBlocks = new BlockDistanceLimitedSearch(bot, 3, 5).detectNearbyBlocks();
         } catch (Throwable ignored) {
         }
 
@@ -294,24 +313,16 @@ public final class SoulSnapshotBuilder {
 
         int knownBaseCount = 0;
         Optional<String> lastSleepLabel = Optional.empty();
+        Optional<String> atBase = Optional.empty();
         try {
             ServerWorld world = (ServerWorld) bot.getEntityWorld();
             List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(server, world);
             knownBaseCount = bases.size();
             Optional<BlockPos> sleepPos = BotHomeService.getLastSleep(bot);
             if (sleepPos.isPresent()) {
-                BlockPos pos = sleepPos.get();
-                double bestDistanceSq = 32.0D * 32.0D;
-                String bestLabel = null;
-                for (BotHomeService.BaseEntry base : bases) {
-                    double distanceSq = pos.getSquaredDistance(base.pos());
-                    if (distanceSq <= bestDistanceSq) {
-                        bestDistanceSq = distanceSq;
-                        bestLabel = base.label();
-                    }
-                }
-                lastSleepLabel = Optional.ofNullable(bestLabel);
+                lastSleepLabel = nearestBaseLabel(bases, sleepPos.get(), 32.0D * 32.0D);
             }
+            atBase = nearestBaseLabel(bases, bot.getBlockPos(), 32.0D * 32.0D);
         } catch (Throwable ignored) {
         }
 
@@ -338,12 +349,33 @@ public final class SoulSnapshotBuilder {
         }
 
         SituationInputs inputs = new SituationInputs(dangerDistance, entities, ownerName, bot.getName().getString(),
+                standingOn, rawNearbyBlocks,
                 enclosed, hasHeadroom, hasEscapeRoute,
-                behaviorMode, inCombat, postCombatLinger, recentKillCount,
+                behaviorMode, following, inCombat, postCombatLinger, recentKillCount,
                 inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
                 recruitedAtEpochMs, deathCount, nowEpochMs,
-                mount, knownBaseCount, lastSleepLabel, hunt, lastHobby);
+                mount, knownBaseCount, lastSleepLabel, atBase, hunt, lastHobby);
         return buildSituation(inputs);
+    }
+
+    /**
+     * Nearest {@link BotHomeService.BaseEntry#label()} to {@code pos} among {@code bases}, within
+     * {@code maxDistanceSq} blocks squared. Shared by the last-sleep-location and current-position
+     * ("am I at a base right now") lookups above -- both are "nearest known base to some point"
+     * with the same 32-block radius, differing only in which point they measure from.
+     */
+    private static Optional<String> nearestBaseLabel(List<BotHomeService.BaseEntry> bases, BlockPos pos,
+            double maxDistanceSq) {
+        double bestDistanceSq = maxDistanceSq;
+        String bestLabel = null;
+        for (BotHomeService.BaseEntry base : bases) {
+            double distanceSq = pos.getSquaredDistance(base.pos());
+            if (distanceSq <= bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                bestLabel = base.label();
+            }
+        }
+        return Optional.ofNullable(bestLabel);
     }
 
     // ─────── Pure projection seam (no Minecraft classes touched) ───────
@@ -378,8 +410,11 @@ public final class SoulSnapshotBuilder {
             List<RawEntity> entities,
             String ownerName,
             String botName,
+            String standingOn,
+            List<String> nearbyBlocks,          // raw scan output, duplicates expected -- see buildSituation
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,
+            boolean following,
             boolean inCombat, boolean postCombatLinger, int recentKillCount,
             boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
             boolean nightTravelActive,
@@ -387,15 +422,19 @@ public final class SoulSnapshotBuilder {
             Optional<SoulTypes.MountSummary> mount,
             int knownBaseCount,
             Optional<String> lastSleepLabel,
+            Optional<String> atBase,
             Optional<SoulTypes.HuntSummary> hunt,
             Optional<String> lastHobby) {
         SituationInputs {
             entities = entities == null ? List.of() : List.copyOf(entities);
             ownerName = ownerName == null ? "" : ownerName;
             botName = botName == null ? "" : botName;
+            standingOn = standingOn == null ? "" : standingOn;
+            nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
+            atBase = atBase == null ? Optional.empty() : atBase;
             hunt = hunt == null ? Optional.empty() : hunt;
             lastHobby = lastHobby == null ? Optional.empty() : lastHobby;
         }
@@ -434,16 +473,30 @@ public final class SoulSnapshotBuilder {
                 .map(entry -> entry.getValue() == 1L ? entry.getKey() : entry.getKey() + " x" + entry.getValue())
                 .collect(Collectors.toList());
 
+        // Dedupe the raw (possibly duplicate-heavy) block scan by type name, most-numerous first,
+        // capped at 4. Air is already excluded upstream by BlockDistanceLimitedSearch.canReachBlock.
+        List<String> nearbyBlocks = inputs.nearbyBlocks().stream()
+                .filter(name -> name != null && !name.isBlank())
+                .collect(Collectors.groupingBy(name -> name, LinkedHashMap::new, Collectors.counting()))
+                .entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(4)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+
         int companionDays = inputs.recruitedAtEpochMs() <= 0L
                 ? -1
                 : (int) Math.floorDiv(inputs.nowEpochMs() - inputs.recruitedAtEpochMs(), 86_400_000L);
 
         return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
+                inputs.standingOn(), nearbyBlocks,
                 inputs.enclosed(), inputs.hasHeadroom(), inputs.hasEscapeRoute(),
-                inputs.behaviorMode(), inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
+                inputs.behaviorMode(), inputs.following(),
+                inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
                 inputs.inShelter(), inputs.surfaceRecoveryActive(), inputs.breakingFree(),
                 inputs.nightTravelActive(), companionDays, inputs.deathCount(),
-                inputs.mount(), inputs.knownBaseCount(), inputs.lastSleepLabel(), inputs.hunt(), inputs.lastHobby());
+                inputs.mount(), inputs.knownBaseCount(), inputs.lastSleepLabel(), inputs.atBase(),
+                inputs.hunt(), inputs.lastHobby());
     }
 
     // ─────── Pure helpers (unit-testable without a Minecraft server) ───────

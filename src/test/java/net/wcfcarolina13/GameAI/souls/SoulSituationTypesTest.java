@@ -35,16 +35,24 @@ class SoulSituationTypesTest {
     void situationSnapshotDefensivelyCopiesAndNormalizes() {
         List<SoulTypes.HostileSighting> hostiles = new ArrayList<>();
         hostiles.add(new SoulTypes.HostileSighting("zombie", "north", 6));
+        List<String> nearbyBlocks = new ArrayList<>();
+        nearbyBlocks.add("Stone");
         SoulTypes.SituationSnapshot s = new SoulTypes.SituationSnapshot(
-                8, hostiles, List.of(), true, false, true, "GUARD",
+                8, hostiles, List.of(), "Grass Block", nearbyBlocks, true, false, true, "GUARD", true,
                 true, false, 2, false, false, false, false,
-                14, 1, Optional.empty(), 3, null, null, Optional.of("fishing"));
+                14, 1, Optional.empty(), 3, null, null, null, Optional.of("fishing"));
         hostiles.clear();
+        nearbyBlocks.clear();
         assertEquals(1, s.hostiles().size());
         assertThrows(UnsupportedOperationException.class,
                 () -> s.hostiles().add(new SoulTypes.HostileSighting("x", "s", 1)));
+        assertEquals(1, s.nearbyBlocks().size());
+        assertThrows(UnsupportedOperationException.class,
+                () -> s.nearbyBlocks().add("y"));
         assertEquals(Optional.empty(), s.lastSleepLabel());
+        assertEquals(Optional.empty(), s.atBase());
         assertEquals(Optional.empty(), s.hunt());
+        assertEquals(true, s.following());
     }
 
     // === Additional normalization coverage ===
@@ -71,14 +79,17 @@ class SoulSituationTypesTest {
     @Test
     void situationSnapshotNullBehaviorModeAndMountNormalize() {
         SoulTypes.SituationSnapshot s = new SoulTypes.SituationSnapshot(
-                -1, null, null, false, false, false, null,
+                -1, null, null, null, null, false, false, false, null, false,
                 false, false, 0, false, false, false, false,
-                -1, -1, null, 0, null, null, null);
+                -1, -1, null, 0, null, null, null, null);
         assertEquals("", s.behaviorMode());
         assertEquals(List.of(), s.hostiles());
         assertEquals(List.of(), s.nearbyAnimals());
+        assertEquals("", s.standingOn());
+        assertEquals(List.of(), s.nearbyBlocks());
         assertEquals(Optional.empty(), s.mount());
         assertEquals(Optional.empty(), s.lastSleepLabel());
+        assertEquals(Optional.empty(), s.atBase());
         assertEquals(Optional.empty(), s.hunt());
         assertEquals(Optional.empty(), s.lastHobby());
     }

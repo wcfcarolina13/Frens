@@ -227,8 +227,11 @@ public final class SoulTypes {
             int dangerDistance,                 // blocks to nearest lava/cliff hazard; -1 = none detected
             List<HostileSighting> hostiles,     // nearest-first, at most 5
             List<String> nearbyAnimals,         // non-hostile entities aggregated by name, most-numerous first, at most 4
+            String standingOn,                  // block name directly under the bot's feet, "" = unknown
+            List<String> nearbyBlocks,          // deduped block-type names in a small box, top 4 by count, air excluded
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,                // Mode.name(), e.g. "GUARD"
+            boolean following,                  // true only when actively following a player (not return-to-base)
             boolean inCombat, boolean postCombatLinger, int recentKillCount,
             boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
             boolean nightTravelActive,
@@ -237,22 +240,27 @@ public final class SoulTypes {
             Optional<MountSummary> mount,
             int knownBaseCount,
             Optional<String> lastSleepLabel,
+            Optional<String> atBase,            // label of the nearest known base within 32 blocks of the bot now
             Optional<HuntSummary> hunt,
             Optional<String> lastHobby) {
         public SituationSnapshot {
             hostiles = hostiles == null ? List.of() : List.copyOf(hostiles);
             nearbyAnimals = nearbyAnimals == null ? List.of() : List.copyOf(nearbyAnimals);
+            standingOn = standingOn == null ? "" : standingOn;
+            nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
+            atBase = atBase == null ? Optional.empty() : atBase;
             hunt = hunt == null ? Optional.empty() : hunt;
             lastHobby = lastHobby == null ? Optional.empty() : lastHobby;
         }
 
         public static SituationSnapshot empty() {
-            return new SituationSnapshot(-1, List.of(), List.of(), false, false, false, "",
-                    false, false, 0, false, false, false, false,
-                    -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+            return new SituationSnapshot(-1, List.of(), List.of(), "", List.of(), false, false, false, "",
+                    false, false, false, 0, false, false, false, false,
+                    -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
+                    Optional.empty());
         }
     }
 

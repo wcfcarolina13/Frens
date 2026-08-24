@@ -2,6 +2,61 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## See blocks bases birds and follow state (2026-08-23, mod_version 1.1.144)
+
+Round-3 field-test fixes on the soul situational-awareness branch. The 1.1.143 pass fixed
+rendering/salience for facts the pipeline already captured; this round fixes facts the pipeline
+never captured at all -- the bot still missed FOLLOW mode, never saw birds/bats, had no idea what
+block it stood on or what surrounded it, and never recognized being at a known base.
+
+- **Follow signal, sourced correctly.** `captureSituation` now reads
+  `BotEventHandler.isFollowingPlayer(bot)` directly (true only for an active player-follow, false
+  for return-to-base, which also runs `Mode.FOLLOW` internally) into a new
+  `SituationSnapshot.following` component. `SoulPromptAssembler`'s PRESENT MOMENT dynamic line and
+  the SITUATION `Mode:` line both switched from string-comparing `bot.behaviorMode() == "FOLLOW"`
+  to reading `situation.following()` -- the previous string check couldn't distinguish an actual
+  follow from a return-to-base disguised as one.
+- **Diagnosability.** `SoulChatRouter`'s `[souls] routing ...` INFO line gained `mode=<mode>
+  following=<bool> sky=<bool>`, sourced from the captured `GroundingSnapshot` on the "submitted"
+  outcome (the five pre-capture outcomes -- loading/invalid-pipeline/unauthorized/unreachable/
+  no-server -- log the neutral defaults since no snapshot exists yet). Content-free facts only, so
+  a field test can check ground truth in `latest.log` without touching player message content.
+- **Birds and other ambient fliers.** `captureSituation`'s entity scan radius widened from 10 to 16
+  blocks for this capture only (no other `AutoFaceEntity.detectNearbyEntities` caller touched).
+  Confirmed the underlying scan was never the problem: `detectNearbyEntities`/`EntityDetails.from`
+  apply no `MobEntity`-only filter -- every `Entity` subtype in line-of-sight (parrots, chickens,
+  bats included) already reaches the nearby-animal aggregation. The miss was purely range: birds
+  and bats often perch/roost past 10 blocks. Non-`LivingEntity` types (dropped items, arrows) can
+  still reach `nearbyAnimals` if in LoS and not hostile -- pre-existing behavior, not a regression
+  from the radius change, left as-is (out of scope for this pass).
+- **Block recognition.** New `SituationSnapshot.standingOn` (block directly under the bot's feet,
+  via `world.getBlockState(pos.down())`) and `SituationSnapshot.nearbyBlocks` (deduped block-type
+  names, top 4 by count, air excluded). Capture mirrors `BotEventHandler`'s own scan exactly --
+  `new BlockDistanceLimitedSearch(bot, 3, 5).detectNearbyBlocks()` -- so the soul sees what the
+  bot's own AI already scans. Dedup/count/cap is pure logic in `buildSituation`, unit-tested
+  without a Minecraft server. Renders in the SITUATION logistics tier: `"Standing on <x>; nearby
+  blocks: a, b, c."`
+- **Base recognition.** New `SituationSnapshot.atBase`: label of the nearest known base within 32
+  blocks of the bot's *current* position. Extracted the inline nearest-base-to-a-point loop that
+  previously existed only for `lastSleepLabel` into a shared `nearestBaseLabel(bases, pos,
+  maxDistanceSq)` helper, reused for both the sleep-position and current-position lookups (same
+  32-block radius, different point). Renders in SITUATION: `You are at your base "<label>".` and
+  appends `, at base <label>` to the PRESENT MOMENT dynamic line.
+- `SituationSnapshot` grows from 21 to 25 components (four added: `standingOn`, `nearbyBlocks`,
+  `following`, `atBase` -- not the three originally estimated). Final order: `dangerDistance,
+  hostiles, nearbyAnimals, standingOn, nearbyBlocks, enclosed, hasHeadroom, hasEscapeRoute,
+  behaviorMode, following, inCombat, postCombatLinger, recentKillCount, inShelter,
+  surfaceRecoveryActive, breakingFree, nightTravelActive, companionDays, deathCount, mount,
+  knownBaseCount, lastSleepLabel, atBase, hunt, lastHobby`. `SituationInputs` (the pure-seam
+  carrier in `SoulSnapshotBuilder`) grows in parallel to 27 fields. Every positional construction
+  across `SoulSnapshotBuilder.java`, `SoulTypes.java`, `SoulGroundingTest.java`,
+  `SoulPromptAssemblerTest.java`, and `SoulSituationTypesTest.java` updated; defensive copies
+  (`List.copyOf` on `nearbyBlocks`) and null/blank normalization added to both records' canonical
+  constructors. 13 new tests (following passthrough, standingOn passthrough, nearbyBlocks
+  dedupe/cap/blank-drop, atBase passthrough and rendering, follow-mode rendering from the boolean
+  not the string, routing-log diagnostics) plus 2 tests fixed for the new render text. Full suite
+  (276 tests) and `./gradlew build -x test` both green.
+
 ## Make Jake's situation legible to small models (2026-08-23, mod_version 1.1.143)
 
 Field-test on the 1.21.11 test instance surfaced four salience gaps that the pre-existing

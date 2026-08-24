@@ -264,7 +264,11 @@ public final class SoulPromptAssembler {
 
         // Priority 4: behavior mode.
         if (!situation.behaviorMode().isEmpty()) {
-            lines.add("Mode: " + situation.behaviorMode() + ".");
+            String modeLine = "Mode: " + situation.behaviorMode();
+            if (situation.following()) {
+                modeLine += ", following your owner";
+            }
+            lines.add(modeLine + ".");
         }
 
         // Priority 5: relationship.
@@ -279,9 +283,23 @@ public final class SoulPromptAssembler {
             lines.add("Relationship: " + String.join("; ", relationshipClauses) + ".");
         }
 
-        // Priority 6: logistics (nearby animals, mount, bases, last sleep, hunt progress, last hobby).
+        // Priority 6: logistics (nearby animals, blocks, mount, bases, last sleep, hunt progress,
+        // last hobby).
         if (!situation.nearbyAnimals().isEmpty()) {
             lines.add("Animals nearby: " + String.join(", ", situation.nearbyAnimals()) + ".");
+        }
+        if (!situation.standingOn().isEmpty() || !situation.nearbyBlocks().isEmpty()) {
+            StringBuilder blockLine = new StringBuilder();
+            if (!situation.standingOn().isEmpty()) {
+                blockLine.append("Standing on ").append(situation.standingOn());
+            }
+            if (!situation.nearbyBlocks().isEmpty()) {
+                if (blockLine.length() > 0) {
+                    blockLine.append("; ");
+                }
+                blockLine.append("nearby blocks: ").append(String.join(", ", situation.nearbyBlocks()));
+            }
+            lines.add(blockLine.append('.').toString());
         }
         if (situation.mount().isPresent()) {
             SoulTypes.MountSummary mount = situation.mount().get();
@@ -293,6 +311,9 @@ public final class SoulPromptAssembler {
         }
         if (situation.knownBaseCount() != 0) {
             lines.add("Bases: " + situation.knownBaseCount() + " known.");
+        }
+        if (situation.atBase().isPresent()) {
+            lines.add("You are at your base \"" + situation.atBase().get() + "\".");
         }
         if (situation.lastSleepLabel().isPresent()) {
             lines.add("Last slept: " + situation.lastSleepLabel().get() + ".");
@@ -416,13 +437,20 @@ public final class SoulPromptAssembler {
 
     private SoulTypes.Message presentMoment(SoulTypes.GroundingSnapshot grounding) {
         SoulTypes.BotSnapshot bot = grounding.bot();
+        SoulTypes.SituationSnapshot situation = grounding.situation();
         StringBuilder rightNow = new StringBuilder("Right now: ")
                 .append(bot.biome()).append(", (")
                 .append(bot.coarseX()).append(',').append(bot.coarseY()).append(',').append(bot.coarseZ())
                 .append("), ").append(bot.skyVisible() ? "open sky" : "underground")
                 .append(", mode ").append(bot.behaviorMode());
-        if ("FOLLOW".equals(bot.behaviorMode())) {
+        // following comes from the situation snapshot's live BotEventHandler.isFollowingPlayer
+        // check, never from string-matching bot.behaviorMode() -- return-to-base also runs
+        // Mode.FOLLOW internally and must not claim to be "following your owner".
+        if (situation.following()) {
             rightNow.append(", following your owner");
+        }
+        if (situation.atBase().isPresent()) {
+            rightNow.append(", at base ").append(situation.atBase().get());
         }
         rightNow.append('.');
 
