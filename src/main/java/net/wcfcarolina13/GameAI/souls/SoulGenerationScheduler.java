@@ -143,6 +143,16 @@ public final class SoulGenerationScheduler implements AutoCloseable {
     }
 
     /**
+     * Queued plus active generation calls — the "LLM work is happening or about to" signal the
+     * cross-mod load probe ({@link SoulRuntime#activeGenerations()}) reports to LoadGoverner.
+     */
+    public int inFlightCount() {
+        synchronized (lock) {
+            return queue.size() + activeCalls.size();
+        }
+    }
+
+    /**
      * Cancels every active call and completes every still-queued job with {@code CANCELLED}.
      * Does not block: cancellation is fire-and-forget, and queued jobs never had a provider call
      * to wait on. Idempotent.

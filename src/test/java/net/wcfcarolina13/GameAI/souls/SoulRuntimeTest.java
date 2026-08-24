@@ -94,6 +94,29 @@ class SoulRuntimeTest {
         verify(provider).close();
     }
 
+    // === Own coverage: activeGenerations — the stable cross-mod load-probe surface LoadGoverner
+    // reflects (integrations/FrensSoulProbe); signature changes there must update the probe ===
+
+    @Test
+    void activeGenerationsIsZeroWithoutARunningRuntime() {
+        assertTrue(SoulRuntime.current().isEmpty());
+        assertEquals(0, SoulRuntime.activeGenerations());
+    }
+
+    @Test
+    void activeGenerationsReportsTheSchedulersInFlightCount() {
+        SoulModelProvider provider = mock(SoulModelProvider.class);
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                provider, scheduler, conversationService);
+        SoulRuntime.installForTest(runtime);
+        when(scheduler.inFlightCount()).thenReturn(2);
+
+        assertEquals(2, SoulRuntime.activeGenerations());
+
+        SoulRuntime.stop();
+        assertEquals(0, SoulRuntime.activeGenerations());
+    }
+
     // === Own coverage: readiness / reload / reset / status / disconnect-cancellation semantics ===
 
     @Test

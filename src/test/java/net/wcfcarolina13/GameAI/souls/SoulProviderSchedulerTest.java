@@ -57,13 +57,17 @@ class SoulProviderSchedulerTest {
                 });
 
         assertEquals(1, started.get());
+        // The cross-mod load probe's signal: one active call + one queued job = 2 in flight.
+        assertEquals(2, scheduler.inFlightCount());
         firstResult.complete(new SoulTypes.ProviderResult(
                 true, "first", null, "test", "test-model", 1L, null, null, null));
         first.join();
         assertEquals(2, started.get());
+        assertEquals(1, scheduler.inFlightCount());
         secondResult.complete(new SoulTypes.ProviderResult(
                 true, "second", null, "test", "test-model", 1L, null, null, null));
         second.join();
+        assertEquals(0, scheduler.inFlightCount());
 
         scheduler.close();
     }
