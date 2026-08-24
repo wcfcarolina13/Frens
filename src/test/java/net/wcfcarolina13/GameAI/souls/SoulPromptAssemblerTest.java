@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -75,6 +76,92 @@ class SoulPromptAssemblerTest {
                 .collect(Collectors.joining("\n"));
         assertTrue(joined.contains("remote communication"));
         assertFalse(joined.contains("playerBiomeSecret"));
+    }
+
+    @Test
+    void remotePromptRendersSituationWithoutPlayerSurroundings() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                false, true, true, "GUARD", false, true, 2,
+                false, false, false, false, 14, 1,
+                Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
+                3, Optional.of("Workshop"), Optional.empty(), Optional.of("fishing"));
+        SoulTypes.GroundingSnapshot remoteGroundingWithSituation = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.REMOTE, bot, Optional.empty(), situation, Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, remoteGroundingWithSituation,
+                List.of(), List.of(), "What's around me?", Duration.ofSeconds(60));
+        String joined = request.messages().stream().map(SoulTypes.Message::content)
+                .collect(Collectors.joining("\n"));
+        assertTrue(joined.contains("remote communication"));
+        assertTrue(joined.contains("SITUATION"));
+        assertTrue(joined.contains("zombie"));
+        assertFalse(joined.contains("playerBiomeSecret"));
+    }
+
+    // === SITUATION rendering ===
+
+    private String authoritativeStateMessage(SoulTypes.ProviderRequest request) {
+        return request.messages().stream()
+                .filter(m -> m.role() == SoulTypes.Role.SYSTEM && m.content().startsWith("AUTHORITATIVE STATE"))
+                .map(SoulTypes.Message::content)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Test
+    void situationBlockRendersInsideAuthoritativeStateInPriorityOrder() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                false, true, true, "GUARD", false, true, 2,
+                false, false, false, false, 14, 1,
+                Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
+                3, Optional.of("Workshop"), Optional.empty(), Optional.of("fishing"));
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "How are we doing?", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request); // helper: find the system msg containing "SITUATION"
+        assertTrue(state.contains("SITUATION"));
+        assertTrue(state.indexOf("zombie") < state.indexOf("GUARD"));      // hazards before mode
+        assertTrue(state.indexOf("GUARD") < state.indexOf("companion"));   // mode before relationship
+        assertTrue(state.contains("northeast"));
+    }
+
+    @Test
+    void situationBlockIsCappedAt800CharsDroppingLowestPriorityFirst() {
+        String longSleepLabel = "S".repeat(400);
+        String longHobby = "H".repeat(400);
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                5, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                false, false, false, "GUARD", false, false, 0,
+                false, false, false, false, 14, 1,
+                Optional.empty(), 0, Optional.of(longSleepLabel), Optional.empty(), Optional.of(longHobby));
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "Status check.", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        int situationStart = state.indexOf("SITUATION");
+        assertTrue(situationStart >= 0, "expected a SITUATION block");
+        String situationBlock = state.substring(situationStart);
+        assertTrue(situationBlock.length() <= 800,
+                "situation block should be capped at 800 chars, was " + situationBlock.length());
+        assertTrue(situationBlock.contains("zombie"), "hostiles line should survive the cap");
+        assertFalse(situationBlock.contains(longHobby), "hobby text should be dropped by the cap");
+    }
+
+    @Test
+    void emptySituationRendersNoSituationBlock() {
+        SoulTypes.GroundingSnapshot groundingWithoutSituation = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(localPlayer), Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, groundingWithoutSituation,
+                List.of(), List.of(), "Status check.", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        assertFalse(state.contains("SITUATION"));
     }
 
     // === Bound assertions ===

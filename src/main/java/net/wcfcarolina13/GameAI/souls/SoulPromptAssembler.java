@@ -42,6 +42,8 @@ public final class SoulPromptAssembler {
     static final int MAX_HISTORY_CHARS = 12_000;
     static final int MAX_EVENT_CHARS = 4_000;
     static final int MAX_OUTPUT_TOKENS = 220;
+    static final int MAX_SITUATION_CHARS = 800;
+    private static final String SITUATION_HEADER = "SITUATION\n";
 
     public SoulPromptAssembler() {
         // No collaborators — assembly is a pure function of its arguments.
@@ -118,6 +120,7 @@ public final class SoulPromptAssembler {
             sb.append("Channel: local presence. Reachability: ").append(grounding.reachability()).append('\n');
             grounding.player().ifPresent(player -> appendPlayerState(sb, player));
         }
+        appendSituation(sb, grounding.situation());
         return new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString());
     }
 
@@ -140,8 +143,8 @@ public final class SoulPromptAssembler {
           .append('\n');
         sb.append("Home: ").append(bot.homeName()).append(", owner: ").append(bot.ownerName())
           .append(", recruited: ").append(bot.recruited())
-          .append(", permanent companion: ").append(bot.permanentCompanion())
-          .append(", companion quest stage: ").append(bot.companionQuestStage())
+          .append(", permanently recruited: ").append(bot.permanentCompanion())
+          .append(", recruitment quest stage: ").append(bot.companionQuestStage())
           .append('\n');
         bot.activeQuest().ifPresent(quest -> sb.append("Active quest: ").append(quest.id())
               .append(" (").append(quest.actionIndex()).append('/').append(quest.actionCount()).append(')')
@@ -156,6 +159,152 @@ public final class SoulPromptAssembler {
           .append(", held item: ").append(player.heldItem())
           .append(", sleeping: ").append(player.sleeping())
           .append('\n');
+    }
+
+    // === SITUATION sub-block (Frens-supplied, appended inside authoritative state) ===
+
+    /**
+     * Appends a bounded {@code SITUATION} sub-block to the authoritative-state message, greedily
+     * filling a fixed {@link #MAX_SITUATION_CHARS} budget in the deterministic priority order
+     * documented on {@link SoulTypes.SituationSnapshot}: hazards/hostiles/enclosure, combat,
+     * survival flags, behavior mode, relationship, then logistics. Default-valued fields (see
+     * {@link SoulTypes.SituationSnapshot#empty()}) are skipped entirely -- an all-default snapshot
+     * produces no lines and therefore no block. A line that does not fit in the remaining budget
+     * is dropped along with every lower-priority line after it.
+     */
+    private void appendSituation(StringBuilder sb, SoulTypes.SituationSnapshot situation) {
+        List<String> lines = situationLines(situation);
+        if (lines.isEmpty()) {
+            return;
+        }
+        StringBuilder block = new StringBuilder(SITUATION_HEADER);
+        for (String line : lines) {
+            String candidate = line + "\n";
+            if (block.length() + candidate.length() > MAX_SITUATION_CHARS) {
+                break;
+            }
+            block.append(candidate);
+        }
+        if (block.length() > SITUATION_HEADER.length()) {
+            sb.append(block);
+        }
+    }
+
+    private List<String> situationLines(SoulTypes.SituationSnapshot situation) {
+        List<String> lines = new ArrayList<>();
+
+        // Priority 1: hazards / hostiles / enclosure.
+        if (situation.dangerDistance() != -1) {
+            lines.add("Hazard: " + situation.dangerDistance() + " blocks away.");
+        }
+        if (!situation.hostiles().isEmpty()) {
+            StringBuilder hostiles = new StringBuilder("Hostiles nearby: ");
+            boolean first = true;
+            for (SoulTypes.HostileSighting hostile : situation.hostiles()) {
+                if (!first) {
+                    hostiles.append(", ");
+                }
+                hostiles.append(hostile.name()).append(' ').append(hostile.distanceBlocks())
+                        .append(" blocks ").append(hostile.direction());
+                first = false;
+            }
+            hostiles.append('.');
+            lines.add(hostiles.toString());
+        }
+        List<String> enclosureClauses = new ArrayList<>();
+        if (situation.enclosed()) {
+            enclosureClauses.add("enclosed");
+        }
+        if (situation.hasHeadroom()) {
+            enclosureClauses.add("has headroom");
+        }
+        if (situation.hasEscapeRoute()) {
+            enclosureClauses.add("has escape route");
+        }
+        if (!enclosureClauses.isEmpty()) {
+            lines.add("Enclosure: " + String.join(", ", enclosureClauses) + ".");
+        }
+
+        // Priority 2: combat.
+        List<String> combatClauses = new ArrayList<>();
+        if (situation.inCombat()) {
+            combatClauses.add("in combat");
+        } else if (situation.postCombatLinger()) {
+            combatClauses.add("just finished a fight");
+        }
+        if (situation.recentKillCount() != 0) {
+            combatClauses.add(situation.recentKillCount() + " recent kills");
+        }
+        if (!combatClauses.isEmpty()) {
+            lines.add("Combat: " + String.join("; ", combatClauses) + ".");
+        }
+
+        // Priority 3: survival flags.
+        List<String> survivalClauses = new ArrayList<>();
+        if (situation.inShelter()) {
+            survivalClauses.add("in shelter");
+        }
+        if (situation.surfaceRecoveryActive()) {
+            survivalClauses.add("recovering to surface");
+        }
+        if (situation.breakingFree()) {
+            survivalClauses.add("breaking free");
+        }
+        if (situation.nightTravelActive()) {
+            survivalClauses.add("traveling at night");
+        }
+        if (!survivalClauses.isEmpty()) {
+            lines.add("Survival: " + String.join(", ", survivalClauses) + ".");
+        }
+
+        // Priority 4: behavior mode.
+        if (!situation.behaviorMode().isEmpty()) {
+            lines.add("Mode: " + situation.behaviorMode() + ".");
+        }
+
+        // Priority 5: relationship.
+        List<String> relationshipClauses = new ArrayList<>();
+        if (situation.companionDays() != -1) {
+            relationshipClauses.add("companion for " + situation.companionDays() + " days");
+        }
+        if (situation.deathCount() != -1) {
+            relationshipClauses.add("died " + situation.deathCount() + " times");
+        }
+        if (!relationshipClauses.isEmpty()) {
+            lines.add("Relationship: " + String.join("; ", relationshipClauses) + ".");
+        }
+
+        // Priority 6: logistics (mount, bases, last sleep, hunt progress, last hobby).
+        if (situation.mount().isPresent()) {
+            SoulTypes.MountSummary mount = situation.mount().get();
+            // Never render mount health as a ratio/percentage/judgment derived from maxHealth --
+            // MountSummary.maxHealth defaults to health when the source lacks a real max, so any
+            // ratio would be fabricated. Raw current health only.
+            lines.add("Mount: " + mount.type() + ", " + (mount.saddled() ? "saddled" : "unsaddled")
+                    + ", health " + formatMagnitude(mount.health()) + ".");
+        }
+        if (situation.knownBaseCount() != 0) {
+            lines.add("Bases: " + situation.knownBaseCount() + " known.");
+        }
+        if (situation.lastSleepLabel().isPresent()) {
+            lines.add("Last slept: " + situation.lastSleepLabel().get() + ".");
+        }
+        if (situation.hunt().isPresent()) {
+            SoulTypes.HuntSummary hunt = situation.hunt().get();
+            lines.add("Hunting " + hunt.target() + ": " + hunt.kills() + "/" + hunt.goal() + ".");
+        }
+        if (situation.lastHobby().isPresent()) {
+            lines.add("Last hobby: " + situation.lastHobby().get() + ".");
+        }
+
+        return lines;
+    }
+
+    private String formatMagnitude(float value) {
+        if (value == Math.floor(value) && !Float.isInfinite(value)) {
+            return String.valueOf((long) value);
+        }
+        return String.valueOf(value);
     }
 
     // === Bounded prior role history (USER/ASSISTANT, never in the system contract) ===

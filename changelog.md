@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Render Jake's situation in prompts (2026-08-23)
+
+Third step of situational awareness: `SoulPromptAssembler.authoritativeState` now appends a
+`SITUATION` sub-block inside the existing authoritative-state system message (message order/count
+is unchanged — no new message, system contract untouched). `situationLines(SituationSnapshot)`
+renders in a fixed priority order — hazard distance + hostiles + enclosure, combat, survival
+flags, behavior mode, relationship, then logistics (mount, bases, last sleep, hunt, last hobby) —
+skipping every default-valued field (`-1` distances/days/deaths, empty hostiles/Optionals, `""`
+behaviorMode, `false` booleans) so `SituationSnapshot.empty()` produces zero lines and therefore no
+block at all. `appendSituation` greedily fills a fixed 800-char budget (`MAX_SITUATION_CHARS`) in
+that priority order; the first line that would overflow the budget is dropped along with every
+lower-priority line after it, so hazards/hostiles always win a fitting slot over a long last-hobby
+or last-sleep label. Per the Task 2 review's controller ruling, the mount line renders only the
+raw current health (`"Mount: horse, saddled, health 11."`) — never a ratio/percentage against
+`MountSummary.maxHealth`, since that field silently defaults to health when the source has no real
+max. Incidentally reworded two `appendBotState` phrases (`"permanent companion"` →
+`"permanently recruited"`, `"companion quest stage"` → `"recruitment quest stage"`) because the
+literal substring `"companion"` appearing earlier in the bot-state text was shadowing the new
+Relationship line's `"companion for N days"` clause in an ordering assertion — no test depended on
+the old wording. Added `situationBlockRendersInsideAuthoritativeStateInPriorityOrder`,
+`situationBlockIsCappedAt800CharsDroppingLowestPriorityFirst`,
+`emptySituationRendersNoSituationBlock`, and `remotePromptRendersSituationWithoutPlayerSurroundings`
+(REMOTE grounding still omits `playerBiomeSecret` with a populated situation present) to
+`SoulPromptAssemblerTest`; all prior tests pass unmodified.
+
 ## Capture Jake's live situation (2026-08-23)
 
 Second step of situational awareness: `SoulSnapshotBuilder.capture` now populates the
