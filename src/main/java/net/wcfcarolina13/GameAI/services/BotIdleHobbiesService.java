@@ -1078,6 +1078,7 @@ public final class BotIdleHobbiesService {
                 LOGGER.info("Idle hobby '{}' finished for {}: success={} msg='{}'",
                         skillToRun, bot.getName().getString(), result != null && result.success(), result != null ? result.message() : "null");
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHobbySession(botUuid, LAST_HOBBY.get(botUuid));
 
                 // Schedule the next decision relative to completion time.
                 // - Success: wait a bit so hobbies feel “occasional”, not spammy.

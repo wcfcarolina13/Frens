@@ -1968,6 +1968,7 @@ public final class BotFleeService {
             if (shouldAbortSurvival(bot)) {
                 return;
             }
+            net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot, "break-free");
 
             // Record shelter exit so the underground linger system doesn't immediately
             // re-trigger surface recovery after a shelter breakfree.
@@ -2553,11 +2554,15 @@ public final class BotFleeService {
      * simply needs to reach surface to start a hobby — not a survival decision.
      */
     public static boolean ensureAtSurfaceForHobby(ServerPlayerEntity bot, ServerWorld world) {
-        return ensureAtSurface(bot, world, true);
+        boolean recovered = ensureAtSurface(bot, world, true);
+        if (recovered) net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot, "surface-recovery");
+        return recovered;
     }
 
     public static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world) {
-        return ensureAtSurface(bot, world, false);
+        boolean recovered = ensureAtSurface(bot, world, false);
+        if (recovered) net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot, "surface-recovery");
+        return recovered;
     }
 
     private static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world,

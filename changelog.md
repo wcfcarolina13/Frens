@@ -2,6 +2,44 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Hook awareness events into services (2026-08-23)
+
+Task 5 of situational awareness: one guarded call per transition wired into the four
+production sites Task 4's hooks needed, each purely additive (no reordering, no other
+behavior change). Two of the four true sites diverged from the task's original file list
+after reading the code, and both are documented deviations rather than blocking stops, per
+the task's own contingency guidance:
+
+- **Mob kill** — `noteKillPosition(UUID, Vec3d)` has exactly one caller, in `Frens.java`'s
+  death-detection block (not `BotCombatCalloutService.java`, which only receives the
+  killed entity for *hostile* kills behind a 10s dialogue-callout cooldown — hooking there
+  would silently under-report kills in a multi-mob fight). `onMobKilled(killer2,
+  dead.getType().getName().getString())` sits right after `noteKillPosition`, inside the
+  existing `isRegisteredBot` guard, unconditional on hostile/non-hostile.
+- **Self-rescue** — `BotFleeService.java`. Surface recovery has no single internal
+  convergence point (the private `ensureAtSurface` has ~7 `return true;` sites), so the
+  hook sits at the two public funnel wrappers (`ensureAtSurface`, `ensureAtSurfaceForHobby`)
+  that capture the boolean result and fire `onSelfRescue(bot, "surface-recovery")` only
+  when `true`. Break-free fires `onSelfRescue(bot, "break-free")` right after
+  `breakFreeFromShelter`'s post-dig abort check clears — proof the dig-out completed
+  without an abort — before the follow-up `escapeToSurface` call (which does not route
+  through the hooked wrappers, so no double-fire).
+- **Hobby session** — `BotIdleHobbiesService.java`, the generic `runSkill` completion path
+  right after `LAST_HOBBY_END_MS.put(...)`, using `LAST_HOBBY.get(botUuid)` so the emitted
+  name matches what `getLastHobby()` returns. The special-cased `cook` hobby branch (its own
+  separate completion site) is intentionally not hooked to keep this to one call per
+  transition.
+- **Hunt progress** — the actual `kills++` mutation lives in `HuntSkill.java`, not
+  `HuntSessionService.java` (that file only stores an already-computed tally via
+  `saveSession`, called once at sunset, not per kill). `onHuntProgress` fires inside the
+  same `if` that increments `kills`, target resolved via the same "first `targetIds` else
+  `zoneName`" fallback `SoulSnapshotBuilder` already uses (`selectedTargets` /
+  `huntZone.name()` here).
+
+Verified: `./gradlew test` and `./gradlew build -x test` both green; both pilot static
+checks over `GameAI/souls` clean (only the known `SoulChatRouter` Javadoc line for the
+first, zero hits for the credential grep).
+
 ## Journal kills, rescues, hobbies, and hunts (2026-08-23)
 
 Task 4 of situational awareness: four new event types appended to the end of
