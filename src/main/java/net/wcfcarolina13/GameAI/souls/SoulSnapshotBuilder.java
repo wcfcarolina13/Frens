@@ -391,23 +391,73 @@ public final class SoulSnapshotBuilder {
                 lines.add("Armor stand displaying: " + String.join(", ", displayed));
             }
         }
-        if (!allStands.isEmpty()) {
-            // Include look-alike entity counts: modern decor mods and datapacks dress rooms
-            // with item/block DisplayEntities or item frames that read as "armor stands with
-            // gear" to a player while the real ArmorStandEntity nearby is bare. Verified in
-            // 1.21.11 source: ArmorStandEntity extends LivingEntity and its equip() writes the
-            // same EntityEquipment that getEquippedStack reads, so vanilla-geared stands DO
-            // report their gear -- a geared-looking stand logging slots=0 means the gear
-            // belongs to one of these other entity kinds.
-            int displays = world.getEntitiesByClass(
-                    net.minecraft.entity.decoration.DisplayEntity.class, box, e -> true).size();
-            int frames = world.getEntitiesByClass(
-                    net.minecraft.entity.decoration.ItemFrameEntity.class, box, e -> true).size();
+        // Look-alike displays are described too: item frames and item displays are how modern
+        // decor (mods, datapacks, map walls) actually shows items, and were the prime suspect
+        // for "geared stand" reads where the real ArmorStandEntity is bare.
+        List<String> frameItems = new ArrayList<>();
+        for (net.minecraft.entity.decoration.ItemFrameEntity frame : world.getEntitiesByClass(
+                net.minecraft.entity.decoration.ItemFrameEntity.class, box,
+                f -> !f.getHeldItemStack().isEmpty()
+                        && net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, f))) {
+            frameItems.add(SoulItemDescriber.describe(extractItemFacts(frame.getHeldItemStack(), 0)));
+        }
+        if (!frameItems.isEmpty()) {
+            lines.add("Item frames holding: " + SoulItemDescriber.groupCounts(frameItems));
+        }
+        List<String> displayItems = new ArrayList<>();
+        for (net.minecraft.entity.decoration.DisplayEntity.ItemDisplayEntity display
+                : world.getEntitiesByClass(
+                        net.minecraft.entity.decoration.DisplayEntity.ItemDisplayEntity.class, box,
+                        d -> !d.getItemStack().isEmpty()
+                                && net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, d))) {
+            displayItems.add(SoulItemDescriber.describe(extractItemFacts(display.getItemStack(), 0)));
+        }
+        if (!displayItems.isEmpty()) {
+            lines.add("Item displays showing: " + SoulItemDescriber.groupCounts(displayItems));
+        }
+        if (!allStands.isEmpty() || !frameItems.isEmpty() || !displayItems.isEmpty()) {
             org.slf4j.LoggerFactory.getLogger("frens-souls").info(
-                    "[souls] armorstands inBox={} visible={} described={} displayEntities={} itemFrames={}",
-                    allStands.size(), visibleStands.size(), lines.size(), displays, frames);
+                    "[souls] displays stands={} visible={} frameItems={} displayItems={} lines={}",
+                    allStands.size(), visibleStands.size(), frameItems.size(), displayItems.size(),
+                    lines.size());
         }
         return lines;
+    }
+
+    /**
+     * Disproof-on-revisit (memory v3): a remembered place whose position the bot can currently
+     * see, but where the block no longer matches, is dropped from memory -- a mined-out chest
+     * stops being "remembered" once the bot stands where it was and sees it gone. Only
+     * positions inside the facility scan box are checked, and only with line of sight, so
+     * memory is never disproven through walls.
+     */
+    private static void disproveStaleMemories(ServerWorld world, ServerPlayerEntity bot) {
+        Optional<SoulTypes.KnowledgeMemory> memory = SoulRuntime.peekKnowledgeMemory(bot.getUuid());
+        if (memory.isEmpty() || memory.get().places().isEmpty()) {
+            return;
+        }
+        String dimension = world.getRegistryKey().getValue().toString();
+        BlockPos center = bot.getBlockPos();
+        java.util.Set<String> disproven = new java.util.HashSet<>();
+        for (SoulTypes.KnownPlace place : memory.get().places()) {
+            if (!place.dimension().equals(dimension)
+                    || Math.abs(place.x() - center.getX()) > FACILITY_SCAN_RADIUS
+                    || Math.abs(place.y() - center.getY()) > FACILITY_SCAN_HEIGHT
+                    || Math.abs(place.z() - center.getZ()) > FACILITY_SCAN_RADIUS) {
+                continue;
+            }
+            BlockPos pos = new BlockPos(place.x(), place.y(), place.z());
+            if (!hasLineOfSight(world, bot, pos)) {
+                continue;
+            }
+            String actual = Registries.BLOCK.getId(world.getBlockState(pos).getBlock()).getPath();
+            if (!actual.equals(place.idPath())) {
+                disproven.add(SoulKnowledgeMemoryOps.positionKey(place));
+            }
+        }
+        if (!disproven.isEmpty()) {
+            SoulRuntime.disprovePlaces(bot.getUuid(), disproven);
+        }
     }
 
     /**
@@ -578,6 +628,12 @@ public final class SoulSnapshotBuilder {
         try {
             rawArmorStands = scanArmorStands((ServerWorld) bot.getEntityWorld(), bot);
         } catch (Throwable ignored) {
+        }
+
+        try {
+            disproveStaleMemories((ServerWorld) bot.getEntityWorld(), bot);
+        } catch (Throwable ignored) {
+            // Memory hygiene is best-effort, never load-bearing for capture.
         }
 
         boolean inCombat = false;

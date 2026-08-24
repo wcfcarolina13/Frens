@@ -133,4 +133,10 @@ class SoulItemDescriberTest {
         assertEquals(6, digest.bulk().size());
         assertEquals("64x Cobblestone", digest.bulk().get(0));
     }
+
+    @Test
+    void groupCountsMergesRepeatsAndKeepsOrder() {
+        assertEquals("Clock, 2x Map, Diamond Sword",
+                SoulItemDescriber.groupCounts(List.of("Clock", "Map", "Diamond Sword", "Map")));
+    }
 }

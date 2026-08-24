@@ -183,6 +183,20 @@ public final class SoulRuntime {
         }
     }
 
+    /** Capture-side peek at cached knowledge memory; empty when souls are off or not yet loaded. */
+    static Optional<SoulTypes.KnowledgeMemory> peekKnowledgeMemory(UUID botId) {
+        SoulRuntime runtime = INSTANCE.get();
+        return runtime == null ? Optional.empty() : runtime.store.cachedKnowledgeMemory(botId);
+    }
+
+    /** Fire-and-forget removal of disproven remembered places. */
+    static void disprovePlaces(UUID botId, java.util.Set<String> positionKeys) {
+        SoulRuntime runtime = INSTANCE.get();
+        if (runtime != null && !positionKeys.isEmpty()) {
+            runtime.store.removePlaces(botId, positionKeys).exceptionally(ex -> null);
+        }
+    }
+
     public static void stop() {
         SoulRuntime runtime = INSTANCE.getAndSet(null);
         if (runtime == null) {

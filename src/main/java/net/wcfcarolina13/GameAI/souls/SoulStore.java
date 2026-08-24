@@ -517,6 +517,23 @@ public final class SoulStore {
         });
     }
 
+    /** Non-blocking peek at the cached knowledge memory (empty until first load this process). */
+    public Optional<SoulTypes.KnowledgeMemory> cachedKnowledgeMemory(UUID botId) {
+        return Optional.ofNullable(cachedKnowledge.get(botId));
+    }
+
+    /** Disproof-on-revisit: removes remembered places whose positions were verified stale. */
+    public CompletableFuture<Void> removePlaces(UUID botId, java.util.Set<String> positionKeys) {
+        return submit(() -> {
+            SoulTypes.KnowledgeMemory current = loadKnowledge(botId);
+            SoulTypes.KnowledgeMemory pruned = SoulKnowledgeMemoryOps.removePlaces(current, positionKeys);
+            if (pruned != current) {
+                saveKnowledge(botId, pruned);
+            }
+            return null;
+        });
+    }
+
     public CompletableFuture<Void> recordToldFact(UUID botId, String topic, SoulTypes.ToldFact fact) {
         return submit(() -> {
             saveKnowledge(botId, SoulKnowledgeMemoryOps.mergeToldFact(loadKnowledge(botId), topic, fact));
