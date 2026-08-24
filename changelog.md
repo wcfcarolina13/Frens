@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Knowledge graph v2: drops, mob topics, deictic retrieval, natural blocks (2026-08-24)
+
+The approved v2 pass on the graph:
+
+- **Drop edges for blocks and mobs.** Loot tables walked once at build via
+  `LootTable.CODEC.encodeStart(RegistryOps(JsonOps))` → recursive JSON scan for item entries —
+  no reflection into `LootTable`'s private pools, version-tolerant, modded tables included.
+  Block tables via `getLootTableKey()`; entity tables by the `entities/<id>` key convention
+  (vanilla and well-behaved mods follow it; misses just yield no edge). Capped 6 drops/node;
+  blocks that only drop themselves are suppressed as noise. Retrieval renders "Diamond Ore
+  drops: Diamond" / "Zombie drops: Rotten Flesh, Iron Ingot, ...".
+- **Entities join the name index**, so mob names are topics ("what do zombies drop?"). Where an
+  entity and item share an id path (chicken, salmon) they share a node — cook edge and drop
+  edge coexist coherently.
+- **Deictic retrieval.** The player's look-target is folded into the retriever's match text, so
+  "what are these? / what are they good for?" while looking at pointed dripstone retrieves the
+  dripstone facts — closing the "Dripstone Powder" hallucination from the first field test
+  end-to-end (look-target names it, graph explains it).
+- **~20 natural-block phrases** for blocks recipes/tags can't explain: dripstone pair, amethyst
+  family, obsidian/crying obsidian, soul sand/soil, magma, sponge pair, sculk trio, cobweb,
+  slime/honey, mycelium, glowstone. Phrase-only knowledge (not facilities); surfaces via topic
+  or look-target retrieval.
+
+Graph-built log line now includes the drop-table count. Suite 350/350 green.
+
 ## Player-activity awareness + second field-test fixes (2026-08-24)
 
 Second field test (1.1.151) verdict: look-target, facilities, oxidation-by-display-name, and
