@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Item frames/displays described; memory v3 disproof-on-revisit (2026-08-24)
+
+Two items: the proactive fix for the armor-stand look-alike suspect, and the next soul-track
+line item.
+
+- **Item frames and item displays are now described.** Within the scan box and canSee-gated:
+  `Item frames holding: Clock, 2x Map` and `Item displays showing: ...` (via
+  `ItemFrameEntity.getHeldItemStack` / `ItemDisplayEntity.getItemStack`, both verified in the
+  1.21.11 named jar). If the "geared stands" are decor-entity look-alikes, their contents now
+  surface through these lines regardless; and map walls / frame decor become conversational
+  either way. The diagnostic line evolved to `[souls] displays stands= visible= frameItems=
+  displayItems= lines=`.
+- **Memory v3: disproof-on-revisit.** Each capture, remembered places inside the current scan
+  box that the bot can actually see (line of sight — never through walls) are checked against
+  the real block; a mismatch (chest mined out, furnace moved) drops that memory. Store gains a
+  synchronous cached peek (`cachedKnowledgeMemory`, mirroring the `cachedState` pattern) so the
+  server-thread capture can read memory without blocking, plus `removePlaces` on the writer
+  thread; the removal policy is pure (`SoulKnowledgeMemoryOps.removePlaces`) and unit-tested.
+  Grouping helper `SoulItemDescriber.groupCounts` is pure and tested. Suite 354/354.
+
 ## Armor stands: source-verified equipment path + look-alike census (2026-08-24)
 
 Bradley questioned whether the armor-stand model was understood deeply enough. Went to the
