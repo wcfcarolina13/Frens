@@ -44,9 +44,9 @@ new/updated coverage:
   takes the nearer of whichever hazard(s) are actually present, instead of
   `DangerZoneDetector.detectDangerZone`'s `lavaDistance + cliffDistance`.
 - **Event-volume flooding.** `HUNT_PROGRESS` now fires only at the first kill and at goal-reached,
-  using `candidate.target.label()` for the target name; `MOB_KILLED` is suppressed while a
-  `HuntSessionService` session is active for the killer, since `HUNT_PROGRESS` already covers hunt
-  kills at milestones.
+  using `candidate.target.label()` for the target name; `MOB_KILLED` is suppressed while the
+  killer's active task is `skill:hunt` (`TaskService.getActiveTaskInfo`), since `HUNT_PROGRESS`
+  already covers hunt kills at milestones.
 
 Added a SELF_RESCUE manual case (negative: hobby/hunt while already safe → no record; positive:
 genuine trapped-underground recovery → exactly one record) to

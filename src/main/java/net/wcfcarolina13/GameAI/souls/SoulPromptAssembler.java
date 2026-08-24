@@ -195,7 +195,7 @@ public final class SoulPromptAssembler {
 
         // Priority 1: hazards / hostiles / enclosure.
         if (situation.dangerDistance() != -1) {
-            lines.add("Hazard: " + situation.dangerDistance() + " blocks away.");
+            lines.add("Hazard: " + Math.round(situation.dangerDistance()) + " blocks away.");
         }
         if (!situation.hostiles().isEmpty()) {
             StringBuilder hostiles = new StringBuilder("Hostiles nearby: ");
