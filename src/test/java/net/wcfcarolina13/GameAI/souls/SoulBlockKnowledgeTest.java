@@ -71,16 +71,15 @@ class SoulBlockKnowledgeTest {
     }
 
     @Test
-    void digestDropsMundaneEntriesAndCapsAtTenKinds() {
-        List<String> lines = SoulBlockKnowledge.digestFacilities(List.of(
-                fac("oak_sign", "Oak Sign"),
-                fac("chest", "Chest"), fac("furnace", "Furnace"), fac("barrel", "Barrel"),
-                fac("smoker", "Smoker"), fac("loom", "Loom"), fac("lectern", "Lectern"),
-                fac("bell", "Bell"), fac("stonecutter", "Stonecutter"),
-                fac("enchanting_table", "Enchanting Table"), fac("grindstone", "Grindstone"),
-                fac("composter", "Composter")));
+    void digestDropsMundaneEntriesAndCapsAtSixteenKinds() {
+        List<SoulTypes.RawFacility> room = new java.util.ArrayList<>();
+        room.add(fac("oak_sign", "Oak Sign"));
+        for (int i = 0; i < 18; i++) {
+            room.add(fac("kind_" + i, "Kind " + i));
+        }
+        List<String> lines = SoulBlockKnowledge.digestFacilities(room);
 
-        assertEquals(10, lines.size());
+        assertEquals(16, lines.size());
         assertFalse(String.join(",", lines).contains("Oak Sign"));
     }
 

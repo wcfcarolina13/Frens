@@ -179,7 +179,7 @@ class SoulKnowledgeRetrieverTest {
                 Map.of("diamond ore", "diamond_ore", "zombie", "zombie", "oak log", "oak_log"),
                 Map.of("diamond_ore", "Diamond Ore", "zombie", "Zombie", "oak_log", "Oak Log",
                         "diamond", "Diamond", "rotten_flesh", "Rotten Flesh", "iron_ingot", "Iron Ingot"),
-                Map.of("diamond_ore", List.of("diamond"),
+                Map.of("diamond_ore", List.of("diamond_ore", "diamond"),
                        "zombie", List.of("rotten_flesh", "iron_ingot"),
                        "oak_log", List.of("oak_log")));
     }
@@ -203,5 +203,14 @@ class SoulKnowledgeRetrieverTest {
         List<String> lines = SoulKnowledgeRetriever.retrieve(
                 "oak log?", Map.of(), List.of(), dropsGraph());
         assertTrue(lines.stream().noneMatch(l -> l.contains("drops:")), String.valueOf(lines));
+    }
+
+    @Test
+    void silkTouchSelfDropIsFilteredWhenOtherDropsExist() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve(
+                "what does diamond ore drop?", Map.of(), List.of(), dropsGraph());
+        assertTrue(lines.contains("Diamond Ore drops: Diamond"), String.valueOf(lines));
+        assertTrue(lines.stream().noneMatch(l -> l.contains("Diamond Ore drops: Diamond Ore")),
+                String.valueOf(lines));
     }
 }

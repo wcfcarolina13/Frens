@@ -198,6 +198,11 @@ public final class SoulConversationService {
         } catch (Throwable ignored) {
             // Retrieval is additive grounding, never load-bearing for a turn.
         }
+        if (!relevantKnowledge.isEmpty()) {
+            // Prompt-side ground truth for field debugging: what retrieval actually injected.
+            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+                    "[souls] knowledge correlationId={} lines={}", correlationId, relevantKnowledge);
+        }
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), profile,
                 turn.grounding(), history, events, relevantKnowledge,
                 turn.playerMessage(), settings.timeout());

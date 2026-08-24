@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Field-test 3 fixes: glass sight lines, cap 16, drop noise, look-target recency (2026-08-24)
+
+Third field test on 1.1.153. Confirmed working: graph built (1255 craftable / 1583 drop tables in
+the log), look-target ("You're looking at a Chest", carpet by name), "what can that do?" on the
+enchanting table, drops retrieval firing. Four diagnosed misses:
+
+- **Armor stand mystery SOLVED by the diagnostic line**: `armorstands inBox=2 visible=1` while
+  Jake said "Nothing" — the geared display stand was LOS-filtered because glass counted as
+  opaque (display case), and the bare visible one made "Nothing" technically true.
+  `hasLineOfSight` now steps past up to 4 non-opaque obstructions (glass, panes), so display
+  cases read as see-through everywhere LOS applies (facilities and stands).
+- **Facility cap 10→16** — third crowd-out casualty: potted plants and the campfire lost slots
+  in a facility-dense base room ("do you see flower pots?" → "No", campfire flickering between
+  turns). The regression test now floods 18 kinds.
+- **Silk-touch self-drops filtered** — "Diamond Ore drops: Diamond Ore, Diamond" pushed the
+  model into "Diamond Ore and Diamonds"; self is dropped whenever real drops exist.
+- **Look-target recency** — "The Chest again" repeats came from history over-attention; the
+  Right-now PRESENT MOMENT line now repeats "; the player is looking at X" in the freshest slot.
+- **New retrieval diagnostic**: `[souls] knowledge correlationId=… lines=[…]` logs exactly what
+  the retriever injected, so the unexplained "Zombie drops → Raw Beef" answer can be split into
+  data-vs-model next session.
+
+Suite 352/352 green.
+
 ## Knowledge graph v2: drops, mob topics, deictic retrieval, natural blocks (2026-08-24)
 
 The approved v2 pass on the graph:
