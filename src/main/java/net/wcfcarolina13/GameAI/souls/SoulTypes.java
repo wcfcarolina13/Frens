@@ -485,18 +485,34 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * {@code routingId} is the correlation id minted where the turn entered the system (the chat
+     * router / whisper surface); {@code SoulConversationService} adopts it as the turn's
+     * correlation id instead of minting its own, so the {@code [souls] routing},
+     * {@code [souls] turn}, {@code [souls] knowledge}, and {@code [souls] delivery} log lines for
+     * one turn all join on a single id.
+     */
     public record AcceptedTurn(ConversationKey key, String botDisplayName,
                                 String playerDisplayName, String playerMessage,
                                 String profileId, GroundingSnapshot grounding,
-                                Instant acceptedAt) {
+                                Instant acceptedAt, UUID routingId) {
         public AcceptedTurn {
             Objects.requireNonNull(key, "key");
             Objects.requireNonNull(grounding, "grounding");
             Objects.requireNonNull(acceptedAt, "acceptedAt");
+            Objects.requireNonNull(routingId, "routingId");
             botDisplayName = botDisplayName == null ? "" : botDisplayName;
             playerDisplayName = playerDisplayName == null ? "" : playerDisplayName;
             playerMessage = playerMessage == null ? "" : playerMessage;
             profileId = profileId == null ? "" : profileId;
+        }
+
+        /** Convenience for callers without a routing-surface id: mints a fresh one. */
+        public AcceptedTurn(ConversationKey key, String botDisplayName, String playerDisplayName,
+                             String playerMessage, String profileId, GroundingSnapshot grounding,
+                             Instant acceptedAt) {
+            this(key, botDisplayName, playerDisplayName, playerMessage, profileId, grounding,
+                    acceptedAt, UUID.randomUUID());
         }
     }
 }

@@ -40,11 +40,11 @@ import java.util.stream.Collectors;
  *
  * <p>Routing decisions are logged at INFO via the shared {@code frens.souls} logger with a
  * router-generated correlation id, identity (bot/player uuids), the resolved reachability, the
- * outcome, and per-stage durations -- never the player's message content. The submit-stage
- * generation/delivery turn mints its own, separate correlation id inside
- * {@link SoulConversationService#submit}; that id is logged by {@link SoulConversationService}
- * itself, since {@link SoulRuntime#submitTurn}'s {@code Submission} return value does not expose
- * it back to this router.
+ * outcome, and per-stage durations -- never the player's message content. The same
+ * {@code routingId} travels inside the {@link SoulTypes.AcceptedTurn} and is adopted by
+ * {@link SoulConversationService#submit} as the turn's correlation id, so this router's
+ * {@code [souls] routing} line and the downstream {@code [souls] turn}/{@code knowledge}/
+ * {@code delivery} lines all join on one id.
  */
 public final class SoulChatRouter {
 
@@ -208,7 +208,7 @@ public final class SoulChatRouter {
         SoulTypes.ConversationKey key =
                 new SoulTypes.ConversationKey(bot.getUuid(), sender.getUuid(), SoulTypes.Channel.DIRECT);
         SoulTypes.AcceptedTurn turn = new SoulTypes.AcceptedTurn(key, bot.getName().getString(),
-                sender.getName().getString(), safePrompt, profileId, grounding, Instant.now());
+                sender.getName().getString(), safePrompt, profileId, grounding, Instant.now(), routingId);
 
         logRouting(routingId, bot, sender, "submitted", reachability, routeStartNanos, authorizationMs,
                 reachabilityMs, snapshotMs, grounding);

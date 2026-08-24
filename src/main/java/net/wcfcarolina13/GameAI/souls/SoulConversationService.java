@@ -89,7 +89,9 @@ public final class SoulConversationService {
 
     public CompletableFuture<Submission> submit(SoulTypes.AcceptedTurn turn) {
         Objects.requireNonNull(turn, "turn");
-        UUID correlationId = UUID.randomUUID();
+        // Adopt the routing surface's id rather than minting a second one, so every [souls] log
+        // line for this turn — routing, turn, knowledge, generation, delivery — joins on one id.
+        UUID correlationId = turn.routingId();
         CompletableFuture<Submission> outcome = new CompletableFuture<>();
         Stages stages = new Stages();
 
