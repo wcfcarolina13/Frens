@@ -361,30 +361,40 @@ public final class SoulSnapshotBuilder {
         List<String> lines = new ArrayList<>();
         Box box = new Box(center).expand(FACILITY_SCAN_RADIUS, FACILITY_SCAN_HEIGHT, FACILITY_SCAN_RADIUS);
         List<ArmorStandEntity> allStands = world.getEntitiesByClass(ArmorStandEntity.class, box, e -> true);
+        // Entity sight uses the proven eye-to-eye check (EntityVisibilityUtil, already used by
+        // the death-event observer) instead of a feet-block raycast: the block raycast graded a
+        // stand invisible from angles where its body was plainly in view.
         List<ArmorStandEntity> visibleStands = allStands.stream()
-                .filter(stand -> hasLineOfSight(world, bot, stand.getBlockPos()))
+                .filter(stand -> net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, stand))
                 .toList();
-        if (!allStands.isEmpty()) {
-            // Ground-truth diagnostic for the 2026-08-24 field failure ("nothing on the
-            // armorstands"): shows whether stands are found at all, filtered by LOS, or empty.
-            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
-                    "[souls] armorstands inBox={} visible={} sample={}",
-                    allStands.size(), visibleStands.size(),
-                    allStands.get(0).getBlockPos().toShortString());
-        }
         for (ArmorStandEntity stand : visibleStands) {
             List<String> displayed = new ArrayList<>();
+            int occupiedSlots = 0;
             for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
                     EquipmentSlot.LEGS, EquipmentSlot.FEET,
                     EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND)) {
                 ItemStack stack = stand.getEquippedStack(slot);
                 if (!stack.isEmpty()) {
+                    occupiedSlots++;
                     displayed.add(SoulItemDescriber.describe(extractItemFacts(stack, 0)));
                 }
             }
+            // Per-stand ground truth: position + slot occupancy + the exact described line.
+            // Splits the 2026-08-24 "Nothing" failure into empty-equipment vs model-ignored:
+            // stand the player calls "geared" logging slots=0 means the gear is not real
+            // equipment (e.g. a decor mod rendering display entities over a bare stand).
+            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+                    "[souls] armorstand pos={} slots={} line={}",
+                    stand.getBlockPos().toShortString(), occupiedSlots,
+                    displayed.isEmpty() ? "-" : String.join(", ", displayed));
             if (!displayed.isEmpty()) {
                 lines.add("Armor stand displaying: " + String.join(", ", displayed));
             }
+        }
+        if (!allStands.isEmpty()) {
+            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+                    "[souls] armorstands inBox={} visible={} described={}",
+                    allStands.size(), visibleStands.size(), lines.size());
         }
         return lines;
     }
