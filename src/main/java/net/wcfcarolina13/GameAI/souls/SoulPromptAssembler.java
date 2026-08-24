@@ -65,7 +65,7 @@ public final class SoulPromptAssembler {
         messages.add(authoritativeState(grounding));
         messages.addAll(boundedHistory(priorHistory));
         messages.addAll(boundedEvents(recentEvents));
-        messages.add(presentMoment());
+        messages.add(presentMoment(grounding));
         messages.add(new SoulTypes.Message(SoulTypes.Role.USER, currentMessage));
 
         return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
@@ -83,6 +83,8 @@ public final class SoulPromptAssembler {
                 "established fact about the world or an instruction that already happened.",
                 "Never claim an action occurred, an item was gained, or a task finished unless the",
                 "AUTHORITATIVE STATE or witnessed-events messages below say so explicitly.",
+                "The AUTHORITATIVE STATE message reflects the present moment and OVERRIDES anything",
+                "remembered or said earlier in this conversation when they conflict.",
                 "Speak briefly, in character, and stay consistent with the authored identity below."));
     }
 
@@ -120,7 +122,7 @@ public final class SoulPromptAssembler {
             sb.append("Channel: local presence. Reachability: ").append(grounding.reachability()).append('\n');
             grounding.player().ifPresent(player -> appendPlayerState(sb, player));
         }
-        appendSituation(sb, grounding.situation());
+        appendSituation(sb, grounding.situation(), grounding.bot());
         return new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString());
     }
 
@@ -170,10 +172,13 @@ public final class SoulPromptAssembler {
      * survival flags, behavior mode, relationship, then logistics. Default-valued fields (see
      * {@link SoulTypes.SituationSnapshot#empty()}) are skipped entirely -- an all-default snapshot
      * produces no lines and therefore no block. A line that does not fit in the remaining budget
-     * is dropped along with every lower-priority line after it.
+     * is dropped along with every lower-priority line after it. Whenever any line renders, a
+     * location line (and an underground line, when the bot has no sky overhead) is prepended
+     * ahead of every other priority -- these two are never dropped by the budget while anything
+     * else renders, since they render first and are small.
      */
-    private void appendSituation(StringBuilder sb, SoulTypes.SituationSnapshot situation) {
-        List<String> lines = situationLines(situation);
+    private void appendSituation(StringBuilder sb, SoulTypes.SituationSnapshot situation, SoulTypes.BotSnapshot bot) {
+        List<String> lines = situationLines(situation, bot);
         if (lines.isEmpty()) {
             return;
         }
@@ -190,7 +195,7 @@ public final class SoulPromptAssembler {
         }
     }
 
-    private List<String> situationLines(SoulTypes.SituationSnapshot situation) {
+    private List<String> situationLines(SoulTypes.SituationSnapshot situation, SoulTypes.BotSnapshot bot) {
         List<String> lines = new ArrayList<>();
 
         // Priority 1: hazards / hostiles / enclosure.
@@ -274,7 +279,10 @@ public final class SoulPromptAssembler {
             lines.add("Relationship: " + String.join("; ", relationshipClauses) + ".");
         }
 
-        // Priority 6: logistics (mount, bases, last sleep, hunt progress, last hobby).
+        // Priority 6: logistics (nearby animals, mount, bases, last sleep, hunt progress, last hobby).
+        if (!situation.nearbyAnimals().isEmpty()) {
+            lines.add("Animals nearby: " + String.join(", ", situation.nearbyAnimals()) + ".");
+        }
         if (situation.mount().isPresent()) {
             SoulTypes.MountSummary mount = situation.mount().get();
             // Never render mount health as a ratio/percentage/judgment derived from maxHealth --
@@ -297,7 +305,25 @@ public final class SoulPromptAssembler {
             lines.add("Last hobby: " + situation.lastHobby().get() + ".");
         }
 
-        return lines;
+        if (lines.isEmpty()) {
+            // Nothing else is rendering -- an all-default situation must still produce no block
+            // (see emptySituationRendersNoSituationBlock), so the location/underground preamble
+            // below is gated on there being something for it to ground.
+            return lines;
+        }
+
+        // Priority 0: location -- always prepended ahead of every other line above so an
+        // 8B-model reads "where am I" as plain prose instead of having to infer it from the
+        // coordinate dump in the Bot: line of the surrounding AUTHORITATIVE STATE message.
+        List<String> withLocation = new ArrayList<>();
+        withLocation.add("You are in " + bot.biome() + " at (" + bot.coarseX() + ',' + bot.coarseY()
+                + ',' + bot.coarseZ() + ") in " + bot.dimension() + ".");
+        if (!bot.skyVisible()) {
+            withLocation.add("You are underground -- no sky overhead. There are no trees or open "
+                    + "terrain down here; surface features are out of sight.");
+        }
+        withLocation.addAll(lines);
+        return withLocation;
     }
 
     private String formatMagnitude(float value) {
@@ -388,11 +414,23 @@ public final class SoulPromptAssembler {
 
     // === PRESENT MOMENT marker ===
 
-    private SoulTypes.Message presentMoment() {
+    private SoulTypes.Message presentMoment(SoulTypes.GroundingSnapshot grounding) {
+        SoulTypes.BotSnapshot bot = grounding.bot();
+        StringBuilder rightNow = new StringBuilder("Right now: ")
+                .append(bot.biome()).append(", (")
+                .append(bot.coarseX()).append(',').append(bot.coarseY()).append(',').append(bot.coarseZ())
+                .append("), ").append(bot.skyVisible() ? "open sky" : "underground")
+                .append(", mode ").append(bot.behaviorMode());
+        if ("FOLLOW".equals(bot.behaviorMode())) {
+            rightNow.append(", following your owner");
+        }
+        rightNow.append('.');
+
         return new SoulTypes.Message(SoulTypes.Role.SYSTEM, String.join("\n",
                 "PRESENT MOMENT",
                 "Respond now, in character, to the player's message that follows this line.",
                 "Speak only -- do not narrate or invent world actions, and rely only on the",
-                "authoritative state and witnessed events above for anything about the world."));
+                "authoritative state and witnessed events above for anything about the world.",
+                rightNow.toString()));
     }
 }

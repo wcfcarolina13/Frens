@@ -226,6 +226,7 @@ public final class SoulTypes {
     public record SituationSnapshot(
             int dangerDistance,                 // blocks to nearest lava/cliff hazard; -1 = none detected
             List<HostileSighting> hostiles,     // nearest-first, at most 5
+            List<String> nearbyAnimals,         // non-hostile entities aggregated by name, most-numerous first, at most 4
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,                // Mode.name(), e.g. "GUARD"
             boolean inCombat, boolean postCombatLinger, int recentKillCount,
@@ -240,6 +241,7 @@ public final class SoulTypes {
             Optional<String> lastHobby) {
         public SituationSnapshot {
             hostiles = hostiles == null ? List.of() : List.copyOf(hostiles);
+            nearbyAnimals = nearbyAnimals == null ? List.of() : List.copyOf(nearbyAnimals);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
@@ -248,7 +250,7 @@ public final class SoulTypes {
         }
 
         public static SituationSnapshot empty() {
-            return new SituationSnapshot(-1, List.of(), false, false, false, "",
+            return new SituationSnapshot(-1, List.of(), List.of(), false, false, false, "",
                     false, false, 0, false, false, false, false,
                     -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
         }

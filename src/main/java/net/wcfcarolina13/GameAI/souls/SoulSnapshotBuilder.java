@@ -86,7 +86,7 @@ public final class SoulSnapshotBuilder {
                 (reachability == SoulTypes.Reachability.LOCAL && player != null)
                         ? capturePlayer(bot, player)
                         : null;
-        SoulTypes.SituationSnapshot situationSnapshot = captureSituation(server, bot);
+        SoulTypes.SituationSnapshot situationSnapshot = captureSituation(server, bot, botSnapshot.ownerName());
 
         return assemble(botSnapshot, playerSnapshot, situationSnapshot, reachability, Instant.now());
     }
@@ -182,8 +182,12 @@ public final class SoulSnapshotBuilder {
      * <p>Every source group is wrapped defensively: a throwing or absent source falls back to
      * that group's neutral default rather than failing the whole capture, mirroring
      * {@link #captureBot(MinecraftServer, ServerPlayerEntity)}'s recruitment-read style.
+     *
+     * @param ownerName the bot's already-captured {@link SoulTypes.BotSnapshot#ownerName()}, used
+     *     to exclude the owner/commander from the aggregated nearby-animal view below.
      */
-    private static SoulTypes.SituationSnapshot captureSituation(MinecraftServer server, ServerPlayerEntity bot) {
+    private static SoulTypes.SituationSnapshot captureSituation(MinecraftServer server, ServerPlayerEntity bot,
+            String ownerName) {
         long nowEpochMs = System.currentTimeMillis();
 
         double dangerDistance = -1.0D;
@@ -333,7 +337,8 @@ public final class SoulSnapshotBuilder {
         } catch (Throwable ignored) {
         }
 
-        SituationInputs inputs = new SituationInputs(dangerDistance, entities, enclosed, hasHeadroom, hasEscapeRoute,
+        SituationInputs inputs = new SituationInputs(dangerDistance, entities, ownerName, bot.getName().getString(),
+                enclosed, hasHeadroom, hasEscapeRoute,
                 behaviorMode, inCombat, postCombatLinger, recentKillCount,
                 inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
                 recruitedAtEpochMs, deathCount, nowEpochMs,
@@ -371,6 +376,8 @@ public final class SoulSnapshotBuilder {
     record SituationInputs(
             double dangerDistance,
             List<RawEntity> entities,
+            String ownerName,
+            String botName,
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,
             boolean inCombat, boolean postCombatLinger, int recentKillCount,
@@ -384,6 +391,8 @@ public final class SoulSnapshotBuilder {
             Optional<String> lastHobby) {
         SituationInputs {
             entities = entities == null ? List.of() : List.copyOf(entities);
+            ownerName = ownerName == null ? "" : ownerName;
+            botName = botName == null ? "" : botName;
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
@@ -394,9 +403,11 @@ public final class SoulSnapshotBuilder {
 
     /**
      * Pure transform: filters to hostiles, computes rounded 3D distance, sorts nearest-first and
-     * caps at 5; floors {@code companionDays} from epoch millis; passes every other group through
-     * unchanged. Contains all filtering/sorting/capping/day-floor/default logic for the situation
-     * snapshot — {@link #captureSituation(MinecraftServer, ServerPlayerEntity)} only reads and forwards.
+     * caps at 5; aggregates non-hostile entities (excluding the owner and the bot itself) by name,
+     * most-numerous first, capped at 4; floors {@code companionDays} from epoch millis; passes
+     * every other group through unchanged. Contains all filtering/sorting/capping/day-floor/default
+     * logic for the situation snapshot — {@link #captureSituation(MinecraftServer, ServerPlayerEntity, String)}
+     * only reads and forwards.
      */
     static SoulTypes.SituationSnapshot buildSituation(SituationInputs inputs) {
         int dangerDistance = inputs.dangerDistance() <= 0.0D
@@ -411,11 +422,23 @@ public final class SoulSnapshotBuilder {
                 .limit(5)
                 .collect(Collectors.toList());
 
+        List<String> nearbyAnimals = inputs.entities().stream()
+                .filter(e -> !e.hostile())
+                .filter(e -> !e.name().isBlank())
+                .filter(e -> !e.name().equalsIgnoreCase(inputs.ownerName()))
+                .filter(e -> !e.name().equalsIgnoreCase(inputs.botName()))
+                .collect(Collectors.groupingBy(RawEntity::name, LinkedHashMap::new, Collectors.counting()))
+                .entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .limit(4)
+                .map(entry -> entry.getValue() == 1L ? entry.getKey() : entry.getKey() + " x" + entry.getValue())
+                .collect(Collectors.toList());
+
         int companionDays = inputs.recruitedAtEpochMs() <= 0L
                 ? -1
                 : (int) Math.floorDiv(inputs.nowEpochMs() - inputs.recruitedAtEpochMs(), 86_400_000L);
 
-        return new SoulTypes.SituationSnapshot(dangerDistance, hostiles,
+        return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
                 inputs.enclosed(), inputs.hasHeadroom(), inputs.hasEscapeRoute(),
                 inputs.behaviorMode(), inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
                 inputs.inShelter(), inputs.surfaceRecoveryActive(), inputs.breakingFree(),

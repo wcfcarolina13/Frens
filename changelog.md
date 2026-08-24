@@ -2,6 +2,50 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Make Jake's situation legible to small models (2026-08-23, mod_version 1.1.143)
+
+Field-test on the 1.21.11 test instance surfaced four salience gaps that the pre-existing
+grounding/prompt pipeline captured correctly but rendered too tersely for an 8B model to act on:
+the bot never mentioned being underground, never reacted to having moved since the last turn,
+ignored an active FOLLOW mode, and had no way to see nearby passive mobs (horses, dogs) because
+`captureSituation`'s entity loop kept only `isHostile()` sightings. Root cause: facts were present
+in the AUTHORITATIVE STATE key-value dump but buried in undifferentiated key:value pairs an
+under-attending small model skips past, and passive entities were filtered out before they ever
+reached the prompt.
+
+- **Nearby passive/notable entities.** `SoulSnapshotBuilder.buildSituation` now aggregates every
+  non-hostile entity from the same 10-block scan by name (`"horse x3"`, `"wolf"`), most-numerous
+  first, capped at 4, excluding the owner (`SituationInputs.ownerName`) and the bot itself
+  (`SituationInputs.botName`) so a nearby commander or teammate bot never shows up as "wildlife".
+  New `SituationSnapshot.nearbyAnimals` component (inserted right after `hostiles`, the record is
+  now 21 components) flows through the existing pure `buildSituation` seam — capture stays
+  server-thread-only, aggregation stays unit-testable without a Minecraft server.
+- **Location and underground lines, prose not key-value.** `SoulPromptAssembler.situationLines`
+  now opens every non-empty SITUATION block with `"You are in <biome> at (x,y,z) in <dimension>."`,
+  and adds `"You are underground -- no sky overhead. There are no trees or open terrain down here;
+  surface features are out of sight."` whenever `!bot.skyVisible()`. Both are top-priority: they
+  render before hazards and survive the 800-char budget while lower-priority lines (last hobby,
+  last slept) get dropped first, same as before. `nearbyAnimals` renders as `"Animals nearby: horse
+  x2, wolf."` in the existing logistics tier, right after `Mode:`.
+- **PRESENT MOMENT carries a dynamic recency anchor.** `presentMoment()` was static boilerplate
+  text; it now takes the `GroundingSnapshot` and appends one compact line — `"Right now: <biome>,
+  (x,y,z), <open sky|underground>, mode <MODE>[, following your owner]."` — after the three
+  existing instruction lines, so the turn immediately preceding the player's message restates
+  current position/mode instead of trusting the model to reconstruct it from further up the prompt.
+  The block still starts with `"PRESENT MOMENT\n"`, so the mandated
+  `presentMomentImmediatelyPrecedesCurrentPlayerMessage` ordering assertion is unaffected.
+- **Contract states recency wins.** `systemContract()` gained one sentence: "The AUTHORITATIVE
+  STATE message reflects the present moment and OVERRIDES anything remembered or said earlier in
+  this conversation when they conflict." — closing the gap where a stale remembered fact (old
+  location, old mode) could outweigh the current turn's grounding in a small model's attention.
+- Every positional `SituationSnapshot`/`SituationInputs` construction across
+  `SoulSnapshotBuilder.java`, `SoulGroundingTest.java`, `SoulPromptAssemblerTest.java`, and
+  `SoulSituationTypesTest.java` was updated for the new components; `SoulSituationTypesTest`'s
+  null-normalization test now also asserts `nearbyAnimals` collapses a `null` to `List.of()`.
+  7 new tests added (location/underground/animals rendering, PRESENT MOMENT dynamic line,
+  nearby-animal aggregation and cap) plus assertions strengthened on 2 existing tests; full suite
+  (267 tests) and `./gradlew build -x test` both green.
+
 ## Correct situational grounding fidelity (2026-08-23)
 
 Final whole-branch review fix wave on the soul situational-awareness branch (post `71f2205`).

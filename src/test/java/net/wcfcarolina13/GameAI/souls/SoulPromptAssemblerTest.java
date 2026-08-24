@@ -32,6 +32,18 @@ class SoulPromptAssemblerTest {
             "day", "clear", 20.0F, 20.0F, 18, 4, "iron_pickaxe",
             8, 36, List.of("oak_log x32"), "content", "idle", "", "IDLE",
             "Workshop", "Player", true, 2, false, java.util.Optional.empty());
+    private final SoulTypes.BotSnapshot undergroundBot = new SoulTypes.BotSnapshot(
+            UUID.fromString("11111111-1111-1111-1111-111111111111"), "Jake",
+            "minecraft:overworld", "plains", 0, 12, 0, false,
+            "day", "clear", 20.0F, 20.0F, 18, 4, "iron_pickaxe",
+            8, 36, List.of("oak_log x32"), "content", "idle", "", "IDLE",
+            "Workshop", "Player", true, 2, false, java.util.Optional.empty());
+    private final SoulTypes.BotSnapshot followBot = new SoulTypes.BotSnapshot(
+            UUID.fromString("11111111-1111-1111-1111-111111111111"), "Jake",
+            "minecraft:overworld", "plains", 0, 64, 0, true,
+            "day", "clear", 20.0F, 20.0F, 18, 4, "iron_pickaxe",
+            8, 36, List.of("oak_log x32"), "content", "FOLLOW", "", "IDLE",
+            "Workshop", "Player", true, 2, false, java.util.Optional.empty());
     private final SoulTypes.PlayerSnapshot localPlayer = new SoulTypes.PlayerSnapshot(
             UUID.fromString("22222222-2222-2222-2222-222222222222"), "Player",
             6, "north", 20.0F, 20.0F, 20, "playerBiomeSecret", false);
@@ -68,6 +80,38 @@ class SoulPromptAssemblerTest {
     }
 
     @Test
+    void presentMomentIncludesDynamicRightNowLineReflectingGrounding() {
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents, "Can you see this village?", Duration.ofSeconds(60));
+        String presentMomentContent = request.messages().get(request.messages().size() - 2).content();
+        assertTrue(presentMomentContent.startsWith("PRESENT MOMENT\n"));
+        assertTrue(presentMomentContent.contains("Right now: plains, (0,64,0), open sky, mode idle."),
+                presentMomentContent);
+    }
+
+    @Test
+    void presentMomentReflectsUndergroundAndFollowMode() {
+        SoulTypes.GroundingSnapshot followGrounding = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, followBot, Optional.of(localPlayer), Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, followGrounding,
+                List.of(), List.of(), "Where are we going?", Duration.ofSeconds(60));
+        String presentMomentContent = request.messages().get(request.messages().size() - 2).content();
+        assertTrue(presentMomentContent.contains("mode FOLLOW, following your owner."), presentMomentContent);
+
+        SoulTypes.GroundingSnapshot undergroundGrounding = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, undergroundBot, Optional.of(localPlayer), Instant.EPOCH);
+        SoulTypes.ProviderRequest undergroundRequest = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, undergroundGrounding,
+                List.of(), List.of(), "Where are we going?", Duration.ofSeconds(60));
+        String undergroundPresentMoment =
+                undergroundRequest.messages().get(undergroundRequest.messages().size() - 2).content();
+        assertTrue(undergroundPresentMoment.contains("Right now: plains, (0,12,0), underground, mode idle."),
+                undergroundPresentMoment);
+    }
+
+    @Test
     void remotePromptDoesNotContainPlayerSurroundings() {
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile, remoteGrounding,
@@ -81,7 +125,7 @@ class SoulPromptAssemblerTest {
     @Test
     void remotePromptRendersSituationWithoutPlayerSurroundings() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
                 false, true, true, "GUARD", false, true, 2,
                 false, false, false, false, 14, 1,
                 Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
@@ -112,7 +156,7 @@ class SoulPromptAssemblerTest {
     @Test
     void situationBlockRendersInsideAuthoritativeStateInPriorityOrder() {
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
                 false, true, true, "GUARD", false, true, 2,
                 false, false, false, false, 14, 1,
                 Optional.of(new SoulTypes.MountSummary("horse", 11.0F, 22.0F, true)),
@@ -134,7 +178,7 @@ class SoulPromptAssemblerTest {
         String longSleepLabel = "S".repeat(400);
         String longHobby = "H".repeat(400);
         SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
-                5, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)),
+                5, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
                 false, false, false, "GUARD", false, false, 0,
                 false, false, false, false, 14, 1,
                 Optional.empty(), 0, Optional.of(longSleepLabel), Optional.empty(), Optional.of(longHobby));
@@ -150,7 +194,66 @@ class SoulPromptAssemblerTest {
         assertTrue(situationBlock.length() <= 800,
                 "situation block should be capped at 800 chars, was " + situationBlock.length());
         assertTrue(situationBlock.contains("zombie"), "hostiles line should survive the cap");
+        assertTrue(situationBlock.contains("You are in plains at (0,64,0) in minecraft:overworld."),
+                "location line is top-priority and must survive the cap");
         assertFalse(situationBlock.contains(longHobby), "hobby text should be dropped by the cap");
+    }
+
+    @Test
+    void situationBlockAlwaysOpensWithLocationLineWhenNonEmpty() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
+                false, false, false, "", false, false, 0,
+                false, false, false, false, -1, -1,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "Status check.", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        int situationStart = state.indexOf("SITUATION");
+        assertTrue(situationStart >= 0, "expected a SITUATION block");
+        String situationBlock = state.substring(situationStart);
+        assertTrue(situationBlock.startsWith("SITUATION\nYou are in plains at (0,64,0) in minecraft:overworld.\n"),
+                "location line should immediately follow the SITUATION header: " + situationBlock);
+        assertFalse(situationBlock.contains("underground"),
+                "the fixture's bot has sky visible; no underground line expected");
+    }
+
+    @Test
+    void undergroundLineAppearsWhenSkyNotVisible() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                6, List.of(new SoulTypes.HostileSighting("zombie", "northeast", 7)), List.of(),
+                false, false, false, "", false, false, 0,
+                false, false, false, false, -1, -1,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, undergroundBot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "Status check.", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        assertTrue(state.contains("You are underground -- no sky overhead. There are no trees or "
+                + "open terrain down here; surface features are out of sight."));
+    }
+
+    @Test
+    void nearbyAnimalsRenderInSituationBlockWithLogistics() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of("horse x2", "wolf"),
+                false, false, false, "IDLE", false, false, 0,
+                false, false, false, false, -1, -1,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile,
+                new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                        Optional.of(localPlayer), situation, Instant.EPOCH),
+                List.of(), List.of(), "What's around?", Duration.ofSeconds(60));
+        String state = authoritativeStateMessage(request);
+        assertTrue(state.contains("Animals nearby: horse x2, wolf."));
+        assertTrue(state.indexOf("Mode: IDLE") < state.indexOf("Animals nearby"),
+                "nearby-animals line renders with logistics, after mode");
     }
 
     @Test

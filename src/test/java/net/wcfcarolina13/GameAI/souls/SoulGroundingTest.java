@@ -145,7 +145,7 @@ class SoulGroundingTest {
 
     private static SoulSnapshotBuilder.SituationInputs baseSituationInputs() {
         return new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, List.of(), false, false, false,
+                -1.0D, List.of(), "", "", false, false, false,
                 "", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -164,7 +164,7 @@ class SoulGroundingTest {
         entities.add(new SoulSnapshotBuilder.RawEntity("Zombie7", true, 5.0D, 0.0D, 0.0D));
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, entities, false, false, false,
+                -1.0D, entities, "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -190,7 +190,7 @@ class SoulGroundingTest {
                 new SoulSnapshotBuilder.RawEntity("Zombie", true, 4.0D, 0.0D, 0.0D));
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, entities, false, false, false,
+                -1.0D, entities, "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -211,7 +211,7 @@ class SoulGroundingTest {
                 new SoulSnapshotBuilder.RawEntity("Zombie", true, 5.0D, 0.0D, -5.0D));
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, entities, false, false, false,
+                -1.0D, entities, "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -225,9 +225,61 @@ class SoulGroundingTest {
     }
 
     @Test
+    void nearbyAnimalsAggregateNonHostileEntitiesExcludingOwnerAndSelf() {
+        List<SoulSnapshotBuilder.RawEntity> entities = List.of(
+                new SoulSnapshotBuilder.RawEntity("horse", false, 2.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("horse", false, 3.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("horse", false, 4.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("wolf", false, 5.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("villager", false, 6.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("Player", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("Jake", false, 0.5D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("Zombie", true, 8.0D, 0.0D, 0.0D));
+
+        SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
+                -1.0D, entities, "Player", "Jake", false, false, false,
+                "IDLE", false, false, 0,
+                false, false, false, false,
+                0L, -1, 0L,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+
+        SoulTypes.SituationSnapshot situation = SoulSnapshotBuilder.buildSituation(inputs);
+
+        // 3 horses win the count, then insertion order breaks the tie between wolf and villager;
+        // "Player" (the owner) and "Jake" (the bot itself) are excluded entirely; the hostile
+        // "Zombie" is excluded from nearbyAnimals (it belongs in hostiles instead).
+        assertEquals(List.of("horse x3", "wolf", "villager"), situation.nearbyAnimals());
+        assertEquals(1, situation.hostiles().size());
+        assertEquals("Zombie", situation.hostiles().get(0).name());
+    }
+
+    @Test
+    void nearbyAnimalsCappedAtFourMostNumerousEntries() {
+        List<SoulSnapshotBuilder.RawEntity> entities = List.of(
+                new SoulSnapshotBuilder.RawEntity("cow", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("cow", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("pig", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("sheep", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("chicken", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("cat", false, 1.0D, 0.0D, 0.0D));
+
+        SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
+                -1.0D, entities, "", "", false, false, false,
+                "IDLE", false, false, 0,
+                false, false, false, false,
+                0L, -1, 0L,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty());
+
+        SoulTypes.SituationSnapshot situation = SoulSnapshotBuilder.buildSituation(inputs);
+
+        assertEquals(4, situation.nearbyAnimals().size());
+        assertEquals("cow x2", situation.nearbyAnimals().get(0));
+    }
+
+    @Test
     void dangerDistancePassesThroughWithNegativeOneDefault() {
         SoulSnapshotBuilder.SituationInputs zero = new SoulSnapshotBuilder.SituationInputs(
-                0.0D, List.of(), false, false, false,
+                0.0D, List.of(), "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -235,7 +287,7 @@ class SoulGroundingTest {
         assertEquals(-1, SoulSnapshotBuilder.buildSituation(zero).dangerDistance());
 
         SoulSnapshotBuilder.SituationInputs negative = new SoulSnapshotBuilder.SituationInputs(
-                -7.0D, List.of(), false, false, false,
+                -7.0D, List.of(), "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -243,7 +295,7 @@ class SoulGroundingTest {
         assertEquals(-1, SoulSnapshotBuilder.buildSituation(negative).dangerDistance());
 
         SoulSnapshotBuilder.SituationInputs positive = new SoulSnapshotBuilder.SituationInputs(
-                12.4D, List.of(), false, false, false,
+                12.4D, List.of(), "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 0L,
@@ -257,7 +309,7 @@ class SoulGroundingTest {
         long twoDaysAndChangeLater = recruitedAt + 2 * 86_400_000L + 12_345L;
 
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, List.of(), false, false, false,
+                -1.0D, List.of(), "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 recruitedAt, -1, twoDaysAndChangeLater,
@@ -269,7 +321,7 @@ class SoulGroundingTest {
     @Test
     void companionDaysIsUnknownWhenRecruitedAtEpochMsIsZero() {
         SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
-                -1.0D, List.of(), false, false, false,
+                -1.0D, List.of(), "", "", false, false, false,
                 "IDLE", false, false, 0,
                 false, false, false, false,
                 0L, -1, 999_999L,

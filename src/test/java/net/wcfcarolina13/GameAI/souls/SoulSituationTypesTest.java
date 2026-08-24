@@ -36,7 +36,7 @@ class SoulSituationTypesTest {
         List<SoulTypes.HostileSighting> hostiles = new ArrayList<>();
         hostiles.add(new SoulTypes.HostileSighting("zombie", "north", 6));
         SoulTypes.SituationSnapshot s = new SoulTypes.SituationSnapshot(
-                8, hostiles, true, false, true, "GUARD",
+                8, hostiles, List.of(), true, false, true, "GUARD",
                 true, false, 2, false, false, false, false,
                 14, 1, Optional.empty(), 3, null, null, Optional.of("fishing"));
         hostiles.clear();
@@ -71,11 +71,12 @@ class SoulSituationTypesTest {
     @Test
     void situationSnapshotNullBehaviorModeAndMountNormalize() {
         SoulTypes.SituationSnapshot s = new SoulTypes.SituationSnapshot(
-                -1, null, false, false, false, null,
+                -1, null, null, false, false, false, null,
                 false, false, 0, false, false, false, false,
                 -1, -1, null, 0, null, null, null);
         assertEquals("", s.behaviorMode());
         assertEquals(List.of(), s.hostiles());
+        assertEquals(List.of(), s.nearbyAnimals());
         assertEquals(Optional.empty(), s.mount());
         assertEquals(Optional.empty(), s.lastSleepLabel());
         assertEquals(Optional.empty(), s.hunt());
