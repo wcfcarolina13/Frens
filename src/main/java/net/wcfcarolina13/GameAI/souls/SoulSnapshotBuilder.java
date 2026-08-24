@@ -1,9 +1,11 @@
 package net.wcfcarolina13.GameAI.souls;
 
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -89,7 +91,8 @@ public final class SoulSnapshotBuilder {
                 (reachability == SoulTypes.Reachability.LOCAL && player != null)
                         ? capturePlayer(bot, player)
                         : null;
-        SoulTypes.SituationSnapshot situationSnapshot = captureSituation(server, bot, botSnapshot.ownerName());
+        SoulTypes.SituationSnapshot situationSnapshot =
+                captureSituation(server, bot, botSnapshot.ownerName(), reachability, player);
 
         return assemble(botSnapshot, playerSnapshot, situationSnapshot, reachability, Instant.now());
     }
@@ -188,9 +191,13 @@ public final class SoulSnapshotBuilder {
      *
      * @param ownerName the bot's already-captured {@link SoulTypes.BotSnapshot#ownerName()}, used
      *     to exclude the owner/commander from the aggregated nearby-animal view below.
+     * @param reachability this turn's pre-classified reachability -- gates the shoulder-pet read
+     *     below to LOCAL the same way {@link #capture} gates {@code playerSnapshot} construction.
+     * @param player the local player, or {@code null} when there is no shared presence (REMOTE) --
+     *     used only to read their shoulder-pet NBT when {@code reachability} is LOCAL.
      */
     private static SoulTypes.SituationSnapshot captureSituation(MinecraftServer server, ServerPlayerEntity bot,
-            String ownerName) {
+            String ownerName, SoulTypes.Reachability reachability, ServerPlayerEntity player) {
         long nowEpochMs = System.currentTimeMillis();
 
         double dangerDistance = -1.0D;
@@ -238,8 +245,24 @@ public final class SoulSnapshotBuilder {
                     continue;
                 }
                 EntityDetails details = EntityDetails.from(bot, e);
-                collected.add(new RawEntity(details.getName(), details.isHostile(),
+                // Name from the entity TYPE first ("wolf", "parrot"), not the display name --
+                // a display name is the vanilla custom name (e.g. "Rex") when one is set, and a
+                // small local model can't map an arbitrary pet name back to a species. A custom
+                // name is still surfaced, just annotated onto the species: "wolf (Rex)".
+                String typePath = EntityType.getId(e.getType()).getPath();
+                String customName = e.hasCustomName() ? e.getCustomName().getString() : null;
+                collected.add(new RawEntity(formatEntityName(typePath, customName), details.isHostile(),
                         details.getX() - bot.getX(), details.getY() - bot.getY(), details.getZ() - bot.getZ()));
+            }
+            // A tamed parrot auto-perches on its owner's shoulder; while perched it is not a world
+            // entity at all -- it is stored as NbtCompound on the holding ServerPlayerEntity
+            // (getLeftShoulderNbt/getRightShoulderNbt), so detectNearbyEntities above can never see
+            // it. Read both shoulders on the bot itself and, when LOCAL, on the present player too,
+            // and fold them into the same collected list so the existing aggregation below (name
+            // grouping, owner/self exclusion, cap) handles them uniformly with ground sightings.
+            appendShoulderPets(collected, bot, "your shoulder");
+            if (reachability == SoulTypes.Reachability.LOCAL && player != null) {
+                appendShoulderPets(collected, player, player.getName().getString() + "'s shoulder");
             }
             entities = collected;
         } catch (Throwable ignored) {
@@ -366,6 +389,33 @@ public final class SoulSnapshotBuilder {
                 recruitedAtEpochMs, deathCount, nowEpochMs,
                 mount, knownBaseCount, lastSleepLabel, atBase, hunt, lastHobby);
         return buildSituation(inputs);
+    }
+
+    /**
+     * Reads both shoulder slots on {@code holder} (a tamed parrot auto-perches there; while
+     * perched it is stored as {@link NbtCompound}, not a world {@link Entity} -- see the
+     * {@code captureSituation} call site) and appends one {@link RawEntity} per occupied slot to
+     * {@code out}, labeled with {@code ownerLabel} (e.g. {@code "your shoulder"} or
+     * {@code "Bradley's shoulder"}).
+     */
+    private static void appendShoulderPets(List<RawEntity> out, ServerPlayerEntity holder, String ownerLabel) {
+        appendShoulderPet(out, holder.getLeftShoulderNbt(), ownerLabel);
+        appendShoulderPet(out, holder.getRightShoulderNbt(), ownerLabel);
+    }
+
+    /**
+     * Decodes the "id" key the same way vanilla's {@code ServerPlayerEntity#spawnShoulderEntity}
+     * does when it respawns the shoulder passenger back into the world (both read
+     * {@code EntityType.CODEC} off the raw {@code "id"} string tag) -- an empty NbtCompound means
+     * that shoulder slot is unoccupied, and a present-but-undecodable id is skipped rather than
+     * fabricating a sighting.
+     */
+    private static void appendShoulderPet(List<RawEntity> out, NbtCompound shoulderNbt, String ownerLabel) {
+        if (shoulderNbt == null || shoulderNbt.isEmpty()) {
+            return;
+        }
+        shoulderNbt.get("id", EntityType.CODEC).ifPresent(type -> out.add(new RawEntity(
+                shoulderEntry(EntityType.getId(type).getPath(), ownerLabel), false, 0.0D, 0.0D, 0.0D)));
     }
 
     /**
@@ -514,6 +564,25 @@ public final class SoulSnapshotBuilder {
     /** Rounds a coordinate to the nearest 8-block increment. */
     static int roundToEight(int value) {
         return (int) Math.round(value / 8.0D) * 8;
+    }
+
+    /**
+     * Species-first entity label: {@code typePath} alone ("wolf", "parrot") when the entity has
+     * no custom name, or {@code "wolf (Rex)"} when it does. A small local model can classify a
+     * species reliably but can't map an arbitrary player-chosen name back to one, so the species
+     * always leads and the custom name is annotated onto it rather than replacing it.
+     */
+    static String formatEntityName(String typePath, String customNameOrNull) {
+        String base = typePath == null ? "" : typePath;
+        if (customNameOrNull == null || customNameOrNull.isBlank()) {
+            return base;
+        }
+        return base + " (" + customNameOrNull + ")";
+    }
+
+    /** Formats one shoulder-perched pet sighting, e.g. {@code "parrot (on your shoulder)"}. */
+    static String shoulderEntry(String species, String ownerLabel) {
+        return species + " (on " + ownerLabel + ")";
     }
 
     /** Resolves the compass direction of {@code (dx, dz)} to its nearest of 8 points. North is -Z, east is +X. */

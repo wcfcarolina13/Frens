@@ -2,6 +2,50 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Notice shoulder pets and name species first (2026-08-23, mod_version 1.1.145)
+
+Round-4 field-test fix: the user's pet parrot, sitting in the same room, went completely
+unnoticed by the soul pipeline. Two root causes, both verified against the Minecraft Wiki and the
+1.21.11 Yarn mappings (`mappings.tiny` under `~/.gradle/caches/fabric-loom/1.21.11/...`, cross-checked
+by `javap`-ing the merged-named jar under the worktree's own loom cache):
+
+- **Shoulder-perched pets aren't world entities.** A tamed parrot auto-perches on its owner's
+  shoulder, and while perched it is *not* a live `Entity` at all -- vanilla stores it as raw NBT on
+  the holding player. `AutoFaceEntity.detectNearbyEntities` (or any other entity scan) can never
+  see it, no matter the radius. Confirmed the exact 1.21.11 API by disassembling
+  `ServerPlayerEntity#mountOntoShoulder`/`#spawnShoulderEntity`: the entity is held in
+  `getLeftShoulderNbt()`/`getRightShoulderNbt()` (both `public`, both return `NbtCompound`, empty
+  when nothing is perched), and `spawnShoulderEntity` decodes it back with
+  `shoulderNbt.get("id", EntityType.CODEC)`. `captureSituation` now reads both shoulder slots on
+  the bot itself (`"parrot (on your shoulder)"`) and, when reachability is LOCAL and a player is
+  present, both of the player's shoulder slots too (`"parrot (on Bradley's shoulder)"`), folding
+  each occupied slot into the same `RawEntity` list the ground-entity scan builds -- the existing
+  aggregation (name grouping, owner/self exclusion, cap) picks them up with no further changes.
+  (Note: `PlayerEntity` separately exposes `getLeftShoulderParrotVariant()`/
+  `getRightShoulderParrotVariant()` returning `Optional<ParrotEntity.Variant>` -- that pair is a
+  rendering-only concern for the parrot's color and was not used here; the `NbtCompound` pair on
+  `ServerPlayerEntity` is the one that actually identifies *what* is perched.)
+- **Named pets hid behind their names.** `EntityDetails.getName()` returns the vanilla display
+  name, which is the custom name ("Rex") when the entity has one -- a small local model has no way
+  to map an arbitrary player-chosen name back to a species. `captureSituation`'s entity loop now
+  builds the `RawEntity` name from the entity's *type* first (`EntityType.getId(e.getType())
+  .getPath()`, e.g. `"wolf"`, `"parrot"`), confirmed via `javap` on the same merged-named jar
+  (`Entity#hasCustomName()`, `Entity#getCustomName()` returning `Text`, `Entity#getType()`), and
+  annotates a custom name onto the species instead of replacing it: `"wolf (Rex)"`. The
+  species+custom-name formatting and the shoulder-entry formatting were both extracted into small
+  pure static helpers (`formatEntityName`, `shoulderEntry`) specifically so this round's fixes are
+  unit-testable -- the enclosing loop still can't be, for the same reason documented in 1.1.144's
+  entry above (live `Entity`/`ServerPlayerEntity` can't be constructed or mocked in this harness).
+- **Diagnosability.** `SoulChatRouter`'s `[souls] routing ...` INFO line gained `hostiles=<n>
+  animals=[a, b, ...]` (capped at 6 rendered entries) sourced from the same captured
+  `GroundingSnapshot` as the existing `mode`/`following`/`sky` fields, so the next field test can
+  confirm from `latest.log` whether capture actually saw the parrot without touching player
+  message content -- these are species-level game facts, never private text.
+- 6 new pure-seam tests added to `SoulGroundingTest` (`formatEntityName`/`shoulderEntry` unit
+  cases plus one aggregation-flow test showing a pre-formatted shoulder entry passes through
+  `buildSituation`'s existing name-grouping/cap logic alongside a ground sighting); full suite
+  (281 tests) and `./gradlew build -x test` both green.
+
 ## Only living creatures count as nearby animals (2026-08-23, mod_version 1.1.144)
 
 Pre-deploy review of the Fix B radius widening (below) caught a pre-existing bug it made worse:

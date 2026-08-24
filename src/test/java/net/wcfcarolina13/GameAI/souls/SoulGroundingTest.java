@@ -425,6 +425,59 @@ class SoulGroundingTest {
         assertEquals(List.of("Stone"), SoulSnapshotBuilder.buildSituation(inputs).nearbyBlocks());
     }
 
+    // --- Round-4 Fix 1: species-first naming with custom-name annotation ---
+
+    @Test
+    void formatEntityNameUsesSpeciesAloneWithoutACustomName() {
+        assertEquals("wolf", SoulSnapshotBuilder.formatEntityName("wolf", null));
+        assertEquals("parrot", SoulSnapshotBuilder.formatEntityName("parrot", ""));
+        assertEquals("horse", SoulSnapshotBuilder.formatEntityName("horse", "   "));
+    }
+
+    @Test
+    void formatEntityNameAnnotatesSpeciesWithCustomNameWhenPresent() {
+        assertEquals("wolf (Rex)", SoulSnapshotBuilder.formatEntityName("wolf", "Rex"));
+        assertEquals("parrot (Polly)", SoulSnapshotBuilder.formatEntityName("parrot", "Polly"));
+    }
+
+    @Test
+    void formatEntityNameTreatsNullTypePathAsEmptyBase() {
+        assertEquals("", SoulSnapshotBuilder.formatEntityName(null, null));
+        assertEquals(" (Rex)", SoulSnapshotBuilder.formatEntityName(null, "Rex"));
+    }
+
+    // --- Round-4 Fix 2: shoulder-perched pets ---
+
+    @Test
+    void shoulderEntryFormatsSpeciesWithOwnerLabel() {
+        assertEquals("parrot (on your shoulder)", SoulSnapshotBuilder.shoulderEntry("parrot", "your shoulder"));
+        assertEquals("parrot (on Bradley's shoulder)",
+                SoulSnapshotBuilder.shoulderEntry("parrot", "Bradley's shoulder"));
+    }
+
+    @Test
+    void shoulderPetsFlowThroughTheSameNearbyAnimalsAggregationAsGroundSightings() {
+        // Shoulder pets are folded into the RawEntity list by captureSituation itself (not a
+        // separate SituationInputs field) so this seam's existing name-grouping/owner-exclusion/
+        // cap logic applies uniformly -- exercised here with pre-formatted shoulder-entry names.
+        List<SoulSnapshotBuilder.RawEntity> entities = List.of(
+                new SoulSnapshotBuilder.RawEntity(
+                        SoulSnapshotBuilder.shoulderEntry("parrot", "your shoulder"), false, 0.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("cow", false, 5.0D, 0.0D, 0.0D));
+
+        SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
+                -1.0D, entities, "", "Jake", "", List.of(), false, false, false,
+                "IDLE", false, false, false, 0,
+                false, false, false, false,
+                0L, -1, 0L,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+
+        SoulTypes.SituationSnapshot situation = SoulSnapshotBuilder.buildSituation(inputs);
+
+        assertTrue(situation.nearbyAnimals().contains("parrot (on your shoulder)"));
+        assertTrue(situation.nearbyAnimals().contains("cow"));
+    }
+
     // --- Fix D: atBase passes through untouched (already-resolved by captureSituation) ---
 
     @Test
