@@ -170,4 +170,38 @@ class SoulKnowledgeRetrieverTest {
                 "the mud is sticking to my boots", Map.of(), List.of(), torchGraph());
         assertEquals(List.of(), lines);
     }
+
+    // === v2: loot/drop edges ===
+
+    private static GameKnowledgeGraph.GraphData dropsGraph() {
+        return new GameKnowledgeGraph.GraphData(
+                Map.of(), Map.of(),
+                Map.of("diamond ore", "diamond_ore", "zombie", "zombie", "oak log", "oak_log"),
+                Map.of("diamond_ore", "Diamond Ore", "zombie", "Zombie", "oak_log", "Oak Log",
+                        "diamond", "Diamond", "rotten_flesh", "Rotten Flesh", "iron_ingot", "Iron Ingot"),
+                Map.of("diamond_ore", List.of("diamond"),
+                       "zombie", List.of("rotten_flesh", "iron_ingot"),
+                       "oak_log", List.of("oak_log")));
+    }
+
+    @Test
+    void dropsLineRendersForMatchedTopic() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve(
+                "what does diamond ore drop?", Map.of(), List.of(), dropsGraph());
+        assertTrue(lines.contains("Diamond Ore drops: Diamond"), String.valueOf(lines));
+    }
+
+    @Test
+    void mobDropsRender() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve(
+                "what do zombies drop?", Map.of(), List.of(), dropsGraph());
+        assertTrue(lines.contains("Zombie drops: Rotten Flesh, Iron Ingot"), String.valueOf(lines));
+    }
+
+    @Test
+    void selfDropsAreSuppressedAsNoise() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve(
+                "oak log?", Map.of(), List.of(), dropsGraph());
+        assertTrue(lines.stream().noneMatch(l -> l.contains("drops:")), String.valueOf(lines));
+    }
 }

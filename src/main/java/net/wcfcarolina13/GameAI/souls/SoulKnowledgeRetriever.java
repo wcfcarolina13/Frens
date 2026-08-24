@@ -61,6 +61,7 @@ final class SoulKnowledgeRetriever {
             List<String> topicLines = new ArrayList<>();
             describeTopic(topic, context.itemCounts(), context.facilityIds(), graph)
                     .ifPresent(topicLines::add);
+            dropsLine(topic, graph).ifPresent(topicLines::add);
             rememberedPlaceLine(topic, context, graph).ifPresent(topicLines::add);
             toldFactLine(topic, context).ifPresent(topicLines::add);
             for (String line : topicLines) {
@@ -97,6 +98,19 @@ final class SoulKnowledgeRetriever {
                                     place.x() - context.botX(), place.z() - context.botZ())
                             + ".";
                 });
+    }
+
+    /** "X drops: A, B" from loot edges; a block that only drops itself is noise and suppressed. */
+    private static Optional<String> dropsLine(String topic, GameKnowledgeGraph.GraphData graph) {
+        List<String> drops = graph.drops().getOrDefault(topic, List.of());
+        if (drops.isEmpty() || drops.equals(List.of(topic))) {
+            return Optional.empty();
+        }
+        String display = graph.displayNames().getOrDefault(topic, topic);
+        String names = drops.stream()
+                .map(id -> graph.displayNames().getOrDefault(id, id))
+                .reduce((a, b) -> a + ", " + b).orElse("");
+        return Optional.of(display + " drops: " + names);
     }
 
     private static Optional<String> toldFactLine(String topic, RetrievalContext context) {

@@ -65,6 +65,27 @@ final class SoulBlockKnowledge {
         PHRASES.put("hopper", "moves items between containers");
         PHRASES.put("dispenser", "shoots items when powered");
         PHRASES.put("dropper", "drops items when powered");
+        // Natural / world blocks whose use recipes and tags cannot explain. Phrase-only:
+        // these are not facilities (no block entity/POI) and surface via topic retrieval.
+        PHRASES.put("pointed_dripstone", "grows into stalactites and stalagmites; drips water or lava into cauldrons; falling spikes hurt");
+        PHRASES.put("dripstone_block", "grows pointed dripstone when one hangs beneath");
+        PHRASES.put("budding_amethyst", "grows amethyst clusters on its faces; breaks permanently if mined");
+        PHRASES.put("amethyst_cluster", "fully grown amethyst, drops shards");
+        PHRASES.put("obsidian", "blast-proof; nether portal frame material");
+        PHRASES.put("crying_obsidian", "crafts respawn anchors; cannot make portals");
+        PHRASES.put("soul_sand", "creates upward bubble columns underwater; slows walking; grows nether wart");
+        PHRASES.put("soul_soil", "lights soul fire; makes basalt with lava and blue ice");
+        PHRASES.put("magma_block", "hurts to stand on; creates downward bubble columns underwater");
+        PHRASES.put("sponge", "soaks up water in a radius; dry in a furnace to reuse");
+        PHRASES.put("wet_sponge", "dry it in a furnace to get a usable sponge");
+        PHRASES.put("sculk_sensor", "detects vibrations, emits redstone");
+        PHRASES.put("sculk_catalyst", "spreads sculk where mobs die nearby");
+        PHRASES.put("sculk_shrieker", "shrieks at vibrations; can summon the warden in deep dark");
+        PHRASES.put("cobweb", "slows anything moving through it; shears harvest it");
+        PHRASES.put("slime_block", "bouncy; sticks to blocks, moved by pistons");
+        PHRASES.put("honey_block", "sticky, reduces fall damage, slows movement");
+        PHRASES.put("mycelium", "spreads to dirt; mushrooms grow on it in any light");
+        PHRASES.put("glowstone", "bright light source from the Nether");
     }
 
     /** Suffix-family phrases for colored/damaged variants sharing one function. */

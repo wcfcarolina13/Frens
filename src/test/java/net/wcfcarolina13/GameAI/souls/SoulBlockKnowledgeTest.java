@@ -107,4 +107,12 @@ class SoulBlockKnowledgeTest {
         assertTrue(joined.contains("Stonecutter"), joined);
         assertTrue(joined.contains("Enchanting Table"), joined);
     }
+
+    @Test
+    void knowsCommonNaturalBlocks() {
+        assertTrue(SoulBlockKnowledge.phraseFor("pointed_dripstone").orElse("").contains("stalact"));
+        assertTrue(SoulBlockKnowledge.phraseFor("obsidian").orElse("").contains("portal"));
+        assertTrue(SoulBlockKnowledge.phraseFor("budding_amethyst").orElse("").contains("amethyst"));
+        assertTrue(SoulBlockKnowledge.phraseFor("soul_sand").orElse("").contains("bubble"));
+    }
 }

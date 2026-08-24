@@ -1,6 +1,12 @@
 package net.wcfcarolina13.GameAI.Knowledge;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.mojang.serialization.JsonOps;
+import net.minecraft.block.Block;
+import net.minecraft.entity.EntityType;
 import net.minecraft.item.Item;
+import net.minecraft.loot.LootTable;
 import net.minecraft.item.ItemStack;
 import net.minecraft.recipe.Ingredient;
 import net.minecraft.recipe.Recipe;
@@ -9,7 +15,11 @@ import net.minecraft.recipe.RecipeType;
 import net.minecraft.recipe.display.RecipeDisplay;
 import net.minecraft.recipe.display.SlotDisplay;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.RegistryOps;
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.util.Identifier;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,8 +49,9 @@ public final class GameKnowledgeGraphBuilder {
         try {
             GameKnowledgeGraph.GraphData data = build(server);
             GameKnowledgeGraph.install(data);
-            LOGGER.info("[souls] knowledge graph built: {} craftable items, {} tagged items, {} names",
-                    data.craftEdges().size(), data.tags().size(), data.nameIndex().size());
+            LOGGER.info("[souls] knowledge graph built: {} craftable items, {} tagged items, {} names, {} drop tables",
+                    data.craftEdges().size(), data.tags().size(), data.nameIndex().size(),
+                    data.drops().size());
         } catch (Throwable t) {
             GameKnowledgeGraph.install(GameKnowledgeGraph.GraphData.empty());
             LOGGER.warn("[souls] knowledge graph build failed; retrieval disabled: {}", t.toString());
@@ -74,7 +85,73 @@ public final class GameKnowledgeGraphBuilder {
                 tags.put(idPath, itemTags);
             }
         }
-        return new GameKnowledgeGraph.GraphData(craftEdges, tags, nameIndex, displayNames);
+
+        // v2: entities join the name index (so "zombie" is a topic) and both blocks and mobs
+        // get drop edges by walking their loot tables' JSON (via LootTable.CODEC) for item
+        // entries — no reflection into private pools, version-tolerant, mod-inclusive.
+        Map<String, List<String>> drops = new LinkedHashMap<>();
+        RegistryOps<JsonElement> ops = RegistryOps.of(JsonOps.INSTANCE, server.getRegistryManager());
+        for (EntityType<?> type : Registries.ENTITY_TYPE) {
+            try {
+                String idPath = Registries.ENTITY_TYPE.getId(type).getPath();
+                displayNames.putIfAbsent(idPath, type.getName().getString());
+                nameIndex.putIfAbsent(type.getName().getString().toLowerCase(Locale.ROOT), idPath);
+                Identifier typeId = Registries.ENTITY_TYPE.getId(type);
+                collectDrops(server, ops,
+                        RegistryKey.of(RegistryKeys.LOOT_TABLE,
+                                Identifier.of(typeId.getNamespace(), "entities/" + typeId.getPath())),
+                        idPath, drops);
+            } catch (Throwable ignored) {
+            }
+        }
+        for (Block block : Registries.BLOCK) {
+            try {
+                block.getLootTableKey().ifPresent(key -> collectDrops(server, ops, key,
+                        Registries.BLOCK.getId(block).getPath(), drops));
+            } catch (Throwable ignored) {
+            }
+        }
+        return new GameKnowledgeGraph.GraphData(craftEdges, tags, nameIndex, displayNames, drops);
+    }
+
+    private static final int MAX_DROPS_PER_NODE = 6;
+
+    /** Extracts the distinct item ids named by a loot table's item entries, capped. */
+    private static void collectDrops(MinecraftServer server, RegistryOps<JsonElement> ops,
+                                     RegistryKey<LootTable> key, String nodeIdPath,
+                                     Map<String, List<String>> drops) {
+        LootTable table = server.getReloadableRegistries().getLootTable(key);
+        if (table == null || table == LootTable.EMPTY) {
+            return;
+        }
+        JsonElement json = LootTable.CODEC.encodeStart(ops, table).result().orElse(null);
+        if (json == null) {
+            return;
+        }
+        List<String> found = new ArrayList<>();
+        collectItemNames(json, found);
+        if (!found.isEmpty()) {
+            drops.put(nodeIdPath, found.stream().distinct().limit(MAX_DROPS_PER_NODE).toList());
+        }
+    }
+
+    /** Recursively collects "name" values of {"type": "...item"} loot entries from table JSON. */
+    private static void collectItemNames(JsonElement element, List<String> out) {
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            JsonElement type = object.get("type");
+            JsonElement name = object.get("name");
+            if (type != null && type.isJsonPrimitive() && name != null && name.isJsonPrimitive()
+                    && type.getAsString().endsWith("item")) {
+                String id = name.getAsString();
+                out.add(id.contains(":") ? id.substring(id.indexOf(':') + 1) : id);
+            }
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                collectItemNames(entry.getValue(), out);
+            }
+        } else if (element.isJsonArray()) {
+            element.getAsJsonArray().forEach(child -> collectItemNames(child, out));
+        }
     }
 
     private static void collectRecipe(Recipe<?> recipe,

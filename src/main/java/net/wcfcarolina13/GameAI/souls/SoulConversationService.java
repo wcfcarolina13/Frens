@@ -181,7 +181,14 @@ public final class SoulConversationService {
         List<String> relevantKnowledge = List.of();
         try {
             SoulTypes.BotSnapshot bot = turn.grounding().bot();
-            relevantKnowledge = SoulKnowledgeRetriever.retrieve(turn.playerMessage(),
+            // Deictic grounding: fold the player's look-target into topic matching so "what is
+            // this / what are they good for" retrieves knowledge about the looked-at block.
+            String lookTarget = turn.grounding().player()
+                    .map(SoulTypes.PlayerSnapshot::lookingAt).orElse("");
+            String matchText = lookTarget.isEmpty()
+                    ? turn.playerMessage()
+                    : turn.playerMessage() + " " + lookTarget;
+            relevantKnowledge = SoulKnowledgeRetriever.retrieve(matchText,
                     new SoulKnowledgeRetriever.RetrievalContext(
                             bot.itemCounts(),
                             turn.grounding().situation().facilityIds(),

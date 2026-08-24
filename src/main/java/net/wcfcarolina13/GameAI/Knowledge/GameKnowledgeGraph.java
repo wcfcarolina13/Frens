@@ -44,16 +44,26 @@ public final class GameKnowledgeGraph {
     public record GraphData(Map<String, List<CraftEdge>> craftEdges,
                             Map<String, List<String>> tags,
                             Map<String, String> nameIndex,
-                            Map<String, String> displayNames) {
+                            Map<String, String> displayNames,
+                            Map<String, List<String>> drops) {
+        /** Pre-drops shape (v1 graph); defaults {@code drops} to empty. */
+        public GraphData(Map<String, List<CraftEdge>> craftEdges,
+                         Map<String, List<String>> tags,
+                         Map<String, String> nameIndex,
+                         Map<String, String> displayNames) {
+            this(craftEdges, tags, nameIndex, displayNames, Map.of());
+        }
+
         public GraphData {
             craftEdges = craftEdges == null ? Map.of() : Map.copyOf(craftEdges);
             tags = tags == null ? Map.of() : Map.copyOf(tags);
             nameIndex = nameIndex == null ? Map.of() : Map.copyOf(nameIndex);
             displayNames = displayNames == null ? Map.of() : Map.copyOf(displayNames);
+            drops = drops == null ? Map.of() : Map.copyOf(drops);
         }
 
         public static GraphData empty() {
-            return new GraphData(Map.of(), Map.of(), Map.of(), Map.of());
+            return new GraphData(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
     }
 
