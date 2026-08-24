@@ -94,6 +94,21 @@ class SoulRuntimeTest {
         verify(provider).close();
     }
 
+    // === Own coverage: cancelPlayer — player-disconnect generation cancellation ===
+
+    @Test
+    void cancelPlayerDelegatesToTheSchedulersPerPlayerCancel() {
+        SoulModelProvider provider = mock(SoulModelProvider.class);
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                provider, scheduler, conversationService);
+        UUID playerId = UUID.randomUUID();
+        when(scheduler.cancelForPlayer(playerId)).thenReturn(2);
+
+        runtime.cancelPlayer(playerId);
+
+        verify(scheduler).cancelForPlayer(playerId);
+    }
+
     // === Own coverage: activeGenerations — the stable cross-mod load-probe surface LoadGoverner
     // reflects (integrations/FrensSoulProbe); signature changes there must update the probe ===
 
