@@ -137,6 +137,12 @@ public final class SoulPromptAssembler {
         sb.append("Health: ").append(bot.health()).append('/').append(bot.maxHealth())
           .append(", hunger: ").append(bot.hunger()).append(", armor: ").append(bot.armor())
           .append(", held item: ").append(bot.heldItem()).append('\n');
+        sb.append("Wearing: ")
+          .append(bot.wornGear().isEmpty() ? "nothing" : String.join(", ", bot.wornGear()))
+          .append('\n');
+        if (!bot.notableItems().isEmpty()) {
+            sb.append("Carrying: ").append(String.join(", ", bot.notableItems())).append('\n');
+        }
         sb.append("Inventory: ").append(bot.occupiedSlots()).append('/').append(bot.inventorySlots())
           .append(" slots occupied, resources: ").append(String.join(", ", bot.resourceSummary()))
           .append('\n');
@@ -300,6 +306,9 @@ public final class SoulPromptAssembler {
                 blockLine.append("nearby blocks: ").append(String.join(", ", situation.nearbyBlocks()));
             }
             lines.add(blockLine.append('.').toString());
+        }
+        if (!situation.facilities().isEmpty()) {
+            lines.add("Facilities nearby: " + String.join(", ", situation.facilities()) + ".");
         }
         if (situation.mount().isPresent()) {
             SoulTypes.MountSummary mount = situation.mount().get();

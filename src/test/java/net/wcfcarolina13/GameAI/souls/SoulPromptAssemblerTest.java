@@ -468,4 +468,61 @@ class SoulPromptAssemblerTest {
                 "frens:dup-test", "Second", List.of(), List.of(), List.of(), List.of());
         assertThrows(IllegalStateException.class, () -> SoulProfileRegistry.register(second));
     }
+
+    private String systemContent(SoulTypes.GroundingSnapshot g) {
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, g,
+                priorHistory, recentEvents, "What are you carrying?", Duration.ofSeconds(60));
+        return request.messages().stream()
+                .filter(m -> m.role() == SoulTypes.Role.SYSTEM)
+                .map(SoulTypes.Message::content)
+                .collect(Collectors.joining("\n"));
+    }
+
+    @Test
+    void stateMessageDescribesWornGearAndNotableItems() {
+        SoulTypes.BotSnapshot gearedBot = new SoulTypes.BotSnapshot(
+                bot.botId(), "Jake", "minecraft:overworld", "plains", 0, 64, 0, true,
+                "day", "clear", 20.0F, 20.0F, 18, 4, "Iron Pickaxe (Efficiency III)",
+                8, 36, List.of("32x Oak Log"),
+                List.of("Iron Helmet (Protection II)", "Shield (offhand)"),
+                List.of("Red Bed", "Red Bundle holding 32x Torch"),
+                "content", "idle", "", "IDLE",
+                "Workshop", "Player", true, 2, false, Optional.empty());
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, gearedBot, Optional.of(localPlayer), Instant.EPOCH));
+
+        assertTrue(content.contains("Wearing: Iron Helmet (Protection II), Shield (offhand)"), content);
+        assertTrue(content.contains("Carrying: Red Bed, Red Bundle holding 32x Torch"), content);
+        assertTrue(content.contains("held item: Iron Pickaxe (Efficiency III)"), content);
+    }
+
+    @Test
+    void stateMessageSaysWearingNothingAndOmitsCarryingWhenBare() {
+        String content = systemContent(grounding);
+
+        assertTrue(content.contains("Wearing: nothing"), content);
+        assertFalse(content.contains("Carrying:"), content);
+    }
+
+    @Test
+    void situationRendersFacilitiesLineWithUtilityPhrases() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(),
+                List.of("2x Chest (stores items)", "Furnace (smelts ore, cooks food)"),
+                false, false, false, "IDLE", false,
+                false, false, 0, false, false, false, false,
+                -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty());
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(localPlayer), situation, Instant.EPOCH));
+
+        assertTrue(content.contains(
+                "Facilities nearby: 2x Chest (stores items), Furnace (smelts ore, cooks food)."), content);
+    }
+
+    @Test
+    void situationOmitsFacilitiesLineWhenNoneSeen() {
+        assertFalse(systemContent(grounding).contains("Facilities nearby"), "no facilities expected");
+    }
 }

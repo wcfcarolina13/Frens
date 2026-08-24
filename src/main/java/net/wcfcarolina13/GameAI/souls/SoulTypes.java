@@ -157,6 +157,40 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * One functional block seen near the bot, reduced to plain data at capture time:
+     * {@code idPath} is the block id's path (e.g. "blast_furnace"), {@code name} its display name.
+     */
+    public record RawFacility(String idPath, String name) {
+        public RawFacility {
+            idPath = idPath == null ? "" : idPath;
+            name = name == null ? "" : name;
+        }
+    }
+
+    /**
+     * Plain-data facts about one item stack, extracted from Minecraft types at capture time so
+     * every downstream consumer (describer, prompt assembler, tests) stays free of game classes.
+     * {@code name} is the display name (custom name when renamed), {@code typeName} the item
+     * type's own name; {@code contents} holds the facts of items inside a bundle/shulker;
+     * {@code wearFraction} is damage/maxDamage (0 when pristine or not damageable).
+     */
+    public record ItemFacts(String name, String typeName, int count, int maxCount,
+                            List<String> enchantments, List<ItemFacts> contents,
+                            double wearFraction) {
+        public ItemFacts {
+            name = name == null ? "" : name;
+            typeName = typeName == null ? "" : typeName;
+            enchantments = enchantments == null ? List.of() : List.copyOf(enchantments);
+            contents = contents == null ? List.of() : List.copyOf(contents);
+            wearFraction = Double.isFinite(wearFraction) ? Math.max(0.0, Math.min(1.0, wearFraction)) : 0.0;
+        }
+
+        public boolean customNamed() {
+            return !name.isEmpty() && !name.equals(typeName);
+        }
+    }
+
     public record QuestSnapshot(String id, String intent, int actionIndex,
                                  int actionCount, long expiresTick) {
         public QuestSnapshot {
@@ -169,11 +203,29 @@ public final class SoulTypes {
                                int coarseX, int coarseY, int coarseZ, boolean skyVisible,
                                String timePhase, String weather, float health, float maxHealth,
                                int hunger, int armor, String heldItem, int occupiedSlots,
-                               int inventorySlots, List<String> resourceSummary, String mood,
+                               int inventorySlots, List<String> resourceSummary,
+                               List<String> wornGear, List<String> notableItems, String mood,
                                String behaviorMode, String activeTask, String taskState,
                                String homeName, String ownerName, boolean recruited,
                                int companionQuestStage, boolean permanentCompanion,
                                Optional<QuestSnapshot> activeQuest) {
+        /** Pre-gear-awareness shape; defaults {@code wornGear}/{@code notableItems} to empty. */
+        public BotSnapshot(UUID botId, String name, String dimension, String biome,
+                           int coarseX, int coarseY, int coarseZ, boolean skyVisible,
+                           String timePhase, String weather, float health, float maxHealth,
+                           int hunger, int armor, String heldItem, int occupiedSlots,
+                           int inventorySlots, List<String> resourceSummary, String mood,
+                           String behaviorMode, String activeTask, String taskState,
+                           String homeName, String ownerName, boolean recruited,
+                           int companionQuestStage, boolean permanentCompanion,
+                           Optional<QuestSnapshot> activeQuest) {
+            this(botId, name, dimension, biome, coarseX, coarseY, coarseZ, skyVisible,
+                    timePhase, weather, health, maxHealth, hunger, armor, heldItem, occupiedSlots,
+                    inventorySlots, resourceSummary, List.of(), List.of(), mood,
+                    behaviorMode, activeTask, taskState, homeName, ownerName, recruited,
+                    companionQuestStage, permanentCompanion, activeQuest);
+        }
+
         public BotSnapshot {
             Objects.requireNonNull(botId, "botId");
             name = name == null ? "" : name;
@@ -183,6 +235,8 @@ public final class SoulTypes {
             weather = weather == null ? "" : weather;
             heldItem = heldItem == null ? "" : heldItem;
             resourceSummary = resourceSummary == null ? List.of() : List.copyOf(resourceSummary);
+            wornGear = wornGear == null ? List.of() : List.copyOf(wornGear);
+            notableItems = notableItems == null ? List.of() : List.copyOf(notableItems);
             mood = mood == null ? "" : mood;
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             activeTask = activeTask == null ? "" : activeTask;
@@ -229,6 +283,7 @@ public final class SoulTypes {
             List<String> nearbyAnimals,         // non-hostile entities aggregated by name, most-numerous first, at most 4
             String standingOn,                  // block name directly under the bot's feet, "" = unknown
             List<String> nearbyBlocks,          // deduped block-type names in a small box, top 4 by count, air excluded
+            List<String> facilities,            // functional blocks nearby, described lines, at most 6 kinds
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,                // Mode.name(), e.g. "GUARD"
             boolean following,                  // true only when actively following a player (not return-to-base)
@@ -243,11 +298,31 @@ public final class SoulTypes {
             Optional<String> atBase,            // label of the nearest known base within 32 blocks of the bot now
             Optional<HuntSummary> hunt,
             Optional<String> lastHobby) {
+        /** Pre-facilities shape; defaults {@code facilities} to empty. */
+        public SituationSnapshot(int dangerDistance, List<HostileSighting> hostiles,
+                                 List<String> nearbyAnimals, String standingOn, List<String> nearbyBlocks,
+                                 boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
+                                 String behaviorMode, boolean following,
+                                 boolean inCombat, boolean postCombatLinger, int recentKillCount,
+                                 boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
+                                 boolean nightTravelActive, int companionDays, int deathCount,
+                                 Optional<MountSummary> mount, int knownBaseCount,
+                                 Optional<String> lastSleepLabel, Optional<String> atBase,
+                                 Optional<HuntSummary> hunt, Optional<String> lastHobby) {
+            this(dangerDistance, hostiles, nearbyAnimals, standingOn, nearbyBlocks, List.of(),
+                    enclosed, hasHeadroom, hasEscapeRoute, behaviorMode, following,
+                    inCombat, postCombatLinger, recentKillCount,
+                    inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
+                    companionDays, deathCount, mount, knownBaseCount,
+                    lastSleepLabel, atBase, hunt, lastHobby);
+        }
+
         public SituationSnapshot {
             hostiles = hostiles == null ? List.of() : List.copyOf(hostiles);
             nearbyAnimals = nearbyAnimals == null ? List.of() : List.copyOf(nearbyAnimals);
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
+            facilities = facilities == null ? List.of() : List.copyOf(facilities);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
