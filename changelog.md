@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Weight witnessed-event selection by salience (2026-08-24)
+
+Post-pilot backlog item. The prompt's witnessed-events block was the newest 12 journal events,
+chronologically -- so a HIGH-salience event (a death, a self-rescue) 20 events back was silently
+dropped while 12 LOW hobby ticks filled every slot. Selection is now salience-weighted but
+recency-dominant: `SoulConversationService` fetches the last 48 events (`EVENT_FETCH_WINDOW`),
+and a pure `SoulPromptAssembler.selectEvents` keeps the 6 newest unconditionally
+(`RECENT_EVENT_FLOOR`, conversational continuity) and fills the remaining 6 slots from the older
+window by salience tier -- HIGH, then NORMAL, then LOW, newest first within a tier -- with the
+final pick re-emitted in journal order so the story still reads chronologically. With 12 or
+fewer events the selection is the identity, so short sessions behave exactly as before. Salience
+ranking is an explicit switch, not enum ordinal, so declaration-order drift can't invert the
+policy. No store or schema changes. Five new selection tests; suite 316/316 green.
+
 ## Teach souls what nearby functional blocks are for (2026-08-24)
 
 Second half of the awareness request: Jake now recognizes the *facilities* around him and what

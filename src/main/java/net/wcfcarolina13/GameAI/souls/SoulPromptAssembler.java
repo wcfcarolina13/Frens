@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.souls;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,10 @@ public final class SoulPromptAssembler {
     // MAX_HISTORY_CHARS and MAX_EVENT_CHARS below are expressed directly in that unit.
     static final int MAX_HISTORY_TURNS = 20;
     static final int MAX_RECENT_EVENTS = 12;
+    /** Journal tail fetched for salience-weighted selection down to {@link #MAX_RECENT_EVENTS}. */
+    static final int EVENT_FETCH_WINDOW = 48;
+    /** Newest events always kept regardless of salience, for conversational continuity. */
+    static final int RECENT_EVENT_FLOOR = 6;
     static final int MAX_HISTORY_CHARS = 12_000;
     static final int MAX_EVENT_CHARS = 4_000;
     static final int MAX_OUTPUT_TOKENS = 220;
@@ -394,9 +399,48 @@ public final class SoulPromptAssembler {
 
     // === Bounded recent witnessed events (factual, SYSTEM role) ===
 
+    /**
+     * Salience-weighted pick of at most {@link #MAX_RECENT_EVENTS} events from a journal-ordered
+     * window: the {@link #RECENT_EVENT_FLOOR} newest are always kept, the remaining slots fill
+     * from the older events by salience tier (HIGH, NORMAL, LOW), newest first within a tier.
+     * The result preserves journal order so the event story still reads chronologically. With
+     * {@code MAX_RECENT_EVENTS} or fewer inputs this is the identity.
+     */
+    static List<SoulTypes.SoulEvent> selectEvents(List<SoulTypes.SoulEvent> events) {
+        if (events.size() <= MAX_RECENT_EVENTS) {
+            return events;
+        }
+        int floorStart = events.size() - RECENT_EVENT_FLOOR;
+        List<Integer> chosen = new ArrayList<>();
+        for (int i = floorStart; i < events.size(); i++) {
+            chosen.add(i);
+        }
+        List<Integer> older = new ArrayList<>();
+        for (int i = 0; i < floorStart; i++) {
+            older.add(i);
+        }
+        older.sort(Comparator
+                .comparingInt((Integer i) -> salienceRank(events.get(i).salience()))
+                .thenComparing(Comparator.<Integer>naturalOrder().reversed()));
+        chosen.addAll(older.subList(0, MAX_RECENT_EVENTS - RECENT_EVENT_FLOOR));
+        chosen.sort(Comparator.naturalOrder());
+        List<SoulTypes.SoulEvent> selected = new ArrayList<>(chosen.size());
+        for (int index : chosen) {
+            selected.add(events.get(index));
+        }
+        return selected;
+    }
+
+    private static int salienceRank(SoulTypes.Salience salience) {
+        return switch (salience) {
+            case HIGH -> 0;
+            case NORMAL -> 1;
+            case LOW -> 2;
+        };
+    }
+
     private List<SoulTypes.Message> boundedEvents(List<SoulTypes.SoulEvent> recentEvents) {
-        int start = Math.max(0, recentEvents.size() - MAX_RECENT_EVENTS);
-        List<SoulTypes.SoulEvent> capped = recentEvents.subList(start, recentEvents.size());
+        List<SoulTypes.SoulEvent> capped = selectEvents(recentEvents);
 
         Deque<SoulTypes.Message> ordered = new ArrayDeque<>();
         int totalChars = 0;

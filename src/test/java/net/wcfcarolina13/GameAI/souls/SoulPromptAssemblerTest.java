@@ -525,4 +525,80 @@ class SoulPromptAssemblerTest {
     void situationOmitsFacilitiesLineWhenNoneSeen() {
         assertFalse(systemContent(grounding).contains("Facilities nearby"), "no facilities expected");
     }
+
+    // === Salience-weighted event selection (pure seam: SoulPromptAssembler.selectEvents) ===
+
+    private SoulTypes.SoulEvent event(SoulTypes.EventType type, long tick, SoulTypes.Salience salience) {
+        return new SoulTypes.SoulEvent(UUID.randomUUID(), type, bot.botId(), List.of(),
+                "minecraft:overworld", "plains", Map.of(), SoulTypes.Witness.SELF,
+                tick, Instant.EPOCH, salience);
+    }
+
+    private List<SoulTypes.SoulEvent> lowEvents(int count, long startTick) {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            events.add(event(SoulTypes.EventType.HOBBY_SESSION, startTick + i, SoulTypes.Salience.LOW));
+        }
+        return events;
+    }
+
+    @Test
+    void twelveOrFewerEventsAreKeptVerbatim() {
+        List<SoulTypes.SoulEvent> events = lowEvents(12, 0L);
+        assertEquals(events, SoulPromptAssembler.selectEvents(events));
+    }
+
+    @Test
+    void highSalienceEventSurvivesDeepInTheWindow() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        events.add(event(SoulTypes.EventType.DEATH, 0L, SoulTypes.Salience.HIGH));
+        events.addAll(lowEvents(40, 1L));
+
+        List<SoulTypes.SoulEvent> selected = SoulPromptAssembler.selectEvents(events);
+
+        assertEquals(12, selected.size());
+        assertEquals(SoulTypes.EventType.DEATH, selected.get(0).type());
+    }
+
+    @Test
+    void sixNewestEventsAreAlwaysKeptInOrder() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        events.add(event(SoulTypes.EventType.DEATH, 0L, SoulTypes.Salience.HIGH));
+        events.addAll(lowEvents(40, 1L));
+
+        List<SoulTypes.SoulEvent> selected = SoulPromptAssembler.selectEvents(events);
+        List<SoulTypes.SoulEvent> lastSix = selected.subList(selected.size() - 6, selected.size());
+
+        assertEquals(events.subList(events.size() - 6, events.size()), lastSix);
+    }
+
+    @Test
+    void salienceFillPrefersNormalOverLowAndNewerWithinTier() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        SoulTypes.SoulEvent olderNormal = event(SoulTypes.EventType.TASK_COMPLETED, 0L, SoulTypes.Salience.NORMAL);
+        SoulTypes.SoulEvent newerNormal = event(SoulTypes.EventType.MOB_KILLED, 1L, SoulTypes.Salience.NORMAL);
+        events.add(olderNormal);
+        events.add(newerNormal);
+        events.addAll(lowEvents(46, 2L));
+
+        List<SoulTypes.SoulEvent> selected = SoulPromptAssembler.selectEvents(events);
+
+        assertTrue(selected.contains(olderNormal), "older NORMAL should beat LOW filler");
+        assertTrue(selected.contains(newerNormal), "newer NORMAL should beat LOW filler");
+        assertEquals(12, selected.size());
+    }
+
+    @Test
+    void selectionIsPresentedInOriginalChronologicalOrder() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>(lowEvents(20, 0L));
+        events.add(event(SoulTypes.EventType.SELF_RESCUE, 20L, SoulTypes.Salience.HIGH));
+        events.addAll(lowEvents(20, 21L));
+
+        List<SoulTypes.SoulEvent> selected = SoulPromptAssembler.selectEvents(events);
+
+        List<SoulTypes.SoulEvent> reordered = new ArrayList<>(selected);
+        reordered.sort((a, b) -> Long.compare(a.worldTick(), b.worldTick()));
+        assertEquals(reordered, selected, "selected events must stay in journal order");
+        assertTrue(selected.stream().anyMatch(e -> e.type() == SoulTypes.EventType.SELF_RESCUE));
+    }
 }
