@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -150,6 +151,49 @@ public final class SoulGenerationScheduler implements AutoCloseable {
         synchronized (lock) {
             return queue.size() + activeCalls.size();
         }
+    }
+
+    /**
+     * Disconnect-time cancellation for a real player: cancels every active call and completes
+     * every still-queued job with {@code CANCELLED} for conversations whose
+     * {@link SoulTypes.ConversationKey#playerId()} is {@code playerId}. No separate per-player
+     * registry exists or is needed — this map/queue pair, keyed by conversation, IS the
+     * in-flight registry. Returns how many generations were cancelled (active + queued) so the
+     * caller can log only when something was actually stopped. Same locking discipline as
+     * {@link #invalidate}/{@link #close}: collect under {@code lock}, side-effect after
+     * releasing it.
+     */
+    public int cancelForPlayer(UUID playerId) {
+        Objects.requireNonNull(playerId, "playerId");
+
+        List<SoulModelProvider.Call> callsToCancel = new ArrayList<>();
+        List<CompletableFuture<SoulTypes.ProviderResult>> queuedFutures = new ArrayList<>();
+        synchronized (lock) {
+            if (closed) {
+                return 0;
+            }
+            for (ActiveJob active : activeCalls.values()) {
+                if (playerId.equals(active.key().playerId())) {
+                    callsToCancel.add(active.call());
+                }
+            }
+            Iterator<QueuedJob> it = queue.iterator();
+            while (it.hasNext()) {
+                QueuedJob job = it.next();
+                if (playerId.equals(job.key().playerId())) {
+                    it.remove();
+                    queuedFutures.add(job.future());
+                }
+            }
+        }
+
+        for (SoulModelProvider.Call call : callsToCancel) {
+            call.cancelNow();
+        }
+        for (CompletableFuture<SoulTypes.ProviderResult> future : queuedFutures) {
+            future.complete(typedFailure(SoulTypes.FailureCode.CANCELLED));
+        }
+        return callsToCancel.size() + queuedFutures.size();
     }
 
     /**

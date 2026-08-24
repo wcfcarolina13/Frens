@@ -498,12 +498,23 @@ public final class SoulRuntime {
     }
 
     /**
-     * Disconnect-time hook for a real player. No per-player in-flight-generation registry exists
-     * yet -- turn submission itself is wired by a later task -- and delivery already fails closed
-     * once the player no longer resolves via the player manager, so there is nothing to cancel
-     * today beyond leaving one explicit call site for that future turn-tracking to plug into.
+     * Disconnect-time hook for a real player: cancels the player's queued and active soul
+     * generations so no GPU time (or LoadGoverner stage floor, via
+     * {@link #activeGenerations()}) is spent finishing a reply that can no longer be delivered.
+     * {@link SoulMessageDelivery.ProductionDeliveryGuard} already fails closed once the player
+     * no longer resolves via the player manager — this stops the wasted generation itself, not
+     * just its delivery. No separate per-player registry is needed: the scheduler's own
+     * queue/active state is keyed by {@link SoulTypes.ConversationKey}, which carries the player
+     * id ({@link SoulGenerationScheduler#cancelForPlayer}). Reads {@code pipelineRef} with the
+     * same plain-read discipline as {@link #submitTurn}: a cancel racing a concurrent reload
+     * lands on whichever scheduler is current, and the displaced pipeline's own {@code close()}
+     * tears down anything it still held.
      */
     public void cancelPlayer(UUID playerId) {
         Objects.requireNonNull(playerId, "playerId");
+        int cancelled = pipelineRef.get().scheduler().cancelForPlayer(playerId);
+        if (cancelled > 0) {
+            LOGGER.info("[souls] cancelPlayer player={} cancelledGenerations={}", playerId, cancelled);
+        }
     }
 }

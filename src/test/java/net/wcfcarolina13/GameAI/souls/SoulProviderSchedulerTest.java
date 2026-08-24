@@ -34,6 +34,51 @@ class SoulProviderSchedulerTest {
                 Duration.ofSeconds(60), 220);
     }
 
+    // === Own coverage: cancelForPlayer — the player-disconnect cancellation surface ===
+
+    @Test
+    void cancelForPlayerCancelsOnlyThatPlayersActiveAndQueuedWork() {
+        SoulGenerationScheduler scheduler = new SoulGenerationScheduler(2, 8);
+        UUID disconnectingPlayer = UUID.randomUUID();
+        UUID otherPlayer = UUID.randomUUID();
+        SoulTypes.ConversationKey activeKey = new SoulTypes.ConversationKey(
+                UUID.randomUUID(), disconnectingPlayer, SoulTypes.Channel.DIRECT);
+        SoulTypes.ConversationKey otherKey = new SoulTypes.ConversationKey(
+                UUID.randomUUID(), otherPlayer, SoulTypes.Channel.DIRECT);
+        SoulTypes.ConversationKey queuedKey = new SoulTypes.ConversationKey(
+                UUID.randomUUID(), disconnectingPlayer, SoulTypes.Channel.DIRECT);
+
+        AtomicBoolean activeCancelled = new AtomicBoolean();
+        CompletableFuture<SoulTypes.ProviderResult> activeResult = new CompletableFuture<>();
+        CompletableFuture<SoulTypes.ProviderResult> otherResult = new CompletableFuture<>();
+
+        scheduler.submit(activeKey, 0L,
+                () -> new SoulModelProvider.Call(activeResult, () -> activeCancelled.set(true)));
+        scheduler.submit(otherKey, 0L,
+                () -> new SoulModelProvider.Call(otherResult, () -> otherResult.cancel(false)));
+        // Both slots are now busy; this third job stays queued.
+        CompletableFuture<SoulTypes.ProviderResult> queued = scheduler.submit(queuedKey, 0L,
+                () -> new SoulModelProvider.Call(new CompletableFuture<>(), () -> {}));
+
+        assertEquals(3, scheduler.inFlightCount());
+        int cancelled = scheduler.cancelForPlayer(disconnectingPlayer);
+
+        assertEquals(2, cancelled);
+        assertTrue(activeCancelled.get(), "the player's active call must be cancelled");
+        assertEquals(SoulTypes.FailureCode.CANCELLED, queued.join().failureCode(),
+                "the player's queued job must complete CANCELLED without ever starting");
+        assertFalse(otherResult.isDone(), "the other player's active call must be untouched");
+
+        scheduler.close();
+    }
+
+    @Test
+    void cancelForPlayerWithNothingInFlightReportsZero() {
+        SoulGenerationScheduler scheduler = new SoulGenerationScheduler(1, 4);
+        assertEquals(0, scheduler.cancelForPlayer(UUID.randomUUID()));
+        scheduler.close();
+    }
+
     // === Mandated tests (verbatim from the task brief) ===
 
     @Test
