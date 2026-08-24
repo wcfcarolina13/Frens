@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Document situational awareness acceptance (2026-08-23)
+
+Task 6, closing out the soul situational-awareness branch. Jake's DM replies now ground on a
+live `SITUATION` sub-block (hazards/hostiles, combat, survival flags, behavior mode,
+relationship, then mount/base/hunt/hobby logistics — 800-char budget, priority-ordered, omitted
+entirely when empty) and on a bounded journal of witnessed events (kills, self-rescues, hobby
+sessions, hunt progress), both gated on the master soul switch and an active profile so a
+souls-disabled install stays byte-identical to pre-branch behavior. Added a "Situational
+awareness" manual test subsection to `docs/testing/SOUL_COMMUNICATION_PILOT.md` covering: naming
+a visible hostile and its direction, truthful `STAY`/`FOLLOW` mode reporting, a kill surfacing
+later from event memory, REMOTE DMs still carrying Jake's own situation while excluding the
+player's, hobby (including cook) sessions surfacing on ask, and a re-run of the feature-off
+baseline's disk assertion. `./gradlew test` (259 tests, 0 failures/errors — up from 228
+pre-branch) and `./gradlew build -x test` both green; artifact
+`build/libs/frens-1.1.141-release+1.21.11.jar`. No `mod_version` bump and no deploy — this is
+documentation only, pending manual acceptance and user confirmation the game is closed.
+
 ## Gate break-free rescue on real success (2026-08-23)
 
 Review fix round on Task 5 (commit `d63b65c`). Two findings:
