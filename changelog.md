@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Knowledge graph v1: recipes + tags, retrieved per soul turn (2026-08-24)
+
+Bradley asked for an ontology/lookup-graph so the soul can know more while spending fewer
+tokens. Key insight: the game already ships the ontology — registries, tags, recipes are
+version-correct, mod-inclusive structured data in memory at runtime. v1 per the spec
+(`docs/superpowers/specs/2026-08-24-soul-knowledge-graph-design.md`):
+
+- **`GameKnowledgeGraph`** (`GameAI/Knowledge/`) — plain-data model (`CraftEdge`,
+  `IngredientReq`, `GraphData` with name index + display names), no Minecraft types in any
+  signature; volatile holder, empty until built. **`GameKnowledgeGraphBuilder`** projects it in
+  one pass over `getRecipeManager().values()` (crafting/smelting/smoking/blasting/campfire;
+  results via the recipe display system: `RecipeDisplay.result()` → `StackSlotDisplay`/
+  `ItemSlotDisplay`, since 1.21.11 recipes have no public result accessor; identical ingredient
+  alternative-sets merged with summed counts) plus the item registry (display names; vanilla
+  tags capped 8/item). Registered on `SERVER_STARTED` and `END_DATA_PACK_RELOAD` (a deliberate
+  deviation from the spec's lazy-build: eager on the server thread avoids off-thread first-query
+  builds). Any failure logs once and installs an empty graph.
+- **`SoulKnowledgeRetriever`** (pure) — longest-name-first word-bounded matching with plural
+  tolerance ("torches" finds torch, "sticking" does not find stick), 2 topics max, ~380-char
+  budget. Craftable topic: `"Torch: craft 4 at crafting table from 1 Stick (have 4) + 1 Coal or
+  Charcoal (MISSING)"` — diffs against real carried counts, names the station, and appends
+  "; no crafting table nearby" when the station isn't among seen facilities. Non-craftable:
+  carried count + SoulBlockKnowledge phrase + "a kind of: <tags>".
+- **Wiring** — `BotSnapshot.itemCounts` (id path → count, main slots) and
+  `SituationSnapshot.facilityIds` (deduped raw scan ids, derived in the pure buildSituation
+  seam) as non-rendered retriever inputs; retrieval runs in `SoulConversationService`
+  (assembler stays pure, old `assemble` overload delegates); `RELEVANT KNOWLEDGE` SYSTEM block
+  between witnessed events and PRESENT MOMENT, omitted when nothing matched — an unmatched
+  message costs zero extra prompt tokens.
+
+10 new tests (8 retriever + 2 assembly); suite 331/331 green.
+
 ## Ground the situational-awareness field-test failures (2026-08-24)
 
 Bradley ran a 19-question awareness matrix in-game on 1.1.148 and "it failed most of them."
