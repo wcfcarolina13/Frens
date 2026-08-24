@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Honest perception + graph memory: LOS, known places, told facts (2026-08-24)
+
+Bradley's ruling after the graph shipped: the bot must never announce things it couldn't
+plausibly see (hidden treasure, sealed rooms) — but if it has been somewhere and seen a thing,
+it should remember it, and if a player tells it where something is, it should remember that too;
+all through the graph/retrieval path, never a per-turn memory dump. Three layers:
+
+- **Line-of-sight gate.** The facilities box scan previously saw through walls — at radius 12 a
+  sealed treasure room's chest would leak into the prompt. `scanFacilities` and
+  `scanArmorStands` now require an unobstructed COLLIDER raycast from the bot's eyes to the
+  target (adjacent ≤2 blocks exempt from ray ambiguity); LOS runs only on blocks that already
+  passed the functional filter, so cost stays trivial. `RawFacility` gained positions;
+  `SituationSnapshot.facilitySightings` (with coords) replaces `facilityIds`, which is now a
+  derived method — conversation-service call sites compiled unchanged.
+- **Known-places memory.** Every LOS-verified sighting is persisted per bot in
+  `knowledge.json` (next to soul.json; atomic tmp+move on the store's single writer thread,
+  in-memory cached): id path, dimension, position, lastSeen. Dedup by position (re-sighting
+  refreshes lastSeen), capped 200 LRU. Retrieval renders the nearest same-dimension memory —
+  "You remember an Enchanting Table about 30 blocks east." — suppressed while the facility is
+  currently in sight (the Facilities line already covers it). Memory phrasing stays epistemic:
+  a since-destroyed chest reads as a stale memory, never a false current sighting.
+  Disproof-on-revisit deferred to v3.
+- **Told facts.** When a player message is a *statement* (pure `isStatement` heuristic: no "?",
+  no interrogative first word) and names a graph topic, the sentence is stored verbatim against
+  that topic (teller + timestamp, 160-char cap, 3/topic, 40 topics LRU) and retrieval later
+  surfaces "Roti told you: \"the spare picks are in the barrel by the gate\"". Deterministic
+  string capture — no NLP, no extra LLM call.
+
+All three stay topic-gated behind the retriever's message matching, preserving the v1 token
+economics. Merge/cap policy is pure (`SoulKnowledgeMemoryOps`) and unit-tested; 8 new tests,
+suite 339/339 green.
+
 ## Knowledge graph v1: recipes + tags, retrieved per soul turn (2026-08-24)
 
 Bradley asked for an ontology/lookup-graph so the soul can know more while spending fewer
