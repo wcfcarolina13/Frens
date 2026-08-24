@@ -160,6 +160,29 @@ public final class SoulRuntime {
      * to call from the server thread during {@code SERVER_STOPPING}. Idempotent: a second call
      * with nothing installed is a no-op.
      */
+    /**
+     * Player-activity notes for Option C awareness. Static facades so Frens' event hooks stay
+     * one-liners; no-ops cost a map put even when souls are disabled (negligible, and keeps the
+     * hooks free of runtime-presence branching).
+     */
+    public static void notePlayerBlockBreak(net.minecraft.server.network.ServerPlayerEntity player,
+                                            net.minecraft.block.BlockState state) {
+        try {
+            SoulPlayerActivity.noteBlockBreak(player.getUuid(),
+                    state.getBlock().getName().getString(), System.currentTimeMillis());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void notePlayerAttack(net.minecraft.server.network.ServerPlayerEntity player,
+                                        net.minecraft.entity.Entity target) {
+        try {
+            SoulPlayerActivity.noteAttack(player.getUuid(),
+                    target.getName().getString(), System.currentTimeMillis());
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static void stop() {
         SoulRuntime runtime = INSTANCE.getAndSet(null);
         if (runtime == null) {

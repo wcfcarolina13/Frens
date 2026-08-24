@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.souls;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.FlowerPotBlock;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.BundleContentsComponent;
 import net.minecraft.component.type.ContainerComponent;
@@ -17,6 +18,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.state.property.Properties;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
@@ -208,7 +210,34 @@ public final class SoulSnapshotBuilder {
         return new SoulTypes.PlayerSnapshot(player.getUuid(), player.getName().getString(), distanceBlocks,
                 cardinalDirection(dx, dz), player.getHealth(), player.getMaxHealth(),
                 player.getHungerManager().getFoodLevel(), heldItemName(player), player.isSleeping(),
-                lookTargetName(player));
+                lookTargetName(player), captureActivity(player));
+    }
+
+    /** Instantaneous player states + the most recent tracked action (Option C awareness). */
+    private static String captureActivity(ServerPlayerEntity player) {
+        try {
+            List<String> states = new ArrayList<>();
+            if (player.isSneaking()) {
+                states.add("sneaking");
+            }
+            if (player.isSprinting()) {
+                states.add("sprinting");
+            }
+            if (player.isSwimming()) {
+                states.add("swimming");
+            }
+            if (player.isGliding()) {
+                states.add("gliding on elytra");
+            }
+            if (player.isUsingItem() && !player.getActiveItem().isEmpty()) {
+                states.add("using " + player.getActiveItem().getName().getString());
+            }
+            String recent = SoulPlayerActivity.recentAction(
+                    player.getUuid(), System.currentTimeMillis()).orElse("");
+            return SoulPlayerActivity.describe(states, recent);
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     /**
@@ -259,7 +288,10 @@ public final class SoulSnapshotBuilder {
             if (state.isAir()) {
                 continue;
             }
-            if (!state.hasBlockEntity() && PointOfInterestTypes.getTypeForState(state).isEmpty()) {
+            boolean pottedPlant = state.getBlock() instanceof FlowerPotBlock
+                    && !"flower_pot".equals(Registries.BLOCK.getId(state.getBlock()).getPath());
+            if (!pottedPlant && !state.hasBlockEntity()
+                    && PointOfInterestTypes.getTypeForState(state).isEmpty()) {
                 continue;
             }
             // Honest perception: only count a facility the bot could actually see -- an
@@ -268,9 +300,15 @@ public final class SoulSnapshotBuilder {
             if (!hasLineOfSight(world, bot, pos)) {
                 continue;
             }
+            // Lit state matters conversationally (an unlit furnace is not "a fire") and the
+            // 8B model otherwise invents it -- field ruling 2026-08-24.
+            String displayName = state.getBlock().getName().getString();
+            if (state.contains(Properties.LIT)) {
+                displayName += state.get(Properties.LIT) ? " (lit)" : " (unlit)";
+            }
             found.add(new SoulTypes.RawFacility(
                     Registries.BLOCK.getId(state.getBlock()).getPath(),
-                    state.getBlock().getName().getString(),
+                    displayName,
                     pos.getX(), pos.getY(), pos.getZ()));
         }
         return found;
@@ -298,8 +336,19 @@ public final class SoulSnapshotBuilder {
         BlockPos center = bot.getBlockPos();
         List<String> lines = new ArrayList<>();
         Box box = new Box(center).expand(FACILITY_SCAN_RADIUS, FACILITY_SCAN_HEIGHT, FACILITY_SCAN_RADIUS);
-        for (ArmorStandEntity stand : world.getEntitiesByClass(ArmorStandEntity.class, box,
-                stand -> hasLineOfSight(world, bot, stand.getBlockPos()))) {
+        List<ArmorStandEntity> allStands = world.getEntitiesByClass(ArmorStandEntity.class, box, e -> true);
+        List<ArmorStandEntity> visibleStands = allStands.stream()
+                .filter(stand -> hasLineOfSight(world, bot, stand.getBlockPos()))
+                .toList();
+        if (!allStands.isEmpty()) {
+            // Ground-truth diagnostic for the 2026-08-24 field failure ("nothing on the
+            // armorstands"): shows whether stands are found at all, filtered by LOS, or empty.
+            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+                    "[souls] armorstands inBox={} visible={} sample={}",
+                    allStands.size(), visibleStands.size(),
+                    allStands.get(0).getBlockPos().toShortString());
+        }
+        for (ArmorStandEntity stand : visibleStands) {
             List<String> displayed = new ArrayList<>();
             for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
                     EquipmentSlot.LEGS, EquipmentSlot.FEET,
