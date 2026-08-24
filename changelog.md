@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Capture Jake's live situation (2026-08-23)
+
+Second step of situational awareness: `SoulSnapshotBuilder.capture` now populates the
+`SituationSnapshot` added to `GroundingSnapshot` in the prior step. Server-thread-only
+`captureSituation(server, bot)` reads danger distance and nearby entities from
+`BotEventHandler.createInitialState`, behavior mode from `getCurrentMode(bot)`, combat/lingering
+state from `BotCombatCalloutService`, shelter/recovery/break-free flags from `BotFleeService`,
+night-travel state from `BotAutoReturnSunsetService`, recruitment epoch/death-count from
+`SurvivalRecruitmentService` (alias-gated exactly like the existing recruitment read in
+`captureBot`), mount state from `MountPersistenceService`, known-base count and a nearest-base
+sleep label (within 32 blocks, else omitted — never raw coordinates) from `BotHomeService`, an
+active hunt from `HuntSessionService`, and the last idle hobby from `BotIdleHobbiesService`. Every
+source group is wrapped in its own try/catch so one throwing/absent source degrades to that
+group's defaults instead of failing the whole capture.
+
+All filtering/sorting/capping/day-floor logic lives in a new pure seam,
+`SoulSnapshotBuilder.buildSituation(SituationInputs)`: hostiles are filtered from nearby-entity
+deltas, distance-sorted nearest-first and capped at 5; `companionDays` floors from
+`recruitedAtEpochMs`/`nowEpochMs` (0 recruited-at = unknown, `-1`); danger distance `<=0` collapses
+to the snapshot's `-1` sentinel. `SituationInputs` (and its `RawEntity` component) are new
+package-private records of plain values only, so `SoulGroundingTest` exercises `buildSituation`
+directly with hand-built inputs — no Minecraft/Mockito needed. `assemble(...)` gains a 5-arg
+overload taking the situation snapshot; the old 4-arg overload now delegates with
+`SituationSnapshot.empty()`, so the two remote/local `assemble` tests from the first step still
+compile and pass unchanged.
+
 ## Add soul situation types (2026-08-23)
 
 First step of situational awareness: `SoulTypes` gains `HostileSighting`, `MountSummary`,
