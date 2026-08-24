@@ -504,4 +504,25 @@ class SoulPromptAssemblerTest {
         assertTrue(content.contains("Wearing: nothing"), content);
         assertFalse(content.contains("Carrying:"), content);
     }
+
+    @Test
+    void situationRendersFacilitiesLineWithUtilityPhrases() {
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(
+                -1, List.of(), List.of(), "", List.of(),
+                List.of("2x Chest (stores items)", "Furnace (smelts ore, cooks food)"),
+                false, false, false, "IDLE", false,
+                false, false, 0, false, false, false, false,
+                -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty());
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(localPlayer), situation, Instant.EPOCH));
+
+        assertTrue(content.contains(
+                "Facilities nearby: 2x Chest (stores items), Furnace (smelts ore, cooks food)."), content);
+    }
+
+    @Test
+    void situationOmitsFacilitiesLineWhenNoneSeen() {
+        assertFalse(systemContent(grounding).contains("Facilities nearby"), "no facilities expected");
+    }
 }

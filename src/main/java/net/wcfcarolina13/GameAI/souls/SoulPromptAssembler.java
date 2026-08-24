@@ -307,6 +307,9 @@ public final class SoulPromptAssembler {
             }
             lines.add(blockLine.append('.').toString());
         }
+        if (!situation.facilities().isEmpty()) {
+            lines.add("Facilities nearby: " + String.join(", ", situation.facilities()) + ".");
+        }
         if (situation.mount().isPresent()) {
             SoulTypes.MountSummary mount = situation.mount().get();
             // Never render mount health as a ratio/percentage/judgment derived from maxHealth --

@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.souls;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.BundleContentsComponent;
 import net.minecraft.component.type.ContainerComponent;
@@ -12,10 +13,12 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.poi.PointOfInterestTypes;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
 import net.wcfcarolina13.DangerZoneDetector.CliffDetector;
 import net.wcfcarolina13.DangerZoneDetector.LavaDetector;
@@ -200,6 +203,37 @@ public final class SoulSnapshotBuilder {
         return held.isEmpty() ? "bare hands" : SoulItemDescriber.describe(extractItemFacts(held, 0));
     }
 
+    /** Horizontal radius of the functional-block ("facilities") scan around the bot. */
+    private static final int FACILITY_SCAN_RADIUS = 8;
+    /** Vertical half-height of the facilities scan box. */
+    private static final int FACILITY_SCAN_HEIGHT = 3;
+
+    /**
+     * Scans a box around the bot for functional blocks. Detection is structural, with no
+     * per-block allowlist: a block counts as functional when its state has a block entity
+     * (storage and workstations -- chests, furnaces, barrels, beds, lecterns, and their modded
+     * equivalents) or when it maps to a vanilla point-of-interest type (job sites, nether portal,
+     * lodestone, beehives). Utility phrases are attached later by {@link SoulBlockKnowledge},
+     * which is free to not know a detected block.
+     */
+    private static List<SoulTypes.RawFacility> scanFacilities(ServerWorld world, BlockPos center) {
+        List<SoulTypes.RawFacility> found = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(
+                center.add(-FACILITY_SCAN_RADIUS, -FACILITY_SCAN_HEIGHT, -FACILITY_SCAN_RADIUS),
+                center.add(FACILITY_SCAN_RADIUS, FACILITY_SCAN_HEIGHT, FACILITY_SCAN_RADIUS))) {
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) {
+                continue;
+            }
+            if (state.hasBlockEntity() || PointOfInterestTypes.getTypeForState(state).isPresent()) {
+                found.add(new SoulTypes.RawFacility(
+                        Registries.BLOCK.getId(state.getBlock()).getPath(),
+                        state.getBlock().getName().getString()));
+            }
+        }
+        return found;
+    }
+
     /**
      * Projects one live stack into plain {@link SoulTypes.ItemFacts}. Component reads are generic
      * (custom name, enchantments, bundle/shulker contents, durability) so any item that carries
@@ -349,6 +383,12 @@ public final class SoulSnapshotBuilder {
         } catch (Throwable ignored) {
         }
 
+        List<SoulTypes.RawFacility> rawFacilities = List.of();
+        try {
+            rawFacilities = scanFacilities((ServerWorld) bot.getEntityWorld(), bot.getBlockPos());
+        } catch (Throwable ignored) {
+        }
+
         boolean inCombat = false;
         boolean postCombatLinger = false;
         int recentKillCount = 0;
@@ -440,7 +480,7 @@ public final class SoulSnapshotBuilder {
         }
 
         SituationInputs inputs = new SituationInputs(dangerDistance, entities, ownerName, bot.getName().getString(),
-                standingOn, rawNearbyBlocks,
+                standingOn, rawNearbyBlocks, rawFacilities,
                 enclosed, hasHeadroom, hasEscapeRoute,
                 behaviorMode, following, inCombat, postCombatLinger, recentKillCount,
                 inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
@@ -530,6 +570,7 @@ public final class SoulSnapshotBuilder {
             String botName,
             String standingOn,
             List<String> nearbyBlocks,          // raw scan output, duplicates expected -- see buildSituation
+            List<SoulTypes.RawFacility> rawFacilities, // functional-block sightings, duplicates expected
             boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
             String behaviorMode,
             boolean following,
@@ -549,6 +590,7 @@ public final class SoulSnapshotBuilder {
             botName = botName == null ? "" : botName;
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
+            rawFacilities = rawFacilities == null ? List.of() : List.copyOf(rawFacilities);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
             lastSleepLabel = lastSleepLabel == null ? Optional.empty() : lastSleepLabel;
@@ -608,6 +650,7 @@ public final class SoulSnapshotBuilder {
 
         return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
                 inputs.standingOn(), nearbyBlocks,
+                SoulBlockKnowledge.digestFacilities(inputs.rawFacilities()),
                 inputs.enclosed(), inputs.hasHeadroom(), inputs.hasEscapeRoute(),
                 inputs.behaviorMode(), inputs.following(),
                 inputs.inCombat(), inputs.postCombatLinger(), inputs.recentKillCount(),
