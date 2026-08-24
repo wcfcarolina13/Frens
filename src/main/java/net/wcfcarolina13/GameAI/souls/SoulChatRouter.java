@@ -106,6 +106,23 @@ public final class SoulChatRouter {
     }
 
     /**
+     * Pure eligibility gate for the private-whisper surface ({@code /msg} and its aliases
+     * {@code /tell} / {@code /w}): should an incoming whisper delivered to a fake player be
+     * handed to {@link #tryRoute} at all? All four facts must hold: the message really is a
+     * {@code MSG_COMMAND_INCOMING} delivery (never ordinary broadcast chat, which already routes
+     * through the public chat callback), the sending player was resolved live (console and
+     * command-block whispers have no player to converse with), the sender is not itself a bot
+     * (no bot-to-bot soul loops), and the whisper has non-blank content. A whisper that fails
+     * this gate — or that {@link #tryRoute} then answers with {@link RouteOutcome#NOT_SOUL} —
+     * stays a plain vanilla whisper with no soul side effects.
+     */
+    public static boolean isWhisperEligible(boolean incomingMsgCommand, boolean senderKnown,
+                                             boolean senderIsBot, String content) {
+        return incomingMsgCommand && senderKnown && !senderIsBot
+                && content != null && !content.isBlank();
+    }
+
+    /**
      * Attempts to route one already-resolved single-target DM through the soul-communication
      * pilot. Returns {@link RouteOutcome#NOT_SOUL} the instant the coarse {@link #decide} check
      * says legacy routing should handle it (no notice sent, nothing logged beyond that check being

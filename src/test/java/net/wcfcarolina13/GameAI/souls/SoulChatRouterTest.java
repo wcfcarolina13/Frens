@@ -133,6 +133,39 @@ class SoulChatRouterTest {
         assertFalse(SoulChatRouter.isSingleBotAddress(0, false));
     }
 
+    // === Own coverage: isWhisperEligible -- the pure gate the fake player's whisper surface
+    // (/msg, /tell, /w -> sendChatMessage(MSG_COMMAND_INCOMING)) consults before tryRoute ===
+
+    @Test
+    void playerWhisperWithContentIsWhisperEligible() {
+        assertTrue(SoulChatRouter.isWhisperEligible(true, true, false, "how are you"));
+    }
+
+    @Test
+    void ordinaryBroadcastChatDeliveryIsNeverWhisperEligible() {
+        // sendChatMessage also fires for every public chat line delivered to the bot; only a
+        // MSG_COMMAND_INCOMING delivery may enter the whisper surface.
+        assertFalse(SoulChatRouter.isWhisperEligible(false, true, false, "how are you"));
+    }
+
+    @Test
+    void whisperWithoutAResolvedPlayerSenderIsNotEligible() {
+        // Console / command-block whispers have no live player to converse with.
+        assertFalse(SoulChatRouter.isWhisperEligible(true, false, false, "how are you"));
+    }
+
+    @Test
+    void botToBotWhisperIsNotEligible() {
+        assertFalse(SoulChatRouter.isWhisperEligible(true, true, true, "how are you"));
+    }
+
+    @Test
+    void blankOrNullWhisperContentIsNotEligible() {
+        assertFalse(SoulChatRouter.isWhisperEligible(true, true, false, ""));
+        assertFalse(SoulChatRouter.isWhisperEligible(true, true, false, "   "));
+        assertFalse(SoulChatRouter.isWhisperEligible(true, true, false, null));
+    }
+
     // === Own coverage: SoulRuntime#submitTurn -- the seam tryRoute's final step delegates to ===
 
     @Test
