@@ -199,7 +199,7 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
             if (bothOnline && prefetchedState.isPresent()) {
                 SoulTypes.SoulState state = prefetchedState.get();
                 profileUnchanged = turn.profileId().equals(state.profileId());
-                String cursorKey = turn.key().channel().name() + ":" + turn.key().playerId();
+                String cursorKey = SoulStore.cursorKey(turn.key());
                 long currentEpoch = state.conversations()
                         .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L)).epoch();
                 epochMatches = currentEpoch == token.epoch();

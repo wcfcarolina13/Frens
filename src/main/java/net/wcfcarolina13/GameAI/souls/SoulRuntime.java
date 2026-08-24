@@ -394,7 +394,8 @@ public final class SoulRuntime {
         CompletableFuture<Boolean> healthFuture = pipeline.provider().health();
         CompletableFuture<SoulTypes.SoulState> stateFuture = store.state(botId);
         return healthFuture.thenCombine(stateFuture, (healthy, state) -> {
-            String cursorKey = SoulTypes.Channel.DIRECT.name() + ":" + playerId;
+            String cursorKey = SoulStore.cursorKey(
+                    new SoulTypes.ConversationKey(botId, playerId, SoulTypes.Channel.DIRECT));
             long epoch = state.conversations()
                     .getOrDefault(cursorKey, new SoulTypes.ConversationCursor(0L, 0L)).epoch();
             return new Status(pipeline.settings().enabled(), pipeline.settings().valid(), isReady(),
