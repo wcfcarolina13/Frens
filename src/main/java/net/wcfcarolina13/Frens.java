@@ -715,6 +715,13 @@ public class Frens implements ModInitializer {
             LOGGER.warn("DJL not found on classpath; BERT intent model disabled.");
         }
 
+        // Knowledge graph: project recipes/tags once the data is loaded, and again after /reload
+        // swaps datapacks. Build failure installs an empty graph (souls degrade gracefully).
+        ServerLifecycleEvents.SERVER_STARTED.register(
+                net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraphBuilder::rebuild);
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resourceManager, success) ->
+                net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraphBuilder.rebuild(server));
+
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             net.wcfcarolina13.GameAI.services.TaskService.clearServerStopping();
             // Re-create any executors that SERVER_STOPPING shut down. Without this,

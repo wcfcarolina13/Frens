@@ -135,8 +135,18 @@ public final class SoulConversationService {
             SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, UUID correlationId,
             List<SoulTypes.ConversationRecord> history, List<SoulTypes.SoulEvent> events, Stages stages) {
         SoulTypes.SoulProfile profile = SoulProfileRegistry.require(turn.profileId());
+        List<String> relevantKnowledge = List.of();
+        try {
+            relevantKnowledge = SoulKnowledgeRetriever.retrieve(turn.playerMessage(),
+                    turn.grounding().bot().itemCounts(),
+                    turn.grounding().situation().facilityIds(),
+                    net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraph.current());
+        } catch (Throwable ignored) {
+            // Retrieval is additive grounding, never load-bearing for a turn.
+        }
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), profile,
-                turn.grounding(), history, events, turn.playerMessage(), settings.timeout());
+                turn.grounding(), history, events, relevantKnowledge,
+                turn.playerMessage(), settings.timeout());
 
         stages.queueDepthAtSubmit = scheduler.queueDepth();
         long scheduleStartNanos = System.nanoTime();

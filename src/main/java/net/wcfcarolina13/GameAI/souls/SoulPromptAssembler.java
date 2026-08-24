@@ -63,6 +63,20 @@ public final class SoulPromptAssembler {
             List<SoulTypes.SoulEvent> recentEvents,
             String currentMessage,
             Duration timeout) {
+        return assemble(correlationId, model, profile, grounding, priorHistory, recentEvents,
+                List.of(), currentMessage, timeout);
+    }
+
+    public SoulTypes.ProviderRequest assemble(
+            UUID correlationId,
+            String model,
+            SoulTypes.SoulProfile profile,
+            SoulTypes.GroundingSnapshot grounding,
+            List<SoulTypes.ConversationRecord> priorHistory,
+            List<SoulTypes.SoulEvent> recentEvents,
+            List<String> relevantKnowledge,
+            String currentMessage,
+            Duration timeout) {
         List<SoulTypes.Message> messages = new ArrayList<>();
         messages.add(systemContract());
         messages.add(identityMessage(profile));
@@ -70,6 +84,10 @@ public final class SoulPromptAssembler {
         messages.add(authoritativeState(grounding));
         messages.addAll(boundedHistory(priorHistory));
         messages.addAll(boundedEvents(recentEvents));
+        if (relevantKnowledge != null && !relevantKnowledge.isEmpty()) {
+            messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
+                    "RELEVANT KNOWLEDGE\n" + String.join("\n", relevantKnowledge)));
+        }
         messages.add(presentMoment(grounding));
         messages.add(new SoulTypes.Message(SoulTypes.Role.USER, currentMessage));
 
