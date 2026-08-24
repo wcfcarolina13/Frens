@@ -4,17 +4,18 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.SleepingChatScreen;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Text;
 
-import java.util.List;
-
-/** Explains the companion sleep command while the player is in bed. */
+/**
+ * Explains the companion sleep command while the player is in bed. Deliberately unobtrusive: a
+ * single thin translucent strip across the very top of the screen (out of the way of the bed
+ * view, chat, and the Leave Bed button), never a centered box.
+ */
 public final class SleepCommandHintHud {
 
-    private static final String TITLE = "Your Frens need to sleep too";
-    private static final String INSTRUCTION =
-            "Type zzz in chat to make all your Frens in this dimension try to sleep.";
+    private static final String HINT =
+            "Your Frens need to sleep too — type zzz in chat to send them to bed.";
+    // Fallback for very narrow scaled widths where the full sentence would clip.
+    private static final String HINT_COMPACT = "Type zzz in chat — Frens sleep too.";
 
     private SleepCommandHintHud() {
     }
@@ -41,41 +42,18 @@ public final class SleepCommandHintHud {
         }
 
         int screenWidth = context.getScaledWindowWidth();
-        int maxTextWidth = Math.min(280, Math.max(40, screenWidth - 32));
-        List<OrderedText> instructionLines = client.textRenderer.wrapLines(
-                Text.literal(INSTRUCTION), maxTextWidth);
-
-        int lineHeight = client.textRenderer.fontHeight + 1;
-        int textWidth = client.textRenderer.getWidth(TITLE);
-        for (OrderedText line : instructionLines) {
-            textWidth = Math.max(textWidth, client.textRenderer.getWidth(line));
+        String hint = HINT;
+        if (client.textRenderer.getWidth(hint) > screenWidth - 12) {
+            hint = HINT_COMPACT;
         }
 
-        int padding = 6;
-        int boxWidth = textWidth + padding * 2;
-        int boxHeight = padding * 2
-                + client.textRenderer.fontHeight
-                + 3
-                + instructionLines.size() * lineHeight;
-        int x = (screenWidth - boxWidth) / 2;
-        int y = Math.max(8, context.getScaledWindowHeight() - 46 - boxHeight);
+        int bandHeight = client.textRenderer.fontHeight + 8;
+        context.fill(0, 0, screenWidth, bandHeight, 0xA0101010);
+        context.fill(0, bandHeight, screenWidth, bandHeight + 1, 0x808A6D32);
 
-        context.fill(x - 1, y - 1, x + boxWidth + 1, y + boxHeight + 1, 0xFF000000);
-        context.fill(x, y, x + boxWidth, y + boxHeight, 0xD0141414);
-        context.fill(x, y, x + boxWidth, y + 1, 0xFF8A6D32);
-        context.fill(x, y + boxHeight - 1, x + boxWidth, y + boxHeight, 0xFF8A6D32);
-        context.fill(x, y, x + 1, y + boxHeight, 0xFF8A6D32);
-        context.fill(x + boxWidth - 1, y, x + boxWidth, y + boxHeight, 0xFF8A6D32);
-
-        int titleX = x + (boxWidth - client.textRenderer.getWidth(TITLE)) / 2;
-        int textY = y + padding;
-        context.drawTextWithShadow(client.textRenderer, TITLE, titleX, textY, 0xFFFFE08A);
-        textY += client.textRenderer.fontHeight + 3;
-        for (OrderedText line : instructionLines) {
-            int lineX = x + (boxWidth - client.textRenderer.getWidth(line)) / 2;
-            context.drawTextWithShadow(client.textRenderer, line, lineX, textY, 0xFFE6D7A3);
-            textY += lineHeight;
-        }
+        int textX = Math.max(6, (screenWidth - client.textRenderer.getWidth(hint)) / 2);
+        int textY = (bandHeight - client.textRenderer.fontHeight) / 2 + 1;
+        context.drawTextWithShadow(client.textRenderer, hint, textX, textY, 0xFFE6D7A3);
     }
 
     static boolean shouldRender(boolean playerSleeping, boolean sleepingChatScreenOpen) {
