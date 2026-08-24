@@ -89,6 +89,80 @@ class SoulKnowledgeRetrieverTest {
         assertTrue(total <= 380, "budget exceeded: " + total);
     }
 
+    // === Memory layers: known places (seen before) and told facts ===
+
+    private static SoulTypes.KnowledgeMemory memoryWith(SoulTypes.KnownPlace... places) {
+        return new SoulTypes.KnowledgeMemory(List.of(places), Map.of());
+    }
+
+    @Test
+    void rememberedPlaceRendersDistanceAndDirectionWhenNotCurrentlySeen() {
+        SoulTypes.KnowledgeMemory memory = memoryWith(new SoulTypes.KnownPlace(
+                "enchanting_table", "minecraft:overworld", 30, 64, 0, 1000L));
+        GameKnowledgeGraph.GraphData graph = new GameKnowledgeGraph.GraphData(
+                Map.of(), Map.of(), Map.of("enchanting table", "enchanting_table"),
+                Map.of("enchanting_table", "Enchanting Table"));
+
+        List<String> lines = SoulKnowledgeRetriever.retrieve("where is the enchanting table?",
+                new SoulKnowledgeRetriever.RetrievalContext(
+                        Map.of(), List.of(), memory, "minecraft:overworld", 0, 64, 0),
+                graph);
+
+        assertTrue(lines.contains("You remember an Enchanting Table about 30 blocks east."),
+                String.valueOf(lines));
+    }
+
+    @Test
+    void rememberedPlaceIsSuppressedWhenCurrentlyVisibleOrOtherDimension() {
+        SoulTypes.KnowledgeMemory memory = memoryWith(
+                new SoulTypes.KnownPlace("enchanting_table", "minecraft:overworld", 30, 64, 0, 1000L),
+                new SoulTypes.KnownPlace("lodestone", "minecraft:the_nether", 5, 64, 0, 1000L));
+        GameKnowledgeGraph.GraphData graph = new GameKnowledgeGraph.GraphData(
+                Map.of(), Map.of(),
+                Map.of("enchanting table", "enchanting_table", "lodestone", "lodestone"),
+                Map.of("enchanting_table", "Enchanting Table", "lodestone", "Lodestone"));
+
+        List<String> visibleCase = SoulKnowledgeRetriever.retrieve("the enchanting table?",
+                new SoulKnowledgeRetriever.RetrievalContext(
+                        Map.of(), List.of("enchanting_table"), memory, "minecraft:overworld", 0, 64, 0),
+                graph);
+        List<String> wrongDimension = SoulKnowledgeRetriever.retrieve("the lodestone?",
+                new SoulKnowledgeRetriever.RetrievalContext(
+                        Map.of(), List.of(), memory, "minecraft:overworld", 0, 64, 0),
+                graph);
+
+        // Currently visible: the Facilities prompt line already covers it — no duplicate lines.
+        assertEquals(List.of(), visibleCase);
+        // Other dimension: never a "you remember" line (phrase-only knowledge is still allowed).
+        assertTrue(wrongDimension.stream().noneMatch(l -> l.contains("remember")),
+                String.valueOf(wrongDimension));
+    }
+
+    @Test
+    void toldFactRendersTellerAndQuote() {
+        SoulTypes.KnowledgeMemory memory = new SoulTypes.KnowledgeMemory(List.of(),
+                Map.of("barrel", List.of(
+                        new SoulTypes.ToldFact("Roti", "the spare picks are in the barrel by the gate", 1000L))));
+        GameKnowledgeGraph.GraphData graph = new GameKnowledgeGraph.GraphData(
+                Map.of(), Map.of(), Map.of("barrel", "barrel"), Map.of("barrel", "Barrel"));
+
+        List<String> lines = SoulKnowledgeRetriever.retrieve("check the barrel",
+                new SoulKnowledgeRetriever.RetrievalContext(
+                        Map.of(), List.of(), memory, "minecraft:overworld", 0, 64, 0),
+                graph);
+
+        assertTrue(lines.stream().anyMatch(l ->
+                l.equals("Roti told you: \"the spare picks are in the barrel by the gate\"")),
+                String.valueOf(lines));
+    }
+
+    @Test
+    void legacyEntryPointStillWorksWithoutMemory() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve(
+                "can you make a torch?", Map.of("stick", 4), List.of("crafting_table"), torchGraph());
+        assertEquals(1, lines.size());
+    }
+
     @Test
     void unknownWordsInsideLongerWordsDoNotMatch() {
         // "stick" must not match inside "sticking"; "torch" not inside "torchlight-style prose".

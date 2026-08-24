@@ -71,6 +71,7 @@ public final class SoulStore {
     private final ExecutorService executor;
     private final ObjectMapper mapper;
     private final ConcurrentHashMap<UUID, SoulTypes.SoulState> cachedStates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, SoulTypes.KnowledgeMemory> cachedKnowledge = new ConcurrentHashMap<>();
     // Only ever read/written from inside submit() tasks, i.e. on this store's single writer
     // thread -- a plain HashMap is race-free here the same way the rest of this class's
     // non-cachedStates fields are, per the class Javadoc's "all filesystem work is funneled
@@ -501,6 +502,50 @@ public final class SoulStore {
         cachedStates.put(state.botId(), state);
     }
 
+    // === knowledge.json (seen places + told facts; merge policy in SoulKnowledgeMemoryOps) ===
+
+    public CompletableFuture<SoulTypes.KnowledgeMemory> knowledgeMemory(UUID botId) {
+        return submit(() -> loadKnowledge(botId));
+    }
+
+    public CompletableFuture<Void> recordSightings(UUID botId, List<SoulTypes.KnownPlace> sightings) {
+        return submit(() -> {
+            if (!sightings.isEmpty()) {
+                saveKnowledge(botId, SoulKnowledgeMemoryOps.mergeSightings(loadKnowledge(botId), sightings));
+            }
+            return null;
+        });
+    }
+
+    public CompletableFuture<Void> recordToldFact(UUID botId, String topic, SoulTypes.ToldFact fact) {
+        return submit(() -> {
+            saveKnowledge(botId, SoulKnowledgeMemoryOps.mergeToldFact(loadKnowledge(botId), topic, fact));
+            return null;
+        });
+    }
+
+    private SoulTypes.KnowledgeMemory loadKnowledge(UUID botId) throws IOException {
+        SoulTypes.KnowledgeMemory cached = cachedKnowledge.get(botId);
+        if (cached != null) {
+            return cached;
+        }
+        Path file = knowledgeFile(botId);
+        SoulTypes.KnowledgeMemory loaded = Files.exists(file)
+                ? mapper.readValue(file.toFile(), SoulTypes.KnowledgeMemory.class)
+                : SoulTypes.KnowledgeMemory.empty();
+        cachedKnowledge.put(botId, loaded);
+        return loaded;
+    }
+
+    private void saveKnowledge(UUID botId, SoulTypes.KnowledgeMemory memory) throws IOException {
+        Path file = knowledgeFile(botId);
+        Files.createDirectories(file.getParent());
+        Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp-" + UUID.randomUUID());
+        mapper.writeValue(tmp.toFile(), memory);
+        atomicReplace(tmp, file);
+        cachedKnowledge.put(botId, memory);
+    }
+
     // === Index preload (disk -> cache only; never the reverse) ===
 
     private void loadIndexFromDisk() throws IOException {
@@ -652,6 +697,10 @@ public final class SoulStore {
 
     private Path eventsFile(UUID botId) {
         return botDir(botId).resolve("events.jsonl");
+    }
+
+    private Path knowledgeFile(UUID botId) {
+        return botDir(botId).resolve("knowledge.json");
     }
 
     // === Executor plumbing ===

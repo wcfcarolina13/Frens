@@ -124,22 +124,69 @@ public final class SoulConversationService {
         CompletableFuture<List<SoulTypes.SoulEvent>> eventsFuture =
                 store.recentEvents(turn.key().botId(), SoulPromptAssembler.EVENT_FETCH_WINDOW);
 
+        recordKnowledgeObservations(turn);
+
+        CompletableFuture<SoulTypes.KnowledgeMemory> memoryFuture =
+                store.knowledgeMemory(turn.key().botId())
+                        .exceptionally(ex -> SoulTypes.KnowledgeMemory.empty());
+
         historyFuture.thenCombine(eventsFuture, HistoryAndEvents::new)
-                .thenCompose(he -> dispatchProvider(turn, token, correlationId, he.history(), he.events(), stages))
+                .thenCombine(memoryFuture, (he, memory) -> dispatchProvider(
+                        turn, token, correlationId, he.history(), he.events(), memory, stages))
+                .thenCompose(f -> f)
                 .whenComplete((result, providerError) ->
                         handleProviderResult(turn, token, correlationId, result, providerError, stages, outcome));
+    }
+
+    /**
+     * Persists this turn's line-of-sight facility sightings and, when the player's message reads
+     * as a statement naming a known topic, the message itself as a told fact. Fire-and-forget:
+     * memory writes are never load-bearing for the turn.
+     */
+    private void recordKnowledgeObservations(SoulTypes.AcceptedTurn turn) {
+        try {
+            long now = System.currentTimeMillis();
+            String dimension = turn.grounding().bot().dimension();
+            List<SoulTypes.KnownPlace> sightings = turn.grounding().situation().facilitySightings()
+                    .stream()
+                    .map(f -> new SoulTypes.KnownPlace(f.idPath(), dimension, f.x(), f.y(), f.z(), now))
+                    .toList();
+            if (!sightings.isEmpty()) {
+                store.recordSightings(turn.key().botId(), sightings)
+                        .exceptionally(ex -> null);
+            }
+
+            if (SoulKnowledgeMemoryOps.isStatement(turn.playerMessage())) {
+                String teller = turn.grounding().player()
+                        .map(SoulTypes.PlayerSnapshot::name).orElse("The player");
+                for (String topic : SoulKnowledgeRetriever.matchTopics(
+                        turn.playerMessage().toLowerCase(java.util.Locale.ROOT),
+                        net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraph.current())) {
+                    store.recordToldFact(turn.key().botId(), topic,
+                                    new SoulTypes.ToldFact(teller, turn.playerMessage(), now))
+                            .exceptionally(ex -> null);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Observation recording must never fail a turn.
+        }
     }
 
     /** Assembles the bounded prompt and schedules exactly one provider generation call. */
     private CompletableFuture<SoulTypes.ProviderResult> dispatchProvider(
             SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, UUID correlationId,
-            List<SoulTypes.ConversationRecord> history, List<SoulTypes.SoulEvent> events, Stages stages) {
+            List<SoulTypes.ConversationRecord> history, List<SoulTypes.SoulEvent> events,
+            SoulTypes.KnowledgeMemory memory, Stages stages) {
         SoulTypes.SoulProfile profile = SoulProfileRegistry.require(turn.profileId());
         List<String> relevantKnowledge = List.of();
         try {
+            SoulTypes.BotSnapshot bot = turn.grounding().bot();
             relevantKnowledge = SoulKnowledgeRetriever.retrieve(turn.playerMessage(),
-                    turn.grounding().bot().itemCounts(),
-                    turn.grounding().situation().facilityIds(),
+                    new SoulKnowledgeRetriever.RetrievalContext(
+                            bot.itemCounts(),
+                            turn.grounding().situation().facilityIds(),
+                            memory, bot.dimension(),
+                            bot.coarseX(), bot.coarseY(), bot.coarseZ()),
                     net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraph.current());
         } catch (Throwable ignored) {
             // Retrieval is additive grounding, never load-bearing for a turn.

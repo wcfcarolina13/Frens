@@ -159,12 +159,47 @@ public final class SoulTypes {
 
     /**
      * One functional block seen near the bot, reduced to plain data at capture time:
-     * {@code idPath} is the block id's path (e.g. "blast_furnace"), {@code name} its display name.
+     * {@code idPath} is the block id's path (e.g. "blast_furnace"), {@code name} its display
+     * name, {@code x/y/z} its world position (0,0,0 when position was not captured).
      */
-    public record RawFacility(String idPath, String name) {
+    public record RawFacility(String idPath, String name, int x, int y, int z) {
+        /** Position-less shape used by pure digest tests. */
+        public RawFacility(String idPath, String name) {
+            this(idPath, name, 0, 0, 0);
+        }
+
         public RawFacility {
             idPath = idPath == null ? "" : idPath;
             name = name == null ? "" : name;
+        }
+    }
+
+    /** A facility the bot has personally seen (line-of-sight) at some point, with position. */
+    public record KnownPlace(String idPath, String dimension, int x, int y, int z,
+                             long lastSeenEpochMs) {
+        public KnownPlace {
+            idPath = idPath == null ? "" : idPath;
+            dimension = dimension == null ? "" : dimension;
+        }
+    }
+
+    /** Something a player told the bot, stored verbatim against a graph topic. */
+    public record ToldFact(String teller, String message, long atEpochMs) {
+        public ToldFact {
+            teller = teller == null ? "" : teller;
+            message = message == null ? "" : message;
+        }
+    }
+
+    /** Per-bot persistent knowledge memory: seen places + told facts, keyed by topic id path. */
+    public record KnowledgeMemory(List<KnownPlace> places, Map<String, List<ToldFact>> toldFacts) {
+        public KnowledgeMemory {
+            places = places == null ? List.of() : List.copyOf(places);
+            toldFacts = toldFacts == null ? Map.of() : Map.copyOf(toldFacts);
+        }
+
+        public static KnowledgeMemory empty() {
+            return new KnowledgeMemory(List.of(), Map.of());
         }
     }
 
@@ -314,7 +349,7 @@ public final class SoulTypes {
             String standingOn,                  // block name directly under the bot's feet, "" = unknown
             List<String> nearbyBlocks,          // deduped block-type names in a small box, top 4 by count, air excluded
             List<String> facilities,            // functional blocks nearby, described lines, at most 10 kinds
-            List<String> facilityIds,           // deduped raw id paths behind facilities; retriever input
+            List<RawFacility> facilitySightings, // LOS-verified sightings with positions; memory + retriever input
             List<String> armorStands,           // "Armor stand displaying: ..." lines, at most 3
             int blockLight,                     // block light at the bot's feet; -1 = unknown
             int skyLight,                       // sky light at the bot's feet; -1 = unknown
@@ -400,7 +435,7 @@ public final class SoulTypes {
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             facilities = facilities == null ? List.of() : List.copyOf(facilities);
-            facilityIds = facilityIds == null ? List.of() : List.copyOf(facilityIds);
+            facilitySightings = facilitySightings == null ? List.of() : List.copyOf(facilitySightings);
             armorStands = armorStands == null ? List.of() : List.copyOf(armorStands);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;
@@ -408,6 +443,12 @@ public final class SoulTypes {
             atBase = atBase == null ? Optional.empty() : atBase;
             hunt = hunt == null ? Optional.empty() : hunt;
             lastHobby = lastHobby == null ? Optional.empty() : lastHobby;
+        }
+
+        /** Deduped id paths of the currently sighted facilities (derived, retriever input). */
+        public List<String> facilityIds() {
+            return facilitySightings.stream().map(RawFacility::idPath)
+                    .filter(id -> !id.isBlank()).distinct().toList();
         }
 
         public static SituationSnapshot empty() {
