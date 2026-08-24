@@ -122,7 +122,7 @@ public final class SoulConversationService {
         CompletableFuture<List<SoulTypes.ConversationRecord>> historyFuture = store.recentBefore(
                 token, SoulPromptAssembler.MAX_HISTORY_TURNS, SoulPromptAssembler.MAX_HISTORY_CHARS);
         CompletableFuture<List<SoulTypes.SoulEvent>> eventsFuture =
-                store.recentEvents(turn.key().botId(), SoulPromptAssembler.MAX_RECENT_EVENTS);
+                store.recentEvents(turn.key().botId(), SoulPromptAssembler.EVENT_FETCH_WINDOW);
 
         historyFuture.thenCombine(eventsFuture, HistoryAndEvents::new)
                 .thenCompose(he -> dispatchProvider(turn, token, correlationId, he.history(), he.events(), stages))
