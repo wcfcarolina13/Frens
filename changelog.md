@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Armor stands: source-verified equipment path + look-alike census (2026-08-24)
+
+Bradley questioned whether the armor-stand model was understood deeply enough. Went to the
+1.21.11 yarn-named jar and verified at the bytecode level: `ArmorStandEntity extends
+LivingEntity` directly (not a mob, not a player), it has no `getEquippedStack` override, and
+its own `equip()` — the code that runs when a player dresses a stand — writes the same
+`EntityEquipment` field that `getEquippedStack` reads. Conclusion: for vanilla stands our scan
+provably reads real gear. The remaining hypothesis is look-alikes: modern decor mods and
+datapacks dress rooms with item/block `DisplayEntity`s or item frames that read to a player as
+"armor stands with gear" while the actual `ArmorStandEntity` nearby is bare. The `[souls]
+armorstands` diagnostic now also counts `displayEntities=` and `itemFrames=` in the scan box —
+one session's log now either confirms the look-alike theory (slots=0 + displays>0) or pins the
+failure on the model ignoring good prompt data (slots>0 with a described line).
+
 ## Armor stands round 3: canSee visibility + per-stand diagnostics (2026-08-24)
 
 Bradley refuted the glass-display-case theory (no glass near those stands), and a closer read of
