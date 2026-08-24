@@ -567,6 +567,48 @@ class SoulPromptAssemblerTest {
         assertFalse(systemContent(grounding).contains("looking at:"), "no look target expected");
     }
 
+    // === RELEVANT KNOWLEDGE block (deterministic retrieval, between events and PRESENT MOMENT) ===
+
+    @Test
+    void relevantKnowledgeRendersBetweenEventsAndPresentMoment() {
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents,
+                List.of("Torch: craft 4 at crafting table from 1 Stick (have 4)"),
+                "can you make a torch?", Duration.ofSeconds(60));
+
+        List<SoulTypes.Message> messages = request.messages();
+        int knowledgeIdx = -1;
+        int presentIdx = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i).content().startsWith("RELEVANT KNOWLEDGE\n")) {
+                knowledgeIdx = i;
+            }
+            if (messages.get(i).content().startsWith("PRESENT MOMENT\n")) {
+                presentIdx = i;
+            }
+        }
+        assertTrue(knowledgeIdx >= 0, "knowledge block missing");
+        assertEquals(presentIdx - 1, knowledgeIdx, "knowledge must immediately precede PRESENT MOMENT");
+        assertEquals(SoulTypes.Role.SYSTEM, messages.get(knowledgeIdx).role());
+        assertTrue(messages.get(knowledgeIdx).content().contains("Torch: craft 4"),
+                messages.get(knowledgeIdx).content());
+    }
+
+    @Test
+    void emptyRelevantKnowledgeAddsNoMessage() {
+        SoulTypes.ProviderRequest withEmpty = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents, List.of(), "hello", Duration.ofSeconds(60));
+        SoulTypes.ProviderRequest legacy = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents, "hello", Duration.ofSeconds(60));
+
+        assertEquals(legacy.messages().size(), withEmpty.messages().size());
+        assertTrue(withEmpty.messages().stream()
+                .noneMatch(m -> m.content().startsWith("RELEVANT KNOWLEDGE")));
+    }
+
     // === Salience-weighted event selection (pure seam: SoulPromptAssembler.selectEvents) ===
 
     private SoulTypes.SoulEvent event(SoulTypes.EventType type, long tick, SoulTypes.Salience salience) {

@@ -204,7 +204,8 @@ public final class SoulTypes {
                                String timePhase, String weather, float health, float maxHealth,
                                int hunger, int armor, String heldItem, int occupiedSlots,
                                int inventorySlots, List<String> resourceSummary,
-                               List<String> wornGear, List<String> notableItems, String mood,
+                               List<String> wornGear, List<String> notableItems,
+                               Map<String, Integer> itemCounts, String mood,
                                String behaviorMode, String activeTask, String taskState,
                                String homeName, String ownerName, boolean recruited,
                                int companionQuestStage, boolean permanentCompanion,
@@ -221,7 +222,25 @@ public final class SoulTypes {
                            Optional<QuestSnapshot> activeQuest) {
             this(botId, name, dimension, biome, coarseX, coarseY, coarseZ, skyVisible,
                     timePhase, weather, health, maxHealth, hunger, armor, heldItem, occupiedSlots,
-                    inventorySlots, resourceSummary, List.of(), List.of(), mood,
+                    inventorySlots, resourceSummary, List.of(), List.of(), Map.of(), mood,
+                    behaviorMode, activeTask, taskState, homeName, ownerName, recruited,
+                    companionQuestStage, permanentCompanion, activeQuest);
+        }
+
+        /** Pre-itemCounts shape; defaults {@code itemCounts} to empty. */
+        public BotSnapshot(UUID botId, String name, String dimension, String biome,
+                           int coarseX, int coarseY, int coarseZ, boolean skyVisible,
+                           String timePhase, String weather, float health, float maxHealth,
+                           int hunger, int armor, String heldItem, int occupiedSlots,
+                           int inventorySlots, List<String> resourceSummary,
+                           List<String> wornGear, List<String> notableItems, String mood,
+                           String behaviorMode, String activeTask, String taskState,
+                           String homeName, String ownerName, boolean recruited,
+                           int companionQuestStage, boolean permanentCompanion,
+                           Optional<QuestSnapshot> activeQuest) {
+            this(botId, name, dimension, biome, coarseX, coarseY, coarseZ, skyVisible,
+                    timePhase, weather, health, maxHealth, hunger, armor, heldItem, occupiedSlots,
+                    inventorySlots, resourceSummary, wornGear, notableItems, Map.of(), mood,
                     behaviorMode, activeTask, taskState, homeName, ownerName, recruited,
                     companionQuestStage, permanentCompanion, activeQuest);
         }
@@ -237,6 +256,7 @@ public final class SoulTypes {
             resourceSummary = resourceSummary == null ? List.of() : List.copyOf(resourceSummary);
             wornGear = wornGear == null ? List.of() : List.copyOf(wornGear);
             notableItems = notableItems == null ? List.of() : List.copyOf(notableItems);
+            itemCounts = itemCounts == null ? Map.of() : Map.copyOf(itemCounts);
             mood = mood == null ? "" : mood;
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             activeTask = activeTask == null ? "" : activeTask;
@@ -294,6 +314,7 @@ public final class SoulTypes {
             String standingOn,                  // block name directly under the bot's feet, "" = unknown
             List<String> nearbyBlocks,          // deduped block-type names in a small box, top 4 by count, air excluded
             List<String> facilities,            // functional blocks nearby, described lines, at most 10 kinds
+            List<String> facilityIds,           // deduped raw id paths behind facilities; retriever input
             List<String> armorStands,           // "Armor stand displaying: ..." lines, at most 3
             int blockLight,                     // block light at the bot's feet; -1 = unknown
             int skyLight,                       // sky light at the bot's feet; -1 = unknown
@@ -343,7 +364,29 @@ public final class SoulTypes {
                                  Optional<String> lastSleepLabel, Optional<String> atBase,
                                  Optional<HuntSummary> hunt, Optional<String> lastHobby) {
             this(dangerDistance, hostiles, nearbyAnimals, standingOn, nearbyBlocks, facilities,
-                    List.of(), -1, -1,
+                    List.of(), List.of(), -1, -1,
+                    enclosed, hasHeadroom, hasEscapeRoute, behaviorMode, following,
+                    inCombat, postCombatLinger, recentKillCount,
+                    inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
+                    companionDays, deathCount, mount, knownBaseCount,
+                    lastSleepLabel, atBase, hunt, lastHobby);
+        }
+
+        /** Pre-facilityIds shape; defaults {@code facilityIds} to empty. */
+        public SituationSnapshot(int dangerDistance, List<HostileSighting> hostiles,
+                                 List<String> nearbyAnimals, String standingOn, List<String> nearbyBlocks,
+                                 List<String> facilities, List<String> armorStands,
+                                 int blockLight, int skyLight,
+                                 boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute,
+                                 String behaviorMode, boolean following,
+                                 boolean inCombat, boolean postCombatLinger, int recentKillCount,
+                                 boolean inShelter, boolean surfaceRecoveryActive, boolean breakingFree,
+                                 boolean nightTravelActive, int companionDays, int deathCount,
+                                 Optional<MountSummary> mount, int knownBaseCount,
+                                 Optional<String> lastSleepLabel, Optional<String> atBase,
+                                 Optional<HuntSummary> hunt, Optional<String> lastHobby) {
+            this(dangerDistance, hostiles, nearbyAnimals, standingOn, nearbyBlocks, facilities,
+                    List.of(), armorStands, blockLight, skyLight,
                     enclosed, hasHeadroom, hasEscapeRoute, behaviorMode, following,
                     inCombat, postCombatLinger, recentKillCount,
                     inShelter, surfaceRecoveryActive, breakingFree, nightTravelActive,
@@ -357,6 +400,7 @@ public final class SoulTypes {
             standingOn = standingOn == null ? "" : standingOn;
             nearbyBlocks = nearbyBlocks == null ? List.of() : List.copyOf(nearbyBlocks);
             facilities = facilities == null ? List.of() : List.copyOf(facilities);
+            facilityIds = facilityIds == null ? List.of() : List.copyOf(facilityIds);
             armorStands = armorStands == null ? List.of() : List.copyOf(armorStands);
             behaviorMode = behaviorMode == null ? "" : behaviorMode;
             mount = mount == null ? Optional.empty() : mount;

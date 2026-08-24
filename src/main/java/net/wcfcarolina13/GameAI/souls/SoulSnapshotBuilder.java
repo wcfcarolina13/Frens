@@ -125,6 +125,7 @@ public final class SoulSnapshotBuilder {
         // carried digest never double-counts an equipped piece.
         int occupiedSlots = 0;
         List<SoulTypes.ItemFacts> carried = new ArrayList<>();
+        Map<String, Integer> itemCounts = new LinkedHashMap<>();
         List<ItemStack> mainStacks = bot.getInventory().getMainStacks();
         int inventorySlots = mainStacks.size();
         for (ItemStack stack : mainStacks) {
@@ -133,6 +134,8 @@ public final class SoulSnapshotBuilder {
             }
             occupiedSlots++;
             carried.add(extractItemFacts(stack, 0));
+            itemCounts.merge(Registries.ITEM.getId(stack.getItem()).getPath(),
+                    stack.getCount(), Integer::sum);
         }
         SoulItemDescriber.InventoryDigest inventoryDigest = SoulItemDescriber.digest(carried);
 
@@ -190,7 +193,7 @@ public final class SoulSnapshotBuilder {
                 timePhase(timeOfDay), weather, bot.getHealth(), bot.getMaxHealth(),
                 bot.getHungerManager().getFoodLevel(), bot.getArmor(), heldItemName(bot),
                 occupiedSlots, inventorySlots, inventoryDigest.bulk(),
-                wornGear, inventoryDigest.notable(),
+                wornGear, inventoryDigest.notable(), itemCounts,
                 BotMoodManager.getMoodDescription(bot), behaviorMode, activeTask, taskState,
                 homeName, ownerName, recruited, companionQuestStage, permanentCompanion, activeQuest);
     }
@@ -723,6 +726,8 @@ public final class SoulSnapshotBuilder {
         return new SoulTypes.SituationSnapshot(dangerDistance, hostiles, nearbyAnimals,
                 inputs.standingOn(), nearbyBlocks,
                 SoulBlockKnowledge.digestFacilities(inputs.rawFacilities()),
+                inputs.rawFacilities().stream().map(SoulTypes.RawFacility::idPath)
+                        .filter(id -> !id.isBlank()).distinct().collect(Collectors.toList()),
                 inputs.armorStands().size() > MAX_ARMOR_STANDS
                         ? inputs.armorStands().subList(0, MAX_ARMOR_STANDS)
                         : inputs.armorStands(),
