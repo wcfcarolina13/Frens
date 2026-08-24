@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Bot places its own bed even when the commander is already asleep (2026-08-24)
+
+Bradley's field report: a bot carrying a bed, with no free placed bed in range, never attempted
+to place it — it "waited out" the night and logged off. Root cause: `SleepService.sleep`'s
+nearby-sleeper suppression (`isAnyPlayerSleepingNearby` within 32) returned before the placement
+branch whenever any player was already in bed — the common case, since the sleep hint invites
+typing zzz *from* the bed. The suppression's own comment ("the sleeping player will advance time
+to morning") was backwards: bots count toward the players-sleeping percentage, so a bot waiting
+awake is precisely what blocks the sleeper's night from advancing.
+
+Fix: suppression now applies only when the bot would have to *craft* a bed first (burning wool
+and planks is still wasted work given the logoff fallback) — a bot already carrying a bed
+proceeds to place it and sleep. Decision extracted to the pure
+`SleepBedCandidatePolicy.waitOutNearbySleeper(canSleepNow, playerSleepingNearby, hasBedItem)`
+with 4 tests. Also corrected the misleading handoff message ("Nearby bed is taken") to "No free
+bed nearby — setting up my own." for the none-placed case. Suite 381/381.
+
 ## Thin sleep hint + one correlation id per soul turn (2026-08-24)
 
 - **Sleep hint restyled (Bradley: "gets in the way, noisy").** The in-bed "Frens need to sleep"
