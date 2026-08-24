@@ -567,6 +567,22 @@ class SoulPromptAssemblerTest {
         assertFalse(systemContent(grounding).contains("looking at:"), "no look target expected");
     }
 
+    @Test
+    void playerLineIncludesCurrentActivity() {
+        SoulTypes.PlayerSnapshot busy = new SoulTypes.PlayerSnapshot(
+                localPlayer.playerId(), "Player", 6, "north", 20.0F, 20.0F, 20,
+                "playerBiomeSecret", false, "", "sneaking; broke Stone 4s ago");
+        String content = systemContent(new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, bot, Optional.of(busy), Instant.EPOCH));
+
+        assertTrue(content.contains("currently: sneaking; broke Stone 4s ago"), content);
+    }
+
+    @Test
+    void playerLineOmitsActivityWhenIdle() {
+        assertFalse(systemContent(grounding).contains("currently:"), "no activity expected");
+    }
+
     // === RELEVANT KNOWLEDGE block (deterministic retrieval, between events and PRESENT MOMENT) ===
 
     @Test

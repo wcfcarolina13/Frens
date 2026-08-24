@@ -305,7 +305,15 @@ public final class SoulTypes {
     public record PlayerSnapshot(UUID playerId, String name, int distanceBlocks,
                                   String direction, float health, float maxHealth,
                                   int hunger, String heldItem, boolean sleeping,
-                                  String lookingAt) {
+                                  String lookingAt, String activity) {
+        /** Pre-activity shape; defaults {@code activity} to idle/unknown. */
+        public PlayerSnapshot(UUID playerId, String name, int distanceBlocks,
+                              String direction, float health, float maxHealth,
+                              int hunger, String heldItem, boolean sleeping, String lookingAt) {
+            this(playerId, name, distanceBlocks, direction, health, maxHealth,
+                    hunger, heldItem, sleeping, lookingAt, "");
+        }
+
         /** Pre-look-target shape; defaults {@code lookingAt} to unknown. */
         public PlayerSnapshot(UUID playerId, String name, int distanceBlocks,
                               String direction, float health, float maxHealth,
@@ -320,6 +328,7 @@ public final class SoulTypes {
             direction = direction == null ? "" : direction;
             heldItem = heldItem == null ? "" : heldItem;
             lookingAt = lookingAt == null ? "" : lookingAt;
+            activity = activity == null ? "" : activity;
         }
     }
 

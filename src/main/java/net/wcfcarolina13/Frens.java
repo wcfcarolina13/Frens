@@ -461,8 +461,18 @@ public class Frens implements ModInitializer {
                     && world instanceof net.minecraft.server.world.ServerWorld serverWorld) {
                 LearningModeService.onBlockBreakAfter(serverPlayer, serverWorld, pos, state);
                 net.wcfcarolina13.GameAI.services.CommanderActivityService.markBlockBreak(serverPlayer);
+                net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerBlockBreak(serverPlayer, state);
                 net.wcfcarolina13.GameAI.services.CompanionContextReactionService.onBotBlockBreak(serverPlayer, serverWorld, pos, state);
             }
+        });
+
+        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register(
+                (player, world, hand, entity, hitResult) -> {
+            if (world != null && !world.isClient()
+                    && player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
+                net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerAttack(serverPlayer, entity);
+            }
+            return net.minecraft.util.ActionResult.PASS;
         });
 
         LOGGER.info("Hello Fabric world!");

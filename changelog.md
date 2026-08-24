@@ -2,6 +2,33 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Player-activity awareness + second field-test fixes (2026-08-24)
+
+Second field test (1.1.151) verdict: look-target, facilities, oxidation-by-display-name, and
+craftability all landed; three misses fixed here, plus the approved Option C feature:
+
+- **Player-activity awareness (Option C).** `SoulPlayerActivity` keeps one most-recent
+  observable action per player — block broken (fed by the existing `PlayerBlockBreakEvents`
+  hook, one added line) or entity attacked (new `AttackEntityCallback` registration) — inside a
+  30s window, joined at capture with instantaneous states (sneaking/sprinting/swimming/gliding/
+  using <item>) into `PlayerSnapshot.activity`, rendered ", currently: sneaking; broke Stone 4s
+  ago". Pure describe/window logic unit-tested; facades on SoulRuntime keep the hooks one-liners.
+- **Flower pots** ("what flowers are in the pots?" → confabulated "none, they're empty"):
+  potted plants had no block entity or POI so they were invisible. `FlowerPotBlock` instanceof
+  (empty `flower_pot` excluded) now counts as a facility — vanilla display names ("Potted
+  Poppy") carry the flower for free, modded pots included.
+- **Lit state** ("do you see the fire?" → "there's a fire burning in the Furnace", furnace cold,
+  campfire lit): facility display names now append the `LIT` blockstate where present —
+  "Furnace (unlit)", "Campfire (lit)" — grouping separates lit from unlit and the model stops
+  inventing fires.
+- **Armor stands still read as absent** ("nothing on the armorstands") despite wiring verified
+  end-to-end. Root cause not reproducible from logs (suspects: display stands behind glass — a
+  COLLIDER raycast treats glass as opaque — or outside the ±3-height box). Diagnostic-first per
+  repo convention: the scan now logs `[souls] armorstands inBox=N visible=M sample=<pos>` per
+  capture whenever stands are in range; next session's log pinpoints the filter.
+
+Suite 346/346 green.
+
 ## Honest perception + graph memory: LOS, known places, told facts (2026-08-24)
 
 Bradley's ruling after the graph shipped: the bot must never announce things it couldn't

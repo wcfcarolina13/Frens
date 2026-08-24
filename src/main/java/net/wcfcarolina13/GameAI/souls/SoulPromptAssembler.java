@@ -192,6 +192,9 @@ public final class SoulPromptAssembler {
         if (!player.lookingAt().isEmpty()) {
             sb.append(", looking at: ").append(player.lookingAt());
         }
+        if (!player.activity().isEmpty()) {
+            sb.append(", currently: ").append(player.activity());
+        }
         sb.append('\n');
     }
 
