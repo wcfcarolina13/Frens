@@ -209,6 +209,22 @@ public final class SoulRuntime {
         return Optional.ofNullable(INSTANCE.get());
     }
 
+    /**
+     * Stable cross-mod probe: soul generation calls currently queued or active, 0 when the
+     * runtime is not running. LoadGoverner reflects this exact static signature
+     * ({@code com.stoneba.loadgoverner.integrations.FrensSoulProbe}) to hold a mitigation-stage
+     * floor while an LLM generation contends with the game for the GPU — do not rename or change
+     * the signature without updating that probe. Same plain-read discipline as
+     * {@link #isMasterEnabled()}: no lock, cheap enough for a once-per-second poll.
+     */
+    public static int activeGenerations() {
+        SoulRuntime runtime = INSTANCE.get();
+        if (runtime == null) {
+            return 0;
+        }
+        return runtime.pipelineRef.get().scheduler().inFlightCount();
+    }
+
     /** Package-private test seam: installs {@code runtime} without going through {@link #start}. */
     static void installForTest(SoulRuntime runtime) {
         INSTANCE.set(runtime);
