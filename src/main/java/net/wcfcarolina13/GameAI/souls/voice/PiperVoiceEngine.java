@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -42,6 +43,12 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     private Writer stdin;
     private BufferedReader stdout;
     private volatile boolean closed;
+    /**
+     * True when the last synthesis attempt failed (process wouldn't start, crashed mid-request,
+     * or timed out). Cleared back to false on the next successful synthesis. {@link #alive()}
+     * reports whether the last interaction with the process was healthy or untried — it is not
+     * a live process-health probe.
+     */
     private volatile boolean lastStartFailed;
 
     public PiperVoiceEngine(String binary, String modelPath, long synthTimeoutMs) throws IOException {
@@ -58,23 +65,28 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     @Override
     public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
         CompletableFuture<byte[]> result = new CompletableFuture<>();
-        engineThread.submit(() -> {
-            try {
-                ensureProcess();
-                stdin.write(text.replace('\n', ' '));
-                stdin.write('\n');
-                stdin.flush();
-                String wavPath = readLineWithDeadline();
-                Path file = Path.of(wavPath.trim());
-                byte[] bytes = Files.readAllBytes(file);
-                Files.deleteIfExists(file);
-                lastStartFailed = false;
-                result.complete(bytes);
-            } catch (Exception ex) {
-                killProcess();
-                result.completeExceptionally(ex);
-            }
-        });
+        try {
+            engineThread.submit(() -> {
+                try {
+                    ensureProcess();
+                    stdin.write(text.replace('\n', ' '));
+                    stdin.write('\n');
+                    stdin.flush();
+                    String wavPath = readLineWithDeadline();
+                    Path file = Path.of(wavPath.trim());
+                    byte[] bytes = Files.readAllBytes(file);
+                    Files.deleteIfExists(file);
+                    lastStartFailed = false;
+                    result.complete(bytes);
+                } catch (Exception ex) {
+                    lastStartFailed = true;
+                    killProcess();
+                    result.completeExceptionally(ex);
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            result.completeExceptionally(new IllegalStateException("engine closed", ex));
+        }
         return result;
     }
 
@@ -109,7 +121,34 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         process = builder.start();
         stdin = new java.io.OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
         stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        startStderrDrain(process);
         LOGGER.info("[souls] tts engine started pid={}", process.pid());
+    }
+
+    /**
+     * Piper's stderr is unused by our stdout-path protocol but must still be drained — an
+     * un-read, full stderr pipe can block the child process and cause spurious synth timeouts.
+     * Runs on its own daemon thread (never the engine thread) for the lifetime of one process;
+     * discards content, logs only a content-free char count at debug level.
+     */
+    private void startStderrDrain(Process proc) {
+        Thread drain = new Thread(() -> {
+            long charsRead = 0;
+            try (InputStreamReader err = new InputStreamReader(proc.getErrorStream(), StandardCharsets.UTF_8)) {
+                char[] buf = new char[512];
+                int n;
+                while ((n = err.read(buf)) != -1) {
+                    charsRead += n;
+                }
+            } catch (IOException ignored) {
+                // process exited or stream closed; nothing left to drain
+            }
+            if (charsRead > 0 && LOGGER.isDebugEnabled()) {
+                LOGGER.debug("[souls] tts stderr drained pid={} chars={}", proc.pid(), charsRead);
+            }
+        }, "frens-soul-voice-stderr");
+        drain.setDaemon(true);
+        drain.start();
     }
 
     private void killProcess() {
@@ -126,8 +165,15 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
 
     @Override
     public void close() {
+        if (closed) {
+            return;
+        }
         closed = true;
-        engineThread.submit(this::killProcess);
+        try {
+            engineThread.submit(this::killProcess);
+        } catch (RejectedExecutionException ignored) {
+            // engine thread is already shutting down; nothing left to submit to
+        }
         engineThread.shutdown();
         try {
             if (!engineThread.awaitTermination(1, TimeUnit.SECONDS)) {
@@ -136,6 +182,27 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             engineThread.shutdownNow();
+        }
+        deleteOutputDirQuietly();
+    }
+
+    /** Best-effort cleanup of the temp WAV-drop directory; failures are ignored on close. */
+    private void deleteOutputDirQuietly() {
+        try {
+            if (Files.isDirectory(outputDir)) {
+                try (var entries = Files.list(outputDir)) {
+                    entries.forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException ignored) {
+                            // best-effort
+                        }
+                    });
+                }
+            }
+            Files.deleteIfExists(outputDir);
+        } catch (IOException ignored) {
+            // best-effort
         }
     }
 }
