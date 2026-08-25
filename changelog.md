@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Invisible-text fix (alpha-0 colors), soul-chat text exemption, per-bot copy; 1.1.168 (2026-08-25)
+
+Field round on 1.1.167. World Settings no longer crashes (fix confirmed live) but rendered
+with NO labels — root-caused against the disassembled 1.21.11 client: `DrawContext.drawText`
+early-returns when `ColorHelper.getAlpha(color) == 0`, so every text draw using a 6-digit
+color (`0xFFFFFF` etc., the pre-1.21.x idiom) is silently invisible. Swept the whole mod:
+13 draw sites across 8 screens fixed by adding the FF alpha byte (AdminWorldSettingsScreen
+title/label/status, ConfigureHobbiesScreen title, ConfigureVoiceCategoriesScreen title+hint,
+ZoneNamePopup/Huntables/CompanionSpells/NavigationConfirm titles, BotPlayerInventoryScreen
+0x404040 inventory labels). `withColor(0xFFAA00)` untouched — Text style colors are RGB.
+
+Bradley's live-session rulings, applied:
+- **Soul Chat replies are EXEMPT from the Text Chat master** (reverses phase B's text
+  gating): direct conversation stays visible even when generic dialogue text is off.
+  `SoulRuntime` back to the 2-arg `SoulMessageDelivery` constructor; the `textEnabled`
+  supplier seam stays for the planned text-category menu. Tooltip updated.
+- **"LLM World" vs per-bot confusion**: global tooltip now states the precedence (soul-bound
+  bots ignore it; classic path needs global AND per-bot ON); per-bot section renamed
+  "LLM" → "Dialogue & AI — per-bot overrides", rows renamed "LLM Chat (this bot)" /
+  "Voiced Dialogue (this bot)" with tooltips naming their global master.
+
+Approved next (not in this build): Text Chat "Adv…" menu with keep-visible-exception
+semantics (Text off but checked categories — danger warnings, status — still show); TTS
+lighter-path A/B test (Dreamsleeve Qwen3 is slow + heavy in play even at low graphics).
+
 ## Dialogue/LLM controls consolidation — phase C: panel cleanup (2026-08-25)
 
 - Global panel reordered so the dialogue family is contiguous: LLM World, Recruitment,

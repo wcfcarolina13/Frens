@@ -4673,9 +4673,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (guideRemoteOpen && !guideRemoteFullAccess) {
             return;
         }
-        context.drawText(this.textRenderer, this.botAlias, this.titleX, this.titleY, 0x404040, false);
-        context.drawText(this.textRenderer, "Level: " + this.handler.getBotLevel(), this.titleX + 90, this.titleY, 0x404040, false);
-        context.drawText(this.textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
+        context.drawText(this.textRenderer, this.botAlias, this.titleX, this.titleY, 0xFF404040, false);
+        context.drawText(this.textRenderer, "Level: " + this.handler.getBotLevel(), this.titleX + 90, this.titleY, 0xFF404040, false);
+        context.drawText(this.textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
     }
 
     @Override

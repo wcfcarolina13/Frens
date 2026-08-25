@@ -75,7 +75,7 @@ public class ZoneNamePopupScreen extends Screen {
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xCC222222);
 
         // Title
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
 
         nameField.render(context, mouseX, mouseY, delta);
         super.render(context, mouseX, mouseY, delta);

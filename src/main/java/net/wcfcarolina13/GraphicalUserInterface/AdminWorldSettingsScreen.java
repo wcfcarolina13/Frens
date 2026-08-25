@@ -127,12 +127,12 @@ public class AdminWorldSettingsScreen extends Screen {
 
         int centerX = this.width / 2;
         int titleY = this.height / 2 - 60;
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, centerX, titleY, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, centerX, titleY, 0xFFFFFFFF);
         context.drawCenteredTextWithShadow(this.textRenderer,
-                Text.literal("Max base radius (blocks)"), centerX, titleY + 20, 0xCCCCCC);
+                Text.literal("Max base radius (blocks)"), centerX, titleY + 20, 0xFFCCCCCC);
         if (this.statusMessage != null) {
             context.drawCenteredTextWithShadow(this.textRenderer,
-                    Text.literal(this.statusMessage), centerX, this.height / 2 + 60, 0xAAAAAA);
+                    Text.literal(this.statusMessage), centerX, this.height / 2 + 60, 0xFFAAAAAA);
         }
     }
 

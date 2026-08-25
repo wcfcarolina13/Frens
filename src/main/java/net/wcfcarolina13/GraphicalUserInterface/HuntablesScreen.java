@@ -299,7 +299,7 @@ public class HuntablesScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         int cx = this.width / 2;
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 8, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 8, 0xFFFFFFFF);
 
         Rect list = listRect();
         List<HuntEntry> entries = getHuntablesSnapshot();

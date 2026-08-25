@@ -35,11 +35,11 @@ public class BotControlScreen extends Screen {
     private record GlobalToggleDef(String label, String hint) {}
 
     private static final List<GlobalToggleDef> GLOBAL_TOGGLES = List.of(
-            new GlobalToggleDef("LLM World", "World-wide switch for natural-language chat and LLM-driven companion responses. Turn this off if you want bots to stay command and UI driven only."),
+            new GlobalToggleDef("LLM World", "Master for the classic LLM chat path (per-bot LLM Chat must also be ON). Soul-bound bots ignore this — their conversation runs through Soul Chat below. Turn off to keep non-soul bots command and UI driven only."),
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
-            new GlobalToggleDef("Text Chat", "Master for all bot text: chat lines, overhead text, subtitles, and soul replies. With this off and Voice on, lines that have audio become voice-only; lines without audio still print as fallback."),
+            new GlobalToggleDef("Text Chat", "Master for scripted bot text: chat lines, overhead text, and subtitles. Soul Chat replies always show — direct conversation is exempt. With this off and Voice on, lines that have audio become voice-only; lines without audio still print as fallback."),
             new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. Per-bot Voiced Dialogue can additionally mute a single bot; Adv… mutes categories."),
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
@@ -429,9 +429,9 @@ public class BotControlScreen extends Screen {
         settingGroups.add(new SettingGroup("Behavior", behavior));
 
         List<SettingEntry> llm = new ArrayList<>();
-        llm.add(makeOnOff("LLM Enabled", "Allows this specific bot to use natural-language or AI-driven conversation features when world-level LLM support is also enabled.", llmEnabled, TOGGLE_W));
-        llm.add(makeOnOff("Voiced Dialogue", "Plays voiced lines for this bot when audio is available. This controls voice playback for the bot, not the text chat itself.", voiced, TOGGLE_W));
-        settingGroups.add(new SettingGroup("LLM", llm));
+        llm.add(makeOnOff("LLM Chat (this bot)", "Per-bot override under the global LLM World master: both must be ON for this bot to use the classic LLM chat path. Soul-bound bots ignore this and talk through Soul Chat instead.", llmEnabled, TOGGLE_W));
+        llm.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Voice master: both must be ON for this bot's baked voice lines to play. Category-level muting lives under the Voice row's Adv… button.", voiced, TOGGLE_W));
+        settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", llm));
     }
 
     private String canonicalSpawnModeForUi(String raw) {

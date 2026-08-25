@@ -332,7 +332,7 @@ public class CompanionSpellsScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         int cx = this.width / 2;
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 14, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 14, 0xFFFFFFFF);
 
         String who = (botAlias != null && !botAlias.isBlank()) ? ("Companion: " + botAlias) : "Companion spells";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(who), cx, 26, 0xFFB0B0B0);

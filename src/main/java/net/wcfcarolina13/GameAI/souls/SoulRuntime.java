@@ -152,14 +152,13 @@ public final class SoulRuntime {
             SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(config);
             Path worldRoot = server.getSavePath(WorldSavePath.ROOT);
             SoulStore store = new SoulStore(worldRoot);
+            // Soul replies deliberately ignore the Text Chat master (Bradley's ruling
+            // 2026-08-25): a direct conversation should stay visible even when generic
+            // bot dialogue text is off. The textEnabled seam in SoulMessageDelivery
+            // stays available for a future per-category text menu.
             SoulConversationService.Delivery delivery = new SoulMessageDelivery(server,
                     new SoulMessageDelivery.ProductionDeliveryGuard(server, store,
-                            () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)),
-                    // Global "Text Chat" toggle gates the reply's chat line (voice still fires).
-                    () -> {
-                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-                        return cfg == null || cfg.isTextDialogueEnabled();
-                    });
+                            () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)));
 
             SoulVoiceService.VoiceDelivery voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) ->
                     server.execute(() -> {
