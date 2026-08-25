@@ -105,6 +105,15 @@ public class ManualConfig {
     private int soulRequestTimeoutSeconds = 60;
     private int soulQueueCapacity = 8;
 
+    // Soul generated-voice (TTS). Default-off; local Piper only. See
+    // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
+    private boolean soulVoiceEnabled = false;
+    private String soulVoicePiperBinary = "";
+    private String soulVoiceModel = "";
+    private int soulVoiceMaxChars = 400;
+    private long soulVoiceSynthTimeoutMs = 8000L;
+    private float soulVoiceRadioGain = 0.6f;
+
     /**
      * Private constructor to prevent direct instantiation.
      * Use the static load() method instead.
@@ -797,6 +806,26 @@ public class ManualConfig {
     public void setSoulQueueCapacity(int soulQueueCapacity) {
         this.soulQueueCapacity = Math.max(1, Math.min(32, soulQueueCapacity));
     }
+
+    // === Soul generated-voice accessors ===
+
+    public boolean isSoulVoiceEnabled() { return soulVoiceEnabled; }
+    public void setSoulVoiceEnabled(boolean v) { this.soulVoiceEnabled = v; }
+
+    public String getSoulVoicePiperBinary() { return soulVoicePiperBinary == null ? "" : soulVoicePiperBinary; }
+    public void setSoulVoicePiperBinary(String v) { this.soulVoicePiperBinary = v == null ? "" : v.trim(); }
+
+    public String getSoulVoiceModel() { return soulVoiceModel == null ? "" : soulVoiceModel; }
+    public void setSoulVoiceModel(String v) { this.soulVoiceModel = v == null ? "" : v.trim(); }
+
+    public int getSoulVoiceMaxChars() { return Math.max(40, Math.min(1000, soulVoiceMaxChars)); }
+    public void setSoulVoiceMaxChars(int v) { this.soulVoiceMaxChars = v; }
+
+    public long getSoulVoiceSynthTimeoutMs() { return Math.max(1000L, Math.min(30_000L, soulVoiceSynthTimeoutMs)); }
+    public void setSoulVoiceSynthTimeoutMs(long v) { this.soulVoiceSynthTimeoutMs = v; }
+
+    public float getSoulVoiceRadioGain() { return Math.max(0.0f, Math.min(1.0f, soulVoiceRadioGain)); }
+    public void setSoulVoiceRadioGain(float v) { this.soulVoiceRadioGain = v; }
 
     /** @deprecated Legacy accessor. Use {@link #getBotControlsByWorld()} or {@link #getAllBotAliases()} instead. */
     @Deprecated

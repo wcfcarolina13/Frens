@@ -53,4 +53,16 @@ class BotSoulCommandsTest {
         assertTrue(BotSoulCommands.validatedModel(null).isEmpty());
         assertTrue(BotSoulCommands.validatedModel("   ").isEmpty());
     }
+
+    @Test
+    void voicePathValidationReportsTheFirstConcreteProblem() {
+        java.util.function.Predicate<String> exists = path -> path.equals("/ok/piper") || path.equals("/ok/jake.onnx");
+        assertTrue(BotSoulCommands.validateVoicePaths("/ok/piper", "/ok/jake.onnx", exists).isEmpty());
+        assertEquals("Piper binary not found: /missing/piper",
+                BotSoulCommands.validateVoicePaths("/missing/piper", "/ok/jake.onnx", exists).orElseThrow());
+        assertEquals("Voice model not found: /missing/jake.onnx",
+                BotSoulCommands.validateVoicePaths("/ok/piper", "/missing/jake.onnx", exists).orElseThrow());
+        assertEquals("Configure the piper binary path first.",
+                BotSoulCommands.validateVoicePaths("", "/ok/jake.onnx", exists).orElseThrow());
+    }
 }

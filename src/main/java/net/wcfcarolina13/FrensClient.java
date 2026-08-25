@@ -1,7 +1,9 @@
 package net.wcfcarolina13;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -770,6 +772,9 @@ public class FrensClient implements ClientModInitializer {
             context.client().execute(() -> BaseManagerScreen.applyBasesJson(json));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.SoulVoicePayload.ID, (payload, context) ->
+                net.wcfcarolina13.ui.SoulVoiceClientPlayer.onPayload(payload));
+
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.ID, (payload, context) -> {
             int current = payload.current();
             int hardLimit = payload.hardLimit();
@@ -1052,6 +1057,12 @@ public class FrensClient implements ClientModInitializer {
                 net.wcfcarolina13.GraphicalUserInterface.HuntTargetPickerOverlay.onClientTick(client));
         ClientTickEvents.END_CLIENT_TICK.register(client ->
                 net.wcfcarolina13.GraphicalUserInterface.StoreTargetPickerOverlay.onClientTick(client));
+        ClientTickEvents.END_CLIENT_TICK.register(client ->
+                net.wcfcarolina13.ui.SoulVoiceClientPlayer.onClientTick(client));
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) ->
+                net.wcfcarolina13.ui.SoulVoiceClientPlayer.stopAll());
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client ->
+                net.wcfcarolina13.ui.SoulVoiceClientPlayer.shutdown());
 
     }
 

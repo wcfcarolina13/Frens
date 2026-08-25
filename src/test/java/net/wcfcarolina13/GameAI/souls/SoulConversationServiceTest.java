@@ -223,6 +223,38 @@ class SoulConversationServiceTest {
         assertEquals(routingId, delivery.lastToken.correlationId());
     }
 
+    // === Additional coverage: SpokenListener seam (voice subscription point) ===
+
+    @Test
+    void spokenListenerFiresExactlyOncePerDeliveredTurnWithTheValidatedText() throws Exception {
+        List<String> spoken = new ArrayList<>();
+        SoulConversationService listening = new SoulConversationService(store,
+                new SoulPromptAssembler(), scheduler, provider, new SoulResponseValidator(),
+                delivery, new SoulSettings(true, true, "", "ollama", "test-model",
+                        URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8),
+                (t, token, text) -> spoken.add(text));
+        delivery.completeNext(true);
+
+        listening.submit(turn).get(2, SECONDS);
+
+        assertEquals(List.of("We're steady."), spoken);
+    }
+
+    @Test
+    void spokenListenerNeverFiresOnFailedDelivery() throws Exception {
+        List<String> spoken = new ArrayList<>();
+        SoulConversationService listening = new SoulConversationService(store,
+                new SoulPromptAssembler(), scheduler, provider, new SoulResponseValidator(),
+                delivery, new SoulSettings(true, true, "", "ollama", "test-model",
+                        URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8),
+                (t, token, text) -> spoken.add(text));
+        delivery.completeNext(false);
+
+        listening.submit(turn).get(2, SECONDS);
+
+        assertEquals(List.of(), spoken);
+    }
+
     // === Fixtures (verbatim from the task brief, with additive, non-modifying test-only helpers) ===
 
     private static final class FakeProvider implements SoulModelProvider {
