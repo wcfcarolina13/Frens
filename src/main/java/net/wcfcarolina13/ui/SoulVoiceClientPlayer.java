@@ -129,19 +129,27 @@ public final class SoulVoiceClientPlayer {
         alTask(SoulVoiceClientPlayer::stopAllOnAlThread);
     }
 
-    /** Stops everything and tears down the AL context + device. */
+    /**
+     * Stops everything and tears down the AL context + device. Enqueues directly to
+     * {@link #AL_TASKS} rather than going through {@link #alTask(Runnable)} — {@code started}
+     * is about to flip false, and routing through {@code alTask} would spin up a second
+     * worker thread racing the one that's already draining these exact cleanup tasks.
+     */
     public static void shutdown() {
-        if (!started) {
-            return;
+        Thread thread;
+        synchronized (SoulVoiceClientPlayer.class) {
+            if (!started) {
+                return;
+            }
+            thread = alThread;
+            started = false;
         }
-        alTask(() -> {
+        AL_TASKS.offer(() -> {
             stopAllOnAlThread();
             destroyContext();
         });
-        Thread thread = alThread;
-        started = false;
         if (thread != null) {
-            alTask(thread::interrupt);
+            AL_TASKS.offer(thread::interrupt);
         }
     }
 
