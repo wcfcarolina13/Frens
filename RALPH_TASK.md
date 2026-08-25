@@ -503,6 +503,20 @@ New mob-proximity and context-triggered ambient lines. All would extend the exis
 - Pool split landed: [PetProximityReactionService.java:79-87](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L79-L87) defines `ANIMAL_WELL_BEHAVED_LINES` (broad tamed-non-wolf trigger, 90s cooldown) and `MOUNT_QUALITY_LINES` ("That's a quality animal", mount-only trigger via `hasNearbyMountAnimal` at [lines 213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232) covering tamed `AbstractHorseEntity` / any `CamelEntity` / `LlamaEntity` & `TraderLlamaEntity` as `AbstractHorseEntity` subclasses).
 - Cooldown bumped: [line 36](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L36) — `MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L`.
 
+## Multiplayer Voice Muting (Backlogged 2026-08-25)
+
+Voiced-line category muting shipped global-only (settings.json5 mask, `ConfigureVoiceCategoriesScreen`
+via the Voice row "Adv…" chip in Bot Control). Deferred multiplayer half:
+
+- [ ] **Per-player mute masks** — on a dedicated server the current design mutes for everyone
+      (`playSoundFromEntity` broadcasts). Fix: replace the broadcast in `BotDialoguePlayer.playSound`
+      with a per-recipient send loop, sync each Frens client's mask via a small C2S payload, and
+      consult it in `VoiceLineMuteService.isMuted(category, viewer)` — the `viewer` param is already
+      threaded as the seam. Settings.json5 mask becomes the server-admin baseline.
+- [ ] **Fix the stubbed config sync** — prerequisite: `configNetworkManager` /
+      `ConfigJsonUtil.configToJson/applyConfigJson` are compile-time no-op stubs, so ALL global
+      config (including the existing Voice toggle) is effectively single-player-only today.
+
 ## Separate Version Ports (Backlogged — Low Priority)
 
 Shelved 2026-05-06. Not on roadmap unless a long-term contributor commits to maintaining a parallel branch.

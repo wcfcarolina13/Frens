@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Voiced-line category muting — phase 3: UI (2026-08-25)
+
+The user-visible half. Feature complete for single-player.
+
+- **`ConfigureVoiceCategoriesScreen`** (new) — popup modeled on `ConfigureHobbiesScreen`:
+  2-column grid of the 9 categories with `§a[x]`-style checked = audible buttons, tooltips
+  from `VoiceLineCategory.description()`, Enable All / Mute All / Done, hint line
+  "Unchecked categories play no audio — text still shows." Writes `Frens.CONFIG` directly
+  and saves on every toggle (no server round-trip needed — global config is same-JVM in
+  single player; the `sendSaveConfigPacket` call is kept for pattern parity with
+  `BotControlScreen` even though that path is stubbed).
+- **`BotControlScreen`** — "Adv…" chip on the global Voice toggle row (index
+  `VOICE_TOGGLE_INDEX = 4`), drawn beside the on/off chip with its own hover tooltip; its
+  hit test runs before the row-wide toggle hit test. Opens the new screen with this screen
+  as parent.
+- **`RALPH_TASK.md`** — backlog section "Multiplayer Voice Muting": per-player masks via
+  the `VoiceLineMuteService.isMuted(category, viewer)` seam + per-recipient send loop, and
+  the prerequisite fix of the stubbed `configNetworkManager`/`ConfigJsonUtil` sync.
+
+Manual test plan (in-game, Bradley): expand global toggles in Bot Control → Voice row →
+Adv… → mute Ambient Chatter → confirm idle banter shows text only; `/bot sound_test`
+still audible (force path deliberately ungated); mute-all then a rescue/combat moment
+stays silent with text intact; settings.json5 gains `mutedVoiceCategories`.
+
 ## Voiced-line category muting — phase 2: direct-caller categories (2026-08-25)
 
 All ~11 direct `BotDialoguePlayer` call sites now pass explicit `VoiceLineCategory` instead

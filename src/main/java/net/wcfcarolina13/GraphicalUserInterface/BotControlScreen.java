@@ -43,6 +43,10 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply.")
     );
 
+    /** Index of the "Voice" toggle in GLOBAL_TOGGLES (list is append-only positional). */
+    private static final int VOICE_TOGGLE_INDEX = 4;
+    private static final int VOICE_ADV_W = 34;
+
     // Layout constants
     private static final int BUTTON_H = 20;
     private static final int TOGGLE_W = 46;
@@ -118,6 +122,8 @@ public class BotControlScreen extends Screen {
     private Rect globalPanelRect;
     private final List<Rect> globalRowRects = new ArrayList<>();
     private final List<Rect> globalChipRects = new ArrayList<>();
+    /** "Adv…" chip on the Voice row — opens the per-category voice mute screen. */
+    private Rect voiceAdvancedRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
     private Rect bulkAutoRespawnOnRect;
     private Rect bulkAutoRespawnOffRect;
@@ -616,6 +622,7 @@ public class BotControlScreen extends Screen {
     private void renderGlobalTogglePanel(DrawContext context, int mouseX, int mouseY) {
         globalRowRects.clear();
         globalChipRects.clear();
+        voiceAdvancedRect = null;
 
         // Panel background
         context.fill(globalPanelRect.x, globalPanelRect.y,
@@ -686,12 +693,33 @@ public class BotControlScreen extends Screen {
                 context.fill(rowRect.x, rowRect.y, rowRect.right(), rowRect.y + 1, 0x30FFFFFF);
             }
 
-            int labelMaxW = chipRect.x - rowRect.x - 12;
+            Rect advRect = null;
+            if (i == VOICE_TOGGLE_INDEX) {
+                advRect = new Rect(chipRect.x - VOICE_ADV_W - 4, y + 1, VOICE_ADV_W, rowH - 2);
+                voiceAdvancedRect = advRect;
+            }
+
+            int labelMaxW = (advRect != null ? advRect.x : chipRect.x) - rowRect.x - 12;
             String label = elideToWidth(def.label(), Math.max(30, labelMaxW));
             int labelY = rowRect.y + (rowRect.h - this.textRenderer.fontHeight) / 2;
             context.drawText(this.textRenderer, label, rowRect.x + 6, labelY, COL_LABEL, false);
 
             drawToggleChip(context, chipRect, globalValues[i], mouseX, mouseY);
+
+            if (advRect != null) {
+                boolean advHover = advRect.contains(mouseX, mouseY);
+                context.fill(advRect.x, advRect.y, advRect.right(), advRect.bottom(),
+                        advHover ? COL_CHIP_HL : COL_CHIP);
+                context.drawText(this.textRenderer, "Adv…",
+                        advRect.x + 6,
+                        advRect.y + (advRect.h - this.textRenderer.fontHeight) / 2,
+                        COL_LABEL, false);
+                if (advHover && tooltipText == null) {
+                    updateTooltipCandidate("global-voice-adv",
+                            "Mute individual categories of voiced lines (combat, ambient, reactions…). Audio only — text still shows.",
+                            mouseX, mouseY);
+                }
+            }
 
             // Tooltip for hovered global toggle
             if (hover && tooltipText == null) {
@@ -1190,6 +1218,14 @@ public class BotControlScreen extends Screen {
             if (!globalsExpanded || my < globalPanelRect.y + 18) {
                 globalsExpanded = !globalsExpanded;
                 this.init();  // relayout with new panel height
+                return true;
+            }
+
+            // "Adv…" chip on the Voice row — must win over the row-wide toggle hit test.
+            if (voiceAdvancedRect != null && voiceAdvancedRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new ConfigureVoiceCategoriesScreen(this));
+                }
                 return true;
             }
 
