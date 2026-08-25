@@ -2,6 +2,28 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dreamsleeve voice-clone engine for soul TTS (2026-08-24)
+
+Bradley's correction after voice v1 shipped: this machine already runs a proven TTS stack — the
+Dreamsleeve warm server (`~/pontus/openmw-forge/dreamsleeve`, Qwen3-TTS 12Hz 1.7B 8-bit on
+MLX/Metal via the `qwen-tts` venv), the same voice-clone system that voices Casca in OpenMW —
+and the v1 engine choice should have started from an audit of it instead of assuming Piper.
+Nothing to install: new `DreamsleeveVoiceEngine` behind the existing `SoulVoiceEngine` seam
+spawns that server on a PRIVATE Unix socket (never Dreamsleeve's daemon socket — OpenMW and
+Frens coexist) and speaks its newline-JSON protocol: `op:"speak"` with the voice-anchor
+reference clip + transcript (cloned per line, temperature 0.3 for identity stability) and an
+`out_file` the server renders a dry normalized 16-bit mono WAV into via atomic rename; the
+engine polls, reads, deletes. Same lifecycle discipline as the Piper engine (engine-thread
+confinement, drained pipes, non-blocking idempotent close). A fire-and-forget warm-up request
+starts the model load at engine build so Jake's first reply doesn't pay it all.
+
+Config: `soulVoiceEngine` ("piper" default | "dreamsleeve"), `soulVoiceDreamsleeveDir`,
+`soulVoiceRefAudio`, `soulVoiceRefText`; validation branches per engine (pure
+`validateVoiceConfig`, tested); `/bot soul voice status` now names the engine. Jake's anchored
+voice on this machine: the vanilla imperial-m bank's calm clip (Captain Falx Carius) — swap the
+ref clip/transcript to re-anchor, which is exactly the per-bot "anchored personal voice" seam
+the spec reserved. Suite 417/417.
+
 ## Soul voice: final whole-branch review fixes (2026-08-25)
 
 Four findings from the final review of `feature/soul-generated-voice`, fixed in one wave:
