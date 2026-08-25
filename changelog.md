@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dialogue/LLM controls consolidation — phase B: soul under the masters (2026-08-25)
+
+Per Bradley's decisions: global "Voice" and "Text Chat" are now true masters over the soul
+pipeline too, and the command-only soul switches got GUI rows.
+
+- **Voice master gates soul TTS.** `SoulVoiceService` takes an injected
+  `masterVoiceEnabled` BooleanSupplier (3-arg constructor keeps the always-true default so
+  the class stays Frens-free for plain-JUnit loading); `SoulRuntime.buildVoiceService`
+  passes a live `ManualConfig.isVoicedDialogueEnabled()` probe. Voice OFF now silences
+  Jake's cloned voice, not just the baked lines.
+- **Text Chat master gates soul reply text — without killing voice-only mode.** The gate
+  sits inside `SoulMessageDelivery.deliverReply`: chat line suppressed but the turn still
+  reports delivered, because `SoulConversationService` only fires the voice subscriber
+  after a successful delivery (gating in the guard would have failed the whole turn).
+  Injected supplier, same test-freedom pattern. `deliverStatus` (command feedback) stays
+  ungated.
+- **"Soul Chat" and "Soul Voice" rows** appended to the global panel (indices 6/7 —
+  append-only positional list), backed by the same `soulsEnabled`/`soulVoiceEnabled`
+  fields as `/bot soul enable` and `/bot soul voice on|off`. Save triggers
+  `SoulRuntime.reloadSettings` when they changed (the runtime holds a settings snapshot —
+  same pattern as `BotSoulCommands.awaitReloadThenReport`), so the chips are live, not
+  write-until-restart. Note: enabling Soul Voice via GUI skips `/bot soul voice on`'s
+  path validation; an invalid engine config degrades to disabled-with-warning in
+  `buildVoiceService`, tooltip points at `/bot soul voice status`.
+
 ## Dialogue/LLM controls consolidation — phase A: make the switches real (2026-08-25)
 
 Bradley: "overlapping, seemingly redundant controls for LLM activation, voice, and text…

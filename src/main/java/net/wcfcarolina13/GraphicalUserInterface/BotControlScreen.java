@@ -40,7 +40,9 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Text Chat", "Shows companion dialogue in chat and as nearby overhead text. Turn this off for a quieter experience."),
             new GlobalToggleDef("Voice", "Enables voiced companion lines when matching audio exists. Voice playback is optional and separate from normal text dialogue."),
-            new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply.")
+            new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
+            new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
+            new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
     );
 
     /** Index of the "Voice" toggle in GLOBAL_TOGGLES (list is append-only positional). */
@@ -208,6 +210,8 @@ public class BotControlScreen extends Screen {
             globalValues[4] = Frens.CONFIG.isVoicedDialogueEnabled();
             // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
             globalValues[5] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+            globalValues[6] = Frens.CONFIG.isSoulsEnabled();
+            globalValues[7] = Frens.CONFIG.isSoulVoiceEnabled();
             globalsLoaded = true;
         }
 
@@ -493,6 +497,21 @@ public class BotControlScreen extends Screen {
         config.setVoicedDialogueEnabled(globalValues[4]);
         // Teleport toggle: ON (true) = clear global override (null), OFF (false) = globally disabled
         config.setGlobalTeleportDuringSkills(globalValues[5] ? null : Boolean.FALSE);
+        // Soul toggles: same fields as /bot soul enable|disable and /bot soul voice on|off.
+        // The live runtime reads a settings snapshot, so a change must trigger reloadSettings
+        // (same pattern as BotSoulCommands.awaitReloadThenReport) or it would sit dormant
+        // until the next server start.
+        boolean soulTogglesChanged = config.isSoulsEnabled() != globalValues[6]
+                || config.isSoulVoiceEnabled() != globalValues[7];
+        config.setSoulsEnabled(globalValues[6]);
+        config.setSoulVoiceEnabled(globalValues[7]);
+        if (soulTogglesChanged) {
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.current().ifPresent(rt ->
+                    rt.reloadSettings(config).exceptionally(ex -> {
+                        net.wcfcarolina13.Frens.LOGGER.warn("[souls] reloadSettings failed after GUI toggle: {}", ex.toString());
+                        return null;
+                    }));
+        }
 
         java.util.List<String> autoRespawnJustEnabled = new java.util.ArrayList<>();
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {

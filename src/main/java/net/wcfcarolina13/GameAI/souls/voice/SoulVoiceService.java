@@ -40,11 +40,23 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
     private final SoulVoiceSettings settings;
     private final SoulVoiceEngine engine; // null only for the disabled instance
     private final VoiceDelivery delivery;
+    /**
+     * Live probe for the global "Voice" master toggle (BotControlScreen). Injected as a supplier
+     * so this class never references Frens (whose static init breaks plain-JUnit loading);
+     * production passes a ManualConfig read, tests get the always-true default.
+     */
+    private final java.util.function.BooleanSupplier masterVoiceEnabled;
     private final ExecutorService worker;
     private final VoiceBackoffPolicy backoff = new VoiceBackoffPolicy();
     private volatile boolean selfDisabled;
 
     public SoulVoiceService(SoulVoiceSettings settings, SoulVoiceEngine engine, VoiceDelivery delivery) {
+        this(settings, engine, delivery, () -> true);
+    }
+
+    public SoulVoiceService(SoulVoiceSettings settings, SoulVoiceEngine engine, VoiceDelivery delivery,
+                             java.util.function.BooleanSupplier masterVoiceEnabled) {
+        this.masterVoiceEnabled = Objects.requireNonNull(masterVoiceEnabled, "masterVoiceEnabled");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.engine = engine;
         this.delivery = Objects.requireNonNull(delivery, "delivery");
@@ -68,7 +80,9 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
 
     @Override
     public void onSpoken(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, String text) {
-        Optional<SoulVoiceGate.Mode> mode = SoulVoiceGate.decide(settings.enabled(),
+        // The global "Voice" master (BotControlScreen) silences soul TTS along with baked lines.
+        Optional<SoulVoiceGate.Mode> mode = SoulVoiceGate.decide(
+                settings.enabled() && masterVoiceEnabled.getAsBoolean(),
                 settings.valid(), engineAlive(), turn.grounding().reachability());
         if (mode.isEmpty()) {
             return;

@@ -154,7 +154,12 @@ public final class SoulRuntime {
             SoulStore store = new SoulStore(worldRoot);
             SoulConversationService.Delivery delivery = new SoulMessageDelivery(server,
                     new SoulMessageDelivery.ProductionDeliveryGuard(server, store,
-                            () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)));
+                            () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)),
+                    // Global "Text Chat" toggle gates the reply's chat line (voice still fires).
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg == null || cfg.isTextDialogueEnabled();
+                    });
 
             SoulVoiceService.VoiceDelivery voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) ->
                     server.execute(() -> {
@@ -400,7 +405,11 @@ public final class SoulRuntime {
                 default -> new PiperVoiceEngine(voiceSettings.piperBinary(),
                         voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs());
             };
-            return new SoulVoiceService(voiceSettings, engine, voiceDelivery);
+            // Global "Voice" toggle is the master over soul TTS as well as baked lines.
+            return new SoulVoiceService(voiceSettings, engine, voiceDelivery, () -> {
+                ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                return cfg == null || cfg.isVoicedDialogueEnabled();
+            });
         } catch (Exception ex) {
             LOGGER.warn("[souls] tts engine unavailable, voice disabled: {}", ex.toString());
             return SoulVoiceService.disabled();

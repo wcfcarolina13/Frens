@@ -60,10 +60,23 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
 
     private final MinecraftServer server;
     private final DeliveryGuard guard;
+    /**
+     * Live probe for the global "Text Chat" toggle (BotControlScreen). When it reads false the
+     * reply's chat line is suppressed but the turn still counts as delivered — so the voice
+     * subscriber (which fires only on committed turns) keeps working in voice-only mode.
+     * Injected as a supplier so this class never references Frens (see logger note above);
+     * production passes a ManualConfig read, tests get the always-true default.
+     */
+    private final BooleanSupplier textEnabled;
 
     public SoulMessageDelivery(MinecraftServer server, DeliveryGuard guard) {
+        this(server, guard, () -> true);
+    }
+
+    public SoulMessageDelivery(MinecraftServer server, DeliveryGuard guard, BooleanSupplier textEnabled) {
         this.server = Objects.requireNonNull(server, "server");
         this.guard = Objects.requireNonNull(guard, "guard");
+        this.textEnabled = Objects.requireNonNull(textEnabled, "textEnabled");
     }
 
     @Override
@@ -90,7 +103,11 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
                     ServerPlayerEntity bot = server.getPlayerManager().getPlayer(turn.key().botId());
                     ServerPlayerEntity player = server.getPlayerManager().getPlayer(turn.key().playerId());
                     if (bot != null && player != null && guard.canDeliver(turn, token, prefetchedState)) {
-                        player.sendMessage(Text.literal(turn.botDisplayName() + ": " + safeText), false);
+                        // Text Chat off = suppress the chat line only; the turn still commits so
+                        // the voice subscriber can speak it (voice-only mode).
+                        if (textEnabled.getAsBoolean()) {
+                            player.sendMessage(Text.literal(turn.botDisplayName() + ": " + safeText), false);
+                        }
                         delivered = true;
                     }
                 } catch (RuntimeException ex) {
