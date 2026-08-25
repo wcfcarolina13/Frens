@@ -163,6 +163,18 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         return !closed && !lastStartFailed;
     }
 
+    /**
+     * Idempotent, non-blocking teardown: flips {@link #closed}, submits {@link #killProcess()} to
+     * the engine thread, and calls {@code engineThread.shutdown()} (all three are fire-and-forget
+     * — submit only enqueues, shutdown only stops accepting new work) — then returns immediately.
+     * The parts that actually block ({@code awaitTermination}, the {@code shutdownNow} escalation,
+     * and the output-directory filesystem cleanup) run on a short-lived daemon closer thread
+     * instead of the caller's thread. This must never block: {@link SoulVoiceService#close()}
+     * calls this from {@code SoulRuntime.closePipeline}, which runs under
+     * {@code SoulRuntime}'s {@code lifecycleLock} on the server thread (both from
+     * {@code SERVER_STOPPING} via {@code SoulRuntime.stop()} and from {@code /bot soul} commands
+     * via {@code reloadSettings}) — a blocking wait there would stall the server thread.
+     */
     @Override
     public void close() {
         if (closed) {
@@ -175,15 +187,19 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
             // engine thread is already shutting down; nothing left to submit to
         }
         engineThread.shutdown();
-        try {
-            if (!engineThread.awaitTermination(1, TimeUnit.SECONDS)) {
+        Thread closer = new Thread(() -> {
+            try {
+                if (!engineThread.awaitTermination(1, TimeUnit.SECONDS)) {
+                    engineThread.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 engineThread.shutdownNow();
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            engineThread.shutdownNow();
-        }
-        deleteOutputDirQuietly();
+            deleteOutputDirQuietly();
+        }, "frens-soul-voice-closer");
+        closer.setDaemon(true);
+        closer.start();
     }
 
     /** Best-effort cleanup of the temp WAV-drop directory; failures are ignored on close. */
