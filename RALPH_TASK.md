@@ -511,17 +511,21 @@ Audit: only live engine is Dreamsleeve (Qwen3-TTS 12Hz 1.7B 8-bit, MLX/Metal war
 `PiperVoiceEngine` exists in code but no piper binary is installed; `soulVoicePiperBinary`
 is empty in live config.
 
-- [ ] **Sentence-streaming synthesis** (the known deferred latency lever) — synthesize and
-      start playing sentence 1 while the rest renders. Same engine/quality; biggest
-      perceived-latency win; does not reduce GPU load.
-- [ ] **Verify LoadGoverner covers synthesis windows** — `SoulRuntime.activeGenerations()`
-      floor: confirm it stays elevated through TTS render, not just LLM generation
-      (the "bugs the laptop" symptom is likely Metal contention during synth).
-- [ ] **Offline engine A/B (optional)** — install piper + an en voice, render the same 3
-      lines via Piper vs Dreamsleeve, compare wall time + let Bradley listen. Expectation:
-      Piper is much lighter/faster but is a generic voice — loses the Jake baked-voice
-      clone identity (sim=0.992 anchor). Check whether a smaller Qwen3-TTS variant exists
-      (verify on HF before pulling — never infer model ids).
+- [x] **Sentence-streaming synthesis** — DONE 2026-08-25 (commit `aefc5d3`): per-sentence
+      segments share a groupId; client queues them on one OpenAL source. Field-verify the
+      first-word latency drop in-game.
+- [x] **Verify LoadGoverner covers synthesis windows** — CONFIRMED BROKEN and fixed same
+      commit: scheduler slot freed before the TTS render, so `activeGenerations()` was 0
+      during the heaviest Metal window; now includes `SoulVoiceService.activeSyntheses`.
+- [x] **Offline engine A/B** — run 2026-08-25 (no game running, so contention-free
+      numbers). Piper (en_US-lessac-medium, CPU): ~0.97s/line after a 3s first-load.
+      Dreamsleeve warm (Qwen3 1.7B, Metal): ~2.6s/line for ~3.7s of audio (~1.5x
+      realtime) — the in-game 8-10s was multi-sentence replies + GPU contention, both now
+      addressed (streaming + governor floor). Piper is ~2.6x faster and zero-GPU but a
+      generic voice. Samples: `voices/ab-test/{piper,dreamsleeve}-line{1..3}.wav`.
+      In-game Piper trial needs NO code: settings.json5 `soulVoiceEngine: "piper"`,
+      `soulVoicePiperBinary: "~/.local/bin/piper"` (expanded), `soulVoiceModel:
+      voices/ab-test/piper-voice/en_US-lessac-medium.onnx`.
 - [ ] Hosted-API offload remains separately backlogged behind the credential security review.
 
 ## Multiplayer Voice Muting (Backlogged 2026-08-25)

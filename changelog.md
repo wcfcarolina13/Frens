@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## TTS A/B results; 1.1.170 deployed (2026-08-25)
+
+Offline A/B (no game running — contention-free): Piper en_US-lessac-medium (CPU) ~0.97s
+per line after a 3s first-load; Dreamsleeve warm (Qwen3 1.7B, Metal) ~2.6s per line for
+~3.7s of audio (~1.5x realtime). The in-game 8-10s Bradley measured was multi-sentence
+replies rendered whole + GPU contention with an unheld governor floor — both fixed by the
+entry below. Piper is ~2.6x faster and zero-GPU but a generic voice (loses the Jake clone).
+Samples for listening: `voices/ab-test/`. An in-game Piper trial needs no code — the
+`soulVoiceEngine: "piper"` config path already exists (binary now installed via pipx).
+Warm-server model load measured at ~3min cold — the mod's spawn-time warm-up request
+covers this in practice.
+
+Deployed **frens-1.1.170** (sentence streaming + governor floor + everything prior) to all
+three Prism instances; md5 verified.
+
 ## Soul TTS: sentence-streaming synthesis + LoadGoverner floor through the render window (2026-08-25)
 
 Bradley: TTS "quite slow, and seems to bug the laptop." Two of the three planned levers:
