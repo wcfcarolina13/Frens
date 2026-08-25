@@ -12,13 +12,14 @@ import net.wcfcarolina13.network.ConfigJsonUtil;
 import net.wcfcarolina13.network.configNetworkManager;
 
 /**
- * Keep-visible exceptions for scripted bot text, opened from the "Adv…" chip on the
- * global Text Chat row in {@link BotControlScreen}.
+ * Per-category text muting, opened from the "Adv…" chip on the global Text Chat row in
+ * {@link BotControlScreen}.
  *
- * Semantics are the INVERSE of the voice category screen: these checkboxes only matter
- * while the Text Chat master is OFF — checked categories still show their text (danger
- * warnings and status lines by default). With the master ON everything shows regardless.
- * State is {@code textVisibleCategoryExceptions} in settings.json5, saved on every toggle.
+ * Same semantics as the voice category screen, deliberately (Bradley flagged the earlier
+ * inverse model as conflicting): the Text Chat master is a hard kill switch, and while it
+ * is ON, checked categories show their text and unchecked ones are hidden (audio
+ * unaffected). State is {@code mutedTextCategories} in settings.json5, saved on every
+ * toggle.
  */
 public class ConfigureTextCategoriesScreen extends Screen {
 
@@ -56,25 +57,25 @@ public class ConfigureTextCategoriesScreen extends Screen {
             addDrawableChild(btn);
         }
 
-        // Bottom row: Check All / Clear All / Done
+        // Bottom row: Enable All / Mute All / Done
         int btnY = cy + POPUP_HEIGHT - 28;
         int btnW = (POPUP_WIDTH - CELL_PAD * 4) / 3;
-        addDrawableChild(ButtonWidget.builder(Text.literal("Check All"),
+        addDrawableChild(ButtonWidget.builder(Text.literal("Enable All"),
                         b -> bulkSet(true))
                 .dimensions(cx + CELL_PAD, btnY, btnW, 20).build());
-        addDrawableChild(ButtonWidget.builder(Text.literal("Clear All"),
+        addDrawableChild(ButtonWidget.builder(Text.literal("Mute All"),
                         b -> bulkSet(false))
                 .dimensions(cx + CELL_PAD * 2 + btnW, btnY, btnW, 20).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
                 .dimensions(cx + CELL_PAD * 3 + btnW * 2, btnY, btnW, 20).build());
     }
 
-    private boolean isException(VoiceLineCategory cat) {
-        return Frens.CONFIG != null && Frens.CONFIG.isTextCategoryException(cat.id());
+    private boolean isShown(VoiceLineCategory cat) {
+        return Frens.CONFIG == null || !Frens.CONFIG.isTextCategoryMuted(cat.id());
     }
 
     private Text buttonText(VoiceLineCategory cat) {
-        String prefix = isException(cat) ? "§a[x] " : "§7[ ] ";
+        String prefix = isShown(cat) ? "§a[x] " : "§7[ ] ";
         return Text.literal(prefix + cat.displayName());
     }
 
@@ -82,17 +83,17 @@ public class ConfigureTextCategoriesScreen extends Screen {
         if (Frens.CONFIG == null) {
             return;
         }
-        Frens.CONFIG.setTextCategoryException(cat.id(), !isException(cat));
+        Frens.CONFIG.setTextCategoryMuted(cat.id(), isShown(cat));
         persist();
         rebuild();
     }
 
-    private void bulkSet(boolean exception) {
+    private void bulkSet(boolean shown) {
         if (Frens.CONFIG == null) {
             return;
         }
         for (VoiceLineCategory cat : VoiceLineCategory.values()) {
-            Frens.CONFIG.setTextCategoryException(cat.id(), exception);
+            Frens.CONFIG.setTextCategoryMuted(cat.id(), !shown);
         }
         persist();
         rebuild();
@@ -117,7 +118,7 @@ public class ConfigureTextCategoriesScreen extends Screen {
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
         context.drawCenteredTextWithShadow(this.textRenderer,
-                Text.literal("§7Checked categories stay visible even when Text Chat is OFF."),
+                Text.literal("§7Unchecked categories show no text — audio unaffected. Same rule as Voice."),
                 this.width / 2, cy + 24, 0xFFFFFFFF);
         super.render(context, mouseX, mouseY, delta);
     }

@@ -39,7 +39,7 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
-            new GlobalToggleDef("Text Chat", "Master for scripted bot text: chat lines, overhead text, and subtitles. Soul Chat replies always show — direct conversation is exempt. With this off and Voice on, lines that have audio become voice-only; lines without audio still print as fallback."),
+            new GlobalToggleDef("Text Chat", "Master kill switch for scripted bot text: chat lines, overhead text, and subtitles. While ON, Adv… mutes individual categories — same rule as Voice. Soul Chat replies always show. With this off and Voice on, lines with audio become voice-only."),
             new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. Per-bot Voiced Dialogue can additionally mute a single bot; Adv… mutes categories."),
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
@@ -754,7 +754,7 @@ public class BotControlScreen extends Screen {
                                 mouseX, mouseY);
                     } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
-                                "Pick categories that stay visible even when Text Chat is off (danger warnings and status lines by default).",
+                                "Mute individual categories of text lines (holograms, subtitles, chat) while Text Chat is on. Text only — audio unaffected. Same rule as the Voice Adv menu.",
                                 mouseX, mouseY);
                     } else {
                         updateTooltipCandidate("global-soul-voice-eng",

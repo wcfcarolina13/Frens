@@ -75,13 +75,11 @@ public class ManualConfig {
     private boolean voicedDialogueEnabled = true;
     // Muted voiced-dialogue categories (VoiceLineCategory ids). Empty = nothing muted.
     private List<String> mutedVoiceCategories = new ArrayList<>();
-    // Categories that stay VISIBLE as text even when textDialogueEnabled is false
-    // (keep-visible exceptions from the Text Chat "Adv…" menu).
-    private List<String> textVisibleCategoryExceptions = defaultTextExceptions();
-
-    private static List<String> defaultTextExceptions() {
-        return new ArrayList<>(List.of("combat_alerts", "survival_status"));
-    }
+    // Muted text categories (VoiceLineCategory ids) — same semantics as the voice mask:
+    // consulted only while textDialogueEnabled is ON; empty = all text shows.
+    // (Replaced the short-lived inverse "keep-visible exceptions" model, which made the
+    // two Adv menus behave as confusing duals of each other.)
+    private List<String> mutedTextCategories = new ArrayList<>();
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
@@ -310,8 +308,8 @@ public class ManualConfig {
             if (loadedConfig.mutedVoiceCategories == null) {
                 loadedConfig.mutedVoiceCategories = new ArrayList<>();
             }
-            if (loadedConfig.textVisibleCategoryExceptions == null) {
-                loadedConfig.textVisibleCategoryExceptions = defaultTextExceptions();
+            if (loadedConfig.mutedTextCategories == null) {
+                loadedConfig.mutedTextCategories = new ArrayList<>();
             }
             // ── Legacy migration: global → per-world ──
             // Old configs stored one BotSpawn per alias; migrate to per-world under "_legacy" key.
@@ -785,25 +783,25 @@ public class ManualConfig {
         return mutedVoiceCategories;
     }
 
-    public boolean isTextCategoryException(String categoryId) {
+    public boolean isTextCategoryMuted(String categoryId) {
         return categoryId != null
-                && textVisibleCategoryExceptions != null
-                && textVisibleCategoryExceptions.contains(categoryId);
+                && mutedTextCategories != null
+                && mutedTextCategories.contains(categoryId);
     }
 
-    public void setTextCategoryException(String categoryId, boolean visibleWhenMuted) {
+    public void setTextCategoryMuted(String categoryId, boolean muted) {
         if (categoryId == null || categoryId.isBlank()) {
             return;
         }
-        if (textVisibleCategoryExceptions == null) {
-            textVisibleCategoryExceptions = defaultTextExceptions();
+        if (mutedTextCategories == null) {
+            mutedTextCategories = new ArrayList<>();
         }
-        if (visibleWhenMuted) {
-            if (!textVisibleCategoryExceptions.contains(categoryId)) {
-                textVisibleCategoryExceptions.add(categoryId);
+        if (muted) {
+            if (!mutedTextCategories.contains(categoryId)) {
+                mutedTextCategories.add(categoryId);
             }
         } else {
-            textVisibleCategoryExceptions.remove(categoryId);
+            mutedTextCategories.remove(categoryId);
         }
     }
 

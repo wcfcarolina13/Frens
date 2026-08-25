@@ -7,10 +7,11 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
  * Single decision point for whether a scripted text line (chat, overhead hologram,
  * subtitle) may be shown.
  *
- * <p>Semantics (Bradley's ruling 2026-08-25): the global Text Chat master ON shows
- * everything; OFF hides text EXCEPT categories the user checked as keep-visible
- * exceptions in the Text Chat "Adv…" menu (danger warnings and status lines by
- * default). Soul Chat replies bypass this entirely — see {@code SoulMessageDelivery}.
+ * <p>Same rule as the voice mask, deliberately: the Text Chat master is a hard kill
+ * switch; while it is ON, categories muted in the Text "Adv…" menu are hidden. (An
+ * earlier iteration used inverse "keep-visible when master off" semantics — Bradley
+ * flagged the two Adv menus as conflicting duals, so both now share this one model.)
+ * Soul Chat replies bypass this entirely — see {@code SoulMessageDelivery}.
  */
 public final class TextLineVisibilityService {
 
@@ -20,9 +21,12 @@ public final class TextLineVisibilityService {
     /** @return true if text of this category should be shown right now. */
     public static boolean isTextAllowed(VoiceLineCategory category) {
         ManualConfig cfg = Frens.CONFIG;
-        if (cfg == null || cfg.isTextDialogueEnabled()) {
+        if (cfg == null) {
             return true;
         }
-        return category != null && cfg.isTextCategoryException(category.id());
+        if (!cfg.isTextDialogueEnabled()) {
+            return false;
+        }
+        return category == null || !cfg.isTextCategoryMuted(category.id());
     }
 }
