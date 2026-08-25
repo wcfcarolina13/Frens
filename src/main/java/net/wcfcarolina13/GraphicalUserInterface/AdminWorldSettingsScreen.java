@@ -120,7 +120,9 @@ public class AdminWorldSettingsScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        this.renderBackground(context, mouseX, mouseY, delta);
+        // Manual dim instead of renderBackground() to avoid double-blur crash
+        // ("Can only blur once per frame", same fix as AdminPlayerSettingsScreen).
+        context.fill(0, 0, this.width, this.height, 0xD0101010);
         super.render(context, mouseX, mouseY, delta);
 
         int centerX = this.width / 2;

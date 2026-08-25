@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## AdminWorldSettingsScreen double-blur crash fix; bump 1.1.167 (2026-08-25)
+
+Bradley: pressing "World Settings" in the bot Admin menu crashed the game. Crash report
+(`crash-2026-08-25_12.24.30-client.txt`): `IllegalStateException: Can only blur once per
+frame` at `AdminWorldSettingsScreen.render:123` — the screen called `renderBackground()`
+AND `super.render()` (which backgrounds again); 1.21.11's once-per-frame blur assertion
+makes that legacy redundancy fatal. Same crash was already fixed in
+`AdminPlayerSettingsScreen` ("manual dim instead of renderBackground()"); this screen was
+missed. Applied the identical pattern: `context.fill(0,0,w,h,0xD0101010)` instead of the
+`renderBackground()` call. Audited the rest: all other `renderBackground` uses are
+overrides (safe), none double-call.
+
+Also diagnosed "muting doesn't work": the jar deployed 10:43 to all three Prism instances
+was the PRE-muting 1.1.166 (0 VoiceLineCategory classes, size == the 10:42 build) — the
+feature had never run in-game. Bumped `mod_version` → 1.1.167; `frens-1.1.167` carries the
+crash fix + all three muting phases. Not yet deployed.
+
 ## Voiced-line category muting — phase 3: UI (2026-08-25)
 
 The user-visible half. Feature complete for single-player.
