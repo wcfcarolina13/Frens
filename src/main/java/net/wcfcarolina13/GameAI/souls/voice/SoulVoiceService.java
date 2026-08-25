@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -99,7 +100,9 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
         } catch (Exception ex) {
             long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
             noteFailure();
-            logTts(turn.routingId(), "failed-" + ex.getClass().getSimpleName(), synthMs, 0, 0);
+            Throwable causeToReport = (ex instanceof ExecutionException && ex.getCause() != null)
+                    ? ex.getCause() : ex;
+            logTts(turn.routingId(), "failed-" + causeToReport.getClass().getSimpleName(), synthMs, 0, 0);
         }
     }
 

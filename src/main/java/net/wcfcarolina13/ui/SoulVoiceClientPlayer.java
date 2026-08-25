@@ -86,16 +86,26 @@ public final class SoulVoiceClientPlayer {
     private SoulVoiceClientPlayer() {
     }
 
-    /** Called from any thread (network receiver thread) — enqueues, never blocks on AL. */
+    /**
+     * Called from any thread (network receiver thread) — enqueues, never blocks on AL.
+     * A malformed payload must never propagate into the Fabric network receiver: any
+     * failure here is dropped, with at most a content-free debug log.
+     */
     public static void onPayload(SoulVoicePayload payload) {
-        long now = System.currentTimeMillis();
-        Optional<byte[]> pcm;
-        synchronized (REASSEMBLY) {
-            pcm = REASSEMBLY.accept(payload.correlationId(), payload.chunkIndex(),
-                    payload.chunkCount(), payload.data(), now);
+        try {
+            long now = System.currentTimeMillis();
+            Optional<byte[]> pcm;
+            synchronized (REASSEMBLY) {
+                pcm = REASSEMBLY.accept(payload.correlationId(), payload.chunkIndex(),
+                        payload.chunkCount(), payload.data(), now);
+            }
+            pcm.ifPresent(bytes -> alTask(() ->
+                    play(payload.botId(), payload.mode(), payload.sampleRate(), bytes)));
+        } catch (Throwable t) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Soul voice: dropped malformed payload");
+            }
         }
-        pcm.ifPresent(bytes -> alTask(() ->
-                play(payload.botId(), payload.mode(), payload.sampleRate(), bytes)));
     }
 
     /** Called every client tick on the client thread. Cheap capture only; work is enqueued. */
@@ -180,9 +190,12 @@ public final class SoulVoiceClientPlayer {
         Vec3d lastKnown = LAST_POSITIONS.get(botId);
         // A bot whose position we've never resolved client-side can't be pinned in space —
         // play it listener-relative (radio) instead of parking it at the OpenAL origin.
-        byte effectiveMode = (mode == SoulVoicePayload.MODE_POSITIONAL && lastKnown == null)
-                ? SoulVoicePayload.MODE_RADIO
-                : mode;
+        // Any mode byte other than MODE_POSITIONAL (including an unrecognized value from a
+        // malformed or future-versioned payload) is treated as radio too, so an unknown mode
+        // can never fall through to the positional branch below and NPE on a null lastKnown.
+        byte effectiveMode = (mode == SoulVoicePayload.MODE_POSITIONAL && lastKnown != null)
+                ? SoulVoicePayload.MODE_POSITIONAL
+                : SoulVoicePayload.MODE_RADIO;
 
         int buffer = AL10.alGenBuffers();
         ByteBuffer data = BufferUtils.createByteBuffer(pcm.length);

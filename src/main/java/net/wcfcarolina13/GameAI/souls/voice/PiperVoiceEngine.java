@@ -43,13 +43,6 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     private Writer stdin;
     private BufferedReader stdout;
     private volatile boolean closed;
-    /**
-     * True when the last synthesis attempt failed (process wouldn't start, crashed mid-request,
-     * or timed out). Cleared back to false on the next successful synthesis. {@link #alive()}
-     * reports whether the last interaction with the process was healthy or untried — it is not
-     * a live process-health probe.
-     */
-    private volatile boolean lastStartFailed;
 
     public PiperVoiceEngine(String binary, String modelPath, long synthTimeoutMs) throws IOException {
         this.binary = binary;
@@ -76,10 +69,8 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
                     Path file = Path.of(wavPath.trim());
                     byte[] bytes = Files.readAllBytes(file);
                     Files.deleteIfExists(file);
-                    lastStartFailed = false;
                     result.complete(bytes);
                 } catch (Exception ex) {
-                    lastStartFailed = true;
                     killProcess();
                     result.completeExceptionally(ex);
                 }
@@ -158,9 +149,17 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         }
     }
 
+    /**
+     * True whenever the engine has not been closed. This is a retryability signal, not a
+     * live process-health probe: {@link #ensureProcess()} restarts a dead or never-started
+     * process on the next {@link #synthesize} call, so a transient synthesis failure must
+     * never permanently gate callers out — health/backoff policy (restart with capped
+     * backoff, self-disable after repeated failures) lives in {@link SoulVoiceService}, not
+     * here.
+     */
     @Override
     public boolean alive() {
-        return !closed && !lastStartFailed;
+        return !closed;
     }
 
     /**

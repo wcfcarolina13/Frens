@@ -78,6 +78,13 @@ public final class SoulVoicePcm {
 
     /** Client-side chunk collector. Not thread-safe; confine to one thread. */
     public static final class Reassembly {
+        /**
+         * Upper bound on a network-supplied chunk count. {@code chunkCount} sizes a
+         * {@code byte[chunkCount][]} reference array below; without a cap a malicious or
+         * corrupt payload could request an unbounded allocation.
+         */
+        private static final int MAX_CHUNK_COUNT = 256;
+
         private record PendingSet(byte[][] chunks, long firstSeenMs) {
         }
 
@@ -85,7 +92,7 @@ public final class SoulVoicePcm {
 
         public Optional<byte[]> accept(UUID correlationId, int chunkIndex, int chunkCount,
                                         byte[] data, long nowMs) {
-            if (correlationId == null || data == null || chunkCount <= 0
+            if (correlationId == null || data == null || chunkCount <= 0 || chunkCount > MAX_CHUNK_COUNT
                     || chunkIndex < 0 || chunkIndex >= chunkCount) {
                 return Optional.empty();
             }

@@ -111,6 +111,45 @@ class SoulVoiceServiceTest {
     }
 
     @Test
+    void engineStaysReachableAfterOneFailureSoTheNextLineIsDelivered() throws Exception {
+        // Regression for C1: an engine whose alive() always reports true (as PiperVoiceEngine
+        // does post-fix — it is always retryable) must not be permanently gated out by
+        // SoulVoiceService after a single failed synthesis. The second onSpoken must still
+        // reach the engine and deliver.
+        java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+        byte[] pcm = new byte[10];
+        CopyOnWriteArrayList<Sent> sent = new CopyOnWriteArrayList<>();
+        CountDownLatch delivered = new CountDownLatch(1);
+        SoulVoiceEngine engine = new SoulVoiceEngine() {
+            @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+                if (attempts.getAndIncrement() == 0) {
+                    return CompletableFuture.failedFuture(new RuntimeException("boom"));
+                }
+                return CompletableFuture.completedFuture(tinyWav(pcm));
+            }
+            @Override public boolean alive() { return true; }
+            @Override public void close() { }
+        };
+        SoulVoiceService service = new SoulVoiceService(enabledSettings(), engine,
+                (playerId, correlationId, botId, mode, sampleRate, chunks) -> {
+                    sent.add(new Sent(playerId, correlationId, botId, mode, sampleRate, chunks));
+                    delivered.countDown();
+                });
+
+        SoulTypes.AcceptedTurn first = turn(SoulTypes.Reachability.LOCAL, UUID.randomUUID());
+        service.onSpoken(first, tokenFor(first), "First line fails.");
+        Thread.sleep(200); // let the failing attempt complete before the next one is queued
+
+        SoulTypes.AcceptedTurn second = turn(SoulTypes.Reachability.LOCAL, UUID.randomUUID());
+        service.onSpoken(second, tokenFor(second), "Second line should land.");
+
+        assertTrue(delivered.await(2, TimeUnit.SECONDS));
+        assertEquals(2, attempts.get());
+        assertEquals(second.routingId(), sent.get(0).correlationId());
+        service.close();
+    }
+
+    @Test
     void engineFailureDropsAudioWithoutThrowing() throws Exception {
         SoulVoiceService service = new SoulVoiceService(enabledSettings(),
                 new SoulVoiceEngine() {

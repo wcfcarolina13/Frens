@@ -63,6 +63,19 @@ class SoulVoicePcmTest {
     }
 
     @Test
+    void oversizedChunkCountIsRejectedWithoutRetainingState() {
+        SoulVoicePcm.Reassembly reassembly = new SoulVoicePcm.Reassembly();
+        UUID id = UUID.randomUUID();
+        assertTrue(reassembly.accept(id, 0, 257, new byte[] {1}, 0L).isEmpty());
+
+        // No PendingSet must have been retained under this correlationId: a fresh, legitimately
+        // small set for the same id completes cleanly rather than colliding with a stale entry.
+        Optional<byte[]> joined = reassembly.accept(id, 0, 1, new byte[] {9}, 1L);
+        assertTrue(joined.isPresent());
+        assertArrayEquals(new byte[] {9}, joined.get());
+    }
+
+    @Test
     void staleIncompleteSetsAreExpired() {
         SoulVoicePcm.Reassembly reassembly = new SoulVoicePcm.Reassembly();
         UUID id = UUID.randomUUID();

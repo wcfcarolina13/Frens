@@ -2,6 +2,36 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul voice: final whole-branch review fixes (2026-08-25)
+
+Four findings from the final review of `feature/soul-generated-voice`, fixed in one wave:
+
+- **Critical** — `PiperVoiceEngine.alive()` returned `!closed && !lastStartFailed`, and
+  `lastStartFailed` latched `true` on any synth failure with no way back except a
+  successful synthesis. Since `SoulVoiceService.onSpoken` gates every attempt on
+  `engineAlive()`, one timeout/crash/EOF permanently silenced voice — the process restart
+  in `ensureProcess()` and the 4-strikes self-disable backoff were unreachable. Deleted
+  `lastStartFailed` entirely; `alive()` is now just `!closed` (the engine is always
+  retryable). Health/backoff policy already lived correctly in `SoulVoiceService` via
+  `VoiceBackoffPolicy` — it just couldn't run.
+- **Important** — `runSynthesis`'s failure log used `ex.getClass().getSimpleName()`, but
+  `Future.get()` wraps engine failures in `ExecutionException`, so a Piper timeout logged
+  `outcome=failed-ExecutionException` instead of `failed-TimeoutException`. Now unwraps a
+  non-null `ExecutionException` cause before taking the simple name.
+- **Important** — `SoulVoicePcm.Reassembly.accept` sized a `byte[chunkCount][]` from a
+  network-controlled varint with no upper bound. Capped at 256 chunks, rejected before any
+  allocation.
+- **Important** — `SoulVoiceClientPlayer.onPayload` now wraps its body in
+  `catch (Throwable)` so a malformed payload can never reach the Fabric network receiver.
+  `play()`'s mode-resolution ternary previously let an unrecognized mode byte fall through
+  to the positional branch, NPEing on a null last-known position after the AL source/buffer
+  were already allocated (leaking them); any byte other than `MODE_POSITIONAL` now
+  unconditionally resolves to radio.
+
+Two new tests: `SoulVoiceServiceTest` proves a post-failure engine (fails once, alive()
+always true) still delivers the next line; `SoulVoicePcmTest` proves chunkCount 257 is
+rejected without retaining reassembly state. Full `./gradlew build -q` (with tests) green.
+
 ## Soul generated voice v1 (2026-08-24)
 
 Per `docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md`: Jake’s committed soul
