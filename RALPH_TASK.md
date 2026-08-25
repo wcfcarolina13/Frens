@@ -1,7 +1,47 @@
 ---
-task: (no active task — pick from Backlog below)
+task: "Soul track next item: GROUP CHAT (multi-party soul conversations). Spec-gated — run brainstorming + spec interview FIRST, do not start coding from this line."
 test_command: "./gradlew build -x test"
 ---
+
+## Session Handoff 2026-08-25 — dialogue controls + TTS/LLM installers shipped (1.1.166→1.1.175)
+
+**Where we are:** frens-1.1.175 deployed to all three Prism instances; suite 417/417; main
+~120 commits ahead of origin (NOT pushed — Bradley must say push). Everything below is in
+`changelog.md` (2026-08-25 entries, newest-first) with full reasoning.
+
+**Shipped today (one line each):** voiced-line category muting (9 categories, Voice row
+Adv…); AdminWorldSettingsScreen double-blur crash fix + mod-wide alpha-0 invisible-text
+fix; LLM/voice/text control consolidation (lazy config-backed LLM enablement — push maps
+deleted; Voice/Text masters now gate the soul pipeline; soul toggles in the GUI); Text Adv
+unified with Voice semantics (master = kill switch, checked = active);
+sentence-streaming TTS + LoadGoverner floor held through the synth window; Piper voice
+engine installer (pinned/sha256, macOS upstream-dylib fix, smoke test) + engine chooser
+(Eng… chip); Ollama soul-model manager (LLM… chip; llama3.2:3b lined up for a speed
+test); Companion Settings autosave (Save button removed); background installs survive
+menu close (service-owned InstallJob, double-start impossible); category-aware chat
+fixes the "Nice bird!" leak (voice-muted lines fell back to untagged chat).
+
+**Bradley's standing rulings from today:** settings autosave unless destructive; one Adv
+semantics everywhere (master kill switch + per-category checkboxes); soul replies always
+visible regardless of Text Chat; users get engine/model CHOICE via transparent installers
+(show size, source, destination, system check, pre-install detection).
+
+**Field-test items still open on 1.1.175:** Piper Download & Install retry on macOS (the
+dylib fix is deployed but untested in-game); llama3.2:3b pull + speed/quality vs 8B
+(prompts were tuned on 8B — judge reply grounding too); streaming first-word latency +
+whether the governor fix stops the laptop bogging during synth; category muting round-trip
+(ambient muted in both menus = fully gone).
+
+**NEXT SOUL-TRACK ITEM — group chat.** Queue from the pilot roadmap: group chat → banter →
+ambient/local chat → consolidation → action requests. Today's session did NOT spec it.
+Known constraints to bring into the brainstorm: soul routing is currently exclusive
+private DM (leading-name routing via ChatAddressing; CompanionCommunicationPolicy.isPrivateSoulAuthorized;
+one AcceptedTurn per player-bot conversation, cursor epochs per ConversationKey);
+SoulMessageDelivery sends privately to ONE player; voice delivery is per-player payloads.
+Group chat likely touches: routing (who is addressed when several bots/players hear),
+delivery fan-out, turn scheduling (SoulGenerationScheduler is 1-slot), reachability
+policy, and how LoadGoverner handles multiple queued generations. Spec first
+(docs/superpowers/specs/), then plan, then implement.
 
 ## Session Notes 2026-05-06 — Named-hostile pacifism shipped (verified in 1.1.55)
 
