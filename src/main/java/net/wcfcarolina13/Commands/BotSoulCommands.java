@@ -17,12 +17,16 @@ import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
 import net.wcfcarolina13.GameAI.souls.SoulTypes;
+import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Explicit `/bot soul` pilot controls: {@code status [bot]}, {@code system <on|off>},
@@ -92,7 +96,11 @@ final class BotSoulCommands {
                 .then(CommandManager.literal("reset")
                         .then(CommandManager.argument("bot", EntityArgumentType.player())
                                 .executes(context -> executeReset(context,
-                                        EntityArgumentType.getPlayer(context, "bot")))));
+                                        EntityArgumentType.getPlayer(context, "bot")))))
+                .then(CommandManager.literal("voice")
+                        .then(CommandManager.literal("on").executes(BotSoulCommands::executeVoiceOn))
+                        .then(CommandManager.literal("off").executes(BotSoulCommands::executeVoiceOff))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeVoiceStatus)));
     }
 
     // === Pure helpers (unit-tested; no Minecraft types) ===
@@ -132,6 +140,28 @@ final class BotSoulCommands {
             }
         }
         return Optional.of(trimmed);
+    }
+
+    /**
+     * Validates the piper binary + voice model paths before {@code /bot soul voice on} flips the
+     * config switch, so a bad config never silently produces a "voice on" that never actually
+     * speaks. Reports the first concrete problem found, in order: binary configured, model
+     * configured, binary exists, model exists.
+     */
+    static Optional<String> validateVoicePaths(String binary, String model, Predicate<String> isFile) {
+        if (binary == null || binary.isBlank()) {
+            return Optional.of("Configure the piper binary path first.");
+        }
+        if (model == null || model.isBlank()) {
+            return Optional.of("Configure a piper voice model first.");
+        }
+        if (!isFile.test(binary)) {
+            return Optional.of("Piper binary not found: " + binary);
+        }
+        if (!isFile.test(model)) {
+            return Optional.of("Voice model not found: " + model);
+        }
+        return Optional.empty();
     }
 
     private static Optional<Boolean> parseOnOff(String raw) {
@@ -206,6 +236,58 @@ final class BotSoulCommands {
                 ChatUtils.sendSystemMessage(source, successMessage);
             }
         }));
+        return 1;
+    }
+
+    // === voice on / off / status (operator-only for on/off, config + live reload) ===
+
+    private static int executeVoiceOn(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the soul voice switch."));
+            return 0;
+        }
+        Optional<String> problem = validateVoicePaths(
+                Frens.CONFIG.getSoulVoicePiperBinary(),
+                Frens.CONFIG.getSoulVoiceModel(),
+                path -> Files.isRegularFile(Path.of(path)));
+        if (problem.isPresent()) {
+            source.sendError(Text.literal(problem.get()));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        config.setSoulVoiceEnabled(true);
+        config.save();
+        return awaitReloadThenReport(source, "Soul voice enabled.");
+    }
+
+    private static int executeVoiceOff(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the soul voice switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        config.setSoulVoiceEnabled(false);
+        config.save();
+        return awaitReloadThenReport(source, "Soul voice disabled.");
+    }
+
+    private static int executeVoiceStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
+        if (maybeRuntime.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "Soul system: runtime not currently running.");
+            return 1;
+        }
+        SoulRuntime runtime = maybeRuntime.get();
+        SoulVoiceSettings voiceSettings = runtime.voiceSettings();
+        boolean alive = runtime.voiceEngineAlive();
+        String line = "Soul voice: " + (voiceSettings.enabled() ? "on" : "off")
+                + " valid=" + voiceSettings.valid()
+                + (voiceSettings.valid() ? "" : " (" + voiceSettings.validationError() + ")")
+                + " engineAlive=" + alive;
+        ChatUtils.sendSystemMessage(source, line);
         return 1;
     }
 
