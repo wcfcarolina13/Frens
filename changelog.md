@@ -2,6 +2,29 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Text Adv unified with Voice + soul LLM model manager; 1.1.173 (2026-08-25)
+
+Two Bradley rulings from the Piper field round:
+
+- **Text Adv semantics unified with Voice** ("backwards/conflicting" — correct: the menus
+  were duals). One rule everywhere now: the master toggle is a hard kill switch, and
+  while it is ON the Adv checkboxes choose which categories are active. `mutedTextCategories`
+  (default empty = all show) replaces the short-lived inverse `textVisibleCategoryExceptions`;
+  `TextLineVisibilityService` = master && !muted; screen/tooltips reworded ("Same rule as
+  Voice"). The "quiet except danger" preset is still one Mute All + two checks away.
+  Old exception field in existing settings.json5 is ignored by Gson and drops on next save.
+- **Soul LLM model manager** — the Piper-installer treatment for the LLM, per request
+  (wants to try a smaller model for speed). `OllamaModelInstaller`: detect (Ollama
+  /api/version + /api/tags, total RAM via OperatingSystemMXBean, disk free), streaming
+  `/api/pull` with NDJSON progress, `select()` = setSoulModel + runtime hot-reload.
+  Offered models verified against registry.ollama.ai (not inferred): llama3.1:8b
+  (4.6 GB, current default), llama3.2:3b (1.9 GB, faster), llama3.2:1b (1.3 GB, fastest);
+  each row shows size, description, installed state, and a RAM-recommendation warning
+  when the machine is under the model's comfortable floor. `SoulModelManagerScreen`
+  behind a new "LLM…" chip on the Soul Chat row; when the Ollama daemon is unreachable
+  the screen says so plainly and points at ollama.com (the mod does not install Ollama
+  itself). Pulls are Ollama-resumable so a failed download retries safely.
+
 ## Piper installer field fixes: macOS dylibs + stderr-aware errors; 1.1.172 deployed (2026-08-25)
 
 Bradley's first in-game run of the installer failed on BOTH paths — reproduced and

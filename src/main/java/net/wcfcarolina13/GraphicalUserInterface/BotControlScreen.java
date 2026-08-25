@@ -48,6 +48,7 @@ public class BotControlScreen extends Screen {
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
     private static final int TEXT_TOGGLE_INDEX = 4;
     private static final int VOICE_TOGGLE_INDEX = 5;
+    private static final int SOUL_CHAT_TOGGLE_INDEX = 6;
     private static final int SOUL_VOICE_TOGGLE_INDEX = 7;
     private static final int VOICE_ADV_W = 34;
 
@@ -133,6 +134,8 @@ public class BotControlScreen extends Screen {
     private Rect textAdvancedRect;
     /** "Eng…" chip on the Soul Voice row — opens the engine chooser (Dreamsleeve / Piper). */
     private Rect soulVoiceEngineRect;
+    /** "LLM…" chip on the Soul Chat row — opens the soul model manager (Ollama). */
+    private Rect soulChatModelRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
     private Rect bulkAutoRespawnOnRect;
     private Rect bulkAutoRespawnOffRect;
@@ -649,6 +652,7 @@ public class BotControlScreen extends Screen {
         voiceAdvancedRect = null;
         textAdvancedRect = null;
         soulVoiceEngineRect = null;
+        soulChatModelRect = null;
 
         // Panel background
         context.fill(globalPanelRect.x, globalPanelRect.y,
@@ -720,12 +724,15 @@ public class BotControlScreen extends Screen {
             }
 
             Rect advRect = null;
-            if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX || i == SOUL_VOICE_TOGGLE_INDEX) {
+            if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX
+                    || i == SOUL_VOICE_TOGGLE_INDEX || i == SOUL_CHAT_TOGGLE_INDEX) {
                 advRect = new Rect(chipRect.x - VOICE_ADV_W - 4, y + 1, VOICE_ADV_W, rowH - 2);
                 if (i == VOICE_TOGGLE_INDEX) {
                     voiceAdvancedRect = advRect;
                 } else if (i == TEXT_TOGGLE_INDEX) {
                     textAdvancedRect = advRect;
+                } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
+                    soulChatModelRect = advRect;
                 } else {
                     soulVoiceEngineRect = advRect;
                 }
@@ -743,7 +750,8 @@ public class BotControlScreen extends Screen {
                 context.fill(advRect.x, advRect.y, advRect.right(), advRect.bottom(),
                         advHover ? COL_CHIP_HL : COL_CHIP);
                 context.drawText(this.textRenderer,
-                        i == SOUL_VOICE_TOGGLE_INDEX ? "Eng…" : "Adv…",
+                        i == SOUL_VOICE_TOGGLE_INDEX ? "Eng…"
+                                : i == SOUL_CHAT_TOGGLE_INDEX ? "LLM…" : "Adv…",
                         advRect.x + 6,
                         advRect.y + (advRect.h - this.textRenderer.fontHeight) / 2,
                         COL_LABEL, false);
@@ -755,6 +763,10 @@ public class BotControlScreen extends Screen {
                     } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
                                 "Mute individual categories of text lines (holograms, subtitles, chat) while Text Chat is on. Text only — audio unaffected. Same rule as the Voice Adv menu.",
+                                mouseX, mouseY);
+                    } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
+                        updateTooltipCandidate("global-soul-chat-llm",
+                                "Manage the soul LLM: see what's installed in Ollama, download a smaller/faster model, and switch — sizes and RAM guidance shown up front.",
                                 mouseX, mouseY);
                     } else {
                         updateTooltipCandidate("global-soul-voice-eng",
@@ -1274,6 +1286,12 @@ public class BotControlScreen extends Screen {
             if (soulVoiceEngineRect != null && soulVoiceEngineRect.contains(mx, my)) {
                 if (this.client != null) {
                     this.client.setScreen(new SoulVoiceEngineScreen(this));
+                }
+                return true;
+            }
+            if (soulChatModelRect != null && soulChatModelRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new SoulModelManagerScreen(this));
                 }
                 return true;
             }
