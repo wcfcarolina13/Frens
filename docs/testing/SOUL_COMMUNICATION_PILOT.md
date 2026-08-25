@@ -351,6 +351,24 @@ most once, ideally before launch.
   are Brigadier-dispatched and never pass through the `CHAT_MESSAGE` event / `SoulChatRouter` at
   all — verify no `[souls] routing` log entries correspond to command invocations.
 
+### Generated voice (v1, off by default)
+
+Setup: install piper + one voice model locally; set `soulVoicePiperBinary` and
+`soulVoiceModel` in the config; `/bot soul voice on` (expect up-front path validation).
+
+- [ ] **Voice disabled baseline** — with `soulVoiceEnabled=false`, DM Jake: behavior identical
+  to pre-voice builds; no `[souls] tts` lines.
+- [ ] **Local positional voice** — stand near Jake, DM him: text reply first, then his voice
+  from his position; walk while he speaks — audio follows him. Log shows
+  `[souls] tts correlationId=<same routingId as the turn> outcome=spoken`.
+- [ ] **Remote radio voice** — DM from far away (REMOTE reachability): flat, quieter voice.
+- [ ] **Engine kill mid-session** — `pkill -f piper` then DM: text still arrives, one WARN,
+  voice recovers (restart) or self-disables after repeated failures.
+- [ ] **Timeout** — set `soulVoiceSynthTimeoutMs=1000` with a long reply: that line's audio is
+  dropped (`outcome=failed-TimeoutException`), text unaffected.
+- [ ] **Volume** — master/players volume sliders scale the voice.
+- [ ] **Whisper voice** — `/msg Jake ...` replies are voiced identically to chat DMs (same DIRECT thread).
+
 ### Generated prose containing apparent command/tool syntax
 
 - [ ] **Verification that generated prose cannot dispatch an action**

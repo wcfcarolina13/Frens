@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul generated voice v1 (2026-08-24)
+
+Per `docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md`: Jake’s committed soul
+replies are synthesized locally with Piper (CPU, mod-owned long-lived subprocess) and played
+client-side through a dedicated OpenAL context — positional from his body when LOCAL, flat
+quieter "radio" when REMOTE. Text-first always: voice subscribes at the commit-spoken point via
+the new `SoulConversationService.SpokenListener` seam and any failure drops audio only.
+Off by default (`/bot soul voice on|off|status`, up-front path validation). Voice requires `/bot soul voice on` after configuring `soulVoicePiperBinary`/`soulVoiceModel`. The client protects game audio by refusing to play (with a WARN) if the OpenAL thread-local-context extension is unavailable. `[souls] tts`
+lines join the turn’s routingId chain with synth time kept separate from LLM/delivery time.
+
 ## cancelPlayer implemented: disconnect cancels in-flight soul generations (2026-08-24)
 
 Second item off the deferred soul-track pile. `SoulRuntime.cancelPlayer` was an explicit no-op
