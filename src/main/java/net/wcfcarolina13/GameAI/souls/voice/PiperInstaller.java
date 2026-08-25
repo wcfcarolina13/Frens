@@ -70,6 +70,26 @@ public final class PiperInstaller {
             RELEASE_BASE + "piper_windows_amd64.zip", "piper_windows_amd64.zip",
             22_477_236L, "f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea");
 
+    /**
+     * The macOS piper archives above are missing their runtime dylibs upstream
+     * (libespeak-ng.1, libpiper_phonemize.1, libonnxruntime.1.14.1 — only the .dSYM debug
+     * bundle ships), and the binary has no LC_RPATH, so it can't start. All three dylibs
+     * ship in the piper-phonemize release for the same toolchain; on macOS the installer
+     * downloads it too and copies the dylibs next to the binary, and
+     * {@link PiperVoiceEngine} spawns with DYLD_LIBRARY_PATH pointing there.
+     * Windows (.dll) and Linux (.so) piper archives are complete — verified by listing.
+     */
+    private static final String PHONEMIZE_BASE =
+            "https://github.com/rhasspy/piper-phonemize/releases/download/2023.11.14-4/";
+    private static final PinnedFile PHONEMIZE_MACOS_AARCH64 = new PinnedFile(
+            PHONEMIZE_BASE + "piper-phonemize_macos_aarch64.tar.gz", "piper-phonemize_macos_aarch64.tar.gz",
+            26_641_933L, "78a9c28b3c94baf6e9526b2e386ce547909abaec4f31aadd7e16b01fbfe5f322");
+    private static final PinnedFile PHONEMIZE_MACOS_X64 = new PinnedFile(
+            PHONEMIZE_BASE + "piper-phonemize_macos_x64.tar.gz", "piper-phonemize_macos_x64.tar.gz",
+            26_641_959L, "9ec6e300c0d012a663758bc45a097b47ee759761a3b91c7742de042af789d84b");
+    private static final String[] MACOS_DYLIBS = {
+            "libespeak-ng.1.dylib", "libpiper_phonemize.1.dylib", "libonnxruntime.1.14.1.dylib"};
+
     private static final PinnedFile VOICE_ONNX = new PinnedFile(
             VOICE_BASE + VOICE_NAME + ".onnx", VOICE_NAME + ".onnx",
             63_201_294L, "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f");
@@ -85,7 +105,8 @@ public final class PiperInstaller {
     public record Plan(boolean platformSupported, String platformName, PinnedFile asset,
                        Path installDir, Path binaryPath, Path voiceOnnxPath,
                        long downloadBytes, long freeDiskBytes,
-                       List<ExistingBinary> existingBinaries, boolean voiceAlreadyPresent) {
+                       List<ExistingBinary> existingBinaries, boolean voiceAlreadyPresent,
+                       PinnedFile macosLibsAsset) {
     }
 
     /** Progress callback; safe to publish to volatile fields for the render thread. */
@@ -103,9 +124,11 @@ public final class PiperInstaller {
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
         boolean arm = arch.contains("aarch64") || arch.contains("arm");
         PinnedFile asset;
+        PinnedFile macosLibs = null;
         String platformName;
         if (os.contains("mac")) {
             asset = arm ? MACOS_AARCH64 : MACOS_X64;
+            macosLibs = arm ? PHONEMIZE_MACOS_AARCH64 : PHONEMIZE_MACOS_X64;
             platformName = "macOS " + (arm ? "(Apple Silicon)" : "(Intel)");
         } else if (os.contains("win")) {
             asset = arm ? null : WINDOWS_AMD64;
@@ -134,13 +157,14 @@ public final class PiperInstaller {
         }
 
         long downloadBytes = (asset == null ? 0 : asset.size())
+                + (macosLibs == null ? 0 : macosLibs.size())
                 + (Files.exists(voiceOnnx) ? 0 : VOICE_ONNX.size() + VOICE_JSON.size());
 
         List<ExistingBinary> existing = findExistingBinaries(binaryPath, os.contains("win"));
         boolean voicePresent = Files.exists(voiceOnnx);
 
         return new Plan(asset != null, platformName, asset, installDir, binaryPath, voiceOnnx,
-                downloadBytes, free, existing, voicePresent);
+                downloadBytes, free, existing, voicePresent, macosLibs);
     }
 
     private static List<ExistingBinary> findExistingBinaries(Path managedBinary, boolean windows) {
@@ -210,6 +234,29 @@ public final class PiperInstaller {
                 throw new IOException("Archive extracted but binary not found at " + binary);
             }
             binary.toFile().setExecutable(true);
+
+            // macOS: the piper archive ships without its runtime dylibs (upstream packaging
+            // defect) — fetch them from the pinned piper-phonemize release and place them
+            // beside the binary. PiperVoiceEngine spawns with DYLD_LIBRARY_PATH there.
+            if (plan.macosLibsAsset() != null) {
+                Path libsArchive = plan.installDir().resolve(plan.macosLibsAsset().fileName());
+                download(plan.macosLibsAsset(), libsArchive, progress);
+                progress.update("Extracting libraries…", 0, 0);
+                Path libsDir = plan.installDir().resolve("phonemize-extract");
+                Files.createDirectories(libsDir);
+                extract(libsArchive, libsDir);
+                Files.deleteIfExists(libsArchive);
+                Path libSrc = libsDir.resolve("piper-phonemize").resolve("lib");
+                for (String dylib : MACOS_DYLIBS) {
+                    Path src = libSrc.resolve(dylib);
+                    if (!Files.isRegularFile(src)) {
+                        throw new IOException("Expected library missing from archive: " + dylib);
+                    }
+                    Files.copy(src, binary.getParent().resolve(dylib),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                deleteRecursively(libsDir);
+            }
         }
 
         if (!Files.exists(plan.voiceOnnxPath())) {
@@ -237,6 +284,21 @@ public final class PiperInstaller {
                 }));
         progress.update("Done", 0, 0);
         LOGGER.info("[souls] piper installed: binary={} voice={}", binary, plan.voiceOnnxPath());
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.delete(p);
+                } catch (IOException ignored) {
+                    // best-effort cleanup of the temp extraction dir
+                }
+            });
+        }
     }
 
     private static void download(PinnedFile file, Path dest, Progress progress) throws IOException {
@@ -314,16 +376,29 @@ public final class PiperInstaller {
      */
     private static void smokeTest(Path binary, Path voice) throws IOException, InterruptedException {
         Path tmpDir = Files.createTempDirectory("frens-piper-smoke");
-        Process proc = new ProcessBuilder(
+        ProcessBuilder pb = new ProcessBuilder(
                 PiperVoiceEngine.command(binary.toString(), voice.toString(), tmpDir.toString()))
-                .redirectErrorStream(false).start();
+                .redirectErrorStream(false);
+        PiperVoiceEngine.applyLibraryPathEnv(pb, binary.toString());
+        Process proc = pb.start();
+        // Drain stderr so the child can't block on a full pipe — but keep the tail so a
+        // failure message can show WHY (e.g. a dyld library-not-loaded line).
+        StringBuilder stderrTail = new StringBuilder();
         try {
             proc.getOutputStream().write("Piper installed successfully.\n".getBytes(StandardCharsets.UTF_8));
             proc.getOutputStream().flush();
-            // Drain stderr so the child can't block on a full pipe.
             Thread drain = new Thread(() -> {
-                try (InputStream err = proc.getErrorStream()) {
-                    while (err.read() != -1) { /* discard */ }
+                try (java.io.BufferedReader err = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(proc.getErrorStream(), StandardCharsets.UTF_8))) {
+                    String errLine;
+                    while ((errLine = err.readLine()) != null) {
+                        synchronized (stderrTail) {
+                            stderrTail.append(errLine).append(' ');
+                            if (stderrTail.length() > 400) {
+                                stderrTail.delete(0, stderrTail.length() - 400);
+                            }
+                        }
+                    }
                 } catch (IOException ignored) {
                 }
             }, "frens-piper-smoke-stderr");
@@ -341,7 +416,8 @@ public final class PiperInstaller {
                     }
                     line.append((char) c);
                 } else if (!proc.isAlive() && out.available() == 0) {
-                    throw new IOException("Piper exited during smoke test (incompatible binary?)");
+                    throw new IOException("Piper exited during smoke test"
+                            + errDetail(stderrTail));
                 } else {
                     Thread.sleep(50);
                 }
@@ -349,11 +425,19 @@ public final class PiperInstaller {
             Path wav = Path.of(line.toString().trim());
             if (line.isEmpty() || !Files.isRegularFile(wav) || Files.size(wav) <= 44) {
                 throw new IOException("Piper smoke test produced no audio — binary rejected "
-                        + "(a Python 'piper' from pip/pipx may not support this CLI; use Download instead)");
+                        + "(a Python 'piper' from pip/pipx may not support this CLI; use Download instead)"
+                        + errDetail(stderrTail));
             }
             Files.deleteIfExists(wav);
         } finally {
             proc.destroyForcibly();
+        }
+    }
+
+    private static String errDetail(StringBuilder stderrTail) {
+        synchronized (stderrTail) {
+            String s = stderrTail.toString().trim();
+            return s.isEmpty() ? "" : " — " + s;
         }
     }
 }

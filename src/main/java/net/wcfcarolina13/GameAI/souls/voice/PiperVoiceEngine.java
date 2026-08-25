@@ -55,6 +55,29 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         return List.of(binary, "--model", modelPath, "--output_dir", outputDir);
     }
 
+    /**
+     * The prebuilt macOS piper binary carries no LC_RPATH, so its @rpath dylibs (placed
+     * beside it by {@link PiperInstaller}) only resolve via DYLD_LIBRARY_PATH; Linux gets
+     * the same treatment with LD_LIBRARY_PATH as harmless insurance (its archive ships
+     * .so files beside the binary too). No-op on Windows (DLLs load from the exe's dir).
+     */
+    public static void applyLibraryPathEnv(ProcessBuilder builder, String binary) {
+        try {
+            java.nio.file.Path parent = java.nio.file.Path.of(binary).toAbsolutePath().getParent();
+            if (parent == null) {
+                return;
+            }
+            String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+            if (os.contains("mac")) {
+                builder.environment().put("DYLD_LIBRARY_PATH", parent.toString());
+            } else if (os.contains("linux")) {
+                builder.environment().put("LD_LIBRARY_PATH", parent.toString());
+            }
+        } catch (RuntimeException ignored) {
+            // unparseable binary path — spawn without the env override
+        }
+    }
+
     @Override
     public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
         CompletableFuture<byte[]> result = new CompletableFuture<>();
@@ -109,6 +132,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         }
         ProcessBuilder builder = new ProcessBuilder(command(binary, modelPath, outputDir.toString()));
         builder.redirectErrorStream(false);
+        applyLibraryPathEnv(builder, binary);
         process = builder.start();
         stdin = new java.io.OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
         stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));

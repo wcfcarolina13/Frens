@@ -2,6 +2,34 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Piper installer field fixes: macOS dylibs + stderr-aware errors; 1.1.172 deployed (2026-08-25)
+
+Bradley's first in-game run of the installer failed on BOTH paths — reproduced and
+root-caused offline:
+
+- **"Use Existing" rejection was correct behavior** (pipx Python piper renders but reports
+  the WAV on stderr, breaking the stdout contract) — working as designed.
+- **"Download & Install" failure was an UPSTREAM PACKAGING DEFECT**: the macOS piper
+  2023.11.14-2 archives ship WITHOUT their runtime dylibs (libespeak-ng.1,
+  libpiper_phonemize.1, libonnxruntime.1.14.1 — only the .dSYM debug bundle is present),
+  and the binary has no LC_RPATH, so dyld dies with "Library not loaded". Windows (.dll)
+  and Linux (.so) archives verified complete by listing — Windows users were never
+  affected.
+- **Fix** (proven locally: piper runs at ~18x realtime, prints the WAV path on stdout):
+  on macOS the installer additionally downloads the pinned
+  piper-phonemize 2023.11.14-4 archive for the arch (25MB, sha256-pinned like everything
+  else), copies the three dylibs beside the binary, and `PiperVoiceEngine` +
+  the smoke test now spawn with `DYLD_LIBRARY_PATH` = the binary's dir (the binary has no
+  rpath to find them otherwise). Linux gets `LD_LIBRARY_PATH` as harmless insurance.
+  Download plan total on macOS is now ~44MB + voice.
+- **Smoke-test failures now carry the child's stderr tail** in the on-screen message — the
+  dyld "Library not loaded" line would have been visible in-game instead of the vague
+  "exited during smoke test (incompatible binary?)".
+
+Deployed **frens-1.1.172**; suite green. Retry path: Bot Control → Soul Voice → Eng… →
+Install Piper… → Download & Install (the voice from the earlier attempt is already
+present and will be reused).
+
 ## Piper installer + soul-voice engine chooser; 1.1.171 (2026-08-25)
 
 Bradley's ruling on the A/B: Piper quality is acceptable for Minecraft — users get the
