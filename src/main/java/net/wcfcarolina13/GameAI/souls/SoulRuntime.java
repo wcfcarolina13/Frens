@@ -116,7 +116,7 @@ public final class SoulRuntime {
                 SoulGenerationScheduler scheduler, SoulConversationService conversationService) {
         this.store = Objects.requireNonNull(store, "store");
         this.delivery = NO_OP_DELIVERY;
-        this.voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) -> { };
+        this.voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { };
         this.pipelineRef = new AtomicReference<>(new Pipeline(
                 Objects.requireNonNull(settings, "settings"),
                 Objects.requireNonNull(provider, "provider"),
@@ -160,7 +160,7 @@ public final class SoulRuntime {
                     new SoulMessageDelivery.ProductionDeliveryGuard(server, store,
                             () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)));
 
-            SoulVoiceService.VoiceDelivery voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) ->
+            SoulVoiceService.VoiceDelivery voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) ->
                     server.execute(() -> {
                         net.minecraft.server.network.ServerPlayerEntity player =
                                 server.getPlayerManager().getPlayer(playerId);
@@ -171,7 +171,8 @@ public final class SoulRuntime {
                                 ? SoulVoicePayload.MODE_POSITIONAL : SoulVoicePayload.MODE_RADIO;
                         for (int i = 0; i < chunks.size(); i++) {
                             ServerPlayNetworking.send(player, new SoulVoicePayload(
-                                    correlationId, botId, modeByte, sampleRate, i, chunks.size(), chunks.get(i)));
+                                    correlationId, botId, modeByte, sampleRate, i, chunks.size(), chunks.get(i),
+                                    groupId, segmentIndex));
                         }
                     });
 
@@ -257,7 +258,11 @@ public final class SoulRuntime {
         if (runtime == null) {
             return 0;
         }
-        return runtime.pipelineRef.get().scheduler().inFlightCount();
+        Pipeline pipeline = runtime.pipelineRef.get();
+        // Include active TTS renders: the synthesis window (8-10s on Metal) starts AFTER the
+        // LLM scheduler frees its slot, and it is the heaviest GPU contention of the whole
+        // turn — without this the LoadGoverner floor dropped exactly when it mattered most.
+        return pipeline.scheduler().inFlightCount() + pipeline.voice().activeSyntheses();
     }
 
     /** Package-private test seam: installs {@code runtime} without going through {@link #start}. */

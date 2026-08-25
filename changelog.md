@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul TTS: sentence-streaming synthesis + LoadGoverner floor through the render window (2026-08-25)
+
+Bradley: TTS "quite slow, and seems to bug the laptop." Two of the three planned levers:
+
+- **LoadGoverner gap CONFIRMED and fixed.** `activeGenerations()` counted only the LLM
+  scheduler's queue+active; the scheduler slot frees before validation/delivery, so the
+  entire 8-10s Qwen3-TTS Metal render ran with the probe at 0 — the governor floor dropped
+  exactly at peak contention. `SoulVoiceService.activeSyntheses` (AtomicInteger, counted
+  inside the worker task so a queue-full rejection can't leak) is now added into
+  `SoulRuntime.activeGenerations()`. Probe signature unchanged (LoadGoverner reflects on it).
+- **Sentence-streaming synthesis.** Replies are split into sentences
+  (`splitSentences`: split on .!?…, fragments <24 chars merge forward, ≥6 segments fold
+  into the last) and each segment renders + delivers independently: playback starts after
+  sentence one while the rest render. Plumbing: `VoiceDelivery.send` gains
+  `groupId` (turn routingId) + `segmentIndex`; `correlationId` is now a derived
+  per-segment id (`segmentCorrelationId`, xor-fold — log-traceable to the turn);
+  `SoulVoicePayload` carries both new fields; `SoulVoiceClientPlayer` queues same-group
+  segments on ONE OpenAL source via `alSourceQueueBuffers` (first segment queued too —
+  static attach can't be appended to), resumes a drained source (render slower than
+  playback = natural pause), and treats a different groupId as a new reply (old
+  stop-and-replace path). `ActiveVoice` record → class holding the buffer list; reap and
+  stop paths delete all queued buffers. Mid-reply engine failure aborts remaining segments
+  (skipping one would garble the reply). Per-segment `[souls] tts` log lines
+  (`spoken-segN/M`) + a `spoken-all-Nseg` total.
+- Tests updated for the correlation-id change; **suite 417/417 green**.
+
 ## Text Chat "Adv…" — keep-visible category exceptions; 1.1.169 built, NOT deployed (2026-08-25)
 
 Bradley's ruling: inverse semantics from the voice menu. Text Chat master ON = everything

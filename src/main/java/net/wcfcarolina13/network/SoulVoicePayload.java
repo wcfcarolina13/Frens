@@ -7,9 +7,17 @@ import net.minecraft.util.Identifier;
 
 import java.util.UUID;
 
-/** Server -> Client: one chunk of a synthesized soul-voice line (16-bit mono PCM). */
+/**
+ * Server -> Client: one chunk of a synthesized soul-voice line (16-bit mono PCM).
+ *
+ * <p>Sentence streaming: a reply is delivered as ordered segments sharing one
+ * {@code groupId} (the turn's routingId), each segment having its own {@code correlationId}
+ * for chunk reassembly and an increasing {@code segmentIndex}. The client queues same-group
+ * segments on one audio source instead of cutting the previous one off.
+ */
 public record SoulVoicePayload(UUID correlationId, UUID botId, byte mode, int sampleRate,
-                                int chunkIndex, int chunkCount, byte[] data)
+                                int chunkIndex, int chunkCount, byte[] data,
+                                UUID groupId, int segmentIndex)
         implements CustomPayload {
 
     public static final byte MODE_POSITIONAL = 0;
@@ -29,11 +37,14 @@ public record SoulVoicePayload(UUID correlationId, UUID botId, byte mode, int sa
         buf.writeVarInt(chunkIndex);
         buf.writeVarInt(chunkCount);
         buf.writeByteArray(data);
+        buf.writeUuid(groupId);
+        buf.writeVarInt(segmentIndex);
     }
 
     private static SoulVoicePayload read(PacketByteBuf buf) {
         return new SoulVoicePayload(buf.readUuid(), buf.readUuid(), buf.readByte(),
-                buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readByteArray());
+                buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readByteArray(),
+                buf.readUuid(), buf.readVarInt());
     }
 
     @Override

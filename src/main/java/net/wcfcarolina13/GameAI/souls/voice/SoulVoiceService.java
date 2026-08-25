@@ -25,17 +25,27 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
     private static final Logger LOGGER = LoggerFactory.getLogger("frens.souls");
     private static final int CHUNK_BYTES = 32_768;
     private static final int QUEUE_CAP = 4;
+    /** Sentence fragments shorter than this merge into the next sentence before synthesis. */
+    static final int MIN_SEGMENT_CHARS = 24;
+    /** Hard cap on streaming segments per reply; overflow folds into the last segment. */
+    static final int MAX_SEGMENTS = 6;
 
-    /** Minecraft-free delivery boundary; production impl sends SoulVoicePayload chunks. */
+    /**
+     * Minecraft-free delivery boundary; production impl sends SoulVoicePayload chunks.
+     * Sentence streaming: a reply is delivered as ordered segments sharing one
+     * {@code groupId} (the turn's routingId); {@code correlationId} is unique per segment
+     * (it keys client-side chunk reassembly). The client queues same-group segments on one
+     * audio source so playback starts after segment 0 while later segments still render.
+     */
     public interface VoiceDelivery {
         void send(UUID playerId, UUID correlationId, UUID botId, SoulVoiceGate.Mode mode,
-                  int sampleRate, List<byte[]> pcmChunks);
+                  int sampleRate, List<byte[]> pcmChunks, UUID groupId, int segmentIndex);
     }
 
     private static final SoulVoiceService DISABLED =
             new SoulVoiceService(new SoulVoiceSettings(false, false, "disabled",
                     SoulVoiceSettings.ENGINE_PIPER, "", "", "", "", "", 400, 8000L, 0.6f),
-                    null, (playerId, correlationId, botId, mode, sampleRate, chunks) -> { });
+                    null, (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { });
 
     private final SoulVoiceSettings settings;
     private final SoulVoiceEngine engine; // null only for the disabled instance
@@ -48,6 +58,11 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
     private final java.util.function.BooleanSupplier masterVoiceEnabled;
     private final ExecutorService worker;
     private final VoiceBackoffPolicy backoff = new VoiceBackoffPolicy();
+    /** Renders currently running on the worker — feeds SoulRuntime.activeGenerations() so the
+     *  LoadGoverner stage floor stays held through the (heavy, Metal-bound) synthesis window,
+     *  not just the LLM generation that precedes it. */
+    private final java.util.concurrent.atomic.AtomicInteger activeSyntheses =
+            new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean selfDisabled;
 
     public SoulVoiceService(SoulVoiceSettings settings, SoulVoiceEngine engine, VoiceDelivery delivery) {
@@ -92,33 +107,104 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
             logTts(turn.routingId(), "skipped-empty", 0L, 0, 0);
             return;
         }
-        worker.execute(() -> runSynthesis(turn, mode.get(), sanitized.get()));
+        worker.execute(() -> {
+            // Counted inside the task (not at submit) so a queue-full rejection can never
+            // leak an increment — the rejection handler discards the task without running it.
+            activeSyntheses.incrementAndGet();
+            try {
+                runSynthesis(turn, mode.get(), sanitized.get());
+            } finally {
+                activeSyntheses.decrementAndGet();
+            }
+        });
     }
 
+    /** Number of synthesis renders currently running (0 or 1; the worker is single-threaded). */
+    public int activeSyntheses() {
+        return activeSyntheses.get();
+    }
+
+    /**
+     * Sentence-streaming synthesis: the reply is split into sentences and each is rendered
+     * and delivered as its own segment (shared groupId = routingId), so the client starts
+     * playing sentence one while the rest still render. A mid-reply failure aborts the
+     * remaining segments — better to stop cleanly than skip a sentence and garble the reply.
+     */
     private void runSynthesis(SoulTypes.AcceptedTurn turn, SoulVoiceGate.Mode mode, String text) {
-        long startNanos = System.nanoTime();
-        try {
-            byte[] wav = engine.synthesize(text, turn.profileId())
-                    .get(settings.synthTimeoutMs() + 500L, TimeUnit.MILLISECONDS);
-            long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
-            Optional<SoulVoicePcm.PcmAudio> pcm = SoulVoicePcm.parseWav(wav);
-            if (pcm.isEmpty()) {
+        List<String> segments = splitSentences(text);
+        long turnStartNanos = System.nanoTime();
+        for (int i = 0; i < segments.size(); i++) {
+            long startNanos = System.nanoTime();
+            try {
+                byte[] wav = engine.synthesize(segments.get(i), turn.profileId())
+                        .get(settings.synthTimeoutMs() + 500L, TimeUnit.MILLISECONDS);
+                long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
+                Optional<SoulVoicePcm.PcmAudio> pcm = SoulVoicePcm.parseWav(wav);
+                if (pcm.isEmpty()) {
+                    noteFailure();
+                    logTts(turn.routingId(), "failed-badwav-seg" + i, synthMs, wav == null ? 0 : wav.length, 0);
+                    return;
+                }
+                List<byte[]> chunks = SoulVoicePcm.chunk(pcm.get().data(), CHUNK_BYTES);
+                delivery.send(turn.key().playerId(), segmentCorrelationId(turn.routingId(), i),
+                        turn.key().botId(), mode, pcm.get().sampleRate(), chunks,
+                        turn.routingId(), i);
+                backoff.onSuccess();
+                logTts(turn.routingId(), "spoken-seg" + i + "/" + segments.size(), synthMs,
+                        pcm.get().data().length, chunks.size());
+            } catch (Exception ex) {
+                long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
                 noteFailure();
-                logTts(turn.routingId(), "failed-badwav", synthMs, wav == null ? 0 : wav.length, 0);
+                Throwable causeToReport = (ex instanceof ExecutionException && ex.getCause() != null)
+                        ? ex.getCause() : ex;
+                logTts(turn.routingId(), "failed-seg" + i + "-" + causeToReport.getClass().getSimpleName(),
+                        synthMs, 0, 0);
                 return;
             }
-            List<byte[]> chunks = SoulVoicePcm.chunk(pcm.get().data(), CHUNK_BYTES);
-            delivery.send(turn.key().playerId(), turn.routingId(), turn.key().botId(),
-                    mode, pcm.get().sampleRate(), chunks);
-            backoff.onSuccess();
-            logTts(turn.routingId(), "spoken", synthMs, pcm.get().data().length, chunks.size());
-        } catch (Exception ex) {
-            long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
-            noteFailure();
-            Throwable causeToReport = (ex instanceof ExecutionException && ex.getCause() != null)
-                    ? ex.getCause() : ex;
-            logTts(turn.routingId(), "failed-" + causeToReport.getClass().getSimpleName(), synthMs, 0, 0);
         }
+        logTts(turn.routingId(), "spoken-all-" + segments.size() + "seg",
+                (System.nanoTime() - turnStartNanos) / 1_000_000L, 0, 0);
+    }
+
+    /**
+     * Deterministic per-segment correlation id derived from the turn's routingId — unique per
+     * segment (keys client chunk reassembly) yet traceable back to the turn in logs.
+     */
+    static UUID segmentCorrelationId(UUID routingId, int segmentIndex) {
+        return new UUID(routingId.getMostSignificantBits(),
+                routingId.getLeastSignificantBits() ^ (0x9E3779B97F4A7C15L * (segmentIndex + 1)));
+    }
+
+    /**
+     * Splits a sanitized reply into sentence segments for streaming synthesis. Fragments
+     * shorter than {@value #MIN_SEGMENT_CHARS} chars are merged with the following sentence
+     * (tiny synth calls sound choppy and waste round-trips); at most {@value #MAX_SEGMENTS}
+     * segments — anything beyond is folded into the last one.
+     */
+    static List<String> splitSentences(String text) {
+        List<String> out = new java.util.ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return out;
+        }
+        String[] raw = text.trim().split("(?<=[.!?…])\\s+");
+        StringBuilder pending = new StringBuilder();
+        for (String part : raw) {
+            if (pending.length() > 0) {
+                pending.append(' ');
+            }
+            pending.append(part.trim());
+            if (pending.length() >= MIN_SEGMENT_CHARS) {
+                if (out.size() == MAX_SEGMENTS - 1) {
+                    continue; // keep accumulating into the final segment
+                }
+                out.add(pending.toString());
+                pending.setLength(0);
+            }
+        }
+        if (pending.length() > 0) {
+            out.add(pending.toString());
+        }
+        return out;
     }
 
     private void noteFailure() {

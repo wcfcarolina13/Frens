@@ -68,7 +68,7 @@ class SoulVoiceServiceTest {
             @Override public void close() { }
         };
         SoulVoiceService service = new SoulVoiceService(enabledSettings(), engine,
-                (playerId, correlationId, botId, mode, sampleRate, chunks) -> {
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> {
                     sent.add(new Sent(playerId, correlationId, botId, mode, sampleRate, chunks));
                     done.countDown();
                 });
@@ -79,7 +79,9 @@ class SoulVoiceServiceTest {
 
         assertTrue(done.await(2, TimeUnit.SECONDS));
         Sent one = sent.get(0);
-        assertEquals(routingId, one.correlationId());
+        // Sentence streaming: correlationId is the derived per-segment id (segment 0 here);
+        // the turn's routingId travels as the delivery groupId instead.
+        assertEquals(SoulVoiceService.segmentCorrelationId(routingId, 0), one.correlationId());
         assertEquals(SoulVoiceGate.Mode.POSITIONAL, one.mode());
         assertEquals(22050, one.sampleRate());
         assertEquals(2, one.chunks().size()); // 40_000 bytes at 32_768/chunk
@@ -101,7 +103,7 @@ class SoulVoiceServiceTest {
                     @Override public boolean alive() { return true; }
                     @Override public void close() { }
                 },
-                (playerId, correlationId, botId, mode, sampleRate, chunks) ->
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) ->
                         sent.add(new Sent(playerId, correlationId, botId, mode, sampleRate, chunks)));
         SoulTypes.AcceptedTurn unreachable = turn(SoulTypes.Reachability.UNREACHABLE, UUID.randomUUID());
         enabled.onSpoken(unreachable, tokenFor(unreachable), "Hello.");
@@ -132,7 +134,7 @@ class SoulVoiceServiceTest {
             @Override public void close() { }
         };
         SoulVoiceService service = new SoulVoiceService(enabledSettings(), engine,
-                (playerId, correlationId, botId, mode, sampleRate, chunks) -> {
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> {
                     sent.add(new Sent(playerId, correlationId, botId, mode, sampleRate, chunks));
                     delivered.countDown();
                 });
@@ -146,7 +148,7 @@ class SoulVoiceServiceTest {
 
         assertTrue(delivered.await(2, TimeUnit.SECONDS));
         assertEquals(2, attempts.get());
-        assertEquals(second.routingId(), sent.get(0).correlationId());
+        assertEquals(SoulVoiceService.segmentCorrelationId(second.routingId(), 0), sent.get(0).correlationId());
         service.close();
     }
 
@@ -160,7 +162,7 @@ class SoulVoiceServiceTest {
                     @Override public boolean alive() { return true; }
                     @Override public void close() { }
                 },
-                (playerId, correlationId, botId, mode, sampleRate, chunks) -> {
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> {
                     throw new AssertionError("must not deliver on engine failure");
                 });
         SoulTypes.AcceptedTurn accepted = turn(SoulTypes.Reachability.LOCAL, UUID.randomUUID());

@@ -68,7 +68,30 @@ public final class SoulVoiceClientPlayer {
     private static final float REFERENCE_DISTANCE = 2.0f;
     private static final float MAX_DISTANCE = 14.0f;
 
-    private record ActiveVoice(UUID botId, int source, int buffer, byte mode) {
+    /**
+     * One playing utterance for one bot. Sentence streaming queues each same-group segment
+     * as an additional buffer on the same source, so {@code buffers} grows as segments land;
+     * all of them are deleted together when the source is reaped or stopped.
+     */
+    private static final class ActiveVoice {
+        private final UUID botId;
+        private final int source;
+        private final byte mode;
+        private final UUID groupId;
+        private final java.util.List<Integer> buffers = new java.util.ArrayList<>();
+
+        private ActiveVoice(UUID botId, int source, byte mode, UUID groupId) {
+            this.botId = botId;
+            this.source = source;
+            this.mode = mode;
+            this.groupId = groupId;
+        }
+
+        private UUID botId() { return botId; }
+        private int source() { return source; }
+        private byte mode() { return mode; }
+        private UUID groupId() { return groupId; }
+        private java.util.List<Integer> buffers() { return buffers; }
     }
 
     private static final BlockingQueue<Runnable> AL_TASKS = new LinkedBlockingQueue<>();
@@ -112,7 +135,7 @@ public final class SoulVoiceClientPlayer {
                         payload.chunkCount(), payload.data(), now);
             }
             pcm.ifPresent(bytes -> alTask(() ->
-                    play(payload.botId(), payload.mode(), payload.sampleRate(), bytes)));
+                    play(payload.botId(), payload.mode(), payload.sampleRate(), bytes, payload.groupId())));
         } catch (Throwable t) {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("Soul voice: dropped malformed payload");
@@ -191,7 +214,7 @@ public final class SoulVoiceClientPlayer {
 
     // ---- AL-thread-confined below this line -------------------------------------------
 
-    private static void play(UUID botId, byte mode, int sampleRate, byte[] pcm) {
+    private static void play(UUID botId, byte mode, int sampleRate, byte[] pcm, UUID groupId) {
         if (playbackDisabled) {
             return;
         }
@@ -199,6 +222,25 @@ public final class SoulVoiceClientPlayer {
         if (context == 0L) {
             return;
         }
+
+        // Sentence streaming: a segment of the utterance already playing for this bot is
+        // QUEUED on the existing source (gapless continuation) instead of cutting it off.
+        // A different groupId is a genuinely new reply and takes the stop-and-replace path.
+        ActiveVoice existing = ACTIVE.get(botId);
+        if (existing != null && groupId != null && groupId.equals(existing.groupId())) {
+            int queuedBuffer = AL10.alGenBuffers();
+            ByteBuffer queuedData = BufferUtils.createByteBuffer(pcm.length);
+            queuedData.put(pcm).flip();
+            AL10.alBufferData(queuedBuffer, AL10.AL_FORMAT_MONO16, queuedData, sampleRate);
+            AL10.alSourceQueueBuffers(existing.source(), queuedBuffer);
+            existing.buffers().add(queuedBuffer);
+            // If rendering fell behind playback the source drained and stopped; resume it.
+            if (AL10.alGetSourcei(existing.source(), AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING) {
+                AL10.alSourcePlay(existing.source());
+            }
+            return;
+        }
+
         stopVoiceOnAlThread(botId);
 
         Vec3d lastKnown = LAST_POSITIONS.get(botId);
@@ -217,7 +259,9 @@ public final class SoulVoiceClientPlayer {
         AL10.alBufferData(buffer, AL10.AL_FORMAT_MONO16, data, sampleRate);
 
         int source = AL10.alGenSources();
-        AL10.alSourcei(source, AL10.AL_BUFFER, buffer);
+        // Queue (not statically attach) even the first segment: later same-group segments
+        // append to this source's queue, which is invalid on a statically-bound source.
+        AL10.alSourceQueueBuffers(source, buffer);
         if (effectiveMode == SoulVoicePayload.MODE_RADIO) {
             AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE);
             AL10.alSource3f(source, AL10.AL_POSITION, 0f, 0f, 0f);
@@ -233,7 +277,9 @@ public final class SoulVoiceClientPlayer {
         }
         AL10.alSourcef(source, AL10.AL_GAIN, currentGain(effectiveMode));
         AL10.alSourcePlay(source);
-        ACTIVE.put(botId, new ActiveVoice(botId, source, buffer, effectiveMode));
+        ActiveVoice voice = new ActiveVoice(botId, source, effectiveMode, groupId);
+        voice.buffers().add(buffer);
+        ACTIVE.put(botId, voice);
     }
 
     private static void tick(Vec3d listenerPos, Vec3d forward, float volumeFactor,
@@ -262,7 +308,9 @@ public final class SoulVoiceClientPlayer {
             int state = AL10.alGetSourcei(voice.source(), AL10.AL_SOURCE_STATE);
             if (state != AL10.AL_PLAYING) {
                 AL10.alDeleteSources(voice.source());
-                AL10.alDeleteBuffers(voice.buffer());
+                for (int buf : voice.buffers()) {
+                    AL10.alDeleteBuffers(buf);
+                }
                 it.remove();
                 continue;
             }
@@ -282,7 +330,9 @@ public final class SoulVoiceClientPlayer {
         if (existing != null) {
             AL10.alSourceStop(existing.source());
             AL10.alDeleteSources(existing.source());
-            AL10.alDeleteBuffers(existing.buffer());
+            for (int buf : existing.buffers()) {
+                AL10.alDeleteBuffers(buf);
+            }
         }
     }
 
@@ -290,7 +340,9 @@ public final class SoulVoiceClientPlayer {
         for (ActiveVoice voice : ACTIVE.values()) {
             AL10.alSourceStop(voice.source());
             AL10.alDeleteSources(voice.source());
-            AL10.alDeleteBuffers(voice.buffer());
+            for (int buf : voice.buffers()) {
+                AL10.alDeleteBuffers(buf);
+            }
         }
         ACTIVE.clear();
     }
