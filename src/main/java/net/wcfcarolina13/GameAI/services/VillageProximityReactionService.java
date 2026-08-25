@@ -7,6 +7,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -201,7 +202,7 @@ public final class VillageProximityReactionService {
 
     private static boolean speak(ServerPlayerEntity bot, WeightedLine line) {
         CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "villager", line.id);
-        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound);
+        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.AMBIENT_CHATTER);
         if (result == BotDialoguePlayer.PlayResult.PLAYED || result == BotDialoguePlayer.PlayResult.THROTTLED) {
             return true;
         }

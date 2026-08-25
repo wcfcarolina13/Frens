@@ -4,6 +4,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -307,7 +308,7 @@ public final class Batch3TopicDialogueService {
         }
         CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3000, 48.0, "topic", triggerKey);
 
-        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound);
+        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.TOPICS_QUESTS);
         if (result == BotDialoguePlayer.PlayResult.PLAYED || result == BotDialoguePlayer.PlayResult.THROTTLED) {
             return true;
         }

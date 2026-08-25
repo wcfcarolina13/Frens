@@ -5,6 +5,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.ChatUtils.EmotionalState;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import java.util.Locale;
@@ -49,7 +50,7 @@ public final class BotTouchChatService {
         // Touch lines are flavor; keep them out of the chat box and show them overhead instead.
         // (Audio/subtitles still play via BotDialoguePlayer.)
         var botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-        BotDialoguePlayer.tryPlayDialogue(botSource, msg);
+        BotDialoguePlayer.tryPlayDialogue(botSource, msg, VoiceLineCategory.AMBIENT_CHATTER);
         CompanionOverheadDialogueService.showOverheadLine(bot, msg, 2_800, 24.0D, "touch", null);
         return true;
     }

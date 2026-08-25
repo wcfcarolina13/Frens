@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
@@ -184,7 +185,8 @@ public final class BotDogWalkingHobbyService {
         BotDialoguePlayer.playSoundForBotDetailed(
                 bot,
                 useGoodDog ? BotDialogueSounds.LINE_WALK_DOGS_GOOD_DOG
-                           : BotDialogueSounds.LINE_WALK_DOGS_WALKIES);
+                           : BotDialogueSounds.LINE_WALK_DOGS_WALKIES,
+                VoiceLineCategory.SKILL_TASK);
     }
 
     private static void advanceSession(MinecraftServer server, ServerWorld world,

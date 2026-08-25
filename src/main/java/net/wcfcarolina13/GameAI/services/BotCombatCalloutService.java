@@ -8,6 +8,7 @@ import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -670,7 +671,7 @@ public final class BotCombatCalloutService {
     }
     
     private static void sayWithSound(ServerPlayerEntity bot, String line, SoundEvent sound) {
-        BotDialoguePlayer.PlayResult res = BotDialoguePlayer.playSoundForBotDetailed(bot, sound);
+        BotDialoguePlayer.PlayResult res = BotDialoguePlayer.playSoundForBotDetailed(bot, sound, VoiceLineCategory.COMBAT_ALERTS);
 
         // If the line was throttled, do nothing (avoid falling back to chat spam).
         if (res == BotDialoguePlayer.PlayResult.THROTTLED) {
@@ -712,7 +713,7 @@ public final class BotCombatCalloutService {
         LAST_HURT_GRUNT_MS.put(botId, now);
 
         // Don't force a chat fallback for nonverbal sounds.
-        BotDialoguePlayer.playSoundForBotDetailed(bot, BotDialogueSounds.FX_HURT_GRUNT);
+        BotDialoguePlayer.playSoundForBotDetailed(bot, BotDialogueSounds.FX_HURT_GRUNT, VoiceLineCategory.COMBAT_ALERTS);
     }
     
     private static String getEntityName(Entity entity) {

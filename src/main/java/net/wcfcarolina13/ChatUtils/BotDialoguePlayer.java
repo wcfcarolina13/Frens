@@ -801,10 +801,23 @@ public final class BotDialoguePlayer {
      * @return true if a sound was played, false otherwise
      */
     public static boolean tryPlayDialogue(ServerCommandSource source, String message) {
-        return tryPlayDialogueDetailed(source, message) == DialogueAttemptResult.PLAYED;
+        return tryPlayDialogueDetailed(source, message, null) == DialogueAttemptResult.PLAYED;
+    }
+
+    /** Category-aware variant of {@link #tryPlayDialogue(ServerCommandSource, String)}. */
+    public static boolean tryPlayDialogue(ServerCommandSource source, String message, VoiceLineCategory category) {
+        return tryPlayDialogueDetailed(source, message, category) == DialogueAttemptResult.PLAYED;
     }
 
     public static DialogueAttemptResult tryPlayDialogueDetailed(ServerCommandSource source, String message) {
+        return tryPlayDialogueDetailed(source, message, null);
+    }
+
+    /**
+     * Category-aware variant. With {@code null} the category falls back to
+     * {@link VoiceLineCategory#fromSound(SoundEvent)} of the resolved sound.
+     */
+    public static DialogueAttemptResult tryPlayDialogueDetailed(ServerCommandSource source, String message, VoiceLineCategory category) {
         if (source == null || message == null || message.isBlank()) {
             LOGGER.info("[VoicedDialogue] Skipping: null/blank source or message");
             return DialogueAttemptResult.FAILED;
@@ -858,7 +871,7 @@ public final class BotDialoguePlayer {
         LOGGER.info("[VoicedDialogue] Found sound: {} for message", sound.id());
 
         // Play the sound at the bot's location (throttled to avoid spam)
-        PlayResult res = playSoundInternal(bot, sound, false, null);
+        PlayResult res = playSoundInternal(bot, sound, false, category);
         return switch (res) {
             case PLAYED -> DialogueAttemptResult.PLAYED;
             case THROTTLED -> DialogueAttemptResult.THROTTLED;

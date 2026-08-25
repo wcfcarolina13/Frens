@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Voiced-line category muting — phase 2: direct-caller categories (2026-08-25)
+
+All ~11 direct `BotDialoguePlayer` call sites now pass explicit `VoiceLineCategory` instead
+of falling back to the coarse sound-id bucket. New category-aware overloads of
+`tryPlayDialogue(Detailed)` added for the text-lookup path. Assignments: rescue shouts ×6 →
+survival_status; combat callouts + hurt grunts → combat_alerts; pet/villager reactions,
+touch chat, ambient chatter ×3 → ambient_chatter; context reactions (weather/wake-up etc.)
+→ reactions; topic lines + quest dialogue → topics_quests; dog-walking → skill_task. The
+only remaining fromSound fallback is `ChatUtils.sendSingleMessage` chat auto-voicing
+(mount/lead lines etc.) → general, by design. Phase 3 (UI screen) next.
+
 ## Voiced-line category muting — phase 1: core gate (2026-08-25)
 
 Baked (pre-TTS) voice lines can now be muted by category, audio-only — overhead text,

@@ -619,7 +619,7 @@ public final class BotAmbientChatter {
             
             if (sound != null) {
                 // Play the sound (respects voiced dialogue setting internally)
-                if (BotDialoguePlayer.playSoundForBot(bot, sound)) {
+                if (BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER)) {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastScheduledSoundId = sound.id().toString();
                     LOGGER.debug("Ambient chatter for {}: {}", botName, sound.id().getPath());
@@ -1321,7 +1321,7 @@ public final class BotAmbientChatter {
         if (bot == null || sound == null) {
             return false;
         }
-        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound);
+        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER);
         if (played) {
             String text = DialogueTextMapper.textForSound(sound);
             if (text != null) {
@@ -1686,7 +1686,7 @@ public final class BotAmbientChatter {
                 ? bot.getCommandSource().getServer().getTicks()
                 : 0L;
         SoundEvent sound = pickChatterSound(bot, state, nowTick);
-        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound);
+        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER);
         if (played && sound != null) {
             String text = DialogueTextMapper.textForSound(sound);
             if (text != null) {

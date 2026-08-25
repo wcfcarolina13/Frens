@@ -16,6 +16,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -755,7 +756,7 @@ public final class BotRescueService {
             CompanionOverheadDialogueService.showOverheadLine(bot, message, 3_000, 48.0, "rescue", "spawn-inside");
             // Best-effort: play matching voiced dialogue for spawn-inside alert
             try {
-                BotDialoguePlayer.tryPlayDialogue(src, message);
+                BotDialoguePlayer.tryPlayDialogue(src, message, VoiceLineCategory.SURVIVAL_STATUS);
             } catch (Exception ignored) {
             }
 
@@ -908,7 +909,7 @@ public final class BotRescueService {
         CompanionOverheadDialogueService.showOverheadLine(bot, msg, 3_000, 48.0, "rescue", "suffocating");
         // Play the voiced dialogue for this message if voiced dialogue is enabled
         try {
-            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg);
+            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg, VoiceLineCategory.SURVIVAL_STATUS);
         } catch (Exception ignored) {
             // Best-effort: do not let dialogue playback failures affect rescue logic
         }
@@ -1000,7 +1001,7 @@ public final class BotRescueService {
         CompanionOverheadDialogueService.showOverheadLine(bot, "I'm stuck!", 3_000, 48.0, "rescue", "stuck-block");
         // Best-effort: play matching voiced dialogue for the suffocation alert
         try {
-            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message);
+            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message, VoiceLineCategory.SURVIVAL_STATUS);
         } catch (Exception ignored) {
         }
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
@@ -1046,14 +1047,14 @@ public final class BotRescueService {
                         String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
                         ChatUtils.sendChatMessages(src, shout);
                         CompanionOverheadDialogueService.showOverheadLine(candidate, shout, 4_000, 64.0, "rescue", "lost-shout");
-                        try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
+                        try { BotDialoguePlayer.tryPlayDialogue(src, shout, VoiceLineCategory.SURVIVAL_STATUS); } catch (Exception ignored) {}
                         LAST_LOST_SHOUT_MS.put(uuid, nowMs);
                     }
                 } else if (nowMs - lastShout >= LOST_SHOUT_REPEAT_MS) {
                     String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
                     ChatUtils.sendChatMessages(src, shout);
                     CompanionOverheadDialogueService.showOverheadLine(candidate, shout, 4_000, 64.0, "rescue", "lost-shout");
-                    try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
+                    try { BotDialoguePlayer.tryPlayDialogue(src, shout, VoiceLineCategory.SURVIVAL_STATUS); } catch (Exception ignored) {}
                     LAST_LOST_SHOUT_MS.put(uuid, nowMs);
                 }
             } else {
@@ -1064,7 +1065,7 @@ public final class BotRescueService {
                     String found = FOUND_LINES[java.util.concurrent.ThreadLocalRandom.current().nextInt(FOUND_LINES.length)];
                     ChatUtils.sendChatMessages(src, found);
                     CompanionOverheadDialogueService.showOverheadLine(candidate, found, 3_000, 48.0, "rescue", "found");
-                    try { BotDialoguePlayer.tryPlayDialogue(src, found); } catch (Exception ignored) {}
+                    try { BotDialoguePlayer.tryPlayDialogue(src, found, VoiceLineCategory.SURVIVAL_STATUS); } catch (Exception ignored) {}
                 }
 
                 // Also check if bot is crawling and can stand up

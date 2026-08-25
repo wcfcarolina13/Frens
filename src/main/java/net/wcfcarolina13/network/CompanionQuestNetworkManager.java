@@ -5,6 +5,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.ChatUtils.DialogueTextMapper;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.SurvivalCompanionQuestService;
@@ -37,7 +38,7 @@ public final class CompanionQuestNetworkManager {
                         if (bot != null && !bot.isRemoved()) {
                             SoundEvent sound = DialogueTextMapper.lookup(firstLine);
                             if (sound != null) {
-                                BotDialoguePlayer.playSoundForBotDetailed(bot, sound);
+                                BotDialoguePlayer.playSoundForBotDetailed(bot, sound, VoiceLineCategory.TOPICS_QUESTS);
                             }
                         }
                     }
