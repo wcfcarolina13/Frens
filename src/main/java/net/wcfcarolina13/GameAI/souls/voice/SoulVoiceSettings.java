@@ -34,32 +34,4 @@ public record SoulVoiceSettings(boolean enabled, boolean valid, String validatio
         return new SoulVoiceSettings(enabled, true, "", binary, model, maxChars, timeoutMs, radioGain);
     }
 
-    /**
-     * Package-private factory for testing — bypasses ManualConfig construction.
-     * Takes plain values and applies clamping rules.
-     */
-    static SoulVoiceSettings of(boolean enabled, String piperBinary, String voiceModel,
-                                 int maxChars, long synthTimeoutMs, float radioGain) {
-        int clampedMaxChars = Math.max(40, Math.min(1000, maxChars));
-        long clampedTimeoutMs = Math.max(1000L, Math.min(30_000L, synthTimeoutMs));
-        float clampedRadioGain = Math.max(0.0f, Math.min(1.0f, radioGain));
-
-        if (piperBinary == null) piperBinary = "";
-        if (voiceModel == null) voiceModel = "";
-        piperBinary = piperBinary.trim();
-        voiceModel = voiceModel.trim();
-
-        boolean valid = !piperBinary.isBlank() && !voiceModel.isBlank();
-        String validationError = "";
-        if (!valid) {
-            if (piperBinary.isBlank()) {
-                validationError = "Configure the piper binary path first.";
-            } else if (voiceModel.isBlank()) {
-                validationError = "Configure a piper voice model first.";
-            }
-        }
-
-        return new SoulVoiceSettings(enabled, valid, validationError,
-                piperBinary, voiceModel, clampedMaxChars, clampedTimeoutMs, clampedRadioGain);
-    }
 }
