@@ -84,6 +84,7 @@ public class BotControlScreen extends Screen {
 
     // Global toggle state
     private boolean[] globalValues = new boolean[GLOBAL_TOGGLES.size()];
+    private boolean globalsLoaded = false;
     private boolean globalsExpanded = false;
 
     // Bot selector
@@ -196,14 +197,19 @@ public class BotControlScreen extends Screen {
         settingWidgets.clear();
         scrollOffset = 0;
 
-        // Load global values from config
-        globalValues[0] = Frens.CONFIG.isDefaultLlmWorldEnabled();
-        globalValues[1] = Frens.CONFIG.isSurvivalRecruitmentMode();
-        globalValues[2] = Frens.CONFIG.isFortifyForcePlaceEnabled();
-        globalValues[3] = Frens.CONFIG.isTextDialogueEnabled();
-        globalValues[4] = Frens.CONFIG.isVoicedDialogueEnabled();
-        // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
-        globalValues[5] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+        // Load global values from config — once per screen instance. init() also runs on
+        // resize and on returning from child screens (Adv…, Permissions); reloading there
+        // silently discarded unsaved chip flips.
+        if (!globalsLoaded) {
+            globalValues[0] = Frens.CONFIG.isDefaultLlmWorldEnabled();
+            globalValues[1] = Frens.CONFIG.isSurvivalRecruitmentMode();
+            globalValues[2] = Frens.CONFIG.isFortifyForcePlaceEnabled();
+            globalValues[3] = Frens.CONFIG.isTextDialogueEnabled();
+            globalValues[4] = Frens.CONFIG.isVoicedDialogueEnabled();
+            // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
+            globalValues[5] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+            globalsLoaded = true;
+        }
 
         recomputeLayout();
 

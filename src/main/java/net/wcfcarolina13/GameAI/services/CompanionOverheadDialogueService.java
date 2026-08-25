@@ -187,13 +187,13 @@ public final class CompanionOverheadDialogueService {
 
         int dur = durationMs > 0 ? durationMs : DURATION_MS;
 
-        if (!isGlobalTextDialogueEnabled()) {
-            return;
+        // Text toggle gates the hologram only; voice is gated by its own toggles below
+        // (previously this early-returned, silencing voice when Text Chat was off —
+        // inconsistent with tryShowGeneric and with ChatUtils' voice-only mode).
+        if (isGlobalTextDialogueEnabled()) {
+            CompanionOverheadHologramService.show(bot, line, dur);
+            LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
         }
-
-        CompanionOverheadHologramService.show(bot, line, dur);
-
-        LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         // If the line has a DialogueTextMapper entry, play the matching sound.
         // This was missing from the public overload (only tryShowGeneric had it),

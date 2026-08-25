@@ -14,9 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,35 +35,30 @@ public final class LLMOrchestrator {
     });
     private static final MemoryStore MEMORY_STORE = new MemoryStore();
 
-    private static final Map<String, Boolean> WORLD_TOGGLES = new ConcurrentHashMap<>();
-    private static final Map<UUID, Boolean> BOT_TOGGLES = new ConcurrentHashMap<>();
-
-    static {
-        WORLD_TOGGLES.put("default", false);
-    }
-
     private LLMOrchestrator() {
     }
 
-    public static boolean isWorldEnabled(String worldKey) {
-        return WORLD_TOGGLES.getOrDefault(worldKey, false);
+    /**
+     * Enablement is read lazily from {@link ManualConfig} — the single source of truth.
+     * (Previously push-populated in-memory maps: they made the GUI toggles write-only
+     * until restart, keyed the world toggle to the overworld only, and let /bot llm
+     * commands diverge from settings.json5.)
+     */
+    public static boolean isWorldEnabled() {
+        return Frens.CONFIG != null && Frens.CONFIG.isDefaultLlmWorldEnabled();
     }
 
-    public static void setWorldEnabled(String worldKey, boolean enabled) {
-        WORLD_TOGGLES.put(worldKey, enabled);
-        LOGGER.info("LLM world toggle for {} set to {}", worldKey, enabled);
-    }
-
-    public static boolean isBotEnabled(UUID botId) {
-        return BOT_TOGGLES.getOrDefault(botId, true);
-    }
-
-    public static void setBotEnabled(UUID botId, boolean enabled) {
-        Boolean prev = BOT_TOGGLES.put(botId, enabled);
-        // Only log when the value actually changes to avoid flooding from repeated calls.
-        if (prev == null || prev != enabled) {
-            LOGGER.info("LLM bot toggle for {} set to {}", botId, enabled);
+    public static boolean isBotEnabled(ServerPlayerEntity bot) {
+        if (bot == null || Frens.CONFIG == null) {
+            return false;
         }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        String worldKey = server != null
+                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server)
+                : null;
+        ManualConfig.BotControlSettings settings =
+                Frens.CONFIG.getEffectiveBotControl(bot.getName().getString(), worldKey);
+        return settings != null && settings.isLlmEnabled();
     }
 
     public static boolean handleChat(ServerPlayerEntity bot,
@@ -79,11 +72,10 @@ public final class LLMOrchestrator {
         if (server == null) {
             return false;
         }
-        String worldKey = worldKey(server, bot);
-        if (!isWorldEnabled(worldKey)) {
+        if (!isWorldEnabled()) {
             return false;
         }
-        if (!isBotEnabled(bot.getUuid())) {
+        if (!isBotEnabled(bot)) {
             return false;
         }
         CHAT_EXECUTOR.submit(() -> processChat(server, bot, botSource, playerUuid, message));

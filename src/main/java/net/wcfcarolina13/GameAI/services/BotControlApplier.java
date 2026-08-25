@@ -41,18 +41,8 @@ public final class BotControlApplier {
         if (server == null || Frens.CONFIG == null) {
             return;
         }
-        applyWorldToggle(server);
         refreshBotPreferences(server);
         scheduleAutoSpawns(server);
-    }
-
-    public static void applyWorldToggle(MinecraftServer server) {
-        if (server == null || Frens.CONFIG == null) {
-            return;
-        }
-        String levelName = server.getSaveProperties().getLevelName();
-        String overworldKey = levelName + ":" + World.OVERWORLD.getValue().toString();
-        LLMOrchestrator.setWorldEnabled(overworldKey, Frens.CONFIG.isDefaultLlmWorldEnabled());
     }
 
     public static void refreshBotPreferences(MinecraftServer server) {
@@ -77,7 +67,7 @@ public final class BotControlApplier {
         SkillPreferences.setFollowTeleport(bot.getUuid(), settings.isFollowTeleport());
         SkillPreferences.setPauseOnFullInventory(bot.getUuid(), settings.isPauseOnFullInventory());
         SkillPreferences.setTeleportDuringDropSweep(bot.getUuid(), settings.isTeleportDuringDropSweep());
-        LLMOrchestrator.setBotEnabled(bot.getUuid(), settings.isLlmEnabled());
+        // LLM enablement is no longer pushed here — LLMOrchestrator reads ManualConfig lazily.
     }
 
     public static void scheduleAutoSpawns(MinecraftServer server) {

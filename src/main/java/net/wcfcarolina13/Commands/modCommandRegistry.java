@@ -34,7 +34,6 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.wcfcarolina13.CommandUtils;
-import net.wcfcarolina13.GameAI.llm.LLMOrchestrator;
 import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -451,9 +450,10 @@ public class modCommandRegistry {
 	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
 	                                                .executes(context -> {
                                                     boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
-                                                    String key = context.getSource().getServer().getSaveProperties().getLevelName()
-                                                            + ":" + context.getSource().getWorld().getRegistryKey().getValue();
-                                                    LLMOrchestrator.setWorldEnabled(key, enabled);
+                                                    if (Frens.CONFIG != null) {
+                                                        Frens.CONFIG.setDefaultLlmWorldEnabled(enabled);
+                                                        Frens.CONFIG.save();
+                                                    }
                                                     ChatUtils.sendSystemMessage(context.getSource(),
                                                             "LLM world toggle set to " + (enabled ? "on" : "off"));
                                                     return 1;
@@ -466,7 +466,14 @@ public class modCommandRegistry {
                                                         .executes(context -> {
                                                             boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
                                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                            LLMOrchestrator.setBotEnabled(bot.getUuid(), enabled);
+                                                            if (Frens.CONFIG != null) {
+                                                                String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(context.getSource().getServer());
+                                                                ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(bot.getName().getString(), wk);
+                                                                if (ctrl != null) {
+                                                                    ctrl.setLlmEnabled(enabled);
+                                                                    Frens.CONFIG.save();
+                                                                }
+                                                            }
                                                             ChatUtils.sendSystemMessage(context.getSource(),
                                                                     bot.getName().getString() + " LLM set to " + (enabled ? "on" : "off"));
                                                             return 1;

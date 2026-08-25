@@ -2,6 +2,33 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dialogue/LLM controls consolidation — phase A: make the switches real (2026-08-25)
+
+Bradley: "overlapping, seemingly redundant controls for LLM activation, voice, and text…
+I suspect the controls don't even work." Full audit confirmed it; phase A fixes behavior
+without touching UI layout. (Phases B/C planned: soul toggles under the Voice/Text
+masters + panel regrouping.)
+
+- **LLM single source of truth.** `LLMOrchestrator` now reads enablement lazily from
+  `ManualConfig` (`isWorldEnabled()` = global flag; `isBotEnabled(bot)` = effective
+  per-bot control). Deleted the push-populated `WORLD_TOGGLES`/`BOT_TOGGLES` maps, which
+  caused three defects: GUI toggles write-only until server restart (no re-apply on
+  Save), world toggle keyed to overworld only (LLM permanently dead in Nether/End), and
+  `/bot llm` writing a store the UI couldn't see. `BotControlApplier.applyWorldToggle`
+  removed; `applyToBot` no longer pushes LLM state. Behavior note: unconfigured bots now
+  default LLM-off (config default), where the old in-memory map defaulted on — config
+  was always the intended authority.
+- **`/bot llm world|bot` now persist** — they write `ManualConfig` + `save()`, so command
+  and GUI can no longer diverge.
+- **Global toggles survive navigation** — `BotControlScreen.init()` reloaded
+  `globalValues` from config on every re-init, so clicking "Adv…" or "Permissions" (or
+  resizing) silently discarded unsaved chip flips. Now loaded once per screen instance
+  (`globalsLoaded`).
+- **Text/voice gate rule unified** — `CompanionOverheadDialogueService.showOverheadLine`
+  early-returned when Text Chat was off, silencing voice too; `tryShowGeneric` didn't.
+  Rule now everywhere: text toggle gates text, voice toggles gate audio, independently
+  (matches ChatUtils' voice-only fallback mode).
+
 ## AdminWorldSettingsScreen double-blur crash fix; bump 1.1.167 (2026-08-25)
 
 Bradley: pressing "World Settings" in the bot Admin menu crashed the game. Crash report
