@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dialogue/LLM controls consolidation — phase C: panel cleanup (2026-08-25)
+
+- Global panel reordered so the dialogue family is contiguous: LLM World, Recruitment,
+  Force-Place, Teleport, then Text Chat → Voice (+Adv…) → Soul Chat → Soul Voice. All
+  three index-wired sites (GLOBAL_TOGGLES, init() loads, saveSettings() writes) moved
+  together; VOICE_TOGGLE_INDEX 4→5.
+- Honest master tooltips: Text Chat documents the voice-only fallback behavior; Voice
+  states it covers baked lines AND soul TTS, with per-bot and per-category tiers named.
+- Deleted the dead commented-out "Personal Preferences" footer button (field, layout,
+  draw, and both click blocks — removed 2026-04-07, never revived).
+
 ## Dialogue/LLM controls consolidation — phase B: soul under the masters (2026-08-25)
 
 Per Bradley's decisions: global "Voice" and "Text Chat" are now true masters over the soul

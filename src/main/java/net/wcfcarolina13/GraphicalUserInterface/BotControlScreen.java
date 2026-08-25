@@ -38,15 +38,15 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("LLM World", "World-wide switch for natural-language chat and LLM-driven companion responses. Turn this off if you want bots to stay command and UI driven only."),
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
-            new GlobalToggleDef("Text Chat", "Shows companion dialogue in chat and as nearby overhead text. Turn this off for a quieter experience."),
-            new GlobalToggleDef("Voice", "Enables voiced companion lines when matching audio exists. Voice playback is optional and separate from normal text dialogue."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
+            new GlobalToggleDef("Text Chat", "Master for all bot text: chat lines, overhead text, subtitles, and soul replies. With this off and Voice on, lines that have audio become voice-only; lines without audio still print as fallback."),
+            new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. Per-bot Voiced Dialogue can additionally mute a single bot; Adv… mutes categories."),
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
     );
 
-    /** Index of the "Voice" toggle in GLOBAL_TOGGLES (list is append-only positional). */
-    private static final int VOICE_TOGGLE_INDEX = 4;
+    /** Index of the "Voice" toggle in GLOBAL_TOGGLES (indices are wired in init() and saveSettings() — move all three sites together). */
+    private static final int VOICE_TOGGLE_INDEX = 5;
     private static final int VOICE_ADV_W = 34;
 
     // Layout constants
@@ -138,7 +138,6 @@ public class BotControlScreen extends Screen {
     // moved to BotPlayerInventoryScreen Admin → Behavior. Restore this block
     // (and the matching layout/render/click sites below) if you want the
     // dedicated screen back.
-    // private Rect personalPrefsActionRect;
     private Rect saveRect;
     private Rect closeRect;
     private final LinkedHashMap<CyclingButtonWidget<?>, Rect> settingChipRects = new LinkedHashMap<>();
@@ -206,10 +205,10 @@ public class BotControlScreen extends Screen {
             globalValues[0] = Frens.CONFIG.isDefaultLlmWorldEnabled();
             globalValues[1] = Frens.CONFIG.isSurvivalRecruitmentMode();
             globalValues[2] = Frens.CONFIG.isFortifyForcePlaceEnabled();
-            globalValues[3] = Frens.CONFIG.isTextDialogueEnabled();
-            globalValues[4] = Frens.CONFIG.isVoicedDialogueEnabled();
             // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
-            globalValues[5] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+            globalValues[3] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+            globalValues[4] = Frens.CONFIG.isTextDialogueEnabled();
+            globalValues[5] = Frens.CONFIG.isVoicedDialogueEnabled();
             globalValues[6] = Frens.CONFIG.isSoulsEnabled();
             globalValues[7] = Frens.CONFIG.isSoulVoiceEnabled();
             globalsLoaded = true;
@@ -290,7 +289,6 @@ public class BotControlScreen extends Screen {
         saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 130, BUTTON_H);
         spawnBotsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 90, BUTTON_H);
-        // personalPrefsActionRect = new Rect(spawnBotsActionRect.right() + footerGap, footerY, 110, BUTTON_H);
     }
 
     private List<String> buildAliasList() {
@@ -493,10 +491,10 @@ public class BotControlScreen extends Screen {
         config.setDefaultLlmWorldEnabled(globalValues[0]);
         config.setSurvivalRecruitmentMode(globalValues[1]);
         config.setFortifyForcePlaceEnabled(globalValues[2]);
-        config.setTextDialogueEnabled(globalValues[3]);
-        config.setVoicedDialogueEnabled(globalValues[4]);
         // Teleport toggle: ON (true) = clear global override (null), OFF (false) = globally disabled
-        config.setGlobalTeleportDuringSkills(globalValues[5] ? null : Boolean.FALSE);
+        config.setGlobalTeleportDuringSkills(globalValues[3] ? null : Boolean.FALSE);
+        config.setTextDialogueEnabled(globalValues[4]);
+        config.setVoicedDialogueEnabled(globalValues[5]);
         // Soul toggles: same fields as /bot soul enable|disable and /bot soul voice on|off.
         // The live runtime reads a settings snapshot, so a change must trigger reloadSettings
         // (same pattern as BotSoulCommands.awaitReloadThenReport) or it would sit dormant
@@ -619,11 +617,6 @@ public class BotControlScreen extends Screen {
                     "Edit which players can command this bot and what they can make it do.",
                     mouseX, mouseY);
         }
-        // drawActionButton(context, personalPrefsActionRect,
-        //         "Personal Preferences",
-        //         false,
-        //         true,
-        //         mouseX, mouseY);
         drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
         drawActionButton(context, closeRect, "Close", false, true, mouseX, mouseY);
 
@@ -1221,12 +1214,6 @@ public class BotControlScreen extends Screen {
                 close();
                 return true;
             }
-            // if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
-            //     if (this.client != null) {
-            //         this.client.setScreen(new BotPlayerPreferencesScreen(this));
-            //     }
-            //     return true;
-            // }
             if (permissionsActionRect.contains(mx, my)) {
                 aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
                 if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
@@ -1288,14 +1275,6 @@ public class BotControlScreen extends Screen {
 
             return true;  // consume click inside panel even if no row matched
         }
-
-        // Footer: Personal Preferences (commented out 2026-04-07 — toggle moved to BotPlayerInventoryScreen)
-        // if (personalPrefsActionRect != null && personalPrefsActionRect.contains(mx, my)) {
-        //     if (this.client != null) {
-        //         this.client.setScreen(new BotPlayerPreferencesScreen(this));
-        //     }
-        //     return true;
-        // }
 
         // Footer: Permissions editor
         if (permissionsActionRect.contains(mx, my)) {
