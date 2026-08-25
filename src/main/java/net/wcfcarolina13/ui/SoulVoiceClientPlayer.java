@@ -12,6 +12,8 @@ import org.lwjgl.openal.AL;
 import org.lwjgl.openal.AL10;
 import org.lwjgl.openal.ALC;
 import org.lwjgl.openal.ALC10;
+import org.lwjgl.openal.ALCCapabilities;
+import org.lwjgl.openal.EXTThreadLocalContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,9 +33,15 @@ import java.util.concurrent.LinkedBlockingQueue;
  * {@link SoulVoicePcm.Reassembly}, confined here under its own lock) feeding a dedicated
  * OpenAL device + context that lives entirely on its own daemon thread.
  *
- * <p>LWJGL AL contexts are current per-thread. Owning our own device/context on our own
- * thread means this class never touches Minecraft's own sound engine or its ALC context —
- * every {@code AL10}/{@code ALC10} call in this file runs on {@code frens-soul-voice-al},
+ * <p>Plain {@code alcMakeContextCurrent} is process-global, not per-thread — using it here
+ * would steal context currency away from Minecraft's own sound thread and could silently
+ * break all game audio. Instead this class requires the {@code ALC_EXT_thread_local_context}
+ * extension and binds our context to {@code frens-soul-voice-al} via
+ * {@link EXTThreadLocalContext#alcSetThreadContext(long)}, never {@code alcMakeContextCurrent}.
+ * If the extension isn't available, playback is permanently disabled for the session rather
+ * than falling back to the global call. Owning our own device/context this way means this
+ * class never touches Minecraft's own sound engine or its ALC context — every {@code AL10}/
+ * {@code ALC10} call in this file runs on {@code frens-soul-voice-al},
  * reached only through {@link #alTask(Runnable)}. The client tick handler
  * ({@link #onClientTick(MinecraftClient)}) does cheap capture only (camera pose, bot
  * positions, option volumes) and hands the result to that thread as a single task.
@@ -66,6 +74,10 @@ public final class SoulVoiceClientPlayer {
     private static volatile long context;
     private static volatile boolean started;
     private static volatile Thread alThread;
+
+    /** Set permanently for the session if thread-local AL context isn't available, or device
+     *  / context creation otherwise fails — every subsequent {@link #play} call no-ops. */
+    private static volatile boolean playbackDisabled;
 
     /** AL-thread-confined; the last volume factor observed by a tick, used as the gain a
      *  freshly started voice plays at before the next tick refreshes it. */
@@ -156,11 +168,21 @@ public final class SoulVoiceClientPlayer {
     // ---- AL-thread-confined below this line -------------------------------------------
 
     private static void play(UUID botId, byte mode, int sampleRate, byte[] pcm) {
+        if (playbackDisabled) {
+            return;
+        }
         ensureContext();
         if (context == 0L) {
             return;
         }
         stopVoiceOnAlThread(botId);
+
+        Vec3d lastKnown = LAST_POSITIONS.get(botId);
+        // A bot whose position we've never resolved client-side can't be pinned in space —
+        // play it listener-relative (radio) instead of parking it at the OpenAL origin.
+        byte effectiveMode = (mode == SoulVoicePayload.MODE_POSITIONAL && lastKnown == null)
+                ? SoulVoicePayload.MODE_RADIO
+                : mode;
 
         int buffer = AL10.alGenBuffers();
         ByteBuffer data = BufferUtils.createByteBuffer(pcm.length);
@@ -169,19 +191,16 @@ public final class SoulVoiceClientPlayer {
 
         int source = AL10.alGenSources();
         AL10.alSourcei(source, AL10.AL_BUFFER, buffer);
-        if (mode == SoulVoicePayload.MODE_RADIO) {
+        if (effectiveMode == SoulVoicePayload.MODE_RADIO) {
             AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE);
             AL10.alSource3f(source, AL10.AL_POSITION, 0f, 0f, 0f);
         } else {
-            Vec3d lastKnown = LAST_POSITIONS.get(botId);
-            if (lastKnown != null) {
-                AL10.alSource3f(source, AL10.AL_POSITION,
-                        (float) lastKnown.x, (float) lastKnown.y, (float) lastKnown.z);
-            }
+            AL10.alSource3f(source, AL10.AL_POSITION,
+                    (float) lastKnown.x, (float) lastKnown.y, (float) lastKnown.z);
         }
-        AL10.alSourcef(source, AL10.AL_GAIN, currentGain(mode));
+        AL10.alSourcef(source, AL10.AL_GAIN, currentGain(effectiveMode));
         AL10.alSourcePlay(source);
-        ACTIVE.put(botId, new ActiveVoice(botId, source, buffer, mode));
+        ACTIVE.put(botId, new ActiveVoice(botId, source, buffer, effectiveMode));
     }
 
     private static void tick(Vec3d listenerPos, Vec3d forward, float volumeFactor,
@@ -249,13 +268,29 @@ public final class SoulVoiceClientPlayer {
                 : masterPlayersVolume;
     }
 
+    /**
+     * Opens our device + context using the {@code ALC_EXT_thread_local_context} extension so
+     * this thread's "current context" is independent of whatever Minecraft's own sound thread
+     * has current. Plain {@code alcMakeContextCurrent} is process-global and would race /
+     * steal currency from the game's own audio — never call it here. If the extension isn't
+     * present, playback is disabled for the rest of the session rather than risking that.
+     */
     private static void ensureContext() {
-        if (context != 0L) {
+        if (context != 0L || playbackDisabled) {
             return;
         }
         device = ALC10.alcOpenDevice((ByteBuffer) null);
         if (device == 0L) {
             LOGGER.warn("Soul voice: failed to open OpenAL device");
+            playbackDisabled = true;
+            return;
+        }
+        ALCCapabilities alcCaps = ALC.createCapabilities(device);
+        if (!alcCaps.ALC_EXT_thread_local_context) {
+            LOGGER.warn("Soul voice: thread-local AL context unavailable — soul voice playback disabled to protect game audio");
+            ALC10.alcCloseDevice(device);
+            device = 0L;
+            playbackDisabled = true;
             return;
         }
         long newContext = ALC10.alcCreateContext(device, (IntBuffer) null);
@@ -263,16 +298,24 @@ public final class SoulVoiceClientPlayer {
             LOGGER.warn("Soul voice: failed to create OpenAL context");
             ALC10.alcCloseDevice(device);
             device = 0L;
+            playbackDisabled = true;
             return;
         }
-        ALC10.alcMakeContextCurrent(newContext);
-        AL.createCapabilities(ALC.createCapabilities(device));
+        if (!EXTThreadLocalContext.alcSetThreadContext(newContext)) {
+            LOGGER.warn("Soul voice: failed to set thread-local AL context — soul voice playback disabled to protect game audio");
+            ALC10.alcDestroyContext(newContext);
+            ALC10.alcCloseDevice(device);
+            device = 0L;
+            playbackDisabled = true;
+            return;
+        }
+        AL.createCapabilities(alcCaps);
         context = newContext;
     }
 
     private static void destroyContext() {
         if (context != 0L) {
-            ALC10.alcMakeContextCurrent(0L);
+            EXTThreadLocalContext.alcSetThreadContext(0L);
             ALC10.alcDestroyContext(context);
             context = 0L;
         }
