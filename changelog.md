@@ -2,6 +2,29 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul voice: loudness parity + cloned from the baked dialogue voice (2026-08-25)
+
+First live-play feedback on the Dreamsleeve engine ("works... really quiet; should be as loud as
+the baked-in voice audio, and should use that voice"). Two fixes:
+
+- **Loudness parity.** The baked OGG lines play at volume 0.8 in `SoundCategory.VOICE` with
+  Minecraft's gentle linear falloff; the synth voice was riding the PLAYERS slider with
+  OpenAL's default inverse-distance model (reference distance 1.0), which crushed gain within
+  a few blocks. `SoulVoiceClientPlayer` now mirrors the baked path on all three axes: gain =
+  master × VOICE × 0.8 for positional lines, `AL_LINEAR_DISTANCE_CLAMPED` on our (thread-local)
+  context with reference distance 2 / max distance 14 / rolloff 1. Radio stays master × VOICE
+  × 0.6, flat.
+- **Voice re-anchored to the mod's own voice.** Jake's clone reference is now built from the
+  baked dialogue lines themselves: three of the longest ambient clips concatenated
+  (`ambient_same_tree__01` + `ambient_giant_statue__01` + `ambient_forgot_something__01`,
+  11.85 s @ 24 kHz mono → `voices/jake/jake-baked-ref.wav`, committed) with their verbatim
+  subtitle transcript as `ref_text` — so the LLM voice and the scripted lines are the same
+  voice. Smoke-tested against the warm server: identity gate sim=0.992, first take, 8.2 s
+  render. Live config updated (the Falx Carius anchor retired).
+
+Suite 417/417. Known: response latency is real (LLM generation + ~8-10 s synth per line);
+sentence-streaming synthesis remains the deferred latency lever.
+
 ## Dreamsleeve voice-clone engine for soul TTS (2026-08-24)
 
 Bradley's correction after voice v1 shipped: this machine already runs a proven TTS stack — the
