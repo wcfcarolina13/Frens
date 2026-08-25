@@ -858,7 +858,7 @@ public final class BotDialoguePlayer {
         LOGGER.info("[VoicedDialogue] Found sound: {} for message", sound.id());
 
         // Play the sound at the bot's location (throttled to avoid spam)
-        PlayResult res = playSoundInternal(bot, sound, false);
+        PlayResult res = playSoundInternal(bot, sound, false, null);
         return switch (res) {
             case PLAYED -> DialogueAttemptResult.PLAYED;
             case THROTTLED -> DialogueAttemptResult.THROTTLED;
@@ -986,9 +986,18 @@ public final class BotDialoguePlayer {
         }
     }
 
-    private static PlayResult playSoundInternal(ServerPlayerEntity bot, SoundEvent sound, boolean showSubtitle) {
+    private static PlayResult playSoundInternal(ServerPlayerEntity bot, SoundEvent sound, boolean showSubtitle,
+                                                VoiceLineCategory voiceCategory) {
         if (bot == null || sound == null) {
             return PlayResult.FAILED;
+        }
+
+        // Category mute gate (audio only — callers' text/subtitle fallback still runs on DISABLED).
+        VoiceLineCategory muteCategory = voiceCategory != null ? voiceCategory : VoiceLineCategory.fromSound(sound);
+        if (VoiceLineMuteService.isMuted(muteCategory, null)) {
+            LOGGER.debug("[VoicedDialogue] Muted (category {}): {} for bot {}",
+                    muteCategory.id(), sound.id(), bot.getName().getString());
+            return PlayResult.DISABLED;
         }
 
         if (isSuppressedByUnderwater(bot)) {
@@ -1030,7 +1039,12 @@ public final class BotDialoguePlayer {
      * @return true if the sound was played
      */
     public static boolean playSoundForBot(ServerPlayerEntity bot, SoundEvent sound) {
-        return playSoundForBotDetailed(bot, sound) == PlayResult.PLAYED;
+        return playSoundForBotDetailed(bot, sound, null) == PlayResult.PLAYED;
+    }
+
+    /** Category-aware variant of {@link #playSoundForBot(ServerPlayerEntity, SoundEvent)}. */
+    public static boolean playSoundForBot(ServerPlayerEntity bot, SoundEvent sound, VoiceLineCategory category) {
+        return playSoundForBotDetailed(bot, sound, category) == PlayResult.PLAYED;
     }
 
     /**
@@ -1038,6 +1052,15 @@ public final class BotDialoguePlayer {
      * Callers can distinguish "throttled" from "disabled" and avoid chat fallback spam.
      */
     public static PlayResult playSoundForBotDetailed(ServerPlayerEntity bot, SoundEvent sound) {
+        return playSoundForBotDetailed(bot, sound, null);
+    }
+
+    /**
+     * Category-aware variant. Pass the line's {@link VoiceLineCategory} when the call site
+     * knows it (e.g. resolved from an overhead-dialogue tag); with {@code null} the category
+     * falls back to {@link VoiceLineCategory#fromSound(SoundEvent)}.
+     */
+    public static PlayResult playSoundForBotDetailed(ServerPlayerEntity bot, SoundEvent sound, VoiceLineCategory category) {
         if (bot == null || sound == null) {
             return PlayResult.FAILED;
         }
@@ -1053,7 +1076,7 @@ public final class BotDialoguePlayer {
             return PlayResult.DISABLED;
         }
 
-        return playSoundInternal(bot, sound, true);
+        return playSoundInternal(bot, sound, true, category);
     }
     
     /**

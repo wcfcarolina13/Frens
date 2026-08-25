@@ -73,6 +73,8 @@ public class ManualConfig {
     private boolean defaultLlmWorldEnabled = true;
     private boolean textDialogueEnabled = true;
     private boolean voicedDialogueEnabled = true;
+    // Muted voiced-dialogue categories (VoiceLineCategory ids). Empty = nothing muted.
+    private List<String> mutedVoiceCategories = new ArrayList<>();
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
@@ -297,6 +299,9 @@ public class ManualConfig {
             }
             if (loadedConfig.botControlsByWorld == null) {
                 loadedConfig.botControlsByWorld = new HashMap<>();
+            }
+            if (loadedConfig.mutedVoiceCategories == null) {
+                loadedConfig.mutedVoiceCategories = new ArrayList<>();
             }
             // ── Legacy migration: global → per-world ──
             // Old configs stored one BotSpawn per alias; migrate to per-world under "_legacy" key.
@@ -739,6 +744,35 @@ public class ManualConfig {
 
     public void setVoicedDialogueEnabled(boolean voicedDialogueEnabled) {
         this.voicedDialogueEnabled = voicedDialogueEnabled;
+    }
+
+    public boolean isVoiceCategoryMuted(String categoryId) {
+        return categoryId != null
+                && mutedVoiceCategories != null
+                && mutedVoiceCategories.contains(categoryId);
+    }
+
+    public void setVoiceCategoryMuted(String categoryId, boolean muted) {
+        if (categoryId == null || categoryId.isBlank()) {
+            return;
+        }
+        if (mutedVoiceCategories == null) {
+            mutedVoiceCategories = new ArrayList<>();
+        }
+        if (muted) {
+            if (!mutedVoiceCategories.contains(categoryId)) {
+                mutedVoiceCategories.add(categoryId);
+            }
+        } else {
+            mutedVoiceCategories.remove(categoryId);
+        }
+    }
+
+    public List<String> getMutedVoiceCategories() {
+        if (mutedVoiceCategories == null) {
+            mutedVoiceCategories = new ArrayList<>();
+        }
+        return mutedVoiceCategories;
     }
 
     public boolean isGameplayTipsEnabled() {

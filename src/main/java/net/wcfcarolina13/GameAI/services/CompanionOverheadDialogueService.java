@@ -5,6 +5,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
 import net.wcfcarolina13.ChatUtils.DialogueTextMapper;
+import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.Frens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,7 +143,7 @@ public final class CompanionOverheadDialogueService {
         }
 
         // If we have an audio mapping for this overhead line, play it.
-        tryPlayVoicedOverheadLine(bot, line);
+        tryPlayVoicedOverheadLine(bot, line, "leaf-stuck");
 
         if (reason != null && !reason.isBlank()) {
             LOGGER.debug("Overhead line (leaf-stuck) bot={} reason={} line={}", bot.getName().getString(), reason, line);
@@ -200,7 +201,7 @@ public final class CompanionOverheadDialogueService {
         // overhead text but never play audio. Callers that also manually
         // BotDialoguePlayer.playSoundForBotDetailed(...) are protected from
         // double-play by BotDialoguePlayer's MIN_GAP_ANY_VOICE_MS mutex.
-        tryPlayVoicedOverheadLine(bot, line);
+        tryPlayVoicedOverheadLine(bot, line, tag);
 
         if (tag != null && !tag.isBlank()) {
             if (reason != null && !reason.isBlank()) {
@@ -249,7 +250,7 @@ public final class CompanionOverheadDialogueService {
         }
 
         // If we have an audio mapping for this overhead line, play it.
-        tryPlayVoicedOverheadLine(bot, line);
+        tryPlayVoicedOverheadLine(bot, line, tag);
 
         if (reason != null && !reason.isBlank()) {
             LOGGER.debug("Overhead line ({}) bot={} reason={} line={}", tag, bot.getName().getString(), reason, line);
@@ -258,7 +259,7 @@ public final class CompanionOverheadDialogueService {
         }
     }
 
-    private static void tryPlayVoicedOverheadLine(ServerPlayerEntity bot, String line) {
+    private static void tryPlayVoicedOverheadLine(ServerPlayerEntity bot, String line, String tag) {
         if (bot == null || bot.isRemoved()) {
             return;
         }
@@ -270,8 +271,8 @@ public final class CompanionOverheadDialogueService {
             if (sound == null) {
                 return;
             }
-            // Respect per-bot voiced dialogue config + global anti-spam.
-            BotDialoguePlayer.playSoundForBotDetailed(bot, sound);
+            // Respect per-bot voiced dialogue config, category mutes + global anti-spam.
+            BotDialoguePlayer.playSoundForBotDetailed(bot, sound, VoiceLineCategory.fromTag(tag));
         } catch (Throwable ignored) {
             // Best-effort only.
         }

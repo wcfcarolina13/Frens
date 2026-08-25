@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Voiced-line category muting — phase 1: core gate (2026-08-25)
+
+Baked (pre-TTS) voice lines can now be muted by category, audio-only — overhead text,
+subtitles, and chat fallback are untouched. Design: global scope (settings.json5), tag-based
+categories grouped into 9 buckets, multiplayer deferred behind a seam.
+
+- **`VoiceLineCategory`** (new, ChatUtils) — 9 user-facing categories (combat_alerts,
+  ambient_chatter, reactions, skill_task, survival_status, sunset_travel, topics_quests,
+  enchanting, general). `fromTag(...)` maps the overhead-dialogue call-site tags (exact table
+  plus `sunset-`/`follow-`/`gear-`/`snowball-fight`/`hobby` prefix rules, unknown → general);
+  `fromSound(...)` is the coarse sound-id-prefix fallback for chat auto-voicing. Ids are the
+  stable config keys — never rename, append only.
+- **`VoiceLineMuteService`** (new) — single mute decision point. `isMuted(category, viewer)`
+  reads only the global mask today; the `viewer` param is the seam for per-player masks in
+  multiplayer later (backlog: per-player masks + fixing the stubbed `configNetworkManager`
+  sync — note the whole SaveConfigPayload path is a no-op stub, so ALL global config is
+  effectively single-player today).
+- **`ManualConfig`** — `mutedVoiceCategories: List<String>` + load null-guard + accessors.
+- **`BotDialoguePlayer`** — gate at the top of `playSoundInternal` returning `DISABLED`
+  (same result as voice-off, so caller fallback logic is unchanged); category-aware
+  `playSoundForBot(Detailed)` overloads. `forcePlaySound` (`/bot sound_test`) deliberately
+  ungated.
+- **`CompanionOverheadDialogueService`** — threads its `tag` into
+  `tryPlayVoicedOverheadLine` → `playSoundForBotDetailed(bot, sound, fromTag(tag))`, so ~30
+  call sites get correct categories with zero call-site churn.
+
+Phase 2 next: explicit categories for the ~11 direct `BotDialoguePlayer` callers. Phase 3:
+`ConfigureVoiceCategoriesScreen` + "Advanced…" button beside the global Voice chip.
+
 ## Soul voice: loudness parity + cloned from the baked dialogue voice (2026-08-25)
 
 First live-play feedback on the Dreamsleeve engine ("works... really quiet; should be as loud as
