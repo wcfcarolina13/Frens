@@ -53,6 +53,14 @@ public final class SoulConversationService {
         void deliverStatus(UUID playerId, String text);
     }
 
+    /** Voice subscription point: fired once per turn, only after text is committed as spoken. */
+    public interface SpokenListener {
+        void onSpoken(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, String text);
+    }
+
+    private static final SpokenListener NO_OP_SPOKEN_LISTENER = (turn, token, text) -> {
+    };
+
     private final SoulStore store;
     private final SoulPromptAssembler prompts;
     private final SoulGenerationScheduler scheduler;
@@ -60,6 +68,7 @@ public final class SoulConversationService {
     private final SoulResponseValidator validator;
     private final Delivery delivery;
     private final SoulSettings settings;
+    private final SpokenListener spokenListener;
 
     public SoulConversationService(SoulStore store,
                                     SoulPromptAssembler prompts,
@@ -68,6 +77,17 @@ public final class SoulConversationService {
                                     SoulResponseValidator validator,
                                     Delivery delivery,
                                     SoulSettings settings) {
+        this(store, prompts, scheduler, provider, validator, delivery, settings, NO_OP_SPOKEN_LISTENER);
+    }
+
+    public SoulConversationService(SoulStore store,
+                                    SoulPromptAssembler prompts,
+                                    SoulGenerationScheduler scheduler,
+                                    SoulModelProvider provider,
+                                    SoulResponseValidator validator,
+                                    Delivery delivery,
+                                    SoulSettings settings,
+                                    SpokenListener spokenListener) {
         this.store = Objects.requireNonNull(store, "store");
         this.prompts = Objects.requireNonNull(prompts, "prompts");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -75,6 +95,7 @@ public final class SoulConversationService {
         this.validator = Objects.requireNonNull(validator, "validator");
         this.delivery = Objects.requireNonNull(delivery, "delivery");
         this.settings = Objects.requireNonNull(settings, "settings");
+        this.spokenListener = Objects.requireNonNull(spokenListener, "spokenListener");
     }
 
     /**
@@ -266,6 +287,12 @@ public final class SoulConversationService {
     private void commitSpoken(SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, UUID correlationId,
                                String text, SoulTypes.ProviderResult result, Stages stages,
                                CompletableFuture<Submission> outcome) {
+        try {
+            spokenListener.onSpoken(turn, token, text);
+        } catch (RuntimeException ex) {
+            LOGGER.warn("[souls] spoken listener threw; voice skipped: {}", ex.toString());
+        }
+
         long commitStartNanos = System.nanoTime();
         store.appendSpoken(token, text, result)
                 .thenCompose(v -> store.appendEvent(turn.key().botId(), directConversationEvent(turn)))
