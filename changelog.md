@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Background installs survive menu close/reopen + "Nice bird!" category leak; 1.1.175 (2026-08-25)
+
+Two field reports from Bradley:
+
+- **Installer progress lost on menu reopen.** Verified from code: downloads DID continue
+  in the background (daemon threads outlive the screen) — but progress state lived in the
+  screen instance, so reopening showed a fresh idle screen with ACTIVE buttons: a user
+  could start a second concurrent download racing on the same .part file. Fix: job state
+  moved into the services (shared `InstallJob`, volatile fields; `installAsync`/`pullAsync`
+  guard with compare-and-set on a static active-job ref). Screens re-attach to the running
+  job on open, show its live progress bar, consume the finished outcome once (green/red
+  line), and keep their buttons disabled while any job runs — double-start now impossible.
+  Applies to both the Piper installer and the Ollama model manager.
+- **"Nice bird!" in chat despite Ambient muted.** Log-verified (latest.log 15:59:27):
+  the line went out via `ChatUtils.sendChatMessages` — the voice attempt was correctly
+  category-muted (AMBIENT_CHATTER), so `PetProximityReactionService` FELL BACK to chat,
+  and chat lines had no category → gated as GENERAL → shown. The voice mute was working;
+  the chat fallback laundered the line into a category the mask couldn't see. Fix:
+  `sendChatMessages` gained a category-aware overload threaded through the whole chain
+  (schedule → sendSingle → text gate AND the voice attempt); the four voice-to-chat
+  fallback services now pass their real category (pet/village → ambient_chatter, context
+  → reactions, topic → topics_quests). Untagged chat (LLM replies, skills, status) stays
+  GENERAL.
+
 ## Companion Settings autosave; 1.1.174 (2026-08-25)
 
 Bradley: menu settings should just autosave (destructive things excepted). The new

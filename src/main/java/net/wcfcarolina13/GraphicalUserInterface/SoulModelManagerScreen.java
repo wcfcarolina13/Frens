@@ -31,14 +31,11 @@ public class SoulModelManagerScreen extends Screen {
 
     private volatile OllamaModelInstaller.Status status;
 
-    private enum Phase { DETECTING, READY, PULLING, FAILED }
+    private enum Phase { DETECTING, READY }
 
     private volatile Phase phase = Phase.DETECTING;
-    private volatile String pullingTag = "";
-    private volatile String stage = "";
-    private volatile long bytesDone;
-    private volatile long bytesTotal;
-    private volatile String failure = "";
+    /** Consumed outcome of the last background pull (green success / red failure line). */
+    private String lastResult;
 
     private final List<ButtonWidget> modelButtons = new ArrayList<>();
 
@@ -103,7 +100,7 @@ public class SoulModelManagerScreen extends Screen {
 
     private void onModelButton(OllamaModelInstaller.KnownModel model) {
         OllamaModelInstaller.Status s = status;
-        if (s == null || phase == Phase.PULLING) {
+        if (s == null || OllamaModelInstaller.activeJob() != null) {
             return;
         }
         if (s.isInstalled(model.tag())) {
@@ -111,31 +108,18 @@ public class SoulModelManagerScreen extends Screen {
             startDetect();
             return;
         }
-        phase = Phase.PULLING;
-        pullingTag = model.tag();
+        // The pull runs in the SERVICE, not this screen: closing and reopening the menu
+        // re-attaches to it, and pullAsync's compare-and-set prevents duplicate pulls.
+        OllamaModelInstaller.clearFinishedJob();
+        lastResult = null;
+        OllamaModelInstaller.pullAsync(model.tag());
         refreshButtons();
-        Thread t = new Thread(() -> {
-            try {
-                OllamaModelInstaller.pull(model.tag(), (st, done, total) -> {
-                    stage = st;
-                    bytesDone = done;
-                    bytesTotal = total;
-                });
-                OllamaModelInstaller.select(model.tag());
-                status = OllamaModelInstaller.detect();
-                phase = Phase.READY;
-            } catch (Throwable ex) {
-                failure = String.valueOf(ex.getMessage());
-                phase = Phase.FAILED;
-            }
-        }, "frens-ollama-pull");
-        t.setDaemon(true);
-        t.start();
     }
 
     private void refreshButtons() {
         OllamaModelInstaller.Status s = status;
-        boolean interactable = s != null && s.reachable() && phase != Phase.PULLING;
+        boolean interactable = s != null && s.reachable()
+                && OllamaModelInstaller.activeJob() == null;
         List<OllamaModelInstaller.KnownModel> models = OllamaModelInstaller.KNOWN_MODELS;
         for (int i = 0; i < modelButtons.size() && i < models.size(); i++) {
             OllamaModelInstaller.KnownModel m = models.get(i);
@@ -196,20 +180,32 @@ public class SoulModelManagerScreen extends Screen {
                 rowY += 34;
             }
 
-            if (phase == Phase.PULLING) {
+            // Pull state lives in the service — a screen reopened mid-download re-attaches
+            // here; a finished job's outcome is consumed once into lastResult + a refresh.
+            net.wcfcarolina13.GameAI.souls.InstallJob job = OllamaModelInstaller.activeJob();
+            if (job != null && job.finished()) {
+                lastResult = job.error() == null
+                        ? "§aDownloaded and selected " + job.description() + "."
+                        : "§c" + job.error();
+                OllamaModelInstaller.clearFinishedJob();
+                startDetect();
+                job = null;
+            }
+            if (job != null) {
                 int py = rowY + 2;
-                String line = bytesTotal > 0
-                        ? pullingTag + ": " + stage + "  " + gb(bytesDone) + " / " + gb(bytesTotal)
-                        : pullingTag + ": " + stage;
+                String line = job.bytesTotal() > 0
+                        ? job.description() + ": " + job.stage() + "  " + gb(job.bytesDone()) + " / " + gb(job.bytesTotal())
+                        : job.description() + ": " + job.stage();
                 context.drawTextWithShadow(this.textRenderer, line, cx + PAD, py, COL_TXT);
                 int barW = POPUP_WIDTH - PAD * 2;
                 context.fill(cx + PAD, py + 11, cx + PAD + barW, py + 17, 0xFF303030);
-                if (bytesTotal > 0) {
-                    int fill = (int) (barW * Math.min(1.0, bytesDone / (double) bytesTotal));
+                if (job.bytesTotal() > 0) {
+                    int fill = (int) (barW * Math.min(1.0, job.bytesDone() / (double) job.bytesTotal()));
                     context.fill(cx + PAD, py + 11, cx + PAD + fill, py + 17, 0xFF4FA8FF);
                 }
-            } else if (phase == Phase.FAILED) {
-                context.drawTextWithShadow(this.textRenderer, "§c" + failure, cx + PAD, rowY + 2, COL_BAD);
+            } else if (lastResult != null) {
+                context.drawTextWithShadow(this.textRenderer, lastResult, cx + PAD, rowY + 2,
+                        lastResult.startsWith("§a") ? COL_OK : COL_BAD);
             }
         }
         super.render(context, mouseX, mouseY, delta);

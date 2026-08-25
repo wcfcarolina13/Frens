@@ -316,7 +316,8 @@ public final class Batch3TopicDialogueService {
         ChatUtils.sendChatMessages(
                 bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
                 line.text,
-                true
+                true,
+                VoiceLineCategory.TOPICS_QUESTS
         );
         return true;
     }

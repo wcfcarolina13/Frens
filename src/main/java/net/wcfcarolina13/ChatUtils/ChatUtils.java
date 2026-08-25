@@ -41,6 +41,18 @@ public class ChatUtils {
      * @param withDelay Whether to add typing delays between message parts.
      */
     public static void sendChatMessages(ServerCommandSource source, String message, boolean withDelay) {
+        sendChatMessages(source, message, withDelay, VoiceLineCategory.GENERAL);
+    }
+
+    /**
+     * Category-aware variant: chat lines historically all gated as GENERAL, which let a
+     * category-muted line leak into chat via the voice-disabled fallback path (Bradley's
+     * "Nice bird!" report — ambient muted in voice, line fell back to chat as GENERAL).
+     * Callers that know their line's category pass it so both the text gate and the
+     * voice attempt classify correctly.
+     */
+    public static void sendChatMessages(ServerCommandSource source, String message, boolean withDelay,
+                                        VoiceLineCategory category) {
         if (message == null || message.trim().isEmpty()) {
             LOGGER.warn("Attempted to send null or empty message");
             return;
@@ -72,24 +84,19 @@ public class ChatUtils {
 
         LOGGER.info("Sending chat message (withDelay={}): '{}'", withDelay, message);
 
-        boolean forceTextFallback = shouldForceTextFallbackForVoiceOnly(recipient.botSender, message);
+        boolean forceTextFallback = shouldForceTextFallbackForVoiceOnly(recipient.botSender, message, category);
 
         List<String> messageParts = splitMessage(message.trim());
         LOGGER.info("Message split into {} parts", messageParts.size());
 
         // This is the core fix. We are queuing a single task on the server's main thread.
         // The task itself handles all logic, including delays.
-        server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay, forceTextFallback));
+        server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay, forceTextFallback, category));
     }
 
-    private static boolean isGlobalTextDialogueEnabled() {
-        // Chat lines have no call-site tag, so they gate as the GENERAL category:
-        // master ON, or GENERAL checked as a keep-visible exception in Text Adv.
-        return TextLineVisibilityService.isTextAllowed(VoiceLineCategory.GENERAL);
-    }
-
-    private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, String rawMessage) {
-        if (!botSender || isGlobalTextDialogueEnabled() || !BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
+    private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, String rawMessage, VoiceLineCategory category) {
+        if (!botSender || TextLineVisibilityService.isTextAllowed(category)
+                || !BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
             return false;
         }
         String cleaned = stripLegacyFormatting(rawMessage == null ? "" : rawMessage.trim());
@@ -114,19 +121,20 @@ public class ChatUtils {
                                                 List<String> messageParts,
                                                 int partIndex,
                                                 boolean withDelay,
-                                                boolean forceTextFallback) {
+                                                boolean forceTextFallback,
+                                                VoiceLineCategory category) {
         if (partIndex >= messageParts.size()) {
             // All parts have been sent, stop the recursion.
             return;
         }
 
         // Send the current message part.
-        sendSingleMessage(server, source, recipientUuid, botSender, messageParts.get(partIndex), partIndex, forceTextFallback);
+        sendSingleMessage(server, source, recipientUuid, botSender, messageParts.get(partIndex), partIndex, forceTextFallback, category);
 
         // Schedule the next part if there are more to send and a delay is requested.
         if (withDelay && partIndex < messageParts.size() - 1) {
             CHAT_DELAY_EXECUTOR.schedule(
-                    () -> server.execute(() -> scheduleAndSendMessages(server, source, recipientUuid, botSender, messageParts, partIndex + 1, true, forceTextFallback)),
+                    () -> server.execute(() -> scheduleAndSendMessages(server, source, recipientUuid, botSender, messageParts, partIndex + 1, true, forceTextFallback, category)),
                     MESSAGE_DELAY_MS,
                     TimeUnit.MILLISECONDS
             );
@@ -142,7 +150,8 @@ public class ChatUtils {
                                           boolean botSender,
                                           String message,
                                           int partIndex,
-                                          boolean forceTextFallback) {
+                                          boolean forceTextFallback,
+                                          VoiceLineCategory category) {
         try {
 
             if (server == null || recipientUuid == null) {
@@ -174,10 +183,10 @@ public class ChatUtils {
             // Play dialogue sound for the first message part only
             // This avoids playing the sound multiple times for split messages
             if (partIndex == 0 && botSender && BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
-                BotDialoguePlayer.tryPlayDialogueDetailed(source, cleanedMessage);
+                BotDialoguePlayer.tryPlayDialogueDetailed(source, cleanedMessage, category);
             }
 
-            boolean sendText = !botSender || isGlobalTextDialogueEnabled() || forceTextFallback;
+            boolean sendText = !botSender || TextLineVisibilityService.isTextAllowed(category) || forceTextFallback;
             if (!sendText) {
                 return;
             }

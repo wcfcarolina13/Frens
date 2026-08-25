@@ -117,6 +117,49 @@ public final class PiperInstaller {
     private PiperInstaller() {
     }
 
+    // ── Background job (screen-independent, survives menu close/reopen) ──────
+
+    private static final java.util.concurrent.atomic.AtomicReference<net.wcfcarolina13.GameAI.souls.InstallJob>
+            ACTIVE_JOB = new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** The running (or finished-but-unconsumed) install job, or null. */
+    public static net.wcfcarolina13.GameAI.souls.InstallJob activeJob() {
+        return ACTIVE_JOB.get();
+    }
+
+    /** Clears a finished job so a new one can start; no-op while one is still running. */
+    public static void clearFinishedJob() {
+        net.wcfcarolina13.GameAI.souls.InstallJob job = ACTIVE_JOB.get();
+        if (job != null && job.finished()) {
+            ACTIVE_JOB.compareAndSet(job, null);
+        }
+    }
+
+    /**
+     * Starts {@link #install} on a service-owned daemon thread. Returns false if a job is
+     * already active — the caller should attach to {@link #activeJob()} instead, which is
+     * exactly what makes a double-start (two downloads racing on the same .part file)
+     * impossible even if the screen is closed and reopened mid-install.
+     */
+    public static boolean installAsync(Plan plan, Path existingBinary) {
+        net.wcfcarolina13.GameAI.souls.InstallJob job = new net.wcfcarolina13.GameAI.souls.InstallJob(
+                existingBinary != null ? "existing Piper" : "Piper download");
+        if (!ACTIVE_JOB.compareAndSet(null, job)) {
+            return false;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                install(plan, existingBinary, job::progress);
+                job.finishOk();
+            } catch (Throwable ex) {
+                job.finishFailed(String.valueOf(ex.getMessage()));
+            }
+        }, "frens-piper-install");
+        t.setDaemon(true);
+        t.start();
+        return true;
+    }
+
     // ── Detection ────────────────────────────────────────────────────────────
 
     public static Plan detect() {

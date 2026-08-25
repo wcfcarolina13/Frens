@@ -66,6 +66,48 @@ public final class OllamaModelInstaller {
     private OllamaModelInstaller() {
     }
 
+    // ── Background job (screen-independent, survives menu close/reopen) ──────
+
+    private static final java.util.concurrent.atomic.AtomicReference<InstallJob> ACTIVE_JOB =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** The running (or finished-but-unconsumed) pull job, or null. */
+    public static InstallJob activeJob() {
+        return ACTIVE_JOB.get();
+    }
+
+    /** Clears a finished job so a new one can start; no-op while one is still running. */
+    public static void clearFinishedJob() {
+        InstallJob job = ACTIVE_JOB.get();
+        if (job != null && job.finished()) {
+            ACTIVE_JOB.compareAndSet(job, null);
+        }
+    }
+
+    /**
+     * Pulls {@code tag} then selects it, on a service-owned daemon thread. Returns false
+     * if a job is already active — callers attach to {@link #activeJob()} instead, so
+     * closing and reopening the screen mid-download can never start a duplicate pull.
+     */
+    public static boolean pullAsync(String tag) {
+        InstallJob job = new InstallJob(tag);
+        if (!ACTIVE_JOB.compareAndSet(null, job)) {
+            return false;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                pull(tag, job::progress);
+                select(tag);
+                job.finishOk();
+            } catch (Throwable ex) {
+                job.finishFailed(String.valueOf(ex.getMessage()));
+            }
+        }, "frens-ollama-pull");
+        t.setDaemon(true);
+        t.start();
+        return true;
+    }
+
     private static String baseUrl() {
         ManualConfig cfg = Frens.CONFIG;
         String url = cfg != null ? cfg.getOllamaBaseUrl() : null;

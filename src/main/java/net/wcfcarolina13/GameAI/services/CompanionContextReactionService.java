@@ -1181,7 +1181,8 @@ public final class CompanionContextReactionService {
         ChatUtils.sendChatMessages(
                 bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
                 line.text,
-                true
+                true,
+                VoiceLineCategory.REACTIONS
         );
         return true;
     }

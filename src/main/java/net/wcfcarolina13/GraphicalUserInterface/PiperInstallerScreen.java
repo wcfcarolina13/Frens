@@ -33,13 +33,11 @@ public class PiperInstallerScreen extends Screen {
     private volatile PiperInstaller.Plan plan;
     private volatile String detectError;
 
-    private enum Phase { DETECTING, READY, INSTALLING, DONE, FAILED }
+    private enum Phase { DETECTING, READY, FAILED }
 
     private volatile Phase phase = Phase.DETECTING;
-    private volatile String stage = "";
-    private volatile long bytesDone;
-    private volatile long bytesTotal;
-    private volatile String failure = "";
+    /** Consumed outcome of the last background job (green success / red failure line). */
+    private String lastResult;
 
     private ButtonWidget installButton;
     private ButtonWidget useExistingButton;
@@ -79,9 +77,8 @@ public class PiperInstallerScreen extends Screen {
                     plan = PiperInstaller.detect();
                     phase = Phase.READY;
                 } catch (Throwable ex) {
-                    detectError = String.valueOf(ex.getMessage());
+                    detectError = "Detection failed: " + ex.getMessage();
                     phase = Phase.FAILED;
-                    failure = "Detection failed: " + detectError;
                 }
             }, "frens-piper-detect");
             t.setDaemon(true);
@@ -91,7 +88,8 @@ public class PiperInstallerScreen extends Screen {
 
     private void refreshButtons() {
         PiperInstaller.Plan p = plan;
-        boolean ready = phase == Phase.READY && p != null;
+        boolean jobRunning = PiperInstaller.activeJob() != null;
+        boolean ready = phase == Phase.READY && p != null && !jobRunning;
         boolean diskOk = p != null && (p.freeDiskBytes() < 0 || p.freeDiskBytes() > 300L * 1024 * 1024);
         if (installButton != null) {
             installButton.active = ready && p.platformSupported() && diskOk;
@@ -103,26 +101,16 @@ public class PiperInstallerScreen extends Screen {
 
     private void startInstall(Path existingBinary) {
         PiperInstaller.Plan p = plan;
-        if (p == null || phase == Phase.INSTALLING) {
+        if (p == null) {
             return;
         }
-        phase = Phase.INSTALLING;
+        // The job lives in the SERVICE, not this screen: closing and reopening the menu
+        // re-attaches to it, and installAsync's compare-and-set makes double-starts
+        // impossible.
+        PiperInstaller.clearFinishedJob();
+        lastResult = null;
+        PiperInstaller.installAsync(p, existingBinary);
         refreshButtons();
-        Thread t = new Thread(() -> {
-            try {
-                PiperInstaller.install(p, existingBinary, (s, done, total) -> {
-                    stage = s;
-                    bytesDone = done;
-                    bytesTotal = total;
-                });
-                phase = Phase.DONE;
-            } catch (Throwable ex) {
-                failure = String.valueOf(ex.getMessage());
-                phase = Phase.FAILED;
-            }
-        }, "frens-piper-install");
-        t.setDaemon(true);
-        t.start();
     }
 
     private static String mb(long bytes) {
@@ -140,36 +128,42 @@ public class PiperInstallerScreen extends Screen {
 
         int y = cy + 24;
         PiperInstaller.Plan p = plan;
-        switch (phase) {
-            case DETECTING -> context.drawTextWithShadow(this.textRenderer,
-                    "Checking your system…", cx + PAD, y, COL_DIM);
-            case READY, INSTALLING, DONE, FAILED -> {
-                if (p != null) {
-                    y = drawPlan(context, p, cx, y);
+        if (phase == Phase.DETECTING) {
+            context.drawTextWithShadow(this.textRenderer, "Checking your system…", cx + PAD, y, COL_DIM);
+        } else if (phase == Phase.FAILED) {
+            context.drawTextWithShadow(this.textRenderer, "§c" + detectError, cx + PAD, y, COL_BAD);
+        } else {
+            if (p != null) {
+                y = drawPlan(context, p, cx, y);
+            }
+            // Job state lives in the service — a screen reopened mid-install re-attaches
+            // here; a finished job's outcome is consumed once into lastResult.
+            net.wcfcarolina13.GameAI.souls.InstallJob job = PiperInstaller.activeJob();
+            if (job != null && job.finished()) {
+                lastResult = job.error() == null
+                        ? "§aInstalled. Piper is now the soul voice engine."
+                        : "§c" + job.error();
+                PiperInstaller.clearFinishedJob();
+                job = null;
+            }
+            y += 4;
+            if (job != null) {
+                String pct = job.bytesTotal() > 0
+                        ? job.stage() + "  " + mb(job.bytesDone()) + " / " + mb(job.bytesTotal())
+                        : job.stage();
+                context.drawTextWithShadow(this.textRenderer, pct, cx + PAD, y, COL_TXT);
+                y += 12;
+                int barW = POPUP_WIDTH - PAD * 2;
+                context.fill(cx + PAD, y, cx + PAD + barW, y + 6, 0xFF303030);
+                if (job.bytesTotal() > 0) {
+                    int fill = (int) (barW * Math.min(1.0, job.bytesDone() / (double) job.bytesTotal()));
+                    context.fill(cx + PAD, y, cx + PAD + fill, y + 6, 0xFF4FA8FF);
                 }
-                if (phase == Phase.INSTALLING) {
-                    y += 4;
-                    String pct = bytesTotal > 0
-                            ? stage + "  " + mb(bytesDone) + " / " + mb(bytesTotal)
-                            : stage;
-                    context.drawTextWithShadow(this.textRenderer, pct, cx + PAD, y, COL_TXT);
-                    y += 12;
-                    int barW = POPUP_WIDTH - PAD * 2;
-                    context.fill(cx + PAD, y, cx + PAD + barW, y + 6, 0xFF303030);
-                    if (bytesTotal > 0) {
-                        int fill = (int) (barW * Math.min(1.0, bytesDone / (double) bytesTotal));
-                        context.fill(cx + PAD, y, cx + PAD + fill, y + 6, 0xFF4FA8FF);
-                    }
-                } else if (phase == Phase.DONE) {
-                    y += 4;
-                    context.drawTextWithShadow(this.textRenderer,
-                            "§aInstalled. Piper is now the soul voice engine.", cx + PAD, y, COL_OK);
-                } else if (phase == Phase.FAILED) {
-                    y += 4;
-                    for (String line : wrap(failure, 66)) {
-                        context.drawTextWithShadow(this.textRenderer, "§c" + line, cx + PAD, y, COL_BAD);
-                        y += 10;
-                    }
+            } else if (lastResult != null) {
+                for (String line : wrap(lastResult, 66)) {
+                    context.drawTextWithShadow(this.textRenderer, line,
+                            cx + PAD, y, lastResult.startsWith("§a") ? COL_OK : COL_BAD);
+                    y += 10;
                 }
             }
         }

@@ -454,7 +454,8 @@ public final class PetProximityReactionService {
         ChatUtils.sendChatMessages(
                 bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
                 line.text,
-                true
+                true,
+                VoiceLineCategory.AMBIENT_CHATTER
         );
         return true;
     }
