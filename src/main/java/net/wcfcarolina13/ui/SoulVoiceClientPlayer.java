@@ -10,6 +10,7 @@ import net.wcfcarolina13.network.SoulVoicePayload;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.openal.AL;
 import org.lwjgl.openal.AL10;
+import org.lwjgl.openal.AL11;
 import org.lwjgl.openal.ALC;
 import org.lwjgl.openal.ALC10;
 import org.lwjgl.openal.ALCCapabilities;
@@ -55,6 +56,17 @@ public final class SoulVoiceClientPlayer {
      * gain, so this is baked in here for v1 rather than plumbed through the payload.
      */
     private static final float RADIO_GAIN = 0.6f;
+    /**
+     * Loudness parity with the baked dialogue OGGs: BotDialoguePlayer plays them via
+     * playSoundFromEntity at volume 0.8 in SoundCategory.VOICE with Minecraft's linear
+     * distance falloff (audible ~volume*16 blocks). We mirror all three: same base gain, the
+     * VOICE category volume, and a linear-clamped distance model (see ensureContext) instead
+     * of OpenAL's default inverse-distance rolloff, which crushed gain within a few blocks
+     * (Bradley: "really quiet").
+     */
+    private static final float POSITIONAL_BASE_GAIN = 0.8f;
+    private static final float REFERENCE_DISTANCE = 2.0f;
+    private static final float MAX_DISTANCE = 14.0f;
 
     private record ActiveVoice(UUID botId, int source, int buffer, byte mode) {
     }
@@ -81,7 +93,7 @@ public final class SoulVoiceClientPlayer {
 
     /** AL-thread-confined; the last volume factor observed by a tick, used as the gain a
      *  freshly started voice plays at before the next tick refreshes it. */
-    private static float masterPlayersVolume = 1.0f;
+    private static float masterVoiceVolume = 1.0f;
 
     private SoulVoiceClientPlayer() {
     }
@@ -127,8 +139,10 @@ public final class SoulVoiceClientPlayer {
         Camera camera = client.gameRenderer.getCamera();
         Vec3d listenerPos = camera.getCameraPos();
         Vec3d forward = client.player.getRotationVector(camera.getPitch(), camera.getYaw());
+        // VOICE, not PLAYERS: the baked dialogue lines play in SoundCategory.VOICE, and the
+        // synthesized voice must ride the same slider.
         float volumeFactor = client.options.getSoundVolume(SoundCategory.MASTER)
-                * client.options.getSoundVolume(SoundCategory.PLAYERS);
+                * client.options.getSoundVolume(SoundCategory.VOICE);
 
         Map<UUID, Vec3d> botPositions = new HashMap<>();
         for (UUID botId : ACTIVE.keySet()) {
@@ -210,6 +224,12 @@ public final class SoulVoiceClientPlayer {
         } else {
             AL10.alSource3f(source, AL10.AL_POSITION,
                     (float) lastKnown.x, (float) lastKnown.y, (float) lastKnown.z);
+            // Mirror Minecraft's gentle linear falloff (model set in ensureContext): full
+            // volume inside REFERENCE_DISTANCE, silent past MAX_DISTANCE — the AL default
+            // inverse-distance curve was already near-inaudible a few blocks out.
+            AL10.alSourcef(source, AL10.AL_REFERENCE_DISTANCE, REFERENCE_DISTANCE);
+            AL10.alSourcef(source, AL10.AL_MAX_DISTANCE, MAX_DISTANCE);
+            AL10.alSourcef(source, AL10.AL_ROLLOFF_FACTOR, 1.0f);
         }
         AL10.alSourcef(source, AL10.AL_GAIN, currentGain(effectiveMode));
         AL10.alSourcePlay(source);
@@ -218,7 +238,7 @@ public final class SoulVoiceClientPlayer {
 
     private static void tick(Vec3d listenerPos, Vec3d forward, float volumeFactor,
                               Map<UUID, Vec3d> botPositions) {
-        masterPlayersVolume = volumeFactor;
+        masterVoiceVolume = volumeFactor;
 
         boolean anyPositional = false;
         for (ActiveVoice voice : ACTIVE.values()) {
@@ -277,8 +297,8 @@ public final class SoulVoiceClientPlayer {
 
     private static float currentGain(byte mode) {
         return mode == SoulVoicePayload.MODE_RADIO
-                ? masterPlayersVolume * RADIO_GAIN
-                : masterPlayersVolume;
+                ? masterVoiceVolume * RADIO_GAIN
+                : masterVoiceVolume * POSITIONAL_BASE_GAIN;
     }
 
     /**
@@ -323,6 +343,9 @@ public final class SoulVoiceClientPlayer {
             return;
         }
         AL.createCapabilities(alcCaps);
+        // Our context only (thread-local): Minecraft-style linear falloff instead of the AL
+        // default inverse-distance curve. Never affects the game's own context.
+        AL10.alDistanceModel(AL11.AL_LINEAR_DISTANCE_CLAMPED);
         context = newContext;
     }
 
