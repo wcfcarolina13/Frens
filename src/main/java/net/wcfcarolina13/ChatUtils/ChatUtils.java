@@ -5,7 +5,6 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import org.slf4j.Logger;
@@ -84,7 +83,9 @@ public class ChatUtils {
     }
 
     private static boolean isGlobalTextDialogueEnabled() {
-        return Frens.CONFIG == null || Frens.CONFIG.isTextDialogueEnabled();
+        // Chat lines have no call-site tag, so they gate as the GENERAL category:
+        // master ON, or GENERAL checked as a keep-visible exception in Text Adv.
+        return TextLineVisibilityService.isTextAllowed(VoiceLineCategory.GENERAL);
     }
 
     private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, String rawMessage) {

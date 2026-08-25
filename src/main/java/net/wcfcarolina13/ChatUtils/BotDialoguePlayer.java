@@ -1036,7 +1036,7 @@ public final class BotDialoguePlayer {
         markPlayed(botId, category, now);
 
         if (showSubtitle) {
-            showSubtitle(bot, sound);
+            showSubtitle(bot, sound, muteCategory);
         }
 
         return PlayResult.PLAYED;
@@ -1099,8 +1099,8 @@ public final class BotDialoguePlayer {
      * @param bot The bot speaking
      * @param sound The sound being played
      */
-    private static void showSubtitle(ServerPlayerEntity bot, SoundEvent sound) {
-        if (Frens.CONFIG != null && !Frens.CONFIG.isTextDialogueEnabled()) {
+    private static void showSubtitle(ServerPlayerEntity bot, SoundEvent sound, VoiceLineCategory category) {
+        if (!TextLineVisibilityService.isTextAllowed(category)) {
             return;
         }
 

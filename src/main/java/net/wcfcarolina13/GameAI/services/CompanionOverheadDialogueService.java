@@ -5,8 +5,8 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
 import net.wcfcarolina13.ChatUtils.DialogueTextMapper;
+import net.wcfcarolina13.ChatUtils.TextLineVisibilityService;
 import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
-import net.wcfcarolina13.Frens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -107,10 +107,6 @@ public final class CompanionOverheadDialogueService {
         return (System.currentTimeMillis() - last) < OVERHEAD_GLOBAL_SUPPRESSION_MS;
     }
 
-    private static boolean isGlobalTextDialogueEnabled() {
-        return Frens.CONFIG == null || Frens.CONFIG.isTextDialogueEnabled();
-    }
-
     /**
      * Best-effort: show a short foliage-stuck line above the bot to nearby players.
      * Rate-limited per bot.
@@ -137,7 +133,7 @@ public final class CompanionOverheadDialogueService {
         String line = LEAF_STUCK_LINES[RNG.nextInt(LEAF_STUCK_LINES.length)];
         int durationMs = DURATION_MS;
 
-        if (isGlobalTextDialogueEnabled()) {
+        if (TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag("leaf-stuck"))) {
             CompanionOverheadHologramService.show(bot, line, durationMs);
             LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
         }
@@ -190,7 +186,7 @@ public final class CompanionOverheadDialogueService {
         // Text toggle gates the hologram only; voice is gated by its own toggles below
         // (previously this early-returned, silencing voice when Text Chat was off —
         // inconsistent with tryShowGeneric and with ChatUtils' voice-only mode).
-        if (isGlobalTextDialogueEnabled()) {
+        if (TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag(tag))) {
             CompanionOverheadHologramService.show(bot, line, dur);
             LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
         }
@@ -244,7 +240,7 @@ public final class CompanionOverheadDialogueService {
         String line = lines[RNG.nextInt(lines.length)];
         int durationMs = DURATION_MS;
 
-        if (isGlobalTextDialogueEnabled()) {
+        if (TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag(tag))) {
             CompanionOverheadHologramService.show(bot, line, durationMs);
             LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
         }

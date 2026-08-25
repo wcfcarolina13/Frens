@@ -45,7 +45,8 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
     );
 
-    /** Index of the "Voice" toggle in GLOBAL_TOGGLES (indices are wired in init() and saveSettings() — move all three sites together). */
+    /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
+    private static final int TEXT_TOGGLE_INDEX = 4;
     private static final int VOICE_TOGGLE_INDEX = 5;
     private static final int VOICE_ADV_W = 34;
 
@@ -127,6 +128,8 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalChipRects = new ArrayList<>();
     /** "Adv…" chip on the Voice row — opens the per-category voice mute screen. */
     private Rect voiceAdvancedRect;
+    /** "Adv…" chip on the Text Chat row — opens the keep-visible text exceptions screen. */
+    private Rect textAdvancedRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
     private Rect bulkAutoRespawnOnRect;
     private Rect bulkAutoRespawnOffRect;
@@ -641,6 +644,7 @@ public class BotControlScreen extends Screen {
         globalRowRects.clear();
         globalChipRects.clear();
         voiceAdvancedRect = null;
+        textAdvancedRect = null;
 
         // Panel background
         context.fill(globalPanelRect.x, globalPanelRect.y,
@@ -712,9 +716,13 @@ public class BotControlScreen extends Screen {
             }
 
             Rect advRect = null;
-            if (i == VOICE_TOGGLE_INDEX) {
+            if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX) {
                 advRect = new Rect(chipRect.x - VOICE_ADV_W - 4, y + 1, VOICE_ADV_W, rowH - 2);
-                voiceAdvancedRect = advRect;
+                if (i == VOICE_TOGGLE_INDEX) {
+                    voiceAdvancedRect = advRect;
+                } else {
+                    textAdvancedRect = advRect;
+                }
             }
 
             int labelMaxW = (advRect != null ? advRect.x : chipRect.x) - rowRect.x - 12;
@@ -733,9 +741,15 @@ public class BotControlScreen extends Screen {
                         advRect.y + (advRect.h - this.textRenderer.fontHeight) / 2,
                         COL_LABEL, false);
                 if (advHover && tooltipText == null) {
-                    updateTooltipCandidate("global-voice-adv",
-                            "Mute individual categories of voiced lines (combat, ambient, reactions…). Audio only — text still shows.",
-                            mouseX, mouseY);
+                    if (i == VOICE_TOGGLE_INDEX) {
+                        updateTooltipCandidate("global-voice-adv",
+                                "Mute individual categories of voiced lines (combat, ambient, reactions…). Audio only — text still shows.",
+                                mouseX, mouseY);
+                    } else {
+                        updateTooltipCandidate("global-text-adv",
+                                "Pick categories that stay visible even when Text Chat is off (danger warnings and status lines by default).",
+                                mouseX, mouseY);
+                    }
                 }
             }
 
@@ -1233,10 +1247,16 @@ public class BotControlScreen extends Screen {
                 return true;
             }
 
-            // "Adv…" chip on the Voice row — must win over the row-wide toggle hit test.
+            // "Adv…" chips on the Voice/Text rows — must win over the row-wide toggle hit test.
             if (voiceAdvancedRect != null && voiceAdvancedRect.contains(mx, my)) {
                 if (this.client != null) {
                     this.client.setScreen(new ConfigureVoiceCategoriesScreen(this));
+                }
+                return true;
+            }
+            if (textAdvancedRect != null && textAdvancedRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new ConfigureTextCategoriesScreen(this));
                 }
                 return true;
             }

@@ -503,6 +503,27 @@ New mob-proximity and context-triggered ambient lines. All would extend the exis
 - Pool split landed: [PetProximityReactionService.java:79-87](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L79-L87) defines `ANIMAL_WELL_BEHAVED_LINES` (broad tamed-non-wolf trigger, 90s cooldown) and `MOUNT_QUALITY_LINES` ("That's a quality animal", mount-only trigger via `hasNearbyMountAnimal` at [lines 213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232) covering tamed `AbstractHorseEntity` / any `CamelEntity` / `LlamaEntity` & `TraderLlamaEntity` as `AbstractHorseEntity` subclasses).
 - Cooldown bumped: [line 36](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L36) — `MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L`.
 
+## TTS Latency / System Load (Backlogged 2026-08-25)
+
+Bradley (field round on 1.1.167/168): soul TTS response "quite slow, and seems to bug the
+laptop even at low graphics/shader settings" — wants a lighter path tested if quality holds.
+Audit: only live engine is Dreamsleeve (Qwen3-TTS 12Hz 1.7B 8-bit, MLX/Metal warm server);
+`PiperVoiceEngine` exists in code but no piper binary is installed; `soulVoicePiperBinary`
+is empty in live config.
+
+- [ ] **Sentence-streaming synthesis** (the known deferred latency lever) — synthesize and
+      start playing sentence 1 while the rest renders. Same engine/quality; biggest
+      perceived-latency win; does not reduce GPU load.
+- [ ] **Verify LoadGoverner covers synthesis windows** — `SoulRuntime.activeGenerations()`
+      floor: confirm it stays elevated through TTS render, not just LLM generation
+      (the "bugs the laptop" symptom is likely Metal contention during synth).
+- [ ] **Offline engine A/B (optional)** — install piper + an en voice, render the same 3
+      lines via Piper vs Dreamsleeve, compare wall time + let Bradley listen. Expectation:
+      Piper is much lighter/faster but is a generic voice — loses the Jake baked-voice
+      clone identity (sim=0.992 anchor). Check whether a smaller Qwen3-TTS variant exists
+      (verify on HF before pulling — never infer model ids).
+- [ ] Hosted-API offload remains separately backlogged behind the credential security review.
+
 ## Multiplayer Voice Muting (Backlogged 2026-08-25)
 
 Voiced-line category muting shipped global-only (settings.json5 mask, `ConfigureVoiceCategoriesScreen`

@@ -2,6 +2,28 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Text Chat "Adv…" — keep-visible category exceptions; 1.1.169 built, NOT deployed (2026-08-25)
+
+Bradley's ruling: inverse semantics from the voice menu. Text Chat master ON = everything
+shows; OFF = quiet EXCEPT categories checked in the new Text Adv menu (defaults:
+combat_alerts + survival_status, so danger warnings and status lines survive a muted chat).
+
+- `ManualConfig.textVisibleCategoryExceptions` (List of VoiceLineCategory ids; default
+  seeded on first load via null-guard) + accessors.
+- **`TextLineVisibilityService.isTextAllowed(category)`** — single text-visibility decision
+  point: master || exception. Wired into every scripted-text gate:
+  `CompanionOverheadDialogueService` (showOverheadLine / tryShowGeneric / tryShowLeafStuck,
+  using the call-site tag → category), `BotDialoguePlayer.showSubtitle` (category threaded
+  from playSoundInternal), `ChatUtils` chat lines (no tag → GENERAL category). Soul replies
+  remain fully exempt (see 1.1.168 entry).
+- **`ConfigureTextCategoriesScreen`** (clone of the voice screen, inverse semantics,
+  "Check All / Clear All") behind a second "Adv…" chip on the Text Chat row
+  (`TEXT_TOGGLE_INDEX = 4`); chip hit-tests before the row toggle, per-chip tooltips.
+- VoiceLineCategory now serves both voice muting and text visibility — same taxonomy.
+
+Backlog noted from field round: TTS latency/system load — test a lighter synthesis path
+(see RALPH_TASK.md).
+
 ## Invisible-text fix (alpha-0 colors), soul-chat text exemption, per-bot copy; 1.1.168 (2026-08-25)
 
 Field round on 1.1.167. World Settings no longer crashes (fix confirmed live) but rendered
