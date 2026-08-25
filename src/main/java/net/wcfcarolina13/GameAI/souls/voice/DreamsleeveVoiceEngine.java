@@ -77,7 +77,12 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
         this.refText = refText;
         this.synthTimeoutMs = synthTimeoutMs;
         this.workDir = Files.createTempDirectory("frens-soul-voice");
-        this.sockPath = workDir.resolve("tts.sock");
+        // AF_UNIX socket paths are limited to ~104 bytes on macOS; java.io.tmpdir
+        // (/var/folders/…) plus the temp-dir name runs right up against that (and the server
+        // exits with "bind failed (AF_UNIX path too long)" when it overflows — observed live).
+        // Bind the socket at a short /tmp path instead; only WAV drops use workDir.
+        this.sockPath = Path.of("/tmp", "frens-voice-" + Long.toHexString(
+                System.nanoTime() & 0xFFFFFFFFL) + ".sock");
     }
 
     public static List<String> command(String dreamsleeveDir, String sockPath, String outDir) {
@@ -270,6 +275,11 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     }
 
     private void deleteWorkDirQuietly() {
+        try {
+            Files.deleteIfExists(sockPath);
+        } catch (IOException ignored) {
+            // best-effort; a stale socket is also reclaimed by the next server start
+        }
         try {
             if (Files.isDirectory(workDir)) {
                 try (var entries = Files.list(workDir)) {
