@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Companion Settings autosave; 1.1.174 (2026-08-25)
+
+Bradley: menu settings should just autosave (destructive things excepted). The new
+screens (category menus, engine chooser, model manager) already persisted per click —
+`BotControlScreen` was the holdout, batching everything behind its Save button. Now:
+
+- Global toggle chips save on flip; per-bot `CyclingButtonWidget`s got a real change
+  callback (`saveSettings()`) instead of the no-op; Save button removed (Close remains),
+  including its dropdown-open click branch, footer draw, rect, and the now-unused
+  SystemToast import.
+- Nothing in this screen qualified as destructive (no deletion/overwrite); the
+  auto-respawn "revive by toggling" flow now fires immediately when Auto Respawn is
+  flipped on — which is the user's intent when clicking it. Bulk ALL ON/OFF buttons were
+  already self-saving. Genuinely action-like flows (Spawn Bots…, Permissions Editor)
+  stay explicit buttons.
+
 ## Text Adv unified with Voice + soul LLM model manager; 1.1.173 (2026-08-25)
 
 Two Bradley rulings from the Piper field round:

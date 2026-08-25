@@ -3,7 +3,6 @@ package net.wcfcarolina13.GraphicalUserInterface;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.CyclingButtonWidget;
-import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.Frens;
@@ -147,7 +146,6 @@ public class BotControlScreen extends Screen {
     // moved to BotPlayerInventoryScreen Admin → Behavior. Restore this block
     // (and the matching layout/render/click sites below) if you want the
     // dedicated screen back.
-    private Rect saveRect;
     private Rect closeRect;
     private final LinkedHashMap<CyclingButtonWidget<?>, Rect> settingChipRects = new LinkedHashMap<>();
 
@@ -295,7 +293,6 @@ public class BotControlScreen extends Screen {
         int footerBtnW = 70;
         int footerGap = 8;
         closeRect = new Rect(outerPanelX + outerPanelW - 10 - footerBtnW, footerY, footerBtnW, BUTTON_H);
-        saveRect = new Rect(closeRect.x - footerGap - footerBtnW, footerY, footerBtnW, BUTTON_H);
         permissionsActionRect = new Rect(contentX, footerY, 130, BUTTON_H);
         spawnBotsActionRect = new Rect(permissionsActionRect.right() + footerGap, footerY, 90, BUTTON_H);
     }
@@ -460,7 +457,7 @@ public class BotControlScreen extends Screen {
         CyclingButtonWidget<Boolean> btn = CyclingButtonWidget.<Boolean>builder(
                         v -> Text.of(v ? "ON" : "OFF"), () -> value)
                 .values(List.of(Boolean.TRUE, Boolean.FALSE))
-                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> saveSettings());
         settingWidgets.add(btn);
         return new SettingEntry(label, desc, btn, w);
     }
@@ -472,7 +469,7 @@ public class BotControlScreen extends Screen {
         CyclingButtonWidget<String> btn = CyclingButtonWidget.<String>builder(
                         formatter::apply, () -> value)
                 .values(opt1, opt2)
-                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> saveSettings());
         settingWidgets.add(btn);
         return new SettingEntry(label, desc, btn, w);
     }
@@ -484,7 +481,7 @@ public class BotControlScreen extends Screen {
         CyclingButtonWidget<String> btn = CyclingButtonWidget.<String>builder(
                         formatter::apply, () -> value)
                 .values(List.of(opt1, opt2, opt3))
-                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> saveSettings());
         settingWidgets.add(btn);
         return new SettingEntry(label, desc, btn, w);
     }
@@ -626,7 +623,6 @@ public class BotControlScreen extends Screen {
                     "Edit which players can command this bot and what they can make it do.",
                     mouseX, mouseY);
         }
-        drawActionButton(context, saveRect, "Save", false, true, mouseX, mouseY);
         drawActionButton(context, closeRect, "Close", false, true, mouseX, mouseY);
 
         // Dropdown renders on top of everything else
@@ -1235,18 +1231,6 @@ public class BotControlScreen extends Screen {
 
         // If dropdown is open, still allow footer buttons before consuming via widget system
         if (aliasDropdown.isOpen()) {
-            if (saveRect.contains(mx, my)) {
-                saveSettings();
-                if (this.client != null) {
-                    this.client.getToastManager().add(SystemToast.create(this.client,
-                            SystemToast.Type.NARRATOR_TOGGLE,
-                            Text.of("Bot settings saved"),
-                            Text.of("Applied new bot preferences")));
-                }
-                // Close dropdown via a harmless re-select
-                aliasDropdown.setSelectedOption(aliasDropdown.getSelectedOption());
-                return true;
-            }
             if (closeRect.contains(mx, my)) {
                 close();
                 return true;
@@ -1302,6 +1286,7 @@ public class BotControlScreen extends Screen {
                 Rect rowRect = globalRowRects.get(i);
                 if (chipRect.contains(mx, my) || rowRect.contains(mx, my)) {
                     globalValues[i] = !globalValues[i];
+                    saveSettings();
                     return true;
                 }
             }
@@ -1344,18 +1329,6 @@ public class BotControlScreen extends Screen {
             if (this.client != null) {
                 java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
                 this.client.setScreen(new BotRestoreScreen(this, aliases));
-            }
-            return true;
-        }
-
-        // Footer: Save
-        if (saveRect.contains(mx, my)) {
-            saveSettings();
-            if (this.client != null) {
-                this.client.getToastManager().add(SystemToast.create(this.client,
-                        SystemToast.Type.NARRATOR_TOGGLE,
-                        Text.of("Bot settings saved"),
-                        Text.of("Applied new bot preferences")));
             }
             return true;
         }
