@@ -48,6 +48,7 @@ public class BotControlScreen extends Screen {
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
     private static final int TEXT_TOGGLE_INDEX = 4;
     private static final int VOICE_TOGGLE_INDEX = 5;
+    private static final int SOUL_VOICE_TOGGLE_INDEX = 7;
     private static final int VOICE_ADV_W = 34;
 
     // Layout constants
@@ -130,6 +131,8 @@ public class BotControlScreen extends Screen {
     private Rect voiceAdvancedRect;
     /** "Adv…" chip on the Text Chat row — opens the keep-visible text exceptions screen. */
     private Rect textAdvancedRect;
+    /** "Eng…" chip on the Soul Voice row — opens the engine chooser (Dreamsleeve / Piper). */
+    private Rect soulVoiceEngineRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
     private Rect bulkAutoRespawnOnRect;
     private Rect bulkAutoRespawnOffRect;
@@ -645,6 +648,7 @@ public class BotControlScreen extends Screen {
         globalChipRects.clear();
         voiceAdvancedRect = null;
         textAdvancedRect = null;
+        soulVoiceEngineRect = null;
 
         // Panel background
         context.fill(globalPanelRect.x, globalPanelRect.y,
@@ -716,12 +720,14 @@ public class BotControlScreen extends Screen {
             }
 
             Rect advRect = null;
-            if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX) {
+            if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX || i == SOUL_VOICE_TOGGLE_INDEX) {
                 advRect = new Rect(chipRect.x - VOICE_ADV_W - 4, y + 1, VOICE_ADV_W, rowH - 2);
                 if (i == VOICE_TOGGLE_INDEX) {
                     voiceAdvancedRect = advRect;
-                } else {
+                } else if (i == TEXT_TOGGLE_INDEX) {
                     textAdvancedRect = advRect;
+                } else {
+                    soulVoiceEngineRect = advRect;
                 }
             }
 
@@ -736,7 +742,8 @@ public class BotControlScreen extends Screen {
                 boolean advHover = advRect.contains(mouseX, mouseY);
                 context.fill(advRect.x, advRect.y, advRect.right(), advRect.bottom(),
                         advHover ? COL_CHIP_HL : COL_CHIP);
-                context.drawText(this.textRenderer, "Adv…",
+                context.drawText(this.textRenderer,
+                        i == SOUL_VOICE_TOGGLE_INDEX ? "Eng…" : "Adv…",
                         advRect.x + 6,
                         advRect.y + (advRect.h - this.textRenderer.fontHeight) / 2,
                         COL_LABEL, false);
@@ -745,9 +752,13 @@ public class BotControlScreen extends Screen {
                         updateTooltipCandidate("global-voice-adv",
                                 "Mute individual categories of voiced lines (combat, ambient, reactions…). Audio only — text still shows.",
                                 mouseX, mouseY);
-                    } else {
+                    } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
                                 "Pick categories that stay visible even when Text Chat is off (danger warnings and status lines by default).",
+                                mouseX, mouseY);
+                    } else {
+                        updateTooltipCandidate("global-soul-voice-eng",
+                                "Choose the soul voice engine: Dreamsleeve (cloned voice, GPU) or Piper (lightweight, CPU — one-time download via a transparent installer).",
                                 mouseX, mouseY);
                     }
                 }
@@ -1257,6 +1268,12 @@ public class BotControlScreen extends Screen {
             if (textAdvancedRect != null && textAdvancedRect.contains(mx, my)) {
                 if (this.client != null) {
                     this.client.setScreen(new ConfigureTextCategoriesScreen(this));
+                }
+                return true;
+            }
+            if (soulVoiceEngineRect != null && soulVoiceEngineRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new SoulVoiceEngineScreen(this));
                 }
                 return true;
             }

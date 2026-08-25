@@ -2,6 +2,36 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Piper installer + soul-voice engine chooser; 1.1.171 (2026-08-25)
+
+Bradley's ruling on the A/B: Piper quality is acceptable for Minecraft — users get the
+choice, via an installer with full transparency (sizes, download sources, install
+location, system check, pre-installed detection).
+
+- **`PiperInstaller`** (souls/voice) — everything pinned, nothing inferred: release
+  2023.11.14-2, per-platform assets (Windows x64 21.4MB / macOS ARM+Intel 18.3MB /
+  Linux x64 25.2MB) + voice en_US-lessac-medium (60MB), each with sha256 computed from
+  one-time verified downloads; every byte hash-checked before trust (.part file, atomic
+  move). `detect()`: OS/arch → asset (unsupported platforms told plainly), disk free,
+  existing-piper scan (configured path, prior mod install, ~/.local/bin, Homebrew,
+  /usr/local/bin, PATH). `install()`: download → verify → extract (zip via
+  java.util.zip with entry-escape guard; tar.gz via system tar) → chmod → **synthesis
+  smoke test** → config write (engine=piper, binary, model, enabled) + SoulRuntime
+  reload. Smoke test proves the PiperVoiceEngine CLI contract (--model/--output_dir,
+  stdin text, WAV path on stdout) — verified live that the pipx *Python* piper 1.7.0
+  renders but reports on stderr, so "Use Existing" correctly rejects it with a
+  use-Download message instead of failing silently in-game.
+- **`PiperInstallerScreen`** — check rows (platform ✓/✗, disk need ~300MB), download
+  plan (size, github.com + huggingface.co, checksums-verified note), install
+  destination, found pre-installs with origin labels + honest compat warning; progress
+  bar during install; all work on daemon threads, screen renders volatile state.
+- **`SoulVoiceEngineScreen`** — user-facing choice: Dreamsleeve (cloned voice, GPU,
+  best quality) vs Piper (lightweight, CPU); availability detected per engine; select
+  writes config + hot-reloads; "Install Piper…" opens the installer. Entry: "Eng…"
+  chip on the Soul Voice row in Bot Control.
+- Deployed as **frens-1.1.171**. Dedicated-server caveat noted in class javadoc
+  (binary would be needed server-side; config sync still stubbed).
+
 ## TTS A/B results; 1.1.170 deployed (2026-08-25)
 
 Offline A/B (no game running — contention-free): Piper en_US-lessac-medium (CPU) ~0.97s
