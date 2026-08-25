@@ -502,6 +502,7 @@ public class Frens implements ModInitializer {
         // Bases manager UI payloads
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestBasesPayload.ID, net.wcfcarolina13.network.RequestBasesPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.BasesListPayload.ID, net.wcfcarolina13.network.BasesListPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.SoulVoicePayload.ID, net.wcfcarolina13.network.SoulVoicePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetPayload.ID, net.wcfcarolina13.network.BaseSetPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRemovePayload.ID, net.wcfcarolina13.network.BaseRemovePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRenamePayload.ID, net.wcfcarolina13.network.BaseRenamePayload.CODEC);

@@ -202,6 +202,9 @@ class SoulRuntimeTest {
         when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
         when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
         when(config.getSoulQueueCapacity()).thenReturn(8);
+        // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
+        // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
+        when(config.getSoulVoicePiperBinary()).thenReturn("");
 
         runtime.reloadSettings(config).join();
 
@@ -240,6 +243,9 @@ class SoulRuntimeTest {
         when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
         when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
         when(config.getSoulQueueCapacity()).thenReturn(8);
+        // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
+        // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
+        when(config.getSoulVoicePiperBinary()).thenReturn("");
 
         runtime.reloadSettings(config).join();
 
@@ -293,6 +299,9 @@ class SoulRuntimeTest {
         when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
         when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
         when(config.getSoulQueueCapacity()).thenReturn(8);
+        // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
+        // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
+        when(config.getSoulVoicePiperBinary()).thenReturn("");
         runtime.reloadSettings(config).join();
         verify(scheduler).close();
         verify(oldProvider).close();

@@ -1,9 +1,16 @@
 package net.wcfcarolina13.GameAI.souls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.WorldSavePath;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine;
+import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceEngine;
+import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceGate;
+import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceService;
+import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
+import net.wcfcarolina13.network.SoulVoicePayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,7 +73,8 @@ public final class SoulRuntime {
 
     private record Pipeline(SoulSettings settings, SoulModelProvider provider,
                              SoulGenerationScheduler scheduler,
-                             SoulConversationService conversationService) {
+                             SoulConversationService conversationService,
+                             SoulVoiceService voice) {
     }
 
     /** Public API contract consumed by later tasks' chat/command routing. */
@@ -78,11 +86,13 @@ public final class SoulRuntime {
 
     private final SoulStore store;
     private final SoulConversationService.Delivery delivery;
+    private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final SoulPromptAssembler promptAssembler = new SoulPromptAssembler();
     private final SoulResponseValidator validator = new SoulResponseValidator();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicReference<Pipeline> pipelineRef;
     private final AtomicBoolean ready = new AtomicBoolean(false);
+    private volatile SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(null);
 
     // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
     // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
@@ -105,18 +115,22 @@ public final class SoulRuntime {
                 SoulGenerationScheduler scheduler, SoulConversationService conversationService) {
         this.store = Objects.requireNonNull(store, "store");
         this.delivery = NO_OP_DELIVERY;
+        this.voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) -> { };
         this.pipelineRef = new AtomicReference<>(new Pipeline(
                 Objects.requireNonNull(settings, "settings"),
                 Objects.requireNonNull(provider, "provider"),
                 Objects.requireNonNull(scheduler, "scheduler"),
-                Objects.requireNonNull(conversationService, "conversationService")));
+                Objects.requireNonNull(conversationService, "conversationService"),
+                SoulVoiceService.disabled()));
     }
 
-    private SoulRuntime(SoulSettings initialSettings, SoulStore store,
-                         SoulConversationService.Delivery delivery) {
+    private SoulRuntime(SoulSettings initialSettings, SoulVoiceSettings initialVoiceSettings, SoulStore store,
+                         SoulConversationService.Delivery delivery, SoulVoiceService.VoiceDelivery voiceDelivery) {
         this.store = Objects.requireNonNull(store, "store");
         this.delivery = Objects.requireNonNull(delivery, "delivery");
-        this.pipelineRef = new AtomicReference<>(buildPipeline(initialSettings));
+        this.voiceDelivery = Objects.requireNonNull(voiceDelivery, "voiceDelivery");
+        this.voiceSettings = Objects.requireNonNull(initialVoiceSettings, "voiceSettings");
+        this.pipelineRef = new AtomicReference<>(buildPipeline(initialSettings, initialVoiceSettings));
     }
 
     // === Static lifecycle ===
@@ -134,13 +148,29 @@ public final class SoulRuntime {
         try {
             SoulProfileRegistry.loadBuiltIns();
             SoulSettings settings = SoulSettings.from(config);
+            SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(config);
             Path worldRoot = server.getSavePath(WorldSavePath.ROOT);
             SoulStore store = new SoulStore(worldRoot);
             SoulConversationService.Delivery delivery = new SoulMessageDelivery(server,
                     new SoulMessageDelivery.ProductionDeliveryGuard(server, store,
                             () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)));
 
-            SoulRuntime runtime = new SoulRuntime(settings, store, delivery);
+            SoulVoiceService.VoiceDelivery voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks) ->
+                    server.execute(() -> {
+                        net.minecraft.server.network.ServerPlayerEntity player =
+                                server.getPlayerManager().getPlayer(playerId);
+                        if (player == null) {
+                            return;
+                        }
+                        byte modeByte = mode == SoulVoiceGate.Mode.POSITIONAL
+                                ? SoulVoicePayload.MODE_POSITIONAL : SoulVoicePayload.MODE_RADIO;
+                        for (int i = 0; i < chunks.size(); i++) {
+                            ServerPlayNetworking.send(player, new SoulVoicePayload(
+                                    correlationId, botId, modeByte, sampleRate, i, chunks.size(), chunks.get(i)));
+                        }
+                    });
+
+            SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, delivery, voiceDelivery);
             INSTANCE.set(runtime);
             runtime.preloadIndex().exceptionally(ex -> {
                 LOGGER.warn("[souls] index preload failed: {}", ex.toString());
@@ -333,25 +363,42 @@ public final class SoulRuntime {
      */
     public CompletableFuture<Void> reloadSettings(ManualConfig config) {
         SoulSettings newSettings = SoulSettings.from(config);
-        Pipeline built = buildPipeline(newSettings);
+        SoulVoiceSettings newVoiceSettings = SoulVoiceSettings.from(config);
+        Pipeline built = buildPipeline(newSettings, newVoiceSettings);
         synchronized (lifecycleLock) {
             if (stopped) {
                 closePipeline(built);
                 return CompletableFuture.completedFuture(null);
             }
+            voiceSettings = newVoiceSettings;
             closePipeline(pipelineRef.getAndSet(built));
         }
         return CompletableFuture.completedFuture(null);
     }
 
-    private Pipeline buildPipeline(SoulSettings settings) {
+    private Pipeline buildPipeline(SoulSettings settings, SoulVoiceSettings voiceSettings) {
         warnIfNonLocalOllamaHost(settings);
         SoulModelProvider provider =
                 new OllamaSoulProvider(settings.ollamaBaseUri(), settings.model(), objectMapper);
         SoulGenerationScheduler scheduler = new SoulGenerationScheduler(1, settings.queueCapacity());
+        SoulVoiceService voice = buildVoiceService(voiceSettings);
         SoulConversationService conversationService = new SoulConversationService(
-                store, promptAssembler, scheduler, provider, validator, delivery, settings);
-        return new Pipeline(settings, provider, scheduler, conversationService);
+                store, promptAssembler, scheduler, provider, validator, delivery, settings, voice);
+        return new Pipeline(settings, provider, scheduler, conversationService, voice);
+    }
+
+    private SoulVoiceService buildVoiceService(SoulVoiceSettings voiceSettings) {
+        if (!voiceSettings.enabled() || !voiceSettings.valid()) {
+            return SoulVoiceService.disabled();
+        }
+        try {
+            SoulVoiceEngine engine = new PiperVoiceEngine(voiceSettings.piperBinary(),
+                    voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs());
+            return new SoulVoiceService(voiceSettings, engine, voiceDelivery);
+        } catch (Exception ex) {
+            LOGGER.warn("[souls] tts engine unavailable, voice disabled: {}", ex.toString());
+            return SoulVoiceService.disabled();
+        }
     }
 
     /**
@@ -401,6 +448,11 @@ public final class SoulRuntime {
             pipeline.provider().close();
         } catch (RuntimeException ex) {
             LOGGER.warn("[souls] provider close failed: {}", ex.toString());
+        }
+        try {
+            pipeline.voice().close();
+        } catch (RuntimeException ex) {
+            LOGGER.warn("[souls] voice close failed: {}", ex.toString());
         }
     }
 
@@ -456,6 +508,16 @@ public final class SoulRuntime {
                     formatHostPort(pipeline.settings().ollamaBaseUri()), healthy,
                     pipeline.scheduler().queueDepth(), botId, state.profileId(), state.active(), epoch);
         });
+    }
+
+    /** Whether the currently installed pipeline's TTS engine is alive and usable right now. */
+    public boolean voiceEngineAlive() {
+        return pipelineRef.get().voice().engineAlive();
+    }
+
+    /** Current soul-voice settings snapshot, refreshed by {@link #reloadSettings}. */
+    public SoulVoiceSettings voiceSettings() {
+        return voiceSettings;
     }
 
     // === Events / disconnect cancellation ===
