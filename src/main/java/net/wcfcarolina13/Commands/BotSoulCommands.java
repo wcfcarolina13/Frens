@@ -164,6 +164,33 @@ final class BotSoulCommands {
         return Optional.empty();
     }
 
+    /**
+     * Engine-aware validation for {@code /bot soul voice on}: piper checks binary + model,
+     * dreamsleeve checks the repo's {@code scripts/tts_server.py} and the voice-anchor
+     * reference clip. Reports the first concrete problem found.
+     */
+    static Optional<String> validateVoiceConfig(String engine, String binary, String model,
+                                                 String dreamsleeveDir, String refAudio,
+                                                 Predicate<String> isFile) {
+        if ("dreamsleeve".equals(engine)) {
+            if (dreamsleeveDir == null || dreamsleeveDir.isBlank()) {
+                return Optional.of("Configure the dreamsleeve directory first.");
+            }
+            if (refAudio == null || refAudio.isBlank()) {
+                return Optional.of("Configure a voice reference clip (soulVoiceRefAudio) first.");
+            }
+            String server = dreamsleeveDir + "/scripts/tts_server.py";
+            if (!isFile.test(server)) {
+                return Optional.of("Dreamsleeve TTS server not found: " + server);
+            }
+            if (!isFile.test(refAudio)) {
+                return Optional.of("Voice reference clip not found: " + refAudio);
+            }
+            return Optional.empty();
+        }
+        return validateVoicePaths(binary, model, isFile);
+    }
+
     private static Optional<Boolean> parseOnOff(String raw) {
         if (raw == null) {
             return Optional.empty();
@@ -247,9 +274,12 @@ final class BotSoulCommands {
             source.sendError(Text.literal("Only an operator may change the soul voice switch."));
             return 0;
         }
-        Optional<String> problem = validateVoicePaths(
+        Optional<String> problem = validateVoiceConfig(
+                Frens.CONFIG.getSoulVoiceEngine(),
                 Frens.CONFIG.getSoulVoicePiperBinary(),
                 Frens.CONFIG.getSoulVoiceModel(),
+                Frens.CONFIG.getSoulVoiceDreamsleeveDir(),
+                Frens.CONFIG.getSoulVoiceRefAudio(),
                 path -> Files.isRegularFile(Path.of(path)));
         if (problem.isPresent()) {
             source.sendError(Text.literal(problem.get()));
@@ -284,6 +314,7 @@ final class BotSoulCommands {
         SoulVoiceSettings voiceSettings = runtime.voiceSettings();
         boolean alive = runtime.voiceEngineAlive();
         String line = "Soul voice: " + (voiceSettings.enabled() ? "on" : "off")
+                + " engine=" + voiceSettings.engine()
                 + " valid=" + voiceSettings.valid()
                 + (voiceSettings.valid() ? "" : " (" + voiceSettings.validationError() + ")")
                 + " engineAlive=" + alive;

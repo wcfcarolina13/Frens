@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.WorldSavePath;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.GameAI.souls.voice.DreamsleeveVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceGate;
@@ -392,8 +393,13 @@ public final class SoulRuntime {
             return SoulVoiceService.disabled();
         }
         try {
-            SoulVoiceEngine engine = new PiperVoiceEngine(voiceSettings.piperBinary(),
-                    voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs());
+            SoulVoiceEngine engine = switch (voiceSettings.engine()) {
+                case SoulVoiceSettings.ENGINE_DREAMSLEEVE -> new DreamsleeveVoiceEngine(
+                        voiceSettings.dreamsleeveDir(), voiceSettings.refAudio(),
+                        voiceSettings.refText(), voiceSettings.synthTimeoutMs());
+                default -> new PiperVoiceEngine(voiceSettings.piperBinary(),
+                        voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs());
+            };
             return new SoulVoiceService(voiceSettings, engine, voiceDelivery);
         } catch (Exception ex) {
             LOGGER.warn("[souls] tts engine unavailable, voice disabled: {}", ex.toString());

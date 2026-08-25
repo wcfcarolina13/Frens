@@ -33,7 +33,8 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
     }
 
     private static final SoulVoiceService DISABLED =
-            new SoulVoiceService(new SoulVoiceSettings(false, false, "disabled", "", "", 400, 8000L, 0.6f),
+            new SoulVoiceService(new SoulVoiceSettings(false, false, "disabled",
+                    SoulVoiceSettings.ENGINE_PIPER, "", "", "", "", "", 400, 8000L, 0.6f),
                     null, (playerId, correlationId, botId, mode, sampleRate, chunks) -> { });
 
     private final SoulVoiceSettings settings;
