@@ -205,6 +205,7 @@ class SoulRuntimeTest {
         // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
         // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
         when(config.getSoulVoicePiperBinary()).thenReturn("");
+        when(config.getSoulVoiceEngine()).thenReturn("piper");
 
         runtime.reloadSettings(config).join();
 
@@ -246,6 +247,7 @@ class SoulRuntimeTest {
         // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
         // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
         when(config.getSoulVoicePiperBinary()).thenReturn("");
+        when(config.getSoulVoiceEngine()).thenReturn("piper");
 
         runtime.reloadSettings(config).join();
 
@@ -302,6 +304,7 @@ class SoulRuntimeTest {
         // Real ManualConfig.getSoulVoicePiperBinary() never returns null (defaults to ""); a bare
         // Mockito mock does unless stubbed, which would NPE inside SoulVoiceSettings.from.
         when(config.getSoulVoicePiperBinary()).thenReturn("");
+        when(config.getSoulVoiceEngine()).thenReturn("piper");
         runtime.reloadSettings(config).join();
         verify(scheduler).close();
         verify(oldProvider).close();

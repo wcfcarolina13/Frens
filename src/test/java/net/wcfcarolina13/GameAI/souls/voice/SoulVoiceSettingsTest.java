@@ -71,6 +71,36 @@ class SoulVoiceSettingsTest {
     }
 
     @Test
+    void dreamsleeveEngineValidatesDirAndRefClipInsteadOfPiperPaths() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulVoiceEnabled(true);
+        config.setSoulVoiceEngine("dreamsleeve");
+        config.setSoulVoiceDreamsleeveDir("/Users/roti/pontus/openmw-forge/dreamsleeve");
+        SoulVoiceSettings missingRef = SoulVoiceSettings.from(config);
+        assertFalse(missingRef.valid());
+        assertEquals("Configure a voice reference clip (soulVoiceRefAudio) first.",
+                missingRef.validationError());
+
+        config.setSoulVoiceRefAudio("/voices/vanilla/imperial-m/calm.wav");
+        config.setSoulVoiceRefText("Yes? What can I do for you?");
+        SoulVoiceSettings s = SoulVoiceSettings.from(config);
+        assertTrue(s.valid());
+        assertEquals(SoulVoiceSettings.ENGINE_DREAMSLEEVE, s.engine());
+        assertEquals("Yes? What can I do for you?", s.refText());
+        // Piper paths are irrelevant for this engine and stay blank without invalidating.
+        assertEquals("", s.piperBinary());
+    }
+
+    @Test
+    void unknownEngineIsInvalid() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulVoiceEngine("espeak");
+        SoulVoiceSettings s = SoulVoiceSettings.from(config);
+        assertFalse(s.valid());
+        assertEquals("Unknown soul voice engine: espeak", s.validationError());
+    }
+
+    @Test
     void accessorsClampValuesCorrectly() throws Exception {
         ManualConfig config = newRealConfig();
         config.setSoulVoiceMaxChars(20);           // below min 40

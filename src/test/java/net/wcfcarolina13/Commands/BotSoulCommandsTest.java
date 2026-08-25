@@ -65,4 +65,23 @@ class BotSoulCommandsTest {
         assertEquals("Configure the piper binary path first.",
                 BotSoulCommands.validateVoicePaths("", "/ok/jake.onnx", exists).orElseThrow());
     }
+
+    @Test
+    void voiceConfigValidationBranchesPerEngine() {
+        java.util.function.Predicate<String> exists = path ->
+                path.equals("/ds/scripts/tts_server.py") || path.equals("/ds/refs/calm.wav")
+                        || path.equals("/ok/piper") || path.equals("/ok/jake.onnx");
+        // dreamsleeve: server script + ref clip, piper paths irrelevant
+        assertTrue(BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
+                "/ds", "/ds/refs/calm.wav", exists).isEmpty());
+        assertEquals("Dreamsleeve TTS server not found: /missing/scripts/tts_server.py",
+                BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
+                        "/missing", "/ds/refs/calm.wav", exists).orElseThrow());
+        assertEquals("Configure a voice reference clip (soulVoiceRefAudio) first.",
+                BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
+                        "/ds", "", exists).orElseThrow());
+        // piper engine delegates to the original path validation
+        assertTrue(BotSoulCommands.validateVoiceConfig("piper", "/ok/piper", "/ok/jake.onnx",
+                "", "", exists).isEmpty());
+    }
 }
