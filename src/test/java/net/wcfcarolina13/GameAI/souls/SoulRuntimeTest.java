@@ -110,6 +110,20 @@ class SoulRuntimeTest {
         verify(provider, never()).generate(any());
     }
 
+    @Test
+    void banterStatusReportsNotRunningOnTheTestSeam() {
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        assertEquals("Banter director not running.",
+                runtime.banterStatus(java.util.UUID.randomUUID()));
+    }
+
+    @Test
+    void notePlayerChatIsSafeWithoutAnyRuntime() {
+        // Static facade must never throw, even with a null player and no installed runtime.
+        SoulRuntime.notePlayerChat(null);
+    }
+
     // === Own coverage: cancelPlayer — player-disconnect generation cancellation ===
 
     @Test

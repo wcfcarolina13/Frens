@@ -101,7 +101,11 @@ final class BotSoulCommands {
                 .then(CommandManager.literal("voice")
                         .then(CommandManager.literal("on").executes(BotSoulCommands::executeVoiceOn))
                         .then(CommandManager.literal("off").executes(BotSoulCommands::executeVoiceOff))
-                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeVoiceStatus)));
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeVoiceStatus)))
+                .then(CommandManager.literal("banter")
+                        .then(CommandManager.literal("on").executes(ctx -> executeBanterToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeBanterToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeBanterStatus)));
     }
 
     // === Pure helpers (unit-tested; no Minecraft types) ===
@@ -524,6 +528,42 @@ final class BotSoulCommands {
                         "Archived your conversation with " + botName + "; new epoch " + newEpoch + ".");
             }
         }));
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul banter on|off} — operator-only kill switch for autonomous banter scenes.
+     * No pipeline reload needed: the director reads the config through a live supplier.
+     */
+    private static int executeBanterToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the banter switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        config.setSoulBanterEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Companion banter set to " + (enabled ? "on" : "off")
+                + (enabled ? ". They'll chat when things are calm." : "."));
+        return 1;
+    }
+
+    /** {@code /bot soul banter status} — enablement plus the actor's live eligibility verdict. */
+    private static int executeBanterStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulBanterEnabled();
+        String verdict = SoulRuntime.current()
+                .map(rt -> rt.banterStatus(actor.getUuid()))
+                .orElse("Soul runtime is not currently running.");
+        ChatUtils.sendSystemMessage(source,
+                "Banter is " + (enabled ? "ON" : "OFF") + ". " + verdict);
         return 1;
     }
 

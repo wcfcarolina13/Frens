@@ -1272,6 +1272,10 @@ public class Frens implements ModInitializer {
             }
             SkillResumeService.handleChat(sender, raw);
 
+            // Banter quiet-window: any typed line (plain chat, DM turn, scene trigger) counts
+            // as the player actively conversing.
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerChat(sender);
+
             ChatTarget target = resolveChatTargets(raw);
             if (!target.bots().isEmpty()) {
                 List<ServerPlayerEntity> routedBots = dedupeTargetBots(target.bots());

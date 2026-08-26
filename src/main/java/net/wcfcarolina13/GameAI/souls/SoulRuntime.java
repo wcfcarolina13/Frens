@@ -103,6 +103,8 @@ public final class SoulRuntime {
     private volatile SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(null);
     /** Scene playback machine; production-only (created by {@link #start}), null in the test seam. */
     private volatile GroupScenePlayback scenePlayback;
+    /** Autonomous banter scheduler; production-only, null in the test seam. */
+    private volatile SoulBanterDirector banterDirector;
 
     // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
     // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
@@ -195,6 +197,18 @@ public final class SoulRuntime {
 
             SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, partyStore,
                     delivery, voiceDelivery);
+            // Ambient-category gates for BANTER scenes (banter spec D6): lazy lambdas so this
+            // class never class-loads Frens/ChatUtils outside a live game. PLAYER scenes ignore
+            // these (soul exemption).
+            java.util.function.BooleanSupplier ambientTextOpen = () ->
+                    net.wcfcarolina13.ChatUtils.TextLineVisibilityService.isTextAllowed(
+                            net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER);
+            java.util.function.BooleanSupplier ambientVoiceOpen = () -> {
+                ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                return cfg == null || (cfg.isVoicedDialogueEnabled() && !cfg.isVoiceCategoryMuted(
+                        net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER.id()));
+            };
+
             // The playback machine reads the CURRENT pipeline's voice/group service through the
             // runtime, so a settings reload swapping the pipeline never leaves it holding a
             // closed voice engine or a displaced group service.
@@ -220,7 +234,15 @@ public final class SoulRuntime {
                                 groupService.sceneFinished(token, deliveredLines, totalLines);
                             }
                         }
-                    });
+                    }, ambientTextOpen, ambientVoiceOpen);
+            runtime.banterDirector = new SoulBanterDirector(runtime, server,
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg != null && cfg.isSoulBanterEnabled();
+                    },
+                    ambientTextOpen, ambientVoiceOpen,
+                    srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
+                    System::currentTimeMillis, new java.util.Random());
             INSTANCE.set(runtime);
             runtime.preloadIndex().exceptionally(ex -> {
                 LOGGER.warn("[souls] index preload failed: {}", ex.toString());
@@ -403,6 +425,13 @@ public final class SoulRuntime {
         if (groupService == null || scenePlayback == null) {
             return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
         }
+        if (turn.kind() == SoulGroupTypes.SceneKind.PLAYER) {
+            // A real conversation re-arms the banter cooldown — banter yields to the player.
+            SoulBanterDirector director = banterDirector;
+            if (director != null) {
+                director.notePlayerScene(turn.ownerId());
+            }
+        }
         return groupService.submit(turn);
     }
 
@@ -461,6 +490,31 @@ public final class SoulRuntime {
         if (playback != null) {
             playback.tick();
         }
+        SoulBanterDirector director = runtime.banterDirector;
+        if (director != null) {
+            director.tick();
+        }
+    }
+
+    /**
+     * Quiet-window signal for the banter director: notes a player's public chat line. Static
+     * facade so the Frens chat callback stays a one-liner; safe no-op on any failure. Every
+     * typed line — plain chat, DM turns, group-scene triggers — arrives through that callback,
+     * so one timestamp covers all "the player is actively conversing" cases.
+     */
+    public static void notePlayerChat(net.minecraft.server.network.ServerPlayerEntity player) {
+        try {
+            if (player != null) {
+                SoulPlayerActivity.noteChat(player.getUuid(), System.currentTimeMillis());
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** For {@code /bot soul banter status}. */
+    public String banterStatus(UUID playerId) {
+        SoulBanterDirector director = banterDirector;
+        return director == null ? "Banter director not running." : director.statusFor(playerId);
     }
 
     // === Store passthroughs ===

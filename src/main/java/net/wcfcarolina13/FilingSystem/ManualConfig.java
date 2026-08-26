@@ -114,6 +114,9 @@ public class ManualConfig {
     // Group scenes ("bots, ..." / "Jake and Sara, ...") kill switch. Default-on: it only takes
     // effect while the souls master above is on, so a souls-off install is unaffected.
     private boolean soulPartyEnabled = true;
+    // Autonomous banter scenes. Default-OFF (explicit opt-in per the banter spec): companions
+    // spending LLM/TTS time on their own initiative only happens after the user asks for it.
+    private boolean soulBanterEnabled = false;
 
     // Soul generated-voice (TTS). Default-off; local engines only. See
     // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
@@ -851,6 +854,9 @@ public class ManualConfig {
 
     public boolean isSoulPartyEnabled() { return soulPartyEnabled; }
     public void setSoulPartyEnabled(boolean v) { this.soulPartyEnabled = v; }
+
+    public boolean isSoulBanterEnabled() { return soulBanterEnabled; }
+    public void setSoulBanterEnabled(boolean v) { this.soulBanterEnabled = v; }
 
     public String getSoulProvider() {
         return (soulProvider == null || soulProvider.isBlank()) ? "ollama" : soulProvider;

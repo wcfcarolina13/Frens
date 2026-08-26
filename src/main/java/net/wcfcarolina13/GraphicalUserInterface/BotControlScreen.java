@@ -41,7 +41,8 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Text Chat", "Master kill switch for scripted bot text: chat lines, overhead text, and subtitles. While ON, Adv… mutes individual categories — same rule as Voice. Soul Chat replies always show. With this off and Voice on, lines with audio become voice-only."),
             new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. Per-bot Voiced Dialogue can additionally mute a single bot; Adv… mutes categories."),
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
-            new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above.")
+            new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above."),
+            new GlobalToggleDef("Banter", "Companions occasionally chat among themselves when things are calm (needs Soul Chat on and 2+ soul-bound bots nearby). Ambient category masks in the Text/Voice Adv… menus apply. /bot soul banter status explains why it is or isn't firing.")
     );
 
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
@@ -49,6 +50,7 @@ public class BotControlScreen extends Screen {
     private static final int VOICE_TOGGLE_INDEX = 5;
     private static final int SOUL_CHAT_TOGGLE_INDEX = 6;
     private static final int SOUL_VOICE_TOGGLE_INDEX = 7;
+    private static final int BANTER_TOGGLE_INDEX = 8;
     private static final int VOICE_ADV_W = 34;
 
     // Layout constants
@@ -218,6 +220,7 @@ public class BotControlScreen extends Screen {
             globalValues[5] = Frens.CONFIG.isVoicedDialogueEnabled();
             globalValues[6] = Frens.CONFIG.isSoulsEnabled();
             globalValues[7] = Frens.CONFIG.isSoulVoiceEnabled();
+            globalValues[BANTER_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterEnabled();
             globalsLoaded = true;
         }
 
@@ -509,6 +512,8 @@ public class BotControlScreen extends Screen {
                 || config.isSoulVoiceEnabled() != globalValues[7];
         config.setSoulsEnabled(globalValues[6]);
         config.setSoulVoiceEnabled(globalValues[7]);
+        // Banter needs no pipeline reload: the director reads this through a live supplier.
+        config.setSoulBanterEnabled(globalValues[BANTER_TOGGLE_INDEX]);
         if (soulTogglesChanged) {
             net.wcfcarolina13.GameAI.souls.SoulRuntime.current().ifPresent(rt ->
                     rt.reloadSettings(config).exceptionally(ex -> {
