@@ -128,6 +128,63 @@ class ChatAddressingTest {
         assertEquals(1, r.matchedNameIndex());
     }
 
+    // === Multi-name leading runs (group scenes) ===
+
+    private static final List<String> JAKE_AND_SARA = List.of("Jake", "Sara");
+
+    @Test
+    void multiNameLeadingRunResolvesAllNames() {
+        ChatAddressing.Resolution r = resolved("Jake and Sara, what do you think", JAKE_AND_SARA);
+        assertEquals(List.of(0, 1), r.matchedNameIndices());
+        assertFalse(r.broadcast());
+        assertEquals("what do you think", r.prompt());
+    }
+
+    @Test
+    void multiNameCommaOnlyRun() {
+        ChatAddressing.Resolution r = resolved("Jake, Sara, come look at this", JAKE_AND_SARA);
+        assertEquals(List.of(0, 1), r.matchedNameIndices());
+        assertEquals("come look at this", r.prompt());
+    }
+
+    @Test
+    void connectorWithoutSecondNameStopsExtension() {
+        ChatAddressing.Resolution r = resolved("Jake and I went mining", JAKE_AND_SARA);
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertEquals("and I went mining", r.prompt());
+    }
+
+    @Test
+    void singleNameCompatAccessorUnchanged() {
+        ChatAddressing.Resolution r = resolved("Jake come here", JAKE_ONLY);
+        assertEquals(0, r.matchedNameIndex());
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertEquals("come here", r.prompt());
+    }
+
+    @Test
+    void midSentenceNameNeverStartsMultiRun() {
+        // Non-leading match keeps today's behavior exactly: first name only, full-message prompt.
+        ChatAddressing.Resolution r = resolved("can you help me, Jake and Sara", JAKE_AND_SARA);
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertEquals("can you help me, Jake and Sara", r.prompt());
+    }
+
+    @Test
+    void broadcastKeywordStillWinsOverNames() {
+        ChatAddressing.Resolution r = resolved("bots Jake and Sara hello", JAKE_AND_SARA);
+        assertTrue(r.broadcast());
+        assertTrue(r.matchedNameIndices().isEmpty());
+        assertEquals(-1, r.matchedNameIndex());
+    }
+
+    @Test
+    void duplicateNameInRunKeptOnce() {
+        ChatAddressing.Resolution r = resolved("Jake and Jake, hi", JAKE_ONLY);
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertEquals("hi", r.prompt());
+    }
+
     // === No-match and degenerate inputs ===
 
     @Test

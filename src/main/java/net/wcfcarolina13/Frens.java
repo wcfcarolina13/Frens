@@ -1451,9 +1451,15 @@ public class Frens implements ModInitializer {
             return new ChatTarget(List.of(), "", false);
         }
         ChatAddressing.Resolution resolved = resolution.get();
-        List<ServerPlayerEntity> targets = resolved.broadcast()
-                ? new ArrayList<>(bots)
-                : new ArrayList<>(List.of(bots.get(resolved.matchedNameIndex())));
+        List<ServerPlayerEntity> targets;
+        if (resolved.broadcast()) {
+            targets = new ArrayList<>(bots);
+        } else {
+            targets = new ArrayList<>();
+            for (int idx : resolved.matchedNameIndices()) {
+                targets.add(bots.get(idx));
+            }
+        }
         targets = dedupeTargetBots(targets);
         if (targets.isEmpty()) {
             return new ChatTarget(List.of(), "", false);
