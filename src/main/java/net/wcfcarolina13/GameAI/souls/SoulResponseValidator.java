@@ -57,10 +57,7 @@ public final class SoulResponseValidator {
             return reject("contains a NUL character");
         }
 
-        String text = raw.replace("\r\n", "\n").replace('\r', '\n');
-        text = THINK_BLOCK.matcher(text).replaceAll("");
-        text = ANALYSIS_BLOCK.matcher(text).replaceAll("");
-        text = truncateAtUnclosedReasoningTag(text);
+        String text = sanitizeBase(raw);
 
         if (FENCE_AT_LINE_START.matcher(text).find()) {
             return reject("contains a fenced tool/JSON payload");
@@ -82,6 +79,19 @@ public final class SoulResponseValidator {
         }
 
         return accept(text);
+    }
+
+    /**
+     * The provider-noise cleanup shared by the DM and group validators: newline normalization,
+     * removal of closed hidden-reasoning blocks, and truncation at any unclosed reasoning tag.
+     * Deliberately excludes the DM-specific steps (fence rejection, speaker-prefix strip,
+     * formatting-code strip) so the DM {@link #validate} pipeline stays byte-identical.
+     */
+    static String sanitizeBase(String raw) {
+        String text = raw.replace("\r\n", "\n").replace('\r', '\n');
+        text = THINK_BLOCK.matcher(text).replaceAll("");
+        text = ANALYSIS_BLOCK.matcher(text).replaceAll("");
+        return truncateAtUnclosedReasoningTag(text);
     }
 
     private static String truncateAtUnclosedReasoningTag(String text) {
