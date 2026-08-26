@@ -1,8 +1,12 @@
 package net.wcfcarolina13.Commands;
 
+import net.wcfcarolina13.FilingSystem.ManualConfig;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -83,5 +87,25 @@ class BotSoulCommandsTest {
         // piper engine delegates to the original path validation
         assertTrue(BotSoulCommands.validateVoiceConfig("piper", "/ok/piper", "/ok/jake.onnx",
                 "", "", exists).isEmpty());
+    }
+
+    /**
+     * Builds a real (non-mocked) ManualConfig instance via its private constructor.
+     * ManualConfig() only assigns selectedLanguageModel from a system property — no file I/O,
+     * no FILE_PATH resolution — so this is safe to call from a plain unit test JVM (mirrors
+     * SoulFoundationTest#newRealConfig).
+     */
+    private static ManualConfig newRealConfig() throws Exception {
+        Constructor<ManualConfig> constructor = ManualConfig.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        return constructor.newInstance();
+    }
+
+    @Test
+    void localChatDefaultsOffAndRoundTrips() throws Exception {
+        ManualConfig config = newRealConfig();
+        assertFalse(config.isSoulLocalChatEnabled(), "ambient speech must be opt-in");
+        config.setSoulLocalChatEnabled(true);
+        assertTrue(config.isSoulLocalChatEnabled());
     }
 }

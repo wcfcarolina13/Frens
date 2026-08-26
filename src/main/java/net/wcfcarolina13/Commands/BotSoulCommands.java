@@ -105,7 +105,11 @@ final class BotSoulCommands {
                 .then(CommandManager.literal("banter")
                         .then(CommandManager.literal("on").executes(ctx -> executeBanterToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeBanterToggle(ctx, false)))
-                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeBanterStatus)));
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeBanterStatus)))
+                .then(CommandManager.literal("local")
+                        .then(CommandManager.literal("on").executes(ctx -> executeLocalToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeLocalToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeLocalStatus)));
     }
 
     // === Pure helpers (unit-tested; no Minecraft types) ===
@@ -564,6 +568,42 @@ final class BotSoulCommands {
                 .orElse("Soul runtime is not currently running.");
         ChatUtils.sendSystemMessage(source,
                 "Banter is " + (enabled ? "ON" : "OFF") + ". " + verdict);
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul local on|off} — operator-only switch for ambient/local chat. No pipeline
+     * reload needed: the director reads the config through a live supplier.
+     */
+    private static int executeLocalToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the local-chat switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        config.setSoulLocalChatEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Companion local chat set to " + (enabled ? "on" : "off")
+                + (enabled ? ". They may chime in on what they overhear." : "."));
+        return 1;
+    }
+
+    /** {@code /bot soul local status} — enablement plus the actor's live eligibility verdict. */
+    private static int executeLocalStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulLocalChatEnabled();
+        String verdict = SoulRuntime.current()
+                .map(rt -> rt.localStatus(actor.getUuid()))
+                .orElse("Soul runtime is not currently running.");
+        ChatUtils.sendSystemMessage(source,
+                "Local chat is " + (enabled ? "ON" : "OFF") + ". " + verdict);
         return 1;
     }
 
