@@ -56,6 +56,27 @@ class SoulGroupTypesTest {
     }
 
     @Test
+    void compatConstructorDefaultsToPlayerKind() {
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
+                UUID.randomUUID(), "Bradley", List.of(), "hi", Instant.EPOCH, UUID.randomUUID());
+        assertEquals(SoulGroupTypes.SceneKind.PLAYER, turn.kind());
+    }
+
+    @Test
+    void banterKindCarriesThrough() {
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.BANTER, UUID.randomUUID(), "Bradley", List.of(),
+                "[seed]", Instant.EPOCH, UUID.randomUUID());
+        assertEquals(SoulGroupTypes.SceneKind.BANTER, turn.kind());
+    }
+
+    @Test
+    void kindRejectsNull() {
+        assertThrows(NullPointerException.class, () -> new SoulGroupTypes.GroupSceneTurn(
+                null, UUID.randomUUID(), "Bradley", List.of(), "hi", Instant.EPOCH, UUID.randomUUID()));
+    }
+
+    @Test
     void sceneParticipantRequiresIdsAndGrounding() {
         assertThrows(NullPointerException.class,
                 () -> new SoulGroupTypes.SceneParticipant(null, "p", "n", grounding(UUID.randomUUID())));

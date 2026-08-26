@@ -20,10 +20,20 @@ public final class SoulGroupTypes {
     public static final int MAX_SCENE_BOTS = 4;
     /** Most lines any single bot may speak in one scene. */
     public static final int MAX_LINES_PER_BOT = 2;
-    /** Most lines one scene may contain in total. */
+    /** Most lines one player-initiated scene may contain in total. */
     public static final int MAX_SCENE_LINES = 6;
+    /** Tighter scene cap for autonomous banter scenes. */
+    public static final int BANTER_MAX_SCENE_LINES = 4;
     /** Longest single scene line (chars, after cleaning); longer lines are truncated. */
     public static final int MAX_LINE_CHARS = 300;
+
+    /**
+     * How a scene came to exist. {@code PLAYER} scenes (broadcast/multi-name chat addresses)
+     * keep the soul-DM visibility exemption; {@code BANTER} scenes are system-initiated and
+     * ambient-like — their delivery respects the ambient text/voice category masks and they
+     * use the tighter {@link #BANTER_MAX_SCENE_LINES} cap.
+     */
+    public enum SceneKind { PLAYER, BANTER }
 
     /**
      * The party channel's conversation/store/scheduler key. Deliberately reuses
@@ -53,16 +63,25 @@ public final class SoulGroupTypes {
      * plays the same correlation role as {@link SoulTypes.AcceptedTurn#routingId()} — minted at
      * the routing surface, adopted end to end, and reused to derive per-line voice group ids.
      */
-    public record GroupSceneTurn(UUID ownerId, String ownerDisplayName,
+    public record GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                   List<SceneParticipant> roster, String playerMessage,
                                   Instant acceptedAt, UUID routingId) {
         public GroupSceneTurn {
+            Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(ownerId, "ownerId");
             Objects.requireNonNull(acceptedAt, "acceptedAt");
             Objects.requireNonNull(routingId, "routingId");
             ownerDisplayName = ownerDisplayName == null ? "" : ownerDisplayName;
             playerMessage = playerMessage == null ? "" : playerMessage;
             roster = roster == null ? List.of() : List.copyOf(roster);
+        }
+
+        /** Compatibility shape from the group-chat pilot: a player-initiated scene. */
+        public GroupSceneTurn(UUID ownerId, String ownerDisplayName,
+                               List<SceneParticipant> roster, String playerMessage,
+                               Instant acceptedAt, UUID routingId) {
+            this(SceneKind.PLAYER, ownerId, ownerDisplayName, roster, playerMessage,
+                    acceptedAt, routingId);
         }
 
         public SoulTypes.ConversationKey key() {

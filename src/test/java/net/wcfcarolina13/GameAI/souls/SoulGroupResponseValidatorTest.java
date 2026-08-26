@@ -68,6 +68,18 @@ class SoulGroupResponseValidatorTest {
     }
 
     @Test
+    void banterSceneCapBindsAtFourLines() {
+        List<String> roster = List.of("A", "B", "C", "D");
+        StringBuilder raw = new StringBuilder();
+        for (String name : roster) {
+            raw.append(name).append(": one\n").append(name).append(": two\n");
+        }
+        var parse = validator.parse(raw.toString(), roster, SoulGroupTypes.BANTER_MAX_SCENE_LINES);
+        assertTrue(parse.accepted());
+        assertEquals(4, parse.lines().size());
+    }
+
+    @Test
     void sceneCapBindsWithALargerRoster() {
         List<String> roster = List.of("A", "B", "C", "D");
         StringBuilder raw = new StringBuilder();

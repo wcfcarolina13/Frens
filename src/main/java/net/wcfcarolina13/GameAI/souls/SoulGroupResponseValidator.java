@@ -47,6 +47,11 @@ public final class SoulGroupResponseValidator {
      *     line's speaker must normalize-match one of these or the line is dropped
      */
     public SceneParse parse(String raw, List<String> rosterDisplayNames) {
+        return parse(raw, rosterDisplayNames, SoulGroupTypes.MAX_SCENE_LINES);
+    }
+
+    /** @param maxSceneLines total-line cap for this scene kind (player 6, banter 4). */
+    public SceneParse parse(String raw, List<String> rosterDisplayNames, int maxSceneLines) {
         if (raw == null || raw.isBlank() || rosterDisplayNames == null || rosterDisplayNames.isEmpty()) {
             return reject("blank output");
         }
@@ -63,7 +68,7 @@ public final class SoulGroupResponseValidator {
         int[] perBot = new int[rosterDisplayNames.size()];
         List<SoulGroupTypes.SceneLine> lines = new ArrayList<>();
         for (String rawLine : text.split("\n")) {
-            if (lines.size() >= SoulGroupTypes.MAX_SCENE_LINES) {
+            if (lines.size() >= maxSceneLines) {
                 break;
             }
             String line = cleanLine(rawLine);
