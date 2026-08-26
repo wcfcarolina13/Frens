@@ -1,7 +1,33 @@
 ---
-task: "Soul track next item: GROUP CHAT (multi-party soul conversations). Spec-gated — run brainstorming + spec interview FIRST, do not start coding from this line."
+task: "Soul track: GROUP CHAT SHIPPED in 1.1.176 (2026-08-25) — field-test it. Next queue item after validation: BANTER (system-initiated scenes), spec-gated like group chat was."
 test_command: "./gradlew build -x test"
 ---
+
+## Session Handoff 2026-08-25 (later) — group chat shipped (1.1.176)
+
+Group chat implemented end-to-end this session: spec
+(`docs/superpowers/specs/2026-08-25-frens-soul-group-chat-design.md`), plan
+(`docs/superpowers/plans/2026-08-25-soul-group-chat.md`), 8 implementation commits, suite
+417 → 463 green. Full reasoning in `changelog.md` (1.1.176 entry). "bots, ..." or
+"Jake and Sara, ..." → roster of the speaker's own soul-bound LOCAL bots → one
+orchestration call → speaker-tagged validated lines → tick-paced playback with
+per-speaker positional voice to everyone in earshot. Party transcripts at
+`<world>/frens/party/v1/<owner>/` (own epochs; `/bot soul reset party`). Kill switch
+`soulPartyEnabled` (default on). DM pipeline untouched; LoadGoverner probe signature
+unchanged (sum now includes active scenes).
+
+**Field-test checklist for next play session (1.1.176):** see the changelog entry —
+2-bot scene needs `/bot soul enable <SecondBot>` (reuses Jake's profile; authoring a
+second soul profile is the natural companion task), mixed soul/non-soul broadcast,
+bystander earshot, voice-off beat pacing, walk-away mid-scene, party reset mid-scene,
+governor floor during scenes, party toggle off → legacy loop. Piper/3B items from the
+1.1.175 checklist below are still open too.
+
+**Next soul-track item after group chat validates: BANTER** — system-initiated scenes
+riding this same PARTY path. Needs its own spec first (eligibility: quiet period,
+cooldowns, player presence; and its own text-category gating — banter is ambient-like, so
+it should NOT inherit the soul-DM Text-master exemption; the `textEnabled` seam in
+SoulMessageDelivery and the scene playback fan-out are the hooks).
 
 ## Session Handoff 2026-08-25 — dialogue controls + TTS/LLM installers shipped (1.1.166→1.1.175)
 

@@ -53,19 +53,18 @@ At the existing soul seam (`Frens.java:1297`): if souls are conversation-enabled
 
 ## 4. Types, scheduling, orchestration
 
-### 4.1 New types (additive)
+### 4.1 New types (additive) — as implemented
 
-- `PartyKey(ownerId)` — identifies the owner's party channel; channel = PARTY implicit. Equality by owner UUID.
-- `GroupSceneTurn(routingId, ownerId, roster, playerMessage, grounding, acceptedAt)` where `roster` = ordered list of `(botId, profileId, displayName)`.
-- `GroupGroundingSnapshot` — trigger-player snapshot + per-bot bounded state for each roster member + the roster itself (the parent spec's "fresh authoritative roster per turn"). Captured server-thread by a new `GroupSnapshotBuilder`, mirroring `SoulSnapshotBuilder`'s discipline (immutable, captured before queueing, throws rather than degrades).
+- `SoulGroupTypes` namespace class: scene caps (`MAX_SCENE_BOTS=4`, `MAX_LINES_PER_BOT=2`, `MAX_SCENE_LINES=6`, `MAX_LINE_CHARS=300`), `GroupSceneTurn(ownerId, ownerDisplayName, roster, playerMessage, acceptedAt, routingId)` with `roster` = ordered list of `SceneParticipant(botId, profileId, displayName, grounding)`, and `SceneLine(participantIndex, text)`.
+- **Refinement (no `PartyKey`, no `GroupGroundingSnapshot`, no `GroupSnapshotBuilder`):** the party key is `SoulGroupTypes.partyKey(ownerId)` = `ConversationKey(botId=ownerId, playerId=ownerId, PARTY)` — safe because the party store is a separately-rooted `SoulStore` instance, so the botId path segment resolves to the owner's own directory there. Per-bot grounding is captured by calling the existing `SoulSnapshotBuilder.capture(server, bot, sender, LOCAL)` once per roster member at accept time (fresh roster per turn, server thread); a capture that throws drops that bot, and fewer than two survivors downgrade to DM or a deterministic notice.
 
-`ConversationKey`, `AcceptedTurn`, `GroundingSnapshot` are not modified.
+`ConversationKey`, `AcceptedTurn`, `GroundingSnapshot`, and `SoulGenerationScheduler` are not modified.
 
-### 4.2 Scheduler generalization
+### 4.2 Scheduler — unchanged (refinement)
 
-`SoulGenerationScheduler`'s key type becomes a minimal interface `SoulJobKey`: equality semantics + `playerId()` accessor (used by `cancelForPlayer`). `ConversationKey` and `PartyKey` both implement it (`PartyKey.playerId()` = ownerId, so owner disconnect cancels pending scenes). All scheduler semantics are unchanged: `maxConcurrent = 1`, per-key single-flight, FIFO queue, `queueCapacity` → `OVERLOADED`, epoch invalidation. A scene is **one job in the same global slot** as DM turns.
+Because the party key IS a `ConversationKey`, the scheduler needs **zero changes**: `maxConcurrent = 1`, per-key single-flight, FIFO queue, `queueCapacity` → `OVERLOADED`, epoch invalidation, and `cancelForPlayer(playerId)` (the party key's playerId is the owner, so owner disconnect cancels pending scenes) all apply as-is. A scene is **one job in the same global slot** as DM turns.
 
-**Frozen contract:** `SoulRuntime.activeGenerations()` (reflected by LoadGoverner's `FrensSoulProbe`) is untouched — a scene contributes exactly like a DM turn (`scheduler.inFlightCount() + voice.activeSyntheses()`), and the governor floor holds through the scene's whole voice window.
+**Frozen contract:** `SoulRuntime.activeGenerations()` (reflected by LoadGoverner's `FrensSoulProbe`) keeps its exact static signature; its sum gains the active-scene count (`scheduler.inFlightCount() + voice.activeSyntheses() + scenePlayback.activeSceneCount()`) so the governor floor holds through the scene's whole playback window, including the gaps between per-line renders.
 
 ### 4.3 Orchestration call
 
@@ -96,16 +95,17 @@ New `GroupSceneDelivery` + a tick-driven playback state machine (registered on t
 - **Per line, on the server thread:**
   1. Liveness re-check: bot still present/alive, scene epoch still current, party toggle + souls master still on, speaker within LOCAL range of the owner (grace: the same 32-block rule, evaluated at line time). Stale → skip the line (and if the whole scene is stale — owner gone, epoch bumped — abort remaining lines).
   2. Text fan-out: `Text.literal(displayName + ": " + line)` to **every player within 32 blocks of the speaking bot** at that moment.
-  3. Voice: hand the line to `SoulVoiceService` with the speaker bot's voice, `groupId = routingId` (per-scene audio grouping, mirroring DM sentence streaming). Voice fan-out sends the positional payload to each in-earshot player (loop over the existing per-player payload path).
+  3. Voice: synthesize via `SoulVoiceService.synthesizeLine(profileId, text)` on the shared voice worker; each line gets its **own derived groupId** (`GroupScenePlayback.lineGroupId(routingId, i)`) so each speaker plays on its own client audio source positioned at that bot — cross-line ordering is enforced server-side by the pacer, not the client queue (refinement: the originally spec'd shared per-scene groupId would have pinned all speakers to one source position). Voice fan-out sends the positional payload to each in-earshot player (loop over the existing per-player payload path).
 - **Pacing:** text for line N appears when line N's audio dispatches. When voice is off/unavailable (muted master, engine down, synthesis failure), the machine falls back to a beat delay of ~1.5–2.5 s scaled by line length. Line N+1 starts after line N's dispatch + estimated audio duration (from PCM length) or its beat. Voice synthesis remains sequential on the existing 1-thread voice executor.
 - **Commit rule (parent-spec ruling):** each line appends to the party transcript **only after successful delivery**. Skipped/stale/undelivered lines never enter the transcript. The player's HEARD record commits at acceptance, as in DM.
 - Voice failure never blocks text or the scene; text failure for one line fails that line only.
 
 ## 6. Storage
 
-New `SoulPartyStore` (parallel to `SoulStore`; DM store untouched):
+**Implementation refinement:** no `SoulPartyStore` class — the party channel is a second `SoulStore` **instance** opened via the new `SoulStore.openAt(exactRoot)` factory at `<world>/frens/party/v1`, keyed by `partyKey(ownerId)`. This reuses the store's epoch, crash-reconciliation, corrupt-tail-quarantine, and bounded-history machinery wholesale (DM store code untouched apart from the additive factory):
 
-- Path: `<world>/party/<ownerUuid>/active.jsonl` + `archive/epoch-N-<ts>.jsonl` + a cursor file (`party.json`) with the same epoch/sequence + crash-reconciliation semantics as `SoulStore` (`reconciledCursor` pattern).
+- Path: `<world>/frens/party/v1/<ownerUuid>/conversations/<ownerUuid>/active.jsonl` + `archive/epoch-N-<ts>.jsonl`; the cursor lives in `<world>/frens/party/v1/<ownerUuid>/soul.json` under key `PARTY:<ownerUuid>`.
+- Records are uniformly speaker-tagged: HEARD content is stored as `"Owner: message"`, SPOKEN as `"Bot: line"`, so party history replays into group prompts verbatim.
 - Records: `HEARD` (player message, roster snapshot ids), `SPOKEN` per delivered line (speaker botId + text), `FAILURE` (category), all joined by `routingId`.
 - PARTY history feeds **only** group prompts. It is never merged into any bot's DM history, and DM history is never fed into scenes (bots' knowledge of the player still comes from per-bot knowledge/events, which remain per-bot and are shared infrastructure).
 - Reset: `/bot soul reset party` archives the active epoch and invalidates queued/in-flight scene jobs via the same scheduler `invalidate` path.
@@ -122,9 +122,9 @@ The DM pipeline's invariants and how this design treats each:
 
 | Invariant (current code) | Treatment |
 |---|---|
-| `ConversationKey` = 1 bot + 1 player | Untouched; scenes use new `PartyKey`/`GroupSceneTurn`. |
+| `ConversationKey` = 1 bot + 1 player | Untouched; scenes use `partyKey(ownerId)` (owner in both slots, PARTY channel) + `GroupSceneTurn`. |
 | Transcript path `<botId>/conversations/<playerId>/` | Untouched; party transcripts live under `<world>/party/<ownerUuid>/`. |
-| One in-flight generation per key; global slot = 1 | Preserved; `PartyKey` is one key, scene = one job. |
+| One in-flight generation per key; global slot = 1 | Preserved; the party key is one key, scene = one job. |
 | One turn → one reply → one recipient | DM path unchanged; group delivery is a new class with fan-out. |
 | `SoulResponseValidator` single-speaker parsing | Untouched; scenes use `SoulGroupResponseValidator`. |
 | Voice targets `key.playerId()` | DM path unchanged; scene voice loops the same payload path per in-earshot player. |
@@ -145,7 +145,7 @@ Pure-unit coverage in the existing souls test style (no Minecraft server in test
 - Roster filter projection: ownership/operator/no-profile/REMOTE/other-world/other-owner exclusions; 1-bot downgrade; 0-bot status.
 - `SoulGroupResponseValidator`: tag parsing, unknown-speaker drops, per-bot/per-scene/per-line caps, zero-valid → MALFORMED.
 - Playback staleness combinator (pure): epoch bump mid-scene, bot removed mid-scene, owner left range, toggle flipped.
-- Scheduler generic-key: DM + party keys coexisting, per-key single-flight, `cancelForPlayer` covering `PartyKey`.
+- Party-key semantics: `partyKey` shape and cursor key, `SoulStore.openAt` root isolation, party epochs/reset.
 - Manual in-game checklist (plan will enumerate): 2-bot and 3-bot scenes, mixed soul/non-soul broadcast, bystander earshot, voice-off pacing, mid-scene walk-away, `/bot soul reset party`, LoadGoverner floor through a scene.
 
 ## 10. Out of scope

@@ -2,6 +2,58 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul group chat (PARTY channel): "bots, ..." scenes with multi-voice paced playback; 1.1.176 (2026-08-25)
+
+Next soul-track item from the roadmap (group chat → banter → ambient → consolidation →
+actions). Spec `docs/superpowers/specs/2026-08-25-frens-soul-group-chat-design.md`, plan
+`docs/superpowers/plans/2026-08-25-soul-group-chat.md`. Interview decisions: broadcast-
+addressed one-turn scenes (no persistent session), roster = speaker's own soul-bound bots
+within 32 blocks, delivery to everyone in earshot, one capped orchestration call (parent-
+spec ruling), text synced to per-speaker positional voice, additive parallel path (DM
+pipeline untouched).
+
+- **Addressing:** `ChatAddressing` resolves leading multi-name runs ("Jake and Sara, ..."
+  / "Jake, Sara, ...") — `Resolution.matchedNameIndices` list, back-compat accessor kept,
+  single-name behavior byte-identical. Broadcast keywords unchanged.
+- **Routing:** `SoulGroupRouter` (pure `eligibleRoster` + `decide` + live `tryRoute`).
+  Eligible = soul-profile-bound ∧ owner/operator-authorized ∧ LOCAL, nearest-first, cap 4.
+  ≥2 → scene; exactly 1 → downgrade to the ordinary DM path; 0 → deterministic notice;
+  souls or `soulPartyEnabled` off → legacy loop exactly as before. When a scene accepts,
+  the legacy per-bot loop does NOT also run (non-soul bots stay quiet on a soul broadcast
+  — deliberate).
+- **Key trick that kept the diff small:** the party key is
+  `ConversationKey(ownerId, ownerId, PARTY)` against a SECOND `SoulStore` instance rooted
+  at `<world>/frens/party/v1` (new `SoulStore.openAt`). Scheduler, epochs, crash
+  reconciliation, corrupt-tail quarantine, bounded history — all reused with zero changes.
+  Party records are speaker-tagged ("Bradley: ...", "Jake: ...") so history replays into
+  prompts verbatim; party history never merges into DM relationship memory.
+- **Generation:** `SoulGroupPromptAssembler` (scene contract, per-bot CAST/STATE blocks,
+  shared situation, 12-turn/4k party history, 320 output tokens) → one LLM call in the
+  same 1-slot scheduler → `SoulGroupResponseValidator` parses speaker-tagged plain lines
+  (chosen over JSON for 3B/8B reliability): unknown speakers dropped, ≤2 lines/bot,
+  ≤6/scene, ≤300 chars/line, zero survivors = MALFORMED.
+- **Playback:** `GroupScenePlayback`, tick-driven on END_SERVER_TICK. Per line: synthesize
+  with the speaker's voice (`SoulVoiceService.synthesizeLine`, counted in the LoadGoverner
+  probe), then fan out text + positional audio to every player within 32 blocks of the
+  speaking bot, then commit SPOKEN (delivered lines only, per spec). Beat pacing
+  (1.5–2.5 s by length) when voice is off/fails; next line renders while the current one
+  plays; per-line derived voice groupIds keep each speaker on their own client audio
+  source (no client changes). Owner disconnect / `/bot soul reset party` / bot death
+  abort/skip via a pure staleness combinator.
+- **LoadGoverner:** `activeGenerations()` signature untouched; sum now includes active
+  scenes so the floor holds across the whole playback window.
+- **Config/commands:** `soulPartyEnabled` (default on, only meaningful with souls on);
+  `/bot soul reset party` archives the actor's own party epoch.
+- Suite 417 → 463 tests, all green. Commits: ChatAddressing multi-name, party store root +
+  types, group validator, group assembler, playback + synthesizeLine, group service,
+  router + runtime wiring, chat seam + config + command.
+
+**Field-test checklist (open):** 2-bot scene (bind a second bot via `/bot soul enable
+<bot>` — it reuses Jake's profile until a second profile is authored, distinct display
+names keep the scene coherent); mixed soul/non-soul broadcast; bystander earshot;
+voice-off beat pacing; walking away mid-scene; party reset mid-scene; governor floor
+during a scene; `soulPartyEnabled=false` → legacy loop.
+
 ## Background installs survive menu close/reopen + "Nice bird!" category leak; 1.1.175 (2026-08-25)
 
 Two field reports from Bradley:
