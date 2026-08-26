@@ -80,9 +80,7 @@ public final class SoulStore {
     private volatile boolean closed;
 
     public SoulStore(Path worldRoot, ExecutorService executor) {
-        this.root = worldRoot.resolve("frens").resolve("souls").resolve("v1");
-        this.executor = executor;
-        this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        this(executor, worldRoot.resolve("frens").resolve("souls").resolve("v1"));
     }
 
     /**
@@ -92,6 +90,28 @@ public final class SoulStore {
      */
     public SoulStore(Path worldRoot) {
         this(worldRoot, newWriterExecutor());
+    }
+
+    /** Root is used verbatim here — the public constructors resolve {@code frens/souls/v1} first. */
+    private SoulStore(ExecutorService executor, Path resolvedRoot) {
+        this.root = resolvedRoot;
+        this.executor = executor;
+        this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    }
+
+    /**
+     * Opens a store whose on-disk root is exactly {@code exactRoot} — no {@code frens/souls/v1}
+     * suffix is appended. Used by the party channel, which keeps its shared group transcripts in
+     * a fully separate tree ({@code <world>/frens/party/v1}) while reusing this class's epoch,
+     * crash-reconciliation, and bounded-history machinery unchanged.
+     */
+    public static SoulStore openAt(Path exactRoot) {
+        return new SoulStore(newWriterExecutor(), exactRoot);
+    }
+
+    /** Test seam for {@link #openAt(Path)} with an injected writer executor. */
+    public static SoulStore openAt(Path exactRoot, ExecutorService executor) {
+        return new SoulStore(executor, exactRoot);
     }
 
     private static ExecutorService newWriterExecutor() {

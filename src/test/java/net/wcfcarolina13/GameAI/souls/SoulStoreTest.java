@@ -56,6 +56,31 @@ class SoulStoreTest {
     }
 
     @Test
+    void openAtUsesTheExactRootForPartyTranscripts() throws Exception {
+        Path partyRoot = worldRoot.resolve("frens/party/v1");
+        ExecutorService partyExecutor = Executors.newSingleThreadExecutor();
+        SoulStore partyStore = SoulStore.openAt(partyRoot, partyExecutor);
+        try {
+            UUID owner = UUID.randomUUID();
+            var key = new SoulTypes.ConversationKey(owner, owner, SoulTypes.Channel.PARTY);
+            partyStore.beginHeardTurn(key, UUID.randomUUID(), "Bradley: hello all", Instant.now())
+                    .get(5, SECONDS);
+            Path active = partyRoot.resolve(owner.toString())
+                    .resolve("conversations").resolve(owner.toString()).resolve("active.jsonl");
+            assertTrue(Files.exists(active), "party transcript should live directly under the exact root");
+            assertFalse(Files.exists(partyRoot.resolve("frens")),
+                    "openAt must not re-nest frens/souls/v1 under the exact root");
+
+            long newEpoch = partyStore.archiveAndReset(key).get(5, SECONDS);
+            assertEquals(1L, newEpoch);
+            assertFalse(Files.exists(active), "reset should archive the active party transcript");
+        } finally {
+            partyStore.close();
+            partyExecutor.shutdownNow();
+        }
+    }
+
+    @Test
     void archivesResetEpochAndRejectsStaleSpeech() throws Exception {
         UUID bot = UUID.randomUUID();
         UUID player = UUID.randomUUID();
