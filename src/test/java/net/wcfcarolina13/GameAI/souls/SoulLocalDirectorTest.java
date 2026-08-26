@@ -116,6 +116,23 @@ class SoulLocalDirectorTest {
         assertFalse(tracker.consumeShouldOpenWindow(player));
     }
 
+    @Test
+    void explicitAddressAfterFireMeansTheInFlightScenesDeliveryOpensNoWindow() {
+        // Regression for fix round 1, FIX 1: noteAddressedChat (and notePlayerScene) must clear
+        // the tracker's pending entry, not just replyWindows -- otherwise a LOCAL scene already
+        // in flight when the player explicitly addresses a bot (or a real PLAYER/BANTER scene
+        // re-arms the cooldown) still opens a fresh window once it finally delivers, resurrecting
+        // a window the explicit address was supposed to close for good.
+        SoulLocalDirector.ContinuationTracker tracker = new SoulLocalDirector.ContinuationTracker();
+        UUID player = UUID.randomUUID();
+        tracker.noteFired(player, false); // scene submitted, not yet delivered
+
+        tracker.forget(player); // the one-liner noteAddressedChat/notePlayerScene now perform
+
+        assertFalse(tracker.consumeShouldOpenWindow(player),
+                "the in-flight scene's later delivery must not open a window after an explicit address");
+    }
+
     private static SoulTypes.SituationSnapshot withHostiles() {
         return new SoulTypes.SituationSnapshot(-1,
                 List.of(new SoulTypes.HostileSighting("creeper", "north", 8)),

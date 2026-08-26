@@ -278,21 +278,28 @@ public final class SoulLocalDirector {
     }
 
     /**
-     * Called by {@link SoulRuntime} when a LOCAL scene it submitted actually delivers at least
-     * one line (local-chat spec §7, amendment C): this is where the reply window opens, not at
-     * submission — a generation that fails, or a scene muted on every output surface, never
-     * grants a bypass window.
+     * Called by {@link SoulRuntime} whenever a LOCAL scene it submitted finishes, whether or not
+     * it delivered anything (local-chat spec §7, amendment C, fix round 1 FIX 2): the reply
+     * window opens on actual delivery, not at submission — a generation that fails, or a scene
+     * muted on every output surface, never grants a bypass window. The pending-continuation flag
+     * is always consumed here, even on a zero-delivery finish, so it never outlives its own
+     * scene.
      *
-     * <p>Exactly one continuation is allowed per reaction: if the scene that just delivered was
+     * <p>Exactly one continuation is allowed per reaction: if the scene that just finished was
      * itself a continuation (it consumed an already-open window), its own delivery must NOT
      * re-open a fresh window, or the exchange could continue forever. {@link #continuationTracker}
-     * remembers which case this was, set at fire time in {@link #noteUnaddressedChat}.
+     * remembers which case this was, set at fire time in {@link #noteUnaddressedChat} — and may
+     * already have been cleared by {@link #noteAddressedChat} or {@link #notePlayerScene} if the
+     * player moved on before this scene finished, in which case nothing opens either.
      */
-    void noteSceneDelivered(UUID playerId, UUID botId) {
+    void noteSceneDelivered(UUID playerId, UUID botId, int deliveredLines) {
         if (playerId == null || botId == null) {
             return;
         }
-        if (continuationTracker.consumeShouldOpenWindow(playerId)) {
+        // Unconditional: consumes (and clears) the pending flag even when nothing was delivered,
+        // so a zero-delivery finish never leaves a stale entry behind.
+        boolean shouldOpen = continuationTracker.consumeShouldOpenWindow(playerId);
+        if (shouldOpen && deliveredLines > 0) {
             openReplyWindow(playerId, botId, clock.getAsLong());
         }
     }
@@ -301,6 +308,9 @@ public final class SoulLocalDirector {
     public void noteAddressedChat(UUID playerId) {
         if (playerId != null) {
             replyWindows.remove(playerId);
+            // An in-flight LOCAL scene's eventual delivery must not resurrect the window this
+            // explicit address just closed (fix round 1, FIX 1).
+            continuationTracker.forget(playerId);
         }
     }
 
@@ -311,6 +321,9 @@ public final class SoulLocalDirector {
         }
         nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelayMs(random));
         replyWindows.remove(playerId);
+        // Same reasoning as noteAddressedChat: a real conversation re-arming the cooldown must
+        // not let a still-in-flight LOCAL scene's delivery open a window afterward.
+        continuationTracker.forget(playerId);
     }
 
     /**

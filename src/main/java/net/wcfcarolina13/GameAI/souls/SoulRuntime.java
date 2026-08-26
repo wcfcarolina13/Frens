@@ -239,13 +239,16 @@ public final class SoulRuntime {
 
                         @Override
                         public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
-                            // The local-chat reply window opens on actual delivery, not scene
-                            // submission (amendment C): a generation that fails, or a scene muted
-                            // on every output surface, must not grant a bypass window.
-                            if (turn.kind() == SoulGroupTypes.SceneKind.LOCAL && deliveredLines > 0) {
+                            // Always notify the director for a LOCAL scene, even with zero
+                            // deliveries (fix round 1 FIX 2) -- noteSceneDelivered itself decides
+                            // whether to open a window; deliveredLines == 0 (generation failed, or
+                            // muted on every surface) still consumes the pending-continuation flag
+                            // so it never outlives its own scene, but never opens a window.
+                            if (turn.kind() == SoulGroupTypes.SceneKind.LOCAL) {
                                 SoulLocalDirector local = runtime.localDirector;
                                 if (local != null && !turn.roster().isEmpty()) {
-                                    local.noteSceneDelivered(turn.ownerId(), turn.roster().get(0).botId());
+                                    local.noteSceneDelivered(turn.ownerId(), turn.roster().get(0).botId(),
+                                            deliveredLines);
                                 }
                             }
                         }
