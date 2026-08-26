@@ -89,6 +89,45 @@ class SoulVoiceServiceTest {
     }
 
     @Test
+    void synthesizeLineReturnsChunkedPcmWithDuration() throws Exception {
+        byte[] pcm = new byte[44_100]; // 1.0s of 16-bit mono at 22050 Hz
+        SoulVoiceEngine engine = new SoulVoiceEngine() {
+            @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+                return CompletableFuture.completedFuture(tinyWav(pcm));
+            }
+            @Override public boolean alive() { return true; }
+            @Override public void close() { }
+        };
+        SoulVoiceService service = new SoulVoiceService(enabledSettings(), engine,
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { });
+
+        var line = service.synthesizeLine("frens:jake", "A scene line.").get(2, TimeUnit.SECONDS);
+        assertTrue(line.isPresent());
+        assertEquals(22050, line.get().sampleRate());
+        assertEquals(2, line.get().chunks().size());
+        assertEquals(1000L, line.get().durationMs());
+        service.close();
+    }
+
+    @Test
+    void synthesizeLineCompletesEmptyOnEngineFailureAndWhenDisabled() throws Exception {
+        SoulVoiceEngine failing = new SoulVoiceEngine() {
+            @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+                return CompletableFuture.failedFuture(new RuntimeException("synthesis exploded"));
+            }
+            @Override public boolean alive() { return true; }
+            @Override public void close() { }
+        };
+        SoulVoiceService service = new SoulVoiceService(enabledSettings(), failing,
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { });
+        assertTrue(service.synthesizeLine("frens:jake", "hi there friend").get(2, TimeUnit.SECONDS).isEmpty());
+        service.close();
+
+        assertTrue(SoulVoiceService.disabled().synthesizeLine("frens:jake", "hi there friend")
+                .get(2, TimeUnit.SECONDS).isEmpty());
+    }
+
+    @Test
     void disabledServiceAndUnreachableTurnsSendNothing() throws Exception {
         CopyOnWriteArrayList<Sent> sent = new CopyOnWriteArrayList<>();
         SoulVoiceService disabled = SoulVoiceService.disabled();

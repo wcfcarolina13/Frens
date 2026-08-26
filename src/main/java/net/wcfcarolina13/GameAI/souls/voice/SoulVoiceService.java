@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -124,6 +125,67 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
         return activeSyntheses.get();
     }
 
+    /** One synthesized scene line: chunked PCM plus its playback duration (16-bit mono). */
+    public record SynthesizedLine(int sampleRate, List<byte[]> chunks, long durationMs) {
+        public SynthesizedLine {
+            chunks = chunks == null ? List.of() : List.copyOf(chunks);
+        }
+    }
+
+    /**
+     * Synthesizes one group-scene line with {@code profileId}'s voice on the shared voice worker
+     * (counted in {@link #activeSyntheses()} so the LoadGoverner floor holds through the render).
+     * Completes with empty on ANY gate or synthesis failure — scene playback then falls back to
+     * beat pacing for that line. Never throws and never blocks the calling thread. Delivery is
+     * the caller's job: unlike {@link #onSpoken}, nothing is sent from here.
+     */
+    public CompletableFuture<java.util.Optional<SynthesizedLine>> synthesizeLine(
+            String profileId, String text) {
+        Optional<SoulVoiceGate.Mode> mode = SoulVoiceGate.decide(
+                settings.enabled() && masterVoiceEnabled.getAsBoolean(),
+                settings.valid(), engineAlive(), SoulTypes.Reachability.LOCAL);
+        Optional<String> sanitized = SoulVoiceSanitizer.sanitize(text, settings.maxChars());
+        if (mode.isEmpty() || sanitized.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        CompletableFuture<Optional<SynthesizedLine>> out = new CompletableFuture<>();
+        try {
+            worker.execute(() -> {
+                activeSyntheses.incrementAndGet();
+                try {
+                    byte[] wav = engine.synthesize(sanitized.get(), profileId)
+                            .get(settings.synthTimeoutMs() + 500L, TimeUnit.MILLISECONDS);
+                    Optional<SoulVoicePcm.PcmAudio> pcm = SoulVoicePcm.parseWav(wav);
+                    if (pcm.isEmpty()) {
+                        noteFailure();
+                        out.complete(Optional.empty());
+                        return;
+                    }
+                    long durationMs = pcm.get().data().length * 1000L / (pcm.get().sampleRate() * 2L);
+                    out.complete(Optional.of(new SynthesizedLine(pcm.get().sampleRate(),
+                            SoulVoicePcm.chunk(pcm.get().data(), CHUNK_BYTES), durationMs)));
+                    backoff.onSuccess();
+                } catch (Exception ex) {
+                    noteFailure();
+                    out.complete(Optional.empty());
+                } finally {
+                    activeSyntheses.decrementAndGet();
+                }
+            });
+        } catch (RuntimeException rejected) {
+            out.complete(Optional.empty());
+        }
+        // The worker's queue-full handler discards silently without running the task; the scene
+        // playback machine additionally guards with a wall-clock timeout (synthGuardMs) so a
+        // dropped render degrades to beat pacing instead of hanging the scene.
+        return out;
+    }
+
+    /** Wall-clock guard the playback machine uses to declare a synthesis future abandoned. */
+    public long synthGuardMs() {
+        return settings.synthTimeoutMs() + 2_000L;
+    }
+
     /**
      * Sentence-streaming synthesis: the reply is split into sentences and each is rendered
      * and delivered as its own segment (shared groupId = routingId), so the client starts
@@ -170,7 +232,7 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
      * Deterministic per-segment correlation id derived from the turn's routingId — unique per
      * segment (keys client chunk reassembly) yet traceable back to the turn in logs.
      */
-    static UUID segmentCorrelationId(UUID routingId, int segmentIndex) {
+    public static UUID segmentCorrelationId(UUID routingId, int segmentIndex) {
         return new UUID(routingId.getMostSignificantBits(),
                 routingId.getLeastSignificantBits() ^ (0x9E3779B97F4A7C15L * (segmentIndex + 1)));
     }
