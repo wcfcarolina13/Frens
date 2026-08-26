@@ -381,11 +381,11 @@ public final class SoulRuntime {
         if (playback != null) {
             playback.cancelAll();
         }
-        // SoulLocalMemory is a process-wide static ring (unlike localDirector's per-player maps,
-        // which are instance state on this runtime and are simply discarded with it), so it needs
-        // an explicit sweep here — mirrors SoulPlayerActivity.clear(), which has no production
-        // call site of its own (grepped for one; only a test resets it directly).
+        // Both of these are process-wide statics (unlike localDirector's per-player maps, which
+        // are instance state on this runtime and are simply discarded with it), so they need an
+        // explicit sweep here or they outlive the world that filled them.
         SoulLocalMemory.clear();
+        SoulPlayerActivity.clear();
         store.close();
         if (partyStore != store) {
             partyStore.close();
@@ -604,15 +604,21 @@ public final class SoulRuntime {
     }
 
     /**
-     * Disconnect-time cleanup for a real player's local-chat state: drops their overheard ring
-     * ({@link SoulLocalMemory#forget}) AND the director's own per-player state — cooldown,
-     * verdict/score history, reply window, and pending-continuation flag — via
-     * {@link SoulLocalDirector#forget}. Both are needed: the director holds the player's last
-     * chat line and open reply window, which {@code SoulLocalMemory} does not.
+     * Disconnect-time cleanup for every piece of per-player soul state:
+     * <ul>
+     *   <li>the overheard-chat ring ({@link SoulLocalMemory#forget});</li>
+     *   <li>the player's observed activity and chat recency ({@link SoulPlayerActivity#forget}) —
+     *       process-wide statics that otherwise grow one entry per player forever and hand a
+     *       rejoining player their own stale timestamps;</li>
+     *   <li>the local director's per-player state — cooldown, verdict/score history, reply
+     *       window, pending-continuation flag ({@link SoulLocalDirector#forget}) — which holds
+     *       the player's last chat line and open reply window.</li>
+     * </ul>
      */
-    public static void forgetPlayerLocalMemory(UUID playerId) {
+    public static void forgetPlayer(UUID playerId) {
         try {
             SoulLocalMemory.forget(playerId);
+            SoulPlayerActivity.forget(playerId);
             SoulRuntime runtime = INSTANCE.get();
             if (runtime != null) {
                 SoulLocalDirector director = runtime.localDirector;

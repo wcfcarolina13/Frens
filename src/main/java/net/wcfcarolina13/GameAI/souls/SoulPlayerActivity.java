@@ -67,6 +67,20 @@ final class SoulPlayerActivity {
         return statesPart + "; " + recentAction;
     }
 
+    /**
+     * Drops one player's activity and chat-recency entries. Called when they disconnect: both maps
+     * are process-wide statics keyed by player UUID, so without this they accumulate one entry per
+     * player for the lifetime of the process and a rejoining player inherits their own stale
+     * timestamps — including across a world change within a single client session.
+     */
+    static void forget(UUID playerId) {
+        if (playerId != null) {
+            LAST_ACTIONS.remove(playerId);
+            LAST_CHAT_AT.remove(playerId);
+        }
+    }
+
+    /** Full sweep, on server stop. */
     static void clear() {
         LAST_ACTIONS.clear();
         LAST_CHAT_AT.clear();

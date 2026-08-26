@@ -229,18 +229,31 @@ archiving local records alongside group-chat and banter ones.
   and bounded on a typical few-bot roster, but was never measured under field load — watch
   it during the checklist above, especially with several soul bots near an active chatter.
 
-**Pre-existing bug found during review, NOT introduced by this work — ships in 1.1.177's
-banter feature, flagged here because this is the first time anyone traced it:**
-`SoulPlayerActivity.clear()` has no production call site anywhere in the repo (the sole
-caller in the whole codebase is a test, `SoulBanterDirectorTest`), and `SoulPlayerActivity`
-has no per-player eviction on disconnect either — its `LAST_ACTIONS`/`LAST_CHAT_AT` maps
-are process-wide statics that grow across an entire server session and survive a player
-rejoin, so a stale "broke Stone 5s ago" can resurface for a returning player. This local-
-chat plan added the equivalent disconnect eviction for `SoulLocalMemory` and
-`SoulLocalDirector` (Task 6 amendment D), but `SoulPlayerActivity` itself was out of
-scope. Recommend a small standalone follow-up: call `clear()`/an per-player evict from
-the existing `ServerPlayConnectionEvents.DISCONNECT` handler, same place the new
-`forgetPlayerLocalMemory` call landed.
+**Pre-existing bug found during review and FIXED in this same version — it shipped in
+1.1.177's banter feature, and this is the first time anyone traced it.**
+`SoulPlayerActivity.clear()` had no production call site anywhere in the repo (its sole
+caller in the whole codebase was a test, `SoulBanterDirectorTest`), and the class had no
+per-player eviction on disconnect either. Its `LAST_ACTIONS`/`LAST_CHAT_AT` maps are
+process-wide statics fed from three live sites in `SoulRuntime` (block break, attack,
+chat), so they grew one entry per player for the life of the process and a rejoining
+player inherited their own stale timestamps — including across a world change inside a
+single client session, since the maps outlive `SoulRuntime.stop()`.
+
+The fix mirrors what this feature already does for its own state:
+
+- `SoulPlayerActivity.forget(UUID)` (new) drops one player's activity and chat recency,
+  and is called from the disconnect handler.
+- `SoulPlayerActivity.clear()` now has a real caller: the shutdown sweep in
+  `SoulRuntime.shutdown()`, right beside `SoulLocalMemory.clear()`.
+- `SoulRuntime.forgetPlayerLocalMemory` is renamed **`forgetPlayer`** — it now evicts the
+  overheard ring, the activity/chat-recency maps, AND the local director's per-player
+  state, so the old name had become a lie. One call site in `Frens.java`, one in
+  `SoulRuntimeTest`.
+
+Three tests cover it: per-player eviction touches only the leaver, `forget(null)` is safe,
+and `clear()` still drops everyone. Note the banter director reads `lastChatAt` for its
+90 s quiet window — a stale timestamp there made banter *more* eager rather than less, so
+the visible symptom was mild; the leak was the real defect.
 
 ## Soul banter: autonomous companion scenes, opt-in, ambient-gated; 1.1.177 (2026-08-26)
 

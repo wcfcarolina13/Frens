@@ -139,7 +139,7 @@ class SoulRuntimeTest {
         // they must be silent no-ops rather than throwing into the chat handler.
         assertDoesNotThrow(() -> SoulRuntime.noteUnaddressedChat(null, "anything"));
         assertDoesNotThrow(() -> SoulRuntime.noteAddressedChat(null));
-        assertDoesNotThrow(() -> SoulRuntime.forgetPlayerLocalMemory(UUID.randomUUID()));
+        assertDoesNotThrow(() -> SoulRuntime.forgetPlayer(UUID.randomUUID()));
     }
 
     // === Own coverage: cancelPlayer — player-disconnect generation cancellation ===

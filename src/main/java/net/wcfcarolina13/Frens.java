@@ -943,9 +943,10 @@ public class Frens implements ModInitializer {
                     runtime.cancelPlayer(player.getUuid());
                 }
             });
-            // Drop this player's overheard-chat ring and local-chat director state (cooldown,
-            // last line, reply window) so nothing lingers for a player who is gone.
-            net.wcfcarolina13.GameAI.souls.SoulRuntime.forgetPlayerLocalMemory(player.getUuid());
+            // Drop every piece of per-player soul state — overheard-chat ring, observed activity
+            // and chat recency, and local-chat director state (cooldown, last line, reply window)
+            // — so nothing lingers for a player who is gone.
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.forgetPlayer(player.getUuid());
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
