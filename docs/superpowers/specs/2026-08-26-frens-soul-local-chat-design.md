@@ -24,7 +24,7 @@ The governing constraint is that unaddressed chat is *every line the player type
 | D2 | Reaction gate | **Deterministic salience score + hard cooldown.** Pure Frens-side scoring before any LLM call — preserves the parent spec's "model never schedules" invariant, and makes "why didn't it react" a single grep, exactly like banter's veto chain. |
 | D3 | Reply surface | **One bot, spoken locally to everyone in earshot.** Positional voice + text via the existing scene playback fan-out, gated by the ambient category masks. Not a private reply — an overheard remark in a shared space should be audible to the people standing in it. |
 | D4 | Memory home | **Session ring buffer; the reaction commits to the existing PARTY transcript** as an ordinary record. No new store, no new epochs, no new reset command. |
-| D5 | Enablement | **Recording unconditional; every consumer gated by `soulLocalChatEnabled` (default false).** With the toggle off the feature is a provable no-op: a buffer nobody reads. |
+| D5 | Enablement | **One gate, at the write.** `soulLocalChatEnabled` (default false) gates recording itself, so with the toggle off the ring stays empty, every consumer reads an empty list, and the feature is a provable no-op that costs not even a distance scan. |
 | D6 | Follow-up | **30 s reply window, one continuation**, landing as another one-bot `LOCAL` scene so the exchange stays in one transcript. |
 | D7 | Architecture | **One-bot PARTY scene ("a scene of one").** The group pipeline has no roster-≥2 assumption; only `SoulGroupRouter.tryRoute` does, and a director never calls it. Rejected: a `Channel.LOCAL` DM-pipeline variant (would rebuild earshot fan-out and per-line ambient gating that the scene path already has) and a standalone path (a third copy of plumbing that exists twice). |
 
@@ -43,16 +43,18 @@ A static facade in the souls package, in the shape of the existing `SoulPlayerAc
 - **Keyed by player UUID.** Each entry: the line text, an epoch timestamp, and the **set of soul-bot UUIDs in earshot when it was spoken**. A bot reads only lines it actually witnessed — "overheard" must mean overheard.
 - **Bounded:** last **8** entries per player, entries older than **10 min** treated as absent. In-memory only; never written to disk.
 - **Cleared** on player disconnect, on `SoulRuntime` shutdown, and by the existing test-visible `clear()` convention.
-- **Written from** the `Frens` public-chat callback, on the unaddressed branch only (`target.bots().isEmpty()`), skipping bot senders and blank lines. Skipped entirely while the souls master is off — nothing above it could read the buffer.
+- **Written from** the `Frens` public-chat callback, on the unaddressed branch only (`target.bots().isEmpty()`), skipping bot senders and blank lines. Skipped entirely unless the souls master **and** `soulLocalChatEnabled` are both on. Gating the single write rather than the three reads is what makes the no-op total: while the toggle is off there is no scan, no buffer, and nothing for any consumer to find.
 - **Witness computation is deliberately cheap:** same world and within `EARSHOT_BLOCKS` of the speaker, over the registered-bot list (typically a handful), plus the already-cached soul-profile-bound check. **No `CompanionCommunicationPolicy` call at record time** — authorization is a reaction-time concern and is enforced by the director's `roster` gate. This keeps the unconditional recorder to a bounded distance scan per chat line, which is what makes the "provable no-op when off" claim in D5 actually true.
 
-**Consumers (all three gated by `soulLocalChatEnabled`):**
+**Consumers reach the ring through one seam, not three.** `SoulTypes.GroundingSnapshot` gains an `overheard` list (with a compatibility constructor, so every existing call site stays source-stable), and `SoulSnapshotBuilder.capture` — the single server-thread place grounding is built — populates it from `SoulLocalMemory.witnessedBy(botId, playerId, now)`, which is empty whenever the toggle is off because nothing was ever recorded. "What I just heard you say nearby" is perception, so grounding is where it belongs.
 
-1. The reaction prompt — the last few witnessed lines as immediate context.
-2. `SoulBanterSeed` — one optional "overheard" fragment, so banter can pick up a thread you dropped.
-3. `SoulPromptAssembler` (DM) — a short bounded "recently overheard" block (≤ ~200 chars, witnessed lines inside the TTL only), appended to the existing state block and omitted entirely when empty.
+Every consumer then reads an argument it already receives:
 
-Consumer 3 is the only touch to the DM pipeline in this spec. Gating it behind the toggle is deliberate (D5): with Local off, DM prompts are byte-identical to 1.1.177, so the 8B-tuned DM behavior can be A/B'd against the change rather than silently replaced.
+1. The reaction prompt — via the `LOCAL` turn's own captured grounding.
+2. `SoulBanterSeed` — one optional "overheard" fragment from `rosterGroundings.get(0).overheard()`; it already takes that list, so this costs no new plumbing.
+3. `SoulPromptAssembler` (DM) — a bounded `RECENTLY OVERHEARD` block (≤ ~200 chars) rendered from `grounding.overheard()`, omitted entirely when empty.
+
+Consumer 3 is the only behavior change to the DM pipeline. Because the block rides grounding, **`SoulConversationService`, `SoulChatRouter`, and `SoulMessageDelivery` are all genuinely untouched** — the alternative (threading a new `assemble` parameter) would have forced a change into the DM service. Gating the write behind the toggle is deliberate (D5): with Local off, `overheard` is empty everywhere and DM prompts are byte-identical to 1.1.177, so the 8B-tuned DM behavior can be A/B'd rather than silently replaced.
 
 ## 5. `SoulLocalDirector` — the reaction gate
 
@@ -145,12 +147,12 @@ A bot that comments on your plans and then goes deaf when you answer is the intr
 | Constraint | Treatment |
 |---|---|
 | Model never schedules (parent spec) | The director is pure deterministic Frens logic — salience scoring plus a veto chain. The model writes one line inside an already-accepted scene. |
-| Explicit enablement | `soulLocalChatEnabled` default off; the souls master still gates everything above it. Recording runs unconditionally but has no reader while the toggle is off. |
+| Explicit enablement | `soulLocalChatEnabled` default off; the souls master still gates everything above it. The toggle gates the recorder's write, so nothing is captured, stored, or read while it is off. |
 | Provider budget | `isSceneBudgetFree` required; `partyKey` single-flight shared with group chat and banter; LoadGoverner probe signature untouched (local scenes count like any scene). |
 | Stale facts cancel the scene | Post-capture danger veto before submission; per-line staleness abort during playback; store epoch checks on commit. |
 | Ambient ≠ soul-DM visibility exemption | `LOCAL` scenes are gated by the ambient text/voice category masks via `isAmbient()`; `PLAYER` scenes keep the exemption, unchanged. |
 | Existing chat behavior preserved | The never-consume invariant (§3): the local path observes and returns; no existing unaddressed-chat handler loses a line. |
-| DM pipeline discipline | One deliberate touch — the bounded "recently overheard" block in `SoulPromptAssembler` — gated by the toggle, so DM prompts are byte-identical to 1.1.177 while Local is off. `SoulChatRouter`, `SoulConversationService`, and `SoulMessageDelivery` are untouched. |
+| DM pipeline discipline | One deliberate touch — the bounded `RECENTLY OVERHEARD` block in `SoulPromptAssembler`, rendered from `grounding.overheard()` and empty while the toggle is off, so DM prompts are byte-identical to 1.1.177. Carrying it on grounding rather than as an `assemble` parameter keeps `SoulChatRouter`, `SoulConversationService`, and `SoulMessageDelivery` genuinely untouched. |
 | Party history never merges into DM memory | Unchanged. Local scenes write only to the PARTY transcript; the DM block reads the in-memory ring, never the party store. |
 | One in-flight generation per key | Guaranteed by `partyKey(ownerId)` single-flight, shared with player scenes and banter. |
 
@@ -160,7 +162,8 @@ Pure-unit coverage in the established style (baseline 488 green):
 
 - **Salience scorer:** every hard reject; each weighted signal in isolation; the leading-name case scoring 0 (it is an address, not an overheard mention); threshold boundary at 3 vs 4; per-bot scoring picking the referenced bot over the merely nearer one.
 - **Veto chain:** truth table over `firstVeto`, asserting cheapest-first ordering by the reason returned; continuation bypass covering cooldown and salience but *not* `busy`, `muted`, `player-not-at-ease`, or the hard rejects.
-- **`SoulLocalMemory`:** ring bound at 8, TTL expiry, witness filtering (a non-witness bot reads nothing), clear-on-disconnect, bot senders skipped.
+- **`SoulLocalMemory`:** ring bound at 8, TTL expiry, witness filtering (a non-witness bot reads nothing), clear-on-disconnect, bot senders and blank lines skipped, and nothing recorded while the toggle is off.
+- **Grounding seam:** `GroundingSnapshot`'s compatibility constructor defaults `overheard` to empty; capture leaves it empty while the toggle is off; the DM assembler renders no block for an empty list and a bounded one otherwise.
 - **Cooldown math:** post-fire band, danger-veto partial retry, mutual re-arm with banter in both directions.
 - **Reply window:** opens on delivery only (never on a vetoed or failed attempt); each of the five closing conditions; exactly one continuation per window.
 - **Kind handling:** `isAmbient()` true for `BANTER` and `LOCAL`, false for `PLAYER`; `LOCAL` final message shape (bracketed context note + speaker-tagged utterance, no skip marker); `LOCAL` HEARD record replays as a player utterance; scene cap of 1 threaded to the validator; `LOCAL` failures silent.
