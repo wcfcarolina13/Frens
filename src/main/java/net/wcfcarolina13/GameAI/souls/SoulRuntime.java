@@ -75,7 +75,8 @@ public final class SoulRuntime {
     private record Pipeline(SoulSettings settings, SoulModelProvider provider,
                              SoulGenerationScheduler scheduler,
                              SoulConversationService conversationService,
-                             SoulVoiceService voice) {
+                             SoulVoiceService voice,
+                             SoulGroupConversationService groupService) {
     }
 
     /** Public API contract consumed by later tasks' chat/command routing. */
@@ -86,14 +87,21 @@ public final class SoulRuntime {
     }
 
     private final SoulStore store;
+    /** Party-channel transcripts — a second SoulStore rooted at {@code <world>/frens/party/v1}.
+     *  The test seam aliases it to {@code store}; only {@link #start} opens the real party root. */
+    private final SoulStore partyStore;
     private final SoulConversationService.Delivery delivery;
     private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final SoulPromptAssembler promptAssembler = new SoulPromptAssembler();
     private final SoulResponseValidator validator = new SoulResponseValidator();
+    private final SoulGroupPromptAssembler groupPromptAssembler = new SoulGroupPromptAssembler();
+    private final SoulGroupResponseValidator groupValidator = new SoulGroupResponseValidator();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicReference<Pipeline> pipelineRef;
     private final AtomicBoolean ready = new AtomicBoolean(false);
     private volatile SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(null);
+    /** Scene playback machine; production-only (created by {@link #start}), null in the test seam. */
+    private volatile GroupScenePlayback scenePlayback;
 
     // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
     // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
@@ -115,6 +123,9 @@ public final class SoulRuntime {
     SoulRuntime(SoulSettings settings, SoulStore store, SoulModelProvider provider,
                 SoulGenerationScheduler scheduler, SoulConversationService conversationService) {
         this.store = Objects.requireNonNull(store, "store");
+        // Test seam only: no world root exists here, so the party store aliases the DM store.
+        // Group turns still fail closed in this configuration (see submitGroupTurn).
+        this.partyStore = store;
         this.delivery = NO_OP_DELIVERY;
         this.voiceDelivery = (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { };
         this.pipelineRef = new AtomicReference<>(new Pipeline(
@@ -122,12 +133,15 @@ public final class SoulRuntime {
                 Objects.requireNonNull(provider, "provider"),
                 Objects.requireNonNull(scheduler, "scheduler"),
                 Objects.requireNonNull(conversationService, "conversationService"),
-                SoulVoiceService.disabled()));
+                SoulVoiceService.disabled(),
+                null));
     }
 
     private SoulRuntime(SoulSettings initialSettings, SoulVoiceSettings initialVoiceSettings, SoulStore store,
-                         SoulConversationService.Delivery delivery, SoulVoiceService.VoiceDelivery voiceDelivery) {
+                         SoulStore partyStore, SoulConversationService.Delivery delivery,
+                         SoulVoiceService.VoiceDelivery voiceDelivery) {
         this.store = Objects.requireNonNull(store, "store");
+        this.partyStore = Objects.requireNonNull(partyStore, "partyStore");
         this.delivery = Objects.requireNonNull(delivery, "delivery");
         this.voiceDelivery = Objects.requireNonNull(voiceDelivery, "voiceDelivery");
         this.voiceSettings = Objects.requireNonNull(initialVoiceSettings, "voiceSettings");
@@ -152,6 +166,8 @@ public final class SoulRuntime {
             SoulVoiceSettings voiceSettings = SoulVoiceSettings.from(config);
             Path worldRoot = server.getSavePath(WorldSavePath.ROOT);
             SoulStore store = new SoulStore(worldRoot);
+            SoulStore partyStore = SoulStore.openAt(
+                    worldRoot.resolve("frens").resolve("party").resolve("v1"));
             // Soul replies deliberately ignore the Text Chat master (Bradley's ruling
             // 2026-08-25): a direct conversation should stay visible even when generic
             // bot dialogue text is off. The textEnabled seam in SoulMessageDelivery
@@ -176,7 +192,34 @@ public final class SoulRuntime {
                         }
                     });
 
-            SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, delivery, voiceDelivery);
+            SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, partyStore,
+                    delivery, voiceDelivery);
+            // The playback machine reads the CURRENT pipeline's voice/group service through the
+            // runtime, so a settings reload swapping the pipeline never leaves it holding a
+            // closed voice engine or a displaced group service.
+            runtime.scenePlayback = new GroupScenePlayback(server,
+                    () -> runtime.pipelineRef.get().voice(), voiceDelivery,
+                    new GroupScenePlayback.LineCommitter() {
+                        @Override
+                        public void commitLine(SoulTypes.TurnToken token, int participantIndex,
+                                                String taggedLine) {
+                            SoulGroupConversationService groupService =
+                                    runtime.pipelineRef.get().groupService();
+                            if (groupService != null) {
+                                groupService.commitLine(token, participantIndex, taggedLine);
+                            }
+                        }
+
+                        @Override
+                        public void sceneFinished(SoulTypes.TurnToken token, int deliveredLines,
+                                                   int totalLines) {
+                            SoulGroupConversationService groupService =
+                                    runtime.pipelineRef.get().groupService();
+                            if (groupService != null) {
+                                groupService.sceneFinished(token, deliveredLines, totalLines);
+                            }
+                        }
+                    });
             INSTANCE.set(runtime);
             runtime.preloadIndex().exceptionally(ex -> {
                 LOGGER.warn("[souls] index preload failed: {}", ex.toString());
@@ -262,7 +305,11 @@ public final class SoulRuntime {
         // Include active TTS renders: the synthesis window (8-10s on Metal) starts AFTER the
         // LLM scheduler frees its slot, and it is the heaviest GPU contention of the whole
         // turn — without this the LoadGoverner floor dropped exactly when it mattered most.
-        return pipeline.scheduler().inFlightCount() + pipeline.voice().activeSyntheses();
+        // Playing group scenes count too: their per-line renders arrive in bursts across the
+        // whole playback window, and the floor must hold between lines as well.
+        GroupScenePlayback playback = runtime.scenePlayback;
+        int activeScenes = playback == null ? 0 : playback.activeSceneCount();
+        return pipeline.scheduler().inFlightCount() + pipeline.voice().activeSyntheses() + activeScenes;
     }
 
     /** Package-private test seam: installs {@code runtime} without going through {@link #start}. */
@@ -281,7 +328,14 @@ public final class SoulRuntime {
             stopped = true;
             closePipeline(pipelineRef.get());
         }
+        GroupScenePlayback playback = scenePlayback;
+        if (playback != null) {
+            playback.cancelAll();
+        }
         store.close();
+        if (partyStore != store) {
+            partyStore.close();
+        }
     }
 
     // === Readiness / status flags ===
@@ -331,6 +385,63 @@ public final class SoulRuntime {
             return CompletableFuture.completedFuture(SoulConversationService.Submission.FAILED);
         }
         return pipelineRef.get().conversationService().submit(turn);
+    }
+
+    /**
+     * Submits a group-scene turn to the currently installed pipeline's group service. Same
+     * plain-read discipline and fail-closed shape as {@link #submitTurn}; additionally fails
+     * closed when no group service exists (the test-seam pipeline, or no playback machine).
+     */
+    public CompletableFuture<SoulGroupConversationService.Submission> submitGroupTurn(
+            SoulGroupTypes.GroupSceneTurn turn) {
+        Objects.requireNonNull(turn, "turn");
+        if (stopped || !isConversationEnabled()) {
+            return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
+        }
+        SoulGroupConversationService groupService = pipelineRef.get().groupService();
+        if (groupService == null || scenePlayback == null) {
+            return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
+        }
+        return groupService.submit(turn);
+    }
+
+    /**
+     * Archives and bumps the actor's party-channel epoch, cancels any playing scene, and
+     * invalidates queued/in-flight scene generations — the party-channel analogue of
+     * {@link #reset}, with the same current-pipeline-under-lock invalidation rule.
+     */
+    public CompletableFuture<Long> resetParty(UUID ownerId) {
+        Objects.requireNonNull(ownerId, "ownerId");
+        SoulTypes.ConversationKey key = SoulGroupTypes.partyKey(ownerId);
+        GroupScenePlayback playback = scenePlayback;
+        if (playback != null) {
+            playback.cancelOwner(ownerId);
+        }
+        return partyStore.archiveAndReset(key).whenComplete((newEpoch, err) -> {
+            if (err == null) {
+                synchronized (lifecycleLock) {
+                    SoulGroupConversationService groupService = pipelineRef.get().groupService();
+                    if (groupService != null) {
+                        groupService.invalidate(key, newEpoch);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Server-tick facade for scene playback, registered on END_SERVER_TICK by {@code Frens}.
+     * Cheap no-op when no runtime is installed or no scene is active.
+     */
+    public static void tickScenes(MinecraftServer server) {
+        SoulRuntime runtime = INSTANCE.get();
+        if (runtime == null) {
+            return;
+        }
+        GroupScenePlayback playback = runtime.scenePlayback;
+        if (playback != null) {
+            playback.tick();
+        }
     }
 
     // === Store passthroughs ===
@@ -394,7 +505,25 @@ public final class SoulRuntime {
         SoulVoiceService voice = buildVoiceService(voiceSettings);
         SoulConversationService conversationService = new SoulConversationService(
                 store, promptAssembler, scheduler, provider, validator, delivery, settings, voice);
-        return new Pipeline(settings, provider, scheduler, conversationService, voice);
+        SoulGroupConversationService groupService = new SoulGroupConversationService(
+                partyStore, groupPromptAssembler, scheduler, provider, groupValidator, settings,
+                new SoulGroupConversationService.ScenePlayer() {
+                    @Override
+                    public void enqueue(GroupScenePlayback.PlayableScene scene) {
+                        GroupScenePlayback playback = scenePlayback;
+                        if (playback != null) {
+                            playback.enqueue(scene);
+                        }
+                    }
+
+                    @Override
+                    public boolean hasActiveScene(UUID ownerId) {
+                        GroupScenePlayback playback = scenePlayback;
+                        return playback != null && playback.hasActiveScene(ownerId);
+                    }
+                },
+                delivery::deliverStatus);
+        return new Pipeline(settings, provider, scheduler, conversationService, voice, groupService);
     }
 
     private SoulVoiceService buildVoiceService(SoulVoiceSettings voiceSettings) {
@@ -596,6 +725,12 @@ public final class SoulRuntime {
         int cancelled = pipelineRef.get().scheduler().cancelForPlayer(playerId);
         if (cancelled > 0) {
             LOGGER.info("[souls] cancelPlayer player={} cancelledGenerations={}", playerId, cancelled);
+        }
+        // The party key's playerId IS the owner, so the scheduler sweep above already covers
+        // queued/active scene generations; this stops a scene that is mid-playback.
+        GroupScenePlayback playback = scenePlayback;
+        if (playback != null) {
+            playback.cancelOwner(playerId);
         }
     }
 }

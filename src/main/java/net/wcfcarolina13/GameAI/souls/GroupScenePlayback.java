@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * Tick-driven playback of validated group scenes: one line at a time, in speaker order, each
@@ -75,18 +76,19 @@ public final class GroupScenePlayback {
     }
 
     private final MinecraftServer server;
-    private final SoulVoiceService voice;
+    /** Reads the CURRENT pipeline's voice service — pipelines are swapped by settings reloads. */
+    private final Supplier<SoulVoiceService> voice;
     private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final LineCommitter committer;
     private final LongSupplier clock;
     private final Map<UUID, SceneState> scenes = new ConcurrentHashMap<>();
 
-    public GroupScenePlayback(MinecraftServer server, SoulVoiceService voice,
+    public GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
                                SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer) {
         this(server, voice, voiceDelivery, committer, System::currentTimeMillis);
     }
 
-    GroupScenePlayback(MinecraftServer server, SoulVoiceService voice,
+    GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
                         SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer,
                         LongSupplier clock) {
         this.server = server;
@@ -150,7 +152,7 @@ public final class GroupScenePlayback {
         if (linesRemain && !state.cancelled && state.synth == null) {
             SoulGroupTypes.SceneLine line = lines.get(state.lineIndex);
             SoulGroupTypes.SceneParticipant speaker = scene.turn().roster().get(line.participantIndex());
-            state.synth = voice.synthesizeLine(speaker.profileId(), line.text());
+            state.synth = voice.get().synthesizeLine(speaker.profileId(), line.text());
             state.synthStartedMs = now;
         }
 
@@ -161,7 +163,7 @@ public final class GroupScenePlayback {
 
         boolean pacingReady = now >= state.notBeforeMs;
         boolean settled = state.synth != null
-                && synthSettled(state.synth.isDone(), state.synthStartedMs, now, voice.synthGuardMs());
+                && synthSettled(state.synth.isDone(), state.synthStartedMs, now, voice.get().synthGuardMs());
         boolean botDeliverable = speakerBot != null && !speakerBot.isRemoved() && speakerBot.isAlive();
 
         Step step = decideStep(state.cancelled, linesRemain, owner != null, botDeliverable,

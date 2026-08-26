@@ -94,6 +94,22 @@ class SoulRuntimeTest {
         verify(provider).close();
     }
 
+    @Test
+    void groupTurnsFailClosedInTheTestSeamAndWhenDisabled() throws Exception {
+        SoulSettings enabled = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        SoulModelProvider provider = mock(SoulModelProvider.class);
+        SoulRuntime runtime = new SoulRuntime(enabled, store, provider, scheduler, conversationService);
+
+        java.util.UUID owner = java.util.UUID.randomUUID();
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(owner, "Player",
+                java.util.List.of(), "hi", java.time.Instant.EPOCH, java.util.UUID.randomUUID());
+        // Test-seam pipeline has no group service/playback: fail closed, no provider call.
+        assertEquals(SoulGroupConversationService.Submission.FAILED,
+                runtime.submitGroupTurn(turn).get(2, java.util.concurrent.TimeUnit.SECONDS));
+        verify(provider, never()).generate(any());
+    }
+
     // === Own coverage: cancelPlayer — player-disconnect generation cancellation ===
 
     @Test
