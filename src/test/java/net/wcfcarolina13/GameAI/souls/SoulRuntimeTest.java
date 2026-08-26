@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -124,6 +125,23 @@ class SoulRuntimeTest {
         SoulRuntime.notePlayerChat(null);
     }
 
+    @Test
+    void localStatusReportsNotRunningOnTheTestSeam() {
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        assertEquals("Local chat director not running.",
+                runtime.localStatus(java.util.UUID.randomUUID()));
+    }
+
+    @Test
+    void localChatStaticsAreNullSafeWithNoRuntimeInstalled() {
+        // The chat callback calls these on every line; with souls off there is no runtime and
+        // they must be silent no-ops rather than throwing into the chat handler.
+        assertDoesNotThrow(() -> SoulRuntime.noteUnaddressedChat(null, "anything"));
+        assertDoesNotThrow(() -> SoulRuntime.noteAddressedChat(null));
+        assertDoesNotThrow(() -> SoulRuntime.forgetPlayerLocalMemory(UUID.randomUUID()));
+    }
+
     // === Own coverage: cancelPlayer — player-disconnect generation cancellation ===
 
     @Test
@@ -174,6 +192,24 @@ class SoulRuntimeTest {
 
         verify(scheduler).close();
         verify(store).close();
+    }
+
+    @Test
+    void stopAlsoClearsTheOverheardLocalChatRing() {
+        // SoulLocalMemory is a process-wide static ring, unlike localDirector's per-player maps
+        // (which are instance state discarded with the runtime) -- shutdown must explicitly
+        // sweep it (amendment D).
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        SoulRuntime.installForTest(runtime);
+        UUID playerId = UUID.randomUUID();
+        UUID botId = UUID.randomUUID();
+        SoulLocalMemory.note(playerId, "hello there", java.util.Set.of(botId), 1_000L);
+        assertEquals(List.of("hello there"), SoulLocalMemory.witnessedBy(botId, playerId, 1_000L));
+
+        SoulRuntime.stop();
+
+        assertTrue(SoulLocalMemory.witnessedBy(botId, playerId, 1_000L).isEmpty());
     }
 
     @Test

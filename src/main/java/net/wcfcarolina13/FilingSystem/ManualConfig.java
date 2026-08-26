@@ -117,6 +117,10 @@ public class ManualConfig {
     // Autonomous banter scenes. Default-OFF (explicit opt-in per the banter spec): companions
     // spending LLM/TTS time on their own initiative only happens after the user asks for it.
     private boolean soulBanterEnabled = false;
+    // Ambient/local chat: bots overhearing unaddressed chat spoken near them. Default-OFF for the
+    // same reason banter is — companions spending LLM/TTS time unprompted is opt-in. This toggle
+    // also gates the overhear recorder's write, so off means nothing is recorded at all.
+    private boolean soulLocalChatEnabled = false;
 
     // Soul generated-voice (TTS). Default-off; local engines only. See
     // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
@@ -857,6 +861,9 @@ public class ManualConfig {
 
     public boolean isSoulBanterEnabled() { return soulBanterEnabled; }
     public void setSoulBanterEnabled(boolean v) { this.soulBanterEnabled = v; }
+
+    public boolean isSoulLocalChatEnabled() { return soulLocalChatEnabled; }
+    public void setSoulLocalChatEnabled(boolean v) { this.soulLocalChatEnabled = v; }
 
     public String getSoulProvider() {
         return (soulProvider == null || soulProvider.isBlank()) ? "ollama" : soulProvider;

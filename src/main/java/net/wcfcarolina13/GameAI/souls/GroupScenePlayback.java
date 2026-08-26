@@ -49,6 +49,15 @@ public final class GroupScenePlayback {
         void commitLine(SoulTypes.TurnToken token, int participantIndex, String taggedLine);
 
         void sceneFinished(SoulTypes.TurnToken token, int deliveredLines, int totalLines);
+
+        /**
+         * Fires once per scene, alongside {@link #sceneFinished}, when at least one line was
+         * actually delivered (local-chat spec §7, amendment C). Default no-op so the single
+         * existing implementation ({@code SoulRuntime.start}'s anonymous {@code LineCommitter})
+         * keeps compiling unchanged unless it opts in.
+         */
+        default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
+        }
     }
 
     /** A validated scene ready to play. */
@@ -273,6 +282,7 @@ public final class GroupScenePlayback {
         LOGGER.info("[souls] scene-playback routingId={} outcome={} delivered={}/{}",
                 state.scene.turn().routingId(), outcome, state.delivered, state.scene.lines().size());
         committer.sceneFinished(state.scene.token(), state.delivered, state.scene.lines().size());
+        committer.sceneDelivered(state.scene.turn(), state.delivered);
     }
 
     private List<ServerPlayerEntity> playersInEarshot(ServerPlayerEntity speaker) {

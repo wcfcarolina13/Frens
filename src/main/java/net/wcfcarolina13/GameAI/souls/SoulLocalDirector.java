@@ -70,6 +70,50 @@ public final class SoulLocalDirector {
     private record ReplyWindow(UUID botId, long expiresAtMs, boolean used) {
     }
 
+    private final ContinuationTracker continuationTracker = new ContinuationTracker();
+
+    /**
+     * Pure per-player bookkeeping for the fire-once-continue-once rule (amendment C): remembers
+     * whether the scene most recently fired for a player was itself a continuation, so
+     * {@link #noteSceneDelivered} knows not to re-open a fresh window for it — without this, a
+     * continuation's own delivery would open another window and the exchange could continue
+     * forever. Split into its own testable unit because this codebase's tests cannot construct or
+     * mock {@code net.minecraft.server.MinecraftServer} at all (see {@code SoulMessageDeliveryTest}'s
+     * class Javadoc), so anything exercised only through a full {@link SoulLocalDirector} instance
+     * is untestable at the unit level.
+     */
+    static final class ContinuationTracker {
+        private final Map<UUID, Boolean> pendingIsContinuation = new ConcurrentHashMap<>();
+
+        /** Records, at fire time, whether the scene just submitted for {@code playerId} was a continuation. */
+        void noteFired(UUID playerId, boolean isContinuation) {
+            if (playerId != null) {
+                pendingIsContinuation.put(playerId, isContinuation);
+            }
+        }
+
+        /**
+         * Consumes the pending flag for {@code playerId} (clearing it either way) and reports
+         * whether a reply window should now open: {@code true} only when a fire was actually
+         * recorded for this player AND it was not a continuation. Fails closed — a delivery
+         * notification with nothing pending (never fired, already consumed, or forgotten) never
+         * opens a window.
+         */
+        boolean consumeShouldOpenWindow(UUID playerId) {
+            if (playerId == null) {
+                return false;
+            }
+            Boolean wasContinuation = pendingIsContinuation.remove(playerId);
+            return wasContinuation != null && !wasContinuation;
+        }
+
+        void forget(UUID playerId) {
+            if (playerId != null) {
+                pendingIsContinuation.remove(playerId);
+            }
+        }
+    }
+
     public SoulLocalDirector(SoulRuntime runtime, MinecraftServer server,
                               BooleanSupplier localChatEnabled, BooleanSupplier ambientTextOpen,
                               BooleanSupplier ambientVoiceOpen,
@@ -220,14 +264,37 @@ public final class SoulLocalDirector {
         nextEligibleAtMs.put(playerId, now + nextDelayMs(random));
         if (bestIsContinuation) {
             markWindowUsed(playerId);
-        } else {
-            openReplyWindow(playerId, bestBot.getUuid(), now);
         }
+        // The reply window itself opens on delivery (see noteSceneDelivered), not here at
+        // submission — a generation that fails, or a scene muted on every surface, must not
+        // grant a bypass window. This only remembers whether THIS fire was a continuation, so
+        // delivery knows not to re-open one and let the exchange run forever.
+        continuationTracker.noteFired(playerId, bestIsContinuation);
         recordVerdict(playerId, "fired");
         lastScore.put(playerId, bestScore);
         LOGGER.info("[souls] local player={} bot={} outcome=fired routingId={} score={}",
                 playerId, bestBot.getUuid(), routingId, bestScore);
         runtime.submitGroupTurn(turn);
+    }
+
+    /**
+     * Called by {@link SoulRuntime} when a LOCAL scene it submitted actually delivers at least
+     * one line (local-chat spec §7, amendment C): this is where the reply window opens, not at
+     * submission — a generation that fails, or a scene muted on every output surface, never
+     * grants a bypass window.
+     *
+     * <p>Exactly one continuation is allowed per reaction: if the scene that just delivered was
+     * itself a continuation (it consumed an already-open window), its own delivery must NOT
+     * re-open a fresh window, or the exchange could continue forever. {@link #continuationTracker}
+     * remembers which case this was, set at fire time in {@link #noteUnaddressedChat}.
+     */
+    void noteSceneDelivered(UUID playerId, UUID botId) {
+        if (playerId == null || botId == null) {
+            return;
+        }
+        if (continuationTracker.consumeShouldOpenWindow(playerId)) {
+            openReplyWindow(playerId, botId, clock.getAsLong());
+        }
     }
 
     /** Closes any open reply window — the player addressed a bot directly, so ambient yields. */
@@ -283,6 +350,7 @@ public final class SoulLocalDirector {
         lastVerdict.remove(playerId);
         lastScore.remove(playerId);
         replyWindows.remove(playerId);
+        continuationTracker.forget(playerId);
     }
 
     /** For {@code /bot soul local status}-style surfaces: last verdict, score, cooldown, window. */

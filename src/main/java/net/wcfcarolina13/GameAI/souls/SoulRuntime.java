@@ -105,6 +105,8 @@ public final class SoulRuntime {
     private volatile GroupScenePlayback scenePlayback;
     /** Autonomous banter scheduler; production-only, null in the test seam. */
     private volatile SoulBanterDirector banterDirector;
+    /** Ambient/local-chat scheduler; production-only, null in the test seam. */
+    private volatile SoulLocalDirector localDirector;
 
     // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
     // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
@@ -234,11 +236,32 @@ public final class SoulRuntime {
                                 groupService.sceneFinished(token, deliveredLines, totalLines);
                             }
                         }
+
+                        @Override
+                        public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
+                            // The local-chat reply window opens on actual delivery, not scene
+                            // submission (amendment C): a generation that fails, or a scene muted
+                            // on every output surface, must not grant a bypass window.
+                            if (turn.kind() == SoulGroupTypes.SceneKind.LOCAL && deliveredLines > 0) {
+                                SoulLocalDirector local = runtime.localDirector;
+                                if (local != null && !turn.roster().isEmpty()) {
+                                    local.noteSceneDelivered(turn.ownerId(), turn.roster().get(0).botId());
+                                }
+                            }
+                        }
                     }, ambientTextOpen, ambientVoiceOpen);
             runtime.banterDirector = new SoulBanterDirector(runtime, server,
                     () -> {
                         ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                         return cfg != null && cfg.isSoulBanterEnabled();
+                    },
+                    ambientTextOpen, ambientVoiceOpen,
+                    srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
+                    System::currentTimeMillis, new java.util.Random());
+            runtime.localDirector = new SoulLocalDirector(runtime, server,
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg != null && cfg.isSoulLocalChatEnabled();
                     },
                     ambientTextOpen, ambientVoiceOpen,
                     srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
@@ -355,6 +378,11 @@ public final class SoulRuntime {
         if (playback != null) {
             playback.cancelAll();
         }
+        // SoulLocalMemory is a process-wide static ring (unlike localDirector's per-player maps,
+        // which are instance state on this runtime and are simply discarded with it), so it needs
+        // an explicit sweep here — mirrors SoulPlayerActivity.clear(), which has no production
+        // call site of its own (grepped for one; only a test resets it directly).
+        SoulLocalMemory.clear();
         store.close();
         if (partyStore != store) {
             partyStore.close();
@@ -426,10 +454,24 @@ public final class SoulRuntime {
             return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
         }
         if (turn.kind() == SoulGroupTypes.SceneKind.PLAYER) {
-            // A real conversation re-arms the banter cooldown — banter yields to the player.
-            SoulBanterDirector director = banterDirector;
-            if (director != null) {
-                director.notePlayerScene(turn.ownerId());
+            // A real conversation re-arms both ambient cooldowns — they yield to the player.
+            SoulBanterDirector banter = banterDirector;
+            if (banter != null) {
+                banter.notePlayerScene(turn.ownerId());
+            }
+            SoulLocalDirector local = localDirector;
+            if (local != null) {
+                local.notePlayerScene(turn.ownerId());
+            }
+        } else if (turn.kind() == SoulGroupTypes.SceneKind.LOCAL) {
+            SoulBanterDirector banter = banterDirector;
+            if (banter != null) {
+                banter.notePlayerScene(turn.ownerId());
+            }
+        } else if (turn.kind() == SoulGroupTypes.SceneKind.BANTER) {
+            SoulLocalDirector local = localDirector;
+            if (local != null) {
+                local.notePlayerScene(turn.ownerId());
             }
         }
         return groupService.submit(turn);
@@ -494,6 +536,10 @@ public final class SoulRuntime {
         if (director != null) {
             director.tick();
         }
+        SoulLocalDirector local = runtime.localDirector;
+        if (local != null) {
+            local.tick();
+        }
     }
 
     /**
@@ -515,6 +561,70 @@ public final class SoulRuntime {
     public String banterStatus(UUID playerId) {
         SoulBanterDirector director = banterDirector;
         return director == null ? "Banter director not running." : director.statusFor(playerId);
+    }
+
+    /**
+     * Records one unaddressed chat line into the overhear ring and offers it to the local
+     * director. Observational only — this never consumes the chat line (local-chat spec §3).
+     */
+    public static void noteUnaddressedChat(net.minecraft.server.network.ServerPlayerEntity player,
+                                            String line) {
+        try {
+            SoulRuntime runtime = INSTANCE.get();
+            if (runtime == null || player == null || line == null || line.isBlank()) {
+                return;
+            }
+            ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+            if (cfg == null || !cfg.isSoulLocalChatEnabled()) {
+                return; // gated at the write: nothing recorded, nothing to read
+            }
+            SoulLocalDirector director = runtime.localDirector;
+            if (director != null) {
+                director.noteUnaddressedChat(player, line);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** An explicit address closes any open reply window (local-chat spec §7). */
+    public static void noteAddressedChat(net.minecraft.server.network.ServerPlayerEntity player) {
+        try {
+            SoulRuntime runtime = INSTANCE.get();
+            if (runtime != null && player != null) {
+                SoulLocalDirector director = runtime.localDirector;
+                if (director != null) {
+                    director.noteAddressedChat(player.getUuid());
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Disconnect-time cleanup for a real player's local-chat state: drops their overheard ring
+     * ({@link SoulLocalMemory#forget}) AND the director's own per-player state — cooldown,
+     * verdict/score history, reply window, and pending-continuation flag — via
+     * {@link SoulLocalDirector#forget}. Both are needed: the director holds the player's last
+     * chat line and open reply window, which {@code SoulLocalMemory} does not.
+     */
+    public static void forgetPlayerLocalMemory(UUID playerId) {
+        try {
+            SoulLocalMemory.forget(playerId);
+            SoulRuntime runtime = INSTANCE.get();
+            if (runtime != null) {
+                SoulLocalDirector director = runtime.localDirector;
+                if (director != null) {
+                    director.forget(playerId);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** For {@code /bot soul local status}. */
+    public String localStatus(UUID playerId) {
+        SoulLocalDirector director = localDirector;
+        return director == null ? "Local chat director not running." : director.statusFor(playerId);
     }
 
     // === Store passthroughs ===

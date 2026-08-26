@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,6 +63,57 @@ class SoulLocalDirectorTest {
     void replyWindowConstantsAreTheSpecValues() {
         assertEquals(30_000L, SoulLocalDirector.REPLY_WINDOW_MS);
         assertEquals(16.0, SoulLocalDirector.EARSHOT_BLOCKS);
+    }
+
+    // === ContinuationTracker (amendment C): the reply window opens on delivery, not submission,
+    // and a continuation's OWN delivery must never re-open a fresh window -- otherwise the
+    // reaction-plus-continuation exchange could run forever. ===
+
+    @Test
+    void firstReactionsDeliveryOpensAWindow() {
+        SoulLocalDirector.ContinuationTracker tracker = new SoulLocalDirector.ContinuationTracker();
+        UUID player = UUID.randomUUID();
+
+        tracker.noteFired(player, false); // the original reaction, not a continuation
+        boolean shouldOpen = tracker.consumeShouldOpenWindow(player);
+
+        assertTrue(shouldOpen, "a plain reaction's delivery must open the reply window");
+    }
+
+    @Test
+    void continuationsDeliveryDoesNotOpenAnotherWindow() {
+        SoulLocalDirector.ContinuationTracker tracker = new SoulLocalDirector.ContinuationTracker();
+        UUID player = UUID.randomUUID();
+
+        tracker.noteFired(player, true); // this fire consumed an already-open window
+        boolean shouldOpen = tracker.consumeShouldOpenWindow(player);
+
+        assertFalse(shouldOpen,
+                "a continuation's own delivery must not re-open a window, or the exchange never ends");
+    }
+
+    @Test
+    void pendingFlagIsConsumedExactlyOnce() {
+        SoulLocalDirector.ContinuationTracker tracker = new SoulLocalDirector.ContinuationTracker();
+        UUID player = UUID.randomUUID();
+        tracker.noteFired(player, false);
+
+        assertTrue(tracker.consumeShouldOpenWindow(player));
+        // A second delivery notification for the same player, with nothing newly fired in
+        // between, must not spuriously open another window either.
+        assertFalse(tracker.consumeShouldOpenWindow(player));
+    }
+
+    @Test
+    void forgetClearsThePendingFlag() {
+        SoulLocalDirector.ContinuationTracker tracker = new SoulLocalDirector.ContinuationTracker();
+        UUID player = UUID.randomUUID();
+        tracker.noteFired(player, false);
+
+        tracker.forget(player);
+
+        // Nothing pending after forget: no window should open off a stale/forgotten fire.
+        assertFalse(tracker.consumeShouldOpenWindow(player));
     }
 
     private static SoulTypes.SituationSnapshot withHostiles() {

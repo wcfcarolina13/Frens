@@ -943,6 +943,9 @@ public class Frens implements ModInitializer {
                     runtime.cancelPlayer(player.getUuid());
                 }
             });
+            // Drop this player's overheard-chat ring and local-chat director state (cooldown,
+            // last line, reply window) so nothing lingers for a player who is gone.
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.forgetPlayerLocalMemory(player.getUuid());
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
@@ -1278,6 +1281,8 @@ public class Frens implements ModInitializer {
 
             ChatTarget target = resolveChatTargets(raw);
             if (!target.bots().isEmpty()) {
+                // Explicit address: close any open ambient reply window. Observational only.
+                net.wcfcarolina13.GameAI.souls.SoulRuntime.noteAddressedChat(sender);
                 List<ServerPlayerEntity> routedBots = dedupeTargetBots(target.bots());
                 // Fast-path: local quest system (no LLM).
                 if (!target.prompt().isEmpty()) {
@@ -1364,6 +1369,11 @@ public class Frens implements ModInitializer {
                 }
                 return;
             }
+
+            // Ambient/local chat: bots standing nearby may overhear this. Strictly observational
+            // — this never consumes the line, so the legacy inline-action parser below still runs
+            // exactly as it did before the feature existed (local-chat spec §3).
+            net.wcfcarolina13.GameAI.souls.SoulRuntime.noteUnaddressedChat(sender, raw);
 
             handleLegacyInlineActionFromRaw(raw, sender);
         });
