@@ -1164,6 +1164,7 @@ public class Frens implements ModInitializer {
             BotEventHandler.ensureBotPresence(newPlayer.getCommandSource().getServer());
         });
 
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.souls.SoulRuntime::tickScenes);
         ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
@@ -1288,9 +1289,34 @@ public class Frens implements ModInitializer {
                     }
                 }
 
-                // Exclusive soul-communication pilot: single-bot DMs only. "bots"/"all bots"
-                // broadcasts never route to souls -- they always fall through to the legacy loop
-                // below until the separately designed group channel exists. Gating on
+                // Group scenes: a broadcast keyword or a multi-name leading address routes to the
+                // soul PARTY channel when souls + the party toggle are on. NOT_SOUL falls through
+                // to the legacy per-bot loop exactly as before; a single-eligible-bot roster
+                // downgrades to the ordinary DM path below via SoulChatRouter.
+                if ((target.broadcast() || routedBots.size() >= 2) && !target.prompt().isEmpty()) {
+                    try {
+                        ServerPlayerEntity[] downgraded = new ServerPlayerEntity[1];
+                        boolean partyEnabled = CONFIG == null || CONFIG.isSoulPartyEnabled();
+                        net.wcfcarolina13.GameAI.souls.SoulGroupRouter.RouteOutcome groupOutcome =
+                                net.wcfcarolina13.GameAI.souls.SoulGroupRouter.tryRoute(
+                                        routedBots, sender, target.prompt(), partyEnabled, downgraded);
+                        if (groupOutcome == net.wcfcarolina13.GameAI.souls.SoulGroupRouter.RouteOutcome.CONSUMED) {
+                            return;
+                        }
+                        if (groupOutcome == net.wcfcarolina13.GameAI.souls.SoulGroupRouter.RouteOutcome.DOWNGRADE_TO_DM
+                                && downgraded[0] != null
+                                && net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(
+                                        downgraded[0], sender, target.prompt())
+                                        == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED) {
+                            return;
+                        }
+                    } catch (Throwable t) {
+                        // Don't let optional soul-communication wiring break chat.
+                        LOGGER.warn("SoulGroupRouter threw; falling back to legacy routing: {}", t.toString());
+                    }
+                }
+
+                // Exclusive soul-communication pilot: single-bot DMs only. Gating on
                 // routedBots.size() == 1 alone is not enough: a broadcast keyword resolves to a
                 // size-1 list whenever the server has exactly one registered bot, so the
                 // resolver's own broadcast flag (never derived from list size) is required too.

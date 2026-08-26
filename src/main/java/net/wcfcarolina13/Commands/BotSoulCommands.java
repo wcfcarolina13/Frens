@@ -94,6 +94,7 @@ final class BotSoulCommands {
                                 .executes(context -> executeDisable(context,
                                         EntityArgumentType.getPlayer(context, "bot")))))
                 .then(CommandManager.literal("reset")
+                        .then(CommandManager.literal("party").executes(BotSoulCommands::executePartyReset))
                         .then(CommandManager.argument("bot", EntityArgumentType.player())
                                 .executes(context -> executeReset(context,
                                         EntityArgumentType.getPlayer(context, "bot")))))
@@ -521,6 +522,38 @@ final class BotSoulCommands {
             } else {
                 ChatUtils.sendSystemMessage(source,
                         "Archived your conversation with " + botName + "; new epoch " + newEpoch + ".");
+            }
+        }));
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul reset party} — archives the ACTOR's own party-channel (group scene)
+     * transcript and cancels any scene still playing. Owner-scoped by construction: the party
+     * thread is keyed by the actor's own UUID, so there is nothing here an operator could erase
+     * for someone else.
+     */
+    private static int executePartyReset(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
+        if (maybeRuntime.isEmpty()) {
+            source.sendError(Text.literal("Soul runtime is not currently running."));
+            return 0;
+        }
+        SoulRuntime runtime = maybeRuntime.get();
+        MinecraftServer server = source.getServer();
+        runtime.resetParty(actor.getUuid()).whenComplete((newEpoch, err) -> server.execute(() -> {
+            if (err != null) {
+                LOGGER.warn("[souls] party reset failed for actor {}: {}", actor.getUuid(), err.toString());
+                ChatUtils.sendSystemMessage(source, "Failed to reset your group conversation.");
+            } else {
+                ChatUtils.sendSystemMessage(source,
+                        "Archived your group conversation; new epoch " + newEpoch + ".");
             }
         }));
         return 1;

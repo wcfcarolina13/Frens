@@ -111,6 +111,9 @@ public class ManualConfig {
     private String soulModel = "";
     private int soulRequestTimeoutSeconds = 60;
     private int soulQueueCapacity = 8;
+    // Group scenes ("bots, ..." / "Jake and Sara, ...") kill switch. Default-on: it only takes
+    // effect while the souls master above is on, so a souls-off install is unaffected.
+    private boolean soulPartyEnabled = true;
 
     // Soul generated-voice (TTS). Default-off; local engines only. See
     // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
@@ -845,6 +848,9 @@ public class ManualConfig {
 
     public boolean isSoulsEnabled() { return soulsEnabled; }
     public void setSoulsEnabled(boolean soulsEnabled) { this.soulsEnabled = soulsEnabled; }
+
+    public boolean isSoulPartyEnabled() { return soulPartyEnabled; }
+    public void setSoulPartyEnabled(boolean v) { this.soulPartyEnabled = v; }
 
     public String getSoulProvider() {
         return (soulProvider == null || soulProvider.isBlank()) ? "ollama" : soulProvider;
