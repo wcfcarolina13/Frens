@@ -1,7 +1,49 @@
 ---
-task: "Soul track: GROUP CHAT (1.1.176) and BANTER (1.1.177, default OFF) both shipped — field-test them together. Next queue item after validation: AMBIENT/LOCAL CHAT (bots overhearing unaddressed chat), spec-gated."
+task: "Soul track: GROUP CHAT (1.1.176), BANTER (1.1.177, default OFF), and AMBIENT/LOCAL CHAT (1.1.178, default OFF) all shipped — none field-tested yet. Next queue item after validation: CONSOLIDATION."
 test_command: "./gradlew build -x test"
 ---
+
+## Session Handoff 2026-08-26 (later) — ambient/local chat shipped (1.1.178)
+
+Ambient/local chat implemented end-to-end this session: spec
+(`docs/superpowers/specs/2026-08-26-frens-soul-local-chat-design.md`), plan
+(`docs/superpowers/plans/2026-08-26-soul-local-chat.md`), 10 implementation commits
+across 7 tasks (incl. two fix rounds on the director and one on the runtime wiring),
+suite 488 → 525 green. Full reasoning in `changelog.md` (1.1.178 entry). A soul-bound
+companion standing near you now overhears unaddressed chat and, rarely, chimes in out
+loud to everyone in earshot via the same PARTY scene pipeline group chat and banter use.
+Split into an always-on recorder (`SoulLocalMemory`, gated only by the toggle + hard
+rejects) and a default-OFF deterministic reaction director (`SoulLocalDirector`, gated by
+a pure salience score plus a banter-style veto chain); the reply window opens on scene
+*delivery* (not submission, a mid-implementation correction) and grants exactly one
+continuation, enforced by a fail-closed `ContinuationTracker`. Never consumes a chat
+line — every pre-existing unaddressed-chat handler still runs untouched, reaction or no
+reaction. Default OFF behind `soulLocalChatEnabled` (Local chip + `/bot soul local
+on|off|status`).
+
+**Field-test:** run the 1.1.176 group-chat checklist, the 1.1.177 banter checklist, AND
+the 1.1.178 local-chat checklist (all three in `changelog.md`) — **none of the three
+soul-track surfaces has been field-tested yet**, so this is a three-feature validation
+pass, not just one. Local chat needs its own toggle ON (`/bot soul local on`) plus a
+second player nearby to confirm the reaction is actually audible to a bystander, not just
+the addressee.
+
+**Follow-ups surfaced during the local-chat plan, not yet actioned** (full detail in the
+changelog's "Follow-ups" and "Pre-existing bug" sections): a word-boundary fix needed in
+the salience scorer's bot-name match (short names like "Al"/"Sam" can substring-match);
+`vetoed:roster-lost` doesn't push the cooldown so repeated capture failures retry every
+line; one stale/duplicate test name in `GroupScenePlaybackTest`; and a **pre-existing bug
+in 1.1.177's banter feature, not introduced by this plan** — `SoulPlayerActivity.clear()`
+has no production call site and `SoulPlayerActivity` has no per-player eviction on
+disconnect, so its static maps grow across a session and stale activity strings can
+survive a player rejoin. Worth its own small follow-up session.
+
+**Next soul-track item after all three validate: CONSOLIDATION.** The roadmap's fifth
+item — durable cross-surface memory (the local ring is deliberately session-scoped;
+consolidation is where that becomes persistent), and folding the now-four conversational
+surfaces (DM, group/PARTY, banter, local) into a coherent whole before the sixth item,
+action requests, gets its own spec. Needs its own interview and spec first, same as every
+prior soul-track item.
 
 ## Session Handoff 2026-08-26 — banter shipped (1.1.177)
 

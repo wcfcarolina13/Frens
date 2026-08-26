@@ -2,6 +2,212 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul ambient/local chat: companions overhear unaddressed chat, opt-in; 1.1.178 (2026-08-26)
+
+Fourth conversational surface on the pilot, and the last one before consolidation. Spec
+`docs/superpowers/specs/2026-08-26-frens-soul-local-chat-design.md`, plan
+`docs/superpowers/plans/2026-08-26-soul-local-chat.md`. A soul-bound companion standing
+near you overhears what you say to nobody in particular and, very occasionally, chimes
+in out loud to everyone in earshot — not a whisper back. Rides the 1.1.176 PARTY scene
+pipeline exactly like banter did; no new store, no new scheduler behavior.
+
+**The never-consume invariant, first, because it's the property that matters most.**
+Unlike every other chat surface in the mod, the local-chat hook never returns `CONSUMED`.
+It observes one unaddressed line and returns — `tryHandleNearbyQuestAsk`,
+`BotRespawnPromptService.handleChat`, `SkillResumeService.handleChat`,
+`FunctionCallerV2.tryHandleConfirmation`, and the terminal
+`handleLegacyInlineActionFromRaw` all still run, unconditionally, exactly as before this
+feature existed. The chat callback in `Frens.java` needed no new `return` and no new
+branch to get this: the hook call sits on the pre-existing fall-through path,
+immediately before `handleLegacyInlineActionFromRaw` (the plan's premise was an `else`
+branch to add; the real code just falls through, so the ruling was to insert on that
+fall-through rather than invent a branch — strictly safer for the invariant, easier to
+verify by eye). An explicit address closes any open reply window via a matching
+`noteAddressedChat` call at the top of the addressed branch, but records nothing and
+still consumes nothing itself — routing to bots proceeds exactly as before.
+
+- **Two units, split by cost and risk.** `SoulLocalMemory` is an always-on, in-memory,
+  bounded per-player ring (8 entries, 10 min TTL) of recently overheard lines — no LLM
+  call, no output, no disk, keyed by the set of soul-bot UUIDs actually in earshot when
+  the line was spoken (a bot reads only what it witnessed). `SoulLocalDirector` is the
+  deterministic, default-OFF reaction gate that turns a rare high-salience line into a
+  one-bot `LOCAL` scene. They're separable on purpose: the recorder is free and useful on
+  its own (it feeds the DM prompt and the banter seed even with reactions off); the
+  speaking half is the only part that costs a provider call, so it's the only part gated
+  by the toggle.
+- **The write-side gate is deliberately asymmetric between the two units.** Recording
+  into the ring is gated ONLY by `soulLocalChatEnabled` and the hard rejects (blank,
+  <3 words, <~12 chars, a repeat of the player's last line, sender is a bot) — never by
+  cooldown, busy, muted, or roster. The expensive half — `SoulSnapshotBuilder.capture`,
+  one per roster candidate, feeding both the salience score and the scene grounding —
+  sits behind the full cheap-gate chain (`pipeline` → `cooldown` → `busy` → `muted` →
+  `player-not-at-ease` → `roster` → `salience` → `danger`). Fix round 1 on
+  `SoulLocalDirector` got this backwards: it restructured the method into two `firstVeto`
+  calls to stop the capture sweep from running before the cheap gates (correct), but
+  accidentally pulled the recording write along with it, so nothing was recorded for the
+  entire 6-12 min post-fire cooldown — the always-on memory half went dark exactly when a
+  reaction fires. Fix round 2 separated the two tiers again: recording happens right
+  after the hard-reject check, unconditionally past that point; the reacting tier (roster
+  filter, capture loop, real veto call) begins strictly after. This is the shape of the
+  two-tier split described in the spec, restored after one implementation regression.
+- **The reply window opens on scene delivery, not scene submission — this changed
+  during implementation.** The plan (and the original Task 5 code) opened the 30 s
+  bypass window the moment the director submitted the scene. The spec says "on a
+  delivered reaction," and the gap matters: a scene that fails to generate (malformed,
+  timeout) or whose text and voice are both muted still grants a free bypass window under
+  submit-time opening, even though the player received nothing. Task 6 closed the gap by
+  adding a `default void sceneDelivered(GroupSceneTurn turn, int deliveredLines)` method
+  to `GroupScenePlayback.LineCommitter` (default body, so the interface change is source-
+  and binary-compatible with its one production implementer), called from
+  `GroupScenePlayback.finish()` — the single terminal point for both FINISH and ABORT —
+  right after `sceneFinished`. `SoulRuntime`'s anonymous committer forwards LOCAL scenes
+  with `deliveredLines > 0` to `SoulLocalDirector.noteSceneDelivered`, which is the only
+  thing that ever calls `openReplyWindow`.
+- **Exactly one continuation, and it fails closed.** A `ContinuationTracker` records,
+  at fire time, whether the fired scene itself was a continuation of an already-open
+  window. On delivery, `consumeShouldOpenWindow` removes and returns that flag — `true`
+  only for a genuine first reaction, never for a continuation's own delivery — so a
+  continuation can never re-open the window it answered, which would otherwise chain LLM
+  calls and speech synthesis indefinitely if a player kept replying. The tracker had to
+  be pulled out as its own class because `MinecraftServer` can't be constructed or mocked
+  in this test harness, so `SoulLocalDirector` itself can't be exercised end-to-end; a fix
+  round caught one more edge on this — `noteAddressedChat` and a player-initiated scene
+  both closed the reply-window map but left a pending continuation flag alive, so a
+  scene already in flight when the player addressed a bot could still pop a window open
+  after the fact. Both callers now clear the tracker too. A window closes on the first
+  of: 30 s elapse; the continuation is used; explicit address; the player leaving earshot
+  or changing world (added in a fix round — the earshot/world check reuses the same
+  `EARSHOT_BLOCKS` radius the witness pass uses); a new reaction firing.
+- **Salience is a pure, additive, per-bot score against constants tuned for field
+  testing, not architecture.** Hard rejects (above) run before any bot context is built.
+  Then: naming a nearby bot NOT in leading position +3 (a leading name is an address,
+  already routed away, and scores 0 here), stated intent/plan phrasing +2, keyword
+  overlap with the bot's active task or last journal event +2, ending in a question mark
+  +2, six-plus words +1, mostly digits/coordinates −2. Fires at ≥4. The threshold and
+  every weight live as constants in one place (`SoulLocalSalience`) — this is the
+  designated field-tuning surface once real logs exist, not something that should need a
+  code review to adjust. Scoring is per-bot so the highest-scoring eligible bot in
+  earshot answers (ties broken by proximity), not merely the nearest one; the reply
+  window's continuation bypass is keyed to that exact bot too — a fix round caught the
+  original implementation OR-ing `windowOpen` into every candidate's eligibility, which
+  let a different bot than the one who opened the window ride its bypass.
+- **Grounding is the seam that kept the DM pipeline untouched.**
+  `SoulTypes.GroundingSnapshot` gained a 6th component, `overheard` (compatibility
+  constructors preserve every existing call site), populated by
+  `SoulSnapshotBuilder.capture` from `SoulLocalMemory.witnessedBy(botId, playerId, now)`
+  — empty whenever the toggle is off, because nothing was ever written. Three consumers
+  read it: the `LOCAL` scene's own turn grounding, one optional "overheard" fragment in
+  `SoulBanterSeed`, and a bounded (≤200 char) `RECENTLY OVERHEARD` block in
+  `SoulPromptAssembler`, omitted entirely when the list is empty. That last one is the
+  only DM-pipeline behavior change in the whole feature, and it rides an argument the
+  assembler already receives — `SoulConversationService`, `SoulChatRouter`, and
+  `SoulMessageDelivery` are all genuinely untouched. With the toggle off, `overheard` is
+  empty everywhere and DM prompts are byte-identical to 1.1.177, so the 8B-tuned DM
+  behavior stays A/B-able against this feature rather than silently mixed with it.
+- **`SceneKind.LOCAL` and the ambient generalization.** Three of the existing
+  `== SceneKind.BANTER` branches in `GroupScenePlayback` and
+  `SoulGroupConversationService` were really asking "is this ambient?" and became
+  `SceneKind.isAmbient()` (voice-mute/combat-abort gating, text/voice surface masking,
+  silent-failure notification — renamed `statusUnlessBanter` → `statusUnlessAmbient`,
+  which turned out to have 4 call sites, not the 2 originally assumed, all correctly
+  caught during implementation). Three branches where content genuinely differs by kind
+  stayed explicit switches: the final USER message (BANTER gets a bracketed narrator
+  directive with no player words at all; `LOCAL` gets a bracketed "overhearing, not
+  addressed" context note followed by the real speaker-tagged line, e.g. `[Bradley is
+  talking nearby, not to you...]` then `Bradley: heading to the ravine`), the per-kind
+  scene-line cap (new `LOCAL_MAX_SCENE_LINES = 1`, vs. banter's 4 and the ordinary 6),
+  and the HEARD-record tagging.
+- **The `LOCAL` scene cap of 1 and the ordinary, unmarked HEARD record.** A `LOCAL` scene
+  is capped at exactly one line — a comment, not a conversation. Its transcript record is
+  the deliberate opposite of banter's: banter's HEARD record carries a `[banter]` prefix
+  because a banter seed is a synthetic narrator directive that must never replay as
+  something the player said, and the assembler's history replay skips prefixed records
+  for exactly that reason. A `LOCAL` record uses the ordinary speaker-tagged form
+  (`Owner: message`) with no marker at all — the overheard line genuinely *was* said by
+  the player in earshot, so it's byte-identical in shape to a `PLAYER` record and replays
+  normally, which is also what gives a windowed continuation its context for free.
+- **Config/UI/commands:** `soulLocalChatEnabled` (default false) + "Local" chip (10th
+  `GLOBAL_TOGGLES` entry, all four wiring sites — list, index constant, `init()` load,
+  `saveSettings()` write — moved together) + `/bot soul local on|off` (operator) and
+  `status` (enablement, most recent veto reason, last score, time-to-next-eligible, open
+  reply window — the primary field-test tool, matching banter's).
+- **Cooldown interplay with banter is unchanged from the spec's design.** A fired local
+  reaction re-arms banter's cooldown and vice versa (`notePlayerScene` on both
+  directors), so the two ambient surfaces take turns instead of stacking; both submit
+  under the same `partyKey(ownerId)` single-flight, so they cannot overlap regardless.
+- Suite 488 → 525, all green (baseline for this branch was 488 at the 1.1.177 tag; the
+  branch's own running counts moved 507 → 511 → 516 → 523 → 524 → 525 across the ten
+  commits below, tracked commit-by-commit in `.superpowers/sdd/2026-08-26-soul-local-chat/progress.md`).
+  Final verification for this entry (`./gradlew build -x test && ./gradlew test`):
+  **BUILD SUCCESSFUL, 525 tests, 0 failures, 0 errors, 0 skipped.**
+  Commits (oldest first): `edf0910` SoulLocalMemory ring, `fbd80d4` SoulLocalSalience
+  scorer, `7a56ea9` SceneKind.LOCAL + ambient generalization, `ec9e9d8` grounding seam
+  (overheard on GroundingSnapshot, DM + banter-seed consumers), `47aa151`
+  SoulLocalDirector (salience gate, cooldowns, reply window), `9e77845` director fix
+  round 1 (cheapest-first gating, window bot identity, cooldown merge, `forget()`),
+  `279dfd2` director fix round 2 (recording gated only by enablement, not the reaction
+  cooldown), `8a810ca` runtime + chat-hook wiring, `90d96c6` wiring fix round 1
+  (continuation flag outlives its window, zero-delivery consume), `67ba7a9` config,
+  command, UI chip.
+
+**Field-test checklist (local chat, on top of the still-open 1.1.176/1.1.177 lists):**
+toggle off → grep the log for `[souls] local` (should be nothing at all) and confirm DM
+replies are unchanged; `/bot soul local status` while typing deliberately boring vs.
+deliberately salient lines, watching the score and the veto reason move; a fired
+reaction end to end with voice, confirmed audible to a second player standing nearby;
+ambient text muted → voice only, ambient voice muted → text only, both muted →
+`vetoed:muted` and no generation at all; answer the bot inside 30 s → exactly one
+continuation, let it lapse → nothing; address a bot explicitly mid-window → window
+closes; pick a fight during the window → `danger` veto; cooldown spacing over a session,
+with banter and local alternating rather than stacking; `/bot soul reset party`
+archiving local records alongside group-chat and banter ones.
+
+**Follow-ups (deferred during this plan, not blocking, not yet fixed):**
+
+- `mentionsBotNotLeading` (salience scorer) uses raw `String.indexOf`, not word-boundary
+  matching — a short bot name ("Al", "Sam") would substring-match inside ordinary words
+  and inflate salience. Contrived for "Jake," real for short names; a 3-line regex fix.
+- `SoulLocalDirector.statusFor` doesn't report enablement itself (spec §8 lists it); the
+  `/bot soul local status` command layer already prints enablement separately ahead of
+  the director's status, so this may already be satisfied in practice — worth a quick
+  look before touching the director.
+- `vetoed:roster-lost` (every roster candidate's `capture` throwing) does not push
+  `nextEligibleAtMs`, so repeated capture failures would retry on every single chat line;
+  banter's equivalent path does push its cooldown. Cheap fix, low blast radius.
+- `GroupScenePlaybackTest.banterCombatAbortOnlyAppliesToBanterScenes` now near-duplicates
+  the newer `ambientCombatAbortAppliesToAmbientKindsOnly` and kept its stale banter-only
+  name after the generalization to `isAmbient()`. Housekeeping only — delete the older
+  test.
+- `SoulLocalMemoryTest`/`SoulGroupPromptAssemblerTest` (task 1, 4 reports)
+  each carry one weak or forward-referencing assertion flagged during review
+  (`seedWithoutOverheardLinesIsUnchanged` only checks the literal string "overheard" is
+  absent, a weak proxy for "seed unchanged"; `SoulLocalMemory`'s class Javadoc
+  forward-referenced the toggle and chat callback this entry now confirms exist).
+  Cosmetic; no functional risk.
+- Two reporting-only inaccuracies caught during review, left uncorrected in the task
+  reports themselves per the ledger's ruling (the code is right, the prose in two task
+  reports undercounted call sites): `statusUnlessAmbient` has 4 call sites, not the 3 one
+  report claimed; `SoulGroupConversationService` also implements `LineCommitter`
+  (a no-op default method there, no functional impact) though one report said nothing
+  else does.
+- Server-thread cost on the chat hot path (earshot distance scan per unaddressed line,
+  one `SoulSnapshotBuilder.capture` per roster bot once the cheap gates pass) is correct
+  and bounded on a typical few-bot roster, but was never measured under field load — watch
+  it during the checklist above, especially with several soul bots near an active chatter.
+
+**Pre-existing bug found during review, NOT introduced by this work — ships in 1.1.177's
+banter feature, flagged here because this is the first time anyone traced it:**
+`SoulPlayerActivity.clear()` has no production call site anywhere in the repo (the sole
+caller in the whole codebase is a test, `SoulBanterDirectorTest`), and `SoulPlayerActivity`
+has no per-player eviction on disconnect either — its `LAST_ACTIONS`/`LAST_CHAT_AT` maps
+are process-wide statics that grow across an entire server session and survive a player
+rejoin, so a stale "broke Stone 5s ago" can resurface for a returning player. This local-
+chat plan added the equivalent disconnect eviction for `SoulLocalMemory` and
+`SoulLocalDirector` (Task 6 amendment D), but `SoulPlayerActivity` itself was out of
+scope. Recommend a small standalone follow-up: call `clear()`/an per-player evict from
+the existing `ServerPlayConnectionEvents.DISCONNECT` handler, same place the new
+`forgetPlayerLocalMemory` call landed.
+
 ## Soul banter: autonomous companion scenes, opt-in, ambient-gated; 1.1.177 (2026-08-26)
 
 Next soul-track item (group chat → BANTER → ambient → consolidation → actions). Spec
