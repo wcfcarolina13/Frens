@@ -1,7 +1,30 @@
 ---
-task: "Soul track: GROUP CHAT SHIPPED in 1.1.176 (2026-08-25) — field-test it. Next queue item after validation: BANTER (system-initiated scenes), spec-gated like group chat was."
+task: "Soul track: GROUP CHAT (1.1.176) and BANTER (1.1.177, default OFF) both shipped — field-test them together. Next queue item after validation: AMBIENT/LOCAL CHAT (bots overhearing unaddressed chat), spec-gated."
 test_command: "./gradlew build -x test"
 ---
+
+## Session Handoff 2026-08-26 — banter shipped (1.1.177)
+
+Banter implemented end-to-end: spec
+(`docs/superpowers/specs/2026-08-26-frens-soul-banter-design.md`), plan
+(`docs/superpowers/plans/2026-08-26-soul-banter.md`), 7 implementation commits, suite
+463 → 488 green. Full reasoning in `changelog.md` (1.1.177 entry). Deterministic
+`SoulBanterDirector` (5 s eval, named-veto chain, two-phase capture+submit) fires
+BANTER-kind scenes through the PARTY machinery; seeds from witnessed events + situation;
+4-line cap; ambient text/voice category masks gate delivery per line (the deliberate
+opposite of the soul-DM exemption); failures silent; default OFF behind
+`soulBanterEnabled` (Banter chip + `/bot soul banter on|off|status` — status prints the
+live veto, the main field-test tool).
+
+**Field-test:** run the 1.1.176 group-chat checklist AND the 1.1.177 banter checklist
+(both in changelog.md). Banter needs the toggle ON + 2 soul-bound bots
+(`/bot soul enable <SecondBot>` reuses Jake's profile) + 4–8 min of calm.
+
+**Next soul-track item after validation: AMBIENT/LOCAL CHAT** — bots overhearing and
+occasionally reacting to unaddressed player chat near them. Spec first. Known tension to
+resolve in the interview: every chat line becomes a potential LLM trigger (cost/noise),
+overlap with banter's quiet-window signal (`SoulPlayerActivity.lastChatAt`), and
+addressing rules (when does an overheard reaction feel natural vs intrusive).
 
 ## Session Handoff 2026-08-25 (later) — group chat shipped (1.1.176)
 

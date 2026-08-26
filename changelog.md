@@ -2,6 +2,59 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Soul banter: autonomous companion scenes, opt-in, ambient-gated; 1.1.177 (2026-08-26)
+
+Next soul-track item (group chat → BANTER → ambient → consolidation → actions). Spec
+`docs/superpowers/specs/2026-08-26-frens-soul-banter-design.md`, plan
+`docs/superpowers/plans/2026-08-26-soul-banter.md`. Interview decisions: opt-in default
+OFF; ~8–15 min cadence; topics = witnessed events + situation; audience = player within
+24 blocks and at ease. Rides the 1.1.176 PARTY machinery end to end — no DM changes,
+scheduler untouched.
+
+- **Director (`SoulBanterDirector`):** deterministic two-phase trigger ticked with the
+  scenes (evaluates every 5 s). Gate chain, cheapest first, each with a named veto:
+  disabled → pipeline → cooldown ([8,15] min post-fire, [4,8] min initial grace, ~2 min
+  retry after danger) → busy (activeGenerations()==0 + no active scene) → muted (both
+  ambient surfaces closed = no generation at all) → player-not-at-ease (alive, awake,
+  hurtTime==0, no attacker) → not-quiet (90 s since last typed line, noted via
+  `SoulRuntime.notePlayerChat` from the chat callback) → roster (group-chat eligibility
+  filter, ≥2 bots within 24 of player) → bots-apart (all within 12 of the nearest). Phase
+  B re-checks, captures fresh grounding per bot (`SoulSnapshotBuilder`), vetoes on
+  hostiles/combat/breaking-free, builds the seed, submits a BANTER-kind turn. Verdicts
+  logged only on change (`[souls] banter outcome=...`).
+- **Seed (`SoulBanterSeed`, pure):** ≤3 events salience-first (dedup by type,
+  DIRECT_CONVERSATION excluded, mild randomness in the 3rd pick) + situation line +
+  player-activity line; ≤400 chars.
+- **Turn shape:** `GroupSceneTurn` gained `SceneKind` (compat ctor keeps PLAYER);
+  banter's HEARD record is `"[banter] <seed>"` — the assembler skips those on history
+  replay (a stale seed must never replay as a player utterance) while banter SPOKEN
+  lines replay normally, so banter and group chat remember each other. Prompt ends in a
+  bracketed narrator directive, never a fake player line; scene cap 4 lines (validator
+  parse now takes the cap).
+- **Delivery gating (the D6 carve-out):** BANTER scenes respect the ambient text/voice
+  category masks, re-read per line — text via `TextLineVisibilityService`, voice via the
+  ambient voice mask on top of the Voice master; voice-muted lines skip the TTS render
+  entirely; both-muted lines skip without committing. PLAYER scenes keep the soul
+  exemption byte-identically. Combat involving audience or speaker aborts the remaining
+  banter lines (stale-facts rule).
+- **Silent failures:** banter never sends status lines — busy/timeout/malformed are
+  log-only. Player scenes still nag as before.
+- **Config/UI/commands:** `soulBanterEnabled` (default false) + "Banter" chip (index 8,
+  all three GLOBAL_TOGGLES sites moved together; no pipeline reload needed — live
+  supplier) + `/bot soul banter on|off` (operator) and `status` (prints the live veto +
+  cooldown — the "why is no one talking?" tool). Player-initiated scenes re-arm the
+  banter cooldown via `submitGroupTurn`.
+- Suite 463 → 488, all green. Commits: SceneKind+cap, seed builder, assembler mode,
+  service banter turns, playback gating+combat abort, director+quiet signal, wiring.
+
+**Field-test checklist (banter, on top of the still-open 1.1.176 group-chat list):**
+enable the chip (or `/bot soul banter on`), stand near 2 soul-bound bots, wait out the
+4–8 min grace with chat quiet; `status` while waiting to watch the veto change;
+ambient-mute matrix (text muted → voice-only banter, voice muted → text-only + no synth
+in the log, both → `vetoed:muted`, zero generations); pick a fight mid-scene →
+`banter-combat-abort`; cooldown spacing over a session; a "bots, ..." scene resets the
+banter timer; `/bot soul reset party` mid-banter; toggle off → director goes fully dark.
+
 ## Soul group chat (PARTY channel): "bots, ..." scenes with multi-voice paced playback; 1.1.176 (2026-08-25)
 
 Next soul-track item from the roadmap (group chat → banter → ambient → consolidation →
