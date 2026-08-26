@@ -39,8 +39,8 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
   into the ring is gated ONLY by `soulLocalChatEnabled` and the hard rejects (blank,
   <3 words, <~12 chars, a repeat of the player's last line, sender is a bot) — never by
   cooldown, busy, muted, or roster. The expensive half — `SoulSnapshotBuilder.capture`,
-  one per roster candidate, feeding both the salience score and the scene grounding —
-  sits behind the full cheap-gate chain (`pipeline` → `cooldown` → `busy` → `muted` →
+  at most one per evaluation (see the two-phase selection below), feeding both the
+  salience score and the scene grounding — sits behind the full cheap-gate chain (`pipeline` → `cooldown` → `busy` → `muted` →
   `player-not-at-ease` → `roster` → `salience` → `danger`). Fix round 1 on
   `SoulLocalDirector` got this backwards: it restructured the method into two `firstVeto`
   calls to stop the capture sweep from running before the cheap gates (correct), but
@@ -60,9 +60,12 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
   to `GroupScenePlayback.LineCommitter` (default body, so the interface change is source-
   and binary-compatible with its one production implementer), called from
   `GroupScenePlayback.finish()` — the single terminal point for both FINISH and ABORT —
-  right after `sceneFinished`. `SoulRuntime`'s anonymous committer forwards LOCAL scenes
-  with `deliveredLines > 0` to `SoulLocalDirector.noteSceneDelivered`, which is the only
-  thing that ever calls `openReplyWindow`.
+  right after `sceneFinished`. `SoulRuntime`'s anonymous committer forwards
+  **every** LOCAL scene to `SoulLocalDirector.noteSceneDelivered`, zero-delivery finishes
+  included — the `deliveredLines > 0` test lives inside the director, where it gates only
+  the window opening, so a scene that delivered nothing still consumes its pending-
+  continuation flag instead of leaving it to outlive its own scene.
+  `noteSceneDelivered` is the only thing that ever calls `openReplyWindow`.
 - **Exactly one continuation, and it fails closed.** A `ContinuationTracker` records,
   at fire time, whether the fired scene itself was a continuation of an already-open
   window. On delivery, `consumeShouldOpenWindow` removes and returns that flag — `true`
@@ -81,9 +84,15 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
 - **Salience is a pure, additive, per-bot score against constants tuned for field
   testing, not architecture.** Hard rejects (above) run before any bot context is built.
   Then: naming a nearby bot NOT in leading position +3 (a leading name is an address,
-  already routed away, and scores 0 here), stated intent/plan phrasing +2, keyword
-  overlap with the bot's active task or last journal event +2, ending in a question mark
-  +2, six-plus words +1, mostly digits/coordinates −2. Fires at ≥4. The threshold and
+  already routed away, and scores 0 here — word-boundary matched, so a two-letter bot
+  name like "Al" doesn't score off "also"), stated intent/plan phrasing +2, keyword
+  overlap with the bot's active task +2, ending in a question mark +2, six-plus words +1,
+  mostly digits/coordinates −2. Fires at ≥4. **Journal-event overlap is not a signal**,
+  despite an earlier draft of this entry and of the spec's weight table saying it was:
+  `SoulLocalSalience.score` takes a `recentEventSubject` parameter but the director has
+  always passed it empty, and the final review ruled it stays that way — the subject's
+  only source is an asynchronous journal read, which has no business on the chat hot
+  path. The parameter is kept as the seam a future tuning pass would fill. The threshold and
   every weight live as constants in one place (`SoulLocalSalience`) — this is the
   designated field-tuning surface once real logs exist, not something that should need a
   code review to adjust. Scoring is per-bot so the highest-scoring eligible bot in
@@ -91,6 +100,26 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
   window's continuation bypass is keyed to that exact bot too — a fix round caught the
   original implementation OR-ing `windowOpen` into every candidate's eligibility, which
   let a different bot than the one who opened the window ride its bypass.
+- **Selection is two-phase, and captures at most ONE bot per evaluation (final fix
+  wave).** Scoring per-bot originally meant *capturing* per-bot: a raycast, a
+  `BlockPos.iterate` sweep and three `getEntitiesByClass` scans for every eligible bot in
+  earshot, on the server thread, just to learn each one's `activeTask` — and because a
+  `salience` veto deliberately never pushes the cooldown out, it recurred on every single
+  typed line, indefinitely. A player standing near four bots paid four full captures per
+  line for as long as they kept talking, on a machine that runs a local LLM alongside the
+  game. Now phase 1 scores every eligible bot from the line alone (no capture) and picks
+  one candidate — highest score, ties by proximity — and phase 2 captures only that bot,
+  then applies the salience threshold and the danger veto to it. Nothing about which
+  gates apply changed; `firstVeto`'s signature, ordering, and reason strings are
+  untouched. `activeTask` overlap consequently only scores for the single captured
+  candidate. The same wave fixed the other half of the window-identity bug above: the
+  window's bot is now chosen as the candidate *unconditionally*, because a continuation
+  bypasses the salience threshold and therefore scores 0, so on score alone any sibling
+  in earshot that reached the threshold displaced it, `bestIsContinuation` went false,
+  the cooldown gate was re-applied, and the player's follow-up died as `vetoed:cooldown`
+  — the window defeated by a bystander. Both rules are unit-testable now: candidate
+  choice was extracted as a pure `chooseCandidate(List<ScoredBot>, UUID)`, for the same
+  reason `ContinuationTracker` was extracted (no `MinecraftServer` in this harness).
 - **Grounding is the seam that kept the DM pipeline untouched.**
   `SoulTypes.GroundingSnapshot` gained a 6th component, `overheard` (compatibility
   constructors preserve every existing call site), populated by
@@ -135,11 +164,14 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
   reaction re-arms banter's cooldown and vice versa (`notePlayerScene` on both
   directors), so the two ambient surfaces take turns instead of stacking; both submit
   under the same `partyKey(ownerId)` single-flight, so they cannot overlap regardless.
-- Suite 488 → 525, all green (baseline for this branch was 488 at the 1.1.177 tag; the
+- Suite 488 → 531, all green (baseline for this branch was 488 at the 1.1.177 tag; the
   branch's own running counts moved 507 → 511 → 516 → 523 → 524 → 525 across the ten
   commits below, tracked commit-by-commit in `.superpowers/sdd/2026-08-26-soul-local-chat/progress.md`).
+  the final review's fix wave then took it to 531 (six candidate-selection tests, one
+  short-bot-name salience test, one stale banter-named duplicate in
+  `GroupScenePlaybackTest` deleted).
   Final verification for this entry (`./gradlew build -x test && ./gradlew test`):
-  **BUILD SUCCESSFUL, 525 tests, 0 failures, 0 errors, 0 skipped.**
+  **BUILD SUCCESSFUL, 531 tests, 0 failures, 0 errors, 0 skipped.**
   Commits (oldest first): `edf0910` SoulLocalMemory ring, `fbd80d4` SoulLocalSalience
   scorer, `7a56ea9` SceneKind.LOCAL + ambient generalization, `ec9e9d8` grounding seam
   (overheard on GroundingSnapshot, DM + banter-seed consumers), `47aa151`
@@ -148,7 +180,9 @@ still consumes nothing itself — routing to bots proceeds exactly as before.
   `279dfd2` director fix round 2 (recording gated only by enablement, not the reaction
   cooldown), `8a810ca` runtime + chat-hook wiring, `90d96c6` wiring fix round 1
   (continuation flag outlives its window, zero-delivery consume), `67ba7a9` config,
-  command, UI chip.
+  command, UI chip, plus the final whole-branch review's fix wave (single-capture
+  two-phase selection, unconditional window-bot candidacy, word-boundary bot-name
+  matching, and the doc corrections above).
 
 **Field-test checklist (local chat, on top of the still-open 1.1.176/1.1.177 lists):**
 toggle off → grep the log for `[souls] local` (should be nothing at all) and confirm DM

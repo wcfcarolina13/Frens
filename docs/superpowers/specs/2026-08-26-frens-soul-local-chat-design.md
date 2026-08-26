@@ -72,14 +72,21 @@ Then an additive score against the candidate bot:
 |---|---|
 | Names a nearby soul bot **not** in leading position (a leading name is an address and was already routed away) | +3 |
 | Stated intent or plan (`I'm going to`, `let's`, `we should`, `I need to`) | +2 |
-| Keyword overlap with that bot's active task name or most recent journal event | +2 |
+| Keyword overlap with that bot's active task name | +2 |
 | Ends in a question mark (an open question to the room) | +2 |
 | Six or more words | +1 |
 | Mostly digits/coordinates | −2 |
 
 Fires only at **≥ 4**. The threshold and every weight are constants in one place, tunable from field-test logs without touching logic.
 
-Scoring is deliberately per-bot, so the reacting bot is the highest-scoring eligible bot in earshot, ties broken by proximity — the companion the line was most *about* answers, not merely the closest one.
+**Journal-event overlap is deliberately not a v1 signal.** The weight table above once read "active task *or most recent journal event*", and `SoulLocalSalience.score` still takes a `recentEventSubject` parameter — but the director has always passed it empty and continues to. The subject's only source is an asynchronous journal read, and this scorer runs on the server thread for every unaddressed line typed near a bot; putting an async read (or a cache fed by one) on that path is exactly the cost the two-phase selection below exists to remove. The parameter stays as the seam a future implementation would fill — a tuning lever, not a shipped signal.
+
+**Selection is two-phase, and captures at most one bot per evaluation.**
+
+- *Phase 1 (no capture).* Every eligible bot in earshot is scored on the line alone — `activeTask` and `recentEventSubject` both empty. The highest score wins, ties broken by proximity, so the companion the line was most *about* answers rather than merely the closest one. **If a reply window is open, its bot is the candidate unconditionally and does not compete on score** (see §7 — a continuation bypasses the threshold and therefore usually scores 0, so on score alone any sibling at threshold would displace it and the cooldown gate would kill the player's follow-up).
+- *Phase 2.* Only that one candidate is captured, and only then does its `activeTask` enter the score, followed by the salience threshold and the danger veto.
+
+The earlier shape captured every roster candidate just to score it, which made a chatty player standing near four bots pay four raycast/entity sweeps per typed line, on the server thread, for as long as they kept talking — a `salience` veto never pushes the cooldown out, so it recurred on every line indefinitely. Active-task overlap consequently applies only to the single captured candidate; the other bots are ranked without it.
 
 ### 5.2 Veto chain
 
@@ -133,6 +140,11 @@ On a delivered reaction the director opens a **30 s reply window** keyed by (pla
 The window closes on the first of: elapse; one continuation used; the player explicitly addressing any bot — the addressed and unaddressed branches diverge before the local hook, so the chat callback notifies the director on **both**: an addressed line closes open windows and records nothing, an unaddressed line records and evaluates; the player leaving earshot or changing world; a new reaction firing.
 
 A bot that comments on your plans and then goes deaf when you answer is the intrusive failure mode this exists to prevent.
+
+**Two in-bounds interactions worth writing down**, both real and both previously undocumented:
+
+- **A fired banter scene closes an open LOCAL reply window.** Not by a dedicated call — it falls out of the mutual cooldown re-arm in §5.3: banter firing invokes the local director's `notePlayerScene`, which re-arms the cooldown, drops the window, and clears the pending-continuation flag. Correct by design (the two ambient surfaces take turns), but it means a player's follow-up can lose its bypass to a banter scene that fired in between.
+- **An overheard line can reach disk by two routes.** A `LOCAL` scene commits its own unmarked, speaker-tagged HEARD record (§6). Independently of whether any reaction ever fires, the newest line in the in-memory ring can also be rendered into a `SoulBanterSeed` as a truncated `<player> was saying: …` fragment, and that seed is persisted as the banter turn's own HEARD record — carrying `BANTER_HEARD_PREFIX`, so it replays as a narrator directive rather than as something the player said. Both are the ordinary party transcript; there is no third, hidden sink. Worth knowing when reading a transcript: an overheard line may appear there even though local *reactions* never fired.
 
 ## 8. Config, commands, UI, telemetry
 

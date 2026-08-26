@@ -133,6 +133,77 @@ class SoulLocalDirectorTest {
                 "the in-flight scene's later delivery must not open a window after an explicit address");
     }
 
+    // === Candidate selection (fix wave FIX 1 + FIX 2): one capture per evaluation, and an open
+    // reply window's bot is the candidate outright rather than competing on score. Extracted as a
+    // pure helper for the same reason ContinuationTracker was -- MinecraftServer cannot be
+    // constructed or mocked in this harness, so noteUnaddressedChat itself is not unit-reachable. ===
+
+    @Test
+    void highestScoringBotIsTheCandidateWithNoWindowOpen() {
+        UUID nearest = UUID.randomUUID();
+        UUID farther = UUID.randomUUID();
+        List<SoulLocalDirector.ScoredBot> scored = List.of(
+                new SoulLocalDirector.ScoredBot(nearest, 1),
+                new SoulLocalDirector.ScoredBot(farther, 5));
+
+        assertEquals(1, SoulLocalDirector.chooseCandidate(scored, null));
+    }
+
+    @Test
+    void tiesAreBrokenByProximity() {
+        // The list arrives nearest-first, so an equal score must not displace the nearer bot.
+        List<SoulLocalDirector.ScoredBot> scored = List.of(
+                new SoulLocalDirector.ScoredBot(UUID.randomUUID(), 4),
+                new SoulLocalDirector.ScoredBot(UUID.randomUUID(), 4));
+
+        assertEquals(0, SoulLocalDirector.chooseCandidate(scored, null));
+    }
+
+    @Test
+    void emptyRosterHasNoCandidate() {
+        assertEquals(-1, SoulLocalDirector.chooseCandidate(List.of(), UUID.randomUUID()));
+    }
+
+    @Test
+    void openWindowsBotWinsEvenWhenASiblingOutscoresIt() {
+        // Regression for the fix wave, FIX 1: a continuation bypasses the salience threshold and
+        // therefore scores 0. On score alone a sibling at or above the threshold would displace
+        // it, bestIsContinuation would go false, the cooldown gate would be re-applied, and the
+        // player's follow-up would die as vetoed:cooldown -- defeating the reply window (spec §7).
+        UUID windowBot = UUID.randomUUID();
+        UUID loudSibling = UUID.randomUUID();
+        List<SoulLocalDirector.ScoredBot> scored = List.of(
+                new SoulLocalDirector.ScoredBot(loudSibling, 6),
+                new SoulLocalDirector.ScoredBot(windowBot, 0));
+
+        assertEquals(1, SoulLocalDirector.chooseCandidate(scored, windowBot),
+                "the window's bot must be chosen unconditionally, not on score");
+    }
+
+    @Test
+    void openWindowsBotWinsRegardlessOfItsPositionInTheRoster() {
+        // Same rule with the window's bot listed first: a later, higher-scoring bot must not
+        // take the candidacy back.
+        UUID windowBot = UUID.randomUUID();
+        List<SoulLocalDirector.ScoredBot> scored = List.of(
+                new SoulLocalDirector.ScoredBot(windowBot, 0),
+                new SoulLocalDirector.ScoredBot(UUID.randomUUID(), 9));
+
+        assertEquals(0, SoulLocalDirector.chooseCandidate(scored, windowBot));
+    }
+
+    @Test
+    void aWindowBotNoLongerInTheRosterDoesNotSuppressOrdinaryScoring() {
+        // The window's bot walked off / lost eligibility: the remaining bots are picked on score
+        // as usual (and the cooldown gate still applies to them, as it does today).
+        UUID absentWindowBot = UUID.randomUUID();
+        List<SoulLocalDirector.ScoredBot> scored = List.of(
+                new SoulLocalDirector.ScoredBot(UUID.randomUUID(), 2),
+                new SoulLocalDirector.ScoredBot(UUID.randomUUID(), 7));
+
+        assertEquals(1, SoulLocalDirector.chooseCandidate(scored, absentWindowBot));
+    }
+
     private static SoulTypes.SituationSnapshot withHostiles() {
         return new SoulTypes.SituationSnapshot(-1,
                 List.of(new SoulTypes.HostileSighting("creeper", "north", 8)),

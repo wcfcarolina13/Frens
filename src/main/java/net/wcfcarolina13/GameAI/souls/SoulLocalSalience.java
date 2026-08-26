@@ -2,6 +2,8 @@ package net.wcfcarolina13.GameAI.souls;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Deterministic "is this overheard line worth answering" rule (local-chat spec §5.1). Pure — no
@@ -57,7 +59,10 @@ final class SoulLocalSalience {
      *
      * @param botName the candidate bot's display name
      * @param activeTask that bot's current task ("skill:fishing", or "" when idle)
-     * @param recentEventSubject a one-word subject from its newest journal event ("creeper"), or ""
+     * @param recentEventSubject a one-word subject from its newest journal event ("creeper"), or
+     *     "" — <b>always</b> "" today: the director passes it empty because its only source is an
+     *     asynchronous journal read, which does not belong on the chat hot path (spec §5.1). Kept
+     *     as the seam a future implementation would fill.
      */
     static int score(String line, String botName, String activeTask, String recentEventSubject) {
         if (line == null || line.isBlank()) {
@@ -92,17 +97,24 @@ final class SoulLocalSalience {
     }
 
     /**
-     * True when the bot's name appears somewhere other than the first word. A leading name is an
-     * address ("Jake, come here") which the DM router already consumed, so it must score zero
-     * here — otherwise every address would double as an overheard mention.
+     * True when the bot's name appears as a whole word somewhere other than the start of the
+     * line. A leading name is an address ("Jake, come here") which the DM router already
+     * consumed, so it must score zero here — otherwise every address would double as an
+     * overheard mention.
+     *
+     * <p>Word-boundary matched, not substring matched: a short name ("Al", "Sam") otherwise
+     * matches inside ordinary words ("also", "same") and adds +3, which together with the
+     * six-word +1 reaches the threshold of 4 on a line that mentions nobody.
      */
     private static boolean mentionsBotNotLeading(String lowerLine, String botName) {
         if (botName == null || botName.isBlank()) {
             return false;
         }
         String needle = botName.trim().toLowerCase(Locale.ROOT);
-        int at = lowerLine.indexOf(needle);
-        return at > 0;
+        Matcher matcher = Pattern.compile("\\b" + Pattern.quote(needle) + "\\b",
+                Pattern.CASE_INSENSITIVE).matcher(lowerLine);
+        // Only the FIRST occurrence decides, matching the previous indexOf semantics.
+        return matcher.find() && matcher.start() > 0;
     }
 
     /** Overlap on the meaningful tail of a task id ("skill:fishing" -> "fishing"). */

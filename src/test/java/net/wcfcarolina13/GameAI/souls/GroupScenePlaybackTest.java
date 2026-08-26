@@ -97,14 +97,6 @@ class GroupScenePlaybackTest {
     }
 
     @Test
-    void banterCombatAbortOnlyAppliesToBanterScenes() {
-        assertTrue(GroupScenePlayback.ambientCombatAbort(true, true, false));
-        assertTrue(GroupScenePlayback.ambientCombatAbort(true, false, true));
-        assertEquals(false, GroupScenePlayback.ambientCombatAbort(true, false, false));
-        assertEquals(false, GroupScenePlayback.ambientCombatAbort(false, true, true));
-    }
-
-    @Test
     void localLinesRespectAmbientMasksJustLikeBanter() {
         // Text open, voice closed -> text only.
         GroupScenePlayback.LineSurfaces textOnly =

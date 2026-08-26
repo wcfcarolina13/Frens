@@ -144,9 +144,16 @@ public final class SoulLocalDirector {
      * entity/POI scans — ever run, and only then re-checks with the real roster size and
      * salience.
      *
+     * <p>The reacting half itself is two-phase, and captures <b>at most one bot per evaluation</b>:
+     * phase 1 scores every eligible roster bot from the line alone (no capture) and
+     * {@link #chooseCandidate} picks one; phase 2 captures only that bot and applies the salience
+     * threshold and the danger veto to it. Capturing every candidate — as this once did — made a
+     * chatty player standing near four bots pay four raycast/entity sweeps per typed line, on the
+     * server thread, indefinitely.
+     *
      * <p>The reply window's bot identity gates the continuation bypass: a window only waives
-     * cooldown/salience for the specific bot that opened it, never for whichever bot happens to
-     * win the scoring race.
+     * cooldown/salience for the specific bot that opened it, and that bot is the candidate
+     * outright — it never has to out-score a sibling to keep its own window.
      */
     public void noteUnaddressedChat(ServerPlayerEntity player, String line) {
         if (player == null || !localChatEnabled.getAsBoolean()) {
@@ -197,47 +204,49 @@ public final class SoulLocalDirector {
         List<ServerPlayerEntity> rosterBots = eligibleRosterBots(player, near);
 
         UUID windowBotId = windowOpen ? window.botId() : null;
-        int topScore = -1;
-        int captureSuccessCount = 0;
-        int bestScore = -1;
-        ServerPlayerEntity bestBot = null;
-        SoulTypes.GroundingSnapshot bestSnapshot = null;
-        boolean bestIsContinuation = false;
-        for (ServerPlayerEntity bot : rosterBots) {
-            SoulTypes.GroundingSnapshot snapshot;
-            try {
-                snapshot = SoulSnapshotBuilder.capture(server, bot, player, SoulTypes.Reachability.LOCAL);
-            } catch (RuntimeException captureFailure) {
-                LOGGER.warn("[souls] local capture failed for bot {}: {}", bot.getUuid(),
-                        captureFailure.toString());
-                continue;
-            }
-            captureSuccessCount++;
-            String activeTask = snapshot.bot().activeTask();
-            int score = SoulLocalSalience.score(line, bot.getName().getString(), activeTask, "");
-            topScore = Math.max(topScore, score);
-            // The continuation bypass belongs to the bot that opened the window — never to
-            // whichever bot merely wins the scoring race.
-            boolean isContinuation = windowBotId != null && windowBotId.equals(bot.getUuid());
-            boolean eligible = score >= SoulLocalSalience.THRESHOLD || isContinuation;
-            if (eligible && score > bestScore) {
-                bestScore = score;
-                bestBot = bot;
-                bestSnapshot = snapshot;
-                bestIsContinuation = isContinuation;
-            }
-        }
 
-        if (!rosterBots.isEmpty() && captureSuccessCount == 0) {
-            // Every capture in a non-empty roster failed — nothing left to ground on. Distinct
-            // from a normal salience miss, so report it as its own reason.
-            recordVerdict(playerId, "vetoed:roster-lost");
-            lastScore.put(playerId, 0);
-            return;
+        // Phase 1 — cheap, no capture: score every eligible roster bot on the line alone and
+        // pick exactly ONE candidate. activeTask overlap is deliberately absent here; it is a
+        // per-bot fact that only a capture can supply, and capturing every candidate just to
+        // score it is the server-thread cost this phase exists to remove (fix wave FIX 2).
+        List<ScoredBot> scored = new ArrayList<>(rosterBots.size());
+        int topScore = -1;
+        for (ServerPlayerEntity bot : rosterBots) {
+            int score = SoulLocalSalience.score(line, bot.getName().getString(), "", "");
+            scored.add(new ScoredBot(bot.getUuid(), score));
+            topScore = Math.max(topScore, score);
         }
+        int candidateIndex = chooseCandidate(scored, windowBotId);
+        ServerPlayerEntity candidateBot = candidateIndex < 0 ? null : rosterBots.get(candidateIndex);
+        boolean bestIsContinuation = candidateBot != null && windowBotId != null
+                && windowBotId.equals(candidateBot.getUuid());
+
+        // Phase 2 — the single capture, and only then the salience threshold and danger veto.
+        SoulTypes.GroundingSnapshot bestSnapshot = null;
+        int bestScore = -1;
+        if (candidateBot != null) {
+            try {
+                bestSnapshot = SoulSnapshotBuilder.capture(server, candidateBot, player,
+                        SoulTypes.Reachability.LOCAL);
+            } catch (RuntimeException captureFailure) {
+                LOGGER.warn("[souls] local capture failed for bot {}: {}", candidateBot.getUuid(),
+                        captureFailure.toString());
+                // The one candidate lost its grounding — nothing left to ground on. Distinct
+                // from a normal salience miss, so report it as its own reason.
+                recordVerdict(playerId, "vetoed:roster-lost");
+                lastScore.put(playerId, 0);
+                return;
+            }
+            // Re-score with the captured bot's active task, the one signal phase 1 could not see.
+            bestScore = SoulLocalSalience.score(line, candidateBot.getName().getString(),
+                    bestSnapshot.bot().activeTask(), "");
+            topScore = Math.max(topScore, bestScore);
+        }
+        boolean salient = candidateBot != null
+                && (bestScore >= SoulLocalSalience.THRESHOLD || bestIsContinuation);
 
         String veto = firstVeto(true, pipelineAvailable, now >= nextAt || bestIsContinuation,
-                budgetFree, surfaceOpen, atEase, rosterBots.size(), bestBot != null);
+                budgetFree, surfaceOpen, atEase, rosterBots.size(), salient);
         if (veto != null) {
             recordVerdict(playerId, "vetoed:" + veto);
             lastScore.put(playerId, Math.max(topScore, 0));
@@ -253,10 +262,10 @@ public final class SoulLocalDirector {
             return;
         }
 
-        String profileId = runtime.cachedState(bestBot.getUuid())
+        String profileId = runtime.cachedState(candidateBot.getUuid())
                 .map(SoulTypes.SoulState::profileId).orElse("");
         SoulGroupTypes.SceneParticipant participant = new SoulGroupTypes.SceneParticipant(
-                bestBot.getUuid(), profileId, bestBot.getName().getString(), bestSnapshot);
+                candidateBot.getUuid(), profileId, candidateBot.getName().getString(), bestSnapshot);
         UUID routingId = UUID.randomUUID();
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 SoulGroupTypes.SceneKind.LOCAL, playerId, player.getName().getString(),
@@ -273,7 +282,7 @@ public final class SoulLocalDirector {
         recordVerdict(playerId, "fired");
         lastScore.put(playerId, bestScore);
         LOGGER.info("[souls] local player={} bot={} outcome=fired routingId={} score={}",
-                playerId, bestBot.getUuid(), routingId, bestScore);
+                playerId, candidateBot.getUuid(), routingId, bestScore);
         runtime.submitGroupTurn(turn);
     }
 
@@ -454,6 +463,35 @@ public final class SoulLocalDirector {
 
     static long nextDelayMs(RandomGenerator random) {
         return 6 * 60_000L + (long) (random.nextDouble() * 6 * 60_000L);
+    }
+
+    /** One eligible roster bot with its phase-1 (capture-free) salience score. */
+    record ScoredBot(UUID botId, int score) {
+    }
+
+    /**
+     * Index of the bot that will be captured and, if the gates allow, react — chosen from
+     * {@code scored} in proximity order (nearest first), or {@code -1} for an empty roster.
+     *
+     * <p>When a reply window is open, its bot is the candidate <em>unconditionally</em>: a
+     * continuation bypasses the salience threshold and therefore usually scores 0, so on score
+     * alone any sibling in earshot that happened to reach the threshold would displace it, the
+     * cooldown gate would be re-applied, and the player's follow-up would die as
+     * {@code vetoed:cooldown} — defeating the window (spec §7, fix wave FIX 1). Otherwise the
+     * highest score wins, ties broken by proximity because the list is nearest-first.
+     */
+    static int chooseCandidate(List<ScoredBot> scored, UUID windowBotId) {
+        int best = -1;
+        for (int i = 0; i < scored.size(); i++) {
+            ScoredBot bot = scored.get(i);
+            if (windowBotId != null && windowBotId.equals(bot.botId())) {
+                return i;
+            }
+            if (best < 0 || bot.score() > scored.get(best).score()) {
+                best = i;
+            }
+        }
+        return best;
     }
 
     /** First failed gate's name in spec §5.2 order, or {@code null} when eligible. */

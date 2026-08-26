@@ -33,6 +33,25 @@ class SoulLocalSalienceTest {
     }
 
     @Test
+    void shortBotNamesDoNotMatchInsideOrdinaryWords() {
+        // Regression for the fix wave, FIX 5: raw substring matching found "al" inside "also"
+        // and added +3, which together with the six-word +1 (and the "we should" intent +2)
+        // pushed a line that mentions nobody past the threshold of 4.
+        assertEquals(3, SoulLocalSalience.score("we should also head back soon", "Al", "", ""),
+                "intent (+2) and length (+1) only -- 'also' is not a mention of Al");
+        assertTrue(SoulLocalSalience.score("we should also head back soon", "Al", "", "")
+                < SoulLocalSalience.THRESHOLD);
+        assertEquals(0, SoulLocalSalience.score("that is the same one", "Sam", "", ""),
+                "'same' is not a mention of Sam");
+
+        // A genuine mid-sentence mention of the same short name still scores.
+        assertEquals(4, SoulLocalSalience.score("i think that was Al being careless", "Al", "", ""),
+                "mention (+3) + seven words (+1)");
+        // ...and a leading address still scores zero, word boundary or not.
+        assertEquals(0, SoulLocalSalience.score("Al go mine some iron", "Al", "", ""));
+    }
+
+    @Test
     void statedIntentScoresOnItsOwn() {
         assertEquals(2, SoulLocalSalience.score("we should rest", "Jake", "", ""));
         assertEquals(0, SoulLocalSalience.score("anyone got flint", "Jake", "", ""),

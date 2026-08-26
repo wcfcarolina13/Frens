@@ -51,10 +51,14 @@ public final class GroupScenePlayback {
         void sceneFinished(SoulTypes.TurnToken token, int deliveredLines, int totalLines);
 
         /**
-         * Fires once per scene, alongside {@link #sceneFinished}, when at least one line was
-         * actually delivered (local-chat spec §7, amendment C). Default no-op so the single
-         * existing implementation ({@code SoulRuntime.start}'s anonymous {@code LineCommitter})
-         * keeps compiling unchanged unless it opts in.
+         * Fires exactly once per scene, unconditionally, alongside {@link #sceneFinished} at the
+         * single finish site — including a scene that delivered nothing at all (local-chat spec
+         * §7, amendment C). {@code deliveredLines} carries the count, and the decision that
+         * belongs to it lives in the consumer: {@code SoulLocalDirector} must consume its
+         * pending-continuation flag even on a zero-delivery finish, so the flag never outlives
+         * its own scene, while only a {@code deliveredLines > 0} finish opens a reply window.
+         * Default no-op so the single existing implementation ({@code SoulRuntime.start}'s
+         * anonymous {@code LineCommitter}) keeps compiling unchanged unless it opts in.
          */
         default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
         }
