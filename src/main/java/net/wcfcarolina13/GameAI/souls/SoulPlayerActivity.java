@@ -25,6 +25,18 @@ final class SoulPlayerActivity {
     }
 
     private static final Map<UUID, LastAction> LAST_ACTIONS = new ConcurrentHashMap<>();
+    /** Last public-chat line per player — the banter director's quiet-window signal. */
+    private static final Map<UUID, Long> LAST_CHAT_AT = new ConcurrentHashMap<>();
+
+    static void noteChat(UUID playerId, long atEpochMs) {
+        LAST_CHAT_AT.put(playerId, atEpochMs);
+    }
+
+    /** @return epoch ms of the player's last public chat line, or 0 when unknown. */
+    static long lastChatAt(UUID playerId) {
+        Long at = LAST_CHAT_AT.get(playerId);
+        return at == null ? 0L : at;
+    }
 
     static void noteBlockBreak(UUID playerId, String blockName, long atEpochMs) {
         LAST_ACTIONS.put(playerId, new LastAction("broke " + blockName, atEpochMs));
@@ -57,5 +69,6 @@ final class SoulPlayerActivity {
 
     static void clear() {
         LAST_ACTIONS.clear();
+        LAST_CHAT_AT.clear();
     }
 }

@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -403,6 +404,24 @@ public final class SoulRuntime {
             return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
         }
         return groupService.submit(turn);
+    }
+
+    /**
+     * Banter-director budget probe: true only when no soul generation or TTS render is active
+     * anywhere AND no scene is playing for {@code ownerId} — an autonomous scene never queues
+     * behind anything (banter spec §3 item 3).
+     */
+    boolean isSceneBudgetFree(UUID ownerId) {
+        if (activeGenerations() > 0) {
+            return false;
+        }
+        GroupScenePlayback playback = scenePlayback;
+        return playback == null || !playback.hasActiveScene(ownerId);
+    }
+
+    /** Banter seed input: a bot's recent witnessed events from the DM store's per-bot journal. */
+    CompletableFuture<List<SoulTypes.SoulEvent>> recentEventsForBanter(UUID botId, int maxRecords) {
+        return store.recentEvents(botId, maxRecords);
     }
 
     /**
