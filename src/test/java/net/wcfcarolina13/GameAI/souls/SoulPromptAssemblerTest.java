@@ -715,4 +715,57 @@ class SoulPromptAssemblerTest {
 
         assertTrue(presentMoment.contains("the player is looking at Brown Carpet"), presentMoment);
     }
+
+    private static SoulTypes.GroundingSnapshot groundingWithOverheard(List<String> overheard) {
+        SoulTypes.BotSnapshot localBot = new SoulTypes.BotSnapshot(
+                UUID.fromString("11111111-1111-1111-1111-111111111111"), "Jake",
+                "minecraft:overworld", "plains", 0, 64, 0, true,
+                "day", "clear", 20.0F, 20.0F, 18, 4, "iron_pickaxe",
+                8, 36, List.of("oak_log x32"), "content", "idle", "", "IDLE",
+                "Workshop", "Player", true, 2, false, Optional.empty());
+        SoulTypes.PlayerSnapshot player = new SoulTypes.PlayerSnapshot(
+                UUID.fromString("22222222-2222-2222-2222-222222222222"), "Player",
+                6, "north", 20.0F, 20.0F, 20, "playerBiomeSecret", false);
+        return new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, localBot,
+                Optional.of(player), SoulTypes.SituationSnapshot.empty(), Instant.EPOCH, overheard);
+    }
+
+    @Test
+    void recentlyOverheardBlockRendersOnlyWhenPresent() {
+        SoulTypes.GroundingSnapshot without = groundingWithOverheard(List.of());
+        SoulTypes.ProviderRequest bare = assembler.assemble(
+                UUID.randomUUID(), "model", profile, without, List.of(), List.of(), List.of(),
+                "hello", Duration.ofSeconds(30));
+        assertTrue(bare.messages().stream().noneMatch(m -> m.content().contains("RECENTLY OVERHEARD")),
+                "an empty list must add no block at all — DM prompts stay byte-identical");
+
+        SoulTypes.GroundingSnapshot with = groundingWithOverheard(
+                List.of("heading to the ravine", "bring a bucket"));
+        SoulTypes.ProviderRequest grounded = assembler.assemble(
+                UUID.randomUUID(), "model", profile, with, List.of(), List.of(), List.of(),
+                "hello", Duration.ofSeconds(30));
+        String block = grounded.messages().stream()
+                .map(SoulTypes.Message::content)
+                .filter(c -> c.contains("RECENTLY OVERHEARD"))
+                .findFirst().orElse("");
+        assertTrue(block.contains("heading to the ravine"));
+        assertTrue(block.contains("bring a bucket"));
+    }
+
+    @Test
+    void overheardBlockIsBounded() {
+        List<String> many = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            many.add("a fairly long overheard line number " + i + " about mining and caves");
+        }
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "model", profile, groundingWithOverheard(many), List.of(),
+                List.of(), List.of(), "hello", Duration.ofSeconds(30));
+        String block = request.messages().stream()
+                .map(SoulTypes.Message::content)
+                .filter(c -> c.contains("RECENTLY OVERHEARD"))
+                .findFirst().orElse("");
+        assertTrue(block.length() <= SoulPromptAssembler.MAX_OVERHEARD_CHARS + 40,
+                "block was " + block.length() + " chars");
+    }
 }

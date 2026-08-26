@@ -790,7 +790,12 @@ public final class SoulSnapshotBuilder {
         Optional<SoulTypes.PlayerSnapshot> playerOpt = reachability == SoulTypes.Reachability.REMOTE
                 ? Optional.empty()
                 : Optional.ofNullable(player);
-        return new SoulTypes.GroundingSnapshot(reachability, bot, playerOpt, situation, capturedAt);
+        List<String> overheard = playerOpt
+                .map(p -> SoulLocalMemory.witnessedBy(bot.botId(), p.playerId(),
+                        System.currentTimeMillis()))
+                .orElse(List.of());
+        return new SoulTypes.GroundingSnapshot(reachability, bot, playerOpt, situation,
+                capturedAt, overheard);
     }
 
     static SoulTypes.GroundingSnapshot assemble(SoulTypes.BotSnapshot bot, SoulTypes.PlayerSnapshot player,

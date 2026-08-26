@@ -34,6 +34,14 @@ class SoulBanterSeedTest {
                 Optional.empty(), Instant.EPOCH);
     }
 
+    private static SoulTypes.GroundingSnapshot groundingWithOverheard(List<String> overheard) {
+        SoulTypes.BotSnapshot bot = new SoulTypes.BotSnapshot(UUID.randomUUID(), "Jake",
+                "overworld", "plains", 0, 64, 0, true, "dusk", "rain", 20f, 20f, 18, 4, "", 4, 36,
+                List.of(), "content", "FOLLOW", "", "", "", "Bradley", true, 0, true, Optional.empty());
+        return new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                Optional.empty(), SoulTypes.SituationSnapshot.empty(), Instant.EPOCH, overheard);
+    }
+
     @Test
     void highSalienceEventsWinOverNewerNormalOnes() {
         List<SoulTypes.SoulEvent> events = List.of(
@@ -110,5 +118,23 @@ class SoulBanterSeedTest {
         String seed = SoulBanterSeed.build(List.of(grounding()), List.of(events),
                 "Bradley", "", new Random(3));
         assertTrue(seed.length() <= SoulBanterSeed.MAX_SEED_CHARS, "len=" + seed.length());
+    }
+
+    @Test
+    void seedPicksUpAnOverheardFragmentFromGrounding() {
+        String seed = SoulBanterSeed.build(
+                List.of(groundingWithOverheard(List.of("we should check the ravine"))),
+                List.of(List.of()), "Bradley", "", new Random(1));
+
+        assertTrue(seed.contains("ravine"), "seed was: " + seed);
+    }
+
+    @Test
+    void seedWithoutOverheardLinesIsUnchanged() {
+        String seed = SoulBanterSeed.build(
+                List.of(groundingWithOverheard(List.of())),
+                List.of(List.of()), "Bradley", "", new Random(1));
+
+        assertFalse(seed.contains("overheard"));
     }
 }

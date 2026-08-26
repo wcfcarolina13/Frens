@@ -470,18 +470,26 @@ public final class SoulTypes {
 
     public record GroundingSnapshot(Reachability reachability, BotSnapshot bot,
                                      Optional<PlayerSnapshot> player, SituationSnapshot situation,
-                                     Instant capturedAt) {
+                                     Instant capturedAt, List<String> overheard) {
         public GroundingSnapshot {
             Objects.requireNonNull(reachability, "reachability");
             Objects.requireNonNull(bot, "bot");
             Objects.requireNonNull(capturedAt, "capturedAt");
             player = player == null ? Optional.empty() : player;
             situation = situation == null ? SituationSnapshot.empty() : situation;
+            overheard = overheard == null ? List.of() : List.copyOf(overheard);
+        }
+
+        /** Pre-overhear shape (local-chat spec §4): no overheard lines. */
+        public GroundingSnapshot(Reachability reachability, BotSnapshot bot,
+                                  Optional<PlayerSnapshot> player, SituationSnapshot situation,
+                                  Instant capturedAt) {
+            this(reachability, bot, player, situation, capturedAt, List.of());
         }
 
         public GroundingSnapshot(Reachability reachability, BotSnapshot bot,
                                   Optional<PlayerSnapshot> player, Instant capturedAt) {
-            this(reachability, bot, player, SituationSnapshot.empty(), capturedAt);
+            this(reachability, bot, player, SituationSnapshot.empty(), capturedAt, List.of());
         }
     }
 

@@ -45,6 +45,13 @@ final class SoulBanterSeed {
         if (playerActivity != null && !playerActivity.isBlank()) {
             parts.add(playerName + " is " + playerActivity);
         }
+        if (!rosterGroundings.isEmpty()) {
+            List<String> overheard = rosterGroundings.get(0).overheard();
+            if (!overheard.isEmpty()) {
+                parts.add(playerName + " was saying: "
+                        + truncatePhrase(overheard.get(overheard.size() - 1)));
+            }
+        }
 
         String seed = String.join("; ", parts);
         return seed.length() <= MAX_SEED_CHARS ? seed : seed.substring(0, MAX_SEED_CHARS);
@@ -109,6 +116,11 @@ final class SoulBanterSeed {
         String factSuffix = event.facts().values().stream().limit(2)
                 .reduce((a, b) -> a + ", " + b).map(s -> " (" + s + ")").orElse("");
         String phrase = base + factSuffix;
+        return phrase.length() <= MAX_PHRASE_CHARS ? phrase : phrase.substring(0, MAX_PHRASE_CHARS);
+    }
+
+    /** Caps a raw overheard line at {@link #MAX_PHRASE_CHARS}, same bound as {@link #phraseFor}. */
+    private static String truncatePhrase(String phrase) {
         return phrase.length() <= MAX_PHRASE_CHARS ? phrase : phrase.substring(0, MAX_PHRASE_CHARS);
     }
 

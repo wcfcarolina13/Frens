@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -48,6 +49,8 @@ public final class SoulPromptAssembler {
     static final int MAX_EVENT_CHARS = 4_000;
     static final int MAX_OUTPUT_TOKENS = 220;
     static final int MAX_SITUATION_CHARS = 800;
+    /** Bound on the RECENTLY OVERHEARD block (local-chat spec §4 consumer 3). */
+    static final int MAX_OVERHEARD_CHARS = 200;
     private static final String SITUATION_HEADER = "SITUATION\n";
 
     public SoulPromptAssembler() {
@@ -88,6 +91,7 @@ public final class SoulPromptAssembler {
             messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
                     "RELEVANT KNOWLEDGE\n" + String.join("\n", relevantKnowledge)));
         }
+        overheardBlock(grounding).ifPresent(messages::add);
         messages.add(presentMoment(grounding));
         messages.add(new SoulTypes.Message(SoulTypes.Role.USER, currentMessage));
 
@@ -516,6 +520,29 @@ public final class SoulPromptAssembler {
         List<Map.Entry<String, String>> entries = new ArrayList<>(facts.entrySet());
         entries.sort(Map.Entry.comparingByKey());
         return entries;
+    }
+
+    // === RECENTLY OVERHEARD block (local-chat spec §4 consumer 3) ===
+
+    /**
+     * Bounded RECENTLY OVERHEARD block: things this player said out loud near this bot that it
+     * was not addressed by. Empty whenever ambient/local chat is off, so DM prompts are then
+     * byte-identical to the pre-feature build.
+     */
+    private Optional<SoulTypes.Message> overheardBlock(SoulTypes.GroundingSnapshot grounding) {
+        if (grounding.overheard().isEmpty()) {
+            return Optional.empty();
+        }
+        StringBuilder sb = new StringBuilder("RECENTLY OVERHEARD\n");
+        sb.append("Things they said out loud nearby, not to you:\n");
+        for (String line : grounding.overheard()) {
+            String candidate = "- " + line + "\n";
+            if (sb.length() + candidate.length() > MAX_OVERHEARD_CHARS) {
+                break;
+            }
+            sb.append(candidate);
+        }
+        return Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()));
     }
 
     // === PRESENT MOMENT marker ===
