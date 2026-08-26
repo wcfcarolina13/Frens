@@ -149,6 +149,43 @@ class SoulGroupPromptAssemblerTest {
                 "cast block length " + cast.length());
     }
 
+    private static SoulGroupTypes.GroupSceneTurn banterTurn(String seed) {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara"))),
+                seed, Instant.EPOCH, UUID.randomUUID());
+    }
+
+    @Test
+    void banterFinalMessageIsANarratorDirectiveNotAPlayerLine() {
+        SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
+                banterTurn("it is dusk, rain; Jake slew a mob"),
+                List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                List.of(), Duration.ofSeconds(60));
+        SoulTypes.Message last = request.messages().get(request.messages().size() - 1);
+        assertEquals(SoulTypes.Role.USER, last.role());
+        assertTrue(last.content().startsWith("[") && last.content().endsWith("]"), last.content());
+        assertTrue(last.content().contains("it is dusk, rain; Jake slew a mob"), last.content());
+        assertTrue(request.messages().stream().noneMatch(m -> m.content().startsWith("Bradley: ")));
+    }
+
+    @Test
+    void banterHeardRecordsAreSkippedInHistoryReplayButSpokenReplay() {
+        List<SoulTypes.ConversationRecord> history = List.of(
+                record(0, SoulTypes.TurnKind.HEARD, SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + "old seed"),
+                record(1, SoulTypes.TurnKind.SPOKEN, "Jake: banter line."),
+                record(2, SoulTypes.TurnKind.HEARD, "Bradley: real question"));
+        SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
+                turn("ok"), List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                history, Duration.ofSeconds(60));
+        assertTrue(request.messages().stream().noneMatch(m -> m.content().contains("old seed")));
+        assertTrue(request.messages().stream().anyMatch(m -> m.content().equals("Jake: banter line.")));
+        assertTrue(request.messages().stream().anyMatch(m -> m.content().equals("Bradley: real question")));
+    }
+
     @Test
     void requestCarriesModelTimeoutTokensAndCorrelation() {
         UUID correlationId = UUID.randomUUID();

@@ -20,6 +20,14 @@ import java.util.UUID;
  */
 public final class SoulGroupPromptAssembler {
 
+    /**
+     * Persistence marker for a banter turn's HEARD record. Single source of truth: the group
+     * service prefixes banter seeds with this when recording HEARD, and {@link #boundedHistory}
+     * skips such records on replay — a stale seed must never re-enter a prompt as if the player
+     * had said it. Banter SPOKEN lines replay normally, so banter and group chat share memory.
+     */
+    public static final String BANTER_HEARD_PREFIX = "[banter] ";
+
     static final int MAX_HISTORY_TURNS = 12;
     static final int MAX_HISTORY_CHARS = 4_000;
     static final int MAX_IDENTITY_CHARS_PER_BOT = 600;
@@ -47,8 +55,15 @@ public final class SoulGroupPromptAssembler {
         messages.add(castBlock(turn, profiles));
         messages.add(stateBlock(turn));
         messages.addAll(boundedHistory(partyHistory));
-        messages.add(new SoulTypes.Message(SoulTypes.Role.USER,
-                turn.ownerDisplayName() + ": " + turn.playerMessage()));
+        if (turn.kind() == SoulGroupTypes.SceneKind.BANTER) {
+            // Narrator directive, never attributed to the player: banter has no player utterance.
+            messages.add(new SoulTypes.Message(SoulTypes.Role.USER,
+                    "[A quiet moment. The companions chat briefly among themselves. Recent happenings: "
+                            + turn.playerMessage() + ". A few short lines only.]"));
+        } else {
+            messages.add(new SoulTypes.Message(SoulTypes.Role.USER,
+                    turn.ownerDisplayName() + ": " + turn.playerMessage()));
+        }
         return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
     }
 
@@ -153,6 +168,10 @@ public final class SoulGroupPromptAssembler {
     private List<SoulTypes.Message> boundedHistory(List<SoulTypes.ConversationRecord> partyHistory) {
         List<SoulTypes.ConversationRecord> relevant = new ArrayList<>();
         for (SoulTypes.ConversationRecord record : partyHistory) {
+            if (record.kind() == SoulTypes.TurnKind.HEARD
+                    && record.content().startsWith(BANTER_HEARD_PREFIX)) {
+                continue; // stale banter seed — never replays as a player utterance
+            }
             if (record.kind() == SoulTypes.TurnKind.HEARD || record.kind() == SoulTypes.TurnKind.SPOKEN) {
                 relevant.add(record);
             }
