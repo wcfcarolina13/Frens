@@ -81,21 +81,42 @@ public final class GroupScenePlayback {
     private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final LineCommitter committer;
     private final LongSupplier clock;
+    /** Ambient-category gates, consulted for BANTER scenes only (spec D6); re-read per line. */
+    private final java.util.function.BooleanSupplier banterTextAllowed;
+    private final java.util.function.BooleanSupplier banterVoiceAllowed;
     private final Map<UUID, SceneState> scenes = new ConcurrentHashMap<>();
 
     public GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
                                SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer) {
-        this(server, voice, voiceDelivery, committer, System::currentTimeMillis);
+        this(server, voice, voiceDelivery, committer, System::currentTimeMillis,
+                () -> true, () -> true);
+    }
+
+    public GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
+                               SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer,
+                               java.util.function.BooleanSupplier banterTextAllowed,
+                               java.util.function.BooleanSupplier banterVoiceAllowed) {
+        this(server, voice, voiceDelivery, committer, System::currentTimeMillis,
+                banterTextAllowed, banterVoiceAllowed);
     }
 
     GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
                         SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer,
                         LongSupplier clock) {
+        this(server, voice, voiceDelivery, committer, clock, () -> true, () -> true);
+    }
+
+    GroupScenePlayback(MinecraftServer server, Supplier<SoulVoiceService> voice,
+                        SoulVoiceService.VoiceDelivery voiceDelivery, LineCommitter committer,
+                        LongSupplier clock, java.util.function.BooleanSupplier banterTextAllowed,
+                        java.util.function.BooleanSupplier banterVoiceAllowed) {
         this.server = server;
         this.voice = Objects.requireNonNull(voice, "voice");
         this.voiceDelivery = Objects.requireNonNull(voiceDelivery, "voiceDelivery");
         this.committer = Objects.requireNonNull(committer, "committer");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.banterTextAllowed = Objects.requireNonNull(banterTextAllowed, "banterTextAllowed");
+        this.banterVoiceAllowed = Objects.requireNonNull(banterVoiceAllowed, "banterVoiceAllowed");
     }
 
     /** Thread-safe; called from the group service's provider-completion thread. */
@@ -145,14 +166,18 @@ public final class GroupScenePlayback {
     private void advance(SceneState state, long now) {
         PlayableScene scene = state.scene;
         List<SoulGroupTypes.SceneLine> lines = scene.lines();
+        boolean banterKind = scene.turn().kind() == SoulGroupTypes.SceneKind.BANTER;
 
         // Synthesis for the current line starts as soon as the line becomes current — it renders
-        // while the previous line's audio is still playing out.
+        // while the previous line's audio is still playing out. A banter line whose voice
+        // surface is muted skips the render entirely (no wasted GPU window).
         boolean linesRemain = state.lineIndex < lines.size();
         if (linesRemain && !state.cancelled && state.synth == null) {
             SoulGroupTypes.SceneLine line = lines.get(state.lineIndex);
             SoulGroupTypes.SceneParticipant speaker = scene.turn().roster().get(line.participantIndex());
-            state.synth = voice.get().synthesizeLine(speaker.profileId(), line.text());
+            state.synth = banterKind && !banterVoiceAllowed.getAsBoolean()
+                    ? CompletableFuture.completedFuture(Optional.empty())
+                    : voice.get().synthesizeLine(speaker.profileId(), line.text());
             state.synthStartedMs = now;
         }
 
@@ -160,6 +185,14 @@ public final class GroupScenePlayback {
         SoulGroupTypes.SceneLine line = linesRemain ? lines.get(state.lineIndex) : null;
         ServerPlayerEntity speakerBot = line == null ? null
                 : server.getPlayerManager().getPlayer(scene.turn().roster().get(line.participantIndex()).botId());
+
+        // Stale-facts rule (banter spec §5): combat involving the audience or the current
+        // speaker cancels the remaining banter lines; player scenes are unaffected.
+        if (banterCombatAbort(banterKind, inCombat(owner), inCombat(speakerBot)) && !state.cancelled) {
+            state.cancelled = true;
+            LOGGER.info("[souls] scene-playback routingId={} outcome=banter-combat-abort",
+                    scene.turn().routingId());
+        }
 
         boolean pacingReady = now >= state.notBeforeMs;
         boolean settled = state.synth != null
@@ -184,16 +217,29 @@ public final class GroupScenePlayback {
     private void deliver(SceneState state, SoulGroupTypes.SceneLine line,
                           ServerPlayerEntity speakerBot, long now) {
         PlayableScene scene = state.scene;
+        boolean banterKind = scene.turn().kind() == SoulGroupTypes.SceneKind.BANTER;
         SoulGroupTypes.SceneParticipant speaker = scene.turn().roster().get(line.participantIndex());
         Optional<SoulVoiceService.SynthesizedLine> audio =
                 state.synth.getNow(Optional.empty());
 
-        List<ServerPlayerEntity> listeners = playersInEarshot(speakerBot);
-        Text chatLine = Text.literal(speaker.displayName() + ": " + line.text());
-        for (ServerPlayerEntity listener : listeners) {
-            listener.sendMessage(chatLine, false);
+        LineSurfaces surfaces = lineSurfaces(banterKind, banterTextAllowed.getAsBoolean(),
+                banterVoiceAllowed.getAsBoolean(), audio.isPresent());
+        if (surfaces.skip()) {
+            // Both ambient surfaces muted mid-scene: the line is neither shown nor committed.
+            LOGGER.info("[souls] scene-playback routingId={} line={}/{} outcome=skipped-muted",
+                    scene.turn().routingId(), state.lineIndex + 1, scene.lines().size());
+            advanceToNextLine(state, now, 0L);
+            return;
         }
-        if (audio.isPresent()) {
+
+        List<ServerPlayerEntity> listeners = playersInEarshot(speakerBot);
+        if (surfaces.text()) {
+            Text chatLine = Text.literal(speaker.displayName() + ": " + line.text());
+            for (ServerPlayerEntity listener : listeners) {
+                listener.sendMessage(chatLine, false);
+            }
+        }
+        if (surfaces.audio()) {
             UUID groupId = lineGroupId(scene.turn().routingId(), state.lineIndex);
             for (ServerPlayerEntity listener : listeners) {
                 voiceDelivery.send(listener.getUuid(), groupId, speaker.botId(),
@@ -205,10 +251,15 @@ public final class GroupScenePlayback {
                 speaker.displayName() + ": " + line.text());
         state.delivered++;
 
-        LOGGER.info("[souls] scene-playback routingId={} line={}/{} speaker={} voiced={} listeners={}",
+        LOGGER.info("[souls] scene-playback routingId={} line={}/{} speaker={} text={} voiced={} listeners={}",
                 scene.turn().routingId(), state.lineIndex + 1, scene.lines().size(),
-                speaker.botId(), audio.isPresent(), listeners.size());
-        advanceToNextLine(state, now, lineDurationMs(audio, line.text().length()));
+                speaker.botId(), surfaces.text(), surfaces.audio(), listeners.size());
+        advanceToNextLine(state, now,
+                lineDurationMs(surfaces.audio() ? audio : Optional.empty(), line.text().length()));
+    }
+
+    private static boolean inCombat(ServerPlayerEntity entity) {
+        return entity != null && (entity.hurtTime > 0 || entity.getAttacker() != null);
     }
 
     private void advanceToNextLine(SceneState state, long now, long holdMs) {
@@ -262,6 +313,26 @@ public final class GroupScenePlayback {
      *  (queue-full drops never complete their future). */
     static boolean synthSettled(boolean done, long startedAtMs, long nowMs, long guardMs) {
         return done || nowMs - startedAtMs > guardMs;
+    }
+
+    /** Which surfaces a line may use. {@code skip} == BANTER with neither surface open. */
+    record LineSurfaces(boolean text, boolean audio, boolean skip) {}
+
+    /** Player scenes always show text (soul exemption) and voice whatever audio exists; banter
+     *  respects the ambient masks per surface and skips entirely when both are closed. */
+    static LineSurfaces lineSurfaces(boolean banterKind, boolean textAllowed,
+                                     boolean voiceAllowed, boolean audioPresent) {
+        if (!banterKind) {
+            return new LineSurfaces(true, audioPresent, false);
+        }
+        boolean text = textAllowed;
+        boolean audio = voiceAllowed && audioPresent;
+        return new LineSurfaces(text, audio, !text && !audio);
+    }
+
+    /** BANTER-only stale-facts rule: any combat involving audience or speaker cancels the scene. */
+    static boolean banterCombatAbort(boolean banterKind, boolean ownerInCombat, boolean speakerInCombat) {
+        return banterKind && (ownerInCombat || speakerInCombat);
     }
 
     /**

@@ -73,6 +73,37 @@ class GroupScenePlaybackTest {
     }
 
     @Test
+    void lineSurfacesTruthTable() {
+        // PLAYER scenes: always text; audio iff present; never skipped.
+        assertEquals(new GroupScenePlayback.LineSurfaces(true, true, false),
+                GroupScenePlayback.lineSurfaces(false, false, false, true));
+        assertEquals(new GroupScenePlayback.LineSurfaces(true, false, false),
+                GroupScenePlayback.lineSurfaces(false, false, false, false));
+        // BANTER: both open.
+        assertEquals(new GroupScenePlayback.LineSurfaces(true, true, false),
+                GroupScenePlayback.lineSurfaces(true, true, true, true));
+        // BANTER: text muted, voice open -> voice-only.
+        assertEquals(new GroupScenePlayback.LineSurfaces(false, true, false),
+                GroupScenePlayback.lineSurfaces(true, false, true, true));
+        // BANTER: voice muted (or no audio), text open -> text-only.
+        assertEquals(new GroupScenePlayback.LineSurfaces(true, false, false),
+                GroupScenePlayback.lineSurfaces(true, true, false, true));
+        assertEquals(new GroupScenePlayback.LineSurfaces(true, false, false),
+                GroupScenePlayback.lineSurfaces(true, true, true, false));
+        // BANTER: both closed -> skip without commit.
+        assertTrue(GroupScenePlayback.lineSurfaces(true, false, false, true).skip());
+        assertTrue(GroupScenePlayback.lineSurfaces(true, false, true, false).skip());
+    }
+
+    @Test
+    void banterCombatAbortOnlyAppliesToBanterScenes() {
+        assertTrue(GroupScenePlayback.banterCombatAbort(true, true, false));
+        assertTrue(GroupScenePlayback.banterCombatAbort(true, false, true));
+        assertEquals(false, GroupScenePlayback.banterCombatAbort(true, false, false));
+        assertEquals(false, GroupScenePlayback.banterCombatAbort(false, true, true));
+    }
+
+    @Test
     void synthesisIsConsideredSettledOnCompletionOrGuardTimeout() {
         assertTrue(GroupScenePlayback.synthSettled(true, 0, 0, 1_000));
         assertTrue(GroupScenePlayback.synthSettled(false, 10_000, 21_000, 10_000));
