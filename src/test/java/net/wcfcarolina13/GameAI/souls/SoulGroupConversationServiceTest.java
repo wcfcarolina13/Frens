@@ -166,6 +166,67 @@ class SoulGroupConversationServiceTest {
         assertTrue(player.enqueued.isEmpty());
     }
 
+    // === Banter turns ===
+
+    private static SoulGroupTypes.GroupSceneTurn banterTurn(String seed) {
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, OWNER_ID, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(JAKE_ID, "frens:jake", "Jake", grounding(JAKE_ID, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(SARA_ID, "frens:jake", "Sara", grounding(SARA_ID, "Sara"))),
+                seed, Instant.EPOCH, UUID.randomUUID());
+    }
+
+    @Test
+    void banterHeardIsTaggedWithTheBanterMarkerNotThePlayerName() throws Exception {
+        SoulGroupTypes.GroupSceneTurn banter = banterTurn("dusk chatter seed");
+        var submission = service.submit(banter).get(2, SECONDS);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, submission);
+        List<SoulTypes.ConversationRecord> records =
+                partyStore.recent(banter.key(), 20, 12_000).get(2, SECONDS);
+        assertEquals(SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + "dusk chatter seed",
+                records.get(0).content());
+    }
+
+    @Test
+    void banterFailuresAreSilentToThePlayer() throws Exception {
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                false, "", SoulTypes.FailureCode.TIMEOUT, "test", "test-model", 5L, null, null, null)));
+        var submission = service.submit(banterTurn("seed")).get(2, SECONDS);
+        assertEquals(SoulGroupConversationService.Submission.FAILED, submission);
+        assertTrue(status.messages.isEmpty(), "banter failure must not nag the player");
+        assertEquals(List.of(SoulTypes.TurnKind.HEARD, SoulTypes.TurnKind.FAILURE),
+                partyStore.recent(SoulGroupTypes.partyKey(OWNER_ID), 20, 12_000).get(2, SECONDS)
+                        .stream().map(SoulTypes.ConversationRecord::kind).toList());
+    }
+
+    @Test
+    void banterBusyGuardIsAlsoSilent() throws Exception {
+        player.active = true;
+        var submission = service.submit(banterTurn("seed")).get(2, SECONDS);
+        assertEquals(SoulGroupConversationService.Submission.FAILED, submission);
+        assertTrue(status.messages.isEmpty());
+    }
+
+    @Test
+    void banterScenesAreCappedAtFourLines() throws Exception {
+        // Three bots × two lines each = six lines surviving the per-bot cap; only the banter
+        // scene cap (4) explains a smaller result.
+        UUID thirdId = UUID.randomUUID();
+        SoulGroupTypes.GroupSceneTurn banter = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.BANTER, OWNER_ID, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(JAKE_ID, "frens:jake", "Jake", grounding(JAKE_ID, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(SARA_ID, "frens:jake", "Sara", grounding(SARA_ID, "Sara")),
+                        new SoulGroupTypes.SceneParticipant(thirdId, "frens:jake", "Milo", grounding(thirdId, "Milo"))),
+                "seed", Instant.EPOCH, UUID.randomUUID());
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                true, "Jake: a\nSara: b\nMilo: c\nJake: d\nSara: e\nMilo: f", null, "test",
+                "test-model", 5L, null, null, null)));
+        var submission = service.submit(banter).get(2, SECONDS);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, submission);
+        assertEquals(SoulGroupTypes.BANTER_MAX_SCENE_LINES, player.enqueued.get(0).lines().size());
+    }
+
     // === Fakes ===
 
     private static final class FakeScenePlayer implements SoulGroupConversationService.ScenePlayer {

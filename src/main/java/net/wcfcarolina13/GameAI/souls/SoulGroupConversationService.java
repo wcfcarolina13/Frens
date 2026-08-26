@@ -82,25 +82,39 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         CompletableFuture<Submission> outcome = new CompletableFuture<>();
 
         if (player.hasActiveScene(turn.ownerId())) {
-            status.deliverStatus(turn.ownerId(), "Your companions are still talking. Give them a moment.");
+            // An autonomous banter turn colliding with a live scene fails silently; a player
+            // asking mid-scene gets told (they acted, they deserve feedback).
+            statusUnlessBanter(turn, "Your companions are still talking. Give them a moment.");
             outcome.complete(Submission.FAILED);
             return outcome;
         }
 
         long submitStartNanos = System.nanoTime();
-        String taggedMessage = turn.ownerDisplayName() + ": " + turn.playerMessage();
+        // Party records are uniformly speaker-tagged; banter turns have no player utterance, so
+        // their HEARD record carries the seed behind the marker the assembler skips on replay.
+        String taggedMessage = turn.kind() == SoulGroupTypes.SceneKind.BANTER
+                ? SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + turn.playerMessage()
+                : turn.ownerDisplayName() + ": " + turn.playerMessage();
         partyStore.beginHeardTurn(turn.key(), correlationId, taggedMessage, turn.acceptedAt())
                 .whenComplete((token, tokenError) -> {
                     if (tokenError != null) {
-                        LOGGER.info("[souls] scene correlationId={} owner={} outcome=no-token error={}",
-                                correlationId, turn.ownerId(), tokenError.getClass().getSimpleName());
-                        status.deliverStatus(turn.ownerId(), statusFor(SoulTypes.FailureCode.INTERNAL));
+                        LOGGER.info("[souls] scene correlationId={} owner={} kind={} outcome=no-token error={}",
+                                correlationId, turn.ownerId(), turn.kind(),
+                                tokenError.getClass().getSimpleName());
+                        statusUnlessBanter(turn, statusFor(SoulTypes.FailureCode.INTERNAL));
                         outcome.complete(Submission.FAILED);
                         return;
                     }
                     continueAfterHeard(turn, token, correlationId, submitStartNanos, outcome);
                 });
         return outcome;
+    }
+
+    /** Banter is ambient: its failures never surface to chat (spec §7 silent-failure rule). */
+    private void statusUnlessBanter(SoulGroupTypes.GroupSceneTurn turn, String text) {
+        if (turn.kind() != SoulGroupTypes.SceneKind.BANTER) {
+            status.deliverStatus(turn.ownerId(), text);
+        }
     }
 
     private void continueAfterHeard(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
@@ -157,7 +171,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
             rosterNames.add(participant.displayName());
         }
-        SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames);
+        int maxSceneLines = turn.kind() == SoulGroupTypes.SceneKind.BANTER
+                ? SoulGroupTypes.BANTER_MAX_SCENE_LINES
+                : SoulGroupTypes.MAX_SCENE_LINES;
+        SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines);
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
                     result.model(), result.elapsedMillis(), outcome);
@@ -166,9 +183,9 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
         sceneResults.put(correlationId, result);
         player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, parse.lines()));
-        LOGGER.info("[souls] scene correlationId={} owner={} rosterSize={} lines={} queueDepth={} "
+        LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
                         + "provider={} model={} providerMs={} totalMs={} outcome=scene-started",
-                correlationId, turn.ownerId(), turn.roster().size(), parse.lines().size(),
+                correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), parse.lines().size(),
                 queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
                 elapsedMs(submitStartNanos));
         outcome.complete(Submission.SCENE_STARTED);
@@ -183,14 +200,14 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         if (tokenAlreadyStale) {
             // Same rule as the DM flow: a reset already bumped the epoch; the store would refuse
             // this append as stale, so skip it rather than attempt-and-fail.
-            status.deliverStatus(turn.ownerId(), statusText);
+            statusUnlessBanter(turn, statusText);
             logFailure(correlationId, turn, code, providerId, model);
             outcome.complete(Submission.FAILED);
             return;
         }
         partyStore.appendFailure(token, code, providerId, model, elapsedMillis)
                 .whenComplete((v, appendError) -> {
-                    status.deliverStatus(turn.ownerId(), statusText);
+                    statusUnlessBanter(turn, statusText);
                     logFailure(correlationId, turn, code, providerId, model);
                     outcome.complete(Submission.FAILED);
                 });
@@ -198,8 +215,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
     private void logFailure(UUID correlationId, SoulGroupTypes.GroupSceneTurn turn,
                              SoulTypes.FailureCode code, String providerId, String model) {
-        LOGGER.info("[souls] scene correlationId={} owner={} rosterSize={} provider={} model={} outcome=failed:{}",
-                correlationId, turn.ownerId(), turn.roster().size(), providerId, model, code);
+        LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} provider={} model={} outcome=failed:{}",
+                correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), providerId, model, code);
     }
 
     // === LineCommitter (called by the playback machine strictly after a line's fan-out) ===
