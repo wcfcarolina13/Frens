@@ -87,12 +87,24 @@ public final class SoulLocalDirector {
 
     /**
      * Server-thread only, called from the chat callback for every unaddressed line spoken near a
-     * soul-bound bot. Records the line into {@link SoulLocalMemory} for every witness, then — on
-     * the same earshot computation — decides whether one bot should react.
+     * soul-bound bot.
+     *
+     * <p>Cheapest-first: bails immediately while the feature is off (no scan, no recording — see
+     * {@link SoulLocalMemory}'s own invariant), then checks the gates that need no per-bot
+     * snapshot ({@code pipeline}/{@code cooldown}/{@code busy}/{@code muted}/
+     * {@code player-not-at-ease}) with placeholder-eligible roster/salience facts before ever
+     * computing earshot or calling {@link SoulSnapshotBuilder#capture}, which does raycasts and
+     * entity/POI scans. Only once those pass does it compute earshot once — shared by the
+     * recording half ({@link SoulLocalMemory#note}) and the reaction half — run the capture loop,
+     * and re-check with the real roster size and salience.
+     *
+     * <p>The reply window's bot identity gates the continuation bypass: a window only waives
+     * cooldown/salience for the specific bot that opened it, never for whichever bot happens to
+     * win the scoring race.
      */
     public void noteUnaddressedChat(ServerPlayerEntity player, String line) {
-        if (player == null) {
-            return;
+        if (player == null || !localChatEnabled.getAsBoolean()) {
+            return; // disabled: no scan, nothing recorded, nothing touched.
         }
         UUID playerId = player.getUuid();
         List<ServerPlayerEntity> bots = botsProvider.apply(server);
@@ -105,6 +117,24 @@ public final class SoulLocalDirector {
         }
         long now = clock.getAsLong();
 
+        ReplyWindow window = replyWindows.get(playerId);
+        boolean windowOpen = window != null && !window.used() && now < window.expiresAtMs();
+
+        // Cheap gates only — no earshot scan, no capture — with permissive placeholders for the
+        // two facts that require the (expensive) roster/capture pass below.
+        long nextAt = nextEligibleAtMs.computeIfAbsent(playerId, id -> now + initialDelayMs(random));
+        boolean pipelineAvailable = runtime.pipelineAvailable();
+        boolean budgetFree = runtime.isSceneBudgetFree(playerId);
+        boolean surfaceOpen = ambientTextOpen.getAsBoolean() || ambientVoiceOpen.getAsBoolean();
+        boolean atEase = playerAtEase(player);
+        String earlyVeto = firstVeto(true, pipelineAvailable, now >= nextAt || windowOpen,
+                budgetFree, surfaceOpen, atEase, 1, true);
+        if (earlyVeto != null) {
+            recordVerdict(playerId, "vetoed:" + earlyVeto);
+            lastScore.put(playerId, 0);
+            return;
+        }
+
         // Earshot computed once and shared by both the recording half and the reaction half.
         List<ServerPlayerEntity> near = botsInEarshot(player, bots);
 
@@ -116,14 +146,15 @@ public final class SoulLocalDirector {
         }
         SoulLocalMemory.note(playerId, line, witnessIds, now);
 
-        ReplyWindow window = replyWindows.get(playerId);
-        boolean windowOpen = window != null && !window.used() && now < window.expiresAtMs();
-
         List<ServerPlayerEntity> rosterBots = eligibleRosterBots(player, near);
 
+        UUID windowBotId = windowOpen ? window.botId() : null;
+        int topScore = -1;
+        int captureSuccessCount = 0;
         int bestScore = -1;
         ServerPlayerEntity bestBot = null;
         SoulTypes.GroundingSnapshot bestSnapshot = null;
+        boolean bestIsContinuation = false;
         for (ServerPlayerEntity bot : rosterBots) {
             SoulTypes.GroundingSnapshot snapshot;
             try {
@@ -133,41 +164,44 @@ public final class SoulLocalDirector {
                         captureFailure.toString());
                 continue;
             }
+            captureSuccessCount++;
             String activeTask = snapshot.bot().activeTask();
             int score = SoulLocalSalience.score(line, bot.getName().getString(), activeTask, "");
-            if (score > bestScore) {
+            topScore = Math.max(topScore, score);
+            // The continuation bypass belongs to the bot that opened the window — never to
+            // whichever bot merely wins the scoring race.
+            boolean isContinuation = windowBotId != null && windowBotId.equals(bot.getUuid());
+            boolean eligible = score >= SoulLocalSalience.THRESHOLD || isContinuation;
+            if (eligible && score > bestScore) {
                 bestScore = score;
                 bestBot = bot;
                 bestSnapshot = snapshot;
+                bestIsContinuation = isContinuation;
             }
         }
 
-        long nextAt = nextEligibleAtMs.computeIfAbsent(playerId, id -> now + initialDelayMs(random));
-        String veto = firstVeto(
-                localChatEnabled.getAsBoolean(),
-                runtime.pipelineAvailable(),
-                now >= nextAt || windowOpen,
-                runtime.isSceneBudgetFree(playerId),
-                ambientTextOpen.getAsBoolean() || ambientVoiceOpen.getAsBoolean(),
-                playerAtEase(player),
-                rosterBots.size(),
-                bestScore >= SoulLocalSalience.THRESHOLD || windowOpen);
-        if (veto != null) {
-            recordVerdict(playerId, "vetoed:" + veto);
-            lastScore.put(playerId, Math.max(bestScore, 0));
+        if (!rosterBots.isEmpty() && captureSuccessCount == 0) {
+            // Every capture in a non-empty roster failed — nothing left to ground on. Distinct
+            // from a normal salience miss, so report it as its own reason.
+            recordVerdict(playerId, "vetoed:roster-lost");
+            lastScore.put(playerId, 0);
             return;
         }
-        if (bestBot == null || bestSnapshot == null) {
-            // Roster was non-empty but every capture in it failed — nothing left to ground on.
-            recordVerdict(playerId, "vetoed:roster-lost");
-            lastScore.put(playerId, Math.max(bestScore, 0));
+
+        String veto = firstVeto(true, pipelineAvailable, now >= nextAt || bestIsContinuation,
+                budgetFree, surfaceOpen, atEase, rosterBots.size(), bestBot != null);
+        if (veto != null) {
+            recordVerdict(playerId, "vetoed:" + veto);
+            lastScore.put(playerId, Math.max(topScore, 0));
             return;
         }
 
         if (groundingDangerous(bestSnapshot.situation())) {
             recordVerdict(playerId, "vetoed:danger");
             lastScore.put(playerId, bestScore);
-            nextEligibleAtMs.put(playerId, now + RETRY_AFTER_VETO_MS);
+            // Push the cooldown out, but never shorten one already armed further out (a prior
+            // fire's full cooldown must survive a subsequent danger veto).
+            nextEligibleAtMs.merge(playerId, now + RETRY_AFTER_VETO_MS, Math::max);
             return;
         }
 
@@ -180,7 +214,7 @@ public final class SoulLocalDirector {
                 SoulGroupTypes.SceneKind.LOCAL, playerId, player.getName().getString(),
                 List.of(participant), line, Instant.now(), routingId);
         nextEligibleAtMs.put(playerId, now + nextDelayMs(random));
-        if (windowOpen) {
+        if (bestIsContinuation) {
             markWindowUsed(playerId);
         } else {
             openReplyWindow(playerId, bestBot.getUuid(), now);
@@ -208,13 +242,43 @@ public final class SoulLocalDirector {
         replyWindows.remove(playerId);
     }
 
-    /** Server-thread only; cheap no-op except for expiring reply windows. */
+    /**
+     * Server-thread only; cheap no-op except for closing reply windows — on expiry, or when the
+     * player has left earshot of the window's bot (gone or in a different world) or moved beyond
+     * {@link #EARSHOT_BLOCKS}, using the same same-world + radius test the witness pass uses.
+     */
     public void tick() {
         if (replyWindows.isEmpty()) {
             return;
         }
         long now = clock.getAsLong();
-        replyWindows.entrySet().removeIf(entry -> now >= entry.getValue().expiresAtMs());
+        replyWindows.entrySet().removeIf(entry -> {
+            ReplyWindow window = entry.getValue();
+            if (now >= window.expiresAtMs()) {
+                return true;
+            }
+            ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
+            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(window.botId());
+            return player == null || bot == null || bot.isRemoved() || !bot.isAlive()
+                    || bot.getEntityWorld() != player.getEntityWorld()
+                    || bot.squaredDistanceTo(player) > EARSHOT_BLOCKS * EARSHOT_BLOCKS;
+        });
+    }
+
+    /**
+     * Evicts {@code playerId}'s entries from every per-player map — called on disconnect so
+     * {@code lastLineByPlayer} (which retains chat text) and the rest don't linger for a player
+     * who is gone.
+     */
+    public void forget(UUID playerId) {
+        if (playerId == null) {
+            return;
+        }
+        lastLineByPlayer.remove(playerId);
+        nextEligibleAtMs.remove(playerId);
+        lastVerdict.remove(playerId);
+        lastScore.remove(playerId);
+        replyWindows.remove(playerId);
     }
 
     /** For {@code /bot soul local status}-style surfaces: last verdict, score, cooldown, window. */
