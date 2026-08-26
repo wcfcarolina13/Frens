@@ -89,14 +89,16 @@ public final class SoulLocalDirector {
      * Server-thread only, called from the chat callback for every unaddressed line spoken near a
      * soul-bound bot.
      *
-     * <p>Cheapest-first: bails immediately while the feature is off (no scan, no recording — see
-     * {@link SoulLocalMemory}'s own invariant), then checks the gates that need no per-bot
-     * snapshot ({@code pipeline}/{@code cooldown}/{@code busy}/{@code muted}/
-     * {@code player-not-at-ease}) with placeholder-eligible roster/salience facts before ever
-     * computing earshot or calling {@link SoulSnapshotBuilder#capture}, which does raycasts and
-     * entity/POI scans. Only once those pass does it compute earshot once — shared by the
-     * recording half ({@link SoulLocalMemory#note}) and the reaction half — run the capture loop,
-     * and re-check with the real roster size and salience.
+     * <p>Two tiers, gated differently. <b>Recording</b> — the earshot pass plus
+     * {@link SoulLocalMemory#note} — is cheap (a distance loop and a cached
+     * {@code hasActiveProfile} lookup over the registered-bot list) and answers only to
+     * {@code localChatEnabled} and the hard-reject check above it; it always runs so later DM
+     * replies and banter scenes have something to reference, independent of whether a reaction
+     * fires. <b>Reacting</b> is the rare, expensive half: it hides behind the cheap veto gates
+     * ({@code pipeline}/{@code cooldown}/{@code busy}/{@code muted}/{@code player-not-at-ease})
+     * before the roster filter and {@link SoulSnapshotBuilder#capture} — which does raycasts and
+     * entity/POI scans — ever run, and only then re-checks with the real roster size and
+     * salience.
      *
      * <p>The reply window's bot identity gates the continuation bypass: a window only waives
      * cooldown/salience for the specific bot that opened it, never for whichever bot happens to
@@ -117,11 +119,24 @@ public final class SoulLocalDirector {
         }
         long now = clock.getAsLong();
 
+        // Recording tier: cheap, and answers only to enablement + hard-reject above — never to
+        // the reaction gates below, so the overheard-line memory stays useful even while the
+        // reaction half is on cooldown.
+        List<ServerPlayerEntity> near = botsInEarshot(player, bots);
+        Set<UUID> witnessIds = new HashSet<>();
+        for (ServerPlayerEntity bot : near) {
+            if (runtime.hasActiveProfile(bot.getUuid())) {
+                witnessIds.add(bot.getUuid());
+            }
+        }
+        SoulLocalMemory.note(playerId, line, witnessIds, now);
+
+        // Reacting tier: cheap veto gates first — no capture yet.
         ReplyWindow window = replyWindows.get(playerId);
         boolean windowOpen = window != null && !window.used() && now < window.expiresAtMs();
 
-        // Cheap gates only — no earshot scan, no capture — with permissive placeholders for the
-        // two facts that require the (expensive) roster/capture pass below.
+        // Cheap gates only — no capture — with permissive placeholders for the two facts that
+        // require the (expensive) roster/capture pass below.
         long nextAt = nextEligibleAtMs.computeIfAbsent(playerId, id -> now + initialDelayMs(random));
         boolean pipelineAvailable = runtime.pipelineAvailable();
         boolean budgetFree = runtime.isSceneBudgetFree(playerId);
@@ -134,17 +149,6 @@ public final class SoulLocalDirector {
             lastScore.put(playerId, 0);
             return;
         }
-
-        // Earshot computed once and shared by both the recording half and the reaction half.
-        List<ServerPlayerEntity> near = botsInEarshot(player, bots);
-
-        Set<UUID> witnessIds = new HashSet<>();
-        for (ServerPlayerEntity bot : near) {
-            if (runtime.hasActiveProfile(bot.getUuid())) {
-                witnessIds.add(bot.getUuid());
-            }
-        }
-        SoulLocalMemory.note(playerId, line, witnessIds, now);
 
         List<ServerPlayerEntity> rosterBots = eligibleRosterBots(player, near);
 
