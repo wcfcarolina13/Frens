@@ -24,16 +24,25 @@ public final class SoulGroupTypes {
     public static final int MAX_SCENE_LINES = 6;
     /** Tighter scene cap for autonomous banter scenes. */
     public static final int BANTER_MAX_SCENE_LINES = 4;
+    /** Tighter scene cap for a one-bot overheard-chat reaction: exactly one line. */
+    public static final int LOCAL_MAX_SCENE_LINES = 1;
     /** Longest single scene line (chars, after cleaning); longer lines are truncated. */
     public static final int MAX_LINE_CHARS = 300;
 
     /**
      * How a scene came to exist. {@code PLAYER} scenes (broadcast/multi-name chat addresses)
-     * keep the soul-DM visibility exemption; {@code BANTER} scenes are system-initiated and
-     * ambient-like — their delivery respects the ambient text/voice category masks and they
-     * use the tighter {@link #BANTER_MAX_SCENE_LINES} cap.
+     * keep the soul-DM visibility exemption. {@code BANTER} and {@code LOCAL} scenes are
+     * system-initiated and ambient-like: their delivery respects the ambient text/voice category
+     * masks, their failures are silent, and combat aborts their remaining lines.
      */
-    public enum SceneKind { PLAYER, BANTER }
+    public enum SceneKind {
+        PLAYER, BANTER, LOCAL;
+
+        /** True for the system-initiated kinds that obey the ambient masks. */
+        public boolean isAmbient() {
+            return this != PLAYER;
+        }
+    }
 
     /**
      * The party channel's conversation/store/scheduler key. Deliberately reuses

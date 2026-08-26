@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -97,10 +98,39 @@ class GroupScenePlaybackTest {
 
     @Test
     void banterCombatAbortOnlyAppliesToBanterScenes() {
-        assertTrue(GroupScenePlayback.banterCombatAbort(true, true, false));
-        assertTrue(GroupScenePlayback.banterCombatAbort(true, false, true));
-        assertEquals(false, GroupScenePlayback.banterCombatAbort(true, false, false));
-        assertEquals(false, GroupScenePlayback.banterCombatAbort(false, true, true));
+        assertTrue(GroupScenePlayback.ambientCombatAbort(true, true, false));
+        assertTrue(GroupScenePlayback.ambientCombatAbort(true, false, true));
+        assertEquals(false, GroupScenePlayback.ambientCombatAbort(true, false, false));
+        assertEquals(false, GroupScenePlayback.ambientCombatAbort(false, true, true));
+    }
+
+    @Test
+    void localLinesRespectAmbientMasksJustLikeBanter() {
+        // Text open, voice closed -> text only.
+        GroupScenePlayback.LineSurfaces textOnly =
+                GroupScenePlayback.lineSurfaces(true, true, false, true);
+        assertTrue(textOnly.text());
+        assertFalse(textOnly.audio());
+        assertFalse(textOnly.skip());
+
+        // Both closed -> skipped entirely, never committed.
+        assertTrue(GroupScenePlayback.lineSurfaces(true, false, false, true).skip());
+
+        // A PLAYER scene ignores both masks (soul exemption).
+        GroupScenePlayback.LineSurfaces player =
+                GroupScenePlayback.lineSurfaces(false, false, false, true);
+        assertTrue(player.text());
+        assertTrue(player.audio());
+        assertFalse(player.skip());
+    }
+
+    @Test
+    void ambientCombatAbortAppliesToAmbientKindsOnly() {
+        assertTrue(GroupScenePlayback.ambientCombatAbort(true, true, false));
+        assertTrue(GroupScenePlayback.ambientCombatAbort(true, false, true));
+        assertFalse(GroupScenePlayback.ambientCombatAbort(true, false, false));
+        assertFalse(GroupScenePlayback.ambientCombatAbort(false, true, true),
+                "player scenes are never aborted by combat");
     }
 
     @Test

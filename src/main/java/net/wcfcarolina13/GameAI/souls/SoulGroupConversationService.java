@@ -82,16 +82,17 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         CompletableFuture<Submission> outcome = new CompletableFuture<>();
 
         if (player.hasActiveScene(turn.ownerId())) {
-            // An autonomous banter turn colliding with a live scene fails silently; a player
+            // An autonomous ambient turn colliding with a live scene fails silently; a player
             // asking mid-scene gets told (they acted, they deserve feedback).
-            statusUnlessBanter(turn, "Your companions are still talking. Give them a moment.");
+            statusUnlessAmbient(turn, "Your companions are still talking. Give them a moment.");
             outcome.complete(Submission.FAILED);
             return outcome;
         }
 
         long submitStartNanos = System.nanoTime();
-        // Party records are uniformly speaker-tagged; banter turns have no player utterance, so
-        // their HEARD record carries the seed behind the marker the assembler skips on replay.
+        // BANTER only: a synthetic narrator seed must never replay as a player utterance. A LOCAL
+        // turn carries a real thing the player said in earshot, so it takes the ordinary
+        // speaker-tagged form and replays normally.
         String taggedMessage = turn.kind() == SoulGroupTypes.SceneKind.BANTER
                 ? SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + turn.playerMessage()
                 : turn.ownerDisplayName() + ": " + turn.playerMessage();
@@ -101,7 +102,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                         LOGGER.info("[souls] scene correlationId={} owner={} kind={} outcome=no-token error={}",
                                 correlationId, turn.ownerId(), turn.kind(),
                                 tokenError.getClass().getSimpleName());
-                        statusUnlessBanter(turn, statusFor(SoulTypes.FailureCode.INTERNAL));
+                        statusUnlessAmbient(turn, statusFor(SoulTypes.FailureCode.INTERNAL));
                         outcome.complete(Submission.FAILED);
                         return;
                     }
@@ -110,9 +111,9 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         return outcome;
     }
 
-    /** Banter is ambient: its failures never surface to chat (spec §7 silent-failure rule). */
-    private void statusUnlessBanter(SoulGroupTypes.GroupSceneTurn turn, String text) {
-        if (turn.kind() != SoulGroupTypes.SceneKind.BANTER) {
+    /** Ambient scenes (banter, local) are system-initiated: their failures never surface to chat. */
+    private void statusUnlessAmbient(SoulGroupTypes.GroupSceneTurn turn, String text) {
+        if (!turn.kind().isAmbient()) {
             status.deliverStatus(turn.ownerId(), text);
         }
     }
@@ -171,9 +172,11 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
             rosterNames.add(participant.displayName());
         }
-        int maxSceneLines = turn.kind() == SoulGroupTypes.SceneKind.BANTER
-                ? SoulGroupTypes.BANTER_MAX_SCENE_LINES
-                : SoulGroupTypes.MAX_SCENE_LINES;
+        int maxSceneLines = switch (turn.kind()) {
+            case BANTER -> SoulGroupTypes.BANTER_MAX_SCENE_LINES;
+            case LOCAL -> SoulGroupTypes.LOCAL_MAX_SCENE_LINES;
+            case PLAYER -> SoulGroupTypes.MAX_SCENE_LINES;
+        };
         SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines);
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
@@ -200,14 +203,14 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         if (tokenAlreadyStale) {
             // Same rule as the DM flow: a reset already bumped the epoch; the store would refuse
             // this append as stale, so skip it rather than attempt-and-fail.
-            statusUnlessBanter(turn, statusText);
+            statusUnlessAmbient(turn, statusText);
             logFailure(correlationId, turn, code, providerId, model);
             outcome.complete(Submission.FAILED);
             return;
         }
         partyStore.appendFailure(token, code, providerId, model, elapsedMillis)
                 .whenComplete((v, appendError) -> {
-                    statusUnlessBanter(turn, statusText);
+                    statusUnlessAmbient(turn, statusText);
                     logFailure(correlationId, turn, code, providerId, model);
                     outcome.complete(Submission.FAILED);
                 });

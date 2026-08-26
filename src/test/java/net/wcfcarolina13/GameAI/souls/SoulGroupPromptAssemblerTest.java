@@ -40,6 +40,14 @@ class SoulGroupPromptAssemblerTest {
                 message, Instant.EPOCH, UUID.randomUUID());
     }
 
+    private static SoulGroupTypes.GroupSceneTurn localTurn(String message) {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.LOCAL, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake"))),
+                message, Instant.EPOCH, UUID.randomUUID());
+    }
+
     private static SoulTypes.SoulProfile profile(String id, String displayName) {
         return new SoulTypes.SoulProfile(id, displayName,
                 List.of("A loyal companion who loves mining.", "Wry sense of humor."),
@@ -196,5 +204,20 @@ class SoulGroupPromptAssemblerTest {
         assertEquals("llama3.2:3b", request.model());
         assertEquals(Duration.ofSeconds(45), request.timeout());
         assertEquals(SoulGroupPromptAssembler.MAX_OUTPUT_TOKENS, request.maxOutputTokens());
+    }
+
+    @Test
+    void localSceneDirectiveMarksTheLineAsNotAddressedToTheBot() {
+        SoulGroupTypes.GroupSceneTurn turn = localTurn("heading to the ravine");
+        SoulTypes.ProviderRequest request = new SoulGroupPromptAssembler().assemble(
+                UUID.randomUUID(), "model", turn, List.of(profile("frens:jake", "Jake")), List.of(),
+                Duration.ofSeconds(30));
+
+        SoulTypes.Message last = request.messages().get(request.messages().size() - 1);
+        assertEquals(SoulTypes.Role.USER, last.role());
+        assertTrue(last.content().contains("not to you"),
+                "the model must know it is chiming in, not answering");
+        assertTrue(last.content().contains("Bradley: heading to the ravine"),
+                "the real utterance is speaker-tagged, unlike a banter seed");
     }
 }

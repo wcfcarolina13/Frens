@@ -55,15 +55,19 @@ public final class SoulGroupPromptAssembler {
         messages.add(castBlock(turn, profiles));
         messages.add(stateBlock(turn));
         messages.addAll(boundedHistory(partyHistory));
-        if (turn.kind() == SoulGroupTypes.SceneKind.BANTER) {
+        messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
-            messages.add(new SoulTypes.Message(SoulTypes.Role.USER,
+            case BANTER -> new SoulTypes.Message(SoulTypes.Role.USER,
                     "[A quiet moment. The companions chat briefly among themselves. Recent happenings: "
-                            + turn.playerMessage() + ". A few short lines only.]"));
-        } else {
-            messages.add(new SoulTypes.Message(SoulTypes.Role.USER,
-                    turn.ownerDisplayName() + ": " + turn.playerMessage()));
-        }
+                            + turn.playerMessage() + ". A few short lines only.]");
+            // A real utterance the bot overheard: bracketed context, then the tagged line.
+            case LOCAL -> new SoulTypes.Message(SoulTypes.Role.USER,
+                    "[" + turn.ownerDisplayName() + " is talking nearby, not to you. You may chime"
+                            + " in with one short line, or stay quiet if there is nothing worth"
+                            + " saying.]\n" + turn.ownerDisplayName() + ": " + turn.playerMessage());
+            case PLAYER -> new SoulTypes.Message(SoulTypes.Role.USER,
+                    turn.ownerDisplayName() + ": " + turn.playerMessage());
+        });
         return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
     }
 

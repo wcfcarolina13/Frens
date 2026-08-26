@@ -9,7 +9,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Locks in the party-channel key convention and the {@link SoulGroupTypes.GroupSceneTurn}
@@ -23,6 +25,13 @@ class SoulGroupTypesTest {
                 List.of(), "", "", "", "", "", "Bradley", true, 0, true, Optional.empty());
         return new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
                 Optional.empty(), Instant.EPOCH);
+    }
+
+    private static SoulTypes.BotSnapshot botSnapshot(UUID botId, String name) {
+        return new SoulTypes.BotSnapshot(botId, name, "overworld", "plains",
+                0, 64, 0, true, "dusk", "clear", 17f, 20f, 14, 5, "iron sword", 10, 36,
+                List.of(), "cheerful", "FOLLOW", "skill:woodcut", "running", "home", "Bradley",
+                true, 0, true, Optional.empty());
     }
 
     @Test
@@ -82,5 +91,33 @@ class SoulGroupTypesTest {
                 () -> new SoulGroupTypes.SceneParticipant(null, "p", "n", grounding(UUID.randomUUID())));
         assertThrows(NullPointerException.class,
                 () -> new SoulGroupTypes.SceneParticipant(UUID.randomUUID(), "p", "n", null));
+    }
+
+    @Test
+    void ambientKindsAreBanterAndLocalOnly() {
+        assertTrue(SoulGroupTypes.SceneKind.BANTER.isAmbient());
+        assertTrue(SoulGroupTypes.SceneKind.LOCAL.isAmbient());
+        assertFalse(SoulGroupTypes.SceneKind.PLAYER.isAmbient(),
+                "player scenes keep the soul-DM visibility exemption");
+    }
+
+    @Test
+    void localScenesAreCappedAtOneLine() {
+        assertEquals(1, SoulGroupTypes.LOCAL_MAX_SCENE_LINES);
+    }
+
+    @Test
+    void localTurnUsesThePartyKeyOfItsOwner() {
+        UUID owner = UUID.randomUUID();
+        UUID bot = UUID.randomUUID();
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.LOCAL, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(bot, "frens:jake", "Jake",
+                        new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL,
+                                botSnapshot(bot, "Jake"), Optional.empty(), Instant.EPOCH))),
+                "heading to the ravine", Instant.EPOCH, UUID.randomUUID());
+
+        assertEquals(SoulGroupTypes.partyKey(owner), turn.key());
+        assertEquals(1, turn.roster().size(), "a scene of one is legal");
     }
 }
