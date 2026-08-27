@@ -2,6 +2,55 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Local chat polish: capture skipped when it cannot matter; roster-lost backoff; 1.1.179 (2026-08-27)
+
+Three deferred findings from the 1.1.178 final review, cleared while the feature sat
+undeployed. No behavior change the player can observe — the first item is an exact
+optimisation, not a heuristic.
+
+**The capture is now skipped when it provably cannot change the outcome.** Candidate
+selection runs in two phases: phase 1 scores every eligible bot on the line alone, phase 2
+captures the single winner and re-scores it with its `activeTask`. The only signal phase 2
+adds is that task overlap, worth exactly `WEIGHT_TOPIC_OVERLAP` (+2). So a phase-1 score
+more than 2 below `THRESHOLD` (4) can never reach it no matter what the bot is doing — and
+`SoulSnapshotBuilder.capture` (a raycast, a `BlockPos.iterate` sweep, three
+`getEntitiesByClass` scans, all on the server thread) is pure waste. New pure predicate
+`SoulLocalDirector.captureCouldReachThreshold(int)` gates it.
+
+In practice that is most lines: ordinary chatter with no bot mention, no stated intent, no
+question and under six words scores 0 or 1, so it now costs a distance loop and some string
+work rather than a world scan. Lines scoring 2+ still capture, exactly as before. The
+predicate is derived from the two constants rather than hardcoded, and a test iterates the
+whole range asserting it tracks them — so retuning the salience weights later cannot
+silently make the optimisation unsound. Continuations skip the check entirely: they bypass
+the salience gate and need their grounding for the scene regardless.
+
+Note the ordering that makes this safe: the clamp in `SoulLocalSalience.score` (`Math.max(0, …)`)
+does not break the bound, because clamping can only raise a negative raw score toward 0 in
+both phases equally.
+
+**`vetoed:roster-lost` now backs off.** When the single chosen candidate's capture throws,
+the director pushes `nextEligibleAtMs` by `RETRY_AFTER_VETO_MS` (~2 min) the same way the
+danger veto does. Whatever made capture throw will not clear within one chat line, and
+without the push a persistent failure re-attempted — and re-threw — on every single line
+typed. (Before the 1.1.178 fix wave this reason meant "every capture in the roster failed";
+since one-capture-per-line it means "the one candidate's capture failed", a strictly more
+precise diagnosis for the same `/bot soul local status` consumer.)
+
+**Banter-seed parity test strengthened.** `seedWithoutOverheardLinesIsUnchanged` only
+asserted the literal string "overheard" was absent from the seed — a weak proxy. Added
+`seedIsByteIdenticalWithAndWithoutAnEmptyOverheardList`, which builds the seed both ways
+from the same fixed random seed and asserts character-for-character equality.
+
+Still deferred, deliberately: `markWindowUsed` runs at scene submission rather than on
+delivery, so a continuation whose generation fails still burns the reply window. It is
+asymmetric with the delivery-gated *opening* built in 1.1.178, but fixing it means moving
+state across the fire/deliver boundary in the most intricate part of the director, and the
+symptom (one lost follow-up after a generation failure) is mild. Worth doing deliberately,
+not opportunistically.
+
+537 tests green.
+
 ## Soul ambient/local chat: companions overhear unaddressed chat, opt-in; 1.1.178 (2026-08-26)
 
 Fourth conversational surface on the pilot, and the last one before consolidation. Spec

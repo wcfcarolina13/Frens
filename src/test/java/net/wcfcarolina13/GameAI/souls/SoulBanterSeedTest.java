@@ -130,6 +130,19 @@ class SoulBanterSeedTest {
     }
 
     @Test
+    void seedIsByteIdenticalWithAndWithoutAnEmptyOverheardList() {
+        // Stronger than asserting the word "overheard" is absent: an empty list must produce
+        // exactly the seed the pre-feature builder produced, character for character.
+        String withEmpty = SoulBanterSeed.build(
+                List.of(groundingWithOverheard(List.of())),
+                List.of(List.of()), "Bradley", "mining", new Random(4));
+        String plain = SoulBanterSeed.build(
+                List.of(grounding()),
+                List.of(List.of()), "Bradley", "mining", new Random(4));
+        assertEquals(plain, withEmpty);
+    }
+
+    @Test
     void seedWithoutOverheardLinesIsUnchanged() {
         String seed = SoulBanterSeed.build(
                 List.of(groundingWithOverheard(List.of())),

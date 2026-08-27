@@ -212,4 +212,32 @@ class SoulLocalDirectorTest {
                 -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty());
     }
+
+    @Test
+    void captureIsSkippedWhenNoActiveTaskOverlapCouldReachTheThreshold() {
+        // The only signal the capture adds is activeTask overlap, worth exactly
+        // WEIGHT_TOPIC_OVERLAP. So a phase-1 score that far below THRESHOLD can never reach it,
+        // and the (expensive) capture is provably pointless.
+        int reachable = SoulLocalSalience.THRESHOLD - SoulLocalSalience.WEIGHT_TOPIC_OVERLAP;
+        assertFalse(SoulLocalDirector.captureCouldReachThreshold(reachable - 1),
+                "below the reachable floor, capture cannot change the outcome");
+        assertTrue(SoulLocalDirector.captureCouldReachThreshold(reachable),
+                "exactly at the floor, overlap alone would tie the threshold");
+        assertTrue(SoulLocalDirector.captureCouldReachThreshold(SoulLocalSalience.THRESHOLD),
+                "already over the threshold without any overlap");
+        assertFalse(SoulLocalDirector.captureCouldReachThreshold(0),
+                "a zero-scoring line is the common case and must not pay for a capture");
+    }
+
+    @Test
+    void theSkipFloorTracksTheConstantsRatherThanAHardcodedNumber() {
+        // Guards against someone retuning THRESHOLD or WEIGHT_TOPIC_OVERLAP in the salience
+        // class and silently making this optimisation unsound.
+        for (int phase1 = 0; phase1 <= SoulLocalSalience.THRESHOLD + 2; phase1++) {
+            boolean couldReach = phase1 + SoulLocalSalience.WEIGHT_TOPIC_OVERLAP
+                    >= SoulLocalSalience.THRESHOLD;
+            assertEquals(couldReach, SoulLocalDirector.captureCouldReachThreshold(phase1),
+                    "phase1=" + phase1);
+        }
+    }
 }

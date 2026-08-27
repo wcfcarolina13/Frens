@@ -221,6 +221,17 @@ public final class SoulLocalDirector {
         boolean bestIsContinuation = candidateBot != null && windowBotId != null
                 && windowBotId.equals(candidateBot.getUuid());
 
+        // Phase 1b — the cheapest reject of all: when no possible activeTask overlap could lift
+        // this candidate to the threshold, skip the capture entirely. Exact, not heuristic (see
+        // captureCouldReachThreshold), so the outcome is identical to capturing and re-scoring.
+        int candidatePhase1Score = candidateIndex < 0 ? 0 : scored.get(candidateIndex).score();
+        if (candidateBot != null && !bestIsContinuation
+                && !captureCouldReachThreshold(candidatePhase1Score)) {
+            recordVerdict(playerId, "vetoed:salience");
+            lastScore.put(playerId, candidatePhase1Score);
+            return;
+        }
+
         // Phase 2 — the single capture, and only then the salience threshold and danger veto.
         SoulTypes.GroundingSnapshot bestSnapshot = null;
         int bestScore = -1;
@@ -235,6 +246,10 @@ public final class SoulLocalDirector {
                 // from a normal salience miss, so report it as its own reason.
                 recordVerdict(playerId, "vetoed:roster-lost");
                 lastScore.put(playerId, 0);
+                // Back off like the danger veto does: whatever made capture throw is unlikely to
+                // clear within one chat line, and without this a persistent failure re-attempts
+                // (and re-throws) on every single line the player types.
+                nextEligibleAtMs.merge(playerId, now + RETRY_AFTER_VETO_MS, Math::max);
                 return;
             }
             // Re-score with the captured bot's active task, the one signal phase 1 could not see.
@@ -523,6 +538,22 @@ public final class SoulLocalDirector {
             return "salience";
         }
         return null;
+    }
+
+    /**
+     * True when capturing the candidate could still change the salience outcome. Phase 1 scores
+     * a line with an empty {@code activeTask}; the ONLY signal the capture adds is that overlap,
+     * worth exactly {@link SoulLocalSalience#WEIGHT_TOPIC_OVERLAP}. So a phase-1 score more than
+     * that far below {@link SoulLocalSalience#THRESHOLD} provably cannot reach it, and the
+     * capture — a raycast, a block sweep and three entity scans on the server thread — is pure
+     * waste for the common case of ordinary chatter.
+     *
+     * <p>Derived from the constants rather than hardcoded, so retuning either one keeps this
+     * sound. Continuations skip this check entirely: they bypass the salience gate, and their
+     * grounding is needed for the scene regardless.
+     */
+    static boolean captureCouldReachThreshold(int phase1Score) {
+        return phase1Score + SoulLocalSalience.WEIGHT_TOPIC_OVERLAP >= SoulLocalSalience.THRESHOLD;
     }
 
     /** Post-capture danger veto — identical rule to banter's. */
