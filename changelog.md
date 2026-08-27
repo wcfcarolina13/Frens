@@ -245,22 +245,25 @@ closes; pick a fight during the window → `danger` veto; cooldown spacing over 
 with banter and local alternating rather than stacking; `/bot soul reset party`
 archiving local records alongside group-chat and banter ones.
 
-**Follow-ups (deferred during this plan, not blocking, not yet fixed):**
+**Follow-ups — status as of 1.1.179 (2026-08-27):**
 
-- `mentionsBotNotLeading` (salience scorer) uses raw `String.indexOf`, not word-boundary
-  matching — a short bot name ("Al", "Sam") would substring-match inside ordinary words
-  and inflate salience. Contrived for "Jake," real for short names; a 3-line regex fix.
-- `SoulLocalDirector.statusFor` doesn't report enablement itself (spec §8 lists it); the
-  `/bot soul local status` command layer already prints enablement separately ahead of
-  the director's status, so this may already be satisfied in practice — worth a quick
-  look before touching the director.
-- `vetoed:roster-lost` (every roster candidate's `capture` throwing) does not push
-  `nextEligibleAtMs`, so repeated capture failures would retry on every single chat line;
-  banter's equivalent path does push its cooldown. Cheap fix, low blast radius.
-- `GroupScenePlaybackTest.banterCombatAbortOnlyAppliesToBanterScenes` now near-duplicates
-  the newer `ambientCombatAbortAppliesToAmbientKindsOnly` and kept its stale banter-only
-  name after the generalization to `isAmbient()`. Housekeeping only — delete the older
-  test.
+- ~~`mentionsBotNotLeading` uses raw `String.indexOf` rather than word-boundary matching~~
+  — **FIXED in the 1.1.178 final-review fix wave** (regex word boundaries, with a test
+  proving a bot named "Al" does not match inside "also").
+- ~~`vetoed:roster-lost` does not push `nextEligibleAtMs`~~ — **FIXED in 1.1.179.**
+- ~~`GroupScenePlaybackTest` stale duplicate~~ — **FIXED in the 1.1.178 fix wave** (older
+  test deleted).
+- `SoulLocalDirector.statusFor` doesn't report enablement itself (spec §8 lists it). Left
+  alone deliberately: the `/bot soul local status` command layer already prints
+  `"Local chat is ON/OFF. "` ahead of the director's verdict, so the user-visible output
+  is complete and the director stays free of a concern the command owns. Consider this
+  closed unless the director's status ever gains a second consumer.
+- **Open, deliberately deferred:** `markWindowUsed` runs at scene submission rather than
+  on delivery, so a continuation whose generation fails still burns the reply window —
+  asymmetric with the delivery-gated *opening*. Fixing it means moving state across the
+  fire/deliver boundary in the director's most intricate section for a mild symptom (one
+  lost follow-up after a generation failure). Worth doing deliberately, not
+  opportunistically.
 - `SoulLocalMemoryTest`/`SoulGroupPromptAssemblerTest` (task 1, 4 reports)
   each carry one weak or forward-referencing assertion flagged during review
   (`seedWithoutOverheardLinesIsUnchanged` only checks the literal string "overheard" is
