@@ -2,6 +2,24 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Global toggles viewport + scroll strip fixes; 1.1.189 (2026-08-29)
+
+Field report from the 1.1.188 test (screenshots): the expanded global-toggle list showed ONE row,
+and pressing the scroll strip toggled the row underneath it.
+
+- **Toggle rows now win the height budget.** The 1.1.185 clamp reserved a fixed 113 px below the
+  panel (alias label + dropdown + a 60 px settings panel) and pinned the two bulk rows inside it;
+  on Bradley's logical resolution that left a single visible toggle. `recomputeLayout` now shrinks
+  the settings-panel reservation to a sliver until at least 5 rows fit (the per-bot panel scrolls
+  anyway), and drops the ALL ON/ALL OFF rows entirely if even 3 rows can't fit with them.
+- **The scroll strip is a real scrollbar.** It is hit-tested before the rows (a gutter click used
+  to fall through to the row-wide toggle hit test), the thumb drags, a track click pages and
+  picks the thumb up, and the 9 px gutter is excluded from row/chip toggling. Thumb highlights on
+  hover/drag.
+
+Verification: full suite green; check in-game that expanding the globals shows ≥5 rows (or all
+11) on the same window, the strip drags, and no toggle flips when it is pressed.
+
 ## Dialogue pacing sliders + active banter; 1.1.188 (2026-08-29)
 
 Spec: `docs/superpowers/specs/2026-08-29-frens-dialogue-pacing-design.md`; plan:

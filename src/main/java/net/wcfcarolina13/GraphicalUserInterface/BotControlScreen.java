@@ -139,6 +139,15 @@ public class BotControlScreen extends Screen {
     /** First visible toggle row when the expanded panel is height-clamped. */
     private int globalScrollRow = 0;
     private boolean globalRowsClamped = false;
+    /** Bulk ALL ON/OFF rows are dropped when the window can't show even 3 toggle rows with them. */
+    private boolean bulkSectionHidden = false;
+    /** Scroll-strip drag state for the clamped toggle list (mirrors draggingScroll below). */
+    private boolean draggingGlobalScroll = false;
+    private int globalScrollGrabOffset = 0;
+    /** Toggle rows win the height budget until at least this many are visible. */
+    private static final int MIN_VISIBLE_GLOBAL_ROWS = 5;
+    /** Gutter right of the chips: scroll strip lives here and row hit-tests stop before it. */
+    private static final int GLOBAL_SCROLL_GUTTER_W = 9;
     private int globalVisibleRows = GLOBAL_TOGGLES.size();
     private final List<Rect> globalChipRects = new ArrayList<>();
     /** "Adv…" chip on the Voice row — opens the per-category voice mute screen. */
@@ -304,23 +313,38 @@ public class BotControlScreen extends Screen {
         // The expanded panel is now clamped to fit above the footer; when clamped, the
         // toggle rows scroll (mouse wheel) and the bulk section stays pinned at the panel
         // bottom.
+        int rowH = getGlobalRowHeight();
         int bulkSectionH = globalsExpanded ? getBulkSectionHeight() : 0;
         int footerTop = outerPanelY + outerPanelH - 30;
-        int desiredPanelH = GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20 + bulkSectionH;
+        int available = footerTop - (globalsStartY - 1);
         // Reserve room for everything that lays out BELOW the panel (review #5): the alias
         // label+dropdown and a minimum usable settings panel. Without this, a clamped panel
         // pushed the dropdown onto the footer band (where its hit-test, which runs before the
         // footer's, ate the clicks) and the per-bot settings panel computed to zero height.
-        int reservedBelow = 8 + this.textRenderer.fontHeight + 4 // alias label
-                + BUTTON_H + 6                                    // alias dropdown + gap
-                + 60                                              // minimum settings panel
-                + 6;                                              // panel bottom margin
-        int maxPanelH = Math.max(20 + getGlobalRowHeight() + bulkSectionH,
-                footerTop - reservedBelow - (globalsStartY - 1));
+        int belowDropdown = 8 + this.textRenderer.fontHeight + 4 // alias label
+                + BUTTON_H + 6;                                   // alias dropdown + gap
+        int reservedBelow = belowDropdown + 60 + 6;               // + minimum settings panel + margin
+        int maxPanelH = available - reservedBelow;
+        // 2026-08-29 field report: on Bradley's logical resolution that reservation plus the
+        // pinned bulk rows left ONE visible toggle row. The toggle rows are what the player
+        // expanded the panel to use, and the per-bot settings panel below scrolls anyway —
+        // so the rows take the height budget first: shrink the settings-panel reservation to
+        // a sliver until MIN_VISIBLE_GLOBAL_ROWS fit, then drop the bulk rows entirely if
+        // even 3 rows don't fit with them.
+        int minRowsWanted = Math.min(GLOBAL_TOGGLES.size(), MIN_VISIBLE_GLOBAL_ROWS);
+        if (globalsExpanded && (maxPanelH - 20 - bulkSectionH) / rowH < minRowsWanted) {
+            maxPanelH = available - (belowDropdown + 24 + 6);
+        }
+        bulkSectionHidden = globalsExpanded && (maxPanelH - 20 - bulkSectionH) / rowH < 3;
+        if (bulkSectionHidden) {
+            bulkSectionH = 0;
+        }
+        int desiredPanelH = GLOBAL_TOGGLES.size() * rowH + 20 + bulkSectionH;
+        maxPanelH = Math.max(20 + rowH + bulkSectionH, maxPanelH);
         int globalPanelH = globalsExpanded ? Math.min(desiredPanelH, maxPanelH) : 18;
         globalRowsClamped = globalsExpanded && desiredPanelH > maxPanelH;
         globalVisibleRows = globalsExpanded
-                ? Math.max(1, (globalPanelH - 20 - bulkSectionH) / getGlobalRowHeight())
+                ? Math.max(1, (globalPanelH - 20 - bulkSectionH) / rowH)
                 : GLOBAL_TOGGLES.size();
         if (!globalRowsClamped) {
             globalScrollRow = 0;
@@ -857,23 +881,29 @@ public class BotControlScreen extends Screen {
         // Scroll indicator when the row list is clamped: a thin position strip in the 7px
         // gutter right of the chips (the arrow glyphs drew inside the chip rects — review).
         if (globalRowsClamped && GLOBAL_TOGGLES.size() > 0) {
-            int rowsTop = globalPanelRect.y + 19;
-            int rowsBottom = globalPanelRect.bottom() - getBulkSectionHeight();
-            int trackH = rowsBottom - rowsTop;
-            int thumbH = Math.max(8, trackH * globalVisibleRows / GLOBAL_TOGGLES.size());
-            int thumbY = rowsTop + (trackH - thumbH) * globalScrollRow
-                    / Math.max(1, GLOBAL_TOGGLES.size() - globalVisibleRows);
-            context.fill(globalPanelRect.right() - 4, rowsTop,
-                    globalPanelRect.right() - 2, rowsBottom, 0x30FFFFFF);
-            context.fill(globalPanelRect.right() - 4, thumbY,
-                    globalPanelRect.right() - 2, thumbY + thumbH, COL_SECTION | 0xFF000000);
+            ScrollTrack track = globalScrollTrack();
+            boolean stripHover = draggingGlobalScroll || isInGlobalScrollGutter(mouseX, mouseY);
+            context.fill(globalPanelRect.right() - 6, track.top(),
+                    globalPanelRect.right() - 2, track.top() + track.trackH(), 0x30FFFFFF);
+            context.fill(globalPanelRect.right() - 6, track.thumbY(),
+                    globalPanelRect.right() - 2, track.thumbY() + track.thumbH(),
+                    (stripHover ? COL_LABEL : COL_SECTION) | 0xFF000000);
+        }
+
+        // Too short for the bulk rows: the toggle list took their height (see recomputeLayout).
+        if (bulkSectionHidden) {
+            bulkAutoRespawnOnRect = null;
+            bulkAutoRespawnOffRect = null;
+            bulkAutoSpawnOnLoadOnRect = null;
+            bulkAutoSpawnOnLoadOffRect = null;
+            return;
         }
 
         // ── Bulk Apply section ────────────────────────────────────────────────
         // Compact: thin separator line + 2 rows with [ALL ON] / [ALL OFF] action
         // buttons.  Pinned to the panel bottom so a clamped/scrolling row list above can
         // never push it past the footer.
-        y = globalPanelRect.bottom() - getBulkSectionHeight();
+        y = globalPanelRect.bottom() - effectiveBulkSectionHeight();
         y += 2;
         context.fill(globalPanelRect.x + 6, y, globalPanelRect.right() - 6, y + 1, COL_SEC_LINE);
         y += 2;
@@ -1281,6 +1311,46 @@ public class BotControlScreen extends Screen {
         return compactLayout ? 15 : GLOBAL_ROW_H;
     }
 
+    /** Zero while the bulk rows are hidden (see recomputeLayout). */
+    private int effectiveBulkSectionHeight() {
+        return bulkSectionHidden ? 0 : getBulkSectionHeight();
+    }
+
+    /** Geometry of the clamped toggle list's scroll strip (rows band right of the chips). */
+    private record ScrollTrack(int top, int trackH, int thumbH, int thumbY) {
+        int bottom() {
+            return top + trackH;
+        }
+    }
+
+    private ScrollTrack globalScrollTrack() {
+        int rowsTop = globalPanelRect.y + 19;
+        int rowsBottom = globalPanelRect.bottom() - effectiveBulkSectionHeight();
+        int trackH = Math.max(1, rowsBottom - rowsTop);
+        int thumbH = Math.min(trackH, Math.max(8, trackH * globalVisibleRows / Math.max(1, GLOBAL_TOGGLES.size())));
+        int thumbY = rowsTop + (trackH - thumbH) * globalScrollRow
+                / Math.max(1, GLOBAL_TOGGLES.size() - globalVisibleRows);
+        return new ScrollTrack(rowsTop, trackH, thumbH, thumbY);
+    }
+
+    private boolean isInGlobalScrollGutter(double mx, double my) {
+        if (!globalsExpanded || !globalRowsClamped || globalPanelRect == null) {
+            return false;
+        }
+        ScrollTrack track = globalScrollTrack();
+        return mx >= globalPanelRect.right() - GLOBAL_SCROLL_GUTTER_W && mx <= globalPanelRect.right()
+                && my >= track.top() && my < track.bottom();
+    }
+
+    /** Maps a strip y (thumb top) to a scroll row; clamps to the valid range. */
+    private void setGlobalScrollFromThumbY(double thumbTopY) {
+        ScrollTrack track = globalScrollTrack();
+        int maxRow = Math.max(0, GLOBAL_TOGGLES.size() - globalVisibleRows);
+        int travel = Math.max(1, track.trackH() - track.thumbH());
+        double ratio = (thumbTopY - track.top()) / (double) travel;
+        globalScrollRow = MathHelper.clamp((int) Math.round(ratio * maxRow), 0, maxRow);
+    }
+
     private int getBulkSectionHeight() {
         // Thin separator (2 gap + 1 line + 2 gap = 5) + 2 compact rows (rowH each).
         // No explicit section header — the row labels ("Auto Respawn — All Bots"
@@ -1365,6 +1435,22 @@ public class BotControlScreen extends Screen {
                 return true;
             }
 
+            // Scroll strip (clamped list only) — must win over the row-wide toggle hit test:
+            // a click in the gutter used to toggle whatever row it landed on (field report).
+            if (isInGlobalScrollGutter(mx, my)) {
+                ScrollTrack track = globalScrollTrack();
+                if (my >= track.thumbY() && my < track.thumbY() + track.thumbH()) {
+                    draggingGlobalScroll = true;
+                    globalScrollGrabOffset = (int) my - track.thumbY();
+                } else {
+                    // Click on the track: page in that direction and pick up the thumb there.
+                    setGlobalScrollFromThumbY(my - track.thumbH() / 2.0);
+                    draggingGlobalScroll = true;
+                    globalScrollGrabOffset = track.thumbH() / 2;
+                }
+                return true;
+            }
+
             // "Adv…" chips on the Voice/Text rows — must win over the row-wide toggle hit test.
             if (voiceAdvancedRect != null && voiceAdvancedRect.contains(mx, my)) {
                 if (this.client != null) {
@@ -1402,7 +1488,8 @@ public class BotControlScreen extends Screen {
             for (int v = 0; v < globalChipRects.size(); v++) {
                 Rect chipRect = globalChipRects.get(v);
                 Rect rowRect = globalRowRects.get(v);
-                if (chipRect.contains(mx, my) || rowRect.contains(mx, my)) {
+                boolean inGutter = globalRowsClamped && mx >= globalPanelRect.right() - GLOBAL_SCROLL_GUTTER_W;
+                if (!inGutter && (chipRect.contains(mx, my) || rowRect.contains(mx, my))) {
                     int toggleIndex = globalRowIndices.get(v);
                     globalValues[toggleIndex] = !globalValues[toggleIndex];
                     saveSettings();
@@ -1515,6 +1602,11 @@ public class BotControlScreen extends Screen {
     @Override
     public boolean mouseDragged(net.minecraft.client.gui.Click click,
                                 double deltaX, double deltaY) {
+        if (draggingGlobalScroll) {
+            resetTooltipHoverState();
+            setGlobalScrollFromThumbY(click.y() - globalScrollGrabOffset);
+            return true;
+        }
         if (draggingScroll) {
             resetTooltipHoverState();
             int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
@@ -1538,6 +1630,10 @@ public class BotControlScreen extends Screen {
 
     @Override
     public boolean mouseReleased(net.minecraft.client.gui.Click click) {
+        if (draggingGlobalScroll) {
+            draggingGlobalScroll = false;
+            return true;
+        }
         if (draggingScroll) {
             draggingScroll = false;
             return true;
