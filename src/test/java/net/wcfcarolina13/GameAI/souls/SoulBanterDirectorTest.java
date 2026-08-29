@@ -110,4 +110,35 @@ class SoulBanterDirectorTest {
         }
         assertTrue(hits > 800 && hits < 1200, "expected ~1000/3000, got " + hits);
     }
+    @Test
+    void scaledCooldownBandsFollowTheMultiplier() {
+        Random random = new Random(3);
+        for (int i = 0; i < 500; i++) {
+            long slow = SoulBanterDirector.nextDelayMs(random, 4.0);
+            assertTrue(slow >= 32 * 60_000L && slow <= 60 * 60_000L, "slow=" + slow);
+            long fast = SoulBanterDirector.nextDelayMs(random, 0.25);
+            assertTrue(fast >= 2 * 60_000L && fast <= 15 * 60_000L / 4, "fast=" + fast);
+            long active = SoulBanterDirector.nextActiveDelayMs(random, 1.0);
+            assertTrue(active >= 4 * 60_000L && active <= 8 * 60_000L, "active=" + active);
+        }
+        assertEquals(SoulBanterDirector.nextDelayMs(new Random(9)), SoulBanterDirector.nextDelayMs(new Random(9), 1.0));
+        assertEquals(4.0, SoulBanterDirector.multiplier(0), 1e-9);
+        assertEquals(0.25, SoulBanterDirector.multiplier(100), 1e-9);
+    }
+
+    @Test
+    void activeVetoOrderAddsNobodyWorkingAndRelaxesAtEase() {
+        assertNull(SoulBanterDirector.firstActiveVeto(true, true, true, true, true, true, true, 2, 1, true));
+        assertEquals("disabled", SoulBanterDirector.firstActiveVeto(false, true, true, true, true, true, true, 2, 1, true));
+        assertEquals("pipeline", SoulBanterDirector.firstActiveVeto(true, false, true, true, true, true, true, 2, 1, true));
+        assertEquals("cooldown", SoulBanterDirector.firstActiveVeto(true, true, false, true, true, true, true, 2, 1, true));
+        assertEquals("busy", SoulBanterDirector.firstActiveVeto(true, true, true, false, true, true, true, 2, 1, true));
+        assertEquals("muted", SoulBanterDirector.firstActiveVeto(true, true, true, true, false, true, true, 2, 1, true));
+        assertEquals("player-not-ready", SoulBanterDirector.firstActiveVeto(true, true, true, true, true, false, true, 2, 1, true));
+        assertEquals("not-quiet", SoulBanterDirector.firstActiveVeto(true, true, true, true, true, true, false, 2, 1, true));
+        assertEquals("roster", SoulBanterDirector.firstActiveVeto(true, true, true, true, true, true, true, 0, 0, true));
+        assertEquals("nobody-working", SoulBanterDirector.firstActiveVeto(true, true, true, true, true, true, true, 2, 0, true));
+        assertEquals("bots-apart", SoulBanterDirector.firstActiveVeto(true, true, true, true, true, true, true, 2, 1, false));
+        assertEquals(30_000L, SoulBanterDirector.ACTIVE_QUIET_WINDOW_MS);
+    }
 }

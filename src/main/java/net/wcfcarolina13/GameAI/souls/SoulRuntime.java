@@ -269,8 +269,23 @@ public final class SoulRuntime {
                         ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                         return cfg != null && cfg.isSoulBanterEnabled();
                     },
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg != null && cfg.isSoulBanterActiveEnabled();
+                    },
                     ambientTextOpen, ambientVoiceOpen,
                     srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
+                    // "Working" = a skill ticket is open, or the bot is actively following a player.
+                    bot -> net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid())
+                            || net.wcfcarolina13.GameAI.BotEventHandler.isFollowingPlayer(bot),
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg == null ? 50 : cfg.getSoulBanterIdleRate();
+                    },
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg == null ? 50 : cfg.getSoulBanterActiveRate();
+                    },
                     System::currentTimeMillis, new java.util.Random());
             runtime.localDirector = new SoulLocalDirector(runtime, server,
                     () -> {
@@ -279,6 +294,10 @@ public final class SoulRuntime {
                     },
                     ambientTextOpen, ambientVoiceOpen,
                     srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg == null ? 50 : cfg.getSoulLocalRate();
+                    },
                     System::currentTimeMillis, new java.util.Random());
             INSTANCE.set(runtime);
             runtime.preloadIndex().exceptionally(ex -> {

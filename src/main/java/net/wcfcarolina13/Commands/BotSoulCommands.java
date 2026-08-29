@@ -648,12 +648,14 @@ final class BotSoulCommands {
         }
         ManualConfig config = Frens.CONFIG;
         boolean enabled = config != null && config.isSoulBanterEnabled();
+        boolean active = config != null && config.isSoulBanterActiveEnabled();
         String verdict = SoulRuntime.current()
                 .map(rt -> rt.banterStatus(actor.getUuid()))
                 .orElse("Soul runtime is not currently running.");
         ChatUtils.sendSystemMessage(source,
-                "Banter is " + (enabled ? "ON" : "OFF") + ". " + verdict + ambientSurfaceWarning()
-                        + (enabled ? replyRoutingNote() : ""));
+                "Banter is " + (enabled ? "ON" : "OFF") + ", active banter is " + (active ? "ON" : "OFF")
+                        + ". " + verdict + ambientSurfaceWarning()
+                        + ((enabled || active) ? replyRoutingNote() : ""));
         return 1;
     }
 

@@ -257,4 +257,12 @@ class SoulLocalDirectorTest {
         assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
                 SoulGroupTypes.SceneKind.PLAYER, true, 1, 0));
     }
+    @Test
+    void scaledCooldownBandFollowsTheMultiplier() {
+        Random random = new Random(5);
+        for (int i = 0; i < 500; i++) {
+            long slow = SoulLocalDirector.nextDelayMs(random, 4.0);
+            assertTrue(slow >= 24 * 60_000L && slow <= 48 * 60_000L, "slow=" + slow);
+        }
+    }
 }

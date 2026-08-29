@@ -18,6 +18,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.random.RandomGenerator;
 
@@ -57,6 +58,8 @@ public final class SoulLocalDirector {
     private final BooleanSupplier ambientTextOpen;
     private final BooleanSupplier ambientVoiceOpen;
     private final Function<MinecraftServer, List<ServerPlayerEntity>> botsProvider;
+    /** Local chime-in rate (0–100, 50 = shipped) — see DialoguePacing; injected to stay Frens-free. */
+    private final IntSupplier localRate;
     private final LongSupplier clock;
     private final RandomGenerator random;
 
@@ -118,13 +121,14 @@ public final class SoulLocalDirector {
                               BooleanSupplier localChatEnabled, BooleanSupplier ambientTextOpen,
                               BooleanSupplier ambientVoiceOpen,
                               Function<MinecraftServer, List<ServerPlayerEntity>> botsProvider,
-                              LongSupplier clock, RandomGenerator random) {
+                              IntSupplier localRate, LongSupplier clock, RandomGenerator random) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.server = Objects.requireNonNull(server, "server");
         this.localChatEnabled = Objects.requireNonNull(localChatEnabled, "localChatEnabled");
         this.ambientTextOpen = Objects.requireNonNull(ambientTextOpen, "ambientTextOpen");
         this.ambientVoiceOpen = Objects.requireNonNull(ambientVoiceOpen, "ambientVoiceOpen");
         this.botsProvider = Objects.requireNonNull(botsProvider, "botsProvider");
+        this.localRate = Objects.requireNonNull(localRate, "localRate");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
     }
@@ -292,7 +296,7 @@ public final class SoulLocalDirector {
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 SoulGroupTypes.SceneKind.LOCAL, playerId, player.getName().getString(),
                 List.of(participant), line, Instant.now(), routingId);
-        long armedUntilMs = now + nextDelayMs(random);
+        long armedUntilMs = now + nextDelayMs(random, cadenceMultiplier());
         nextEligibleAtMs.put(playerId, armedUntilMs);
         if (bestIsContinuation) {
             markWindowUsed(playerId);
@@ -393,7 +397,7 @@ public final class SoulLocalDirector {
         if (playerId == null) {
             return;
         }
-        nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelayMs(random));
+        nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelayMs(random, cadenceMultiplier()));
         replyWindows.remove(playerId);
         // Same reasoning as noteAddressedChat: a real conversation re-arming the cooldown must
         // not let a still-in-flight LOCAL scene's delivery open a window afterward.
@@ -527,7 +531,17 @@ public final class SoulLocalDirector {
     }
 
     static long nextDelayMs(RandomGenerator random) {
-        return 6 * 60_000L + (long) (random.nextDouble() * 6 * 60_000L);
+        return nextDelayMs(random, 1.0);
+    }
+
+    /** 6–12 min × the Local rate multiplier (DialoguePacing math, mirrored to stay Frens-free). */
+    static long nextDelayMs(RandomGenerator random, double multiplier) {
+        return Math.round((6 * 60_000L + random.nextDouble() * 6 * 60_000L) * multiplier);
+    }
+
+    private double cadenceMultiplier() {
+        int r = Math.max(0, Math.min(100, localRate.getAsInt()));
+        return Math.pow(4.0, (50 - r) / 50.0);
     }
 
     /** One eligible roster bot with its phase-1 (capture-free) salience score. */

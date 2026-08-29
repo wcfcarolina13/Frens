@@ -18,7 +18,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.random.RandomGenerator;
 
 /**
@@ -50,6 +52,8 @@ public final class SoulBanterDirector {
     static final double BOT_PROXIMITY_BLOCKS = 12.0;
     /** Journal tail fetched per roster bot for the seed builder. */
     static final int EVENT_FETCH_WINDOW = 12;
+    /** Active lane: work continues under chat, so only a short hush is required. */
+    static final long ACTIVE_QUIET_WINDOW_MS = 30_000L;
 
     private final SoulRuntime runtime;
     private final MinecraftServer server;
@@ -65,17 +69,36 @@ public final class SoulBanterDirector {
     private final Set<UUID> pendingAttempts = ConcurrentHashMap.newKeySet();
     private final Map<UUID, String> lastVerdict = new ConcurrentHashMap<>();
 
+    // Active lane (2026-08-29 pacing spec §3.4): companions chat WHILE working. Own enable,
+    // own cadence, own cooldown + verdict per player; pendingAttempts is shared so the two
+    // lanes never race one player into two scenes.
+    private final BooleanSupplier activeEnabled;
+    private final Predicate<ServerPlayerEntity> workingProbe;
+    private final IntSupplier idleRate;
+    private final IntSupplier activeRate;
+    private final Map<UUID, Long> nextActiveAtMs = new ConcurrentHashMap<>();
+    private final Map<UUID, String> lastActiveVerdict = new ConcurrentHashMap<>();
+
+    /** Which banter lane a scene belongs to; each has its own cooldown map and verdict. */
+    enum Lane { IDLE, ACTIVE }
+
     public SoulBanterDirector(SoulRuntime runtime, MinecraftServer server,
-                               BooleanSupplier banterEnabled, BooleanSupplier ambientTextOpen,
-                               BooleanSupplier ambientVoiceOpen,
+                               BooleanSupplier banterEnabled, BooleanSupplier activeEnabled,
+                               BooleanSupplier ambientTextOpen, BooleanSupplier ambientVoiceOpen,
                                Function<MinecraftServer, List<ServerPlayerEntity>> botsProvider,
+                               Predicate<ServerPlayerEntity> workingProbe,
+                               IntSupplier idleRate, IntSupplier activeRate,
                                LongSupplier clock, RandomGenerator random) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.server = Objects.requireNonNull(server, "server");
         this.banterEnabled = Objects.requireNonNull(banterEnabled, "banterEnabled");
+        this.activeEnabled = Objects.requireNonNull(activeEnabled, "activeEnabled");
         this.ambientTextOpen = Objects.requireNonNull(ambientTextOpen, "ambientTextOpen");
         this.ambientVoiceOpen = Objects.requireNonNull(ambientVoiceOpen, "ambientVoiceOpen");
         this.botsProvider = Objects.requireNonNull(botsProvider, "botsProvider");
+        this.workingProbe = Objects.requireNonNull(workingProbe, "workingProbe");
+        this.idleRate = Objects.requireNonNull(idleRate, "idleRate");
+        this.activeRate = Objects.requireNonNull(activeRate, "activeRate");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.random = Objects.requireNonNull(random, "random");
     }
@@ -85,8 +108,8 @@ public final class SoulBanterDirector {
         if (++tickCounter % EVAL_INTERVAL_TICKS != 0) {
             return;
         }
-        if (!banterEnabled.getAsBoolean()) {
-            return; // fully dark when off: no verdict churn, no logs
+        if (!banterEnabled.getAsBoolean() && !activeEnabled.getAsBoolean()) {
+            return; // fully dark when both lanes are off: no verdict churn, no logs
         }
         long now = clock.getAsLong();
         List<ServerPlayerEntity> bots = botsProvider.apply(server);
@@ -101,7 +124,12 @@ public final class SoulBanterDirector {
                     || pendingAttempts.contains(player.getUuid())) {
                 continue;
             }
-            evaluate(player, bots, now);
+            if (banterEnabled.getAsBoolean()) {
+                evaluate(player, bots, now);
+            }
+            if (activeEnabled.getAsBoolean() && !pendingAttempts.contains(player.getUuid())) {
+                evaluateActive(player, bots, now);
+            }
         }
     }
 
@@ -121,11 +149,43 @@ public final class SoulBanterDirector {
                 rosterBots.size(),
                 botsCloseTogether(rosterBots));
         if (veto != null) {
-            recordVerdict(playerId, "vetoed:" + veto);
+            recordVerdict(playerId, Lane.IDLE, "vetoed:" + veto);
             return;
         }
+        beginScene(playerId, rosterBots, Lane.IDLE);
+    }
 
-        // Phase A passed — fetch the roster's recent events off-thread, then hop back.
+    /** Active lane, Phase A: same roster rules, its own gate chain, needs someone working. */
+    private void evaluateActive(ServerPlayerEntity player, List<ServerPlayerEntity> bots, long now) {
+        UUID playerId = player.getUuid();
+        long nextAt = nextActiveAtMs.computeIfAbsent(playerId, id -> now + initialDelayMs(random));
+        List<ServerPlayerEntity> rosterBots = eligibleRosterBots(player, bots);
+        int working = 0;
+        for (ServerPlayerEntity bot : rosterBots) {
+            if (workingProbe.test(bot)) {
+                working++;
+            }
+        }
+        String veto = firstActiveVeto(
+                activeEnabled.getAsBoolean(),
+                runtime.pipelineAvailable(),
+                now >= nextAt,
+                runtime.isSceneBudgetFree(playerId),
+                ambientTextOpen.getAsBoolean() || ambientVoiceOpen.getAsBoolean(),
+                playerReady(player),
+                now - SoulPlayerActivity.lastChatAt(playerId) >= ACTIVE_QUIET_WINDOW_MS,
+                rosterBots.size(),
+                working,
+                botsCloseTogether(rosterBots));
+        if (veto != null) {
+            recordVerdict(playerId, Lane.ACTIVE, "vetoed:" + veto);
+            return;
+        }
+        beginScene(playerId, rosterBots, Lane.ACTIVE);
+    }
+
+    /** Phase A tail shared by both lanes: fetch recent events off-thread, hop back, fire. */
+    private void beginScene(UUID playerId, List<ServerPlayerEntity> rosterBots, Lane lane) {
         pendingAttempts.add(playerId);
         List<UUID> rosterIds = rosterBots.stream().map(ServerPlayerEntity::getUuid).toList();
         List<CompletableFuture<List<SoulTypes.SoulEvent>>> fetches = new ArrayList<>();
@@ -140,7 +200,7 @@ public final class SoulBanterDirector {
                         for (CompletableFuture<List<SoulTypes.SoulEvent>> fetch : fetches) {
                             eventsPerBot.add(fetch.getNow(List.of()));
                         }
-                        fireScene(playerId, rosterIds, eventsPerBot);
+                        fireScene(playerId, rosterIds, eventsPerBot, lane);
                     } finally {
                         pendingAttempts.remove(playerId);
                     }
@@ -149,13 +209,16 @@ public final class SoulBanterDirector {
 
     /** Phase B, server thread: re-check, capture, danger-veto, seed, submit. */
     private void fireScene(UUID playerId, List<UUID> rosterIds,
-                            List<List<SoulTypes.SoulEvent>> eventsPerBot) {
+                            List<List<SoulTypes.SoulEvent>> eventsPerBot, Lane lane) {
         long now = clock.getAsLong();
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
-        if (player == null || !banterEnabled.getAsBoolean() || !runtime.pipelineAvailable()
-                || !runtime.isSceneBudgetFree(playerId) || !playerAtEase(player)
-                || now - SoulPlayerActivity.lastChatAt(playerId) < QUIET_WINDOW_MS) {
-            recordVerdict(playerId, "vetoed:changed-before-capture");
+        boolean laneEnabled = lane == Lane.IDLE ? banterEnabled.getAsBoolean() : activeEnabled.getAsBoolean();
+        long quietWindow = lane == Lane.IDLE ? QUIET_WINDOW_MS : ACTIVE_QUIET_WINDOW_MS;
+        boolean ready = player != null && (lane == Lane.IDLE ? playerAtEase(player) : playerReady(player));
+        if (player == null || !laneEnabled || !runtime.pipelineAvailable()
+                || !runtime.isSceneBudgetFree(playerId) || !ready
+                || now - SoulPlayerActivity.lastChatAt(playerId) < quietWindow) {
+            recordVerdict(playerId, lane, "vetoed:changed-before-capture");
             return;
         }
 
@@ -170,8 +233,8 @@ public final class SoulBanterDirector {
                 SoulTypes.GroundingSnapshot grounding = SoulSnapshotBuilder.capture(
                         server, bot, player, SoulTypes.Reachability.LOCAL);
                 if (groundingDangerous(grounding.situation())) {
-                    recordVerdict(playerId, "vetoed:danger");
-                    nextEligibleAtMs.put(playerId, now + RETRY_AFTER_VETO_MS);
+                    recordVerdict(playerId, lane, "vetoed:danger");
+                    cooldowns(lane).put(playerId, now + RETRY_AFTER_VETO_MS);
                     return;
                 }
                 String profileId = runtime.cachedState(botId)
@@ -185,8 +248,8 @@ public final class SoulBanterDirector {
             }
         }
         if (roster.size() < 1) {
-            recordVerdict(playerId, "vetoed:roster-lost");
-            nextEligibleAtMs.put(playerId, now + RETRY_AFTER_VETO_MS);
+            recordVerdict(playerId, lane, "vetoed:roster-lost");
+            cooldowns(lane).put(playerId, now + RETRY_AFTER_VETO_MS);
             return;
         }
 
@@ -196,13 +259,13 @@ public final class SoulBanterDirector {
         UUID routingId = UUID.randomUUID();
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
-                SoulGroupTypes.SceneKind.BANTER, playerId, player.getName().getString(),
+                kind(lane), playerId, player.getName().getString(),
                 roster, seed, Instant.now(), routingId, addressPlayer);
-        long armedUntilMs = now + nextDelayMs(random);
-        nextEligibleAtMs.put(playerId, armedUntilMs);
-        recordVerdict(playerId, "fired");
-        LOGGER.info("[souls] banter player={} outcome=fired routingId={} roster={} seedChars={} addressPlayer={}",
-                playerId, routingId, roster.size(), seed.length(), addressPlayer);
+        long armedUntilMs = now + nextDelay(lane);
+        cooldowns(lane).put(playerId, armedUntilMs);
+        recordVerdict(playerId, lane, "fired");
+        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} addressPlayer={}",
+                lane, playerId, routingId, roster.size(), seed.length(), addressPlayer);
         runtime.submitGroupTurn(turn).thenAccept(submission -> {
             // 2026-08-29 field fix (+ review round): a fired scene arms the full 8–15 min
             // cooldown up front, so a generation that then FAILS (observed: 3B output rejected
@@ -211,9 +274,9 @@ public final class SoulBanterDirector {
             // min-merge would also shorten a cooldown deliberately re-armed by notePlayerScene
             // when a real player conversation started while this generation was in flight.
             if (submission == SoulGroupConversationService.Submission.FAILED) {
-                if (nextEligibleAtMs.replace(playerId, armedUntilMs,
+                if (cooldowns(lane).replace(playerId, armedUntilMs,
                         clock.getAsLong() + RETRY_AFTER_VETO_MS)) {
-                    recordVerdict(playerId, "fired-but-failed");
+                    recordVerdict(playerId, lane, "fired-but-failed");
                 }
             }
         });
@@ -224,29 +287,57 @@ public final class SoulBanterDirector {
     public void primeNow(UUID playerId) {
         if (playerId != null) {
             nextEligibleAtMs.put(playerId, 0L);
+            nextActiveAtMs.put(playerId, 0L);
         }
     }
 
     /** A player-initiated scene re-arms the full cooldown — banter yields to real conversation. */
     public void notePlayerScene(UUID playerId) {
-        nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelayMs(random));
+        nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelay(Lane.IDLE));
+        nextActiveAtMs.put(playerId, clock.getAsLong() + nextDelay(Lane.ACTIVE));
     }
 
     /** For {@code /bot soul banter status}: last verdict + time to next eligibility. */
     public String statusFor(UUID playerId) {
         long now = clock.getAsLong();
-        long nextAt = nextEligibleAtMs.getOrDefault(playerId, 0L);
-        String verdict = lastVerdict.getOrDefault(playerId, "no evaluation yet");
+        return "idle — " + laneStatus(playerId, now, lastVerdict, nextEligibleAtMs)
+                + "; active — " + laneStatus(playerId, now, lastActiveVerdict, nextActiveAtMs);
+    }
+
+    private static String laneStatus(UUID playerId, long now, Map<UUID, String> verdicts,
+                                     Map<UUID, Long> cooldowns) {
+        long nextAt = cooldowns.getOrDefault(playerId, 0L);
+        String verdict = verdicts.getOrDefault(playerId, "no evaluation yet");
         long remainingS = Math.max(0L, (nextAt - now) / 1000L);
         return "last verdict: " + verdict + "; cooldown: "
                 + (remainingS == 0 ? "elapsed" : remainingS + "s remaining");
     }
 
-    private void recordVerdict(UUID playerId, String verdict) {
-        String previous = lastVerdict.put(playerId, verdict);
+    private void recordVerdict(UUID playerId, Lane lane, String verdict) {
+        Map<UUID, String> verdicts = lane == Lane.IDLE ? lastVerdict : lastActiveVerdict;
+        String previous = verdicts.put(playerId, verdict);
         if (!verdict.equals(previous)) {
-            LOGGER.info("[souls] banter player={} outcome={}", playerId, verdict);
+            LOGGER.info("[souls] banter lane={} player={} outcome={}", lane, playerId, verdict);
         }
+    }
+
+    private Map<UUID, Long> cooldowns(Lane lane) {
+        return lane == Lane.IDLE ? nextEligibleAtMs : nextActiveAtMs;
+    }
+
+    private static SoulGroupTypes.SceneKind kind(Lane lane) {
+        return lane == Lane.IDLE ? SoulGroupTypes.SceneKind.BANTER : SoulGroupTypes.SceneKind.WORK;
+    }
+
+    private long nextDelay(Lane lane) {
+        return lane == Lane.IDLE
+                ? nextDelayMs(random, multiplier(idleRate.getAsInt()))
+                : nextActiveDelayMs(random, multiplier(activeRate.getAsInt()));
+    }
+
+    /** Active lane is lenient: work goes on under light danger; only dead/asleep blocks it. */
+    private static boolean playerReady(ServerPlayerEntity player) {
+        return player.isAlive() && !player.isSleeping();
     }
 
     private List<ServerPlayerEntity> eligibleRosterBots(ServerPlayerEntity player,
@@ -308,7 +399,61 @@ public final class SoulBanterDirector {
     }
 
     static long nextDelayMs(RandomGenerator random) {
-        return 8 * 60_000L + (long) (random.nextDouble() * 7 * 60_000L);
+        return nextDelayMs(random, 1.0);
+    }
+
+    /** 8–15 min × the Idle rate multiplier (DialoguePacing math, mirrored to stay Frens-free). */
+    static long nextDelayMs(RandomGenerator random, double multiplier) {
+        return Math.round((8 * 60_000L + random.nextDouble() * 7 * 60_000L) * multiplier);
+    }
+
+    /** 4–8 min × the Active rate multiplier — working chatter is denser than idle chatter. */
+    static long nextActiveDelayMs(RandomGenerator random, double multiplier) {
+        return Math.round((4 * 60_000L + random.nextDouble() * 4 * 60_000L) * multiplier);
+    }
+
+    /** Same curve as DialoguePacing.multiplier: rate 0 → ×4, 50 → ×1, 100 → ×0.25. */
+    static double multiplier(int rate) {
+        int r = Math.max(0, Math.min(100, rate));
+        return Math.pow(4.0, (50 - r) / 50.0);
+    }
+
+    /** Active lane gate chain: "player-not-ready" replaces at-ease, "nobody-working" is new. */
+    static String firstActiveVeto(boolean enabled, boolean pipelineAvailable, boolean cooldownElapsed,
+                                   boolean budgetFree, boolean surfaceOpen, boolean playerReady,
+                                   boolean quiet, int eligibleRosterSize, int workingCount,
+                                   boolean botsCloseTogether) {
+        if (!enabled) {
+            return "disabled";
+        }
+        if (!pipelineAvailable) {
+            return "pipeline";
+        }
+        if (!cooldownElapsed) {
+            return "cooldown";
+        }
+        if (!budgetFree) {
+            return "busy";
+        }
+        if (!surfaceOpen) {
+            return "muted";
+        }
+        if (!playerReady) {
+            return "player-not-ready";
+        }
+        if (!quiet) {
+            return "not-quiet";
+        }
+        if (eligibleRosterSize < 1) {
+            return "roster";
+        }
+        if (workingCount < 1) {
+            return "nobody-working";
+        }
+        if (!botsCloseTogether) {
+            return "bots-apart";
+        }
+        return null;
     }
 
     /**
