@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -219,5 +220,55 @@ class SoulGroupPromptAssemblerTest {
                 "the model must know it is chiming in, not answering");
         assertTrue(last.content().contains("Bradley: heading to the ravine"),
                 "the real utterance is speaker-tagged, unlike a banter seed");
+    }
+
+    // === Engagement spec §4: three banter directive variants ===
+
+    private static SoulGroupTypes.GroupSceneTurn banterTurn(int rosterSize, boolean addressPlayer) {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        List<SoulGroupTypes.SceneParticipant> roster = new ArrayList<>();
+        roster.add(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")));
+        if (rosterSize > 1) {
+            UUID sara = UUID.randomUUID();
+            roster.add(new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara")));
+        }
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, owner, "Bradley",
+                roster, "seed-text", Instant.EPOCH, UUID.randomUUID(), addressPlayer);
+    }
+
+    private SoulTypes.ProviderRequest assembleBanter(SoulGroupTypes.GroupSceneTurn turn) {
+        List<SoulTypes.SoulProfile> profiles = new ArrayList<>();
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            profiles.add(profile("frens:jake", participant.displayName()));
+        }
+        return assembler.assemble(UUID.randomUUID(), "m", turn, profiles, List.of(),
+                Duration.ofSeconds(30));
+    }
+
+    private static String lastMessage(SoulTypes.ProviderRequest request) {
+        return request.messages().get(request.messages().size() - 1).content();
+    }
+
+    @Test
+    void groupBanterWithoutFlagKeepsTheShippedDirective() {
+        String last = lastMessage(assembleBanter(banterTurn(2, false)));
+        assertTrue(last.contains("chat briefly among themselves"));
+        assertFalse(last.contains("to Bradley"), "unflagged banter never addresses the player");
+    }
+
+    @Test
+    void groupBanterWithFlagAppendsThePlayerAddressedOption() {
+        String last = lastMessage(assembleBanter(banterTurn(2, true)));
+        assertTrue(last.contains("chat briefly among themselves"), "appends, not replaces");
+        assertTrue(last.contains("may end by saying one short thing to Bradley"));
+    }
+
+    @Test
+    void soloBanterDirectiveSpeaksToThePlayerByName() {
+        String last = lastMessage(assembleBanter(banterTurn(1, true)));
+        assertFalse(last.contains("among themselves"), "there is no 'themselves' for one bot");
+        assertTrue(last.contains("Jake may say one short thing to Bradley"));
+        assertTrue(last.contains("seed-text"), "the seed still steers the topic");
     }
 }

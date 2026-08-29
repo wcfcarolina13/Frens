@@ -57,9 +57,25 @@ public final class SoulGroupPromptAssembler {
         messages.addAll(boundedHistory(partyHistory));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
+            // Three variants (engagement spec §4): solo scenes always speak TO the owner; group
+            // scenes may be granted a closing player-addressed line by the director's fire-time
+            // coin — the model never decides WHETHER the player is addressed, only HOW.
             case BANTER -> new SoulTypes.Message(SoulTypes.Role.USER,
-                    "[A quiet moment. The companions chat briefly among themselves. Recent happenings: "
-                            + turn.playerMessage() + ". A few short lines only.]");
+                    turn.roster().size() == 1
+                            ? "[A quiet moment. " + turn.roster().get(0).displayName()
+                                    + " may say one short thing to " + turn.ownerDisplayName()
+                                    + " — a remark, an observation, or a question about recent"
+                                    + " happenings: " + turn.playerMessage()
+                                    + ". One or two short lines only.]"
+                            : "[A quiet moment. The companions chat briefly among themselves."
+                                    + " Recent happenings: " + turn.playerMessage()
+                                    + ". A few short lines only."
+                                    + (turn.addressPlayer()
+                                            ? " One of you may end by saying one short thing to "
+                                                    + turn.ownerDisplayName()
+                                                    + " — a question or a remark addressed to them."
+                                            : "")
+                                    + "]");
             // A real utterance the bot overheard: bracketed context, then the tagged line.
             case LOCAL -> new SoulTypes.Message(SoulTypes.Role.USER,
                     "[" + turn.ownerDisplayName() + " is talking nearby, not to you. You may chime"

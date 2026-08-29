@@ -120,4 +120,21 @@ class SoulGroupTypesTest {
         assertEquals(SoulGroupTypes.partyKey(owner), turn.key());
         assertEquals(1, turn.roster().size(), "a scene of one is legal");
     }
+
+    @Test
+    void addressPlayerDefaultsFalseOnBothCompatConstructors() {
+        UUID owner = UUID.randomUUID();
+        SoulGroupTypes.GroupSceneTurn kinded = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.BANTER, owner, "Bradley", List.of(), "seed",
+                Instant.EPOCH, UUID.randomUUID());
+        assertFalse(kinded.addressPlayer(), "7-arg compat shape must not address the player");
+        SoulGroupTypes.GroupSceneTurn playerKind = new SoulGroupTypes.GroupSceneTurn(
+                owner, "Bradley", List.of(), "hi", Instant.EPOCH, UUID.randomUUID());
+        assertFalse(playerKind.addressPlayer());
+
+        SoulGroupTypes.GroupSceneTurn engaged = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.BANTER, owner, "Bradley", List.of(), "seed",
+                Instant.EPOCH, UUID.randomUUID(), true);
+        assertTrue(engaged.addressPlayer());
+    }
 }

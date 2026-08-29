@@ -74,7 +74,7 @@ public final class SoulGroupTypes {
      */
     public record GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                   List<SceneParticipant> roster, String playerMessage,
-                                  Instant acceptedAt, UUID routingId) {
+                                  Instant acceptedAt, UUID routingId, boolean addressPlayer) {
         public GroupSceneTurn {
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(ownerId, "ownerId");
@@ -85,12 +85,24 @@ public final class SoulGroupTypes {
             roster = roster == null ? List.of() : List.copyOf(roster);
         }
 
+        /**
+         * Pre-engagement shape (1.1.177–1.1.180): the scene never addresses the player.
+         * {@code addressPlayer} is only ever set by the banter director's fire-time coin
+         * (engagement spec §3) — PLAYER and LOCAL turns always carry {@code false}.
+         */
+        public GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
+                               List<SceneParticipant> roster, String playerMessage,
+                               Instant acceptedAt, UUID routingId) {
+            this(kind, ownerId, ownerDisplayName, roster, playerMessage, acceptedAt,
+                    routingId, false);
+        }
+
         /** Compatibility shape from the group-chat pilot: a player-initiated scene. */
         public GroupSceneTurn(UUID ownerId, String ownerDisplayName,
                                List<SceneParticipant> roster, String playerMessage,
                                Instant acceptedAt, UUID routingId) {
             this(SceneKind.PLAYER, ownerId, ownerDisplayName, roster, playerMessage,
-                    acceptedAt, routingId);
+                    acceptedAt, routingId, false);
         }
 
         public SoulTypes.ConversationKey key() {
