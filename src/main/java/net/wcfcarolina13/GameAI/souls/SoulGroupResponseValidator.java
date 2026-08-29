@@ -26,7 +26,7 @@ public final class SoulGroupResponseValidator {
      *  repair must not turn "Note: …" narration into spoken dialogue (2026-08-29 review #4). */
     private static final java.util.Set<String> META_TAGS = java.util.Set.of(
             "note", "notes", "scene", "narrator", "narration", "system", "user", "assistant",
-            "output", "response", "context", "instruction", "instructions");
+            "output", "response", "context", "instruction", "instructions", "player", "owner");
     /** Sentence-boundary truncation only applies past this many chars; earlier ends hard-cut. */
     private static final int MIN_TRUNCATION_SENTENCE_CHARS = 80;
 
@@ -58,6 +58,31 @@ public final class SoulGroupResponseValidator {
 
     /** @param maxSceneLines total-line cap for this scene kind (player 6, banter 4). */
     public SceneParse parse(String raw, List<String> rosterDisplayNames, int maxSceneLines) {
+        return parse(raw, rosterDisplayNames, maxSceneLines, "");
+    }
+
+    /**
+     * True when a speaker tag names the scene owner: exact, or a ≥3-char abbreviation the model
+     * is prone to ("Roti" for "RotiWokeman"). Such a line was written FOR the player.
+     */
+    static boolean isOwnerTag(String normalizedSpeaker, String normalizedOwner) {
+        if (normalizedOwner == null || normalizedOwner.isEmpty()
+                || normalizedSpeaker == null || normalizedSpeaker.isEmpty()) {
+            return false;
+        }
+        return normalizedSpeaker.equals(normalizedOwner)
+                || (normalizedSpeaker.length() >= 3 && normalizedOwner.startsWith(normalizedSpeaker));
+    }
+
+    /**
+     * @param ownerDisplayName the scene owner's (player's) display name. A line tagged with it —
+     *     or an abbreviation of it — is one the model wrote for the player, which the contract
+     *     forbids; it is dropped under every roster size. 2026-08-29 field fix: the solo
+     *     wrong-tag repair used to strip that tag and hand the player's answer to the lone bot,
+     *     so Jake visibly asked a question and then answered himself.
+     */
+    public SceneParse parse(String raw, List<String> rosterDisplayNames, int maxSceneLines,
+                            String ownerDisplayName) {
         if (raw == null || raw.isBlank() || rosterDisplayNames == null || rosterDisplayNames.isEmpty()) {
             return reject("blank output");
         }
@@ -70,6 +95,7 @@ public final class SoulGroupResponseValidator {
         for (String name : rosterDisplayNames) {
             normRoster.add(normalize(name));
         }
+        String normOwner = normalize(ownerDisplayName == null ? "" : ownerDisplayName);
 
         // Solo-roster leniency (2026-08-29 field fix): with exactly ONE possible speaker the
         // "Name: line" grammar protects nothing — the 3B model answered a solo banter directive
@@ -101,7 +127,7 @@ public final class SoulGroupResponseValidator {
                 body = line.substring(colon + 1).strip();
                 idx = normRoster.indexOf(speaker);
                 if (idx < 0) {
-                    if (soloRoster && !META_TAGS.contains(speaker)) {
+                    if (soloRoster && !META_TAGS.contains(speaker) && !isOwnerTag(speaker, normOwner)) {
                         idx = 0; // wrong NAME tag, one possible speaker — strip it, keep the line
                     } else {
                         continue; // unknown speaker or scaffolding tag — dropped, never repaired

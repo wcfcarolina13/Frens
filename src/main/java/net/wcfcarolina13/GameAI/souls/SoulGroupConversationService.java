@@ -177,7 +177,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             case LOCAL -> SoulGroupTypes.LOCAL_MAX_SCENE_LINES;
             case PLAYER -> SoulGroupTypes.MAX_SCENE_LINES;
         };
-        SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines);
+        SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines,
+                turn.ownerDisplayName());
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
                     result.model(), result.elapsedMillis(), outcome);

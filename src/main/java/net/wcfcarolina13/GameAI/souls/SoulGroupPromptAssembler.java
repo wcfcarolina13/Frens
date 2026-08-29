@@ -66,7 +66,9 @@ public final class SoulGroupPromptAssembler {
                                     + " may say one short thing to " + turn.ownerDisplayName()
                                     + " — a remark, an observation, or a question about recent"
                                     + " happenings: " + turn.playerMessage()
-                                    + ". One or two short lines only.]"
+                                    + ". One short line, at most two, all spoken by "
+                                    + turn.roster().get(0).displayName() + "; "
+                                    + turn.ownerDisplayName() + " does not answer in this scene.]"
                             : "[A quiet moment. The companions chat briefly among themselves."
                                     + " Recent happenings: " + turn.playerMessage()
                                     + ". A few short lines only."

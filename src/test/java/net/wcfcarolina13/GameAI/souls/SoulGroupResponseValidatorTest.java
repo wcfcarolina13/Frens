@@ -184,6 +184,37 @@ class SoulGroupResponseValidatorTest {
     }
 
     @Test
+    void soloRosterDropsLinesWrittenForTheOwnerInsteadOfSpeakingThem() {
+        // Field log 2026-08-29 13:08: llama3.2:3b answered a solo banter directive with a
+        // two-speaker exchange — the bot's question, then the PLAYER's answer. The wrong-tag
+        // repair handed the player's line to the bot, so Jake visibly talked to himself.
+        // A line tagged with the owner's name (or an abbreviation of it) is a line written for
+        // the player, which the scene contract forbids — dropped, never repaired.
+        SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                .parse("Jake: Morning, Roti. Any signs of movement?\nRoti: Not yet. Just the usual birdsong.",
+                        List.of("Jake"), 4, "RotiWokeman");
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size(), "the owner's answer must not be spoken by the bot");
+        assertEquals("Morning, Roti. Any signs of movement?", parse.lines().get(0).text());
+
+        SoulGroupResponseValidator.SceneParse exact = new SoulGroupResponseValidator()
+                .parse("RotiWokeman: I'm fine.\nJake: Good.", List.of("Jake"), 4, "RotiWokeman");
+        assertEquals(1, exact.lines().size());
+        assertEquals("Good.", exact.lines().get(0).text());
+
+        // "Player:" / "Owner:" are scaffolding tags for the same thing.
+        SoulGroupResponseValidator.SceneParse player = new SoulGroupResponseValidator()
+                .parse("Player: hello?\nJake: Hi.", List.of("Jake"), 4, "RotiWokeman");
+        assertEquals(1, player.lines().size());
+        assertEquals("Hi.", player.lines().get(0).text());
+
+        // Multi-roster grammar: an owner-tagged line was already dropped (unknown speaker).
+        SoulGroupResponseValidator.SceneParse multi = new SoulGroupResponseValidator()
+                .parse("Roti: hey\nJake: yo\nSara: sup", List.of("Jake", "Sara"), 6, "RotiWokeman");
+        assertEquals(2, multi.lines().size());
+    }
+
+    @Test
     void soloMetaTagListCoversTheCommonScaffoldWords() {
         for (String meta : List.of("Note", "Scene", "Narrator", "System", "Output", "Response")) {
             SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
