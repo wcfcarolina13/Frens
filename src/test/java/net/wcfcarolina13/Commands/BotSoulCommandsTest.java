@@ -27,10 +27,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BotSoulCommandsTest {
 
     @Test
-    void onlyJakeProfileAliasIsAcceptedInPilot() {
+    void registeredProfileAliasesResolveAndUnknownNamesStayEmpty() {
         assertEquals("frens:jake", BotSoulCommands.profileId("jake").orElseThrow());
         assertEquals("frens:jake", BotSoulCommands.profileId("frens:jake").orElseThrow());
-        assertTrue(BotSoulCommands.profileId("bob").isEmpty());
+        // Since 2026-08-29 Bob has his own registered persona (frens:bob).
+        assertEquals("frens:bob", BotSoulCommands.profileId("bob").orElseThrow());
+        assertEquals("frens:bob", BotSoulCommands.profileId("frens:bob").orElseThrow());
+        // An arbitrary bot display name still maps to no profile — enable falls back to Jake.
+        assertTrue(BotSoulCommands.profileId("Steve").isEmpty());
     }
 
     @Test

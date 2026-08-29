@@ -123,4 +123,46 @@ class SoulGroupResponseValidatorTest {
         assertFalse(validator.parse("", ROSTER).accepted());
         assertFalse(validator.parse(null, ROSTER).accepted());
     }
+
+    // === Solo-roster leniency (2026-08-29): llama3.2:3b answered a roster-of-one banter
+    // directive with untagged prose, and the strict "Name: line" grammar rejected every line
+    // (outcome=failed:MALFORMED in the field log). With exactly one possible speaker there is
+    // no ambiguity to protect against, so untagged lines attribute to that speaker.
+
+    @Test
+    void soloRosterAcceptsUntaggedLines() {
+        SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                .parse("Quiet night, huh? Watch the tree line anyway.", List.of("Jake"), 4);
+        assertTrue(parse.accepted(), "one speaker means untagged prose is unambiguous");
+        assertEquals(1, parse.lines().size());
+        assertEquals(0, parse.lines().get(0).participantIndex());
+        assertEquals("Quiet night, huh? Watch the tree line anyway.", parse.lines().get(0).text());
+    }
+
+    @Test
+    void soloRosterStripsAWrongNameTagInsteadOfRejecting() {
+        // The shared profile means the model may tag lines with the PROFILE's name ("Jake")
+        // while the roster bot is Bob — attribute to the only speaker, tag stripped.
+        SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                .parse("Jake: That cave smells wrong.", List.of("Bob"), 4);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals(0, parse.lines().get(0).participantIndex());
+        assertEquals("That cave smells wrong.", parse.lines().get(0).text());
+    }
+
+    @Test
+    void soloRosterStillCapsLines() {
+        SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                .parse("One.\nTwo.\nThree.\nFour.", List.of("Jake"), 4);
+        assertTrue(parse.accepted());
+        assertEquals(2, parse.lines().size(), "MAX_LINES_PER_BOT still binds a solo speaker");
+    }
+
+    @Test
+    void multiRosterGrammarIsUnchangedByTheLeniency() {
+        SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                .parse("Just some prose with no speaker tag.", List.of("Jake", "Sara"), 6);
+        assertFalse(parse.accepted(), "with 2+ speakers an untagged line is still ambiguous");
+    }
 }

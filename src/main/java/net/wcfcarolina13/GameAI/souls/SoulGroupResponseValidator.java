@@ -65,6 +65,15 @@ public final class SoulGroupResponseValidator {
             normRoster.add(normalize(name));
         }
 
+        // Solo-roster leniency (2026-08-29 field fix): with exactly ONE possible speaker the
+        // "Name: line" grammar protects nothing — the 3B model answered a solo banter directive
+        // with untagged prose and every line was dropped (outcome=failed:MALFORMED). For a
+        // roster of one, untagged lines attribute to that speaker, and a line tagged with a
+        // WRONG name (typically the shared profile's name rather than the bot's display name)
+        // has its tag stripped instead of being rejected. Multi-speaker grammar is unchanged:
+        // an untagged line is genuinely ambiguous there and still drops.
+        boolean soloRoster = rosterDisplayNames.size() == 1;
+
         int[] perBot = new int[rosterDisplayNames.size()];
         List<SoulGroupTypes.SceneLine> lines = new ArrayList<>();
         for (String rawLine : text.split("\n")) {
@@ -75,18 +84,31 @@ public final class SoulGroupResponseValidator {
             if (line.isEmpty()) {
                 continue;
             }
+            int idx;
+            String body;
             int colon = line.indexOf(':');
-            if (colon <= 0 || colon > MAX_SPEAKER_TAG_CHARS) {
-                continue; // narration or untagged prose
+            boolean tagged = colon > 0 && colon <= MAX_SPEAKER_TAG_CHARS
+                    && !normalize(line.substring(0, colon)).isEmpty()
+                    && !line.substring(colon + 1).strip().isEmpty();
+            if (tagged) {
+                String speaker = normalize(line.substring(0, colon));
+                body = line.substring(colon + 1).strip();
+                idx = normRoster.indexOf(speaker);
+                if (idx < 0) {
+                    if (soloRoster) {
+                        idx = 0; // wrong tag, one possible speaker — strip it, keep the line
+                    } else {
+                        continue; // unknown speaker — dropped, never repaired
+                    }
+                }
+            } else if (soloRoster) {
+                idx = 0;
+                body = line;
+            } else {
+                continue; // narration or untagged prose is ambiguous with 2+ speakers
             }
-            String speaker = normalize(line.substring(0, colon));
-            String body = line.substring(colon + 1).strip();
-            if (speaker.isEmpty() || body.isEmpty()) {
+            if (body.isEmpty()) {
                 continue;
-            }
-            int idx = normRoster.indexOf(speaker);
-            if (idx < 0) {
-                continue; // unknown speaker — dropped, never repaired
             }
             if (perBot[idx] >= SoulGroupTypes.MAX_LINES_PER_BOT) {
                 continue;

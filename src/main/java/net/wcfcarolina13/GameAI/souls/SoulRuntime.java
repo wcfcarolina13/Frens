@@ -825,8 +825,15 @@ public final class SoulRuntime {
     // === Profile / activation / reset ===
 
     public CompletableFuture<SoulTypes.SoulState> bindJake(UUID botId) {
+        return bindProfile(botId, "frens:jake");
+    }
+
+    /** Binds {@code botId} to any registered profile — since 2026-08-29 a bot named after a
+     *  registered profile (Bob → frens:bob) gets its OWN persona instead of Jake's. */
+    public CompletableFuture<SoulTypes.SoulState> bindProfile(UUID botId, String profileId) {
         Objects.requireNonNull(botId, "botId");
-        return store.bindProfile(botId, "frens:jake");
+        Objects.requireNonNull(profileId, "profileId");
+        return store.bindProfile(botId, profileId);
     }
 
     public CompletableFuture<SoulTypes.SoulState> setActive(UUID botId, boolean active) {

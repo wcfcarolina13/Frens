@@ -581,6 +581,17 @@ public class BotControlScreen extends Screen {
         config.save();
         configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
 
+        // 2026-08-29 field fix: per-bot settings edited mid-session were written to config but
+        // never pushed into SkillPreferences for ALREADY-SPAWNED bots — applyToBot only ran at
+        // registration and server start, so e.g. enabling Follow Teleport for a live bot
+        // silently did nothing until the world reloaded. Re-apply on the server thread now.
+        net.minecraft.client.MinecraftClient mcApply = net.minecraft.client.MinecraftClient.getInstance();
+        net.minecraft.server.MinecraftServer srvApply = mcApply != null ? mcApply.getServer() : null;
+        if (srvApply != null) {
+            srvApply.execute(() ->
+                    net.wcfcarolina13.GameAI.services.BotControlApplier.refreshBotPreferences(srvApply));
+        }
+
         // If the user toggled Auto Respawn ON for any bot that isn't active, spawn
         // them (handles the post-death "revive by toggling" flow).
         if (!autoRespawnJustEnabled.isEmpty()) {

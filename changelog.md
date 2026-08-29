@@ -2,6 +2,59 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Field autopsy 3: live-settings apply, solo-scene MALFORMED, Bob's own persona; 1.1.184 (2026-08-29)
+
+Session 01:30–01:40 on 1.1.182. The engagement machinery WORKED — solo banter fired at
+01:33:49 (roster=1, addressPlayer=true, 2.5 min in: the new pacing) — and then five distinct
+defects showed themselves. All root-caused from the log; no crashes, no frens errors.
+
+**1. Per-bot settings edited mid-session never reached live bots** (the "Bob won't teleport"
+report). `saveSettings()` wrote the config and synced it, but `BotControlApplier.applyToBot`
+runs only at bot registration and server start — `SkillPreferences` for already-spawned bots
+was never updated, so enabling Follow Teleport for a live Bob silently did nothing while
+Jake (whose pref was applied at spawn from an earlier save) teleported 4× in the log. Fix:
+`saveSettings()` now schedules `refreshBotPreferences` on the server thread after every save.
+This silently affected every per-bot setting, not just teleport.
+
+**2. Solo banter scene failed `MALFORMED`.** llama3.2:3b answered the roster-of-one
+directive with untagged prose; the scene grammar requires `Name: line` and dropped
+everything. With exactly one possible speaker that grammar protects nothing, so the
+validator now attributes untagged lines to the sole roster bot — and strips a WRONG name
+tag (the model often tags with the shared profile's name, e.g. `Jake:` while the bot is
+Bob) instead of rejecting. Multi-speaker grammar unchanged. 4 new validator tests.
+
+**3. A failed banter generation consumed the full 8–15 min cooldown.** The cooldown arms at
+fire time; MALFORMED then cost the whole window for zero delivered lines. Now a FAILED
+submission refunds down to the ~2 min retry delay (`Math::min` merge — only ever shortens),
+with a `fired-but-failed` verdict for status.
+
+**4. Both bots spoke identical scripted lines seconds apart** ("Nice bird!" ×2, "I respect
+a well-behaved animal" ×4) — pet-reaction cooldowns are per-bot, so two bots near one
+parrot each independently fired the same line. `playLine` now keeps a cross-bot per-line-id
+recency map (120 s): a line spoken by ANY bot is off the menu for every bot; a second bot
+may still react with a different line from the pool.
+
+**5. "Bob was speaking as Jake" — he literally was.** Every `/bot soul enable` bound
+`frens:jake`, the deterministic router notices hardcoded "Jake" ("You cannot reach Jake
+from here" even when addressing Bob), and there was only one persona in the registry. Now:
+**Bob has his own built-in profile** (`frens:bob` — a curious naturalist/tinkerer,
+deliberately contrasting Jake's pragmatic field engineer), `enable` binds a bot named after
+a registered profile to its OWN persona (unknown names still fall back to Jake, with the
+message saying so), and every router notice uses the bot's real name. **Re-run
+`/bot soul enable Bob` once to rebind him** — his existing binding predates the profile.
+Known remainder: Bob still speaks with Jake's TTS voice (one cloned anchor exists); a
+second voice needs its own reference sample — flagged for the voice track.
+
+Also noted, benign: `[Frens] LLM runtime not available (build without -PaiEnabled?)` at
+startup is the CLASSIC LLM path (DJL) being absent from the standard build — souls run on
+Ollama and are unaffected.
+
+550 tests green (546 + 4 validator, 1 stale alias test updated to the new contract).
+**Field test:** save any per-bot toggle mid-session and see it act immediately; solo remark
+should now DELIVER (grep `scene ... rosterSize=1 outcome=`); `/bot soul enable Bob` → "Bob
+is now speaking as Bob."; two bots near a parrot → at most one of them comments; a failed
+generation retries within ~2 min.
+
 ## Admin menu: expanded toggles no longer bury the footer; 1.1.183 (2026-08-29)
 
 Screenshot-reported regression: with "Hide global toggles" expanded, the footer row

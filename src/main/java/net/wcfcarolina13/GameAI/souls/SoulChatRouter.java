@@ -158,14 +158,14 @@ public final class SoulChatRouter {
 
         if (!indexReady) {
             logRouting(routingId, bot, sender, "loading", null, routeStartNanos, 0L, 0L, 0L);
-            sendNotice(sender, "Jake's conversation memory is still loading. Try again in a moment.");
+            sendNotice(sender, bot.getName().getString() + "'s conversation memory is still loading. Try again in a moment.");
             return RouteOutcome.CONSUMED;
         }
 
         boolean pipelineAvailable = runtime.pipelineAvailable();
         if (!pipelineAvailable) {
             logRouting(routingId, bot, sender, "invalid-pipeline", null, routeStartNanos, 0L, 0L, 0L);
-            sendNotice(sender, "Jake's local conversation model is not ready: " + runtime.safeValidationError());
+            sendNotice(sender, bot.getName().getString() + "'s local conversation model is not ready: " + runtime.safeValidationError());
             return RouteOutcome.CONSUMED;
         }
 
@@ -174,7 +174,7 @@ public final class SoulChatRouter {
         long authorizationMs = elapsedMs(authStartNanos);
         if (!authorized) {
             logRouting(routingId, bot, sender, "unauthorized", null, routeStartNanos, authorizationMs, 0L, 0L);
-            sendNotice(sender, "Jake's private conversation is available only to his owner or an operator.");
+            sendNotice(sender, bot.getName().getString() + "'s private conversation is available only to their owner or an operator.");
             return RouteOutcome.CONSUMED;
         }
 
@@ -184,7 +184,7 @@ public final class SoulChatRouter {
         if (reachability == SoulTypes.Reachability.UNREACHABLE) {
             logRouting(routingId, bot, sender, "unreachable", reachability, routeStartNanos, authorizationMs,
                     reachabilityMs, 0L);
-            sendNotice(sender, "You cannot reach Jake from here.");
+            sendNotice(sender, "You cannot reach " + bot.getName().getString() + " from here.");
             return RouteOutcome.CONSUMED;
         }
 
@@ -196,7 +196,7 @@ public final class SoulChatRouter {
             // fabricate a new message.
             logRouting(routingId, bot, sender, "no-server", reachability, routeStartNanos, authorizationMs,
                     reachabilityMs, 0L);
-            sendNotice(sender, "You cannot reach Jake from here.");
+            sendNotice(sender, "You cannot reach " + bot.getName().getString() + " from here.");
             return RouteOutcome.CONSUMED;
         }
 

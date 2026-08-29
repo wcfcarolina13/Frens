@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SoulProfileRegistry {
 
     private static final String BUILT_IN_JAKE_RESOURCE = "data/frens/souls/jake.json";
+    private static final String BUILT_IN_BOB_RESOURCE = "data/frens/souls/bob.json";
 
     private static final Map<String, SoulTypes.SoulProfile> PROFILES = new ConcurrentHashMap<>();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -46,6 +47,7 @@ public final class SoulProfileRegistry {
             return;
         }
         register(loadFromClasspath(BUILT_IN_JAKE_RESOURCE));
+        register(loadFromClasspath(BUILT_IN_BOB_RESOURCE));
         builtInsLoaded = true;
     }
 

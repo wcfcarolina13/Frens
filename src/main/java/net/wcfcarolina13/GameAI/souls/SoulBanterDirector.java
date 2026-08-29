@@ -202,7 +202,17 @@ public final class SoulBanterDirector {
         recordVerdict(playerId, "fired");
         LOGGER.info("[souls] banter player={} outcome=fired routingId={} roster={} seedChars={} addressPlayer={}",
                 playerId, routingId, roster.size(), seed.length(), addressPlayer);
-        runtime.submitGroupTurn(turn);
+        runtime.submitGroupTurn(turn).thenAccept(submission -> {
+            // 2026-08-29 field fix: a fired scene arms the full 8–15 min cooldown up front, so a
+            // generation that then FAILS (observed: 3B model output rejected as MALFORMED) used
+            // to cost the player the whole window for zero delivered lines. Refund a failure
+            // down to the short retry delay — Math::min only ever shortens, and a player scene
+            // re-arming the cooldown meanwhile is respected because min keeps the earlier time.
+            if (submission == SoulGroupConversationService.Submission.FAILED) {
+                nextEligibleAtMs.merge(playerId, clock.getAsLong() + RETRY_AFTER_VETO_MS, Math::min);
+                recordVerdict(playerId, "fired-but-failed");
+            }
+        });
     }
 
     /** Field-test lever ({@code /bot soul banter now}): clears the actor's cooldown so the

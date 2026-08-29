@@ -130,6 +130,9 @@ final class BotSoulCommands {
         if (normalized.equals("jake") || normalized.equals("frens:jake")) {
             return Optional.of("frens:jake");
         }
+        if (normalized.equals("bob") || normalized.equals("frens:bob")) {
+            return Optional.of("frens:bob");
+        }
         return Optional.empty();
     }
 
@@ -436,10 +439,15 @@ final class BotSoulCommands {
         MinecraftServer server = source.getServer();
         UUID botId = bot.getUuid();
         String botName = bot.getName().getString();
-        runtime.bindJake(botId).whenComplete((boundState, bindErr) -> {
+        // A bot named after a registered profile gets its own persona (Bob → frens:bob);
+        // anything else keeps the Jake fallback that the pilot shipped with. Field-reported
+        // 2026-08-29: "Bob was speaking as Jake" — because every enable bound frens:jake.
+        String boundProfileId = profileId(botName).orElse(JAKE_PROFILE_ID);
+        String personaName = boundProfileId.equals(JAKE_PROFILE_ID) ? "Jake" : botName;
+        runtime.bindProfile(botId, boundProfileId).whenComplete((boundState, bindErr) -> {
             if (bindErr != null) {
                 server.execute(() -> {
-                    LOGGER.warn("[souls] enable (bind {}) failed for bot {}: {}", JAKE_PROFILE_ID, botId,
+                    LOGGER.warn("[souls] enable (bind {}) failed for bot {}: {}", boundProfileId, botId,
                             bindErr.toString());
                     ChatUtils.sendSystemMessage(source, "Failed to enable soul communication for " + botName + ".");
                 });
@@ -448,9 +456,12 @@ final class BotSoulCommands {
             runtime.setActive(botId, true).whenComplete((activeState, activeErr) -> server.execute(() -> {
                 if (activeErr != null) {
                     LOGGER.warn("[souls] enable (activate) failed for bot {}: {}", botId, activeErr.toString());
-                    ChatUtils.sendSystemMessage(source, "Bound " + botName + " to Jake but failed to activate.");
+                    ChatUtils.sendSystemMessage(source, "Bound " + botName + " to " + personaName
+                            + " but failed to activate.");
                 } else {
-                    ChatUtils.sendSystemMessage(source, botName + " is now speaking as Jake.");
+                    ChatUtils.sendSystemMessage(source, botName + " is now speaking as " + personaName
+                            + (boundProfileId.equals(JAKE_PROFILE_ID) && !botName.equalsIgnoreCase("Jake")
+                                    ? " (no profile of their own is registered yet)." : "."));
                 }
             }));
         });

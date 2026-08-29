@@ -424,6 +424,14 @@ public final class PetProximityReactionService {
         playLine(bot, WOLF_OBSERVATION_LINES, null, LAST_WOLF_OBSERVATION_MS, WOLF_OBSERVATION_COOLDOWN_MS);
     }
 
+    /** Cross-bot recency per line id: with two companions near the same animal, each bot's
+     *  per-bot cooldown allowed both to fire the IDENTICAL line seconds apart ("Nice bird!"
+     *  from Jake at :22 and Bob at :24 in the 2026-08-29 field log). Any line spoken by ANY
+     *  bot is off the menu for every bot for this window; a second bot may still react with a
+     *  different line from the pool. */
+    private static final long GLOBAL_LINE_DEDUP_MS = 120_000L;
+    private static final ConcurrentHashMap<String, Long> GLOBAL_LAST_LINE_MS = new ConcurrentHashMap<>();
+
     private static boolean playLine(ServerPlayerEntity bot,
                                     WeightedLine[] pool,
                                     String forcedLineId,
@@ -439,11 +447,26 @@ public final class PetProximityReactionService {
             return false;
         }
 
-        WeightedLine line = pickWeightedLine(pool, forcedLineId);
+        WeightedLine[] eligible = pool;
+        if (forcedLineId == null) {
+            java.util.List<WeightedLine> fresh = new java.util.ArrayList<>(pool.length);
+            for (WeightedLine candidate : pool) {
+                if (now - GLOBAL_LAST_LINE_MS.getOrDefault(candidate.id, 0L) >= GLOBAL_LINE_DEDUP_MS) {
+                    fresh.add(candidate);
+                }
+            }
+            if (fresh.isEmpty()) {
+                return false; // every line in this pool was recently spoken by some bot
+            }
+            eligible = fresh.toArray(new WeightedLine[0]);
+        }
+
+        WeightedLine line = pickWeightedLine(eligible, forcedLineId);
         if (line == null) {
             return false;
         }
 
+        GLOBAL_LAST_LINE_MS.put(line.id, now);
         cooldownMap.put(botId, now);
         CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "pet", line.id);
         BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.AMBIENT_CHATTER);
