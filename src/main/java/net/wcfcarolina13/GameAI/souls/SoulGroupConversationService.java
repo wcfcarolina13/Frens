@@ -173,7 +173,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             rosterNames.add(participant.displayName());
         }
         int maxSceneLines = switch (turn.kind()) {
-            case BANTER -> SoulGroupTypes.BANTER_MAX_SCENE_LINES;
+            case BANTER, WORK -> SoulGroupTypes.BANTER_MAX_SCENE_LINES;
             case LOCAL -> SoulGroupTypes.LOCAL_MAX_SCENE_LINES;
             case PLAYER -> SoulGroupTypes.MAX_SCENE_LINES;
         };

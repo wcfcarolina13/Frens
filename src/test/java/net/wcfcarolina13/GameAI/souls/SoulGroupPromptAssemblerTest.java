@@ -271,4 +271,49 @@ class SoulGroupPromptAssemblerTest {
         assertTrue(last.contains("Jake may say one short thing to Bradley"));
         assertTrue(last.contains("seed-text"), "the seed still steers the topic");
     }
+    private SoulGroupTypes.GroupSceneTurn workTurn(int rosterSize, boolean addressPlayer) {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        List<SoulGroupTypes.SceneParticipant> roster = new ArrayList<>();
+        roster.add(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")));
+        if (rosterSize > 1) {
+            UUID sara = UUID.randomUUID();
+            roster.add(new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara")));
+        }
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.WORK, owner, "Bradley",
+                roster, "seed-text", Instant.EPOCH, UUID.randomUUID(), addressPlayer);
+    }
+
+    @Test
+    void humanizeTaskStripsThePrefixAndMapsKnownSkills() {
+        assertEquals("woodcutting", SoulGroupPromptAssembler.humanizeTask("skill:woodcut"));
+        assertEquals("mining", SoulGroupPromptAssembler.humanizeTask("skill:mining"));
+        assertEquals("collect dirt", SoulGroupPromptAssembler.humanizeTask("skill:collect_dirt"));
+        assertEquals("", SoulGroupPromptAssembler.humanizeTask(""));
+        assertEquals("", SoulGroupPromptAssembler.humanizeTask(null));
+    }
+
+    @Test
+    void groupWorkDirectiveNamesWhatEachBotIsDoing() {
+        String last = lastMessage(assembleBanter(workTurn(2, false)));
+        assertTrue(last.contains("Jake is woodcutting"), last);
+        assertTrue(last.contains("Sara is woodcutting"), last);
+        assertTrue(last.contains("without stopping"));
+        assertTrue(last.contains("seed-text"));
+        assertFalse(last.contains("to Bradley"), "unflagged work scenes never address the player");
+    }
+
+    @Test
+    void groupWorkDirectiveWithFlagAppendsThePlayerAddressedOption() {
+        String last = lastMessage(assembleBanter(workTurn(2, true)));
+        assertTrue(last.contains("may end by saying one short thing to Bradley"));
+    }
+
+    @Test
+    void soloWorkDirectiveSpeaksToThePlayerAndForbidsAnAnswer() {
+        String last = lastMessage(assembleBanter(workTurn(1, true)));
+        assertTrue(last.contains("Jake is woodcutting and may say one short thing to Bradley"), last);
+        assertTrue(last.contains("Bradley does not answer in this scene"));
+        assertFalse(last.contains("among themselves"));
+    }
 }

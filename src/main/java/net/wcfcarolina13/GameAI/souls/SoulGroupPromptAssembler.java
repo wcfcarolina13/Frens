@@ -78,6 +78,8 @@ public final class SoulGroupPromptAssembler {
                                                     + " — a question or a remark addressed to them."
                                             : "")
                                     + "]");
+            // Working lane: what each companion is doing, said without stopping the work.
+            case WORK -> new SoulTypes.Message(SoulTypes.Role.USER, workDirective(turn));
             // A real utterance the bot overheard: bracketed context, then the tagged line.
             case LOCAL -> new SoulTypes.Message(SoulTypes.Role.USER,
                     "[" + turn.ownerDisplayName() + " is talking nearby, not to you. You may chime"
@@ -87,6 +89,62 @@ public final class SoulGroupPromptAssembler {
                     turn.ownerDisplayName() + ": " + turn.playerMessage());
         });
         return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
+    }
+
+    /** "skill:woodcut" → "woodcutting"; unknown ids just lose the prefix and underscores. */
+    static String humanizeTask(String activeTask) {
+        String t = activeTask == null ? "" : activeTask.trim().toLowerCase(java.util.Locale.ROOT);
+        if (t.startsWith("skill:")) {
+            t = t.substring("skill:".length());
+        }
+        return switch (t) {
+            case "woodcut", "woodcutting" -> "woodcutting";
+            case "mine", "mining" -> "mining";
+            case "fish", "fishing" -> "fishing";
+            case "farm", "farming" -> "farming";
+            case "shelter" -> "building a shelter";
+            case "fortify", "fortify_village", "fortifyvillage" -> "fortifying the village";
+            case "hunt", "hunting" -> "hunting";
+            default -> t.replace('_', ' ');
+        };
+    }
+
+    /** "Jake is woodcutting" / "Bob is walking with Roti" / "Bob is busy". */
+    static String workLabel(SoulGroupTypes.SceneParticipant participant, String ownerDisplayName) {
+        String task = humanizeTask(participant.grounding().bot().activeTask());
+        if (!task.isEmpty()) {
+            return participant.displayName() + " is " + task;
+        }
+        if (participant.grounding().situation().following()) {
+            return participant.displayName() + " is walking with " + ownerDisplayName;
+        }
+        return participant.displayName() + " is busy";
+    }
+
+    private static String workDirective(SoulGroupTypes.GroupSceneTurn turn) {
+        String owner = turn.ownerDisplayName();
+        if (turn.roster().size() == 1) {
+            SoulGroupTypes.SceneParticipant only = turn.roster().get(0);
+            return "[" + workLabel(only, owner) + " and may say one short thing to " + owner
+                    + " about it — a remark, a grumble, or a question. Recent happenings: "
+                    + turn.playerMessage() + ". One short line, at most two, all spoken by "
+                    + only.displayName() + "; " + owner + " does not answer in this scene.]";
+        }
+        StringBuilder who = new StringBuilder();
+        for (int i = 0; i < turn.roster().size(); i++) {
+            if (i > 0) {
+                who.append(i == turn.roster().size() - 1 ? " and " : ", ");
+            }
+            who.append(workLabel(turn.roster().get(i), owner));
+        }
+        return "[The companions are busy — " + who + ". They trade a short word or two about"
+                + " the work without stopping. Recent happenings: " + turn.playerMessage()
+                + ". A few short lines only."
+                + (turn.addressPlayer()
+                        ? " One of you may end by saying one short thing to " + owner
+                                + " — a question or a remark addressed to them."
+                        : "")
+                + "]";
     }
 
     // === Scene contract (stable, provider-neutral, no interpolation) ===

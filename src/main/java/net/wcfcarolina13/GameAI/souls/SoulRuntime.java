@@ -482,7 +482,8 @@ public final class SoulRuntime {
             if (banter != null) {
                 banter.notePlayerScene(turn.ownerId());
             }
-        } else if (turn.kind() == SoulGroupTypes.SceneKind.BANTER) {
+        } else if (turn.kind() == SoulGroupTypes.SceneKind.BANTER
+                || turn.kind() == SoulGroupTypes.SceneKind.WORK) {
             SoulLocalDirector local = localDirector;
             if (local != null) {
                 local.notePlayerScene(turn.ownerId());

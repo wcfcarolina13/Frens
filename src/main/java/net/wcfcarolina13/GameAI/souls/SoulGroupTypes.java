@@ -36,7 +36,9 @@ public final class SoulGroupTypes {
      * masks, their failures are silent, and combat aborts their remaining lines.
      */
     public enum SceneKind {
-        PLAYER, BANTER, LOCAL;
+        PLAYER, BANTER, LOCAL,
+        /** Banter's second lane: companions chatting WHILE working (skill running / following). */
+        WORK;
 
         /** True for the system-initiated kinds that obey the ambient masks. */
         public boolean isAmbient() {
