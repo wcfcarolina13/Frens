@@ -282,9 +282,11 @@ public final class BotInventoryStorageService {
      * <ol>
      *   <li>No snapshot file → don't load.</li>
      *   <li>Vanilla restoration didn't happen → load the snapshot (it's the only source of truth).</li>
-     *   <li>Vanilla restoration produced an empty inventory but the snapshot has substantial
-     *       content → load the snapshot. This catches the post-crash recovery case where the
-     *       vanilla {@code .dat} was rewritten by world load but contains no items.</li>
+     *   <li>Vanilla restoration produced an empty inventory → load the snapshot, whatever its
+     *       size or age. Vanilla never repopulates a fake player's items on join, and on every
+     *       clean shutdown vanilla's "Saving players" rewrites the {@code .dat} ~4 s AFTER our
+     *       pre-shutdown snapshot — past the stale grace — so the snapshot is the only item
+     *       source and the mtime rule below would discard it every time.</li>
      *   <li>Snapshot mtime is well behind vanilla mtime → skip as stale.</li>
      *   <li>Otherwise → load the snapshot.</li>
      * </ol>
@@ -311,23 +313,28 @@ public final class BotInventoryStorageService {
             return true;
         }
 
-        // Empty-bot override: if vanilla restoration produced no items but the snapshot has
-        // substantial content, prefer the snapshot regardless of mtime. This is the post-crash
-        // recovery path — without this, a fresh empty .dat written during world load would
-        // make our older-but-valid snapshot look "stale" and silently wipe the bot.
-        try {
-            long snapshotSize = Files.size(snapshotPath);
-            if (snapshotSize >= MIN_VALID_SAVE_BYTES && isInventoryEffectivelyEmpty(bot)) {
-                LOGGER.warn("Empty-bot override for '{}': vanilla restoration produced no items"
-                                + " but snapshot {} ({} bytes) is substantial — loading snapshot.",
-                        bot.getName().getString(),
-                        snapshotPath.getFileName(),
-                        snapshotSize);
-                return true;
+        // Empty-bot override: if vanilla restoration produced no items, prefer the snapshot
+        // regardless of mtime. Without this, the .dat vanilla writes AFTER our pre-shutdown
+        // snapshot (~4 s later on a clean stop, past SNAPSHOT_STALE_GRACE_MS) makes the
+        // older-but-valid snapshot look "stale" and silently wipes the bot.
+        // 2026-08-29: this used to require the snapshot to be >= MIN_VALID_SAVE_BYTES. Bob's
+        // two-item snapshot (stone axe + lead) was under that, fell through to the stale rule,
+        // was skipped, and the next periodic save overwrote it with the empty inventory. A
+        // small snapshot is still the ONLY record of a small inventory — no size gate.
+        if (isInventoryEffectivelyEmpty(bot)) {
+            long snapshotSize = -1L;
+            try {
+                snapshotSize = Files.size(snapshotPath);
+            } catch (IOException e) {
+                LOGGER.debug("Snapshot size check failed for '{}': {}",
+                        bot.getName().getString(), e.getMessage());
             }
-        } catch (IOException e) {
-            LOGGER.debug("Snapshot size check failed for '{}': {}",
-                    bot.getName().getString(), e.getMessage());
+            LOGGER.warn("Empty-bot override for '{}': vanilla restoration produced no items"
+                            + " — loading snapshot {} ({} bytes) regardless of its age.",
+                    bot.getName().getString(),
+                    snapshotPath.getFileName(),
+                    snapshotSize);
+            return true;
         }
 
         Path playerDataPath = server.getSavePath(WorldSavePath.PLAYERDATA)
