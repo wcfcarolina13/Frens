@@ -121,6 +121,15 @@ public class ManualConfig {
     // same reason banter is — companions spending LLM/TTS time unprompted is opt-in. This toggle
     // also gates the overhear recorder's write, so off means nothing is recorded at all.
     private boolean soulLocalChatEnabled = false;
+    // Active banter: companions chat while WORKING (skill running / actively following) —
+    // a second lane in SoulBanterDirector with its own cadence. Default-OFF like banter.
+    private boolean soulBanterActiveEnabled = false;
+    // Dialogue pacing sliders (0–100, 50 = shipped cadence). Never "off": the toggles above
+    // and the Text/Voice masters are the kill switches. See DialoguePacing for the math.
+    private int dialogueScriptedRate = 50;
+    private int soulBanterIdleRate = 50;
+    private int soulBanterActiveRate = 50;
+    private int soulLocalRate = 50;
 
     // Soul generated-voice (TTS). Default-off; local engines only. See
     // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
@@ -864,6 +873,19 @@ public class ManualConfig {
 
     public boolean isSoulLocalChatEnabled() { return soulLocalChatEnabled; }
     public void setSoulLocalChatEnabled(boolean v) { this.soulLocalChatEnabled = v; }
+
+    public boolean isSoulBanterActiveEnabled() { return soulBanterActiveEnabled; }
+    public void setSoulBanterActiveEnabled(boolean v) { this.soulBanterActiveEnabled = v; }
+
+    private static int clampRate(int rate) { return Math.max(0, Math.min(100, rate)); }
+    public int getDialogueScriptedRate() { return clampRate(dialogueScriptedRate); }
+    public void setDialogueScriptedRate(int v) { this.dialogueScriptedRate = clampRate(v); }
+    public int getSoulBanterIdleRate() { return clampRate(soulBanterIdleRate); }
+    public void setSoulBanterIdleRate(int v) { this.soulBanterIdleRate = clampRate(v); }
+    public int getSoulBanterActiveRate() { return clampRate(soulBanterActiveRate); }
+    public void setSoulBanterActiveRate(int v) { this.soulBanterActiveRate = clampRate(v); }
+    public int getSoulLocalRate() { return clampRate(soulLocalRate); }
+    public void setSoulLocalRate(int v) { this.soulLocalRate = clampRate(v); }
 
     public String getSoulProvider() {
         return (soulProvider == null || soulProvider.isBlank()) ? "ollama" : soulProvider;
