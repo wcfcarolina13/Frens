@@ -2,6 +2,49 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Overnight review of 1.1.182–184: five regressions caught before they were felt; 1.1.185 (2026-08-29)
+
+The three rapid fix batches shipped today (separation/pacing, admin-menu clamp, field
+autopsy 3) went out with only self-review, so a full independent review ran over the whole
+range overnight. Verdict: no Critical, five Important — four of them regressions the fast
+fixes themselves introduced. All fixed, plus six minors; a scoped re-review confirmed every
+item with no new breakage. 552 tests green.
+
+- **Banter's failure refund could clobber a real conversation's cooldown.** The
+  `merge(Math::min)` refund also shortened a cooldown deliberately re-armed by
+  `notePlayerScene` while the generation was in flight. Now a conditional
+  `replace(key, exactValueThisFireWrote, retry)` — a concurrent re-arm always survives.
+  Same pattern added to the local director, which previously had no failure refund at all.
+- **The cross-bot line dedup had quietly become a global cooldown.** 9 of the 11 pet-line
+  pools hold exactly one line, so "any line spoken by any bot is off the menu for 2 min"
+  stretched designed cadences up to 15× (WOLF_HURT: 8 s by design). Dedup now stores WHO
+  spoke and suppresses only a line recently said by a DIFFERENT bot — the echo bug stays
+  fixed, solo cadences are untouched. Also: `/bot dialogue test <trigger>` (cooldownMs=0)
+  now bypasses dedup entirely, so the debug command can't silently no-op.
+- **Solo-scene leniency could speak model scaffolding.** "Here is the scene:" (tag with
+  empty body) fell through as prose; "Note: this is narration" had its tag stripped and was
+  delivered as dialogue; a bare ":" was speakable. Now: a META_TAGS denylist
+  (note/scene/narrator/system/…, compared post-normalize so case/spacing can't slip
+  through), tag-like lines with empty bodies dropped, punctuation-only lines dropped.
+  Wrong NAME tags (the "Jake:" while being Bob case) still strip correctly. +2 tests.
+- **The admin-menu clamp fixed the footer and broke the middle.** It reserved room for the
+  toggle rows and bulk section only — everything below still laid out from the panel
+  bottom, so a clamped panel pushed the alias dropdown onto the footer band (where its
+  hit-test, which runs before the footer's, ate the clicks again) and zeroed the per-bot
+  settings panel. `recomputeLayout` now reserves the below-panel block (alias label +
+  dropdown + a 60 px minimum settings panel). The scroll arrows, which drew inside the
+  chip rects, became a thin position strip in the chip gutter.
+- Minors: registry built-ins now load per-resource (a bad bob.json can no longer wedge
+  startup into a misleading duplicate-id failure while Jake half-loaded);
+  `bindProfile` validates the id via `require()` so a typo fails at enable with a clear
+  message; stale Javadocs corrected; blank forced line ids normalized; dead post-panel
+  footer click code removed. Field note: a rebound Bob keeps his existing transcript, so
+  early history reads as Jake-voiced — it ages out naturally.
+
+Also overnight: the field-test guide artifact was rewritten for 1.1.184+ (prime commands,
+solo remarks, the separation proof, and a PROOFS section walking every reported defect),
+and RALPH_TASK.md reflects the field-test loop state.
+
 ## Field autopsy 3: live-settings apply, solo-scene MALFORMED, Bob's own persona; 1.1.184 (2026-08-29)
 
 Session 01:30–01:40 on 1.1.182. The engagement machinery WORKED — solo banter fired at

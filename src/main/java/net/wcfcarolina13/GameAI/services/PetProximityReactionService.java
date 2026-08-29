@@ -426,11 +426,16 @@ public final class PetProximityReactionService {
 
     /** Cross-bot recency per line id: with two companions near the same animal, each bot's
      *  per-bot cooldown allowed both to fire the IDENTICAL line seconds apart ("Nice bird!"
-     *  from Jake at :22 and Bob at :24 in the 2026-08-29 field log). Any line spoken by ANY
-     *  bot is off the menu for every bot for this window; a second bot may still react with a
-     *  different line from the pool. */
+     *  from Jake at :22 and Bob at :24 in the 2026-08-29 field log). A line recently spoken by
+     *  a DIFFERENT bot is off the menu; the SAME bot repeating is still governed only by its
+     *  own per-pool cooldown — 9 of the 11 pools hold exactly one line, so a bot-agnostic
+     *  window would have silently stretched every such pool's designed cadence (review #2). */
     private static final long GLOBAL_LINE_DEDUP_MS = 120_000L;
-    private static final ConcurrentHashMap<String, Long> GLOBAL_LAST_LINE_MS = new ConcurrentHashMap<>();
+
+    private record LineEcho(UUID botId, long atMs) {
+    }
+
+    private static final ConcurrentHashMap<String, LineEcho> GLOBAL_LAST_LINE = new ConcurrentHashMap<>();
 
     private static boolean playLine(ServerPlayerEntity bot,
                                     WeightedLine[] pool,
@@ -447,16 +452,24 @@ public final class PetProximityReactionService {
             return false;
         }
 
+        if (forcedLineId != null && forcedLineId.isBlank()) {
+            forcedLineId = null; // a blank forced id is no forced id (review minor)
+        }
         WeightedLine[] eligible = pool;
-        if (forcedLineId == null) {
+        // Dedup applies only to organic fires (cooldownMs > 0): the debug command
+        // (/bot dialogue test <trigger>) passes cooldownMs == 0 and must always play.
+        if (forcedLineId == null && cooldownMs > 0L) {
             java.util.List<WeightedLine> fresh = new java.util.ArrayList<>(pool.length);
             for (WeightedLine candidate : pool) {
-                if (now - GLOBAL_LAST_LINE_MS.getOrDefault(candidate.id, 0L) >= GLOBAL_LINE_DEDUP_MS) {
+                LineEcho echo = GLOBAL_LAST_LINE.get(candidate.id);
+                boolean recentlyByAnotherBot = echo != null && !botId.equals(echo.botId())
+                        && now - echo.atMs() < GLOBAL_LINE_DEDUP_MS;
+                if (!recentlyByAnotherBot) {
                     fresh.add(candidate);
                 }
             }
             if (fresh.isEmpty()) {
-                return false; // every line in this pool was recently spoken by some bot
+                return false; // every line in this pool was just spoken by a different bot
             }
             eligible = fresh.toArray(new WeightedLine[0]);
         }
@@ -466,7 +479,7 @@ public final class PetProximityReactionService {
             return false;
         }
 
-        GLOBAL_LAST_LINE_MS.put(line.id, now);
+        GLOBAL_LAST_LINE.put(line.id, new LineEcho(botId, now));
         cooldownMap.put(botId, now);
         CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "pet", line.id);
         BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.AMBIENT_CHATTER);

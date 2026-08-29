@@ -46,8 +46,19 @@ public final class SoulProfileRegistry {
         if (builtInsLoaded) {
             return;
         }
-        register(loadFromClasspath(BUILT_IN_JAKE_RESOURCE));
-        register(loadFromClasspath(BUILT_IN_BOB_RESOURCE));
+        // Each built-in registers independently: a fault in one resource must not leave the
+        // registry half-loaded with the loaded flag unset, where a retry would then throw
+        // "Duplicate soul profile id" for the profile that DID load (review minor). A profile
+        // that fails to parse is logged and skipped; the others still work.
+        for (String resource : new String[] {BUILT_IN_JAKE_RESOURCE, BUILT_IN_BOB_RESOURCE}) {
+            try {
+                register(loadFromClasspath(resource));
+            } catch (RuntimeException loadFailure) {
+                org.slf4j.LoggerFactory.getLogger("frens.souls")
+                        .error("[souls] built-in profile {} failed to load: {}", resource,
+                                loadFailure.toString());
+            }
+        }
         builtInsLoaded = true;
     }
 

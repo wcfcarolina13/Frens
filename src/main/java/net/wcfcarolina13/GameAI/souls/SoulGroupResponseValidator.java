@@ -21,6 +21,12 @@ public final class SoulGroupResponseValidator {
 
     /** A speaker tag longer than this many raw chars is treated as narration, not a tag. */
     private static final int MAX_SPEAKER_TAG_CHARS = 40;
+
+    /** Tag words that are model scaffolding, never speaker names — a solo roster's wrong-tag
+     *  repair must not turn "Note: …" narration into spoken dialogue (2026-08-29 review #4). */
+    private static final java.util.Set<String> META_TAGS = java.util.Set.of(
+            "note", "notes", "scene", "narrator", "narration", "system", "user", "assistant",
+            "output", "response", "context", "instruction", "instructions");
     /** Sentence-boundary truncation only applies past this many chars; earlier ends hard-cut. */
     private static final int MIN_TRUNCATION_SENTENCE_CHARS = 80;
 
@@ -87,21 +93,27 @@ public final class SoulGroupResponseValidator {
             int idx;
             String body;
             int colon = line.indexOf(':');
-            boolean tagged = colon > 0 && colon <= MAX_SPEAKER_TAG_CHARS
-                    && !normalize(line.substring(0, colon)).isEmpty()
-                    && !line.substring(colon + 1).strip().isEmpty();
+            boolean tagLike = colon > 0 && colon <= MAX_SPEAKER_TAG_CHARS
+                    && !normalize(line.substring(0, colon)).isEmpty();
+            boolean tagged = tagLike && !line.substring(colon + 1).strip().isEmpty();
             if (tagged) {
                 String speaker = normalize(line.substring(0, colon));
                 body = line.substring(colon + 1).strip();
                 idx = normRoster.indexOf(speaker);
                 if (idx < 0) {
-                    if (soloRoster) {
-                        idx = 0; // wrong tag, one possible speaker — strip it, keep the line
+                    if (soloRoster && !META_TAGS.contains(speaker)) {
+                        idx = 0; // wrong NAME tag, one possible speaker — strip it, keep the line
                     } else {
-                        continue; // unknown speaker — dropped, never repaired
+                        continue; // unknown speaker or scaffolding tag — dropped, never repaired
                     }
                 }
             } else if (soloRoster) {
+                if (tagLike || line.endsWith(":")) {
+                    continue; // "Here is the scene:" — a tag with no body is scaffolding, not prose
+                }
+                if (line.replaceAll("[\\p{Punct}\\s]", "").isEmpty()) {
+                    continue; // punctuation-only noise
+                }
                 idx = 0;
                 body = line;
             } else {

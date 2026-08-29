@@ -829,10 +829,18 @@ public final class SoulRuntime {
     }
 
     /** Binds {@code botId} to any registered profile — since 2026-08-29 a bot named after a
-     *  registered profile (Bob → frens:bob) gets its OWN persona instead of Jake's. */
+     *  registered profile (Bob → frens:bob) gets its OWN persona instead of Jake's. The id is
+     *  validated against the registry up front so a typo fails HERE with a clear message,
+     *  not later at prompt assembly (review minor). */
     public CompletableFuture<SoulTypes.SoulState> bindProfile(UUID botId, String profileId) {
         Objects.requireNonNull(botId, "botId");
         Objects.requireNonNull(profileId, "profileId");
+        try {
+            SoulProfileRegistry.require(profileId);
+        } catch (RuntimeException unknownProfile) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "Unknown soul profile id: " + profileId, unknownProfile));
+        }
         return store.bindProfile(botId, profileId);
     }
 

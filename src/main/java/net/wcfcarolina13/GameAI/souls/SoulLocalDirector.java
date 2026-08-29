@@ -292,7 +292,8 @@ public final class SoulLocalDirector {
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 SoulGroupTypes.SceneKind.LOCAL, playerId, player.getName().getString(),
                 List.of(participant), line, Instant.now(), routingId);
-        nextEligibleAtMs.put(playerId, now + nextDelayMs(random));
+        long armedUntilMs = now + nextDelayMs(random);
+        nextEligibleAtMs.put(playerId, armedUntilMs);
         if (bestIsContinuation) {
             markWindowUsed(playerId);
         }
@@ -305,7 +306,17 @@ public final class SoulLocalDirector {
         lastScore.put(playerId, bestScore);
         LOGGER.info("[souls] local player={} bot={} outcome=fired routingId={} score={}",
                 playerId, candidateBot.getUuid(), routingId, bestScore);
-        runtime.submitGroupTurn(turn);
+        runtime.submitGroupTurn(turn).thenAccept(submission -> {
+            // Same failure-refund rule as the banter director (review round, minor #1): a
+            // MALFORMED generation must not burn the full 6–12 min window. Conditional replace
+            // of exactly the value this fire wrote, so a deliberate re-arm meanwhile stands.
+            if (submission == SoulGroupConversationService.Submission.FAILED) {
+                if (nextEligibleAtMs.replace(playerId, armedUntilMs,
+                        clock.getAsLong() + RETRY_AFTER_VETO_MS)) {
+                    recordVerdict(playerId, "fired-but-failed");
+                }
+            }
+        });
     }
 
     /**

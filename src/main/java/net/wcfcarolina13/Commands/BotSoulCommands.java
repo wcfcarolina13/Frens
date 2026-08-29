@@ -117,10 +117,11 @@ final class BotSoulCommands {
     // === Pure helpers (unit-tested; no Minecraft types) ===
 
     /**
-     * Resolves a user-typed bot alias to the pilot's single supported profile id, or
-     * {@link Optional#empty()} for anything else. Deliberately narrow: naming a bot "Jake" (or
-     * any other alias) does not itself grant the soul-communication profile -- only an explicit
-     * {@code /bot soul enable <bot>} call does, via {@link #JAKE_PROFILE_ID}.
+     * Resolves a user-typed alias to a registered profile id ("jake"/"frens:jake" and, since
+     * 2026-08-29, "bob"/"frens:bob"), or {@link Optional#empty()} for anything else. A name
+     * alone never activates anything — activation still requires an explicit
+     * {@code /bot soul enable <bot>}, which binds a name-matched profile when one is
+     * registered and falls back to {@link #JAKE_PROFILE_ID} otherwise.
      */
     static Optional<String> profileId(String rawAlias) {
         if (rawAlias == null) {

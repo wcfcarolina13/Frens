@@ -302,8 +302,16 @@ public class BotControlScreen extends Screen {
         int bulkSectionH = globalsExpanded ? getBulkSectionHeight() : 0;
         int footerTop = outerPanelY + outerPanelH - 30;
         int desiredPanelH = GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20 + bulkSectionH;
+        // Reserve room for everything that lays out BELOW the panel (review #5): the alias
+        // label+dropdown and a minimum usable settings panel. Without this, a clamped panel
+        // pushed the dropdown onto the footer band (where its hit-test, which runs before the
+        // footer's, ate the clicks) and the per-bot settings panel computed to zero height.
+        int reservedBelow = 8 + this.textRenderer.fontHeight + 4 // alias label
+                + BUTTON_H + 6                                    // alias dropdown + gap
+                + 60                                              // minimum settings panel
+                + 6;                                              // panel bottom margin
         int maxPanelH = Math.max(20 + getGlobalRowHeight() + bulkSectionH,
-                footerTop - 6 - (globalsStartY - 1));
+                footerTop - reservedBelow - (globalsStartY - 1));
         int globalPanelH = globalsExpanded ? Math.min(desiredPanelH, maxPanelH) : 18;
         globalRowsClamped = globalsExpanded && desiredPanelH > maxPanelH;
         globalVisibleRows = globalsExpanded
@@ -831,16 +839,19 @@ public class BotControlScreen extends Screen {
             y += rowH;
         }
 
-        // Scroll hints when the row list is clamped: small arrows at the panel's right edge.
-        if (globalRowsClamped) {
-            if (globalScrollRow > 0) {
-                context.drawText(this.textRenderer, "\u25B4", globalPanelRect.right() - 10,
-                        globalPanelRect.y + 20, COL_SECTION, false);
-            }
-            if (lastVisible < GLOBAL_TOGGLES.size()) {
-                context.drawText(this.textRenderer, "\u25BE", globalPanelRect.right() - 10,
-                        globalPanelRect.bottom() - getBulkSectionHeight() - 10, COL_SECTION, false);
-            }
+        // Scroll indicator when the row list is clamped: a thin position strip in the 7px
+        // gutter right of the chips (the arrow glyphs drew inside the chip rects — review).
+        if (globalRowsClamped && GLOBAL_TOGGLES.size() > 0) {
+            int rowsTop = globalPanelRect.y + 19;
+            int rowsBottom = globalPanelRect.bottom() - getBulkSectionHeight();
+            int trackH = rowsBottom - rowsTop;
+            int thumbH = Math.max(8, trackH * globalVisibleRows / GLOBAL_TOGGLES.size());
+            int thumbY = rowsTop + (trackH - thumbH) * globalScrollRow
+                    / Math.max(1, GLOBAL_TOGGLES.size() - globalVisibleRows);
+            context.fill(globalPanelRect.right() - 4, rowsTop,
+                    globalPanelRect.right() - 2, rowsBottom, 0x30FFFFFF);
+            context.fill(globalPanelRect.right() - 4, thumbY,
+                    globalPanelRect.right() - 2, thumbY + thumbH, COL_SECTION | 0xFF000000);
         }
 
         // ── Bulk Apply section ────────────────────────────────────────────────
@@ -1403,28 +1414,7 @@ public class BotControlScreen extends Screen {
             return true;  // consume click inside panel even if no row matched
         }
 
-        // Footer: Permissions editor
-        if (permissionsActionRect.contains(mx, my)) {
-            if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
-                this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
-            }
-            return true;
-        }
-
-        // Footer: Spawn Bots — opens BotRestoreScreen for multi-select spawning
-        if (spawnBotsActionRect.contains(mx, my)) {
-            if (this.client != null) {
-                java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
-                this.client.setScreen(new BotRestoreScreen(this, aliases));
-            }
-            return true;
-        }
-
-        // Footer: Close
-        if (closeRect.contains(mx, my)) {
-            close();
-            return true;
-        }
+        // (Footer buttons are handled at the top of this method — always-on-top rule.)
 
         // Setting chip clicks (per-bot)
         for (Map.Entry<CyclingButtonWidget<?>, Rect> entry : settingChipRects.entrySet()) {

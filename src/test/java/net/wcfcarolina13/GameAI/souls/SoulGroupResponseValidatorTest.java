@@ -165,4 +165,30 @@ class SoulGroupResponseValidatorTest {
                 .parse("Just some prose with no speaker tag.", List.of("Jake", "Sara"), 6);
         assertFalse(parse.accepted(), "with 2+ speakers an untagged line is still ambiguous");
     }
+
+    @Test
+    void soloRosterDropsModelScaffoldingInsteadOfSpeakingIt() {
+        // "Here is the scene:" — a tag-shaped prefix with an EMPTY body used to fall through as
+        // untagged prose and be spoken verbatim. A line ending in a bare colon is scaffolding.
+        assertFalse(new SoulGroupResponseValidator()
+                .parse("Here is the scene:", List.of("Jake"), 4).accepted());
+        // Meta tags are narration markers, not wrong NAMES — dropped, never repaired.
+        SoulGroupResponseValidator.SceneParse note = new SoulGroupResponseValidator()
+                .parse("Note: this is narration\nJake: actual dialogue", List.of("Jake"), 4);
+        assertTrue(note.accepted());
+        assertEquals(1, note.lines().size());
+        assertEquals("actual dialogue", note.lines().get(0).text());
+        // Punctuation-only lines are noise.
+        assertFalse(new SoulGroupResponseValidator()
+                .parse(":", List.of("Jake"), 4).accepted());
+    }
+
+    @Test
+    void soloMetaTagListCoversTheCommonScaffoldWords() {
+        for (String meta : List.of("Note", "Scene", "Narrator", "System", "Output", "Response")) {
+            SoulGroupResponseValidator.SceneParse parse = new SoulGroupResponseValidator()
+                    .parse(meta + ": should not be spoken", List.of("Bob"), 4);
+            assertFalse(parse.accepted(), meta + " must be treated as scaffolding, not a name");
+        }
+    }
 }
