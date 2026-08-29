@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Dialogue pacing sliders + active banter; 1.1.188 (2026-08-29)
+
+Spec: `docs/superpowers/specs/2026-08-29-frens-dialogue-pacing-design.md`; plan:
+`docs/superpowers/plans/2026-08-29-dialogue-pacing.md`. Approach A — one pure pacing helper,
+four rates, a second banter lane.
+
+- **Four frequency sliders — Scripted lines, Idle banter, Active banter, Local chime-ins.**
+  Each is 0–100 with 50 = the shipped cadence; `DialoguePacing.multiplier = 4^((50−rate)/50)`
+  scales cooldowns (0 → ×4 rarer, 100 → ×0.25 chattier) and divides one-shot chances (clamped).
+  A slider never means "off" — the toggles stay the kill switches. First-scene delays are not
+  scaled, so a fresh session still speaks in 60–150 s. Scripted services read the rate lazily at
+  every cooldown site (pet, overhead, inventory-full, enchanting, wake-up, animal-defence);
+  the soul directors receive the rates as injected `IntSupplier`s (souls stays Frens-free).
+- **Active banter: companions chat WHILE working.** `SoulBanterDirector` gained a second lane
+  with its own enable (new **Active** global toggle), cooldown (4–8 min × rate), verdict and
+  gate chain: disabled → pipeline → cooldown → busy → muted → player-not-ready (dead/asleep
+  only — light danger no longer vetoes) → not-quiet (30 s, not 90) → roster → nobody-working →
+  bots-apart; the post-capture danger veto still applies. "Working" = an open skill ticket or
+  actively following a player. Fires `SceneKind.WORK`; the prompt directive names what each bot
+  is doing ("Jake is woodcutting, Bob is walking with Roti… a short word or two about the work
+  without stopping"; solo: "…may say one short thing to Roti about it; Roti does not answer").
+  `/bot soul banter status` reports both lanes; `/bot soul banter now` primes both.
+- **Dialogue Frequency screen** — the **Rate…** chip on the Banter row of the global panel opens
+  four labelled sliders with live captions ("every ~4–8 min", "cooldowns ×0.50"), Reset defaults,
+  Done; every change autosaves to settings.json5 and syncs.
+- Tests: +4 `DialoguePacingTest`, +4 prompt (WORK directives, `humanizeTask`), +2 banter
+  (scaled bands, active veto order), +1 local. Full suite green.
+
+Field checklist: sliders persist across restart; Scripted at 100 → denser pet remarks, at 0
+near-silent; Active ON + a bot woodcutting → a `lane=ACTIVE … outcome=fired` line within ~2.5
+min and a scene that mentions the work; Idle unchanged at 50; status shows both lanes.
+
 ## Follow-up to autopsy 4: snapshot is the only truth, restore-window save guard, raw scene logging; 1.1.187 (2026-08-29)
 
 Self-review of 1.1.186 found the inventory fix had widened an escape hatch instead of
