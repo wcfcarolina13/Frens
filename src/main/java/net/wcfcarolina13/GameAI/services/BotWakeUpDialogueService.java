@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -131,7 +132,7 @@ public final class BotWakeUpDialogueService {
 
             // Random chance to stay silent. Don't burn the service-level cooldown when the
             // line never actually plays — let the next sleep cycle have a chance to fire.
-            if (ThreadLocalRandom.current().nextDouble() >= SPEAK_CHANCE) {
+            if (ThreadLocalRandom.current().nextDouble() >= DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, SPEAK_CHANCE)) {
                 LOGGER.info("Wake-up dialogue suppressed (random silence) for bot {}", bot.getName().getString());
                 continue;
             }

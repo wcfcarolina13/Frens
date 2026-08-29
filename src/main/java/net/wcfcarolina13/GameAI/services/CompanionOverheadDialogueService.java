@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
@@ -125,7 +126,7 @@ public final class CompanionOverheadDialogueService {
 
         long now = System.currentTimeMillis();
         long last = LAST_LEAF_STUCK_MS.getOrDefault(id, 0L);
-        if (now - last < COOLDOWN_MS) {
+        if (now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, COOLDOWN_MS)) {
             return;
         }
         LAST_LEAF_STUCK_MS.put(id, now);
@@ -232,7 +233,7 @@ public final class CompanionOverheadDialogueService {
 
         long now = System.currentTimeMillis();
         long last = lastMap.getOrDefault(id, 0L);
-        if (now - last < Math.max(0L, cooldownMs)) {
+        if (now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, Math.max(0L, cooldownMs))) {
             return;
         }
         lastMap.put(id, now);

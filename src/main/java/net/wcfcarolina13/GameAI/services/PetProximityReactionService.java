@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.entity.passive.AbstractNautilusEntity;
 import net.minecraft.entity.passive.CamelEntity;
@@ -448,7 +449,8 @@ public final class PetProximityReactionService {
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
         long last = cooldownMap.getOrDefault(botId, 0L);
-        if (forcedLineId == null && cooldownMs > 0L && now - last < cooldownMs) {
+        if (forcedLineId == null && cooldownMs > 0L
+                && now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, cooldownMs)) {
             return false;
         }
 

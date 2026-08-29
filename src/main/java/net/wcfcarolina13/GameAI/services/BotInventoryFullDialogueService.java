@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -55,7 +56,7 @@ public final class BotInventoryFullDialogueService {
                 continue;
             }
             long last = LAST_FULL_INVENTORY_LINE_MS.getOrDefault(bot.getUuid(), 0L);
-            if (now - last < FULL_INVENTORY_COOLDOWN_MS) {
+            if (now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, FULL_INVENTORY_COOLDOWN_MS)) {
                 continue;
             }
             // Keep this occasional even when inventory remains full for long stretches.
@@ -81,10 +82,10 @@ public final class BotInventoryFullDialogueService {
         long now = System.currentTimeMillis();
         UUID botId = bot.getUuid();
         long last = LAST_CHEST_RELIEF_LINE_MS.getOrDefault(botId, 0L);
-        if (now - last < CHEST_RELIEF_COOLDOWN_MS) {
+        if (now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, CHEST_RELIEF_COOLDOWN_MS)) {
             return;
         }
-        if (RNG.nextDouble() > CHEST_RELIEF_CHANCE) {
+        if (RNG.nextDouble() > DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, CHEST_RELIEF_CHANCE)) {
             return;
         }
         LAST_CHEST_RELIEF_LINE_MS.put(botId, now);

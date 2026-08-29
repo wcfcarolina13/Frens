@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -321,7 +322,7 @@ public final class BotAnimalDefenseService {
         WarnKey key = new WarnKey(bot.getUuid(), victim.getUuid(), attacker.getUuid());
         long now = System.currentTimeMillis();
         Long lastWarnedAt = LAST_OVERHEAD_WARN_MS.get(key);
-        if (lastWarnedAt != null && now - lastWarnedAt < OVERHEAD_WARN_COOLDOWN_MS) {
+        if (lastWarnedAt != null && now - lastWarnedAt < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, OVERHEAD_WARN_COOLDOWN_MS)) {
             return;
         }
         LAST_OVERHEAD_WARN_MS.put(key, now);

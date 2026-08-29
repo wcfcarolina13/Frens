@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -79,7 +80,7 @@ public final class EnchantingAmbientDialogueService {
 
             // Per-bot cooldown
             long last = LAST_LINE_MS.getOrDefault(id, 0L);
-            if (now - last < COOLDOWN_MS) {
+            if (now - last < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, COOLDOWN_MS)) {
                 continue;
             }
 
@@ -89,7 +90,7 @@ public final class EnchantingAmbientDialogueService {
             }
 
             // Random chance gate
-            if (ThreadLocalRandom.current().nextDouble() > SPEAK_CHANCE) {
+            if (ThreadLocalRandom.current().nextDouble() > DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, SPEAK_CHANCE)) {
                 continue;
             }
 
