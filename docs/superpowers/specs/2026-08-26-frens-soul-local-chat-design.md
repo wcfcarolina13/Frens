@@ -3,6 +3,9 @@
 **Date:** 2026-08-26
 **Status:** Approved design (interview + section approval this session)
 **Parent specs:** `2026-08-23-frens-soul-communication-design.md` (the pilot's channel model and its standing invariants: the model never schedules, explicit enablement, stale facts cancel a scene, provider budget respected), `2026-08-25-frens-soul-group-chat-design.md` (the PARTY scene machinery this rides, shipped in 1.1.176), and `2026-08-26-frens-soul-banter-design.md` (the deterministic-director pattern and the ambient-mask gating rule this reuses, shipped in 1.1.177).
+> **REVISED 2026-08-29 (1.1.182):** ambient delivery gating is masters-only (Text master /
+> Voice master + Soul Voice), not the Adv category masks — see the banter spec's revision note.
+
 **Baseline:** frens 1.1.177; suite 488 green; group-chat and banter field tests both still pending. Local chat ships behind its own default-off toggle, so it can be validated independently of either.
 
 ## 1. Summary

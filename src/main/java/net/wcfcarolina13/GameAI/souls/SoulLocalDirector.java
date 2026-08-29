@@ -359,6 +359,14 @@ public final class SoulLocalDirector {
         }
     }
 
+    /** Field-test lever ({@code /bot soul local now}): clears the actor's reaction cooldown so
+     *  the next salient unaddressed line may fire immediately. */
+    public void primeNow(UUID playerId) {
+        if (playerId != null) {
+            nextEligibleAtMs.put(playerId, 0L);
+        }
+    }
+
     /** Closes any open reply window — the player addressed a bot directly, so ambient yields. */
     public void noteAddressedChat(UUID playerId) {
         if (playerId != null) {

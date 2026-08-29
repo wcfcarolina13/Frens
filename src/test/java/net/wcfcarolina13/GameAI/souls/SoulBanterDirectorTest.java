@@ -41,7 +41,10 @@ class SoulBanterDirectorTest {
         Random random = new Random(7);
         for (int i = 0; i < 1000; i++) {
             long initial = SoulBanterDirector.initialDelayMs(random);
-            assertTrue(initial >= 4 * 60_000L && initial <= 8 * 60_000L, "initial=" + initial);
+            // 60–150 s: a companion that says nothing for the first five minutes of every
+            // session reads as broken — both 2026-08 field sessions ended before the old
+            // 4–8 min grace ever elapsed.
+            assertTrue(initial >= 60_000L && initial <= 150_000L, "initial=" + initial);
             long next = SoulBanterDirector.nextDelayMs(random);
             assertTrue(next >= 8 * 60_000L && next <= 15 * 60_000L, "next=" + next);
         }

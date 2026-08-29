@@ -2,6 +2,45 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Prebaked/LLM dialogue separation + engagement pacing + prime commands; 1.1.182 (2026-08-29)
+
+Second field session (01:07–01:11, 3.5 minutes, 1.1.181) reported "still no LLM engagement"
+— and the log shows why in one line: `vetoed:cooldown` at 01:08:31. The initial banter grace
+was 4–8 minutes; **both** field sessions to date ended before it ever elapsed. Not a code
+bug — a pacing design that made the feature untestable and made fresh sessions feel mute.
+Plus the real menu defect underneath the earlier mute incident, now named: soul ambient
+delivery obeyed the same Adv CATEGORY masks as the prebaked lines (banter spec D6), so the
+admin menu had no way to mute scripted chatter while keeping LLM chatter — the exact
+separation the user asked for.
+
+Three changes:
+
+**1. Separation (revises banter spec D6, notes added to both specs).** The Adv… category
+mutes now govern PREBAKED lines only. LLM ambient (banter/solo remarks/local reactions)
+gates on: the Text Chat master for text, the Voice master + Soul Voice for audio, and its
+own Banter/Local chips. Bradley's 1.1.175 ruling stands — the masters remain universal kill
+switches — but the category layer no longer reaches into soul scenes. To run "no scripted
+chatter, full LLM chatter": leave both masters ON, mute categories in Adv, done. Wiring:
+the two `ambientTextOpen`/`ambientVoiceOpen` suppliers in `SoulRuntime.start` (playback
+re-reads them per line, the directors use them for the `muted` veto — one change covers
+all), `ambientSurfaceWarning` in the commands, and the four chip tooltips now say which
+layer owns what.
+
+**2. Pacing.** `initialDelayMs` drops 4–8 min → **60–150 s** (band test updated); a fresh
+session's first possible scene lands within ~2.5 min. Steady-state `nextDelayMs` (8–15 min)
+unchanged.
+
+**3. Prime commands.** `/bot soul banter now` and `/bot soul local now` (operator): clear
+the actor's cooldown so the next evaluation may fire immediately. Every other gate — quiet
+window, budget, surfaces, roster, danger — still applies; this only removes the wait. THE
+field-test lever; both mentioned in the chip tooltips.
+
+546 tests green. **Field test (1.1.182):** launch, `/bot soul enable Bob` if testing pairs,
+then `/bot soul banter now` + stand quiet 90 s → scene inside ~10 s of eligibility; solo →
+remark addressed to you; reply within 30 s → exactly one continuation. Mute ambient_chatter
+in BOTH Adv menus → scripted one-liners silent, banter still speaks (the separation proof).
+`vetoed:muted` should now appear only with Text master off AND (Voice or Soul Voice) off.
+
 ## Player engagement: solo remarks + player-addressed banter; 1.1.181 (2026-08-29)
 
 The 2026-08-28 session exposed the structural gap: with one bot, no bot-initiated

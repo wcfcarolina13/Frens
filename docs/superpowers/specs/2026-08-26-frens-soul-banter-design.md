@@ -3,6 +3,12 @@
 **Date:** 2026-08-26
 **Status:** Approved design (interview + section-by-section approval this session)
 **Parent specs:** `2026-08-23-frens-soul-communication-design.md` (§Autonomous banter: scheduled by deterministic Frens logic, never the model; eligibility = explicit enablement + nearby qualified participants + suitable player presence + quiet period + per-bot cooldowns + provider-budget availability + no danger/urgent transitions; scene cancelled if facts go stale before delivery) and `2026-08-25-frens-soul-group-chat-design.md` (the PARTY scene machinery this rides, shipped in 1.1.176).
+> **REVISED 2026-08-29 (1.1.182):** D6's delivery gating no longer uses the ambient text/voice
+> CATEGORY masks — field sessions showed that coupling meant muting scripted one-liners also
+> silenced every soul scene. BANTER (and LOCAL) delivery now gates on the Text master, the
+> Voice master + Soul Voice, and the feature chips; the Adv category mutes govern prebaked
+> lines only. The PLAYER-scene exemption and everything else in D6 stands.
+
 **Baseline:** frens 1.1.176 deployed; suite 463/463; group chat field-test pending (banter ships behind a default-off toggle, so the two can be field-tested together).
 
 ## 1. Summary

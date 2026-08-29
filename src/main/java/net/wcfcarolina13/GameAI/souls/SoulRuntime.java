@@ -199,16 +199,19 @@ public final class SoulRuntime {
 
             SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, partyStore,
                     delivery, voiceDelivery);
-            // Ambient-category gates for BANTER scenes (banter spec D6): lazy lambdas so this
-            // class never class-loads Frens/ChatUtils outside a live game. PLAYER scenes ignore
-            // these (soul exemption).
-            java.util.function.BooleanSupplier ambientTextOpen = () ->
-                    net.wcfcarolina13.ChatUtils.TextLineVisibilityService.isTextAllowed(
-                            net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER);
+            // Ambient gates for BANTER/LOCAL scenes — MASTERS ONLY (2026-08-29 separation
+            // ruling, revising banter spec D6): the Adv category mutes are the PREBAKED lines'
+            // controls, and coupling LLM chatter to them meant muting scripted "Nice bird!"
+            // one-liners also silenced every soul scene (the root cause of both silent field
+            // sessions). LLM ambient now answers to: the Text master, the Voice master + Soul
+            // Voice, and its own Banter/Local chips. PLAYER scenes ignore these (soul exemption).
+            java.util.function.BooleanSupplier ambientTextOpen = () -> {
+                ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                return cfg == null || cfg.isTextDialogueEnabled();
+            };
             java.util.function.BooleanSupplier ambientVoiceOpen = () -> {
                 ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-                return cfg == null || (cfg.isVoicedDialogueEnabled() && !cfg.isVoiceCategoryMuted(
-                        net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER.id()));
+                return cfg == null || (cfg.isVoicedDialogueEnabled() && cfg.isSoulVoiceEnabled());
             };
 
             // The playback machine reads the CURRENT pipeline's voice/group service through the
@@ -565,6 +568,21 @@ public final class SoulRuntime {
                 SoulPlayerActivity.noteChat(player.getUuid(), System.currentTimeMillis());
             }
         } catch (Throwable ignored) {
+        }
+    }
+
+    /** Field-test levers for {@code /bot soul banter|local now}. */
+    public void primeBanter(UUID playerId) {
+        SoulBanterDirector director = banterDirector;
+        if (director != null) {
+            director.primeNow(playerId);
+        }
+    }
+
+    public void primeLocal(UUID playerId) {
+        SoulLocalDirector director = localDirector;
+        if (director != null) {
+            director.primeNow(playerId);
         }
     }
 

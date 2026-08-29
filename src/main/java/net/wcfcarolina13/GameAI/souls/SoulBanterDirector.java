@@ -205,6 +205,14 @@ public final class SoulBanterDirector {
         runtime.submitGroupTurn(turn);
     }
 
+    /** Field-test lever ({@code /bot soul banter now}): clears the actor's cooldown so the
+     *  next 5 s evaluation may fire immediately if every other gate passes. */
+    public void primeNow(UUID playerId) {
+        if (playerId != null) {
+            nextEligibleAtMs.put(playerId, 0L);
+        }
+    }
+
     /** A player-initiated scene re-arms the full cooldown — banter yields to real conversation. */
     public void notePlayerScene(UUID playerId) {
         nextEligibleAtMs.put(playerId, clock.getAsLong() + nextDelayMs(random));
@@ -279,7 +287,10 @@ public final class SoulBanterDirector {
     // === Pure rules (unit-tested) ===
 
     static long initialDelayMs(RandomGenerator random) {
-        return 4 * 60_000L + (long) (random.nextDouble() * 4 * 60_000L);
+        // 60–150 s (was 4–8 min): both 2026-08 field sessions ended before the old grace ever
+        // elapsed, so the feature was untestable and a fresh session felt mute. Steady-state
+        // spacing (nextDelayMs) is unchanged — this only moves the FIRST possible scene.
+        return 60_000L + (long) (random.nextDouble() * 90_000L);
     }
 
     static long nextDelayMs(RandomGenerator random) {

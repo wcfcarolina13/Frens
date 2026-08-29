@@ -105,10 +105,12 @@ final class BotSoulCommands {
                 .then(CommandManager.literal("banter")
                         .then(CommandManager.literal("on").executes(ctx -> executeBanterToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeBanterToggle(ctx, false)))
+                        .then(CommandManager.literal("now").executes(ctx -> executePrime(ctx, true)))
                         .then(CommandManager.literal("status").executes(BotSoulCommands::executeBanterStatus)))
                 .then(CommandManager.literal("local")
                         .then(CommandManager.literal("on").executes(ctx -> executeLocalToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeLocalToggle(ctx, false)))
+                        .then(CommandManager.literal("now").executes(ctx -> executePrime(ctx, false)))
                         .then(CommandManager.literal("status").executes(BotSoulCommands::executeLocalStatus)));
     }
 
@@ -544,17 +546,51 @@ final class BotSoulCommands {
      * at least one ambient surface can deliver; otherwise a one-line explanation.
      */
     private static String ambientSurfaceWarning() {
+        // Masters-only since the 2026-08-29 separation ruling: Adv category mutes affect
+        // prebaked lines only and can no longer silence LLM chatter.
         ManualConfig config = Frens.CONFIG;
-        boolean textOpen = net.wcfcarolina13.ChatUtils.TextLineVisibilityService.isTextAllowed(
-                net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER);
-        boolean voiceOpen = config == null || (config.isVoicedDialogueEnabled()
-                && !config.isVoiceCategoryMuted(
-                        net.wcfcarolina13.ChatUtils.VoiceLineCategory.AMBIENT_CHATTER.id()));
+        boolean textOpen = config == null || config.isTextDialogueEnabled();
+        boolean voiceOpen = config == null
+                || (config.isVoicedDialogueEnabled() && config.isSoulVoiceEnabled());
         if (textOpen || voiceOpen) {
             return "";
         }
-        return " WARNING: Ambient Chatter is muted in both the Text and Voice Adv menus, so"
-                + " nothing can be delivered and no lines will be generated until one is unmuted.";
+        return " WARNING: the Text Chat master is off and voice (Voice master + Soul Voice) is"
+                + " off, so nothing can be delivered and no lines will be generated until one"
+                + " surface is back on.";
+    }
+
+    /**
+     * {@code /bot soul banter|local now} — field-test lever: clears the actor's cooldown so the
+     * next evaluation may fire immediately (every other gate — quiet window, budget, surfaces,
+     * roster, danger — still applies; this only removes the wait).
+     */
+    private static int executePrime(CommandContext<ServerCommandSource> context, boolean banter) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may prime a cooldown."));
+            return 0;
+        }
+        java.util.Optional<SoulRuntime> runtime = SoulRuntime.current();
+        if (runtime.isEmpty()) {
+            source.sendError(Text.literal("Soul runtime is not currently running."));
+            return 0;
+        }
+        if (banter) {
+            runtime.get().primeBanter(actor.getUuid());
+            ChatUtils.sendSystemMessage(source, "Banter cooldown cleared — if things are calm"
+                    + " and quiet, expect a scene within ~10 seconds.");
+        } else {
+            runtime.get().primeLocal(actor.getUuid());
+            ChatUtils.sendSystemMessage(source, "Local-chat cooldown cleared — your next"
+                    + " substantive unaddressed line may draw a reaction.");
+        }
+        return 1;
     }
 
     /**
