@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Admin menu: expanded toggles no longer bury the footer; 1.1.183 (2026-08-29)
+
+Screenshot-reported regression: with "Hide global toggles" expanded, the footer row
+(Permissions Editor / Spawn Bots… / Close) drew on top of the bulk-apply rows and none of
+them were clickable. Two defects, one growth-related and one ordering-related:
+
+- **No geometry guard.** `footerY` is pinned to the panel bottom while the expanded panel's
+  height is `GLOBAL_TOGGLES.size() × rowH + header + bulk`. The list has grown 8 → 10 rows
+  (Banter 1.1.177, Local 1.1.178), so on shorter logical windows (large GUI scale) the
+  panel now ran past the footer line. Nothing ever clamped it.
+- **Click priority.** `mouseClicked` tested `globalPanelRect` before the footer rects (the
+  footer was only pre-checked while the ALIAS dropdown was open), so once the rects
+  overlapped, the panel consumed every footer click — buttons visible, dead.
+
+Fix: the expanded panel is clamped to fit above the footer; when clamped, the toggle rows
+scroll with the mouse wheel (▴/▾ hints at the panel edge) and the bulk-apply rows are
+pinned to the panel bottom so they can never be pushed past it. Row hit-testing now goes
+through a parallel `globalRowIndices` list, since with a scrolled list the Nth visible rect
+is no longer the Nth toggle — without this, clicking a visible toggle would have flipped a
+DIFFERENT setting, a worse bug than the one reported. Footer buttons are checked first in
+`mouseClicked`, unconditionally: they are always visually on top, so they win clicks.
+
+UI-only change, no gameplay logic touched; 546 tests green (suite can't construct screens —
+verification is manual: expand the toggles at a large GUI scale, confirm the footer stays
+clickable, the rows scroll, and a scrolled row-click flips the row you clicked).
+
 ## Prebaked/LLM dialogue separation + engagement pacing + prime commands; 1.1.182 (2026-08-29)
 
 Second field session (01:07–01:11, 3.5 minutes, 1.1.181) reported "still no LLM engagement"

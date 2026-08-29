@@ -130,6 +130,14 @@ public class BotControlScreen extends Screen {
     // Custom click targets
     private Rect globalPanelRect;
     private final List<Rect> globalRowRects = new ArrayList<>();
+    /** Toggle index behind each entry of {@link #globalRowRects} — the two lists are parallel.
+     *  Needed since 2026-08-29: on short windows the expanded panel clamps and scrolls, so the
+     *  Nth visible row is no longer the Nth toggle. */
+    private final List<Integer> globalRowIndices = new ArrayList<>();
+    /** First visible toggle row when the expanded panel is height-clamped. */
+    private int globalScrollRow = 0;
+    private boolean globalRowsClamped = false;
+    private int globalVisibleRows = GLOBAL_TOGGLES.size();
     private final List<Rect> globalChipRects = new ArrayList<>();
     /** "Adv…" chip on the Voice row — opens the per-category voice mute screen. */
     private Rect voiceAdvancedRect;
@@ -283,10 +291,27 @@ public class BotControlScreen extends Screen {
 
         // When collapsed: just the header row (18px).  When expanded: header + rows
         // + bulk-apply section (separator + label + 2 button rows).
+        //
+        // 2026-08-29 regression fix: the toggle list has grown (10 rows since Banter/Local
+        // landed) and the footer is pinned to the panel bottom, so on short logical windows
+        // the expanded panel used to run PAST footerY — the footer buttons drew on top of
+        // the bulk rows and, because the panel consumed their clicks, became unclickable.
+        // The expanded panel is now clamped to fit above the footer; when clamped, the
+        // toggle rows scroll (mouse wheel) and the bulk section stays pinned at the panel
+        // bottom.
         int bulkSectionH = globalsExpanded ? getBulkSectionHeight() : 0;
-        int globalPanelH = globalsExpanded
-                ? (GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20 + bulkSectionH)
-                : 18;
+        int footerTop = outerPanelY + outerPanelH - 30;
+        int desiredPanelH = GLOBAL_TOGGLES.size() * getGlobalRowHeight() + 20 + bulkSectionH;
+        int maxPanelH = Math.max(20 + getGlobalRowHeight() + bulkSectionH,
+                footerTop - 6 - (globalsStartY - 1));
+        int globalPanelH = globalsExpanded ? Math.min(desiredPanelH, maxPanelH) : 18;
+        globalRowsClamped = globalsExpanded && desiredPanelH > maxPanelH;
+        globalVisibleRows = globalsExpanded
+                ? Math.max(1, (globalPanelH - 20 - bulkSectionH) / getGlobalRowHeight())
+                : GLOBAL_TOGGLES.size();
+        if (!globalRowsClamped) {
+            globalScrollRow = 0;
+        }
         globalPanelRect = new Rect(contentX - 2, globalsStartY - 1, contentW + 4, globalPanelH);
 
         // Alias dropdown after globals
@@ -655,6 +680,7 @@ public class BotControlScreen extends Screen {
     private void renderGlobalTogglePanel(DrawContext context, int mouseX, int mouseY) {
         globalRowRects.clear();
         globalChipRects.clear();
+        globalRowIndices.clear();
         voiceAdvancedRect = null;
         textAdvancedRect = null;
         soulVoiceEngineRect = null;
@@ -714,18 +740,22 @@ public class BotControlScreen extends Screen {
         int chipW = 46;
         int rowH = getGlobalRowHeight();
 
-        for (int i = 0; i < GLOBAL_TOGGLES.size(); i++) {
+        int maxScrollRow = Math.max(0, GLOBAL_TOGGLES.size() - globalVisibleRows);
+        globalScrollRow = Math.max(0, Math.min(globalScrollRow, maxScrollRow));
+        int lastVisible = Math.min(GLOBAL_TOGGLES.size(), globalScrollRow + globalVisibleRows);
+        for (int i = globalScrollRow; i < lastVisible; i++) {
             GlobalToggleDef def = GLOBAL_TOGGLES.get(i);
             Rect rowRect = new Rect(rowX, y, rowW, rowH);
             Rect chipRect = new Rect(rowRect.right() - chipW - 6, y + 1, chipW, rowH - 2);
             globalRowRects.add(rowRect);
             globalChipRects.add(chipRect);
+            globalRowIndices.add(i);
 
             boolean hover = rowRect.contains(mouseX, mouseY);
             context.fill(rowRect.x, rowRect.y, rowRect.right(), rowRect.bottom(),
                     hover ? COL_ROW_HL : COL_ROW);
 
-            if (i > 0) {
+            if (i > globalScrollRow) {
                 context.fill(rowRect.x, rowRect.y, rowRect.right(), rowRect.y + 1, 0x30FFFFFF);
             }
 
@@ -790,9 +820,23 @@ public class BotControlScreen extends Screen {
             y += rowH;
         }
 
+        // Scroll hints when the row list is clamped: small arrows at the panel's right edge.
+        if (globalRowsClamped) {
+            if (globalScrollRow > 0) {
+                context.drawText(this.textRenderer, "\u25B4", globalPanelRect.right() - 10,
+                        globalPanelRect.y + 20, COL_SECTION, false);
+            }
+            if (lastVisible < GLOBAL_TOGGLES.size()) {
+                context.drawText(this.textRenderer, "\u25BE", globalPanelRect.right() - 10,
+                        globalPanelRect.bottom() - getBulkSectionHeight() - 10, COL_SECTION, false);
+            }
+        }
+
         // ── Bulk Apply section ────────────────────────────────────────────────
         // Compact: thin separator line + 2 rows with [ALL ON] / [ALL OFF] action
-        // buttons.  Kept short to avoid squeezing the per-bot settings panel below.
+        // buttons.  Pinned to the panel bottom so a clamped/scrolling row list above can
+        // never push it past the footer.
+        y = globalPanelRect.bottom() - getBulkSectionHeight();
         y += 2;
         context.fill(globalPanelRect.x + 6, y, globalPanelRect.right() - 6, y + 1, COL_SEC_LINE);
         y += 2;
@@ -1255,6 +1299,26 @@ public class BotControlScreen extends Screen {
             return super.mouseClicked(click, isInside);
         }
 
+        // Footer buttons are always visually on top — check them before the global panel,
+        // whose expanded rect may reach the footer line on short windows (2026-08-29 fix).
+        if (closeRect != null && closeRect.contains(mx, my)) {
+            close();
+            return true;
+        }
+        if (permissionsActionRect != null && permissionsActionRect.contains(mx, my)) {
+            if (this.client != null && selectedAlias != null && !selectedAlias.isBlank()) {
+                this.client.setScreen(new AdminPlayerSettingsScreen(this, selectedAlias));
+            }
+            return true;
+        }
+        if (spawnBotsActionRect != null && spawnBotsActionRect.contains(mx, my)) {
+            if (this.client != null) {
+                java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
+                this.client.setScreen(new BotRestoreScreen(this, aliases));
+            }
+            return true;
+        }
+
         // Global panel click: toggle expand/collapse, or toggle individual values
         if (globalPanelRect.contains(mx, my)) {
             // Click on the header row (top 18px) always toggles expand/collapse
@@ -1290,12 +1354,14 @@ public class BotControlScreen extends Screen {
                 return true;
             }
 
-            // Click on an expanded toggle row
-            for (int i = 0; i < globalChipRects.size(); i++) {
-                Rect chipRect = globalChipRects.get(i);
-                Rect rowRect = globalRowRects.get(i);
+            // Click on an expanded toggle row (rects are parallel to globalRowIndices —
+            // with a clamped, scrolled list the Nth rect is NOT the Nth toggle)
+            for (int v = 0; v < globalChipRects.size(); v++) {
+                Rect chipRect = globalChipRects.get(v);
+                Rect rowRect = globalRowRects.get(v);
                 if (chipRect.contains(mx, my) || rowRect.contains(mx, my)) {
-                    globalValues[i] = !globalValues[i];
+                    int toggleIndex = globalRowIndices.get(v);
+                    globalValues[toggleIndex] = !globalValues[toggleIndex];
                     saveSettings();
                     return true;
                 }
@@ -1401,6 +1467,15 @@ public class BotControlScreen extends Screen {
             resetTooltipHoverState();
             return aliasDropdown.mouseScrolled(mouseX, mouseY,
                     horizontalAmount, verticalAmount);
+        }
+
+        if (globalsExpanded && globalRowsClamped && globalPanelRect != null
+                && globalPanelRect.contains(mouseX, mouseY)) {
+            resetTooltipHoverState();
+            int maxRow = Math.max(0, GLOBAL_TOGGLES.size() - globalVisibleRows);
+            int step = verticalAmount > 0 ? -1 : verticalAmount < 0 ? 1 : 0;
+            globalScrollRow = Math.max(0, Math.min(globalScrollRow + step, maxRow));
+            return true;
         }
 
         if (mouseX >= panelX && mouseX <= panelX + panelW
