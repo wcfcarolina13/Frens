@@ -2,6 +2,64 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Player engagement: solo remarks + player-addressed banter; 1.1.181 (2026-08-29)
+
+The 2026-08-28 session exposed the structural gap: with one bot, no bot-initiated
+conversation could exist at all — banter needed a roster of 2, local chat needed the player
+to speak substantively first. A quiet solo player got total silence. Spec
+`docs/superpowers/specs/2026-08-29-frens-soul-player-engagement-design.md` (interview
+decisions E1–E3); one capability, two entry points: **a companion may start a conversation
+with the player.**
+
+- **Solo remarks:** the banter director's roster gate relaxes ≥2 → ≥1 (`bots-apart` is
+  vacuously satisfied for a lone bot). A roster-of-one scene always carries the new
+  `GroupSceneTurn.addressPlayer` flag — the bot speaks TO the player: one short remark,
+  observation or question, seeded from real recent events on banter's existing cadence
+  (4–8 min initial grace, 8–15 min bands, 90 s quiet window, all vetoes unchanged).
+- **Player-addressed banter:** rosters of ≥2 get `addressPlayer` with probability exactly
+  1/3 from the director's injected RandomGenerator (`decideAddressPlayer`, unit-tested at
+  ~1000/3000). The model never decides WHETHER the player is addressed, only how — the
+  assembler renders three directive variants (unchanged / append the option / solo).
+- **Reply window on delivery:** `sceneDelivered` gains a `lastSpeakerIndex` (tracked in
+  playback beside `delivered++`, −1 when nothing delivered; skipped lines never set it).
+  A flagged BANTER scene with ≥1 delivered line opens the local-chat reply window for its
+  last speaker via NEW `SoulLocalDirector.noteEngagementDelivered` + pure
+  `shouldOpenEngagementWindow` (LOCAL excluded). Reusing `noteSceneDelivered` was
+  impossible by design: its continuation tracker fails closed for deliveries with no
+  matching pending fire, and a banter fire never registers one. The window is gated on
+  `soulLocalChatEnabled` so status never claims a window that cannot route (see below).
+  Continuation semantics unchanged: exactly one reply, then done; the state machine was
+  re-traced end-to-end in review (single window per player, budget gate prevents scene
+  overlap, `tick()` closes on death/earshot/world-change).
+- **Enablement rides existing toggles** (E3): no new chip, no new command. Banter chip text
+  now says a lone companion may speak to you; `/bot soul banter on|status` notes when
+  Local chat is OFF that replies can't route (spec §5 limitation: banter ON + local OFF
+  makes remarks one-way).
+
+Suite 539 → 546 green. Commits: `68e05eb` flag + directives, `9c1ba23` director, `b495f2a`
+window handoff + text, plus the review fix (window gated on the local toggle).
+
+**Review notes / follow-ups (whole-branch review, opus):**
+- FIELD-TEST QUESTION: every banter submit re-arms local chat's 6–12 min cooldown (the
+  established "surfaces take turns" rule). With solo banter now firing every 8–15 min, a
+  solo player's *organic* local reactions are heavily suppressed — engagement still arrives
+  (via remarks), but judge in-game whether the balance feels right.
+- A scene that enters capture with 2 bots and loses one now fires as a solo remark instead
+  of vetoing roster-lost (reviewed and judged correct: the directive is assembled from the
+  surviving roster, so no mismatch is possible). Wart: the seed's event pool still includes
+  the dropped bot's journal tail — a solo remark can retell an event its speaker didn't
+  witness. Pre-existing shape, more visible in first person; candidate for the
+  consolidation work.
+- The scene contract preamble still says "among a player's companions … at most six lines"
+  even for a solo scene; the directive overrides it in practice. Cosmetic.
+
+**Field-test checklist (1.1.181):** solo bot + calm + 90 s quiet → a remark addressed to
+you within 4–8 min of world start (8–15 min after); answer inside 30 s → exactly one
+continuation, no chain; ignore it → window lapses silently; two-bot banter ~2/3 plain,
+~1/3 ending addressed to you (`addressPlayer=true` on the fired log line); ambient mutes
+still silence everything; `/bot soul banter status` shows the local-off note only when
+local chat is off. Remember `/bot soul enable Bob` for two-bot scenes.
+
 ## Field-session autopsy: door-plan jump loop + silent ambient mute; 1.1.180 (2026-08-29)
 
 First real session on 1.1.179 (2026-08-28, ~11 min). Two anomalies reported; both root-caused

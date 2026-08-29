@@ -1,7 +1,8 @@
 ---
-task: "Soul track: GROUP CHAT (1.1.176), BANTER (1.1.177, default OFF), and AMBIENT/LOCAL CHAT (1.1.178, default OFF) all shipped — none field-tested yet. Next queue item after validation: CONSOLIDATION."
+task: "Soul track: PLAYER ENGAGEMENT (1.1.181) shipped — solo remarks + player-addressed banter, pending field test alongside group chat (1.1.176), banter (1.1.177), local chat (1.1.178-180). Next queue item after validation: CONSOLIDATION (needs design interview)."
 test_command: "./gradlew build -x test"
 ---
+
 
 ## Session Handoff 2026-08-26 (later) — ambient/local chat shipped (1.1.178)
 

@@ -349,9 +349,12 @@ public final class SoulLocalDirector {
                 && deliveredLines > 0 && lastSpeakerIndex >= 0;
     }
 
-    /** A banter scene spoke to the player — open a fresh window so their answer routes back. */
+    /** A banter scene spoke to the player — open a fresh window so their answer routes back.
+     *  Gated on the local-chat toggle: with local chat off the continuation path can't route a
+     *  reply anyway (documented spec §5 limitation), and opening a window would only make
+     *  {@code /bot soul local status} claim a reply window that cannot work. */
     void noteEngagementDelivered(UUID playerId, UUID botId) {
-        if (playerId != null && botId != null) {
+        if (playerId != null && botId != null && localChatEnabled.getAsBoolean()) {
             openReplyWindow(playerId, botId, clock.getAsLong());
         }
     }
