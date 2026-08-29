@@ -32,7 +32,7 @@
 - Produces: `DialoguePacing.Stream {SCRIPTED, BANTER_IDLE, BANTER_ACTIVE, LOCAL}`, `static double multiplier(int rate)`, `static long scaledCooldown(int rate, long baseMs)`, `static double scaledChance(int rate, double base)`, `static String describe(int rate, long minMs, long maxMs)`, `static long scaledCooldown(Stream, long)`, `static double scaledChance(Stream, double)`, `static int rate(Stream)`.
 - Produces on `ManualConfig`: `getDialogueScriptedRate/set…`, `getSoulBanterIdleRate/set…`, `getSoulBanterActiveRate/set…`, `getSoulLocalRate/set…` (int, clamped 0–100), `isSoulBanterActiveEnabled/setSoulBanterActiveEnabled`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```java
 package net.wcfcarolina13.GameAI.services.dialogue;
@@ -84,12 +84,12 @@ class DialoguePacingTest {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `./gradlew test --tests '*DialoguePacingTest*' -q`
 Expected: compilation failure — `DialoguePacing` does not exist.
 
-- [ ] **Step 3: Implement config fields and the helper**
+- [x] **Step 3: Implement config fields and the helper**
 
 `ManualConfig.java`, after the `soulLocalChatEnabled` field (line ~123):
 
@@ -196,12 +196,12 @@ public final class DialoguePacing {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `./gradlew test --tests '*DialoguePacingTest*' -q`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/wcfcarolina13/FilingSystem/ManualConfig.java src/main/java/net/wcfcarolina13/GameAI/services/dialogue/DialoguePacing.java src/test/java/net/wcfcarolina13/GameAI/services/dialogue/DialoguePacingTest.java
@@ -225,13 +225,13 @@ git commit -m "pacing: DialoguePacing rate→multiplier helper + four rate field
 
 No unit test harness reaches these (they need a server); verification is compile + field check. Each edit is one expression; constants stay as base values.
 
-- [ ] **Step 1: Add the import to each of the six files**
+- [x] **Step 1: Add the import to each of the six files**
 
 ```java
 import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 ```
 
-- [ ] **Step 2: Replace the cooldown/chance expressions**
+- [x] **Step 2: Replace the cooldown/chance expressions**
 
 `PetProximityReactionService.playLine` (line 451):
 ```java
@@ -272,12 +272,12 @@ and `tryShowGeneric` line 235:
         if (lastWarnedAt != null && now - lastWarnedAt < DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED, OVERHEAD_WARN_COOLDOWN_MS)) {
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `./gradlew build -x test -q`
 Expected: clean.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java src/main/java/net/wcfcarolina13/GameAI/services/CompanionOverheadDialogueService.java src/main/java/net/wcfcarolina13/GameAI/services/BotInventoryFullDialogueService.java src/main/java/net/wcfcarolina13/GameAI/services/EnchantingAmbientDialogueService.java src/main/java/net/wcfcarolina13/GameAI/services/BotWakeUpDialogueService.java src/main/java/net/wcfcarolina13/GameAI/services/BotAnimalDefenseService.java
@@ -298,7 +298,7 @@ git commit -m "pacing: scripted line cooldowns and chances follow the Scripted r
 **Interfaces:**
 - Produces: `SoulGroupTypes.SceneKind.WORK` (ambient, line cap `BANTER_MAX_SCENE_LINES`), `static String SoulGroupPromptAssembler.humanizeTask(String)`, `static String SoulGroupPromptAssembler.workLabel(SceneParticipant, String ownerDisplayName)`.
 
-- [ ] **Step 1: Write the failing tests** (append to `SoulGroupPromptAssemblerTest`, next to `banterTurn`)
+- [x] **Step 1: Write the failing tests** (append to `SoulGroupPromptAssemblerTest`, next to `banterTurn`)
 
 ```java
     private SoulGroupTypes.GroupSceneTurn workTurn(int rosterSize, boolean addressPlayer) {
@@ -348,12 +348,12 @@ git commit -m "pacing: scripted line cooldowns and chances follow the Scripted r
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `./gradlew test --tests '*SoulGroupPromptAssemblerTest*' -q`
 Expected: compilation failure — `SceneKind.WORK` / `humanizeTask` missing.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `SoulGroupTypes.SceneKind`:
 ```java
@@ -438,12 +438,12 @@ Expected: compilation failure — `SceneKind.WORK` / `humanizeTask` missing.
     }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `./gradlew test --tests '*SoulGroupPromptAssemblerTest*' --tests '*SoulGroupConversationServiceTest*' -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/net/wcfcarolina13/GameAI/souls/SoulGroupTypes.java src/main/java/net/wcfcarolina13/GameAI/souls/SoulGroupConversationService.java src/main/java/net/wcfcarolina13/GameAI/souls/SoulGroupPromptAssembler.java src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java src/test/java/net/wcfcarolina13/GameAI/souls/SoulGroupPromptAssemblerTest.java
@@ -465,7 +465,7 @@ git commit -m "souls: SceneKind.WORK with a 'while working' directive built from
 - Consumes: `SceneKind.WORK` (Task 3), `ManualConfig` rate getters (Task 1).
 - Produces: `SoulBanterDirector(runtime, server, banterEnabled, activeEnabled, ambientTextOpen, ambientVoiceOpen, botsProvider, workingProbe, idleRate, activeRate, clock, random)`; statics `nextDelayMs(RandomGenerator, double multiplier)`, `nextActiveDelayMs(RandomGenerator, double multiplier)`, `firstActiveVeto(...)`; `SoulLocalDirector(... , localRate, clock, random)` and `nextDelayMs(RandomGenerator, double)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `SoulBanterDirectorTest`:
 ```java
@@ -513,12 +513,12 @@ Append to `SoulLocalDirectorTest`:
     }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `./gradlew test --tests '*SoulBanterDirectorTest*' --tests '*SoulLocalDirectorTest*' -q`
 Expected: compilation failure (new overloads missing).
 
-- [ ] **Step 3: Implement `SoulLocalDirector`**
+- [x] **Step 3: Implement `SoulLocalDirector`**
 
 Replace the static cadence helper and its two call sites:
 ```java
@@ -538,7 +538,7 @@ Replace the static cadence helper and its two call sites:
 ```
 Constructor: add `IntSupplier localRate` parameter directly before `LongSupplier clock`, store as `private final IntSupplier localRate;` (`import java.util.function.IntSupplier;`). Lines 295 and 396: `nextDelayMs(random)` → `nextDelayMs(random, cadenceMultiplier())`. Line 198 (`initialDelayMs`) unchanged.
 
-- [ ] **Step 4: Implement `SoulBanterDirector`**
+- [x] **Step 4: Implement `SoulBanterDirector`**
 
 Fields/constructor (replace the existing constructor):
 ```java
@@ -737,7 +737,7 @@ Static cadence rules:
     }
 ```
 
-- [ ] **Step 5: Wire in `SoulRuntime` (line ~267)**
+- [x] **Step 5: Wire in `SoulRuntime` (line ~267)**
 
 ```java
             runtime.banterDirector = new SoulBanterDirector(runtime, server,
@@ -777,7 +777,7 @@ Static cadence rules:
 ```
 (The lazy `Frens.CONFIG` reads inside lambdas are the established pattern here; the souls package still has no static reference.)
 
-- [ ] **Step 6: `BotSoulCommands.executeBanterStatus`** — report both lanes:
+- [x] **Step 6: `BotSoulCommands.executeBanterStatus`** — report both lanes:
 ```java
         boolean enabled = config != null && config.isSoulBanterEnabled();
         boolean active = config != null && config.isSoulBanterActiveEnabled();
@@ -787,12 +787,12 @@ Static cadence rules:
                         + ((enabled || active) ? replyRoutingNote() : ""));
 ```
 
-- [ ] **Step 7: Run tests + build**
+- [x] **Step 7: Run tests + build**
 
 Run: `./gradlew test --tests '*SoulBanterDirectorTest*' --tests '*SoulLocalDirectorTest*' --tests '*SoulRuntimeTest*' -q && ./gradlew build -x test -q`
 Expected: PASS, clean build.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/main/java/net/wcfcarolina13/GameAI/souls/SoulBanterDirector.java src/main/java/net/wcfcarolina13/GameAI/souls/SoulLocalDirector.java src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java src/main/java/net/wcfcarolina13/Commands/BotSoulCommands.java src/test/java/net/wcfcarolina13/GameAI/souls/SoulBanterDirectorTest.java src/test/java/net/wcfcarolina13/GameAI/souls/SoulLocalDirectorTest.java
@@ -812,7 +812,7 @@ git commit -m "souls: active banter lane (WORK scenes while bots work) + rate-sc
 
 No unit harness for screens; verify by opening the screen in-game.
 
-- [ ] **Step 1: Create the screen**
+- [x] **Step 1: Create the screen**
 
 ```java
 package net.wcfcarolina13.GraphicalUserInterface;
@@ -998,7 +998,7 @@ public class DialogueSettingsScreen extends Screen {
 }
 ```
 
-- [ ] **Step 2: `BotControlScreen` — Active toggle + Rates chip**
+- [x] **Step 2: `BotControlScreen` — Active toggle + Rates chip**
 
 1. Insert after the "Banter" `GlobalToggleDef` (line 45):
 ```java
@@ -1024,12 +1024,12 @@ public class DialogueSettingsScreen extends Screen {
 7. `init()` (line 233): `globalValues[ACTIVE_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterActiveEnabled();`
 8. `saveSettings()` (line 552): `config.setSoulBanterActiveEnabled(globalValues[ACTIVE_TOGGLE_INDEX]);`
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `./gradlew build -x test -q`
 Expected: clean.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/main/java/net/wcfcarolina13/GraphicalUserInterface/DialogueSettingsScreen.java src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotControlScreen.java
@@ -1043,13 +1043,13 @@ git commit -m "ui: Dialogue Frequency screen (four rate sliders) + Active banter
 **Files:**
 - Modify: `changelog.md` (new top entry), `gradle.properties` (`mod_version` → `1.1.188-release+1.21.11`)
 
-- [ ] **Step 1: Full suite + build**
+- [x] **Step 1: Full suite + build**
 
 Run: `./gradlew build -q` — Expected: all tests green (≥ 553 + new), clean.
 
-- [ ] **Step 2: Changelog entry** under the file header, newest-first, titled `## Dialogue pacing sliders + active banter; 1.1.188 (2026-08-29)`, listing: the four streams and the multiplier rule, the WORK scene and its veto chain, the screen and where it opens, the field checklist from spec §4.
+- [x] **Step 2: Changelog entry** under the file header, newest-first, titled `## Dialogue pacing sliders + active banter; 1.1.188 (2026-08-29)`, listing: the four streams and the multiplier rule, the WORK scene and its veto chain, the screen and where it opens, the field checklist from spec §4.
 
-- [ ] **Step 3: Commit + deploy**
+- [x] **Step 3: Commit + deploy**
 
 ```bash
 git add changelog.md gradle.properties
@@ -1061,4 +1061,4 @@ for DIR in "/Users/roti/Library/Application Support/PrismLauncher/instances/1.21
 ```
 Verify with `javap` that the deployed jar's `SoulGroupTypes$SceneKind` lists `WORK`.
 
-- [ ] **Step 4: Field checklist for Bradley** (from spec §4): sliders persist across restart; Scripted 100 → denser pet remarks, 0 → near-silent; Active ON + a bot woodcutting → a WORK scene within ~2.5 min mentioning the work; `/bot soul banter status` shows both lanes.
+- [x] **Step 4: Field checklist for Bradley** (from spec §4): sliders persist across restart; Scripted 100 → denser pet remarks, 0 → near-silent; Active ON + a bot woodcutting → a WORK scene within ~2.5 min mentioning the work; `/bot soul banter status` shows both lanes.
