@@ -335,6 +335,27 @@ public final class SoulLocalDirector {
         }
     }
 
+    /**
+     * Engagement handoff rule (engagement spec §5), pure: a BANTER scene the director marked
+     * {@code addressPlayer} opens a reply window for its last delivered speaker. LOCAL scenes
+     * are excluded — they flow through {@link #noteSceneDelivered}'s continuation tracker,
+     * which deliberately fails closed for deliveries with no matching pending fire (and a
+     * banter fire never registers one, which is why reusing that path could never work).
+     */
+    static boolean shouldOpenEngagementWindow(SoulGroupTypes.SceneKind kind,
+                                               boolean addressPlayer, int deliveredLines,
+                                               int lastSpeakerIndex) {
+        return kind == SoulGroupTypes.SceneKind.BANTER && addressPlayer
+                && deliveredLines > 0 && lastSpeakerIndex >= 0;
+    }
+
+    /** A banter scene spoke to the player — open a fresh window so their answer routes back. */
+    void noteEngagementDelivered(UUID playerId, UUID botId) {
+        if (playerId != null && botId != null) {
+            openReplyWindow(playerId, botId, clock.getAsLong());
+        }
+    }
+
     /** Closes any open reply window — the player addressed a bot directly, so ambient yields. */
     public void noteAddressedChat(UUID playerId) {
         if (playerId != null) {

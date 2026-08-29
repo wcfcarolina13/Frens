@@ -558,6 +558,20 @@ final class BotSoulCommands {
     }
 
     /**
+     * Reply-routing note (engagement spec §5 limitation): the reply window and its continuation
+     * live in the local-chat director, so with banter ON but local chat OFF a companion remark
+     * is one-way — the bot speaks, but answering it routes nowhere special.
+     */
+    private static String replyRoutingNote() {
+        ManualConfig config = Frens.CONFIG;
+        if (config != null && !config.isSoulLocalChatEnabled()) {
+            return " Note: Local chat is OFF, so you can't answer companion remarks —"
+                    + " /bot soul local on enables replies.";
+        }
+        return "";
+    }
+
+    /**
      * {@code /bot soul banter on|off} — operator-only kill switch for autonomous banter scenes.
      * No pipeline reload needed: the director reads the config through a live supplier.
      */
@@ -571,7 +585,8 @@ final class BotSoulCommands {
         config.setSoulBanterEnabled(enabled);
         config.save();
         ChatUtils.sendSystemMessage(source, "Companion banter set to " + (enabled ? "on" : "off")
-                + (enabled ? ". They'll chat when things are calm." + ambientSurfaceWarning() : "."));
+                + (enabled ? ". They'll chat when things are calm, or speak to you when one is alone."
+                        + ambientSurfaceWarning() + replyRoutingNote() : "."));
         return 1;
     }
 
@@ -589,7 +604,8 @@ final class BotSoulCommands {
                 .map(rt -> rt.banterStatus(actor.getUuid()))
                 .orElse("Soul runtime is not currently running.");
         ChatUtils.sendSystemMessage(source,
-                "Banter is " + (enabled ? "ON" : "OFF") + ". " + verdict + ambientSurfaceWarning());
+                "Banter is " + (enabled ? "ON" : "OFF") + ". " + verdict + ambientSurfaceWarning()
+                        + (enabled ? replyRoutingNote() : ""));
         return 1;
     }
 

@@ -240,4 +240,21 @@ class SoulLocalDirectorTest {
                     "phase1=" + phase1);
         }
     }
+
+    @Test
+    void engagementWindowRuleOpensOnlyForDeliveredAddressPlayerBanter() {
+        assertTrue(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.BANTER, true, 1, 0));
+        assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.BANTER, false, 3, 1), "plain banter never opens");
+        assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.BANTER, true, 0, -1), "zero deliveries never opens");
+        assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.BANTER, true, 2, -1), "no identified speaker, no window");
+        assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.LOCAL, true, 1, 0),
+                "LOCAL scenes keep their own tracker path");
+        assertFalse(SoulLocalDirector.shouldOpenEngagementWindow(
+                SoulGroupTypes.SceneKind.PLAYER, true, 1, 0));
+    }
 }

@@ -42,7 +42,7 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. Per-bot Voiced Dialogue can additionally mute a single bot; Adv… mutes categories."),
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above."),
-            new GlobalToggleDef("Banter", "Companions occasionally chat among themselves when things are calm (needs Soul Chat on and 2+ soul-bound bots nearby). Ambient category masks in the Text/Voice Adv… menus apply. /bot soul banter status explains why it is or isn't firing."),
+            new GlobalToggleDef("Banter", "Companions occasionally chat when things are calm (needs Soul Chat on; with one soul-bound bot nearby it may speak to you, with 2+ they chat among themselves and may pull you in). Ambient category masks in the Text/Voice Adv… menus apply. /bot soul banter status explains why it is or isn't firing."),
             new GlobalToggleDef("Local", "Companions may occasionally react to chat you type near them that wasn't addressed to anyone (needs Soul Chat on). Ambient category masks in the Text/Voice Adv… menus apply. /bot soul local status explains why it is or isn't firing.")
     );
 

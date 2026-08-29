@@ -57,10 +57,15 @@ public final class GroupScenePlayback {
          * belongs to it lives in the consumer: {@code SoulLocalDirector} must consume its
          * pending-continuation flag even on a zero-delivery finish, so the flag never outlives
          * its own scene, while only a {@code deliveredLines > 0} finish opens a reply window.
-         * Default no-op so the single existing implementation ({@code SoulRuntime.start}'s
-         * anonymous {@code LineCommitter}) keeps compiling unchanged unless it opts in.
+         * Default no-op so implementations that don't care keep compiling unchanged. Fires
+         * exactly once per scene, unconditionally — including a scene that delivered nothing —
+         * so the receiver can settle per-scene state either way. {@code lastSpeakerIndex} is the
+         * roster index of the last DELIVERED line's speaker, or −1 when nothing was delivered;
+         * the engagement handoff (spec §5) uses it to aim the reply window at whichever
+         * companion the player would naturally answer.
          */
-        default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
+        default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines,
+                                     int lastSpeakerIndex) {
         }
     }
 
@@ -78,6 +83,7 @@ public final class GroupScenePlayback {
         final PlayableScene scene;
         int lineIndex;
         int delivered;
+        int lastDeliveredParticipant = -1;
         long notBeforeMs;
         CompletableFuture<Optional<SoulVoiceService.SynthesizedLine>> synth;
         long synthStartedMs;
@@ -263,6 +269,7 @@ public final class GroupScenePlayback {
         committer.commitLine(scene.token(), line.participantIndex(),
                 speaker.displayName() + ": " + line.text());
         state.delivered++;
+        state.lastDeliveredParticipant = line.participantIndex();
 
         LOGGER.info("[souls] scene-playback routingId={} line={}/{} speaker={} text={} voiced={} listeners={}",
                 scene.turn().routingId(), state.lineIndex + 1, scene.lines().size(),
@@ -286,7 +293,7 @@ public final class GroupScenePlayback {
         LOGGER.info("[souls] scene-playback routingId={} outcome={} delivered={}/{}",
                 state.scene.turn().routingId(), outcome, state.delivered, state.scene.lines().size());
         committer.sceneFinished(state.scene.token(), state.delivered, state.scene.lines().size());
-        committer.sceneDelivered(state.scene.turn(), state.delivered);
+        committer.sceneDelivered(state.scene.turn(), state.delivered, state.lastDeliveredParticipant);
     }
 
     private List<ServerPlayerEntity> playersInEarshot(ServerPlayerEntity speaker) {

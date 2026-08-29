@@ -238,18 +238,26 @@ public final class SoulRuntime {
                         }
 
                         @Override
-                        public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines) {
-                            // Always notify the director for a LOCAL scene, even with zero
-                            // deliveries (fix round 1 FIX 2) -- noteSceneDelivered itself decides
-                            // whether to open a window; deliveredLines == 0 (generation failed, or
-                            // muted on every surface) still consumes the pending-continuation flag
-                            // so it never outlives its own scene, but never opens a window.
+                        public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn,
+                                                    int deliveredLines, int lastSpeakerIndex) {
+                            SoulLocalDirector local = runtime.localDirector;
+                            if (local == null || turn.roster().isEmpty()) {
+                                return;
+                            }
                             if (turn.kind() == SoulGroupTypes.SceneKind.LOCAL) {
-                                SoulLocalDirector local = runtime.localDirector;
-                                if (local != null && !turn.roster().isEmpty()) {
-                                    local.noteSceneDelivered(turn.ownerId(), turn.roster().get(0).botId(),
-                                            deliveredLines);
-                                }
+                                // Always notify the director for a LOCAL scene, even with zero
+                                // deliveries (fix round 1 FIX 2) -- noteSceneDelivered itself decides
+                                // whether to open a window; deliveredLines == 0 (generation failed, or
+                                // muted on every surface) still consumes the pending-continuation flag
+                                // so it never outlives its own scene, but never opens a window.
+                                local.noteSceneDelivered(turn.ownerId(), turn.roster().get(0).botId(),
+                                        deliveredLines);
+                            } else if (SoulLocalDirector.shouldOpenEngagementWindow(turn.kind(),
+                                    turn.addressPlayer(), deliveredLines, lastSpeakerIndex)) {
+                                // Engagement spec §5: a banter scene that spoke to the player opens
+                                // the reply window for its last delivered speaker.
+                                local.noteEngagementDelivered(turn.ownerId(),
+                                        turn.roster().get(lastSpeakerIndex).botId());
                             }
                         }
                     }, ambientTextOpen, ambientVoiceOpen);
