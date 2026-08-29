@@ -6158,7 +6158,11 @@ public class BotEventHandler {
         // Fallback: if raycast missed a door (diagonal line skips door block), do area scan
         if (forcedDoorBase == null && standRouteBlocked) {
             BlockPos nearDoor = findDoorNearPath(world, bot.getBlockPos(), candidate.standPos(), 2);
-            if (nearDoor != null) {
+            // The area scan returns the nearest door in the bounding box, which can be a door
+            // BESIDE the route: the 01:34 log committed Jake to a door two blocks west of a
+            // straight-ahead stand, so the step-through pointed away from the goal (20 s loop).
+            // Only force a door that lies roughly between the bot and the stand.
+            if (nearDoor != null && isStepMeaningfullyTowardGoal(bot.getBlockPos(), nearDoor, candidate.standPos())) {
                 forcedDoorBase = normalizeDoorBase(world, nearDoor);
             }
         }

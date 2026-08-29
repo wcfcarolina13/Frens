@@ -93,7 +93,7 @@ public final class MovementService {
     }
 
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_CLOSE_COOLDOWN = new ConcurrentHashMap<>();
-    private static final Map<UUID, Map<BlockPos, Long>> DOOR_DEBUG_COOLDOWN = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<String, Long>> DOOR_DEBUG_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_IRON_WARN_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_RECENTLY_CLOSED_UNTIL = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> DOOR_AUTO_CLOSE_SUPPRESS_UNTIL_MS = new ConcurrentHashMap<>();
@@ -2160,13 +2160,24 @@ public final class MovementService {
                 + " step=" + step.toShortString()
                 + " goal=" + (goal != null ? goal.toShortString() : "null"));
 
-        boolean approached = botPos.getSquaredDistance(approach) <= 2.25D
-                || nudgeTowardUntilClose(bot, approach, 2.25D, 2000L, 0.18, label + "-door-approach");
+        // 2026-08-29 field fix: "within 1.5 blocks of the approach tile" accepted a bot standing
+        // DIAGONALLY past the wall corner beside the door. From there the open attempt failed the
+        // reach/LoS check (its log hidden by the commit line's throttle), the step nudge never
+        // ran, and the vertical-lock caller shoved the bot into the wall for its whole TTL —
+        // 34 s at one door in the 13:09 log. Being near only counts when the door is actually
+        // interactable from here; otherwise walk ONTO the approach tile first.
+        boolean approached = BotPositionUtil.isAt(bot, approach)
+                || (botPos.getSquaredDistance(approach) <= 2.25D && BlockInteractionService.canInteract(bot, base))
+                || nudgeTowardUntilClose(bot, approach, 0.5D, 2000L, 0.18, label + "-door-approach");
         if (!approached) {
+            maybeLogDoor(bot, base, "doorway-commit failed: approach tile unreachable label=" + label
+                    + " approach=" + approach.toShortString());
             return false;
         }
 
-        tryOpenDoorAt(bot, base);
+        if (!tryOpenDoorAt(bot, base)) {
+            return false;
+        }
         // Be slightly forgiving: stepping "enough" across the threshold is usually sufficient for replans.
         return nudgeTowardUntilClose(bot, step, 4.0D, 3200L, 0.22, label + "-door-step");
     }
@@ -2269,12 +2280,16 @@ public final class MovementService {
         }
         UUID id = player.getUuid();
         long now = System.currentTimeMillis();
-        Map<BlockPos, Long> perBot = DOOR_DEBUG_COOLDOWN.computeIfAbsent(id, __ -> new ConcurrentHashMap<>());
-        Long last = perBot.get(doorPos);
+        // Throttle per (door, message kind). Keyed on the door alone, a "door-open blocked" fired
+        // 0 ms after "doorway-commit" was dropped and the failure reason never reached the log.
+        int kindEnd = message.indexOf(':');
+        String key = doorPos.asLong() + "|" + (kindEnd > 0 ? message.substring(0, kindEnd) : message);
+        Map<String, Long> perBot = DOOR_DEBUG_COOLDOWN.computeIfAbsent(id, __ -> new ConcurrentHashMap<>());
+        Long last = perBot.get(key);
         if (last != null && now - last < 1500L) {
             return;
         }
-        perBot.put(doorPos, now);
+        perBot.put(key, now);
         LOGGER.info("Door debug: bot={} door={} msg={}", player.getName().getString(), doorPos.toShortString(), message);
     }
 

@@ -2,6 +2,46 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Field autopsy 4 (13:05 session + 01:30 session): Bob's inventory wipe, solo-scene self-talk, door-corner stall; 1.1.186 (2026-08-29)
+
+Three log-traced root causes, each a small surgical fix, one commit per lane.
+
+- **Bob lost his stone axe + lead on reload — the "stale snapshot" rule can never be right.**
+  On every clean shutdown vanilla's "Saving players" rewrites the bot `.dat` ~4 s AFTER our
+  pre-shutdown snapshot (grace was 2 s), and vanilla restoration never repopulates a fake
+  player's items on join (Bob's `.dat` holds no item ids at all). So the snapshot is the only
+  item source and was always judged "stale"; the only thing keeping Jake alive was the
+  empty-bot override, which was gated on the snapshot being ≥ 300 bytes. Bob's two-item file
+  was under that → skipped → the 13:07:21 periodic save overwrote it (and rotated `.bak`) with
+  the empty inventory. `shouldRestoreOnJoin` now applies the override whenever vanilla
+  restoration produced no items, regardless of snapshot size. The items themselves are gone
+  from disk (`bob_*.nbt` and `.bak` are both the empty 180-byte file).
+- **Jake asked a question and answered himself.** Bob was 28 blocks off (Y66 vs the player's
+  Y48), outside the 24-block audience radius, so the roster was legitimately one. The 3B
+  model answered the solo directive with a two-speaker exchange — Jake's line, then the
+  PLAYER's reply — and the solo wrong-tag repair stripped the "Roti:" tag and handed the reply
+  to Jake. `SoulGroupResponseValidator.parse` now takes the owner's display name: a line
+  tagged with it, or a ≥ 3-char abbreviation of it ("Roti" ⊂ "RotiWokeman"), is dropped
+  under every roster size; "player"/"owner" joined the META_TAGS denylist. The solo prompt
+  now says "One short line, at most two, all spoken by Jake; RotiWokeman does not answer in
+  this scene" instead of the ambiguous "One or two short lines only." +1 test (4 cases).
+- **Jake stalled 34 s beside a door he was diagonal to (13:09), and 20 s at a door beside
+  his route (01:34).** `tryTraverseOpenableToward` accepted "within 1.5 blocks of the
+  approach tile" as approached, so a bot past the wall corner never stepped onto the tile;
+  `tryOpenDoorAt` then failed reach/LoS silently (its log was throttled by the
+  `doorway-commit` line 0 ms earlier — same door key) and the vertical-lock shoved the bot
+  straight into the wall for its whole 8 s TTL, re-acquiring each time. Now: approached =
+  on the tile, or near AND `canInteract`, or nudged onto the tile (reach 0.5); a failed open
+  aborts the commit instead of nudging into a closed door; the door-debug throttle is keyed
+  per (door, message kind). The 01:34 sibling: `findDoorNearPath`'s bounding-box scan forced
+  a door two blocks BESIDE a straight-ahead stand, so the step-through pointed away from the
+  goal — the fallback now requires `isStepMeaningfullyTowardGoal(bot, door, stand)`.
+
+Verification: soul suites 47/47 green (validator 10, prompt 18, conversation 13, banter 6);
+`./gradlew build -x test` clean. Movement/persistence paths need a world — field-check items:
+Bob's inventory survives a clean quit+reload, Jake takes a door from a diagonal approach
+without a stall, a solo banter scene is one voice only.
+
 ## Overnight review of 1.1.182–184: five regressions caught before they were felt; 1.1.185 (2026-08-29)
 
 The three rapid fix batches shipped today (separation/pacing, admin-menu clamp, field
