@@ -84,6 +84,7 @@ public final class BotPersistenceService {
                 restoreSeq,
                 joinTick);
 
+        BotInventoryStorageService.markRestorePending(bot.getUuid());
         boolean managerRestored = restoreViaPlayerManager(server, bot);
         if (managerRestored) {
             LOGGER.info("Restored fakeplayer '{}' using PlayerManager.", bot.getName().getString());
@@ -130,12 +131,12 @@ public final class BotPersistenceService {
                     restoreSeq,
                     entityReady);
             if (!bot.isRemoved()) {
-                boolean shouldLoadSnapshot = BotInventoryStorageService.shouldRestoreOnJoin(server, bot, managerRestored);
+                boolean shouldLoadSnapshot = BotInventoryStorageService.shouldRestoreOnJoin(server, bot);
                 boolean loaded = false;
                 if (shouldLoadSnapshot) {
                     loaded = BotInventoryStorageService.load(bot);
                 } else {
-                    LOGGER.info("[PersistCheck] inventory-load-skipped bot={} reason=stale-or-missing-snapshot managerRestored={} tick={} vitalsBeforeSkip={}",
+                    LOGGER.info("[PersistCheck] inventory-load-skipped bot={} reason=missing-snapshot managerRestored={} tick={} vitalsBeforeSkip={}",
                         bot.getName().getString(),
                         managerRestored,
                         server.getTicks(),

@@ -39,14 +39,15 @@ public final class BotInventoryStorageService {
     /** Old mod-ID subdirectory used before the ai-player → frens rename. */
     private static final String LEGACY_MOD_DIR = "ai-player";
     private static final AtomicBoolean MIGRATION_DONE = new AtomicBoolean(false);
-    private static final long SNAPSHOT_STALE_GRACE_MS = 2_000L;
     private static final long SAVE_LOG_COOLDOWN_MS = 60_000L;
     /**
-     * Minimum file size (bytes) for a save to be considered valid.
-     * A bot with any real inventory is typically 500+ bytes compressed.
-     * An empty/reset bot is ~200 bytes. We use 300 as the threshold.
+     * Bots whose join-restore has been scheduled but whose snapshot has not yet been applied.
+     * While pending, an EMPTY inventory must never overwrite a snapshot that still holds items:
+     * that is blank state from a not-yet-restored bot, not a real deposit. Marked by
+     * {@link #markRestorePending}, cleared when {@link #load} applies the snapshot or
+     * {@link #shouldRestoreOnJoin} finds nothing on disk to protect.
      */
-    private static final long MIN_VALID_SAVE_BYTES = 300L;
+    private static final Set<UUID> RESTORE_PENDING = ConcurrentHashMap.newKeySet();
 
     private static final String KEY_ALIAS = "Alias";
     private static final String KEY_UUID = "Uuid";
@@ -125,15 +126,16 @@ public final class BotInventoryStorageService {
         root.putInt(KEY_TOTAL_XP, bot.totalExperience);
 
         try {
-            // Guard: if the new save has no items but the existing file is substantial,
-            // this is likely a blank-state overwrite after a crash. Refuse to save.
-            if (items.isEmpty() && Files.exists(path)) {
-                long existingSize = Files.size(path);
-                if (existingSize > MIN_VALID_SAVE_BYTES) {
-                    LOGGER.warn("Refusing to overwrite substantial save ({} bytes) with empty inventory for '{}'",
-                            existingSize, bot.getName().getString());
-                    return false;
-                }
+            // Guard: a bot whose snapshot has not been applied yet must not overwrite a snapshot
+            // that still holds items with its blank inventory. Once the restore has applied, an
+            // empty save is a real deposit/death and is honoured (no item duplication on rejoin).
+            // 2026-08-29: this was a 300-byte size heuristic — it protected Jake's large
+            // snapshot and let Bob's two-item one be wiped by the first periodic save.
+            if (items.isEmpty() && RESTORE_PENDING.contains(bot.getUuid())
+                    && Files.exists(path) && snapshotItemCount(path) > 0) {
+                LOGGER.warn("Refusing to overwrite snapshot {} (still holds items) with the empty inventory of not-yet-restored '{}'",
+                        path.getFileName(), bot.getName().getString());
+                return false;
             }
 
             // Backup: copy existing file to .bak before overwriting.
@@ -175,21 +177,10 @@ public final class BotInventoryStorageService {
                     primaryPath.getFileName());
         }
 
-        // If primary file is suspiciously small (likely blank state from a crash recovery),
-        // fall back to the .bak file which preserves the last known good state.
+        // The primary snapshot is authoritative; .bak is only consulted when the primary cannot
+        // be parsed. (A size-based ".bak looks bigger" fallback used to live here — it could
+        // resurrect items the bot had legitimately deposited.)
         Path loadPath = path;
-        try {
-            if (Files.exists(path) && Files.size(path) < MIN_VALID_SAVE_BYTES) {
-                Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
-                if (Files.exists(backup) && Files.size(backup) >= MIN_VALID_SAVE_BYTES) {
-                    LOGGER.warn("Primary save for '{}' is suspiciously small ({} bytes) — falling back to .bak ({} bytes)",
-                            bot.getName().getString(), Files.size(path), Files.size(backup));
-                    loadPath = backup;
-                }
-            }
-        } catch (IOException sizeErr) {
-            LOGGER.debug("Size check failed for '{}': {}", bot.getName().getString(), sizeErr.getMessage());
-        }
 
         NbtCompound root;
         try {
@@ -272,110 +263,47 @@ public final class BotInventoryStorageService {
                 path.getFileName(),
                 before,
                 statsSnapshot(bot));
+        RESTORE_PENDING.remove(bot.getUuid());
         return true;
     }
 
     /**
-     * Returns true when loading a custom inventory snapshot is safe at join time.
-     *
-     * <p>Decision tree (in priority order):
-     * <ol>
-     *   <li>No snapshot file → don't load.</li>
-     *   <li>Vanilla restoration didn't happen → load the snapshot (it's the only source of truth).</li>
-     *   <li>Vanilla restoration produced an empty inventory → load the snapshot, whatever its
-     *       size or age. Vanilla never repopulates a fake player's items on join, and on every
-     *       clean shutdown vanilla's "Saving players" rewrites the {@code .dat} ~4 s AFTER our
-     *       pre-shutdown snapshot — past the stale grace — so the snapshot is the only item
-     *       source and the mtime rule below would discard it every time.</li>
-     *   <li>Snapshot mtime is well behind vanilla mtime → skip as stale.</li>
-     *   <li>Otherwise → load the snapshot.</li>
-     * </ol>
-     *
-     * <p>The empty-bot override (rule 3) is critical: after a server crash, vanilla MC may
-     * recreate the fake player's {@code .dat} on the next world load with default state. The
-     * fresh mtime would otherwise cause our (older but valid) snapshot to be discarded as
-     * "stale", losing all of the bot's inventory and XP. We trust the in-memory inventory
-     * state because it has already been populated by vanilla restoration before this method
-     * is called from {@code BotPersistenceService}'s next-tick join handler.
+     * True when a snapshot exists for this bot — and a snapshot is the ONLY source of a fake
+     * player's items. Vanilla's {@code PlayerManager.loadPlayerData} merely READS the
+     * {@code .dat}; applying it to the entity is part of the real-client connect path that
+     * fake players never run (Jake's .dat held his items while his in-memory inventory was
+     * still empty). On a clean stop vanilla also rewrites that {@code .dat} ~4 s after our
+     * pre-shutdown snapshot. The mtime/size heuristics that used to live here therefore judged
+     * the snapshot "stale" on every clean shutdown and wiped Bob's two-item inventory on
+     * 2026-08-29. There is nothing to compare against: if the file is there, load it.
      */
-    public static boolean shouldRestoreOnJoin(MinecraftServer server,
-                                              ServerPlayerEntity bot,
-                                              boolean managerRestored) {
+    public static boolean shouldRestoreOnJoin(MinecraftServer server, ServerPlayerEntity bot) {
         if (server == null || bot == null) {
             return false;
         }
         Path snapshotPath = resolveBestInventoryPath(server, bot);
-        if (snapshotPath == null || !Files.exists(snapshotPath)) {
-            return false;
+        boolean present = snapshotPath != null && Files.exists(snapshotPath);
+        if (!present) {
+            RESTORE_PENDING.remove(bot.getUuid()); // nothing on disk to protect from an empty save
         }
-
-        if (!managerRestored) {
-            return true;
-        }
-
-        // Empty-bot override: if vanilla restoration produced no items, prefer the snapshot
-        // regardless of mtime. Without this, the .dat vanilla writes AFTER our pre-shutdown
-        // snapshot (~4 s later on a clean stop, past SNAPSHOT_STALE_GRACE_MS) makes the
-        // older-but-valid snapshot look "stale" and silently wipes the bot.
-        // 2026-08-29: this used to require the snapshot to be >= MIN_VALID_SAVE_BYTES. Bob's
-        // two-item snapshot (stone axe + lead) was under that, fell through to the stale rule,
-        // was skipped, and the next periodic save overwrote it with the empty inventory. A
-        // small snapshot is still the ONLY record of a small inventory — no size gate.
-        if (isInventoryEffectivelyEmpty(bot)) {
-            long snapshotSize = -1L;
-            try {
-                snapshotSize = Files.size(snapshotPath);
-            } catch (IOException e) {
-                LOGGER.debug("Snapshot size check failed for '{}': {}",
-                        bot.getName().getString(), e.getMessage());
-            }
-            LOGGER.warn("Empty-bot override for '{}': vanilla restoration produced no items"
-                            + " — loading snapshot {} ({} bytes) regardless of its age.",
-                    bot.getName().getString(),
-                    snapshotPath.getFileName(),
-                    snapshotSize);
-            return true;
-        }
-
-        Path playerDataPath = server.getSavePath(WorldSavePath.PLAYERDATA)
-                .resolve(bot.getUuidAsString() + ".dat");
-        if (!Files.exists(playerDataPath)) {
-            return true;
-        }
-
-        try {
-            long snapshotMs = Files.getLastModifiedTime(snapshotPath).toMillis();
-            long vanillaMs = Files.getLastModifiedTime(playerDataPath).toMillis();
-            boolean staleSnapshot = snapshotMs + SNAPSHOT_STALE_GRACE_MS < vanillaMs;
-            if (staleSnapshot) {
-                LOGGER.info("Skipping stale inventory snapshot for '{}': snapshot={} vanillaDat={} (ageDiffMs={})",
-                        bot.getName().getString(),
-                        snapshotPath.getFileName(),
-                        playerDataPath.getFileName(),
-                        vanillaMs - snapshotMs);
-                return false;
-            }
-        } catch (IOException e) {
-            LOGGER.warn("Unable to compare snapshot age for '{}': {}",
-                    bot.getName().getString(),
-                    e.getMessage());
-        }
-        return true;
+        return present;
     }
 
-    /**
-     * True if the bot has zero items in its main inventory, armor, and offhand. Used by the
-     * empty-bot override in {@link #shouldRestoreOnJoin} to detect a post-crash wipe by vanilla
-     * restoration.
-     */
-    private static boolean isInventoryEffectivelyEmpty(ServerPlayerEntity bot) {
-        PlayerInventory inv = bot.getInventory();
-        for (int slot = 0; slot < inv.size(); slot++) {
-            if (!inv.getStack(slot).isEmpty()) {
-                return false;
-            }
+    /** Called at join-start, before the next-tick snapshot load — see {@link #RESTORE_PENDING}. */
+    public static void markRestorePending(UUID botId) {
+        if (botId != null) {
+            RESTORE_PENDING.add(botId);
         }
-        return true;
+    }
+
+    /** Item entries in a snapshot file; 0 when unreadable (an unreadable file is not worth protecting). */
+    private static int snapshotItemCount(Path path) {
+        try {
+            NbtCompound root = net.minecraft.nbt.NbtIo.readCompressed(path, NbtSizeTracker.ofUnlimitedBytes());
+            return root.getList(KEY_INVENTORY).map(NbtList::size).orElse(0);
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
     }
 
     private static Path resolveInventoryPath(MinecraftServer server, ServerPlayerEntity bot) {
