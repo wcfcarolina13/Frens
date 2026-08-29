@@ -153,7 +153,7 @@ public class BotEventHandler {
     // Stuck-jump trigger: after ~0.4s of no block-position change while ticking a door plan,
     // force a jump each tick. Slabs/stairs/trapdoors at head level block horizontal motion
     // but are cleared by a simple hop. Same remedy as commander's own jump nudging the bot.
-    private static final int  FOLLOW_DOOR_STUCK_JUMP_TICKS = 8;
+    private static final int  FOLLOW_DOOR_STUCK_JUMP_TICKS = FollowDoorRules.STUCK_JUMP_TICKS;
     private static final double COME_REACHABILITY_PROBE_RANGE_SQ = 32.0D * 32.0D;
     private static final long COME_REACHABILITY_PROBE_TIMEOUT_MS = 60L;
     private static final long COME_REACHABILITY_PROBE_COOLDOWN_TICKS = 80L;
@@ -5196,10 +5196,17 @@ public class BotEventHandler {
         //       user's observation is "bot unsticks when I jump a couple times" (commander
         //       Y > 0.6 triggers dy-based jump in applyHumanLikeForwardInput, which works).
         //       Trigger the same jump automatically when stagnant near the doorway.
-        boolean steppingThroughOpenDoor = plan.stepping() && doorOpen;
+        // 2026-08-28 field fix: the (a) case — jump on EVERY grounded tick while stepping —
+        // is itself a stall under a low ceiling. A 2-high doorway with solid blocks above
+        // gives a 1.8-tall bot only 0.2 clearance, so a jumping bot is airborne with its head
+        // above the lintel exactly when it reaches the threshold and never enters the door
+        // column; it lands, jumps again, and pins in place (observed 5s at a double door by a
+        // descending staircase, until the plan TTL + wolf-teleport rescued it). The original
+        // (a) motivations — the door's 3-pixel leaf collision, pressure plates, overhanging
+        // stair thresholds — are all *stall* scenarios, so jump-on-stagnation covers them a
+        // few ticks later; a bot that is actually progressing must never be forced airborne.
         int currentStuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
-        boolean stuckNearDoorway = currentStuck >= FOLLOW_DOOR_STUCK_JUMP_TICKS;
-        if ((steppingThroughOpenDoor || stuckNearDoorway) && bot.isOnGround()) {
+        if (FollowDoorRules.shouldForceDoorJump(currentStuck) && bot.isOnGround()) {
             BotActions.jump(bot);
         } else {
             BotActions.autoJumpIfNeeded(bot);
@@ -5217,7 +5224,10 @@ public class BotEventHandler {
         BlockPos curBlock = bot.getBlockPos();
         BlockPos prev = FOLLOW_DOOR_LAST_BLOCK.get(botId);
         int stuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
-        if (prev != null && prev.equals(curBlock)) {
+        // Compare X/Z only: a jump in place flips BlockPos Y (65↔66) every airborne tick,
+        // and full-equality comparison let that bounce reset the counter — which is why the
+        // 24-tick stuck-abort never fired during the observed 5s doorway pin.
+        if (FollowDoorRules.samePlanColumn(prev, curBlock)) {
             stuck++;
         } else {
             stuck = 0;

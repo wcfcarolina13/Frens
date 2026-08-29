@@ -166,6 +166,13 @@ public final class SoulLocalDirector {
         }
         String previousLine = lastLineByPlayer.put(playerId, line);
         if (SoulLocalSalience.hardReject(line, previousLine)) {
+            // Observability (2026-08-28 field session): the player's one unaddressed line all
+            // session was "what's up" — two words, hard-rejected, and the director logged
+            // nothing at all, which made "why no reaction?" undiagnosable from status. Record
+            // the verdict (throttled per reason change, content never logged) so
+            // /bot soul local status can say what happened to the last line.
+            recordVerdict(playerId, "vetoed:hard-reject");
+            lastScore.put(playerId, 0);
             return;
         }
         long now = clock.getAsLong();

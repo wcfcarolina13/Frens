@@ -2,6 +2,59 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Field-session autopsy: door-plan jump loop + silent ambient mute; 1.1.180 (2026-08-29)
+
+First real session on 1.1.179 (2026-08-28, ~11 min). Two anomalies reported; both root-caused
+from `latest.log`. Zero frens errors in the log — all 481 WARN/ERRORs were resource-pack and
+shader noise from other mods.
+
+**1. Bot pinned at a double door by descending stairs (23:51:09–18).** One cause, two
+symptoms. While a follow-mode door plan was `stepping=true` through the open half
+(253,65,1284; the other half 253,65,1285 was under avoid-cooldown), the plan force-jumped
+the bot on EVERY grounded tick. Indoors under a low ceiling a 2-high doorway leaves a
+1.8-tall bot 0.2 blocks of clearance — a jumping bot arrives at the threshold airborne with
+its head above the lintel, can't enter the door column, lands, jumps again: pinned at the
+approach tile for ~5 s while the commander descended y=64→50. Symptom two: the bounce
+flipped `getBlockPos()` Y between 65 and 66, and the stuck counter compared full BlockPos
+equality, so the 24-tick `door-plan abort` never fired; only the plan TTL expiry and the
+wolf-teleport rescue (23:51:18) recovered it — which is why it *felt* like "trouble with a
+door" rather than a hard stall.
+
+Fix, extracted to a new pure `FollowDoorRules` (BotEventHandler's static init needs a game
+bootstrap, so rules that want unit tests can't live there): `shouldForceDoorJump` now fires
+only on ≥8 ticks of *horizontal* stagnation (`samePlanColumn` compares X/Z, ignoring the
+jump bounce), never merely because a step-through is in progress. The historical
+jump-while-stepping motivations — door leaf collision, pressure plates, overhanging stair
+thresholds — are all stall scenarios, so jump-on-stagnation still covers them a few ticks
+later, and a progressing bot is never forced airborne. `FollowDoorPlanRulesTest` locks both
+rules with the 252,65↔66,1284 bounce from the log as the fixture.
+
+**2. Zero banter / zero ambient engagement — not a code bug, but two UX defects.** The log
+tells the whole story: banter evaluated correctly (`vetoed:cooldown` at 23:50 inside its 4–8
+min grace, then `vetoed:muted` at 23:56:57 once the cooldown elapsed). Root cause:
+`ambient_chatter` was muted in BOTH the Text and Voice Adv category lists in
+`settings.json5` — persisted from the 1.1.175 category-muting test — so the directors
+correctly refused to generate what nothing could deliver. Local chat additionally logged
+nothing at all because the session's only unaddressed line ("what's up", 2 words) fell to
+the silent hard-reject floor; every other line was `Jake ...` → DM (both DM turns delivered
+fine on llama3.2:3b, 2.7–6.5 s). Also: the second bot (Bob, spawned 23:54) was never
+`/bot soul enable`d, so even unmuted, banter's roster gate had one bot until 23:54 and an
+unbound one after.
+
+Fixes shipped:
+- **`ambient_chatter` unmuted** in both lists of the live `settings.json5` (backup:
+  `settings.json5.bak-2026-08-29`; all other category mutes untouched).
+- **Toggle-time warning:** `/bot soul banter on`, `/bot soul local on`, and both `status`
+  commands now append a WARNING when both ambient surfaces are closed — enabling a feature
+  that cannot deliver is no longer silent.
+- **Hard-reject observability:** a hard-rejected line now records `vetoed:hard-reject`
+  (throttled per reason change, content never logged), so `/bot soul local status` can
+  explain what happened to the last line instead of showing stale state.
+
+539 tests green (537 + 2). The door fix needs in-game verification: walk the bot through the
+same double door at 253,65,1284 while descending; expect no pin, or at worst a single jump
+after ~0.4 s of stall, and a `door-plan abort` within ~1.2 s if genuinely blocked.
+
 ## Local chat polish: capture skipped when it cannot matter; roster-lost backoff; 1.1.179 (2026-08-27)
 
 Three deferred findings from the 1.1.178 final review, cleared while the feature sat
