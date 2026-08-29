@@ -43,6 +43,7 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
             new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above."),
             new GlobalToggleDef("Banter", "Companions occasionally chat when things are calm (needs Soul Chat on; with one soul-bound bot nearby it may speak to you, with 2+ they chat among themselves and may pull you in). Independent of the Adv… category masks (those govern scripted lines only). /bot soul banter status explains why it is or isn't firing; /bot soul banter now skips the wait."),
+            new GlobalToggleDef("Active", "Companions also chat while WORKING — a skill running or actively following you (needs Soul Chat on). Its own cadence, tuned with the Rates… chip on the Banter row. /bot soul banter status shows the active lane; /bot soul banter now primes both lanes."),
             new GlobalToggleDef("Local", "Companions may occasionally react to chat you type near them that wasn't addressed to anyone (needs Soul Chat on). Independent of the Adv… category masks (those govern scripted lines only). /bot soul local status explains why it is or isn't firing; /bot soul local now skips the cooldown.")
     );
 
@@ -52,7 +53,8 @@ public class BotControlScreen extends Screen {
     private static final int SOUL_CHAT_TOGGLE_INDEX = 6;
     private static final int SOUL_VOICE_TOGGLE_INDEX = 7;
     private static final int BANTER_TOGGLE_INDEX = 8;
-    private static final int LOCAL_TOGGLE_INDEX = 9;
+    private static final int ACTIVE_TOGGLE_INDEX = 9;
+    private static final int LOCAL_TOGGLE_INDEX = 10;
     private static final int VOICE_ADV_W = 34;
 
     // Layout constants
@@ -147,6 +149,8 @@ public class BotControlScreen extends Screen {
     private Rect soulVoiceEngineRect;
     /** "LLM…" chip on the Soul Chat row — opens the soul model manager (Ollama). */
     private Rect soulChatModelRect;
+    /** "Rates…" chip on the Banter row — opens the four dialogue-frequency sliders. */
+    private Rect dialogueRatesRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
     private Rect bulkAutoRespawnOnRect;
     private Rect bulkAutoRespawnOffRect;
@@ -231,6 +235,7 @@ public class BotControlScreen extends Screen {
             globalValues[6] = Frens.CONFIG.isSoulsEnabled();
             globalValues[7] = Frens.CONFIG.isSoulVoiceEnabled();
             globalValues[BANTER_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterEnabled();
+            globalValues[ACTIVE_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterActiveEnabled();
             globalValues[LOCAL_TOGGLE_INDEX] = Frens.CONFIG.isSoulLocalChatEnabled();
             globalsLoaded = true;
         }
@@ -550,6 +555,7 @@ public class BotControlScreen extends Screen {
         config.setSoulVoiceEnabled(globalValues[7]);
         // Banter needs no pipeline reload: the director reads this through a live supplier.
         config.setSoulBanterEnabled(globalValues[BANTER_TOGGLE_INDEX]);
+        config.setSoulBanterActiveEnabled(globalValues[ACTIVE_TOGGLE_INDEX]);
         // Local chat needs no pipeline reload either: same live-supplier pattern as banter.
         config.setSoulLocalChatEnabled(globalValues[LOCAL_TOGGLE_INDEX]);
         if (soulTogglesChanged) {
@@ -704,6 +710,7 @@ public class BotControlScreen extends Screen {
         textAdvancedRect = null;
         soulVoiceEngineRect = null;
         soulChatModelRect = null;
+        dialogueRatesRect = null;
 
         // Panel background
         context.fill(globalPanelRect.x, globalPanelRect.y,
@@ -780,7 +787,8 @@ public class BotControlScreen extends Screen {
 
             Rect advRect = null;
             if (i == VOICE_TOGGLE_INDEX || i == TEXT_TOGGLE_INDEX
-                    || i == SOUL_VOICE_TOGGLE_INDEX || i == SOUL_CHAT_TOGGLE_INDEX) {
+                    || i == SOUL_VOICE_TOGGLE_INDEX || i == SOUL_CHAT_TOGGLE_INDEX
+                    || i == BANTER_TOGGLE_INDEX) {
                 advRect = new Rect(chipRect.x - VOICE_ADV_W - 4, y + 1, VOICE_ADV_W, rowH - 2);
                 if (i == VOICE_TOGGLE_INDEX) {
                     voiceAdvancedRect = advRect;
@@ -788,6 +796,8 @@ public class BotControlScreen extends Screen {
                     textAdvancedRect = advRect;
                 } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
                     soulChatModelRect = advRect;
+                } else if (i == BANTER_TOGGLE_INDEX) {
+                    dialogueRatesRect = advRect;
                 } else {
                     soulVoiceEngineRect = advRect;
                 }
@@ -806,7 +816,8 @@ public class BotControlScreen extends Screen {
                         advHover ? COL_CHIP_HL : COL_CHIP);
                 context.drawText(this.textRenderer,
                         i == SOUL_VOICE_TOGGLE_INDEX ? "Eng…"
-                                : i == SOUL_CHAT_TOGGLE_INDEX ? "LLM…" : "Adv…",
+                                : i == SOUL_CHAT_TOGGLE_INDEX ? "LLM…"
+                                : i == BANTER_TOGGLE_INDEX ? "Rate…" : "Adv…",
                         advRect.x + 6,
                         advRect.y + (advRect.h - this.textRenderer.fontHeight) / 2,
                         COL_LABEL, false);
@@ -818,6 +829,10 @@ public class BotControlScreen extends Screen {
                     } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
                                 "Mute individual categories of text lines (holograms, subtitles, chat) while Text Chat is on. Text only — audio unaffected. Same rule as the Voice Adv menu.",
+                                mouseX, mouseY);
+                    } else if (i == BANTER_TOGGLE_INDEX) {
+                        updateTooltipCandidate("global-dialogue-rates",
+                                "Dialogue frequency sliders: scripted lines, idle banter, active banter and local chime-ins. 50 = shipped cadence; the toggles stay the on/off switches.",
                                 mouseX, mouseY);
                     } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-soul-chat-llm",
@@ -1372,6 +1387,12 @@ public class BotControlScreen extends Screen {
             if (soulChatModelRect != null && soulChatModelRect.contains(mx, my)) {
                 if (this.client != null) {
                     this.client.setScreen(new SoulModelManagerScreen(this));
+                }
+                return true;
+            }
+            if (dialogueRatesRect != null && dialogueRatesRect.contains(mx, my)) {
+                if (this.client != null) {
+                    this.client.setScreen(new DialogueSettingsScreen(this));
                 }
                 return true;
             }
