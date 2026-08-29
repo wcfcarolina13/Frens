@@ -1,7 +1,8 @@
 ---
-task: "Soul track: PLAYER ENGAGEMENT (1.1.181) shipped — solo remarks + player-addressed banter, pending field test alongside group chat (1.1.176), banter (1.1.177), local chat (1.1.178-180). Next queue item after validation: CONSOLIDATION (needs design interview)."
+task: "Soul track: field-test iteration loop. 1.1.184 deployed (engagement + separation + pacing + prime commands + Bob persona + live-settings apply + admin-menu clamp). Awaiting next field session. Next queue item after validation: CONSOLIDATION (needs design interview). Open voice-track item: Bob needs his own TTS reference sample."
 test_command: "./gradlew build -x test"
 ---
+
 
 
 ## Session Handoff 2026-08-26 (later) — ambient/local chat shipped (1.1.178)
