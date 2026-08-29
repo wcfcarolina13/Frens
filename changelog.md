@@ -2,6 +2,32 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Follow-up to autopsy 4: snapshot is the only truth, restore-window save guard, raw scene logging; 1.1.187 (2026-08-29)
+
+Self-review of 1.1.186 found the inventory fix had widened an escape hatch instead of
+removing a false premise, so this finishes the job.
+
+- **`managerRestored` never meant "vanilla restored the bot".** `PlayerManager.loadPlayerData`
+  only READS the `.dat`; applying it is the real-client connect path fake players never run —
+  which is why Jake's `.dat` held his items while his in-memory inventory was empty. The whole
+  stale/mtime rule (and its 2 s grace) was built on that misreading. Deleted. `shouldRestoreOnJoin`
+  is now "snapshot exists → load it"; `SNAPSHOT_STALE_GRACE_MS`, `MIN_VALID_SAVE_BYTES` and the
+  `isInventoryEffectivelyEmpty` override are gone.
+- **Save guard is restore-window based, not byte based.** The 300-byte "refuse to overwrite a
+  substantial save with an empty inventory" guard protected Jake and let Bob be wiped, and for
+  large inventories it could resurrect legitimately deposited items on rejoin. Now: a bot is
+  marked restore-pending at join-start; while pending, an empty save never overwrites a snapshot
+  that still holds items (one NBT read, only on that path); once `load()` applies the snapshot
+  the flag clears and empty saves are honoured. The size-based `.bak` fallback in `load()` is
+  gone for the same duplication reason — `.bak` is consulted only when the primary won't parse.
+- **Raw provider output is logged for rejected and solo-roster scenes** (whitespace-collapsed,
+  600-char cap). The 1.1.186 self-talk diagnosis was inferred from delivered lines because the
+  raw text was invisible; next time it is in the log.
+
+Verification: full suite 553/553 green; `./gradlew build` clean. Field check: Bob's items
+survive a clean quit+reload (`inventory-load bot=Bob loaded=true`), a bot that empties its
+inventory into a chest and rejoins does NOT get the items back.
+
 ## Field autopsy 4 (13:05 session + 01:30 session): Bob's inventory wipe, solo-scene self-talk, door-corner stall; 1.1.186 (2026-08-29)
 
 Three log-traced root causes, each a small surgical fix, one commit per lane.

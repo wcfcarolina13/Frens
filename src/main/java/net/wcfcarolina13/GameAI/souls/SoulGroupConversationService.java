@@ -179,6 +179,13 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         };
         SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines,
                 turn.ownerDisplayName());
+        // Raw provider output is not persisted anywhere, so a rejected or solo-roster scene logs
+        // it (whitespace-collapsed, capped). The 2026-08-29 self-talk diagnosis had to be
+        // inferred from the delivered lines because this was invisible.
+        if (!parse.accepted() || rosterNames.size() == 1) {
+            LOGGER.info("[souls] scene correlationId={} kind={} rosterSize={} accepted={} raw=\"{}\"",
+                    correlationId, turn.kind(), rosterNames.size(), parse.accepted(), rawForLog(result.text()));
+        }
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
                     result.model(), result.elapsedMillis(), outcome);
@@ -215,6 +222,15 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                     logFailure(correlationId, turn, code, providerId, model);
                     outcome.complete(Submission.FAILED);
                 });
+    }
+
+    /** One log-safe line: newlines shown as " ⏎ ", whitespace collapsed, capped at 600 chars. */
+    static String rawForLog(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String flat = raw.replace("\r", "").replace("\n", " ⏎ ").replaceAll("\\s+", " ").strip();
+        return flat.length() <= 600 ? flat : flat.substring(0, 600) + "…";
     }
 
     private void logFailure(UUID correlationId, SoulGroupTypes.GroupSceneTurn turn,
