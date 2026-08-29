@@ -184,7 +184,7 @@ public final class SoulBanterDirector {
                         captureFailure.toString());
             }
         }
-        if (roster.size() < 2) {
+        if (roster.size() < 1) {
             recordVerdict(playerId, "vetoed:roster-lost");
             nextEligibleAtMs.put(playerId, now + RETRY_AFTER_VETO_MS);
             return;
@@ -194,13 +194,14 @@ public final class SoulBanterDirector {
         String seed = SoulBanterSeed.build(groundings, eventsPerBot,
                 player.getName().getString(), playerActivity, random);
         UUID routingId = UUID.randomUUID();
+        boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 SoulGroupTypes.SceneKind.BANTER, playerId, player.getName().getString(),
-                roster, seed, Instant.now(), routingId);
+                roster, seed, Instant.now(), routingId, addressPlayer);
         nextEligibleAtMs.put(playerId, now + nextDelayMs(random));
         recordVerdict(playerId, "fired");
-        LOGGER.info("[souls] banter player={} outcome=fired routingId={} roster={} seedChars={}",
-                playerId, routingId, roster.size(), seed.length());
+        LOGGER.info("[souls] banter player={} outcome=fired routingId={} roster={} seedChars={} addressPlayer={}",
+                playerId, routingId, roster.size(), seed.length(), addressPlayer);
         runtime.submitGroupTurn(turn);
     }
 
@@ -261,8 +262,10 @@ public final class SoulBanterDirector {
 
     /** All roster bots within {@link #BOT_PROXIMITY_BLOCKS} of the nearest one. */
     private static boolean botsCloseTogether(List<ServerPlayerEntity> roster) {
-        if (roster.size() < 2) {
-            return false;
+        if (roster.size() <= 1) {
+            // A lone bot is trivially "together" — solo remarks (engagement spec §3) need no
+            // proximity pair; an empty roster stays false so the roster gate reports first.
+            return roster.size() == 1;
         }
         ServerPlayerEntity anchor = roster.get(0);
         for (ServerPlayerEntity bot : roster) {
@@ -281,6 +284,15 @@ public final class SoulBanterDirector {
 
     static long nextDelayMs(RandomGenerator random) {
         return 8 * 60_000L + (long) (random.nextDouble() * 7 * 60_000L);
+    }
+
+    /**
+     * Fire-time engagement coin (engagement spec §3): solo scenes always speak to the player;
+     * group scenes get a closing player-addressed line about one time in three. Deterministic
+     * Frens logic — the model never decides WHETHER the player is addressed.
+     */
+    static boolean decideAddressPlayer(int rosterSize, RandomGenerator random) {
+        return rosterSize == 1 || random.nextInt(3) == 0;
     }
 
     /** First failed gate's name in spec §3 order, or {@code null} when eligible. */
@@ -308,8 +320,8 @@ public final class SoulBanterDirector {
         if (!quiet) {
             return "not-quiet";
         }
-        if (eligibleRosterSize < 2) {
-            return "roster";
+        if (eligibleRosterSize < 1) {
+            return "roster"; // no eligible bot at all — solo rosters are valid since the engagement spec
         }
         if (!botsCloseTogether) {
             return "bots-apart";

@@ -30,7 +30,7 @@ class SoulBanterDirectorTest {
         assertEquals("muted", SoulBanterDirector.firstVeto(true, true, true, true, false, true, true, 2, true));
         assertEquals("player-not-at-ease", SoulBanterDirector.firstVeto(true, true, true, true, true, false, true, 2, true));
         assertEquals("not-quiet", SoulBanterDirector.firstVeto(true, true, true, true, true, true, false, 2, true));
-        assertEquals("roster", SoulBanterDirector.firstVeto(true, true, true, true, true, true, true, 1, true));
+        assertEquals("roster", SoulBanterDirector.firstVeto(true, true, true, true, true, true, true, 0, true));
         assertEquals("bots-apart", SoulBanterDirector.firstVeto(true, true, true, true, true, true, true, 2, false));
         // Earlier gate wins when two fail.
         assertEquals("cooldown", SoulBanterDirector.firstVeto(true, true, false, false, true, true, true, 0, false));
@@ -83,5 +83,28 @@ class SoulBanterDirectorTest {
                 true, false, 0, false, false, false, false,
                 -1, -1, Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty());
+    }
+
+    @Test
+    void soloRosterIsEligibleAndAlwaysAddressesThePlayer() {
+        assertNull(SoulBanterDirector.firstVeto(true, true, true, true, true, true, true, 1, true),
+                "one eligible bot is a valid banter roster since the engagement spec");
+        Random random = new Random(3);
+        for (int i = 0; i < 100; i++) {
+            assertTrue(SoulBanterDirector.decideAddressPlayer(1, random),
+                    "a solo scene's whole point is speaking to the player");
+        }
+    }
+
+    @Test
+    void groupScenesAddressThePlayerAboutOneTimeInThree() {
+        Random random = new Random(9);
+        int hits = 0;
+        for (int i = 0; i < 3000; i++) {
+            if (SoulBanterDirector.decideAddressPlayer(2, random)) {
+                hits++;
+            }
+        }
+        assertTrue(hits > 800 && hits < 1200, "expected ~1000/3000, got " + hits);
     }
 }
