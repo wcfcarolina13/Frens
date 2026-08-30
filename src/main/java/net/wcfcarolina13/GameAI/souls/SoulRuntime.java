@@ -780,7 +780,7 @@ public final class SoulRuntime {
     }
 
     public static SoulTypes.VoiceSpec toSpec(ManualConfig.SoulVoiceAssignment a) {
-        return new SoulTypes.VoiceSpec(a.getPiperModel(), a.getPiperSpeaker(), a.getRefAudio(), a.getRefText());
+        return new SoulTypes.VoiceSpec(a.getVoice(), a.getSpeaker(), a.getRefAudio(), a.getRefText());
     }
 
     private SoulVoiceService buildVoiceService(SoulVoiceSettings voiceSettings) {

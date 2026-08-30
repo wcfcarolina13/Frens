@@ -206,14 +206,14 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         if (spec == null) {
             spec = SoulTypes.VoiceSpec.EMPTY;
         }
-        String model = resolveModelPath(modelPath, spec.piperModel(), Files::isRegularFile);
-        if (!spec.piperModel().isEmpty() && model.equals(modelPath)
-                && !resolveModelPath(modelPath, spec.piperModel(), p -> true).equals(modelPath)
-                && warnedMissingVoices.add(spec.piperModel())) {
+        String model = resolveModelPath(modelPath, spec.voice(), Files::isRegularFile);
+        if (!spec.voice().isEmpty() && model.equals(modelPath)
+                && !resolveModelPath(modelPath, spec.voice(), p -> true).equals(modelPath)
+                && warnedMissingVoices.add(spec.voice())) {
             LOGGER.warn("[souls] tts voice '{}' for {} not found under {} — using the default voice",
-                    spec.piperModel(), key, voicesDir(modelPath));
+                    spec.voice(), key, voicesDir(modelPath));
         }
-        int speaker = spec.piperSpeaker();
+        int speaker = spec.speaker();
         String processKey = model + "#" + speaker;
         PiperProcess proc = processes.get(processKey);
         if (proc == null) {

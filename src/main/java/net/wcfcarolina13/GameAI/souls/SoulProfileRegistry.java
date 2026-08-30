@@ -136,11 +136,12 @@ public final class SoulProfileRegistry {
             SoulTypes.VoiceSpec voice = SoulTypes.VoiceSpec.EMPTY;
             JsonNode voiceNode = root.path("voice");
             if (voiceNode.isObject()) {
-                voice = new SoulTypes.VoiceSpec(
-                        voiceNode.path("piperModel").asText(""),
-                        voiceNode.path("piperSpeaker").asInt(-1),
-                        voiceNode.path("refAudio").asText(""),
-                        voiceNode.path("refText").asText(""));
+                String voiceName = voiceNode.hasNonNull("voice") ? voiceNode.path("voice").asText("")
+                        : voiceNode.path("piperModel").asText("");
+                int speaker = voiceNode.hasNonNull("speaker") ? voiceNode.path("speaker").asInt(-1)
+                        : voiceNode.path("piperSpeaker").asInt(-1);
+                voice = new SoulTypes.VoiceSpec(voiceName, speaker,
+                        voiceNode.path("refAudio").asText(""), voiceNode.path("refText").asText(""));
             }
             return new SoulTypes.SoulProfile(id, displayName, identity, values, boundaries, examples, voice);
         } catch (IOException e) {

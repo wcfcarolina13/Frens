@@ -145,29 +145,30 @@ public final class SoulTypes {
     }
 
     /**
-     * A profile's generated-voice selection (2026-08-29 per-bot voices). {@code piperModel} is a
-     * voice name (resolved in the voices directory) or a path, {@code piperSpeaker} an optional
-     * multi-speaker id ({@code -1} = model default); {@code refAudio}/{@code refText} are a
-     * Dreamsleeve clone anchor. Blank fields fall back to the globally configured voice.
+     * A profile's generated-voice selection (2026-08-29 per-bot voices). {@code voice} is an
+     * engine-interpreted voice name (Piper: onnx model name or path; Pocket: preset name),
+     * {@code speaker} an optional multi-speaker id ({@code -1} = engine default);
+     * {@code refAudio}/{@code refText} are a Dreamsleeve clone anchor. Blank fields fall back to
+     * the globally configured voice.
      */
-    public record VoiceSpec(String piperModel, int piperSpeaker, String refAudio, String refText) {
+    public record VoiceSpec(String voice, int speaker, String refAudio, String refText) {
         public static final VoiceSpec EMPTY = new VoiceSpec("", -1, "", "");
 
         public VoiceSpec {
-            piperModel = piperModel == null ? "" : piperModel.trim();
+            voice = voice == null ? "" : voice.trim();
             refAudio = refAudio == null ? "" : refAudio.trim();
             refText = refText == null ? "" : refText;
-            if (piperSpeaker < -1) {
-                piperSpeaker = -1;
+            if (speaker < -1) {
+                speaker = -1;
             }
         }
 
         public boolean isEmpty() {
-            return piperModel.isEmpty() && refAudio.isEmpty();
+            return voice.isEmpty() && refAudio.isEmpty();
         }
 
-        /** {@code "en_US-ryan-medium#3"} → model + speaker 3; no {@code #} → default speaker. */
-        public static VoiceSpec parsePiper(String assignment) {
+        /** {@code "en_US-ryan-medium#3"} → voice + speaker 3; no {@code #} → default speaker. */
+        public static VoiceSpec parse(String assignment) {
             String s = assignment == null ? "" : assignment.trim();
             if (s.isEmpty()) {
                 return EMPTY;
@@ -177,7 +178,7 @@ public final class SoulTypes {
                 try {
                     return new VoiceSpec(s.substring(0, hash), Integer.parseInt(s.substring(hash + 1).trim()), "", "");
                 } catch (NumberFormatException ignored) {
-                    // fall through: treat the whole string as the model name
+                    // fall through: treat the whole string as the voice name
                 }
             }
             return new VoiceSpec(s, -1, "", "");

@@ -387,10 +387,10 @@ final class BotSoulCommands {
 
     static String describeSpec(net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec) {
         StringBuilder sb = new StringBuilder();
-        if (!spec.piperModel().isEmpty()) {
-            sb.append("piper ").append(spec.piperModel());
-            if (spec.piperSpeaker() >= 0) {
-                sb.append('#').append(spec.piperSpeaker());
+        if (!spec.voice().isEmpty()) {
+            sb.append("voice ").append(spec.voice());
+            if (spec.speaker() >= 0) {
+                sb.append('#').append(spec.speaker());
             }
         }
         if (!spec.refAudio().isEmpty()) {
@@ -520,21 +520,21 @@ final class BotSoulCommands {
             return 1;
         }
         net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec =
-                net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.parsePiper(voiceOrNull);
+                net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.parse(voiceOrNull);
         String defaultModel = cfg.getSoulVoiceModel();
         if (defaultModel != null && !defaultModel.isBlank()) {
             String resolved = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
-                    defaultModel, spec.piperModel(), Files::isRegularFile);
+                    defaultModel, spec.voice(), Files::isRegularFile);
             String wanted = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
-                    defaultModel, spec.piperModel(), p -> true);
+                    defaultModel, spec.voice(), p -> true);
             if (!resolved.equals(wanted)) {
-                source.sendError(Text.literal("Voice '" + spec.piperModel() + "' is not installed (looked for "
+                source.sendError(Text.literal("Voice '" + spec.voice() + "' is not installed (looked for "
                         + wanted + "). /bot soul voice install <name> first, or /bot soul voice list."));
                 return 0;
             }
         }
         cfg.setSoulProfileVoice(profileId, new ManualConfig.SoulVoiceAssignment(
-                spec.piperModel(), spec.piperSpeaker(), "", ""));
+                spec.voice(), spec.speaker(), "", ""));
         cfg.save();
         ChatUtils.sendSystemMessage(source, profileId + " → " + describeSpec(spec)
                 + ". Takes effect on the next spoken line (Piper keeps one warm process per voice).");
@@ -567,8 +567,8 @@ final class BotSoulCommands {
         }
         ManualConfig.SoulVoiceAssignment existing = cfg.getSoulProfileVoices().get(profileId);
         cfg.setSoulProfileVoice(profileId, new ManualConfig.SoulVoiceAssignment(
-                existing == null ? "" : existing.getPiperModel(),
-                existing == null ? -1 : existing.getPiperSpeaker(),
+                existing == null ? "" : existing.getVoice(),
+                existing == null ? -1 : existing.getSpeaker(),
                 refAudio, refText));
         cfg.save();
         ChatUtils.sendSystemMessage(source, profileId + " → clone " + Path.of(refAudio).getFileName()

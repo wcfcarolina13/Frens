@@ -2,6 +2,7 @@ package net.wcfcarolina13.FilingSystem;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 import net.wcfcarolina13.Exception.ollamaNotReachableException;
 import net.wcfcarolina13.ServiceLLMClients.*;
@@ -489,27 +490,33 @@ public class ManualConfig {
         }
     }
 
-    /** One profile's voice pick: a Piper voice (+ optional speaker) and/or a Dreamsleeve clone anchor. */
+    /**
+     * One profile's voice pick: an engine-interpreted voice name (+ optional speaker) and/or a
+     * Dreamsleeve clone anchor. Pre-pocket configs wrote {@code piperModel}/{@code piperSpeaker};
+     * those keys are still read and are rewritten as {@code voice}/{@code speaker} on save.
+     */
     public static class SoulVoiceAssignment {
-        private String piperModel = "";
-        private int piperSpeaker = -1;
+        @SerializedName(value = "voice", alternate = {"piperModel"})
+        private String voice = "";
+        @SerializedName(value = "speaker", alternate = {"piperSpeaker"})
+        private int speaker = -1;
         private String refAudio = "";
         private String refText = "";
 
         public SoulVoiceAssignment() {
         }
 
-        public SoulVoiceAssignment(String piperModel, int piperSpeaker, String refAudio, String refText) {
-            this.piperModel = piperModel == null ? "" : piperModel.trim();
-            this.piperSpeaker = piperSpeaker;
+        public SoulVoiceAssignment(String voice, int speaker, String refAudio, String refText) {
+            this.voice = voice == null ? "" : voice.trim();
+            this.speaker = speaker;
             this.refAudio = refAudio == null ? "" : refAudio.trim();
             this.refText = refText == null ? "" : refText;
         }
 
-        public String getPiperModel() { return piperModel == null ? "" : piperModel; }
-        public void setPiperModel(String v) { this.piperModel = v == null ? "" : v.trim(); }
-        public int getPiperSpeaker() { return piperSpeaker; }
-        public void setPiperSpeaker(int v) { this.piperSpeaker = v; }
+        public String getVoice() { return voice == null ? "" : voice; }
+        public void setVoice(String v) { this.voice = v == null ? "" : v.trim(); }
+        public int getSpeaker() { return speaker; }
+        public void setSpeaker(int v) { this.speaker = v; }
         public String getRefAudio() { return refAudio == null ? "" : refAudio; }
         public void setRefAudio(String v) { this.refAudio = v == null ? "" : v.trim(); }
         public String getRefText() { return refText == null ? "" : refText; }
@@ -517,7 +524,7 @@ public class ManualConfig {
 
         @com.fasterxml.jackson.annotation.JsonIgnore
         public boolean isEmpty() {
-            return getPiperModel().isEmpty() && getRefAudio().isEmpty();
+            return getVoice().isEmpty() && getRefAudio().isEmpty();
         }
     }
 
