@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Conversation ontology Phase 1: change-driven cues + speech-act rotation; 1.1.196 (2026-08-29)
+
+Spec: `docs/superpowers/specs/2026-08-29-frens-soul-conversation-ontology-phase1.md`. Every
+ambient scene used to start from a flat bag of present-tense facts; topic rotation (1.1.194)
+stopped the same noun recurring but nothing told the model what CHANGED or what KIND of thing
+to say, so scenes stayed observational and drifted to instinct.
+
+- **`SoulSceneDiff` — what changed since this audience's last scene.** Compares the previous and
+  current grounding (first roster bot + player snapshot) plus a per-audience seen-registry and
+  emits weight-5 anchors (above every static fact, below a HIGH event): the rain just stopped /
+  it started raining, night has fallen / dawn is breaking, crossed into <biome>, the first
+  <animal>/<facility>/<biome> any of you have seen, hostiles showed up / are gone, <bot> just
+  took a hit, is getting hungry, switched to <item>, <player> is holding <item> now, back at /
+  left <base>, riding a <mount> now / on foot again, died since you last talked. The first scene
+  for an audience reports first sightings only and primes the registry (session-scoped).
+- **`SoulSpeechAct` — what kind of thing to say.** OBSERVE / ASK / TEASE / PLAN / RECALL / WORRY /
+  JOKE with group and solo directives ("one of you asks the other something real about …" vs
+  "ask Roti something about …"). RECALL needs an event anchor, WORRY a danger/health/food anchor;
+  weighted pick that skips the last 4 acts per audience. RECALL/WORRY re-pick the primary among
+  fitting anchors so the verb and the subject agree.
+- **Seed + director.** Change anchors join the pool; the cue opens with the act's directive
+  instead of "talk about". `SoulBanterDirector.AudienceMemory` (last grounding, seen keys, recent
+  topics, recent acts) replaces the topic ring; the fired log line now shows `act=… topic="…"`.
+- Tests: +3 `SoulSceneDiffTest`, +3 `SoulSpeechActTest`, +2 seed. Full suite 584/584.
+
+Field check: the second scene after a weather/biome/time change leads with it; consecutive
+scenes show different `act=` values; first sightings ("the first wolves any of you have seen")
+appear once and never again in the session.
+
 ## Banter: nobody answers for the player; the prompt knows about home, food and shelter; 1.1.195 (2026-08-29)
 
 Field report on the 18:52 scene — "Bob: Morning, Roti. How's the sleep skill going? / Jake:

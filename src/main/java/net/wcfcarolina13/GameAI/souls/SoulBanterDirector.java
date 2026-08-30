@@ -78,9 +78,19 @@ public final class SoulBanterDirector {
     private final IntSupplier activeRate;
     private final Map<UUID, Long> nextActiveAtMs = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastActiveVerdict = new ConcurrentHashMap<>();
-    /** Topic keys of the last few scenes per audience (both lanes) — fed back to the seed so
-     *  consecutive scenes rotate instead of retelling the nap next to the bed (2026-08-29). */
-    private final Map<UUID, java.util.ArrayDeque<String>> recentTopics = new ConcurrentHashMap<>();
+    /**
+     * Per-audience conversational memory (both lanes): the grounding of the last scene (for
+     * {@link SoulSceneDiff}), the seen-registry, and the last few topics and speech acts — fed
+     * back to the seed so consecutive scenes differ in subject AND shape (ontology Phase 1).
+     */
+    static final class AudienceMemory {
+        SoulTypes.GroundingSnapshot lastGrounding;
+        final Set<String> seen = ConcurrentHashMap.newKeySet();
+        final java.util.ArrayDeque<String> topics = new java.util.ArrayDeque<>();
+        final java.util.ArrayDeque<SoulSpeechAct> acts = new java.util.ArrayDeque<>();
+    }
+
+    private final Map<UUID, AudienceMemory> memories = new ConcurrentHashMap<>();
     static final int RECENT_TOPIC_MEMORY = 6;
 
     /** Which banter lane a scene belongs to; each has its own cooldown map and verdict. */
@@ -258,18 +268,29 @@ public final class SoulBanterDirector {
         }
 
         String playerActivity = SoulPlayerActivity.recentAction(playerId, now).orElse("");
-        java.util.ArrayDeque<String> topicRing = recentTopics.computeIfAbsent(playerId, id -> new java.util.ArrayDeque<>());
-        SoulBanterSeed.Seed seeded = SoulBanterSeed.buildSeed(groundings, eventsPerBot,
-                player.getName().getString(), playerActivity, random, new java.util.HashSet<>(topicRing));
-        String seed = seeded.text();
-        if (!seeded.topic().isEmpty()) {
-            synchronized (topicRing) {
-                topicRing.addLast(seeded.topic());
-                while (topicRing.size() > RECENT_TOPIC_MEMORY) {
-                    topicRing.removeFirst();
+        AudienceMemory memory = memories.computeIfAbsent(playerId, id -> new AudienceMemory());
+        SoulBanterSeed.Seed seeded;
+        synchronized (memory) {
+            List<SoulBanterSeed.Anchor> changes = SoulSceneDiff.diff(memory.lastGrounding,
+                    groundings.get(0), memory.seen, player.getName().getString());
+            memory.lastGrounding = groundings.get(0);
+            seeded = SoulBanterSeed.buildSeed(groundings, eventsPerBot,
+                    player.getName().getString(), playerActivity, random,
+                    new java.util.HashSet<>(memory.topics), changes, new ArrayList<>(memory.acts));
+            if (!seeded.topic().isEmpty()) {
+                memory.topics.addLast(seeded.topic());
+                while (memory.topics.size() > RECENT_TOPIC_MEMORY) {
+                    memory.topics.removeFirst();
+                }
+            }
+            if (seeded.act() != null) {
+                memory.acts.addLast(seeded.act());
+                while (memory.acts.size() > SoulSpeechAct.RECENT_ACT_MEMORY) {
+                    memory.acts.removeFirst();
                 }
             }
         }
+        String seed = seeded.text();
         UUID routingId = UUID.randomUUID();
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
@@ -278,8 +299,8 @@ public final class SoulBanterDirector {
         long armedUntilMs = now + nextDelay(lane);
         cooldowns(lane).put(playerId, armedUntilMs);
         recordVerdict(playerId, lane, "fired");
-        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} topic=\"{}\" addressPlayer={}",
-                lane, playerId, routingId, roster.size(), seed.length(), seeded.topic(), addressPlayer);
+        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} act={} topic=\"{}\" addressPlayer={}",
+                lane, playerId, routingId, roster.size(), seed.length(), seeded.act(), seeded.topic(), addressPlayer);
         runtime.submitGroupTurn(turn).thenAccept(submission -> {
             // 2026-08-29 field fix (+ review round): a fired scene arms the full 8–15 min
             // cooldown up front, so a generation that then FAILS (observed: 3B output rejected

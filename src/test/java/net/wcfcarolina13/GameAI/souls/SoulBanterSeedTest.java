@@ -221,4 +221,39 @@ class SoulBanterSeedTest {
             assertTrue(seed.text().contains("died"), seed.text());
         }
     }
+    @Test
+    void changeAnchorsLeadAndTheActOpensTheCue() {
+        List<SoulBanterSeed.Anchor> changes = List.of(
+                new SoulBanterSeed.Anchor("the weather", "the rain just stopped", SoulSceneDiff.CHANGE_WEIGHT));
+        int changeLed = 0;
+        for (int i = 0; i < 100; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                    "Bradley", "", new Random(i), Set.of(), changes, List.of(SoulSpeechAct.OBSERVE));
+            assertTrue(seed.act() != null && seed.act() != SoulSpeechAct.OBSERVE, "act rotates: " + seed.act());
+            assertTrue(seed.text().startsWith(seed.act().directive(true, "Bradley") + " "), seed.text());
+            if (seed.topic().equals("the weather")) {
+                changeLed++;
+            }
+        }
+        assertTrue(changeLed >= 20, "a change should lead often: " + changeLed + "/100");
+    }
+
+    @Test
+    void recallActRepicksAnEventAnchorAsPrimary() {
+        List<SoulTypes.SoulEvent> events = List.of(
+                event(SoulTypes.EventType.MOB_KILLED, SoulTypes.Salience.NORMAL, 900, Map.of("mob", "zombie")));
+        List<SoulSpeechAct> recentAllButRecall = List.of(SoulSpeechAct.OBSERVE, SoulSpeechAct.ASK,
+                SoulSpeechAct.TEASE, SoulSpeechAct.PLAN);
+        int recalls = 0;
+        for (int i = 0; i < 100; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(events),
+                    "Bradley", "", new Random(i), Set.of(), List.of(), recentAllButRecall);
+            if (seed.act() == SoulSpeechAct.RECALL) {
+                recalls++;
+                // "fighting" (the zombie) or "hobbies" (the grounding's last hobby) — both recallable.
+                assertTrue(SoulBanterSeed.isEventTopic(seed.topic()), seed.text());
+            }
+        }
+        assertTrue(recalls > 0, "RECALL must be reachable when an event exists");
+    }
 }

@@ -31,8 +31,28 @@ final class SoulBanterSeed {
     /** Supporting facts after the primary anchor. */
     static final int MAX_SUPPORT = 2;
 
-    /** What the seed steered toward; {@code topic} is the human-readable key the director remembers. */
-    record Seed(String text, String topic) {
+    /** What the seed steered toward; {@code topic} and {@code act} are what the director remembers. */
+    record Seed(String text, String topic, SoulSpeechAct act) {
+        Seed(String text, String topic) {
+            this(text, topic, null);
+        }
+    }
+
+    /** Topics that come from journal events (RECALL material). */
+    static boolean isEventTopic(String topic) {
+        return switch (topic) {
+            case "the work", "getting hurt", "fighting", "dying", "sleep", "travel", "quests",
+                    "getting stuck", "hobbies", "hunting" -> true;
+            default -> false;
+        };
+    }
+
+    /** Topics worth a worry. */
+    static boolean isWorryTopic(String topic) {
+        return switch (topic) {
+            case "danger", "health", "food", "getting hurt", "dying", "fighting", "getting stuck" -> true;
+            default -> false;
+        };
     }
 
     /** One candidate topic: a rotation key, the phrase the model sees, and a pick weight. */
@@ -58,8 +78,26 @@ final class SoulBanterSeed {
                           List<List<SoulTypes.SoulEvent>> eventsPerBot,
                           String playerName, String playerActivity, RandomGenerator random,
                           Set<String> recentTopics) {
+        return buildSeed(rosterGroundings, eventsPerBot, playerName, playerActivity, random,
+                recentTopics, List.of(), null);
+    }
+
+    /**
+     * @param changeAnchors what changed since the audience's last scene ({@link SoulSceneDiff});
+     *     they join the pool at their own (high) weight so novelty usually leads
+     * @param recentActs speech acts of recent scenes — {@code null} keeps the legacy "talk about"
+     *     phrasing (no act wheel); otherwise an act is picked and its directive opens the cue
+     */
+    static Seed buildSeed(List<SoulTypes.GroundingSnapshot> rosterGroundings,
+                          List<List<SoulTypes.SoulEvent>> eventsPerBot,
+                          String playerName, String playerActivity, RandomGenerator random,
+                          Set<String> recentTopics, List<Anchor> changeAnchors,
+                          java.util.Collection<SoulSpeechAct> recentActs) {
         Set<String> recent = recentTopics == null ? Set.of() : recentTopics;
         List<Anchor> anchors = new ArrayList<>();
+        if (changeAnchors != null) {
+            anchors.addAll(changeAnchors);
+        }
         List<SoulTypes.SoulEvent> picked = pickEvents(eventsPerBot, random);
         for (SoulTypes.SoulEvent event : picked) {
             anchors.add(new Anchor(topicOf(event.type()), phraseFor(event), weightOf(event)));
@@ -86,10 +124,27 @@ final class SoulBanterSeed {
         List<Anchor> pool = fresh.isEmpty() ? anchors : fresh;
 
         Anchor primary = pool.isEmpty() ? null : weightedPick(pool, random);
+        SoulSpeechAct act = null;
+        if (recentActs != null) {
+            boolean hasEvent = false;
+            boolean hasWorry = false;
+            for (Anchor anchor : anchors) {
+                hasEvent |= isEventTopic(anchor.topic());
+                hasWorry |= isWorryTopic(anchor.topic());
+            }
+            act = SoulSpeechAct.pick(hasEvent, hasWorry, recentActs, random);
+            // RECALL and WORRY need a matching primary: re-pick the primary among fitting anchors.
+            if (primary != null && act == SoulSpeechAct.RECALL && !isEventTopic(primary.topic())) {
+                primary = firstMatching(pool, anchors, SoulBanterSeed::isEventTopic, random, primary);
+            } else if (primary != null && act == SoulSpeechAct.WORRY && !isWorryTopic(primary.topic())) {
+                primary = firstMatching(pool, anchors, SoulBanterSeed::isWorryTopic, random, primary);
+            }
+        }
         List<String> parts = new ArrayList<>();
         Set<String> usedTopics = new LinkedHashSet<>();
         if (primary != null) {
-            parts.add("talk about " + primary.phrase());
+            String verb = act == null ? "talk about" : act.directive(rosterGroundings.size() <= 1, playerName);
+            parts.add(verb + " " + primary.phrase());
             usedTopics.add(primary.topic());
         }
         // Supporting facts: HIGH-salience events always make it in, then other fresh anchors.
@@ -125,7 +180,27 @@ final class SoulBanterSeed {
 
         String seed = String.join("; ", parts);
         String text = seed.length() <= MAX_SEED_CHARS ? seed : seed.substring(0, MAX_SEED_CHARS);
-        return new Seed(text, primary == null ? "" : primary.topic());
+        return new Seed(text, primary == null ? "" : primary.topic(), act);
+    }
+
+    /** A weighted pick among anchors whose topic passes {@code test} (fresh pool first), else {@code fallback}. */
+    private static Anchor firstMatching(List<Anchor> pool, List<Anchor> all,
+                                        java.util.function.Predicate<String> test,
+                                        RandomGenerator random, Anchor fallback) {
+        List<Anchor> fitting = new ArrayList<>();
+        for (Anchor anchor : pool) {
+            if (test.test(anchor.topic())) {
+                fitting.add(anchor);
+            }
+        }
+        if (fitting.isEmpty()) {
+            for (Anchor anchor : all) {
+                if (test.test(anchor.topic())) {
+                    fitting.add(anchor);
+                }
+            }
+        }
+        return fitting.isEmpty() ? fallback : weightedPick(fitting, random);
     }
 
     /** Everything the grounding offers to talk about besides journal events. Weight 2 unless noted. */
