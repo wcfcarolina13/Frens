@@ -7,6 +7,7 @@ import net.minecraft.util.WorldSavePath;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.souls.voice.DreamsleeveVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine;
+import net.wcfcarolina13.GameAI.souls.voice.PocketVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceGate;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceService;
@@ -808,8 +809,12 @@ public final class SoulRuntime {
                 case SoulVoiceSettings.ENGINE_DREAMSLEEVE -> new DreamsleeveVoiceEngine(
                         voiceSettings.dreamsleeveDir(), voiceSettings.refAudio(),
                         voiceSettings.refText(), voiceSettings.synthTimeoutMs(), voiceResolver);
-                default -> new PiperVoiceEngine(voiceSettings.piperBinary(),
+                case SoulVoiceSettings.ENGINE_POCKET -> new PocketVoiceEngine(
+                        voiceSettings.pocketDir(), voiceSettings.pocketVoice(),
+                        voiceSettings.synthTimeoutMs(), voiceResolver);
+                case SoulVoiceSettings.ENGINE_PIPER -> new PiperVoiceEngine(voiceSettings.piperBinary(),
                         voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs(), voiceResolver);
+                default -> throw new IllegalStateException("unknown soul voice engine: " + voiceSettings.engine());
             };
             // Soul Voice is the only master over soul TTS (the Scripted Voice master governs
             // pre-baked audio only — lane separation, 2026-08-29). Read live so a toggle flip
