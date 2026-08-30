@@ -122,8 +122,8 @@ class SoulBanterDirectorTest {
             assertTrue(active >= 4 * 60_000L && active <= 8 * 60_000L, "active=" + active);
         }
         assertEquals(SoulBanterDirector.nextDelayMs(new Random(9)), SoulBanterDirector.nextDelayMs(new Random(9), 1.0));
-        assertEquals(4.0, SoulBanterDirector.multiplier(0), 1e-9);
-        assertEquals(0.25, SoulBanterDirector.multiplier(100), 1e-9);
+        assertEquals(8.0, SoulBanterDirector.multiplier(0), 1e-9);
+        assertEquals(0.125, SoulBanterDirector.multiplier(100), 1e-9);
     }
 
     @Test

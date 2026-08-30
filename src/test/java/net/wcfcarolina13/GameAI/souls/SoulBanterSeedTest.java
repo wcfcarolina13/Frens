@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -149,5 +150,75 @@ class SoulBanterSeedTest {
                 List.of(List.of()), "Bradley", "", new Random(1));
 
         assertFalse(seed.contains("overheard"));
+    }
+    // === Topic rotation (2026-08-29): the bots kept talking about naps next to a bed ===
+
+    private static SoulTypes.GroundingSnapshot richGrounding() {
+        SoulTypes.BotSnapshot bot = new SoulTypes.BotSnapshot(UUID.randomUUID(), "Jake",
+                "overworld", "taiga", 0, 64, 0, true, "morning", "clear", 11f, 20f, 8, 4, "iron axe", 4, 36,
+                List.of("oak logs x40"), "cheerful", "IDLE", "", "", "", "Bradley", true, 0, true, Optional.empty());
+        SoulTypes.SituationSnapshot base = SoulTypes.SituationSnapshot.empty();
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(base.dangerDistance(), base.hostiles(),
+                List.of("wolves", "sheep"), "grass block", List.of("spruce logs", "moss"), List.of("Bed nearby: sleep"),
+                base.facilitySightings(), base.armorStands(), base.blockLight(), base.skyLight(), base.enclosed(),
+                base.hasHeadroom(), base.hasEscapeRoute(), base.behaviorMode(), base.following(), base.inCombat(),
+                base.postCombatLinger(), base.recentKillCount(), base.inShelter(), base.surfaceRecoveryActive(),
+                base.breakingFree(), base.nightTravelActive(), 3, 1, base.mount(), base.knownBaseCount(),
+                base.lastSleepLabel(), base.atBase(), base.hunt(), Optional.of("fishing"));
+        return new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                Optional.empty(), situation, Instant.EPOCH, List.of());
+    }
+
+    @Test
+    void sleepAndWakeCollapseToOneTopicAndNeverOutrankTheWorld() {
+        assertEquals(SoulBanterSeed.topicOf(SoulTypes.EventType.SLEEP), SoulBanterSeed.topicOf(SoulTypes.EventType.WAKE));
+        List<SoulTypes.SoulEvent> naps = List.of(
+                event(SoulTypes.EventType.SLEEP, SoulTypes.Salience.LOW, 900, Map.of()),
+                event(SoulTypes.EventType.WAKE, SoulTypes.Salience.LOW, 950, Map.of()));
+        int sleepPrimary = 0;
+        for (int i = 0; i < 200; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(naps),
+                    "Bradley", "", new Random(i), Set.of());
+            if (seed.topic().equals("sleep")) {
+                sleepPrimary++;
+            }
+        }
+        assertTrue(sleepPrimary < 40, "sleep was primary " + sleepPrimary + "/200 — it should be a rare pick");
+    }
+
+    @Test
+    void recentTopicsAreSkippedWhileAnythingElseExists() {
+        List<SoulTypes.SoulEvent> naps = List.of(
+                event(SoulTypes.EventType.SLEEP, SoulTypes.Salience.LOW, 900, Map.of()));
+        Set<String> recent = new java.util.HashSet<>(Set.of("sleep", "the weather", "the land"));
+        for (int i = 0; i < 100; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(naps),
+                    "Bradley", "", new Random(i), recent);
+            assertFalse(recent.contains(seed.topic()), "picked a recent topic: " + seed.topic());
+            assertTrue(seed.text().startsWith("talk about "), seed.text());
+            assertTrue(seed.text().contains("do not bring up"), seed.text());
+        }
+    }
+
+    @Test
+    void groundingOffersManyAnchorsBeyondEvents() {
+        List<SoulBanterSeed.Anchor> anchors = SoulBanterSeed.groundingAnchors(richGrounding());
+        Set<String> topics = new java.util.HashSet<>();
+        for (SoulBanterSeed.Anchor a : anchors) {
+            topics.add(a.topic());
+        }
+        assertTrue(topics.containsAll(Set.of("the weather", "the land", "gear", "food", "health", "mood",
+                "animals", "terrain", "facilities", "loot", "hobbies", "the journey", "deaths")), topics.toString());
+    }
+
+    @Test
+    void highSalienceEventsStillSurfaceAsSupportWhenNotPrimary() {
+        List<SoulTypes.SoulEvent> events = List.of(
+                event(SoulTypes.EventType.DEATH, SoulTypes.Salience.HIGH, 100, Map.of()));
+        for (int i = 0; i < 50; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(events),
+                    "Bradley", "", new Random(i), Set.of());
+            assertTrue(seed.text().contains("died"), seed.text());
+        }
     }
 }

@@ -64,13 +64,13 @@ public final class SoulGroupPromptAssembler {
                     turn.roster().size() == 1
                             ? "[A quiet moment. " + turn.roster().get(0).displayName()
                                     + " may say one short thing to " + turn.ownerDisplayName()
-                                    + " — a remark, an observation, or a question about recent"
-                                    + " happenings: " + turn.playerMessage()
+                                    + " — a remark, an observation, or a question. Cue: "
+                                    + turn.playerMessage()
                                     + ". One short line, at most two, all spoken by "
                                     + turn.roster().get(0).displayName() + "; "
                                     + turn.ownerDisplayName() + " does not answer in this scene.]"
                             : "[A quiet moment. The companions chat briefly among themselves."
-                                    + " Recent happenings: " + turn.playerMessage()
+                                    + " Cue: " + turn.playerMessage()
                                     + ". A few short lines only."
                                     + (turn.addressPlayer()
                                             ? " One of you may end by saying one short thing to "
@@ -126,7 +126,7 @@ public final class SoulGroupPromptAssembler {
         if (turn.roster().size() == 1) {
             SoulGroupTypes.SceneParticipant only = turn.roster().get(0);
             return "[" + workLabel(only, owner) + " and may say one short thing to " + owner
-                    + " about it — a remark, a grumble, or a question. Recent happenings: "
+                    + " about it — a remark, a grumble, or a question. Cue: "
                     + turn.playerMessage() + ". One short line, at most two, all spoken by "
                     + only.displayName() + "; " + owner + " does not answer in this scene.]";
         }
@@ -138,7 +138,7 @@ public final class SoulGroupPromptAssembler {
             who.append(workLabel(turn.roster().get(i), owner));
         }
         return "[The companions are busy — " + who + ". They trade a short word or two about"
-                + " the work without stopping. Recent happenings: " + turn.playerMessage()
+                + " the work without stopping. Cue: " + turn.playerMessage()
                 + ". A few short lines only."
                 + (turn.addressPlayer()
                         ? " One of you may end by saying one short thing to " + owner

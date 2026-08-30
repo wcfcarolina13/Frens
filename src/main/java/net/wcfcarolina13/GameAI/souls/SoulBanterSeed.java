@@ -3,16 +3,24 @@ package net.wcfcarolina13.GameAI.souls;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.random.RandomGenerator;
 
 /**
- * Deterministic banter topic seed (spec §4): up to {@value #MAX_EVENTS} salient witnessed events
- * from the roster bots' journals plus a one-line situation summary and the audience player's
- * apparent activity. Pure — no Minecraft imports, randomness injected. The model never chooses
- * topics; this string is the whole steering input.
+ * Deterministic banter topic seed (spec §4, topic rotation 2026-08-29): ONE primary anchor the
+ * scene is steered onto, up to two supporting facts, a one-line situation summary, the
+ * audience player's apparent activity, and — when the director supplies them — the topics of
+ * recent scenes as an explicit "do not bring up" list. Pure — no Minecraft imports, randomness
+ * injected. The model never chooses topics; this string is the whole steering input.
+ *
+ * <p>Why rotation: with a quiet journal the old event-first pick surfaced SLEEP + WAKE every
+ * time (distinct types, so both survived the dedupe) and the bots talked about napping scene
+ * after scene while standing next to the weather, their gear, the animals, their hunger, the
+ * biome, their mood and the player's own activity. Anchors now come from the whole grounding,
+ * carry a human-readable topic key, and a key used recently is skipped while any other exists.
  */
 final class SoulBanterSeed {
 
@@ -20,6 +28,16 @@ final class SoulBanterSeed {
     static final int MAX_SEED_CHARS = 400;
     /** A single event phrase (incl. fact suffix) never exceeds this. */
     static final int MAX_PHRASE_CHARS = 60;
+    /** Supporting facts after the primary anchor. */
+    static final int MAX_SUPPORT = 2;
+
+    /** What the seed steered toward; {@code topic} is the human-readable key the director remembers. */
+    record Seed(String text, String topic) {
+    }
+
+    /** One candidate topic: a rotation key, the phrase the model sees, and a pick weight. */
+    record Anchor(String topic, String phrase, int weight) {
+    }
 
     private SoulBanterSeed() {
     }
@@ -32,29 +50,154 @@ final class SoulBanterSeed {
     static String build(List<SoulTypes.GroundingSnapshot> rosterGroundings,
                          List<List<SoulTypes.SoulEvent>> eventsPerBot,
                          String playerName, String playerActivity, RandomGenerator random) {
-        List<String> parts = new ArrayList<>();
+        return buildSeed(rosterGroundings, eventsPerBot, playerName, playerActivity, random, Set.of()).text();
+    }
 
+    /** @param recentTopics topic keys of recent scenes for this audience — skipped while any other anchor exists */
+    static Seed buildSeed(List<SoulTypes.GroundingSnapshot> rosterGroundings,
+                          List<List<SoulTypes.SoulEvent>> eventsPerBot,
+                          String playerName, String playerActivity, RandomGenerator random,
+                          Set<String> recentTopics) {
+        Set<String> recent = recentTopics == null ? Set.of() : recentTopics;
+        List<Anchor> anchors = new ArrayList<>();
         List<SoulTypes.SoulEvent> picked = pickEvents(eventsPerBot, random);
         for (SoulTypes.SoulEvent event : picked) {
-            parts.add(phraseFor(event));
+            anchors.add(new Anchor(topicOf(event.type()), phraseFor(event), weightOf(event)));
         }
-
-        if (!rosterGroundings.isEmpty()) {
-            parts.add(situationLine(rosterGroundings.get(0)));
+        SoulTypes.GroundingSnapshot first = rosterGroundings.isEmpty() ? null : rosterGroundings.get(0);
+        if (first != null) {
+            anchors.addAll(groundingAnchors(first));
         }
         if (playerActivity != null && !playerActivity.isBlank()) {
-            parts.add(playerName + " is " + playerActivity);
+            anchors.add(new Anchor("the player", playerName + " is " + playerActivity, 3));
         }
-        if (!rosterGroundings.isEmpty()) {
-            List<String> overheard = rosterGroundings.get(0).overheard();
-            if (!overheard.isEmpty()) {
-                parts.add(playerName + " was saying: "
-                        + truncatePhrase(overheard.get(overheard.size() - 1)));
+        if (first != null && !first.overheard().isEmpty()) {
+            anchors.add(new Anchor("what was overheard", playerName + " was saying: "
+                    + truncatePhrase(first.overheard().get(first.overheard().size() - 1)), 4));
+        }
+
+        // Rotation: drop anchors whose topic came up recently, unless that empties the pool.
+        List<Anchor> fresh = new ArrayList<>();
+        for (Anchor anchor : anchors) {
+            if (!recent.contains(anchor.topic())) {
+                fresh.add(anchor);
+            }
+        }
+        List<Anchor> pool = fresh.isEmpty() ? anchors : fresh;
+
+        Anchor primary = pool.isEmpty() ? null : weightedPick(pool, random);
+        List<String> parts = new ArrayList<>();
+        Set<String> usedTopics = new LinkedHashSet<>();
+        if (primary != null) {
+            parts.add("talk about " + primary.phrase());
+            usedTopics.add(primary.topic());
+        }
+        // Supporting facts: HIGH-salience events always make it in, then other fresh anchors.
+        List<Anchor> support = new ArrayList<>(anchors);
+        support.sort(Comparator.comparingInt(Anchor::weight).reversed());
+        for (Anchor anchor : support) {
+            if (usedTopics.size() > MAX_SUPPORT) {
+                break;
+            }
+            if (anchor == primary || usedTopics.contains(anchor.topic())) {
+                continue;
+            }
+            if (recent.contains(anchor.topic()) && anchor.weight() < 6) {
+                continue; // recently discussed and not important enough to force back in
+            }
+            parts.add(anchor.phrase());
+            usedTopics.add(anchor.topic());
+        }
+        if (first != null) {
+            parts.add(situationLine(first));
+        }
+        if (!recent.isEmpty()) {
+            List<String> avoid = new ArrayList<>();
+            for (String topic : recent) {
+                if (!usedTopics.contains(topic)) {
+                    avoid.add(topic);
+                }
+            }
+            if (!avoid.isEmpty()) {
+                parts.add("do not bring up " + String.join(" or ", avoid) + " again");
             }
         }
 
         String seed = String.join("; ", parts);
-        return seed.length() <= MAX_SEED_CHARS ? seed : seed.substring(0, MAX_SEED_CHARS);
+        String text = seed.length() <= MAX_SEED_CHARS ? seed : seed.substring(0, MAX_SEED_CHARS);
+        return new Seed(text, primary == null ? "" : primary.topic());
+    }
+
+    /** Everything the grounding offers to talk about besides journal events. Weight 2 unless noted. */
+    static List<Anchor> groundingAnchors(SoulTypes.GroundingSnapshot grounding) {
+        SoulTypes.BotSnapshot bot = grounding.bot();
+        SoulTypes.SituationSnapshot situation = grounding.situation();
+        List<Anchor> out = new ArrayList<>();
+        if (!bot.weather().isEmpty() || !bot.timePhase().isEmpty()) {
+            out.add(new Anchor("the weather", "the " + (bot.weather().isEmpty() ? "" : bot.weather().toLowerCase(Locale.ROOT) + " ")
+                    + (bot.timePhase().isEmpty() ? "sky" : bot.timePhase()), 2));
+        }
+        if (!bot.biome().isEmpty()) {
+            out.add(new Anchor("the land", "this " + bot.biome() + " country", 2));
+        }
+        if (!bot.heldItem().isEmpty()) {
+            out.add(new Anchor("gear", "the " + bot.heldItem() + " in hand", 2));
+        }
+        if (bot.hunger() >= 0 && bot.hunger() < 12) {
+            out.add(new Anchor("food", "being hungry (" + bot.hunger() + "/20)", 3));
+        }
+        if (bot.maxHealth() > 0 && bot.health() < bot.maxHealth() * 0.6f) {
+            out.add(new Anchor("health", "nursing wounds (" + Math.round(bot.health()) + "/" + Math.round(bot.maxHealth()) + ")", 3));
+        }
+        if (!bot.mood().isEmpty()) {
+            out.add(new Anchor("mood", "feeling " + bot.mood(), 1));
+        }
+        if (!situation.nearbyAnimals().isEmpty()) {
+            out.add(new Anchor("animals", "the " + String.join(" and ", situation.nearbyAnimals().subList(0, Math.min(2, situation.nearbyAnimals().size()))) + " nearby", 2));
+        }
+        if (!situation.nearbyBlocks().isEmpty()) {
+            out.add(new Anchor("terrain", "the " + String.join(", ", situation.nearbyBlocks().subList(0, Math.min(3, situation.nearbyBlocks().size()))) + " around here", 1));
+        } else if (!situation.standingOn().isEmpty()) {
+            out.add(new Anchor("terrain", "standing on " + situation.standingOn(), 1));
+        }
+        if (!situation.facilities().isEmpty()) {
+            out.add(new Anchor("facilities", "the " + truncatePhrase(situation.facilities().get(0)).toLowerCase(Locale.ROOT), 1));
+        }
+        if (!bot.notableItems().isEmpty()) {
+            out.add(new Anchor("loot", "carrying " + String.join(", ", bot.notableItems().subList(0, Math.min(2, bot.notableItems().size()))), 2));
+        } else if (!bot.resourceSummary().isEmpty()) {
+            out.add(new Anchor("loot", "the haul so far (" + String.join(", ", bot.resourceSummary().subList(0, Math.min(2, bot.resourceSummary().size()))) + ")", 2));
+        }
+        if (!bot.wornGear().isEmpty()) {
+            out.add(new Anchor("armor", "wearing " + String.join(", ", bot.wornGear().subList(0, Math.min(2, bot.wornGear().size()))), 1));
+        }
+        situation.lastHobby().ifPresent(h -> out.add(new Anchor("hobbies", "the last hobby (" + h + ")", 2)));
+        situation.hunt().ifPresent(h -> out.add(new Anchor("hunting", "the hunt for " + h.target() + " (" + h.kills() + "/" + h.goal() + ")", 3)));
+        situation.atBase().ifPresent(b -> out.add(new Anchor("home", "being home at " + b, 2)));
+        situation.mount().ifPresent(m -> out.add(new Anchor("the mount", "the " + m.type() + (m.saddled() ? " under saddle" : ""), 2)));
+        if (situation.companionDays() > 0) {
+            out.add(new Anchor("the journey", situation.companionDays() + " days travelling together", 1));
+        }
+        if (situation.deathCount() > 0) {
+            out.add(new Anchor("deaths", "having died " + situation.deathCount() + (situation.deathCount() == 1 ? " time" : " times"), 1));
+        }
+        bot.activeQuest().ifPresent(q -> out.add(new Anchor("quests", "the quest (" + q.intent() + ")", 3)));
+        return out;
+    }
+
+    private static Anchor weightedPick(List<Anchor> pool, RandomGenerator random) {
+        int total = 0;
+        for (Anchor anchor : pool) {
+            total += Math.max(1, anchor.weight());
+        }
+        int roll = random.nextInt(total);
+        for (Anchor anchor : pool) {
+            roll -= Math.max(1, anchor.weight());
+            if (roll < 0) {
+                return anchor;
+            }
+        }
+        return pool.get(pool.size() - 1);
     }
 
     /** Salience-first (HIGH→NORMAL→LOW), newest-first within a tier, deduped by type; when more
@@ -90,6 +233,34 @@ final class SoulBanterSeed {
         return picked;
     }
 
+    /** SLEEP and WAKE are one topic ("sleep"); the rest group by what they are about. */
+    static String topicOf(SoulTypes.EventType type) {
+        return switch (type) {
+            case TASK_STARTED, TASK_COMPLETED, TASK_FAILED, TASK_PAUSED, TASK_CANCELLED -> "the work";
+            case BOT_DAMAGE, OWNER_DAMAGE -> "getting hurt";
+            case COMBAT_STARTED, COMBAT_ENDED, MOB_KILLED -> "fighting";
+            case DEATH, RESPAWN -> "dying";
+            case SLEEP, WAKE -> "sleep";
+            case DIMENSION_CHANGED -> "travel";
+            case QUEST_STAGE_CHANGED -> "quests";
+            case SELF_RESCUE -> "getting stuck";
+            case HOBBY_SESSION -> "hobbies";
+            case HUNT_PROGRESS -> "hunting";
+            case DIRECT_CONVERSATION -> "conversation";
+        };
+    }
+
+    private static int weightOf(SoulTypes.SoulEvent event) {
+        if (event.type() == SoulTypes.EventType.SLEEP || event.type() == SoulTypes.EventType.WAKE) {
+            return 1; // routine — never let a nap outrank the world around the bots
+        }
+        return switch (event.salience()) {
+            case HIGH -> 6;
+            case NORMAL -> 3;
+            case LOW -> 1;
+        };
+    }
+
     private static String phraseFor(SoulTypes.SoulEvent event) {
         String base = switch (event.type()) {
             case TASK_STARTED -> "started a task";
@@ -119,7 +290,7 @@ final class SoulBanterSeed {
         return phrase.length() <= MAX_PHRASE_CHARS ? phrase : phrase.substring(0, MAX_PHRASE_CHARS);
     }
 
-    /** Caps a raw overheard line at {@link #MAX_PHRASE_CHARS}, same bound as {@link #phraseFor}. */
+    /** Caps a raw phrase at {@link #MAX_PHRASE_CHARS}, same bound as {@link #phraseFor}. */
     private static String truncatePhrase(String phrase) {
         return phrase.length() <= MAX_PHRASE_CHARS ? phrase : phrase.substring(0, MAX_PHRASE_CHARS);
     }

@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Banter topic rotation + wider, labelled talkativeness sliders; 1.1.194 (2026-08-29)
+
+Field report: "they keep talking about sleeping just because we're near a bed". The 18:45
+scene in the log was exactly that ("Nice job on that sleep skill… I could use a nap"). Cause:
+the seed was journal-events-first, and in a quiet session the only events are SLEEP and WAKE —
+distinct types, so BOTH survived the type dedupe and filled the seed every scene, while the
+grounding (weather, biome, gear, hunger, animals, terrain, hobbies, the player's activity…) was
+never a candidate.
+
+- **`SoulBanterSeed` now picks ONE primary anchor by weighted random from the whole grounding
+  plus the events**, with up to two supporting facts (HIGH-salience events always make it in),
+  the situation line, and an explicit "do not bring up X or Y again" tail. Anchors carry a
+  human-readable topic key (the weather, the land, gear, food, health, mood, animals, terrain,
+  facilities, loot, armor, hobbies, hunting, home, the mount, the journey, deaths, quests, the
+  work, fighting, dying, sleep, travel, the player, what was overheard). SLEEP+WAKE collapse to
+  one key, "sleep", at the lowest weight.
+- **Rotation memory in `SoulBanterDirector`:** the last 6 topic keys per audience (both lanes)
+  are fed back into the seed and skipped while any other anchor exists. The fired log line now
+  carries `topic="…"` so the rotation is visible in the log.
+- Directives say `Cue: …` instead of `Recent happenings: …` — the seed is a steer, not a diary.
+- **Sliders:** range widened to ×8 either way (`DialoguePacing.RANGE`), so 100 on Idle banter
+  means every ~1–2 min — enough to see several scenes in one test session. Every slider now has
+  "◂ less talkative … more talkative ▸" end labels.
+- Tests: +4 seed (sleep rarely primary, recent topics skipped, grounding anchor coverage, HIGH
+  events still surface), pacing/director endpoints updated. Full suite 573/573.
+
+Field check: several scenes at Idle 100 → the `topic="…"` values differ scene to scene and the
+lines follow them; standing by a bed no longer yields nap talk twice in a row.
+
 ## Two dialogue lanes, two sets of masters — scripted vs soul fully separated; 1.1.193 (2026-08-29)
 
 Bradley's question: "does disabling Text Chat also disable LLM chat?" — partly, yes: the Text

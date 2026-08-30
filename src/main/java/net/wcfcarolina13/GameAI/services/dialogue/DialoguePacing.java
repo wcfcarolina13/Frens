@@ -7,7 +7,8 @@ import java.util.Locale;
 
 /**
  * One knob per dialogue stream. A rate of 0–100 (50 = the shipped cadence) becomes a cooldown
- * multiplier {@code 4^((50 - rate) / 50)}: 0 → ×4 (rarer), 100 → ×0.25 (chattier). Cooldowns
+ * multiplier {@code 8^((50 - rate) / 50)}: 0 → ×8 (rarer), 100 → ×0.125 (chattier — wide
+ * enough that a tester sees several scenes in a few minutes). Cooldowns
  * multiply by it, per-tick chances divide by it. Pure functions take the rate explicitly; the
  * {@link Stream} overloads read the live {@link ManualConfig} lazily at call time so a slider
  * change applies to the next line without any reload. The souls package must NOT call the
@@ -24,8 +25,11 @@ public final class DialoguePacing {
 
     public static double multiplier(int rate) {
         int r = Math.max(0, Math.min(100, rate));
-        return Math.pow(4.0, (50 - r) / 50.0);
+        return Math.pow(RANGE, (50 - r) / 50.0);
     }
+
+    /** Multiplier at either end of the slider: ×8 rarer at 0, ×1/8 chattier at 100. */
+    public static final double RANGE = 8.0;
 
     public static long scaledCooldown(int rate, long baseMs) {
         return Math.round(baseMs * multiplier(rate));
@@ -40,7 +44,7 @@ public final class DialoguePacing {
         double m = multiplier(rate);
         long lo = Math.round(minMs * m);
         long hi = Math.round(maxMs * m);
-        if (hi < 120_000L) {
+        if (hi < 90_000L) {
             return String.format(Locale.ROOT, "every ~%d–%d s", Math.round(lo / 1000.0), Math.round(hi / 1000.0));
         }
         return String.format(Locale.ROOT, "every ~%d–%d min", Math.round(lo / 60_000.0), Math.round(hi / 60_000.0));

@@ -32,6 +32,7 @@ public class DialogueSettingsScreen extends Screen {
     private static final int PAD = 8;
     private static final int ROW_H = 20;
     private static final int ROW_GAP = 16;
+    private static final int ROW_COUNT = 4;
 
     private final Screen parent;
 
@@ -53,7 +54,7 @@ public class DialogueSettingsScreen extends Screen {
             return;
         }
         addRow(cx + PAD, y, w, "Scripted lines", cfg::getDialogueScriptedRate, cfg::setDialogueScriptedRate,
-                rate -> String.format(Locale.ROOT, "cooldowns ×%.2f", DialoguePacing.multiplier(rate)),
+                rate -> String.format(Locale.ROOT, "cooldowns ×%.3g", DialoguePacing.multiplier(rate)),
                 "Pet, weather, gear, inventory, wake-up and enchanting remarks. Left = rarer, right = chattier.");
         y += ROW_H + ROW_GAP;
         addRow(cx + PAD, y, w, "Idle banter", cfg::getSoulBanterIdleRate, cfg::setSoulBanterIdleRate,
@@ -153,6 +154,15 @@ public class DialogueSettingsScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer,
                 Text.literal("§750 = shipped cadence. Toggles stay the on/off switches."),
                 this.width / 2, cy + 24, 0xFFFFFFFF);
+        // End labels under each slider so the direction is never in doubt.
+        int w = POPUP_WIDTH - PAD * 2;
+        for (int row = 0; row < ROW_COUNT; row++) {
+            int rowY = cy + 40 + row * (ROW_H + ROW_GAP) + ROW_H + 2;
+            context.drawText(this.textRenderer, Text.literal("§8◂ less talkative"), cx + PAD + 2, rowY, 0xFFFFFFFF, false);
+            String right = "more talkative ▸";
+            context.drawText(this.textRenderer, Text.literal("§8" + right),
+                    cx + PAD + w - 2 - this.textRenderer.getWidth(right), rowY, 0xFFFFFFFF, false);
+        }
         super.render(context, mouseX, mouseY, delta);
     }
 

@@ -78,6 +78,10 @@ public final class SoulBanterDirector {
     private final IntSupplier activeRate;
     private final Map<UUID, Long> nextActiveAtMs = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastActiveVerdict = new ConcurrentHashMap<>();
+    /** Topic keys of the last few scenes per audience (both lanes) — fed back to the seed so
+     *  consecutive scenes rotate instead of retelling the nap next to the bed (2026-08-29). */
+    private final Map<UUID, java.util.ArrayDeque<String>> recentTopics = new ConcurrentHashMap<>();
+    static final int RECENT_TOPIC_MEMORY = 6;
 
     /** Which banter lane a scene belongs to; each has its own cooldown map and verdict. */
     enum Lane { IDLE, ACTIVE }
@@ -254,8 +258,18 @@ public final class SoulBanterDirector {
         }
 
         String playerActivity = SoulPlayerActivity.recentAction(playerId, now).orElse("");
-        String seed = SoulBanterSeed.build(groundings, eventsPerBot,
-                player.getName().getString(), playerActivity, random);
+        java.util.ArrayDeque<String> topicRing = recentTopics.computeIfAbsent(playerId, id -> new java.util.ArrayDeque<>());
+        SoulBanterSeed.Seed seeded = SoulBanterSeed.buildSeed(groundings, eventsPerBot,
+                player.getName().getString(), playerActivity, random, new java.util.HashSet<>(topicRing));
+        String seed = seeded.text();
+        if (!seeded.topic().isEmpty()) {
+            synchronized (topicRing) {
+                topicRing.addLast(seeded.topic());
+                while (topicRing.size() > RECENT_TOPIC_MEMORY) {
+                    topicRing.removeFirst();
+                }
+            }
+        }
         UUID routingId = UUID.randomUUID();
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
@@ -264,8 +278,8 @@ public final class SoulBanterDirector {
         long armedUntilMs = now + nextDelay(lane);
         cooldowns(lane).put(playerId, armedUntilMs);
         recordVerdict(playerId, lane, "fired");
-        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} addressPlayer={}",
-                lane, playerId, routingId, roster.size(), seed.length(), addressPlayer);
+        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} topic=\"{}\" addressPlayer={}",
+                lane, playerId, routingId, roster.size(), seed.length(), seeded.topic(), addressPlayer);
         runtime.submitGroupTurn(turn).thenAccept(submission -> {
             // 2026-08-29 field fix (+ review round): a fired scene arms the full 8–15 min
             // cooldown up front, so a generation that then FAILS (observed: 3B output rejected
@@ -412,10 +426,10 @@ public final class SoulBanterDirector {
         return Math.round((4 * 60_000L + random.nextDouble() * 4 * 60_000L) * multiplier);
     }
 
-    /** Same curve as DialoguePacing.multiplier: rate 0 → ×4, 50 → ×1, 100 → ×0.25. */
+    /** Same curve as DialoguePacing.multiplier: rate 0 → ×8, 50 → ×1, 100 → ×0.125. */
     static double multiplier(int rate) {
         int r = Math.max(0, Math.min(100, rate));
-        return Math.pow(4.0, (50 - r) / 50.0);
+        return Math.pow(8.0, (50 - r) / 50.0);
     }
 
     /** Active lane gate chain: "player-not-ready" replaces at-ease, "nobody-working" is new. */

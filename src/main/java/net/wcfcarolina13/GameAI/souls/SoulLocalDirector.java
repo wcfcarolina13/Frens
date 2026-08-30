@@ -541,7 +541,7 @@ public final class SoulLocalDirector {
 
     private double cadenceMultiplier() {
         int r = Math.max(0, Math.min(100, localRate.getAsInt()));
-        return Math.pow(4.0, (50 - r) / 50.0);
+        return Math.pow(8.0, (50 - r) / 50.0);
     }
 
     /** One eligible roster bot with its phase-1 (capture-free) salience score. */
