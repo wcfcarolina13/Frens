@@ -33,18 +33,23 @@ public class BotControlScreen extends Screen {
 
     private record GlobalToggleDef(String label, String hint) {}
 
+    // Two dialogue lanes, each with its own text + voice master (2026-08-29 separation):
+    //   Scripted — the pre-baked line pools (Scripted Text / Scripted Voice + their Adv… masks)
+    //   Soul     — everything the LLM says (Soul Chat = text + generation, Soul Voice = TTS,
+    //              Soul Banter / Active / Local = when it speaks unprompted)
+    // Neither lane's switches affect the other, so "LLM only" or "scripted only" is two clicks.
     private static final List<GlobalToggleDef> GLOBAL_TOGGLES = List.of(
-            new GlobalToggleDef("LLM World", "Master for the classic LLM chat path (per-bot LLM Chat must also be ON). Soul-bound bots ignore this — their conversation runs through Soul Chat below. Turn off to keep non-soul bots command and UI driven only."),
+            new GlobalToggleDef("LLM World (legacy)", "The pre-souls LLM chat path (per-bot LLM Chat must also be ON). Soul-bound bots ignore this — they talk through Soul Chat below. Leave off unless you use non-soul bots with the classic path."),
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
-            new GlobalToggleDef("Text Chat", "Master kill switch for ALL bot text (scripted and LLM chatter; Soul Chat replies always show). While ON, the Adv… category mutes silence SCRIPTED lines only — LLM chatter (Banter/Local) has its own chips below. With this off and Voice on, lines with audio become voice-only."),
-            new GlobalToggleDef("Voice", "Master for all bot audio: the baked voice lines AND the soul TTS voice. The Adv… category mutes silence BAKED lines only — soul speech follows Soul Voice and the chips below. Per-bot Voiced Dialogue can additionally mute a single bot."),
-            new GlobalToggleDef("Soul Chat", "Conversational soul pilot (local LLM). When on, talking to a soul-bound bot routes through its soul instead of the classic LLM path. Same switch as /bot soul enable."),
-            new GlobalToggleDef("Soul Voice", "Text-to-speech for soul replies in the bot's cloned voice. Requires a configured TTS engine (check /bot soul voice status). Also obeys the Voice master toggle above."),
-            new GlobalToggleDef("Banter", "Companions occasionally chat when things are calm (needs Soul Chat on; with one soul-bound bot nearby it may speak to you, with 2+ they chat among themselves and may pull you in). Independent of the Adv… category masks (those govern scripted lines only). /bot soul banter status explains why it is or isn't firing; /bot soul banter now skips the wait."),
-            new GlobalToggleDef("Active", "Companions also chat while WORKING — a skill running or actively following you (needs Soul Chat on). Its own cadence, tuned with the Rates… chip on the Banter row. /bot soul banter status shows the active lane; /bot soul banter now primes both lanes."),
-            new GlobalToggleDef("Local", "Companions may occasionally react to chat you type near them that wasn't addressed to anyone (needs Soul Chat on). Independent of the Adv… category masks (those govern scripted lines only). /bot soul local status explains why it is or isn't firing; /bot soul local now skips the cooldown.")
+            new GlobalToggleDef("Scripted Text", "SCRIPTED lane — text of the pre-baked lines (holograms, subtitles, chat fallbacks). Adv… mutes single categories while this is on. Does NOT touch anything the LLM says (see Soul Chat)."),
+            new GlobalToggleDef("Scripted Voice", "SCRIPTED lane — audio of the pre-baked voice lines. Adv… mutes single categories while this is on; per-bot Voiced Dialogue can mute one bot. Does NOT touch the soul TTS (see Soul Voice)."),
+            new GlobalToggleDef("Soul Chat", "SOUL lane master — the local-LLM persona: replies when you talk to a soul-bound bot, plus every unprompted scene below. Off = the LLM says nothing at all. Same switch as /bot soul enable."),
+            new GlobalToggleDef("Soul Voice", "SOUL lane — text-to-speech for what the LLM says, in each bot's assigned voice (Eng… picks the engine; /bot soul voice list|install|assign picks voices). Independent of Scripted Voice."),
+            new GlobalToggleDef("Soul Banter", "SOUL lane — companions chat on their own when things are calm (one nearby bot may speak to you; 2+ chat among themselves and may pull you in). Needs Soul Chat. Rate… tunes how often. /bot soul banter status explains the last verdict; /bot soul banter now skips the wait."),
+            new GlobalToggleDef("Soul Active", "SOUL lane — companions also chat while WORKING (a skill running or actively following you). Needs Soul Chat. Own cadence under Rate…; /bot soul banter status shows this lane too."),
+            new GlobalToggleDef("Soul Local", "SOUL lane — companions may react to chat you type near them that wasn't addressed to anyone. Needs Soul Chat. /bot soul local status explains why it is or isn't firing; /bot soul local now skips the cooldown.")
     );
 
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
@@ -152,7 +157,7 @@ public class BotControlScreen extends Screen {
     private final List<Rect> globalChipRects = new ArrayList<>();
     /** "Adv…" chip on the Voice row — opens the per-category voice mute screen. */
     private Rect voiceAdvancedRect;
-    /** "Adv…" chip on the Text Chat row — opens the keep-visible text exceptions screen. */
+    /** "Adv…" chip on the Scripted Text row — opens the keep-visible text exceptions screen. */
     private Rect textAdvancedRect;
     /** "Eng…" chip on the Soul Voice row — opens the engine chooser (Dreamsleeve / Piper). */
     private Rect soulVoiceEngineRect;
@@ -508,8 +513,8 @@ public class BotControlScreen extends Screen {
         settingGroups.add(new SettingGroup("Behavior", behavior));
 
         List<SettingEntry> llm = new ArrayList<>();
-        llm.add(makeOnOff("LLM Chat (this bot)", "Per-bot override under the global LLM World master: both must be ON for this bot to use the classic LLM chat path. Soul-bound bots ignore this and talk through Soul Chat instead.", llmEnabled, TOGGLE_W));
-        llm.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Voice master: both must be ON for this bot's baked voice lines to play. Category-level muting lives under the Voice row's Adv… button.", voiced, TOGGLE_W));
+        llm.add(makeOnOff("LLM Chat (this bot)", "Per-bot override under the global LLM World (legacy) master: both must be ON for this bot to use the classic LLM chat path. Soul-bound bots ignore this and talk through Soul Chat instead.", llmEnabled, TOGGLE_W));
+        llm.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Scripted Voice master: both must be ON for this bot's pre-baked voice lines to play. Category muting lives under the Scripted Voice row's Adv… button. Soul TTS is separate (Soul Voice).", voiced, TOGGLE_W));
         settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", llm));
     }
 
@@ -838,7 +843,10 @@ public class BotControlScreen extends Screen {
             int labelMaxW = (advRect != null ? advRect.x : chipRect.x) - rowRect.x - 12;
             String label = elideToWidth(def.label(), Math.max(30, labelMaxW));
             int labelY = rowRect.y + (rowRect.h - this.textRenderer.fontHeight) / 2;
-            context.drawText(this.textRenderer, label, rowRect.x + 6, labelY, COL_LABEL, false);
+            // Soul Voice/Banter/Active/Local are inert while Soul Chat is off — say so visually.
+            boolean inert = i > SOUL_CHAT_TOGGLE_INDEX && !globalValues[SOUL_CHAT_TOGGLE_INDEX];
+            context.drawText(this.textRenderer, inert ? label + " §8(needs Soul Chat)" : label,
+                    rowRect.x + 6, labelY, inert ? COL_INFO : COL_LABEL, false);
 
             drawToggleChip(context, chipRect, globalValues[i], mouseX, mouseY);
 
@@ -856,11 +864,11 @@ public class BotControlScreen extends Screen {
                 if (advHover && tooltipText == null) {
                     if (i == VOICE_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-voice-adv",
-                                "Mute individual categories of voiced lines (combat, ambient, reactions…). Audio only — text still shows.",
+                                "Mute individual categories of SCRIPTED voice lines (combat, ambient, reactions…). Audio only — text still shows; soul TTS unaffected.",
                                 mouseX, mouseY);
                     } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
-                                "Mute individual categories of text lines (holograms, subtitles, chat) while Text Chat is on. Text only — audio unaffected. Same rule as the Voice Adv menu.",
+                                "Mute individual categories of SCRIPTED text lines (holograms, subtitles, chat) while Scripted Text is on. Text only — audio and soul chat unaffected.",
                                 mouseX, mouseY);
                     } else if (i == BANTER_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-dialogue-rates",

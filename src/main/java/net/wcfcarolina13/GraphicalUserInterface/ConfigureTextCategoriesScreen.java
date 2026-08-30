@@ -12,11 +12,11 @@ import net.wcfcarolina13.network.ConfigJsonUtil;
 import net.wcfcarolina13.network.configNetworkManager;
 
 /**
- * Per-category text muting, opened from the "Adv…" chip on the global Text Chat row in
+ * Per-category text muting, opened from the "Adv…" chip on the global Scripted Text row in
  * {@link BotControlScreen}.
  *
  * Same semantics as the voice category screen, deliberately (Bradley flagged the earlier
- * inverse model as conflicting): the Text Chat master is a hard kill switch, and while it
+ * inverse model as conflicting): the Scripted Text master is a hard kill switch, and while it
  * is ON, checked categories show their text and unchecked ones are hidden (audio
  * unaffected). State is {@code mutedTextCategories} in settings.json5, saved on every
  * toggle.
@@ -32,7 +32,7 @@ public class ConfigureTextCategoriesScreen extends Screen {
     private final Screen parent;
 
     public ConfigureTextCategoriesScreen(Screen parent) {
-        super(Text.literal("§bText Line Categories"));
+        super(Text.literal("§bScripted Text Categories"));
         this.parent = parent;
     }
 
@@ -118,7 +118,7 @@ public class ConfigureTextCategoriesScreen extends Screen {
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
         context.drawCenteredTextWithShadow(this.textRenderer,
-                Text.literal("§7Unchecked categories show no text — audio unaffected. Same rule as Voice."),
+                Text.literal("§7Scripted lines only. Unchecked = no text; audio and soul chat unaffected."),
                 this.width / 2, cy + 24, 0xFFFFFFFF);
         super.render(context, mouseX, mouseY, delta);
     }

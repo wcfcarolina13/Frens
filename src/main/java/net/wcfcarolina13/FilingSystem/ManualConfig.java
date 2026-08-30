@@ -128,7 +128,7 @@ public class ManualConfig {
     // a second lane in SoulBanterDirector with its own cadence. Default-OFF like banter.
     private boolean soulBanterActiveEnabled = false;
     // Dialogue pacing sliders (0–100, 50 = shipped cadence). Never "off": the toggles above
-    // and the Text/Voice masters are the kill switches. See DialoguePacing for the math.
+    // and the lane masters (Scripted Text/Voice, Soul Chat/Voice) are the kill switches.
     private int dialogueScriptedRate = 50;
     private int soulBanterIdleRate = 50;
     private int soulBanterActiveRate = 50;

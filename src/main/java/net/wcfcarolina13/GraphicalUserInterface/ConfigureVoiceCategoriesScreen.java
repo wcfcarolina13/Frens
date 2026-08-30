@@ -31,7 +31,7 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
     private final Screen parent;
 
     public ConfigureVoiceCategoriesScreen(Screen parent) {
-        super(Text.literal("§bVoiced Line Categories"));
+        super(Text.literal("§bScripted Voice Categories"));
         this.parent = parent;
     }
 
@@ -117,7 +117,7 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
         context.drawCenteredTextWithShadow(this.textRenderer,
-                Text.literal("§7Unchecked categories play no audio — text still shows."),
+                Text.literal("§7Scripted lines only. Unchecked = no audio; text and soul TTS unaffected."),
                 this.width / 2, cy + 24, 0xFFFFFFFF);
         super.render(context, mouseX, mouseY, delta);
     }

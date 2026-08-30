@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Two dialogue lanes, two sets of masters — scripted vs soul fully separated; 1.1.193 (2026-08-29)
+
+Bradley's question: "does disabling Text Chat also disable LLM chat?" — partly, yes: the Text
+master also closed the soul ambient text surface, and the Voice master also silenced soul TTS,
+so "LLM only, no pre-baked lines" was impossible. Now the global panel is two lanes that never
+touch each other:
+
+- **Scripted lane** — `Scripted Text` and `Scripted Voice` (renamed from Text Chat / Voice; same
+  config keys, so nothing in settings.json5 changes). They govern the pre-baked line pools only,
+  with their Adv… category masks (screens retitled "Scripted Text/Voice Categories", subtitles say
+  what they leave alone). Per-bot "Voiced Dialogue (this bot)" sits under Scripted Voice.
+- **Soul lane** — `Soul Chat` is the single master for everything the LLM says (direct replies
+  AND the unprompted scenes); `Soul Voice` is the only master for soul TTS; `Soul Banter`,
+  `Soul Active`, `Soul Local` decide when it speaks unprompted and are drawn dimmed with
+  "(needs Soul Chat)" while the master is off. `ambientTextOpen` now reads Soul Chat,
+  `ambientVoiceOpen` and the TTS gate read Soul Voice — the scripted masters are never consulted.
+- `LLM World` is labelled `(legacy)` so the two LLM paths can't be confused.
+- Removed: the `/bot soul … status` "masters are off" warning — with Soul Chat as the only text
+  master there is no configuration in which a soul scene can be generated but not delivered.
+
+Recipes: LLM only = Scripted Text OFF, Scripted Voice OFF, Soul Chat ON, Soul Voice ON.
+Scripted only = the inverse. Field check: with Scripted Text off, Jake still answers you and
+banter still prints; with Soul Voice on and Scripted Voice off, soul lines are still spoken.
+
 ## Voices keyed by bot, legacy frens:jake bindings migrated; 1.1.192 (2026-08-29)
 
 Field test of 1.1.190: `assign bob en_US-ryan-medium` succeeded but Bob still spoke in Jake's

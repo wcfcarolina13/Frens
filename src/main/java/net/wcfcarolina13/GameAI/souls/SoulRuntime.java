@@ -174,10 +174,10 @@ public final class SoulRuntime {
             SoulStore store = new SoulStore(worldRoot);
             SoulStore partyStore = SoulStore.openAt(
                     worldRoot.resolve("frens").resolve("party").resolve("v1"));
-            // Soul replies deliberately ignore the Text Chat master (Bradley's ruling
-            // 2026-08-25): a direct conversation should stay visible even when generic
-            // bot dialogue text is off. The textEnabled seam in SoulMessageDelivery
-            // stays available for a future per-category text menu.
+            // Soul replies never consult the Scripted Text master (Bradley's ruling
+            // 2026-08-25, now the lane rule): a direct conversation is SOUL-lane text and
+            // Soul Chat itself is its only switch. The textEnabled seam in
+            // SoulMessageDelivery stays available for a future per-category text menu.
             SoulConversationService.Delivery delivery = new SoulMessageDelivery(server,
                     new SoulMessageDelivery.ProductionDeliveryGuard(server, store,
                             () -> current().map(SoulRuntime::isMasterEnabled).orElse(false)));
@@ -200,19 +200,18 @@ public final class SoulRuntime {
 
             SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, partyStore,
                     delivery, voiceDelivery);
-            // Ambient gates for BANTER/LOCAL scenes — MASTERS ONLY (2026-08-29 separation
-            // ruling, revising banter spec D6): the Adv category mutes are the PREBAKED lines'
-            // controls, and coupling LLM chatter to them meant muting scripted "Nice bird!"
-            // one-liners also silenced every soul scene (the root cause of both silent field
-            // sessions). LLM ambient now answers to: the Text master, the Voice master + Soul
-            // Voice, and its own Banter/Local chips. PLAYER scenes ignore these (soul exemption).
+            // Ambient surfaces for BANTER/WORK/LOCAL scenes belong to the SOUL lane only
+            // (2026-08-29 lane separation, second pass): the Scripted Text/Voice masters and
+            // their Adv category masks govern pre-baked lines and nothing else. Soul text is
+            // open whenever Soul Chat is on; soul audio whenever Soul Voice is on. PLAYER
+            // scenes ignore these (a direct conversation always shows).
             java.util.function.BooleanSupplier ambientTextOpen = () -> {
                 ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-                return cfg == null || cfg.isTextDialogueEnabled();
+                return cfg == null || cfg.isSoulsEnabled();
             };
             java.util.function.BooleanSupplier ambientVoiceOpen = () -> {
                 ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-                return cfg == null || (cfg.isVoicedDialogueEnabled() && cfg.isSoulVoiceEnabled());
+                return cfg == null || cfg.isSoulVoiceEnabled();
             };
 
             // The playback machine reads the CURRENT pipeline's voice/group service through the
@@ -812,10 +811,12 @@ public final class SoulRuntime {
                 default -> new PiperVoiceEngine(voiceSettings.piperBinary(),
                         voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs(), voiceResolver);
             };
-            // Global "Voice" toggle is the master over soul TTS as well as baked lines.
+            // Soul Voice is the only master over soul TTS (the Scripted Voice master governs
+            // pre-baked audio only — lane separation, 2026-08-29). Read live so a toggle flip
+            // applies to the next line without a pipeline rebuild.
             return new SoulVoiceService(voiceSettings, engine, voiceDelivery, () -> {
                 ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-                return cfg == null || cfg.isVoicedDialogueEnabled();
+                return cfg == null || cfg.isSoulVoiceEnabled();
             });
         } catch (Exception ex) {
             LOGGER.warn("[souls] tts engine unavailable, voice disabled: {}", ex.toString());

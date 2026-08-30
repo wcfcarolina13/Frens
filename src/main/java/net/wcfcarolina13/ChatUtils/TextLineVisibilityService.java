@@ -7,7 +7,7 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
  * Single decision point for whether a scripted text line (chat, overhead hologram,
  * subtitle) may be shown.
  *
- * <p>Same rule as the voice mask, deliberately: the Text Chat master is a hard kill
+ * <p>Same rule as the voice mask, deliberately: the Scripted Text master is a hard kill
  * switch; while it is ON, categories muted in the Text "Adv…" menu are hidden. (An
  * earlier iteration used inverse "keep-visible when master off" semantics — Bradley
  * flagged the two Adv menus as conflicting duals, so both now share this one model.)

@@ -790,29 +790,6 @@ final class BotSoulCommands {
     }
 
     /**
-     * Ambient-surface warning shared by the banter and local-chat toggles/status (added after
-     * the 2026-08-28 field session, where both features were enabled but silently produced
-     * nothing for a whole session because {@code ambient_chatter} was muted in BOTH the Text
-     * and Voice Adv menus — the directors correctly refused to spend generations nobody could
-     * receive, but the only clue was a {@code vetoed:muted} line in the log). Returns "" when
-     * at least one ambient surface can deliver; otherwise a one-line explanation.
-     */
-    private static String ambientSurfaceWarning() {
-        // Masters-only since the 2026-08-29 separation ruling: Adv category mutes affect
-        // prebaked lines only and can no longer silence LLM chatter.
-        ManualConfig config = Frens.CONFIG;
-        boolean textOpen = config == null || config.isTextDialogueEnabled();
-        boolean voiceOpen = config == null
-                || (config.isVoicedDialogueEnabled() && config.isSoulVoiceEnabled());
-        if (textOpen || voiceOpen) {
-            return "";
-        }
-        return " WARNING: the Text Chat master is off and voice (Voice master + Soul Voice) is"
-                + " off, so nothing can be delivered and no lines will be generated until one"
-                + " surface is back on.";
-    }
-
-    /**
      * {@code /bot soul banter|local now} — field-test lever: clears the actor's cooldown so the
      * next evaluation may fire immediately (every other gate — quiet window, budget, surfaces,
      * roster, danger — still applies; this only removes the wait).
@@ -874,7 +851,7 @@ final class BotSoulCommands {
         config.save();
         ChatUtils.sendSystemMessage(source, "Companion banter set to " + (enabled ? "on" : "off")
                 + (enabled ? ". They'll chat when things are calm, or speak to you when one is alone."
-                        + ambientSurfaceWarning() + replyRoutingNote() : "."));
+                        + replyRoutingNote() : "."));
         return 1;
     }
 
@@ -894,7 +871,7 @@ final class BotSoulCommands {
                 .orElse("Soul runtime is not currently running.");
         ChatUtils.sendSystemMessage(source,
                 "Banter is " + (enabled ? "ON" : "OFF") + ", active banter is " + (active ? "ON" : "OFF")
-                        + ". " + verdict + ambientSurfaceWarning()
+                        + ". " + verdict
                         + ((enabled || active) ? replyRoutingNote() : ""));
         return 1;
     }
@@ -913,7 +890,7 @@ final class BotSoulCommands {
         config.setSoulLocalChatEnabled(enabled);
         config.save();
         ChatUtils.sendSystemMessage(source, "Companion local chat set to " + (enabled ? "on" : "off")
-                + (enabled ? ". They may chime in on what they overhear." + ambientSurfaceWarning() : "."));
+                + (enabled ? ". They may chime in on what they overhear." : "."));
         return 1;
     }
 
@@ -931,7 +908,7 @@ final class BotSoulCommands {
                 .map(rt -> rt.localStatus(actor.getUuid()))
                 .orElse("Soul runtime is not currently running.");
         ChatUtils.sendSystemMessage(source,
-                "Local chat is " + (enabled ? "ON" : "OFF") + ". " + verdict + ambientSurfaceWarning());
+                "Local chat is " + (enabled ? "ON" : "OFF") + ". " + verdict);
         return 1;
     }
 
