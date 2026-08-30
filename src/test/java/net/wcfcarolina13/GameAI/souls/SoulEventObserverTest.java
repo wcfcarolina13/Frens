@@ -59,9 +59,38 @@ class SoulEventObserverTest {
         UUID bot = UUID.randomUUID();
 
         observer.observe(new SoulEventObserver.Observation(bot, "minecraft:overworld", "plains",
-                false, "", 0L, Instant.now()));
+                false, "", 0L, 0, Instant.now()));
 
         assertTrue(sink.events().isEmpty());
+    }
+
+    @Test
+    void dayRolloverNotifiesTheSinkOncePerDay() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        // First observation seeds; same-day repeats are silent; only the 4 -> 5 edge fires.
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 96_000L, 4));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 96_100L, 4));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 120_000L, 5));
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 120_100L, 5));
+
+        assertEquals(List.of(5), sink.newDays);
+        assertTrue(sink.events().isEmpty(), "a day rollover is a sink callback, not a journal event");
+    }
+
+    @Test
+    void dayRolloverNeverFiresForARejectedBot() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 0L, 4));
+        sink.setAccepts(false);
+        observer.observe(observation(bot, "minecraft:overworld", "plains", false, "", 24_000L, 5));
+
+        assertTrue(sink.newDays.isEmpty());
     }
 
     @Test
@@ -297,12 +326,18 @@ class SoulEventObserverTest {
 
     private static SoulEventObserver.Observation observation(UUID bot, String dimension, String biome,
             boolean sleeping, String questSignature, long worldTick) {
+        return observation(bot, dimension, biome, sleeping, questSignature, worldTick, 0);
+    }
+
+    private static SoulEventObserver.Observation observation(UUID bot, String dimension, String biome,
+            boolean sleeping, String questSignature, long worldTick, int day) {
         return new SoulEventObserver.Observation(bot, dimension, biome, sleeping, questSignature,
-                worldTick, Instant.now());
+                worldTick, day, Instant.now());
     }
 
     private static final class CapturingSink implements SoulEventObserver.EventSink {
         private final List<SoulTypes.SoulEvent> events = new ArrayList<>();
+        private final List<Integer> newDays = new ArrayList<>();
         private boolean accepts = true;
 
         void setAccepts(boolean accepts) {
@@ -317,6 +352,11 @@ class SoulEventObserverTest {
         @Override
         public void append(UUID botId, SoulTypes.SoulEvent event) {
             events.add(event);
+        }
+
+        @Override
+        public void onNewDay(UUID botId, int day, String biome) {
+            newDays.add(day);
         }
 
         List<SoulTypes.SoulEvent> events() {

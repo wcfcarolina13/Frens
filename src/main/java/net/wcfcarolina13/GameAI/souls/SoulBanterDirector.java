@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -80,18 +81,22 @@ public final class SoulBanterDirector {
     private final Map<UUID, String> lastActiveVerdict = new ConcurrentHashMap<>();
     /**
      * Per-audience conversational memory (both lanes): the grounding of the last scene (for
-     * {@link SoulSceneDiff}), the seen-registry, and the last few topics and speech acts — fed
-     * back to the seed so consecutive scenes differ in subject AND shape (ontology Phase 1).
+     * {@link SoulSceneDiff}), and the last few topics and speech acts — fed back to the seed so
+     * consecutive scenes differ in subject AND shape (ontology Phase 1). The seen-registry
+     * moved to the bots' minds in Phase 2 (union of the roster's sets, written back per bot),
+     * so it survives restarts and follows the bot between audiences.
      */
     static final class AudienceMemory {
         SoulTypes.GroundingSnapshot lastGrounding;
-        final Set<String> seen = ConcurrentHashMap.newKeySet();
         final java.util.ArrayDeque<String> topics = new java.util.ArrayDeque<>();
         final java.util.ArrayDeque<SoulSpeechAct> acts = new java.util.ArrayDeque<>();
+        long lastFiredMs;
     }
 
     private final Map<UUID, AudienceMemory> memories = new ConcurrentHashMap<>();
     static final int RECENT_TOPIC_MEMORY = 6;
+    /** An audience whose last scene is older than this is forgotten at the next fire. */
+    static final long AUDIENCE_IDLE_MS = 3_600_000L;
 
     /** Which banter lane a scene belongs to; each has its own cooldown map and verdict. */
     enum Lane { IDLE, ACTIVE }
@@ -268,15 +273,36 @@ public final class SoulBanterDirector {
         }
 
         String playerActivity = SoulPlayerActivity.recentAction(playerId, now).orElse("");
+        memories.entrySet().removeIf(entry -> !entry.getKey().equals(playerId)
+                && audienceIdle(entry.getValue().lastFiredMs, now));
         AudienceMemory memory = memories.computeIfAbsent(playerId, id -> new AudienceMemory());
+        // Ontology Phase 2: the seen-registry and the memory/thread anchors come from the
+        // roster bots' minds (cached reads only — never block the server thread on the store).
+        List<UUID> presentIds = roster.stream().map(SoulGroupTypes.SceneParticipant::botId).toList();
+        List<SoulTypes.SoulMind> minds = runtime.mindsFor(presentIds);
+        int currentDay = (int) (player.getEntityWorld().getTimeOfDay() / 24000L);
+        Set<String> seenBefore = new LinkedHashSet<>();
+        List<SoulBanterSeed.Anchor> mindAnchors = new ArrayList<>();
+        for (int i = 0; i < minds.size(); i++) {
+            seenBefore.addAll(minds.get(i).seen());
+            mindAnchors.addAll(SoulMindOps.anchors(minds.get(i), roster.get(i).displayName(),
+                    currentDay, random));
+        }
         SoulBanterSeed.Seed seeded;
         synchronized (memory) {
+            Set<String> seen = new LinkedHashSet<>(seenBefore);
             List<SoulBanterSeed.Anchor> changes = SoulSceneDiff.diff(memory.lastGrounding,
-                    groundings.get(0), memory.seen, player.getName().getString());
+                    groundings.get(0), seen, player.getName().getString());
             memory.lastGrounding = groundings.get(0);
+            memory.lastFiredMs = now;
+            Set<String> newKeys = newSeenKeys(seenBefore, seen);
+            if (!newKeys.isEmpty()) {
+                runtime.updateMinds(presentIds, m -> SoulMindOps.withSeen(m, newKeys));
+            }
             seeded = SoulBanterSeed.buildSeed(groundings, eventsPerBot,
                     player.getName().getString(), playerActivity, random,
-                    new java.util.HashSet<>(memory.topics), changes, new ArrayList<>(memory.acts));
+                    new java.util.HashSet<>(memory.topics), changes, new ArrayList<>(memory.acts),
+                    mindAnchors);
             if (!seeded.topic().isEmpty()) {
                 memory.topics.addLast(seeded.topic());
                 while (memory.topics.size() > RECENT_TOPIC_MEMORY) {
@@ -291,6 +317,14 @@ public final class SoulBanterDirector {
             }
         }
         String seed = seeded.text();
+        String topic = seeded.topic();
+        if (topic.startsWith(SoulMindOps.MEMORY_TOPIC_PREFIX)) {
+            // Only the holder of that memory actually changes; the others are no-ops.
+            String recalled = topic.substring(SoulMindOps.MEMORY_TOPIC_PREFIX.length());
+            runtime.updateMinds(presentIds, m -> SoulMindOps.noteRecalled(m, recalled, currentDay));
+        } else if (topic.equals(SoulMindOps.TOPIC_UNANSWERED)) {
+            runtime.updateMinds(presentIds, SoulMindOps::dropExpired);
+        }
         UUID routingId = UUID.randomUUID();
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
@@ -425,6 +459,18 @@ public final class SoulBanterDirector {
     }
 
     // === Pure rules (unit-tested) ===
+
+    /** Keys {@link SoulSceneDiff#diff} added to the roster's union — written back to every bot. */
+    static Set<String> newSeenKeys(Set<String> before, Set<String> after) {
+        Set<String> added = new LinkedHashSet<>(after);
+        added.removeAll(before);
+        return added;
+    }
+
+    /** An audience is idle once its last fired scene is more than {@link #AUDIENCE_IDLE_MS} old. */
+    static boolean audienceIdle(long lastFiredMs, long nowMs) {
+        return nowMs - lastFiredMs > AUDIENCE_IDLE_MS;
+    }
 
     static long initialDelayMs(RandomGenerator random) {
         // 60–150 s (was 4–8 min): both 2026-08 field sessions ended before the old grace ever

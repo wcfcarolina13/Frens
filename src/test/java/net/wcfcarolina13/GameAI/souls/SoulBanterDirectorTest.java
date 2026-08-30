@@ -51,6 +51,25 @@ class SoulBanterDirectorTest {
     }
 
     @Test
+    void newSeenKeysAreOnlyWhatTheDiffAdded() {
+        java.util.Set<String> before = new java.util.LinkedHashSet<>(List.of("mob:wolf", "biome:plains"));
+        java.util.Set<String> after = new java.util.LinkedHashSet<>(before);
+        after.add("mob:creeper");
+        after.add("biome:forest");
+
+        assertEquals(List.of("mob:creeper", "biome:forest"),
+                List.copyOf(SoulBanterDirector.newSeenKeys(before, after)));
+        assertTrue(SoulBanterDirector.newSeenKeys(before, before).isEmpty());
+    }
+
+    @Test
+    void audienceIdleAfterOneHourWithoutAScene() {
+        long now = 10_000_000L;
+        assertFalse(SoulBanterDirector.audienceIdle(now - SoulBanterDirector.AUDIENCE_IDLE_MS, now));
+        assertTrue(SoulBanterDirector.audienceIdle(now - SoulBanterDirector.AUDIENCE_IDLE_MS - 1, now));
+    }
+
+    @Test
     void groundingDangerVeto() {
         assertFalse(SoulBanterDirector.groundingDangerous(calm()));
         assertTrue(SoulBanterDirector.groundingDangerous(withHostiles()));

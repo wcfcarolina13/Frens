@@ -469,10 +469,14 @@ class SoulRuntimeTest {
                 SoulTypes.EventType.COMBAT_STARTED, actor, List.of(actor), "overworld", "plains",
                 Map.of(), SoulTypes.Witness.SELF, 0L, Instant.EPOCH, SoulTypes.Salience.NORMAL);
         when(store.appendEvent(bot, event)).thenReturn(CompletableFuture.completedFuture(null));
+        // Ontology Phase 2: the first event after join warms the mind cache (nothing cached yet).
+        when(store.cachedMind(bot)).thenReturn(Optional.empty());
+        when(store.mind(bot)).thenReturn(CompletableFuture.completedFuture(SoulTypes.SoulMind.empty()));
 
         runtime.recordEvent(bot, event);
 
         verify(store).appendEvent(bot, event);
+        verify(store).mind(bot);
     }
 
     /**

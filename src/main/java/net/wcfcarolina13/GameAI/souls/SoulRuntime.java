@@ -18,6 +18,9 @@ import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -27,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 
 /**
  * One per-{@link MinecraftServer} soul-communication runtime.
@@ -49,9 +53,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link #installForTest} exists purely so a unit test can exercise {@link #stop} without a real
  * {@link MinecraftServer}.
  *
- * <p>This class takes {@link MinecraftServer} and {@link ManualConfig} only as method parameters,
- * never as static state, and never references {@code Frens} — so neither it nor its test ever
- * trips {@code Frens}'s static initializer, which fails outside a running game (see
+ * <p>This class takes {@link MinecraftServer} and {@link ManualConfig} only as method parameters
+ * (plus the instance-scoped {@link #server} handle {@link #start} records for the Phase 2 mind
+ * hooks — never static state), and never references {@code Frens} — so neither it nor its test
+ * ever trips {@code Frens}'s static initializer, which fails outside a running game (see
  * {@code SoulConversationService}'s Javadoc for the same rule).
  */
 public final class SoulRuntime {
@@ -97,7 +102,7 @@ public final class SoulRuntime {
     private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final SoulPromptAssembler promptAssembler = new SoulPromptAssembler();
     private final SoulResponseValidator validator = new SoulResponseValidator();
-    private final SoulGroupPromptAssembler groupPromptAssembler = new SoulGroupPromptAssembler();
+    private final SoulGroupPromptAssembler groupPromptAssembler = new SoulGroupPromptAssembler(this::cachedMind);
     private final SoulGroupResponseValidator groupValidator = new SoulGroupResponseValidator();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicReference<Pipeline> pipelineRef;
@@ -109,6 +114,13 @@ public final class SoulRuntime {
     private volatile SoulBanterDirector banterDirector;
     /** Ambient/local-chat scheduler; production-only, null in the test seam. */
     private volatile SoulLocalDirector localDirector;
+    /**
+     * The server this runtime was started against ({@code null} under the test seam). Read only
+     * on the server thread by the Phase 2 mind hooks: player names for consolidation, the bot's
+     * world day, and the periodic open-thread sweep.
+     */
+    private volatile MinecraftServer server;
+    private long mindTick;
 
     // Serializes every pipeline-lifecycle transition (reload, reset's invalidation read, and
     // shutdown) against this one instance's own `stopped` flag. Without it, `stop()` reading and
@@ -201,6 +213,7 @@ public final class SoulRuntime {
 
             SoulRuntime runtime = new SoulRuntime(settings, voiceSettings, store, partyStore,
                     delivery, voiceDelivery);
+            runtime.server = server;
             // Ambient surfaces for BANTER/WORK/LOCAL scenes belong to the SOUL lane only
             // (2026-08-29 lane separation, second pass): the Scripted Text/Voice masters and
             // their Adv category masks govern pre-baked lines and nothing else. Soul text is
@@ -243,7 +256,9 @@ public final class SoulRuntime {
 
                         @Override
                         public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn,
-                                                    int deliveredLines, int lastSpeakerIndex) {
+                                                    int deliveredLines, int lastSpeakerIndex,
+                                                    List<SoulGroupTypes.SceneLine> delivered) {
+                            runtime.noteSceneDeliveredForMind(turn, lastSpeakerIndex, delivered);
                             SoulLocalDirector local = runtime.localDirector;
                             if (local == null || turn.roster().isEmpty()) {
                                 return;
@@ -469,6 +484,7 @@ public final class SoulRuntime {
         if (stopped || !isConversationEnabled()) {
             return CompletableFuture.completedFuture(SoulConversationService.Submission.FAILED);
         }
+        noteThreadAnswered(turn.key().botId());
         return pipelineRef.get().conversationService().submit(turn);
     }
 
@@ -488,6 +504,10 @@ public final class SoulRuntime {
             return CompletableFuture.completedFuture(SoulGroupConversationService.Submission.FAILED);
         }
         if (turn.kind() == SoulGroupTypes.SceneKind.PLAYER) {
+            // The player spoke to the party: every roster bot's open threads count as answered.
+            for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+                noteThreadAnswered(participant.botId());
+            }
             // A real conversation re-arms both ambient cooldowns — they yield to the player.
             SoulBanterDirector banter = banterDirector;
             if (banter != null) {
@@ -576,6 +596,7 @@ public final class SoulRuntime {
         if (local != null) {
             local.tick();
         }
+        runtime.sweepThreads();
     }
 
     /**
@@ -646,6 +667,13 @@ public final class SoulRuntime {
                 if (director != null) {
                     director.noteAddressedChat(player.getUuid());
                 }
+                // Ontology Phase 2: an addressed line answers the open threads of every
+                // registered bot with an active profile (bots are not owner-keyed here).
+                for (UUID botId : net.wcfcarolina13.GameAI.services.BotRegistry.ids()) {
+                    if (runtime.hasActiveProfile(botId)) {
+                        runtime.noteThreadAnswered(botId);
+                    }
+                }
             }
         } catch (Throwable ignored) {
         }
@@ -694,6 +722,127 @@ public final class SoulRuntime {
         return store.cachedState(botId)
                 .map(state -> state.active() && !state.profileId().isBlank())
                 .orElse(false);
+    }
+
+    // === mind.json (ontology Phase 2) — cached reads, fire-and-forget writes ===
+
+    /** Last loaded/saved mind for {@code botId}; empty until the store has touched it. */
+    public Optional<SoulTypes.SoulMind> cachedMind(UUID botId) {
+        return store.cachedMind(botId);
+    }
+
+    /** Cached minds for a roster, in roster order; a bot with no cached mind yields an empty one. */
+    List<SoulTypes.SoulMind> mindsFor(List<UUID> botIds) {
+        List<SoulTypes.SoulMind> out = new ArrayList<>(botIds.size());
+        for (UUID botId : botIds) {
+            out.add(store.cachedMind(botId).orElseGet(SoulTypes.SoulMind::empty));
+        }
+        return out;
+    }
+
+    /** Applies one pure rule to every roster bot's mind on the store thread; failures are logged. */
+    void updateMinds(List<UUID> botIds, UnaryOperator<SoulTypes.SoulMind> update) {
+        for (UUID botId : botIds) {
+            updateMind(botId, update);
+        }
+    }
+
+    private void updateMind(UUID botId, UnaryOperator<SoulTypes.SoulMind> update) {
+        store.updateMind(botId, update).exceptionally(ex -> {
+            LOGGER.warn("[souls] mind update failed for bot {}: {}", botId, ex.toString());
+            return null;
+        });
+    }
+
+    /** The player answered this bot (DM turn, party turn, or addressed chat): threads close. */
+    void noteThreadAnswered(UUID botId) {
+        if (botId == null || store.cachedMind(botId).map(m -> m.threads().isEmpty()).orElse(true)) {
+            return; // nothing open — skip the store round-trip
+        }
+        updateMind(botId, SoulMindOps::markAnswered);
+    }
+
+    /**
+     * Day rollover (server thread, from {@link SoulEventObserver}): consolidates the journal
+     * since the last consolidation into day memories, decays the stance, then trims the journal.
+     * Player names are captured here so the store thread never touches entities.
+     */
+    public void onNewDay(UUID botId, int day, String biome) {
+        Objects.requireNonNull(botId, "botId");
+        Map<UUID, String> names = new HashMap<>();
+        MinecraftServer srv = server;
+        if (srv != null) {
+            for (net.minecraft.server.network.ServerPlayerEntity online : srv.getPlayerManager().getPlayerList()) {
+                names.put(online.getUuid(), online.getName().getString());
+            }
+        }
+        long lastMs = store.cachedMind(botId).map(SoulTypes.SoulMind::lastConsolidatedAtMs).orElse(0L);
+        Instant since = lastMs <= 0L ? Instant.EPOCH : Instant.ofEpochMilli(lastMs);
+        store.eventsSince(botId, since)
+                .thenCompose(events -> store.updateMind(botId, m -> SoulMindOps.consolidate(
+                        m, events, day, biome, id -> names.getOrDefault(id, "someone"),
+                        System.currentTimeMillis())))
+                .thenCompose(mind -> store.trimEvents(botId, 200).thenApply(trimmed -> mind))
+                .thenAccept(mind -> LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
+                        botId, day, mind.memories().size()))
+                .exceptionally(ex -> {
+                    LOGGER.warn("[souls] day consolidation failed for bot {} day {}: {}",
+                            botId, day, ex.toString());
+                    return null;
+                });
+    }
+
+    /** Every 600 ticks: open threads past their TTL flip to expired (exasperation +1 each). */
+    private void sweepThreads() {
+        if (++mindTick % 600 != 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (UUID botId : net.wcfcarolina13.GameAI.services.BotRegistry.ids()) {
+            Optional<SoulTypes.SoulMind> mind = store.cachedMind(botId);
+            if (mind.isEmpty()) {
+                continue;
+            }
+            boolean due = mind.get().threads().stream()
+                    .anyMatch(t -> !t.expired() && now - t.askedAtMs() > SoulMindOps.THREAD_TTL_MS);
+            if (due) {
+                updateMind(botId, m -> SoulMindOps.expireThreads(m, now));
+            }
+        }
+    }
+
+    /**
+     * Narrator-seeded scenes only: a closing line that asks the player something becomes an
+     * open thread on its speaker (see {@link SoulMindOps#extractQuestion}).
+     */
+    private void noteSceneDeliveredForMind(SoulGroupTypes.GroupSceneTurn turn, int lastSpeakerIndex,
+                                           List<SoulGroupTypes.SceneLine> delivered) {
+        if (!turn.kind().isNarratorSeeded() || lastSpeakerIndex < 0 || delivered == null
+                || delivered.isEmpty() || lastSpeakerIndex >= turn.roster().size()) {
+            return;
+        }
+        SoulGroupTypes.SceneLine last = delivered.get(delivered.size() - 1);
+        Optional<String> question = SoulMindOps.extractQuestion(last.text(), turn.ownerDisplayName(),
+                turn.addressPlayer());
+        if (question.isEmpty()) {
+            return;
+        }
+        UUID asker = turn.roster().get(lastSpeakerIndex).botId();
+        long now = System.currentTimeMillis();
+        updateMind(asker, m -> SoulMindOps.openThread(m,
+                new SoulTypes.OpenThread(asker, question.get(), now, false)));
+    }
+
+    /** The bot's Minecraft day from its world (server thread), else the mind's last known day. */
+    private int currentDay(UUID botId) {
+        MinecraftServer srv = server;
+        if (srv != null) {
+            net.minecraft.server.network.ServerPlayerEntity bot = srv.getPlayerManager().getPlayer(botId);
+            if (bot != null) {
+                return (int) (bot.getEntityWorld().getTimeOfDay() / 24000L);
+            }
+        }
+        return store.cachedMind(botId).map(SoulTypes.SoulMind::lastDay).orElse(-1);
     }
 
     public CompletableFuture<Void> preloadIndex() {
@@ -1003,6 +1152,23 @@ public final class SoulRuntime {
     public void recordEvent(UUID botId, SoulTypes.SoulEvent event) {
         Objects.requireNonNull(botId, "botId");
         Objects.requireNonNull(event, "event");
+        if (store.cachedMind(botId).isEmpty()) {
+            // Warm the mind cache on the bot's first event after join, so persisted threads and
+            // stance are visible to the cached readers (prompt, sweep, answered) before any write.
+            store.mind(botId).exceptionally(ex -> {
+                LOGGER.warn("[souls] mind load failed for bot {}: {}", botId, ex.toString());
+                return null;
+            });
+        }
+        // Stance rules (ontology Phase 2): a real task from the player earns trust once per
+        // day; seeing the owner hurt raises curiosity.
+        if (event.type() == SoulTypes.EventType.TASK_STARTED
+                && !"hobby".equals(event.facts().getOrDefault("category", ""))) {
+            int day = currentDay(botId);
+            updateMind(botId, m -> SoulMindOps.noteTaskGiven(m, day));
+        } else if (event.type() == SoulTypes.EventType.OWNER_DAMAGE) {
+            updateMind(botId, SoulMindOps::noteOwnerHurt);
+        }
         store.appendEvent(botId, event).exceptionally(ex -> {
             LOGGER.warn("[souls] recordEvent failed for bot {}: {}", botId, ex.toString());
             return null;

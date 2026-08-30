@@ -62,10 +62,12 @@ public final class GroupScenePlayback {
          * so the receiver can settle per-scene state either way. {@code lastSpeakerIndex} is the
          * roster index of the last DELIVERED line's speaker, or −1 when nothing was delivered;
          * the engagement handoff (spec §5) uses it to aim the reply window at whichever
-         * companion the player would naturally answer.
+         * companion the player would naturally answer. {@code delivered} holds the lines
+         * actually delivered, in order (ontology Phase 2: the runtime extracts an open thread
+         * from the last one); empty when nothing was delivered.
          */
         default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines,
-                                     int lastSpeakerIndex) {
+                                     int lastSpeakerIndex, List<SoulGroupTypes.SceneLine> delivered) {
         }
     }
 
@@ -84,6 +86,7 @@ public final class GroupScenePlayback {
         int lineIndex;
         int delivered;
         int lastDeliveredParticipant = -1;
+        final List<SoulGroupTypes.SceneLine> deliveredLines = new ArrayList<>();
         long notBeforeMs;
         CompletableFuture<Optional<SoulVoiceService.SynthesizedLine>> synth;
         long synthStartedMs;
@@ -270,6 +273,7 @@ public final class GroupScenePlayback {
                 speaker.displayName() + ": " + line.text());
         state.delivered++;
         state.lastDeliveredParticipant = line.participantIndex();
+        state.deliveredLines.add(line);
 
         LOGGER.info("[souls] scene-playback routingId={} line={}/{} speaker={} text={} voiced={} listeners={}",
                 scene.turn().routingId(), state.lineIndex + 1, scene.lines().size(),
@@ -293,7 +297,8 @@ public final class GroupScenePlayback {
         LOGGER.info("[souls] scene-playback routingId={} outcome={} delivered={}/{}",
                 state.scene.turn().routingId(), outcome, state.delivered, state.scene.lines().size());
         committer.sceneFinished(state.scene.token(), state.delivered, state.scene.lines().size());
-        committer.sceneDelivered(state.scene.turn(), state.delivered, state.lastDeliveredParticipant);
+        committer.sceneDelivered(state.scene.turn(), state.delivered, state.lastDeliveredParticipant,
+                List.copyOf(state.deliveredLines));
     }
 
     private List<ServerPlayerEntity> playersInEarshot(ServerPlayerEntity speaker) {

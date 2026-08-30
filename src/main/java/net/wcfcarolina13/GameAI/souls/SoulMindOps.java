@@ -40,7 +40,10 @@ final class SoulMindOps {
     static final int RECALL_COOLDOWN_DAYS = 3;
 
     private static final String TOPIC_SLEEP = "sleep";
-    private static final String TOPIC_UNANSWERED = "unanswered question";
+    /** Seed topic of an expired-thread anchor; the director drops those threads once recalled. */
+    static final String TOPIC_UNANSWERED = "unanswered question";
+    /** Seed topics of memory anchors are {@code memory:<topic>}; the director marks them recalled. */
+    static final String MEMORY_TOPIC_PREFIX = "memory:";
 
     private SoulMindOps() {
     }
@@ -326,7 +329,7 @@ final class SoulMindOps {
         }
         for (SoulTypes.DayMemory m : picked) {
             String when = m.day() < currentDay ? " on day " + m.day() : "";
-            out.add(new SoulBanterSeed.Anchor("memory:" + m.topic(),
+            out.add(new SoulBanterSeed.Anchor(MEMORY_TOPIC_PREFIX + m.topic(),
                     "remember when " + m.phrase() + when, MEMORY_ANCHOR_WEIGHT));
         }
         return out;

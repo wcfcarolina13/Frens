@@ -81,6 +81,7 @@ public final class SoulEventObserver {
     private final Map<UUID, Boolean> seeded = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastDimension = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> lastSleeping = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> lastDay = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastQuestSignature = new ConcurrentHashMap<>();
     private final Map<UUID, Long> combatDeadlineTicks = new ConcurrentHashMap<>();
     private final Map<UUID, TaskSignature> activeTaskByBot = new ConcurrentHashMap<>();
@@ -98,6 +99,14 @@ public final class SoulEventObserver {
         boolean accepts(UUID botId);
 
         void append(UUID botId, SoulTypes.SoulEvent event);
+
+        /**
+         * The bot's Minecraft day number changed since its previous observation (ontology
+         * Phase 2 day rollover). Not a journal event — the runtime consolidates the journal
+         * into day memories on it. Default no-op so recording sinks keep compiling.
+         */
+        default void onNewDay(UUID botId, int day, String biome) {
+        }
     }
 
     SoulEventObserver(EventSink sink, long combatQuietTicks) {
@@ -127,6 +136,11 @@ public final class SoulEventObserver {
             @Override
             public void append(UUID botId, SoulTypes.SoulEvent event) {
                 SoulRuntime.current().ifPresent(runtime -> runtime.recordEvent(botId, event));
+            }
+
+            @Override
+            public void onNewDay(UUID botId, int day, String biome) {
+                SoulRuntime.current().ifPresent(runtime -> runtime.onNewDay(botId, day, biome));
             }
         };
         PRODUCTION.set(new SoulEventObserver(sink, DEFAULT_COMBAT_QUIET_TICKS));
@@ -364,7 +378,7 @@ public final class SoulEventObserver {
 
     /** One tick's worth of session-relevant facts about a bot, ready for {@link #observe}. */
     record Observation(UUID botId, String dimension, String biome, boolean sleeping,
-                        String questSignature, long worldTick, Instant occurredAt) {
+                        String questSignature, long worldTick, int day, Instant occurredAt) {
     }
 
     /**
@@ -384,11 +398,16 @@ public final class SoulEventObserver {
         String previousDimension = lastDimension.put(botId, observation.dimension());
         Boolean previousSleeping = lastSleeping.put(botId, observation.sleeping());
         String previousQuest = lastQuestSignature.put(botId, observation.questSignature());
+        Integer previousDay = lastDay.put(botId, observation.day());
 
         tickCombat(botId, observation.dimension(), observation.biome(), observation.worldTick());
 
         if (firstSeen) {
             return;
+        }
+
+        if (previousDay != null && previousDay.intValue() != observation.day()) {
+            sink.onNewDay(botId, observation.day(), observation.biome());
         }
 
         if (!Objects.equals(previousDimension, observation.dimension())) {
@@ -576,6 +595,7 @@ public final class SoulEventObserver {
         seeded.clear();
         lastDimension.clear();
         lastSleeping.clear();
+        lastDay.clear();
         lastQuestSignature.clear();
         combatDeadlineTicks.clear();
         activeTaskByBot.clear();
@@ -585,6 +605,7 @@ public final class SoulEventObserver {
         seeded.remove(botId);
         lastDimension.remove(botId);
         lastSleeping.remove(botId);
+        lastDay.remove(botId);
         lastQuestSignature.remove(botId);
         combatDeadlineTicks.remove(botId);
         activeTaskByBot.remove(botId);
@@ -657,7 +678,8 @@ public final class SoulEventObserver {
 
     private static Observation buildObservation(ServerPlayerEntity bot, long worldTick) {
         return new Observation(bot.getUuid(), dimensionOf(bot), biomeOf(bot), bot.isSleeping(),
-                questSignatureOf(bot.getUuid()), worldTick, Instant.now());
+                questSignatureOf(bot.getUuid()), worldTick,
+                (int) (bot.getEntityWorld().getTimeOfDay() / 24000L), Instant.now());
     }
 
     private static String questSignatureOf(UUID botId) {
