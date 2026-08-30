@@ -81,11 +81,21 @@ public final class SoulProfileRegistry {
      * registered (via {@link #loadBuiltIns()} or {@link #register}).
      */
     public static SoulTypes.SoulProfile require(String profileId) {
+        // Lazy, idempotent: SoulRuntime.start() loads the built-ins, but callers that reach
+        // here without a started runtime (bindProfile in isolation, tests) must not fail
+        // with "Unknown soul profile id" for a profile that ships with the mod.
+        loadBuiltIns();
         SoulTypes.SoulProfile profile = PROFILES.get(profileId);
         if (profile == null) {
             throw new IllegalArgumentException("Unknown soul profile id: " + profileId);
         }
         return profile;
+    }
+
+    /** The authored voice for {@code profileId}; {@link SoulTypes.VoiceSpec#EMPTY} when unknown. */
+    public static SoulTypes.VoiceSpec voiceFor(String profileId) {
+        SoulTypes.SoulProfile profile = profileId == null ? null : PROFILES.get(profileId);
+        return profile == null ? SoulTypes.VoiceSpec.EMPTY : profile.voice();
     }
 
     private static SoulTypes.SoulProfile loadFromClasspath(String resourcePath) {
@@ -105,7 +115,16 @@ public final class SoulProfileRegistry {
                 String content = exampleNode.path("content").asText("");
                 examples.add(new SoulTypes.Message(role, content));
             }
-            return new SoulTypes.SoulProfile(id, displayName, identity, values, boundaries, examples);
+            SoulTypes.VoiceSpec voice = SoulTypes.VoiceSpec.EMPTY;
+            JsonNode voiceNode = root.path("voice");
+            if (voiceNode.isObject()) {
+                voice = new SoulTypes.VoiceSpec(
+                        voiceNode.path("piperModel").asText(""),
+                        voiceNode.path("piperSpeaker").asInt(-1),
+                        voiceNode.path("refAudio").asText(""),
+                        voiceNode.path("refText").asText(""));
+            }
+            return new SoulTypes.SoulProfile(id, displayName, identity, values, boundaries, examples, voice);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load soul profile resource: " + resourcePath, e);
         }

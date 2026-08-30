@@ -144,9 +144,49 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * A profile's generated-voice selection (2026-08-29 per-bot voices). {@code piperModel} is a
+     * voice name (resolved in the voices directory) or a path, {@code piperSpeaker} an optional
+     * multi-speaker id ({@code -1} = model default); {@code refAudio}/{@code refText} are a
+     * Dreamsleeve clone anchor. Blank fields fall back to the globally configured voice.
+     */
+    public record VoiceSpec(String piperModel, int piperSpeaker, String refAudio, String refText) {
+        public static final VoiceSpec EMPTY = new VoiceSpec("", -1, "", "");
+
+        public VoiceSpec {
+            piperModel = piperModel == null ? "" : piperModel.trim();
+            refAudio = refAudio == null ? "" : refAudio.trim();
+            refText = refText == null ? "" : refText;
+            if (piperSpeaker < -1) {
+                piperSpeaker = -1;
+            }
+        }
+
+        public boolean isEmpty() {
+            return piperModel.isEmpty() && refAudio.isEmpty();
+        }
+
+        /** {@code "en_US-ryan-medium#3"} → model + speaker 3; no {@code #} → default speaker. */
+        public static VoiceSpec parsePiper(String assignment) {
+            String s = assignment == null ? "" : assignment.trim();
+            if (s.isEmpty()) {
+                return EMPTY;
+            }
+            int hash = s.lastIndexOf('#');
+            if (hash > 0) {
+                try {
+                    return new VoiceSpec(s.substring(0, hash), Integer.parseInt(s.substring(hash + 1).trim()), "", "");
+                } catch (NumberFormatException ignored) {
+                    // fall through: treat the whole string as the model name
+                }
+            }
+            return new VoiceSpec(s, -1, "", "");
+        }
+    }
+
     public record SoulProfile(String id, String displayName, List<String> identity,
                                List<String> values, List<String> boundaries,
-                               List<Message> examples) {
+                               List<Message> examples, VoiceSpec voice) {
         public SoulProfile {
             id = id == null ? "" : id;
             displayName = displayName == null ? "" : displayName;
@@ -154,6 +194,13 @@ public final class SoulTypes {
             values = values == null ? List.of() : List.copyOf(values);
             boundaries = boundaries == null ? List.of() : List.copyOf(boundaries);
             examples = examples == null ? List.of() : List.copyOf(examples);
+            voice = voice == null ? VoiceSpec.EMPTY : voice;
+        }
+
+        /** Pre-voice shape: no per-profile voice, the global one applies. */
+        public SoulProfile(String id, String displayName, List<String> identity,
+                           List<String> values, List<String> boundaries, List<Message> examples) {
+            this(id, displayName, identity, values, boundaries, examples, VoiceSpec.EMPTY);
         }
     }
 

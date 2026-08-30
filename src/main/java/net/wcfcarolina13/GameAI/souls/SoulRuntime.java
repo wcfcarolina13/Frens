@@ -769,12 +769,25 @@ public final class SoulRuntime {
             return SoulVoiceService.disabled();
         }
         try {
+            // Per-bot voices: a config assignment wins, then the profile's authored "voice"
+            // block, then the global settings the engine was built with.
+            java.util.function.Function<String, SoulTypes.VoiceSpec> voiceResolver = profileId -> {
+                ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                if (cfg != null) {
+                    ManualConfig.SoulVoiceAssignment a = cfg.getSoulProfileVoices().get(profileId);
+                    if (a != null && !a.isEmpty()) {
+                        return new SoulTypes.VoiceSpec(a.getPiperModel(), a.getPiperSpeaker(),
+                                a.getRefAudio(), a.getRefText());
+                    }
+                }
+                return SoulProfileRegistry.voiceFor(profileId);
+            };
             SoulVoiceEngine engine = switch (voiceSettings.engine()) {
                 case SoulVoiceSettings.ENGINE_DREAMSLEEVE -> new DreamsleeveVoiceEngine(
                         voiceSettings.dreamsleeveDir(), voiceSettings.refAudio(),
-                        voiceSettings.refText(), voiceSettings.synthTimeoutMs());
+                        voiceSettings.refText(), voiceSettings.synthTimeoutMs(), voiceResolver);
                 default -> new PiperVoiceEngine(voiceSettings.piperBinary(),
-                        voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs());
+                        voiceSettings.voiceModel(), voiceSettings.synthTimeoutMs(), voiceResolver);
             };
             // Global "Voice" toggle is the master over soul TTS as well as baked lines.
             return new SoulVoiceService(voiceSettings, engine, voiceDelivery, () -> {

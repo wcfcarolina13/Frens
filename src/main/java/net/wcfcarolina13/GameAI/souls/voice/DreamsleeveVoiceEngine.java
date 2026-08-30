@@ -56,6 +56,8 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     private final String dreamsleeveDir;
     private final String refAudio;
     private final String refText;
+    /** Per-bot clone anchors (2026-08-29): profile id → spec; blank refAudio = the global anchor. */
+    private final java.util.function.Function<String, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver;
     private final long synthTimeoutMs;
     private final Path workDir;
     private final Path sockPath;
@@ -72,9 +74,19 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
 
     public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
                                    long synthTimeoutMs) throws IOException {
+        this(dreamsleeveDir, refAudio, refText, synthTimeoutMs,
+                id -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY);
+    }
+
+    public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
+                                   long synthTimeoutMs,
+                                   java.util.function.Function<String, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver)
+            throws IOException {
         this.dreamsleeveDir = dreamsleeveDir;
         this.refAudio = refAudio;
         this.refText = refText;
+        this.voiceResolver = voiceResolver == null
+                ? id -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY : voiceResolver;
         this.synthTimeoutMs = synthTimeoutMs;
         this.workDir = Files.createTempDirectory("frens-soul-voice");
         // AF_UNIX socket paths are limited to ~104 bytes on macOS; java.io.tmpdir
@@ -83,6 +95,15 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
         // Bind the socket at a short /tmp path instead; only WAV drops use workDir.
         this.sockPath = Path.of("/tmp", "frens-voice-" + Long.toHexString(
                 System.nanoTime() & 0xFFFFFFFFL) + ".sock");
+    }
+
+    private net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec resolveQuietly(String voiceId) {
+        try {
+            net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = voiceResolver.apply(voiceId == null ? "" : voiceId);
+            return spec == null ? net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY : spec;
+        } catch (RuntimeException ignored) {
+            return net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY;
+        }
     }
 
     public static List<String> command(String dreamsleeveDir, String sockPath, String outDir) {
@@ -125,7 +146,10 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
                 Path outFile = workDir.resolve("frens-" + requestSeq.incrementAndGet() + ".wav");
                 try {
                     ensureServer();
-                    sendRequest(speakRequestJson(text.replace('\n', ' '), refAudio, refText,
+                    net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = resolveQuietly(voiceId);
+                    String ref = spec.refAudio().isEmpty() ? refAudio : spec.refAudio();
+                    String txt = spec.refAudio().isEmpty() ? refText : spec.refText();
+                    sendRequest(speakRequestJson(text.replace('\n', ' '), ref, txt,
                             outFile.toString()));
                     byte[] bytes = awaitRenderedFile(outFile);
                     result.complete(bytes);

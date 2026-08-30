@@ -90,6 +90,9 @@ public class ManualConfig {
     private int undergroundLingerMinutes = 3;
     private int undergroundProximityBlocks = 32;
     private Map<String, String> botSkins = new HashMap<>();
+    // Per-bot generated voices (2026-08-29): soul profile id → voice assignment. Overrides the
+    // profile JSON's own "voice" block; absent/blank = the global soul voice settings.
+    private Map<String, SoulVoiceAssignment> soulProfileVoices = new HashMap<>();
     private Map<String, BotSkinSelection> botSkinSelections = new HashMap<>();
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Per-world bot control settings: alias → worldKey → BotControlSettings.
@@ -467,6 +470,56 @@ public class ManualConfig {
     }
 
     // ── Bot skin presets ──
+
+    public Map<String, SoulVoiceAssignment> getSoulProfileVoices() {
+        if (soulProfileVoices == null) {
+            soulProfileVoices = new HashMap<>();
+        }
+        return soulProfileVoices;
+    }
+
+    public void setSoulProfileVoice(String profileId, SoulVoiceAssignment assignment) {
+        if (profileId == null || profileId.isBlank()) {
+            return;
+        }
+        if (assignment == null || assignment.isEmpty()) {
+            getSoulProfileVoices().remove(profileId.trim());
+        } else {
+            getSoulProfileVoices().put(profileId.trim(), assignment);
+        }
+    }
+
+    /** One profile's voice pick: a Piper voice (+ optional speaker) and/or a Dreamsleeve clone anchor. */
+    public static class SoulVoiceAssignment {
+        private String piperModel = "";
+        private int piperSpeaker = -1;
+        private String refAudio = "";
+        private String refText = "";
+
+        public SoulVoiceAssignment() {
+        }
+
+        public SoulVoiceAssignment(String piperModel, int piperSpeaker, String refAudio, String refText) {
+            this.piperModel = piperModel == null ? "" : piperModel.trim();
+            this.piperSpeaker = piperSpeaker;
+            this.refAudio = refAudio == null ? "" : refAudio.trim();
+            this.refText = refText == null ? "" : refText;
+        }
+
+        public String getPiperModel() { return piperModel == null ? "" : piperModel; }
+        public void setPiperModel(String v) { this.piperModel = v == null ? "" : v.trim(); }
+        public int getPiperSpeaker() { return piperSpeaker; }
+        public void setPiperSpeaker(int v) { this.piperSpeaker = v; }
+        public String getRefAudio() { return refAudio == null ? "" : refAudio; }
+        public void setRefAudio(String v) { this.refAudio = v == null ? "" : v.trim(); }
+        public String getRefText() { return refText == null ? "" : refText; }
+        public void setRefText(String v) { this.refText = v == null ? "" : v; }
+
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        public boolean isEmpty() {
+            return getPiperModel().isEmpty() && getRefAudio().isEmpty();
+        }
+    }
 
     public Map<String, String> getBotSkins() {
         if (botSkins == null) {
