@@ -346,6 +346,11 @@ public class BotControlScreen extends Screen {
         globalVisibleRows = globalsExpanded
                 ? Math.max(1, (globalPanelH - 20 - bulkSectionH) / rowH)
                 : GLOBAL_TOGGLES.size();
+        if (globalRowsClamped) {
+            // Snap to whole rows: the fractional remainder was a blank band under the last row
+            // (field screenshot, 1.1.190); the settings panel below gets it back instead.
+            globalPanelH = 20 + globalVisibleRows * rowH + bulkSectionH;
+        }
         if (!globalRowsClamped) {
             globalScrollRow = 0;
         }
@@ -802,11 +807,14 @@ public class BotControlScreen extends Screen {
             globalRowIndices.add(i);
 
             boolean hover = rowRect.contains(mouseX, mouseY);
-            context.fill(rowRect.x, rowRect.y, rowRect.right(), rowRect.bottom(),
+            // Rows and their dividers stop at the scroll gutter when the strip is showing —
+            // the dividers used to bleed across the strip (field screenshot, 1.1.190).
+            int rowDrawRight = globalRowsClamped ? globalPanelRect.right() - GLOBAL_SCROLL_GUTTER_W : rowRect.right();
+            context.fill(rowRect.x, rowRect.y, rowDrawRight, rowRect.bottom(),
                     hover ? COL_ROW_HL : COL_ROW);
 
             if (i > globalScrollRow) {
-                context.fill(rowRect.x, rowRect.y, rowRect.right(), rowRect.y + 1, 0x30FFFFFF);
+                context.fill(rowRect.x, rowRect.y, rowDrawRight, rowRect.y + 1, 0x30FFFFFF);
             }
 
             Rect advRect = null;

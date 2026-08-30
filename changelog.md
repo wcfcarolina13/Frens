@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Global toggles: dividers stop at the scroll gutter, no dead band under the rows; 1.1.191 (2026-08-29)
+
+Field screenshot on 1.1.190: row dividers bled across the scroll strip, and a fractional row's
+worth of blank space sat under the last visible toggle. Rows and dividers now stop at the 9 px
+gutter while the strip is showing, and the clamped panel height snaps to whole rows — the
+remainder goes back to the per-bot settings panel below. Render-only change.
+
 ## Per-bot voices: Piper voice catalogue, per-profile assignment, multi-voice engine; 1.1.190 (2026-08-29)
 
 Bradley's ask after the pacing work: "can we introduce different voices?" Yes — the
