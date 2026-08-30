@@ -97,6 +97,117 @@ public final class PiperInstaller {
             VOICE_BASE + VOICE_NAME + ".onnx.json", VOICE_NAME + ".onnx.json",
             4_885L, "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0");
 
+    // ── Voice catalogue (per-bot voices, 2026-08-29) ────────────────────────────
+    // .onnx sizes/sha256 come from the Hugging Face LFS metadata; the small .onnx.json configs
+    // were downloaded once and hashed. Every byte is verified before a file lands.
+    private static final String VOICES_ROOT =
+            "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/";
+
+    /** One installable voice: a pinned model + its config, plus a one-line description. */
+    public record CatalogVoice(String name, String description, PinnedFile onnx, PinnedFile json) {
+        public long downloadBytes() {
+            return onnx.size() + json.size();
+        }
+    }
+
+    private static CatalogVoice catalogVoice(String name, String hfPath, String description,
+                                             long onnxSize, String onnxSha, long jsonSize, String jsonSha) {
+        String base = VOICES_ROOT + hfPath + "/";
+        return new CatalogVoice(name, description,
+                new PinnedFile(base + name + ".onnx", name + ".onnx", onnxSize, onnxSha),
+                new PinnedFile(base + name + ".onnx.json", name + ".onnx.json", jsonSize, jsonSha));
+    }
+
+    public static final List<CatalogVoice> VOICE_CATALOG = List.of(
+            catalogVoice("en_US-ryan-medium", "en_US/ryan/medium", "US male, clear and even",
+                    63_201_294L, "abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a",
+                    4_883L, "44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d"),
+            catalogVoice("en_US-amy-medium", "en_US/amy/medium", "US female, warm",
+                    63_201_294L, "b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18",
+                    4_882L, "95a23eb4d42909d38df73bb9ac7f45f597dbfcde2d1bf9526fdeaf5466977d77"),
+            catalogVoice("en_US-joe-medium", "en_US/joe/medium", "US male, deeper",
+                    63_201_294L, "58afce0321b8d9c46d7cdf9c16500cc55a793b4220212dba6b70fb788b3baf06",
+                    4_794L, "3d6d5410b3795cb1950595247ef8f06190719e6fdbfa3a2356d8ec368e1aad33"),
+            catalogVoice("en_US-hfc_male-medium", "en_US/hfc_male/medium", "US male, bright",
+                    63_201_294L, "d11e403a02bdf5a670c877b3dc56e0e1c8cece6fb30289586314dffdc0a78cb0",
+                    5_033L, "f66847424aed0bf99ecbb5d7cfde47c0a906f426a0daf7c46f305e7d21afd886"),
+            catalogVoice("en_US-hfc_female-medium", "en_US/hfc_female/medium", "US female, bright",
+                    63_201_294L, "914c473788fc1fa8b63ace1cdcdb44588f4ae523d3ab37df1536616835a140b7",
+                    5_033L, "03f1fa0622b80463283592d97aca9f6e89aec345a5c56b7257723e0093c58b6c"),
+            catalogVoice("en_GB-alan-medium", "en_GB/alan/medium", "British male",
+                    63_201_294L, "0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330",
+                    4_888L, "c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e"),
+            catalogVoice("en_US-libritts_r-medium", "en_US/libritts_r/medium", "904 speakers — pick one with #N (e.g. #17)",
+                    78_580_914L, "10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195",
+                    20_123L, "b471dc60d2d8335e819c393d196d6fbf792817f40051257b269878505bc9afb3"));
+
+    public static java.util.Optional<CatalogVoice> findCatalogVoice(String name) {
+        String want = name == null ? "" : name.trim();
+        for (CatalogVoice voice : VOICE_CATALOG) {
+            if (voice.name().equalsIgnoreCase(want)) {
+                return java.util.Optional.of(voice);
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    /** Voices directory: beside the configured default model when Piper is set up, else the installer's. */
+    public static Path voicesDir() {
+        ManualConfig cfg = Frens.CONFIG;
+        String model = cfg == null ? "" : cfg.getSoulVoiceModel();
+        if (model != null && !model.isBlank()) {
+            return PiperVoiceEngine.voicesDir(model);
+        }
+        return FabricLoader.getInstance().getGameDir().resolve("config").resolve("frens")
+                .resolve("piper").resolve("voices");
+    }
+
+    /** Bare names of every {@code *.onnx} in {@code voicesDir}, sorted; empty when the dir is absent. */
+    public static List<String> installedVoiceNames(Path voicesDir) {
+        List<String> names = new ArrayList<>();
+        if (voicesDir == null || !Files.isDirectory(voicesDir)) {
+            return names;
+        }
+        try (var stream = Files.list(voicesDir)) {
+            stream.filter(Files::isRegularFile)
+                    .map(p -> p.getFileName().toString())
+                    .filter(n -> n.toLowerCase(Locale.ROOT).endsWith(".onnx"))
+                    .map(n -> n.substring(0, n.length() - ".onnx".length()))
+                    .sorted()
+                    .forEach(names::add);
+        } catch (IOException ignored) {
+            // unreadable dir reads as "nothing installed"
+        }
+        return names;
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean VOICE_INSTALL_RUNNING =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * Downloads and verifies one catalogue voice (model + config) into {@code voicesDir}; files
+     * already present with the pinned size are kept. One install at a time. Returns the .onnx path.
+     */
+    public static Path installVoice(CatalogVoice voice, Path voicesDir, Progress progress) throws IOException {
+        if (!VOICE_INSTALL_RUNNING.compareAndSet(false, true)) {
+            throw new IOException("a voice install is already running");
+        }
+        try {
+            Files.createDirectories(voicesDir);
+            Path onnx = voicesDir.resolve(voice.onnx().fileName());
+            Path json = voicesDir.resolve(voice.json().fileName());
+            if (!Files.isRegularFile(onnx) || Files.size(onnx) != voice.onnx().size()) {
+                download(voice.onnx(), onnx, progress);
+            }
+            if (!Files.isRegularFile(json) || Files.size(json) != voice.json().size()) {
+                download(voice.json(), json, progress);
+            }
+            return onnx;
+        } finally {
+            VOICE_INSTALL_RUNNING.set(false);
+        }
+    }
+
     /** A piper binary found on this machine before installing anything. */
     public record ExistingBinary(Path path, String origin) {
     }

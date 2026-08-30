@@ -92,6 +92,14 @@ public final class SoulProfileRegistry {
         return profile;
     }
 
+    /** Every registered profile id, sorted (built-ins load first if needed). */
+    public static List<String> registeredIds() {
+        loadBuiltIns();
+        List<String> ids = new ArrayList<>(PROFILES.keySet());
+        java.util.Collections.sort(ids);
+        return ids;
+    }
+
     /** The authored voice for {@code profileId}; {@link SoulTypes.VoiceSpec#EMPTY} when unknown. */
     public static SoulTypes.VoiceSpec voiceFor(String profileId) {
         SoulTypes.SoulProfile profile = profileId == null ? null : PROFILES.get(profileId);

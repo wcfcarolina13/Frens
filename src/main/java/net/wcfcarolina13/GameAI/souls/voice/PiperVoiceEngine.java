@@ -119,7 +119,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
      * {@code <voicesDir>/<name>.onnx}. Anything that does not {@code exist} falls back to the
      * default model (the caller logs that once per name).
      */
-    static String resolveModelPath(String defaultModelPath, String requested, Predicate<Path> exists) {
+    public static String resolveModelPath(String defaultModelPath, String requested, Predicate<Path> exists) {
         String want = requested == null ? "" : requested.trim();
         if (want.isEmpty()) {
             return defaultModelPath;

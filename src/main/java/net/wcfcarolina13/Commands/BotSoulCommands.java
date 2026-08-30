@@ -101,7 +101,23 @@ final class BotSoulCommands {
                 .then(CommandManager.literal("voice")
                         .then(CommandManager.literal("on").executes(BotSoulCommands::executeVoiceOn))
                         .then(CommandManager.literal("off").executes(BotSoulCommands::executeVoiceOff))
-                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeVoiceStatus)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeVoiceStatus))
+                        // Per-bot voices (2026-08-29): what is installed, fetch a pinned catalogue
+                        // voice, and pick a voice per soul profile.
+                        .then(CommandManager.literal("list").executes(BotSoulCommands::executeVoiceList))
+                        .then(CommandManager.literal("install")
+                                .then(CommandManager.argument("voice", StringArgumentType.word())
+                                        .executes(BotSoulCommands::executeVoiceInstall)))
+                        .then(CommandManager.literal("assign")
+                                .then(CommandManager.argument("profile", StringArgumentType.word())
+                                        .then(CommandManager.literal("default")
+                                                .executes(ctx -> executeVoiceAssign(ctx, null)))
+                                        .then(CommandManager.literal("clone")
+                                                .then(CommandManager.argument("ref", StringArgumentType.greedyString())
+                                                        .executes(BotSoulCommands::executeVoiceAssignClone)))
+                                        .then(CommandManager.argument("voice", StringArgumentType.greedyString())
+                                                .executes(ctx -> executeVoiceAssign(ctx,
+                                                        StringArgumentType.getString(ctx, "voice")))))))
                 .then(CommandManager.literal("banter")
                         .then(CommandManager.literal("on").executes(ctx -> executeBanterToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeBanterToggle(ctx, false)))
@@ -334,6 +350,197 @@ final class BotSoulCommands {
                 + (voiceSettings.valid() ? "" : " (" + voiceSettings.validationError() + ")")
                 + " engineAlive=" + alive;
         ChatUtils.sendSystemMessage(source, line);
+        return 1;
+    }
+
+    // === per-bot voices ===
+
+    /** "bob" → "frens:bob"; anything with a ':' is taken as a full profile id. */
+    static String resolveProfileArg(String raw) {
+        String s = raw == null ? "" : raw.trim();
+        return s.contains(":") ? s : "frens:" + s.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    static String describeSpec(net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec) {
+        StringBuilder sb = new StringBuilder();
+        if (!spec.piperModel().isEmpty()) {
+            sb.append("piper ").append(spec.piperModel());
+            if (spec.piperSpeaker() >= 0) {
+                sb.append('#').append(spec.piperSpeaker());
+            }
+        }
+        if (!spec.refAudio().isEmpty()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append("clone ").append(Path.of(spec.refAudio()).getFileName());
+        }
+        return sb.toString();
+    }
+
+    private static String describeEffectiveVoice(ManualConfig cfg, String profileId) {
+        ManualConfig.SoulVoiceAssignment assigned = cfg == null ? null : cfg.getSoulProfileVoices().get(profileId);
+        if (assigned != null && !assigned.isEmpty()) {
+            return describeSpec(new net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec(
+                    assigned.getPiperModel(), assigned.getPiperSpeaker(),
+                    assigned.getRefAudio(), assigned.getRefText())) + " (assigned)";
+        }
+        net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec authored =
+                net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.voiceFor(profileId);
+        if (!authored.isEmpty()) {
+            return describeSpec(authored) + " (profile)";
+        }
+        return "global voice";
+    }
+
+    /** {@code /bot soul voice list} — installed Piper voices, the catalogue, and each profile's pick. */
+    private static int executeVoiceList(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ManualConfig cfg = Frens.CONFIG;
+        Path dir = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.voicesDir();
+        java.util.List<String> installed = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.installedVoiceNames(dir);
+        ChatUtils.sendSystemMessage(source, "Piper voices in " + dir + ": "
+                + (installed.isEmpty() ? "none" : String.join(", ", installed)));
+        StringBuilder catalogue = new StringBuilder("Catalogue (/bot soul voice install <name>):");
+        for (net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.CatalogVoice voice
+                : net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.VOICE_CATALOG) {
+            catalogue.append("\n  ").append(voice.name()).append(" — ").append(voice.description())
+                    .append(installed.contains(voice.name()) ? " [installed]" : "");
+        }
+        ChatUtils.sendSystemMessage(source, catalogue.toString());
+        StringBuilder picks = new StringBuilder("Profile voices (/bot soul voice assign <bot> <voice[#speaker]> | clone <ref.wav> | default):");
+        for (String id : net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds()) {
+            picks.append("\n  ").append(id).append(" → ").append(describeEffectiveVoice(cfg, id));
+        }
+        ChatUtils.sendSystemMessage(source, picks.toString());
+        return 1;
+    }
+
+    /** {@code /bot soul voice install <name>} — background download of one pinned catalogue voice. */
+    private static int executeVoiceInstall(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may install voices."));
+            return 0;
+        }
+        String name = StringArgumentType.getString(context, "voice");
+        java.util.Optional<net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.CatalogVoice> maybe =
+                net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.findCatalogVoice(name);
+        if (maybe.isEmpty()) {
+            source.sendError(Text.literal("Unknown voice '" + name + "'. See /bot soul voice list for the catalogue."));
+            return 0;
+        }
+        net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.CatalogVoice voice = maybe.get();
+        Path dir = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.voicesDir();
+        net.minecraft.server.MinecraftServer server = source.getServer();
+        ChatUtils.sendSystemMessage(source, "Downloading " + voice.name() + " ("
+                + (voice.downloadBytes() / (1024 * 1024)) + " MB, sha256-verified)…");
+        Thread worker = new Thread(() -> {
+            long[] lastPct = {-1L};
+            try {
+                net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.installVoice(voice, dir, (stage, done, total) -> {
+                    if (total <= 0) {
+                        return;
+                    }
+                    long pct = done * 100 / total;
+                    if (pct / 25 != lastPct[0] / 25) {
+                        lastPct[0] = pct;
+                        server.execute(() -> ChatUtils.sendSystemMessage(source, stage + " " + pct + "%"));
+                    }
+                });
+                server.execute(() -> ChatUtils.sendSystemMessage(source, "Installed " + voice.name()
+                        + ". Assign it with /bot soul voice assign <bot> " + voice.name()
+                        + (voice.name().contains("libritts") ? "#<speaker>" : "")));
+            } catch (Exception ex) {
+                server.execute(() -> source.sendError(Text.literal("Voice install failed: " + ex.getMessage())));
+            }
+        }, "frens-voice-install");
+        worker.setDaemon(true);
+        worker.start();
+        return 1;
+    }
+
+    /** {@code /bot soul voice assign <bot> <voice[#speaker]>} or {@code … default}. */
+    private static int executeVoiceAssign(CommandContext<ServerCommandSource> context, String voiceOrNull) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may assign voices."));
+            return 0;
+        }
+        ManualConfig cfg = Frens.CONFIG;
+        if (cfg == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        String profileId = resolveProfileArg(StringArgumentType.getString(context, "profile"));
+        java.util.List<String> known = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds();
+        if (!known.contains(profileId)) {
+            source.sendError(Text.literal("Unknown soul profile '" + profileId + "'. Known: " + String.join(", ", known)));
+            return 0;
+        }
+        if (voiceOrNull == null || voiceOrNull.isBlank() || voiceOrNull.trim().equalsIgnoreCase("default")) {
+            cfg.setSoulProfileVoice(profileId, null);
+            cfg.save();
+            ChatUtils.sendSystemMessage(source, profileId + " now uses the global voice.");
+            return 1;
+        }
+        net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec =
+                net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.parsePiper(voiceOrNull);
+        String defaultModel = cfg.getSoulVoiceModel();
+        if (defaultModel != null && !defaultModel.isBlank()) {
+            String resolved = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
+                    defaultModel, spec.piperModel(), Files::isRegularFile);
+            String wanted = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
+                    defaultModel, spec.piperModel(), p -> true);
+            if (!resolved.equals(wanted)) {
+                source.sendError(Text.literal("Voice '" + spec.piperModel() + "' is not installed (looked for "
+                        + wanted + "). /bot soul voice install <name> first, or /bot soul voice list."));
+                return 0;
+            }
+        }
+        cfg.setSoulProfileVoice(profileId, new ManualConfig.SoulVoiceAssignment(
+                spec.piperModel(), spec.piperSpeaker(), "", ""));
+        cfg.save();
+        ChatUtils.sendSystemMessage(source, profileId + " → " + describeSpec(spec)
+                + ". Takes effect on the next spoken line (Piper keeps one warm process per voice).");
+        return 1;
+    }
+
+    /** {@code /bot soul voice assign <bot> clone <ref.wav>[ | <transcript>]} — Dreamsleeve anchor. */
+    private static int executeVoiceAssignClone(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may assign voices."));
+            return 0;
+        }
+        ManualConfig cfg = Frens.CONFIG;
+        if (cfg == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        String profileId = resolveProfileArg(StringArgumentType.getString(context, "profile"));
+        java.util.List<String> known = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds();
+        if (!known.contains(profileId)) {
+            source.sendError(Text.literal("Unknown soul profile '" + profileId + "'. Known: " + String.join(", ", known)));
+            return 0;
+        }
+        String raw = StringArgumentType.getString(context, "ref");
+        int bar = raw.indexOf('|');
+        String refAudio = (bar >= 0 ? raw.substring(0, bar) : raw).trim();
+        String refText = bar >= 0 ? raw.substring(bar + 1).trim() : "";
+        if (refAudio.isEmpty() || !Files.isRegularFile(Path.of(refAudio))) {
+            source.sendError(Text.literal("Reference clip not found: " + refAudio));
+            return 0;
+        }
+        ManualConfig.SoulVoiceAssignment existing = cfg.getSoulProfileVoices().get(profileId);
+        cfg.setSoulProfileVoice(profileId, new ManualConfig.SoulVoiceAssignment(
+                existing == null ? "" : existing.getPiperModel(),
+                existing == null ? -1 : existing.getPiperSpeaker(),
+                refAudio, refText));
+        cfg.save();
+        ChatUtils.sendSystemMessage(source, profileId + " → clone " + Path.of(refAudio).getFileName()
+                + (refText.isEmpty() ? " (no transcript — cloning quality is better with one)" : "")
+                + ". Takes effect on the next spoken line.");
         return 1;
     }
 
