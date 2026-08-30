@@ -2,10 +2,13 @@ package net.wcfcarolina13.GameAI.souls;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -259,6 +262,76 @@ public final class SoulTypes {
 
         public static KnowledgeMemory empty() {
             return new KnowledgeMemory(List.of(), Map.of());
+        }
+    }
+
+    // === mind.json (conversation ontology Phase 2; rules live in SoulMindOps) ===
+
+    /**
+     * How the bot currently feels about its player. Every field is clamped to 0..6; the
+     * resting point is {@link #BASELINE} (trust 3, exasperation 0, curiosity 3) and day
+     * consolidation walks each field one step back toward it.
+     */
+    public record Stance(int trust, int exasperation, int curiosity) {
+        public static final Stance BASELINE = new Stance(3, 0, 3);
+
+        public Stance {
+            trust = clamp(trust);
+            exasperation = clamp(exasperation);
+            curiosity = clamp(curiosity);
+        }
+
+        private static int clamp(int v) {
+            return Math.max(0, Math.min(6, v));
+        }
+    }
+
+    /**
+     * A question this bot put to the player that has not been answered yet. {@code askedAtMs}
+     * is wall-clock epoch millis (server ticks reset every launch); {@code expired} flips once
+     * the answer window has passed so the seed can recall it exactly once before it is dropped.
+     */
+    public record OpenThread(UUID askerBotId, String question, long askedAtMs, boolean expired) {
+        public OpenThread {
+            Objects.requireNonNull(askerBotId, "askerBotId");
+            question = question == null ? "" : question.trim();
+        }
+    }
+
+    /**
+     * One thing the bot remembers about a Minecraft day, distilled from its event journal at
+     * consolidation. {@code salience} decays by one per day and the memory is evicted at 0;
+     * {@code lastRecalledDay} is -1 until the seed has used it once.
+     */
+    public record DayMemory(int day, String topic, String phrase, String place, List<String> participants,
+                            int salience, int lastRecalledDay) {
+        public DayMemory {
+            topic = topic == null ? "" : topic;
+            phrase = phrase == null ? "" : phrase;
+            place = place == null ? "" : place;
+            participants = participants == null ? List.of() : List.copyOf(participants);
+        }
+    }
+
+    /**
+     * Per-bot persistent mind: stance toward the player, open threads, day memories, and the
+     * first-sighting registry ({@code seen}, kept in insertion order so the oldest key is the
+     * one evicted at the cap). {@code lastConsolidatedAtMs} is epoch millis, {@code lastDay}
+     * the Minecraft day number last consolidated (-1 never), {@code lastTaskTrustDay} the day
+     * the "player gave a task" trust bump was last granted (-1 never).
+     */
+    public record SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
+                           List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
+                           int lastDay, int lastTaskTrustDay) {
+        public SoulMind {
+            playerStance = playerStance == null ? Stance.BASELINE : playerStance;
+            threads = threads == null ? List.of() : List.copyOf(threads);
+            memories = memories == null ? List.of() : List.copyOf(memories);
+            seen = seen == null ? Set.of() : Collections.unmodifiableSet(new LinkedHashSet<>(seen));
+        }
+
+        public static SoulMind empty() {
+            return new SoulMind(1, Stance.BASELINE, List.of(), List.of(), Set.of(), 0L, -1, -1);
         }
     }
 

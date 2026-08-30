@@ -566,4 +566,53 @@ class SoulStoreTest {
         List<Long> sequences = records.stream().map(SoulTypes.ConversationRecord::sequence).toList();
         assertEquals(List.of(0L, 1L, 2L), sequences, "no duplicate sequence numbers on disk");
     }
+
+    // === mind.json + events journal (ontology Phase 2) ===
+
+    private static SoulTypes.SoulEvent eventAt(Instant occurredAt) {
+        UUID actor = UUID.randomUUID();
+        return new SoulTypes.SoulEvent(UUID.randomUUID(), SoulTypes.EventType.MOB_KILLED, actor,
+                List.of(actor), "overworld", "plains", Map.of("mob", "Zombie"),
+                SoulTypes.Witness.SELF, occurredAt.toEpochMilli() / 50, occurredAt, SoulTypes.Salience.NORMAL);
+    }
+
+    @Test
+    void mindRoundTripAndUpdate() throws Exception {
+        UUID bot = UUID.randomUUID();
+        assertEquals(SoulTypes.SoulMind.empty(), store.mind(bot).get(2, SECONDS));
+        SoulTypes.SoulMind updated = store.updateMind(bot, m -> SoulMindOps.noteOwnerHurt(m)).get(2, SECONDS);
+        assertEquals(4, updated.playerStance().curiosity());
+        assertTrue(Files.isRegularFile(botDir(bot).resolve("mind.json")));
+        assertEquals(updated, store.cachedMind(bot).orElseThrow());
+        SoulStore reopened = new SoulStore(worldRoot, executor);
+        assertEquals(updated, reopened.mind(bot).get(2, SECONDS));
+    }
+
+    @Test
+    void mindSeenRegistryKeepsInsertionOrderAcrossReload() throws Exception {
+        UUID bot = UUID.randomUUID();
+        List<String> keys = List.of("zeta", "alpha", "mid", "beta");
+        SoulTypes.SoulMind saved = store.updateMind(bot, m -> {
+            SoulTypes.SoulMind next = m;
+            for (String k : keys) {
+                next = SoulMindOps.withSeen(next, java.util.Set.of(k));
+            }
+            return next;
+        }).get(2, SECONDS);
+        assertEquals(keys, new ArrayList<>(saved.seen()));
+        SoulStore reopened = new SoulStore(worldRoot, executor);
+        assertEquals(keys, new ArrayList<>(reopened.mind(bot).get(2, SECONDS).seen()),
+                "seen keys must reload in insertion order so eviction stays oldest-first");
+    }
+
+    @Test
+    void eventsSinceAndTrim() throws Exception {
+        UUID bot = UUID.randomUUID();
+        for (int i = 0; i < 5; i++) {
+            store.appendEvent(bot, eventAt(Instant.ofEpochMilli(1000L * i))).get(2, SECONDS);
+        }
+        assertEquals(2, store.eventsSince(bot, Instant.ofEpochMilli(2500L)).get(2, SECONDS).size());
+        assertEquals(3, store.trimEvents(bot, 2).get(2, SECONDS));
+        assertEquals(2, store.recentEvents(bot, 10).get(2, SECONDS).size());
+    }
 }
