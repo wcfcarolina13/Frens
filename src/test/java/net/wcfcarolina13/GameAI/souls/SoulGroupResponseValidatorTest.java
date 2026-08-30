@@ -222,4 +222,20 @@ class SoulGroupResponseValidatorTest {
             assertFalse(parse.accepted(), meta + " must be treated as scaffolding, not a name");
         }
     }
+    @Test
+    void aPlayerAddressedLineEndsAnAmbientSceneSoNobodyAnswersForThem() {
+        // Field 2026-08-29 18:52: Bob greeted Roti, then Jake answered as if he were Roti.
+        String raw = "Bob: Morning, Roti. How's the sleep skill going?\nJake: Still a bit rough.\nBob: Hungry.";
+        SoulGroupResponseValidator.SceneParse ambient = new SoulGroupResponseValidator()
+                .parse(raw, List.of("Jake", "Bob"), 4, "RotiWokeman", true);
+        assertEquals(1, ambient.lines().size(), "the scene must stop at the line addressed to Roti");
+        assertEquals(1, ambient.lines().get(0).participantIndex());
+        // Replies to the player (PLAYER scenes) are all addressed to them — no truncation there.
+        SoulGroupResponseValidator.SceneParse reply = new SoulGroupResponseValidator()
+                .parse(raw, List.of("Jake", "Bob"), 6, "RotiWokeman", false);
+        assertEquals(3, reply.lines().size());
+        // Abbreviations need 4+ letters: "Rot" is not the player, "Roti" is.
+        assertTrue(SoulGroupResponseValidator.addressesOwner("Nice one, Roti!", "rotiwokeman"));
+        assertFalse(SoulGroupResponseValidator.addressesOwner("That rot won't wash out.", "rotiwokeman"));
+    }
 }

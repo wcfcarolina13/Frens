@@ -2,6 +2,30 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Banter: nobody answers for the player; the prompt knows about home, food and shelter; 1.1.195 (2026-08-29)
+
+Field report on the 18:52 scene — "Bob: Morning, Roti. How's the sleep skill going? / Jake:
+Still a bit rough…" — Jake answered a question meant for Roti. And the bots kept calling for
+"food and shelter" while standing at home base by a campfire with full inventories and chests.
+
+- **A player-addressed line now ENDS an ambient scene.** `SoulGroupResponseValidator.parse`
+  gained `endAtOwnerAddress` (true for BANTER/WORK/LOCAL, false for PLAYER replies): the first
+  line that names the owner — full name or a ≥4-letter abbreviation ("Roti" ⊂ "RotiWokeman") —
+  is the last line delivered, so the reply window is the player's, not the other bot's. The
+  scene contract now says it in words too: the player is present but not a speaker; never
+  answer for them; a line to them must be the last.
+- **The model finally hears about provisions and shelter.** The grounding counts food items
+  (`food for N meals` / `no food at all` at the head of `resourceSummary`); the state block
+  prints `hunger 18/20 (well fed)` + that food line per bot; the shared situation adds
+  `The group is AT HOME BASE (<label>) — sheltered, nothing to seek` (or "sheltered") and
+  `Close by: campfire (cook food), 3x chest (storage), …`. The contract adds: trust CURRENT
+  STATE over instinct — fed/sheltered/at home means no fretting about food, shelter or moving on.
+- Tests: +1 validator (truncation + abbreviation rule), +2 prompt (contract wording; home/fed/
+  provisioned state). Full suite 576/576.
+
+Field check: stand at base with food → scenes stop proposing to "find food and shelter"; when a
+bot addresses you it is the last line and the other bot stays quiet until you answer.
+
 ## Banter topic rotation + wider, labelled talkativeness sliders; 1.1.194 (2026-08-29)
 
 Field report: "they keep talking about sleeping just because we're near a bed". The 18:45

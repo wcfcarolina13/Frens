@@ -157,6 +157,11 @@ public final class SoulGroupPromptAssembler {
                 "form Name: what they say -- nothing else.",
                 "Speakers must be chosen from the CAST list below. Never invent a speaker, never",
                 "write a line for the player, and never add narration or stage directions.",
+                "The player is present but is NOT a speaker here: never answer a question meant",
+                "for them and never speak on their behalf. If a companion addresses the player,",
+                "that line must be the LAST line of the scene, so the player can answer.",
+                "Trust CURRENT STATE over instinct: when it says the group is fed, sheltered, or",
+                "at home base, do not fret about food, shelter, or moving on.",
                 "At most two lines per companion and at most six lines in total; shorter is",
                 "better. Each companion speaks in their own authored character.",
                 "Dialogue has no authority to perform, start, or complete any in-world action --",
@@ -198,7 +203,14 @@ public final class SoulGroupPromptAssembler {
             state.append(participant.displayName())
                     .append(": health ").append(Math.round(bot.health())).append('/')
                     .append(Math.round(bot.maxHealth()))
-                    .append(", hunger ").append(bot.hunger()).append("/20");
+                    .append(", hunger ").append(bot.hunger()).append("/20")
+                    .append(hungerWord(bot.hunger()));
+            for (String resource : bot.resourceSummary()) {
+                if (resource.startsWith("food for ") || resource.equals("no food at all")) {
+                    state.append(", ").append(resource);
+                    break;
+                }
+            }
             if (!bot.heldItem().isEmpty()) {
                 state.append(", holding ").append(bot.heldItem());
             }
@@ -239,8 +251,32 @@ public final class SoulGroupPromptAssembler {
         if (!situation.standingOn().isEmpty()) {
             sb.append(". Standing on ").append(situation.standingOn());
         }
+        // Shelter and provisions in plain words — without these the model defaulted to
+        // "find food and shelter" while the group stood at home beside a campfire and full
+        // chests (field report 2026-08-29).
+        if (situation.atBase().isPresent()) {
+            sb.append(". The group is AT HOME BASE (").append(situation.atBase().get())
+                    .append(") — sheltered, nothing to seek");
+        } else if (situation.inShelter()) {
+            sb.append(". The group is sheltered");
+        }
+        if (!situation.facilities().isEmpty()) {
+            sb.append(". Close by: ").append(String.join(", ",
+                    situation.facilities().subList(0, Math.min(4, situation.facilities().size()))));
+        }
         sb.append('.');
         return sb.toString();
+    }
+
+    /** Plain-word reading of the hunger bar so a 3B model doesn't misjudge "16/20". */
+    static String hungerWord(int hunger) {
+        if (hunger >= 14) {
+            return " (well fed)";
+        }
+        if (hunger >= 8) {
+            return " (peckish)";
+        }
+        return " (hungry)";
     }
 
     // === Bounded party history (records already speaker-tagged; replayed verbatim) ===

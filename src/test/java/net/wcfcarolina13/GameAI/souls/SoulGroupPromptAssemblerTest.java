@@ -316,4 +316,41 @@ class SoulGroupPromptAssemblerTest {
         assertTrue(last.contains("Bradley does not answer in this scene"));
         assertFalse(last.contains("among themselves"));
     }
+    @Test
+    void contractForbidsAnsweringForThePlayerAndTrustsStateOverInstinct() {
+        String contract = assembleBanter(banterTurn(2, false)).messages().get(0).content();
+        assertTrue(contract.contains("never speak on their behalf"), contract);
+        assertTrue(contract.contains("must be the LAST line"), contract);
+        assertTrue(contract.contains("do not fret about food, shelter"), contract);
+    }
+
+    @Test
+    void stateBlockSaysWhenTheGroupIsHomeFedAndProvisioned() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        SoulTypes.BotSnapshot bot = new SoulTypes.BotSnapshot(jake, "Jake", "overworld", "plains",
+                0, 64, 0, true, "dusk", "clear", 17f, 20f, 18, 5, "iron sword", 10, 36,
+                List.of("food for 12 meals", "40x oak logs"), "cheerful", "IDLE", "", "", "home", "Bradley",
+                true, 0, true, Optional.empty());
+        SoulTypes.SituationSnapshot base = SoulTypes.SituationSnapshot.empty();
+        SoulTypes.SituationSnapshot situation = new SoulTypes.SituationSnapshot(base.dangerDistance(), base.hostiles(),
+                base.nearbyAnimals(), "oak planks", base.nearbyBlocks(), List.of("campfire (cook food)", "3x chest (storage)"),
+                base.facilitySightings(), base.armorStands(), base.blockLight(), base.skyLight(), base.enclosed(),
+                base.hasHeadroom(), base.hasEscapeRoute(), base.behaviorMode(), base.following(), base.inCombat(),
+                base.postCombatLinger(), base.recentKillCount(), true, base.surfaceRecoveryActive(),
+                base.breakingFree(), base.nightTravelActive(), base.companionDays(), base.deathCount(), base.mount(),
+                1, base.lastSleepLabel(), Optional.of("Riverside"), base.hunt(), base.lastHobby());
+        SoulTypes.GroundingSnapshot grounding = new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                Optional.empty(), situation, Instant.EPOCH, List.of());
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, owner,
+                "Bradley", List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding)),
+                "seed-text", Instant.EPOCH, UUID.randomUUID(), false);
+        String all = String.join("\n", assembleBanter(turn).messages().stream().map(SoulTypes.Message::content).toList());
+        assertTrue(all.contains("hunger 18/20 (well fed)"), all);
+        assertTrue(all.contains("food for 12 meals"), all);
+        assertTrue(all.contains("AT HOME BASE (Riverside)"), all);
+        assertTrue(all.contains("Close by: campfire (cook food), 3x chest (storage)"), all);
+        assertEquals(" (hungry)", SoulGroupPromptAssembler.hungerWord(5));
+        assertEquals(" (peckish)", SoulGroupPromptAssembler.hungerWord(10));
+    }
 }

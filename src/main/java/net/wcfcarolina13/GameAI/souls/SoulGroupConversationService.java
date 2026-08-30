@@ -178,7 +178,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             case PLAYER -> SoulGroupTypes.MAX_SCENE_LINES;
         };
         SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines,
-                turn.ownerDisplayName());
+                turn.ownerDisplayName(), turn.kind() != SoulGroupTypes.SceneKind.PLAYER);
         // Raw provider output is not persisted anywhere, so a rejected or solo-roster scene logs
         // it (whitespace-collapsed, capped). The 2026-08-29 self-talk diagnosis had to be
         // inferred from the delivered lines because this was invisible.

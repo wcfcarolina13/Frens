@@ -83,6 +83,17 @@ public final class SoulGroupResponseValidator {
      */
     public SceneParse parse(String raw, List<String> rosterDisplayNames, int maxSceneLines,
                             String ownerDisplayName) {
+        return parse(raw, rosterDisplayNames, maxSceneLines, ownerDisplayName, false);
+    }
+
+    /**
+     * @param endAtOwnerAddress for ambient scenes (banter/work/local): the first line that
+     *     addresses the owner by name ends the scene — everything after it is dropped. Field
+     *     2026-08-29: "Bob: Morning, Roti. How's the sleep skill going?" was followed by Jake
+     *     answering on Roti's behalf. PLAYER scenes (replies to the owner) pass {@code false}.
+     */
+    public SceneParse parse(String raw, List<String> rosterDisplayNames, int maxSceneLines,
+                            String ownerDisplayName, boolean endAtOwnerAddress) {
         if (raw == null || raw.isBlank() || rosterDisplayNames == null || rosterDisplayNames.isEmpty()) {
             return reject("blank output");
         }
@@ -155,10 +166,35 @@ public final class SoulGroupResponseValidator {
             lines.add(new SoulGroupTypes.SceneLine(idx, truncateLine(body)));
         }
 
+        if (endAtOwnerAddress && !normOwner.isEmpty()) {
+            for (int i = 0; i < lines.size() - 1; i++) {
+                if (addressesOwner(lines.get(i).text(), normOwner)) {
+                    lines = new ArrayList<>(lines.subList(0, i + 1));
+                    break;
+                }
+            }
+        }
         if (lines.isEmpty()) {
             return reject("no roster-tagged dialogue lines");
         }
         return new SceneParse(true, lines, null, "");
+    }
+
+    /** True when a word of the line is the owner's name or a ≥4-char abbreviation of it. */
+    static boolean addressesOwner(String text, String normalizedOwner) {
+        if (text == null || normalizedOwner == null || normalizedOwner.isEmpty()) {
+            return false;
+        }
+        for (String word : text.split("[^A-Za-z0-9]+")) {
+            String w = normalize(word);
+            if (w.isEmpty()) {
+                continue;
+            }
+            if (w.equals(normalizedOwner) || (w.length() >= 4 && normalizedOwner.startsWith(w))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Strips Minecraft formatting codes and control characters from one candidate line. */

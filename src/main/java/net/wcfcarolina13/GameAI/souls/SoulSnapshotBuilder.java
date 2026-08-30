@@ -132,16 +132,24 @@ public final class SoulSnapshotBuilder {
         Map<String, Integer> itemCounts = new LinkedHashMap<>();
         List<ItemStack> mainStacks = bot.getInventory().getMainStacks();
         int inventorySlots = mainStacks.size();
+        int foodItems = 0;
         for (ItemStack stack : mainStacks) {
             if (stack.isEmpty()) {
                 continue;
             }
             occupiedSlots++;
+            if (stack.get(DataComponentTypes.FOOD) != null) {
+                foodItems += stack.getCount();
+            }
             carried.add(extractItemFacts(stack, 0));
             itemCounts.merge(Registries.ITEM.getId(stack.getItem()).getPath(),
                     stack.getCount(), Integer::sum);
         }
         SoulItemDescriber.InventoryDigest inventoryDigest = SoulItemDescriber.digest(carried);
+        // Provisions are a first-class fact (2026-08-29 field report: the bots fretted about
+        // food while everyone was carrying plenty — the prompt never said so).
+        List<String> resourceSummary = new ArrayList<>(inventoryDigest.bulk());
+        resourceSummary.add(0, foodItems > 0 ? "food for " + foodItems + " meals" : "no food at all");
 
         List<String> wornGear = new ArrayList<>();
         for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST,
@@ -196,7 +204,7 @@ public final class SoulSnapshotBuilder {
                 roundToEight(pos.getX()), roundToEight(pos.getY()), roundToEight(pos.getZ()), skyVisible,
                 timePhase(timeOfDay), weather, bot.getHealth(), bot.getMaxHealth(),
                 bot.getHungerManager().getFoodLevel(), bot.getArmor(), heldItemName(bot),
-                occupiedSlots, inventorySlots, inventoryDigest.bulk(),
+                occupiedSlots, inventorySlots, resourceSummary,
                 wornGear, inventoryDigest.notable(), itemCounts,
                 BotMoodManager.getMoodDescription(bot), behaviorMode, activeTask, taskState,
                 homeName, ownerName, recruited, companionQuestStage, permanentCompanion, activeQuest);
