@@ -2,6 +2,64 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Pocket TTS engine + in-game installer; conversation ontology Phase 2 (mind.json); 1.1.198 (2026-08-29)
+
+Two lanes shipped together. Specs: `docs/superpowers/specs/2026-08-29-frens-soul-pocket-tts-engine-design.md`,
+`docs/superpowers/specs/2026-08-29-frens-soul-conversation-ontology-phase2.md`; plans under
+`docs/superpowers/plans/`. Full suite 621/621 (souls 496).
+
+### Pocket TTS — the less-robotic CPU voice (commits dc4890d … 5a56852)
+Piper sounded robotic; Kyutai's Pocket TTS costs the same CPU (0.37x vs 0.35x core-hour on the
+2026 Picovoice benchmark; measured here 5–7× real time with torch on one thread, ~1 GB resident)
+and outputs 24 kHz mono 16-bit — exactly what `SoulVoicePcm` wants. Samples: `voices/ab-test/pocket/`.
+- **`PocketVoiceEngine`** — third `SoulVoiceEngine`: owns one `pocket-tts serve` on a private
+  loopback port (`OMP_NUM_THREADS=1`), health-polled startup (20 s), fire-and-forget warm-up,
+  `POST /tts` per line with the bot's preset (`VoiceSpec.voice`), same non-blocking lifecycle as
+  Dreamsleeve. Unknown engine ids now fail loudly instead of silently meaning Piper.
+- **`PocketInstaller` + `PocketInstallerScreen`** — mirrors the Piper installer (`InstallJob`
+  with compare-and-set, screen re-attach): finds `uv` (preferred; provisions its own Python 3.12)
+  or a python ≥3.10 (`/usr/bin/python3` is 3.9 on this Mac and is rejected), creates
+  `config/frens/pocket-tts/venv`, `pip install pocket-tts==3.0.2` (~850 MB, streamed stage text
+  with an indeterminate bar since pip reports no totals), smoke-tests one real line (which pulls
+  the 228 MB model into the HF cache), then writes `engine=pocket` and hot-reloads. The screen
+  says up front whether voice cloning is available (it needs a Hugging Face login — presets don't).
+- **Engine chooser** is now a three-row list (`EngineRow`) instead of two hardcoded buttons.
+- **`VoiceSpec.piperModel/piperSpeaker` → `voice/speaker`** (engine-interpreted). Legacy keys are
+  read as aliases in profile JSON and in `settings.json5` (`@SerializedName(alternate=…)`).
+- **Settings**: `soulVoicePocketDir`, `soulVoicePocketVoice` (default `charles`);
+  `SoulVoiceSettings.disabled(reason)` replaces three hand-rolled invalid literals.
+- **`VoiceCatalog`** — one place for Piper's 7 downloadable voices and Pocket's 21 English presets;
+  `/bot soul voice list|install|assign` are engine-aware (Pocket presets need no download; `assign`
+  validates against the active engine instead of always calling Piper's resolver).
+- Not in this cut: Pocket voice cloning (HF-gated weights — Jake keeps his Dreamsleeve clone).
+
+### Ontology Phase 2 — continuity across scenes (commits 88c2729 … 8430b42)
+Phase 1 gave scenes what changed and what kind of thing to say; nothing remembered anything.
+- **`mind.json` per bot** (`SoulTypes.SoulMind`, `SoulStore.mind/updateMind`, cached like state):
+  `Stance(trust, exasperation, curiosity)` toward the player (0..6, baselines 3/0/3), up to 3
+  `OpenThread`s, up to 30 `DayMemory`s, the Phase 1 `seen` registry (now persisted, per bot, and
+  read as the roster union so "the first wolf any of you have seen" survives restarts).
+- **`SoulMindOps`** — every rule is pure and unit-tested: thread answered → trust+1/curiosity−1;
+  thread expired (10 min) → exasperation+1 and a one-shot seed anchor (`Bob never got an answer
+  about "…"`, weight 5); player gives a task → trust+1 once per day; owner hurt → curiosity+1;
+  stance decays one step toward baseline per day; memories decay −1/day and evict at 0.
+- **Day consolidation, no LLM** — the event observer now emits `onNewDay` when the Minecraft day
+  number changes (a sleeping bot's wake-up, or midnight for one that never sleeps): events since
+  the last consolidation are grouped by topic, ranked (strongest single event, then summed
+  salience + count; sleep excluded), top 3 become memories with the humanized phrase, place
+  (biome) and participants; then `events.jsonl` is trimmed to its last 200 records — it had
+  never been trimmed and was re-parsed whole on every read.
+- **Prompt + seed** — `stateBlock` gets a stance clause ("wary of Roti", "fed up with being
+  ignored", "full of questions for Roti"); a new `OPEN THREADS` block (`Bob still wants to know:
+  "…"`) appears only when a thread is open; memories join the seed pool at weight 4 as
+  `remember when <phrase> on day N` and count as RECALL material.
+- **Thread lifecycle** — `LineCommitter.sceneDelivered` now carries the delivered lines; a
+  narrator-seeded scene whose last line is a question to the player opens a thread on its
+  speaker; any addressed chat, DM or party message from the player marks threads answered;
+  a 600-tick sweep expires the rest.
+- Director: `AudienceMemory` keeps only lastGrounding/topics/acts and evicts audiences idle > 1 h.
+- Not in this cut (Phase 3): bot↔bot stance, typed relation facts, structured output, novelty rejection.
+
 ## Ontology Phase 1 field fixes: seed provenance, humanized events, player-as-animal, turn merging; 1.1.197 (2026-08-29)
 
 First 1.1.196 session (3 min, two scenes) ran clean at the pipeline level but the transcript
