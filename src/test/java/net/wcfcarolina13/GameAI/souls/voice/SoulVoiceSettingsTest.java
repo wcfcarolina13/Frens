@@ -112,4 +112,24 @@ class SoulVoiceSettingsTest {
         assertEquals(1000L, config.getSoulVoiceSynthTimeoutMs());
         assertEquals(0.0f, config.getSoulVoiceRadioGain(), 0.0001f);
     }
+
+    @Test
+    void pocketEngineNeedsAnInstallDir() throws Exception {
+        ManualConfig config = newRealConfig();
+        config.setSoulVoiceEnabled(true);
+        config.setSoulVoiceEngine("pocket");
+        assertFalse(SoulVoiceSettings.from(config).valid());
+        config.setSoulVoicePocketDir("/tmp/frens/pocket-tts");
+        SoulVoiceSettings s = SoulVoiceSettings.from(config);
+        assertTrue(s.valid());
+        assertEquals("charles", s.pocketVoice(), "blank voice falls back to the default preset");
+    }
+
+    @Test
+    void disabledFactoryIsInvalidWithTheGivenReason() {
+        SoulVoiceSettings s = SoulVoiceSettings.disabled("off");
+        assertFalse(s.enabled());
+        assertFalse(s.valid());
+        assertEquals("off", s.validationError());
+    }
 }

@@ -138,8 +138,9 @@ public class ManualConfig {
     // Soul generated-voice (TTS). Default-off; local engines only. See
     // docs/superpowers/specs/2026-08-24-soul-generated-voice-design.md.
     private boolean soulVoiceEnabled = false;
-    // Engine: "piper" (CPU, simple) or "dreamsleeve" (the Qwen3-TTS voice-clone warm server
-    // from ~/pontus/openmw-forge/dreamsleeve — same stack that voices Casca in OpenMW).
+    // Engine: "piper" (CPU, simple), "dreamsleeve" (the Qwen3-TTS voice-clone warm server
+    // from ~/pontus/openmw-forge/dreamsleeve — same stack that voices Casca in OpenMW), or
+    // "pocket" (Kyutai Pocket TTS — CPU, warm HTTP server, English preset voices).
     private String soulVoiceEngine = "piper";
     private String soulVoicePiperBinary = "";
     private String soulVoiceModel = "";
@@ -148,6 +149,10 @@ public class ManualConfig {
     private String soulVoiceDreamsleeveDir = "";
     private String soulVoiceRefAudio = "";
     private String soulVoiceRefText = "";
+    // Pocket engine (Kyutai Pocket TTS, CPU): install dir holding the managed venv, plus the
+    // default English preset voice; per-bot presets come from soulVoiceAssignments.
+    private String soulVoicePocketDir = "";
+    private String soulVoicePocketVoice = "charles";
     private int soulVoiceMaxChars = 400;
     private long soulVoiceSynthTimeoutMs = 8000L;
     private float soulVoiceRadioGain = 0.6f;
@@ -1004,6 +1009,15 @@ public class ManualConfig {
 
     public String getSoulVoiceModel() { return soulVoiceModel == null ? "" : soulVoiceModel; }
     public void setSoulVoiceModel(String v) { this.soulVoiceModel = v == null ? "" : v.trim(); }
+
+    public String getSoulVoicePocketDir() { return soulVoicePocketDir == null ? "" : soulVoicePocketDir.trim(); }
+    public void setSoulVoicePocketDir(String v) { this.soulVoicePocketDir = v == null ? "" : v.trim(); }
+
+    /** Default Pocket TTS preset; blank reads as {@code "charles"}. */
+    public String getSoulVoicePocketVoice() {
+        return (soulVoicePocketVoice == null || soulVoicePocketVoice.isBlank()) ? "charles" : soulVoicePocketVoice.trim();
+    }
+    public void setSoulVoicePocketVoice(String v) { this.soulVoicePocketVoice = v == null ? "" : v.trim(); }
 
     public int getSoulVoiceMaxChars() { return Math.max(40, Math.min(1000, soulVoiceMaxChars)); }
     public void setSoulVoiceMaxChars(int v) { this.soulVoiceMaxChars = v; }

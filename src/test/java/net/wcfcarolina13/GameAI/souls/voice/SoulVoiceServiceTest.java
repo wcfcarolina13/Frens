@@ -51,7 +51,7 @@ class SoulVoiceServiceTest {
 
     private static SoulVoiceSettings enabledSettings() {
         return new SoulVoiceSettings(true, true, "", SoulVoiceSettings.ENGINE_PIPER,
-                "/bin/piper", "/voices/jake.onnx", "", "", "",
+                "/bin/piper", "/voices/jake.onnx", "", "", "", "", "charles",
                 400, 8000L, 0.6f);
     }
 
