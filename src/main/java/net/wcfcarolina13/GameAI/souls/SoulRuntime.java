@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -570,6 +571,7 @@ public final class SoulRuntime {
         if (director != null) {
             director.tick();
         }
+        runtime.migrateLegacyBindings(server);
         SoulLocalDirector local = runtime.localDirector;
         if (local != null) {
             local.tick();
@@ -764,6 +766,24 @@ public final class SoulRuntime {
         return new Pipeline(settings, provider, scheduler, conversationService, voice, groupService);
     }
 
+    /** Case-insensitive lookup of a non-empty voice assignment keyed by bot name or profile id. */
+    public static ManualConfig.SoulVoiceAssignment assignmentFor(ManualConfig cfg, String key) {
+        if (cfg == null || key == null || key.isBlank()) {
+            return null;
+        }
+        for (Map.Entry<String, ManualConfig.SoulVoiceAssignment> e : cfg.getSoulProfileVoices().entrySet()) {
+            if (e.getKey() != null && e.getKey().equalsIgnoreCase(key.trim())
+                    && e.getValue() != null && !e.getValue().isEmpty()) {
+                return e.getValue();
+            }
+        }
+        return null;
+    }
+
+    public static SoulTypes.VoiceSpec toSpec(ManualConfig.SoulVoiceAssignment a) {
+        return new SoulTypes.VoiceSpec(a.getPiperModel(), a.getPiperSpeaker(), a.getRefAudio(), a.getRefText());
+    }
+
     private SoulVoiceService buildVoiceService(SoulVoiceSettings voiceSettings) {
         if (!voiceSettings.enabled() || !voiceSettings.valid()) {
             return SoulVoiceService.disabled();
@@ -771,16 +791,19 @@ public final class SoulRuntime {
         try {
             // Per-bot voices: a config assignment wins, then the profile's authored "voice"
             // block, then the global settings the engine was built with.
-            java.util.function.Function<String, SoulTypes.VoiceSpec> voiceResolver = profileId -> {
+            java.util.function.Function<SoulTypes.VoiceKey, SoulTypes.VoiceSpec> voiceResolver = key -> {
                 ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                 if (cfg != null) {
-                    ManualConfig.SoulVoiceAssignment a = cfg.getSoulProfileVoices().get(profileId);
-                    if (a != null && !a.isEmpty()) {
-                        return new SoulTypes.VoiceSpec(a.getPiperModel(), a.getPiperSpeaker(),
-                                a.getRefAudio(), a.getRefText());
+                    ManualConfig.SoulVoiceAssignment byBot = assignmentFor(cfg, key.botName());
+                    if (byBot != null) {
+                        return toSpec(byBot);
+                    }
+                    ManualConfig.SoulVoiceAssignment byProfile = assignmentFor(cfg, key.profileId());
+                    if (byProfile != null) {
+                        return toSpec(byProfile);
                     }
                 }
-                return SoulProfileRegistry.voiceFor(profileId);
+                return SoulProfileRegistry.voiceFor(key.profileId());
             };
             SoulVoiceEngine engine = switch (voiceSettings.engine()) {
                 case SoulVoiceSettings.ENGINE_DREAMSLEEVE -> new DreamsleeveVoiceEngine(
@@ -859,6 +882,41 @@ public final class SoulRuntime {
 
     public CompletableFuture<SoulTypes.SoulState> bindJake(UUID botId) {
         return bindProfile(botId, "frens:jake");
+    }
+
+    private final java.util.Set<UUID> bindingChecked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private long bindingTick;
+
+    /**
+     * Once per bot per runtime: a bot whose name has its OWN registered profile but whose
+     * persisted state still says {@code frens:jake} (bound before bob.json shipped in 1.1.184)
+     * is rebound. Field 2026-08-29: Bob kept Jake's persona AND Jake's voice for that reason.
+     */
+    void migrateLegacyBindings(MinecraftServer server) {
+        if (++bindingTick % 100 != 0 || server == null) {
+            return;
+        }
+        for (net.minecraft.server.network.ServerPlayerEntity bot
+                : net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(server)) {
+            if (bot == null || !bindingChecked.add(bot.getUuid())) {
+                continue;
+            }
+            String name = bot.getName().getString();
+            Optional<String> own = SoulProfileRegistry.profileIdForBotName(name);
+            Optional<SoulTypes.SoulState> state = cachedState(bot.getUuid());
+            if (own.isEmpty() || state.isEmpty() || own.get().equals(state.get().profileId())
+                    || !"frens:jake".equals(state.get().profileId())) {
+                continue;
+            }
+            UUID botId = bot.getUuid();
+            bindProfile(botId, own.get()).whenComplete((bound, err) -> {
+                if (err != null) {
+                    LOGGER.warn("[souls] legacy binding migration failed for {}: {}", name, err.toString());
+                } else {
+                    LOGGER.info("[souls] rebound {} from frens:jake to its own profile {}", name, own.get());
+                }
+            });
+        }
     }
 
     /** Binds {@code botId} to any registered profile — since 2026-08-29 a bot named after a

@@ -10,6 +10,11 @@ public interface SoulVoiceEngine extends AutoCloseable {
      */
     CompletableFuture<byte[]> synthesize(String text, String voiceId);
 
+    /** Per-bot voice selection; engines that only know profile ids fall back to that. */
+    default CompletableFuture<byte[]> synthesize(String text, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey key) {
+        return synthesize(text, key == null ? "" : key.profileId());
+    }
+
     boolean alive();
 
     @Override

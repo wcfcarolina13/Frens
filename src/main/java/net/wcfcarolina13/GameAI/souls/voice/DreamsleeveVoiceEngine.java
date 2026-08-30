@@ -57,7 +57,7 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     private final String refAudio;
     private final String refText;
     /** Per-bot clone anchors (2026-08-29): profile id → spec; blank refAudio = the global anchor. */
-    private final java.util.function.Function<String, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver;
+    private final java.util.function.Function<net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver;
     private final long synthTimeoutMs;
     private final Path workDir;
     private final Path sockPath;
@@ -75,18 +75,18 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
                                    long synthTimeoutMs) throws IOException {
         this(dreamsleeveDir, refAudio, refText, synthTimeoutMs,
-                id -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY);
+                key -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY);
     }
 
     public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
                                    long synthTimeoutMs,
-                                   java.util.function.Function<String, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver)
+                                   java.util.function.Function<net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec> voiceResolver)
             throws IOException {
         this.dreamsleeveDir = dreamsleeveDir;
         this.refAudio = refAudio;
         this.refText = refText;
         this.voiceResolver = voiceResolver == null
-                ? id -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY : voiceResolver;
+                ? key -> net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY : voiceResolver;
         this.synthTimeoutMs = synthTimeoutMs;
         this.workDir = Files.createTempDirectory("frens-soul-voice");
         // AF_UNIX socket paths are limited to ~104 bytes on macOS; java.io.tmpdir
@@ -97,9 +97,9 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
                 System.nanoTime() & 0xFFFFFFFFL) + ".sock");
     }
 
-    private net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec resolveQuietly(String voiceId) {
+    private net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec resolveQuietly(net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey key) {
         try {
-            net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = voiceResolver.apply(voiceId == null ? "" : voiceId);
+            net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = voiceResolver.apply(key);
             return spec == null ? net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY : spec;
         } catch (RuntimeException ignored) {
             return net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.EMPTY;
@@ -140,13 +140,20 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
 
     @Override
     public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+        return synthesize(text, new net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey("", voiceId));
+    }
+
+    @Override
+    public CompletableFuture<byte[]> synthesize(String text, net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey key) {
+        final net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey voiceKey =
+                key == null ? new net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey("", "") : key;
         CompletableFuture<byte[]> result = new CompletableFuture<>();
         try {
             engineThread.submit(() -> {
                 Path outFile = workDir.resolve("frens-" + requestSeq.incrementAndGet() + ".wav");
                 try {
                     ensureServer();
-                    net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = resolveQuietly(voiceId);
+                    net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = resolveQuietly(voiceKey);
                     String ref = spec.refAudio().isEmpty() ? refAudio : spec.refAudio();
                     String txt = spec.refAudio().isEmpty() ? refText : spec.refText();
                     sendRequest(speakRequestJson(text.replace('\n', ' '), ref, txt,

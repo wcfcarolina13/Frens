@@ -184,6 +184,18 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * Who is speaking, for voice selection: the bot's display name first (two bots can share
+     * one profile — Bob was still bound to frens:jake in the field and got Jake's voice), then
+     * the profile id. Either may be blank.
+     */
+    public record VoiceKey(String botName, String profileId) {
+        public VoiceKey {
+            botName = botName == null ? "" : botName.trim();
+            profileId = profileId == null ? "" : profileId.trim();
+        }
+    }
+
     public record SoulProfile(String id, String displayName, List<String> identity,
                                List<String> values, List<String> boundaries,
                                List<Message> examples, VoiceSpec voice) {

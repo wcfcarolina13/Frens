@@ -92,6 +92,16 @@ public final class SoulProfileRegistry {
         return profile;
     }
 
+    /** {@code "Bob"} → {@code frens:bob} when such a profile is registered; empty otherwise. */
+    public static java.util.Optional<String> profileIdForBotName(String botName) {
+        if (botName == null || botName.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        loadBuiltIns();
+        String id = "frens:" + botName.trim().toLowerCase(java.util.Locale.ROOT);
+        return PROFILES.containsKey(id) ? java.util.Optional.of(id) : java.util.Optional.empty();
+    }
+
     /** Every registered profile id, sorted (built-ins load first if needed). */
     public static List<String> registeredIds() {
         loadBuiltIns();

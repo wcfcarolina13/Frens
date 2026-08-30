@@ -49,7 +49,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     private final String modelPath;
     private final long synthTimeoutMs;
     private final Path outputDir;
-    private final Function<String, SoulTypes.VoiceSpec> voiceResolver;
+    private final Function<SoulTypes.VoiceKey, SoulTypes.VoiceSpec> voiceResolver;
     private final ExecutorService engineThread =
             Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "frens-soul-voice-engine");
@@ -79,15 +79,15 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     }
 
     public PiperVoiceEngine(String binary, String modelPath, long synthTimeoutMs) throws IOException {
-        this(binary, modelPath, synthTimeoutMs, id -> SoulTypes.VoiceSpec.EMPTY);
+        this(binary, modelPath, synthTimeoutMs, key -> SoulTypes.VoiceSpec.EMPTY);
     }
 
     public PiperVoiceEngine(String binary, String modelPath, long synthTimeoutMs,
-                            Function<String, SoulTypes.VoiceSpec> voiceResolver) throws IOException {
+                            Function<SoulTypes.VoiceKey, SoulTypes.VoiceSpec> voiceResolver) throws IOException {
         this.binary = binary;
         this.modelPath = modelPath;
         this.synthTimeoutMs = synthTimeoutMs;
-        this.voiceResolver = voiceResolver == null ? id -> SoulTypes.VoiceSpec.EMPTY : voiceResolver;
+        this.voiceResolver = voiceResolver == null ? key -> SoulTypes.VoiceSpec.EMPTY : voiceResolver;
         this.outputDir = Files.createTempDirectory("frens-soul-voice");
     }
 
@@ -161,12 +161,18 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
 
     @Override
     public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+        return synthesize(text, new SoulTypes.VoiceKey("", voiceId));
+    }
+
+    @Override
+    public CompletableFuture<byte[]> synthesize(String text, SoulTypes.VoiceKey key) {
+        SoulTypes.VoiceKey voiceKey = key == null ? new SoulTypes.VoiceKey("", "") : key;
         CompletableFuture<byte[]> result = new CompletableFuture<>();
         try {
             engineThread.submit(() -> {
                 PiperProcess proc = null;
                 try {
-                    proc = processFor(voiceId);
+                    proc = processFor(voiceKey);
                     ensureProcess(proc);
                     proc.stdin.write(text.replace('\n', ' '));
                     proc.stdin.write('\n');
@@ -190,10 +196,10 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
     }
 
     /** Engine thread: pick (or create the bookkeeping for) the process serving this voice. */
-    private PiperProcess processFor(String voiceId) throws IOException {
+    private PiperProcess processFor(SoulTypes.VoiceKey key) throws IOException {
         SoulTypes.VoiceSpec spec;
         try {
-            spec = voiceResolver.apply(voiceId == null ? "" : voiceId);
+            spec = voiceResolver.apply(key);
         } catch (RuntimeException resolveFailure) {
             spec = SoulTypes.VoiceSpec.EMPTY;
         }
@@ -204,17 +210,17 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         if (!spec.piperModel().isEmpty() && model.equals(modelPath)
                 && !resolveModelPath(modelPath, spec.piperModel(), p -> true).equals(modelPath)
                 && warnedMissingVoices.add(spec.piperModel())) {
-            LOGGER.warn("[souls] tts voice '{}' for profile {} not found under {} — using the default voice",
-                    spec.piperModel(), voiceId, voicesDir(modelPath));
+            LOGGER.warn("[souls] tts voice '{}' for {} not found under {} — using the default voice",
+                    spec.piperModel(), key, voicesDir(modelPath));
         }
         int speaker = spec.piperSpeaker();
-        String key = model + "#" + speaker;
-        PiperProcess proc = processes.get(key);
+        String processKey = model + "#" + speaker;
+        PiperProcess proc = processes.get(processKey);
         if (proc == null) {
             Path outDir = processes.isEmpty() ? outputDir
                     : Files.createDirectories(outputDir.resolve("v" + processes.size()));
             proc = new PiperProcess(model, speaker, outDir);
-            processes.put(key, proc);
+            processes.put(processKey, proc);
         }
         return proc;
     }

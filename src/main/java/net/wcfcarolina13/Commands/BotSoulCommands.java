@@ -355,10 +355,34 @@ final class BotSoulCommands {
 
     // === per-bot voices ===
 
-    /** "bob" → "frens:bob"; anything with a ':' is taken as a full profile id. */
-    static String resolveProfileArg(String raw) {
+    /**
+     * Voice assignments are keyed by BOT name first (two bots may share a profile — Bob was
+     * still bound to frens:jake in the field), then by profile id. "bob" → the registered bot's
+     * exact display name; anything with a ':' is a profile id; otherwise "frens:<name>" if such
+     * a profile exists. Returns null (after sending an error) when nothing matches.
+     */
+    private static String resolveVoiceTarget(ServerCommandSource source, String raw) {
         String s = raw == null ? "" : raw.trim();
-        return s.contains(":") ? s : "frens:" + s.toLowerCase(java.util.Locale.ROOT);
+        if (s.contains(":")) {
+            java.util.List<String> known = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds();
+            if (!known.contains(s)) {
+                source.sendError(Text.literal("Unknown soul profile '" + s + "'. Known: " + String.join(", ", known)));
+                return null;
+            }
+            return s;
+        }
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(source.getServer())) {
+            if (bot != null && bot.getName().getString().equalsIgnoreCase(s)) {
+                return bot.getName().getString();
+            }
+        }
+        Optional<String> profile = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.profileIdForBotName(s);
+        if (profile.isPresent()) {
+            return profile.get();
+        }
+        source.sendError(Text.literal("No bot or soul profile named '" + s + "'. Bots must be spawned; profiles: "
+                + String.join(", ", net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds())));
+        return null;
     }
 
     static String describeSpec(net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec) {
@@ -378,12 +402,14 @@ final class BotSoulCommands {
         return sb.toString();
     }
 
-    private static String describeEffectiveVoice(ManualConfig cfg, String profileId) {
-        ManualConfig.SoulVoiceAssignment assigned = cfg == null ? null : cfg.getSoulProfileVoices().get(profileId);
-        if (assigned != null && !assigned.isEmpty()) {
-            return describeSpec(new net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec(
-                    assigned.getPiperModel(), assigned.getPiperSpeaker(),
-                    assigned.getRefAudio(), assigned.getRefText())) + " (assigned)";
+    private static String describeEffectiveVoice(ManualConfig cfg, String botName, String profileId) {
+        ManualConfig.SoulVoiceAssignment byBot = SoulRuntime.assignmentFor(cfg, botName);
+        if (byBot != null) {
+            return describeSpec(SoulRuntime.toSpec(byBot)) + " (assigned to bot)";
+        }
+        ManualConfig.SoulVoiceAssignment assigned = SoulRuntime.assignmentFor(cfg, profileId);
+        if (assigned != null) {
+            return describeSpec(SoulRuntime.toSpec(assigned)) + " (assigned to profile)";
         }
         net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec authored =
                 net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.voiceFor(profileId);
@@ -408,9 +434,20 @@ final class BotSoulCommands {
                     .append(installed.contains(voice.name()) ? " [installed]" : "");
         }
         ChatUtils.sendSystemMessage(source, catalogue.toString());
-        StringBuilder picks = new StringBuilder("Profile voices (/bot soul voice assign <bot> <voice[#speaker]> | clone <ref.wav> | default):");
+        StringBuilder picks = new StringBuilder("Voices (/bot soul voice assign <bot|profile> <voice[#speaker]> | clone <ref.wav> | default):");
+        Optional<SoulRuntime> rt = SoulRuntime.current();
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(source.getServer())) {
+            if (bot == null) {
+                continue;
+            }
+            String name = bot.getName().getString();
+            String profile = rt.flatMap(r -> r.cachedState(bot.getUuid()))
+                    .map(net.wcfcarolina13.GameAI.souls.SoulTypes.SoulState::profileId).orElse("");
+            picks.append("\n  ").append(name).append(profile.isEmpty() ? " (no soul)" : " [" + profile + "]")
+                    .append(" → ").append(describeEffectiveVoice(cfg, name, profile));
+        }
         for (String id : net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds()) {
-            picks.append("\n  ").append(id).append(" → ").append(describeEffectiveVoice(cfg, id));
+            picks.append("\n  ").append(id).append(" → ").append(describeEffectiveVoice(cfg, "", id));
         }
         ChatUtils.sendSystemMessage(source, picks.toString());
         return 1;
@@ -472,10 +509,8 @@ final class BotSoulCommands {
             source.sendError(Text.literal("Config not loaded."));
             return 0;
         }
-        String profileId = resolveProfileArg(StringArgumentType.getString(context, "profile"));
-        java.util.List<String> known = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds();
-        if (!known.contains(profileId)) {
-            source.sendError(Text.literal("Unknown soul profile '" + profileId + "'. Known: " + String.join(", ", known)));
+        String profileId = resolveVoiceTarget(source, StringArgumentType.getString(context, "profile"));
+        if (profileId == null) {
             return 0;
         }
         if (voiceOrNull == null || voiceOrNull.isBlank() || voiceOrNull.trim().equalsIgnoreCase("default")) {
@@ -518,10 +553,8 @@ final class BotSoulCommands {
             source.sendError(Text.literal("Config not loaded."));
             return 0;
         }
-        String profileId = resolveProfileArg(StringArgumentType.getString(context, "profile"));
-        java.util.List<String> known = net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds();
-        if (!known.contains(profileId)) {
-            source.sendError(Text.literal("Unknown soul profile '" + profileId + "'. Known: " + String.join(", ", known)));
+        String profileId = resolveVoiceTarget(source, StringArgumentType.getString(context, "profile"));
+        if (profileId == null) {
             return 0;
         }
         String raw = StringArgumentType.getString(context, "ref");

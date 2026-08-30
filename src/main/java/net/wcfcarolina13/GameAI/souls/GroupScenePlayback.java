@@ -196,7 +196,7 @@ public final class GroupScenePlayback {
             SoulGroupTypes.SceneParticipant speaker = scene.turn().roster().get(line.participantIndex());
             state.synth = ambientKind && !ambientVoiceAllowed.getAsBoolean()
                     ? CompletableFuture.completedFuture(Optional.empty())
-                    : voice.get().synthesizeLine(speaker.profileId(), line.text());
+                    : voice.get().synthesizeLine(speaker.displayName(), speaker.profileId(), line.text());
             state.synthStartedMs = now;
         }
 

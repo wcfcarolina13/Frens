@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Voices keyed by bot, legacy frens:jake bindings migrated; 1.1.192 (2026-08-29)
+
+Field test of 1.1.190: `assign bob en_US-ryan-medium` succeeded but Bob still spoke in Jake's
+voice. Live log + `saves/…/souls/v1/<bob>/soul.json` showed why: Bob's persisted soul state is
+`profileId: "frens:jake"` — he was enabled before `bob.json` shipped (1.1.184), and the
+"Bob → frens:bob" rule only runs at enable time. The voice seam was the profile id, so both
+bots resolved to the same voice (and Bob has had Jake's persona all along).
+
+- **Voice selection is keyed by bot name first, then profile id** (`SoulTypes.VoiceKey`;
+  engines gained `synthesize(text, VoiceKey)`, the string overload remains for the legacy/test
+  seam). `/bot soul voice assign <bot|profile> …` stores under the bot's exact display name
+  when a spawned bot matches, else the profile id; lookups are case-insensitive. `list` now shows
+  each spawned bot with its bound profile and effective voice.
+- **Legacy binding migration:** once per bot per runtime (checked every 100 ticks), a bot whose
+  name has its own registered profile but whose state still says `frens:jake` is rebound —
+  logged as `[souls] rebound Bob from frens:jake to its own profile frens:bob`. Bob gets his own
+  persona without re-enabling.
+- **Pre-deploy check fixed (CLAUDE.md + guardrail):** `pgrep -f net.minecraft.client.main.Main`
+  never matches a Prism/Fabric launch (main class arrives via stdin); the check now matches the
+  instance natives path. It had been passing on luck.
+
+Field check: after relaunch, `/bot soul voice list` shows `Bob [frens:bob] → piper
+en_US-ryan-medium (assigned to bot)`; Bob's next spoken line starts a second Piper process
+(`tts engine started … model=en_US-ryan-medium.onnx`) and sounds different from Jake.
+
 ## Global toggles: dividers stop at the scroll gutter, no dead band under the rows; 1.1.191 (2026-08-29)
 
 Field screenshot on 1.1.190: row dividers bled across the scroll strip, and a fractional row's

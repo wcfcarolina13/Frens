@@ -141,6 +141,12 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
      */
     public CompletableFuture<java.util.Optional<SynthesizedLine>> synthesizeLine(
             String profileId, String text) {
+        return synthesizeLine("", profileId, text);
+    }
+
+    /** Per-bot voice: the speaker's display name is the first key, the profile id the second. */
+    public CompletableFuture<java.util.Optional<SynthesizedLine>> synthesizeLine(
+            String botName, String profileId, String text) {
         Optional<SoulVoiceGate.Mode> mode = SoulVoiceGate.decide(
                 settings.enabled() && masterVoiceEnabled.getAsBoolean(),
                 settings.valid(), engineAlive(), SoulTypes.Reachability.LOCAL);
@@ -153,7 +159,7 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
             worker.execute(() -> {
                 activeSyntheses.incrementAndGet();
                 try {
-                    byte[] wav = engine.synthesize(sanitized.get(), profileId)
+                    byte[] wav = engine.synthesize(sanitized.get(), new SoulTypes.VoiceKey(botName, profileId))
                             .get(settings.synthTimeoutMs() + 500L, TimeUnit.MILLISECONDS);
                     Optional<SoulVoicePcm.PcmAudio> pcm = SoulVoicePcm.parseWav(wav);
                     if (pcm.isEmpty()) {
@@ -198,7 +204,8 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
         for (int i = 0; i < segments.size(); i++) {
             long startNanos = System.nanoTime();
             try {
-                byte[] wav = engine.synthesize(segments.get(i), turn.profileId())
+                byte[] wav = engine.synthesize(segments.get(i),
+                                new SoulTypes.VoiceKey(turn.botDisplayName(), turn.profileId()))
                         .get(settings.synthTimeoutMs() + 500L, TimeUnit.MILLISECONDS);
                 long synthMs = (System.nanoTime() - startNanos) / 1_000_000L;
                 Optional<SoulVoicePcm.PcmAudio> pcm = SoulVoicePcm.parseWav(wav);
