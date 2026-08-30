@@ -222,7 +222,7 @@ public final class SoulGroupResponseValidator {
 
     /** Same normalization contract as {@code ChatAddressing.normalizeToken}, local to keep this
      *  package free of top-level mod classes: strip non-alphanumerics, lowercase. */
-    private static String normalize(String token) {
+    static String normalize(String token) {
         if (token == null) {
             return "";
         }

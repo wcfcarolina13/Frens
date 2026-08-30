@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.souls;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.BufferedWriter;
@@ -17,9 +18,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -27,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 /**
@@ -72,6 +77,7 @@ public final class SoulStore {
     private final ObjectMapper mapper;
     private final ConcurrentHashMap<UUID, SoulTypes.SoulState> cachedStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SoulTypes.KnowledgeMemory> cachedKnowledge = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, SoulTypes.SoulMind> cachedMinds = new ConcurrentHashMap<>();
     // Only ever read/written from inside submit() tasks, i.e. on this store's single writer
     // thread -- a plain HashMap is race-free here the same way the rest of this class's
     // non-cachedStates fields are, per the class Javadoc's "all filesystem work is funneled
@@ -96,7 +102,10 @@ public final class SoulStore {
     private SoulStore(ExecutorService executor, Path resolvedRoot) {
         this.root = resolvedRoot;
         this.executor = executor;
-        this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        // Set -> LinkedHashSet so SoulMind.seen reloads in insertion order (oldest-first eviction).
+        this.mapper = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .registerModule(new SimpleModule().addAbstractTypeMapping(Set.class, LinkedHashSet.class));
     }
 
     /**
@@ -543,7 +552,7 @@ public final class SoulStore {
     }
 
     /** Disproof-on-revisit: removes remembered places whose positions were verified stale. */
-    public CompletableFuture<Void> removePlaces(UUID botId, java.util.Set<String> positionKeys) {
+    public CompletableFuture<Void> removePlaces(UUID botId, Set<String> positionKeys) {
         return submit(() -> {
             SoulTypes.KnowledgeMemory current = loadKnowledge(botId);
             SoulTypes.KnowledgeMemory pruned = SoulKnowledgeMemoryOps.removePlaces(current, positionKeys);
@@ -581,6 +590,81 @@ public final class SoulStore {
         mapper.writeValue(tmp.toFile(), memory);
         atomicReplace(tmp, file);
         cachedKnowledge.put(botId, memory);
+    }
+
+    // === mind.json (stance, open threads, day memories, seen-registry; rules in SoulMindOps) ===
+
+    public CompletableFuture<SoulTypes.SoulMind> mind(UUID botId) {
+        return submit(() -> loadMind(botId));
+    }
+
+    /** Last loaded/saved mind, readable from any thread; empty until {@link #mind} or {@link #updateMind} ran. */
+    public Optional<SoulTypes.SoulMind> cachedMind(UUID botId) {
+        return Optional.ofNullable(cachedMinds.get(botId));
+    }
+
+    /** Load -> {@code update} -> save when changed; the returned future carries the resulting mind. */
+    public CompletableFuture<SoulTypes.SoulMind> updateMind(UUID botId, UnaryOperator<SoulTypes.SoulMind> update) {
+        return submit(() -> {
+            SoulTypes.SoulMind current = loadMind(botId);
+            SoulTypes.SoulMind next = Objects.requireNonNull(update.apply(current), "updateMind returned null");
+            if (!next.equals(current)) {
+                saveMind(botId, next);
+            }
+            return next;
+        });
+    }
+
+    /** Journal events that occurred strictly after {@code after}, oldest first. */
+    public CompletableFuture<List<SoulTypes.SoulEvent>> eventsSince(UUID botId, Instant after) {
+        return submit(() -> loadTranscript(eventsFile(botId), SoulTypes.SoulEvent.class).stream()
+                .filter(event -> event.occurredAt().isAfter(after))
+                .toList());
+    }
+
+    /** Rewrites {@code events.jsonl} atomically keeping only the last {@code keepLast}; returns how many went. */
+    public CompletableFuture<Integer> trimEvents(UUID botId, int keepLast) {
+        return submit(() -> {
+            Path file = eventsFile(botId);
+            List<SoulTypes.SoulEvent> all = loadTranscript(file, SoulTypes.SoulEvent.class);
+            int keep = Math.max(0, keepLast);
+            int removed = Math.max(0, all.size() - keep);
+            if (removed == 0) {
+                return 0;
+            }
+            Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp-" + UUID.randomUUID());
+            try (BufferedWriter writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                for (SoulTypes.SoulEvent event : all.subList(all.size() - keep, all.size())) {
+                    writer.write(mapper.writeValueAsString(event));
+                    writer.write(System.lineSeparator());
+                }
+            }
+            atomicReplace(tmp, file);
+            return removed;
+        });
+    }
+
+    private SoulTypes.SoulMind loadMind(UUID botId) throws IOException {
+        SoulTypes.SoulMind cached = cachedMinds.get(botId);
+        if (cached != null) {
+            return cached;
+        }
+        Path file = mindFile(botId);
+        SoulTypes.SoulMind loaded = Files.exists(file)
+                ? mapper.readValue(file.toFile(), SoulTypes.SoulMind.class)
+                : SoulTypes.SoulMind.empty();
+        cachedMinds.put(botId, loaded);
+        return loaded;
+    }
+
+    private void saveMind(UUID botId, SoulTypes.SoulMind mind) throws IOException {
+        Path file = mindFile(botId);
+        Files.createDirectories(file.getParent());
+        Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp-" + UUID.randomUUID());
+        mapper.writeValue(tmp.toFile(), mind);
+        atomicReplace(tmp, file);
+        cachedMinds.put(botId, mind);
     }
 
     // === Index preload (disk -> cache only; never the reverse) ===
@@ -738,6 +822,10 @@ public final class SoulStore {
 
     private Path knowledgeFile(UUID botId) {
         return botDir(botId).resolve("knowledge.json");
+    }
+
+    private Path mindFile(UUID botId) {
+        return botDir(botId).resolve("mind.json");
     }
 
     // === Executor plumbing ===
