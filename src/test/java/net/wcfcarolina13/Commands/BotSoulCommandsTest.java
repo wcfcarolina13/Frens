@@ -81,16 +81,24 @@ class BotSoulCommandsTest {
                         || path.equals("/ok/piper") || path.equals("/ok/jake.onnx");
         // dreamsleeve: server script + ref clip, piper paths irrelevant
         assertTrue(BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
-                "/ds", "/ds/refs/calm.wav", exists).isEmpty());
+                "/ds", "/ds/refs/calm.wav", "", exists).isEmpty());
         assertEquals("Dreamsleeve TTS server not found: /missing/scripts/tts_server.py",
                 BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
-                        "/missing", "/ds/refs/calm.wav", exists).orElseThrow());
+                        "/missing", "/ds/refs/calm.wav", "", exists).orElseThrow());
         assertEquals("Configure a voice reference clip (soulVoiceRefAudio) first.",
                 BotSoulCommands.validateVoiceConfig("dreamsleeve", "", "",
-                        "/ds", "", exists).orElseThrow());
+                        "/ds", "", "", exists).orElseThrow());
         // piper engine delegates to the original path validation
         assertTrue(BotSoulCommands.validateVoiceConfig("piper", "/ok/piper", "/ok/jake.onnx",
-                "", "", exists).isEmpty());
+                "", "", "", exists).isEmpty());
+        // pocket: only the installed pocket-tts binary matters
+        java.util.function.Predicate<String> pocketInstalled = path ->
+                path.equals("/pocket/venv/bin/pocket-tts");
+        assertTrue(BotSoulCommands.validateVoiceConfig("pocket", "", "",
+                "", "", "/pocket", pocketInstalled).isEmpty());
+        assertEquals("Pocket TTS is not installed (Soul Voice → Eng… → Install).",
+                BotSoulCommands.validateVoiceConfig("pocket", "", "",
+                        "", "", "/elsewhere", pocketInstalled).orElseThrow());
     }
 
     /**

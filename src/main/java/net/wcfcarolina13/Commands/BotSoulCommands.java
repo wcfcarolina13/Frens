@@ -17,7 +17,9 @@ import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
 import net.wcfcarolina13.GameAI.souls.SoulTypes;
+import net.wcfcarolina13.GameAI.souls.voice.PocketVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
+import net.wcfcarolina13.GameAI.souls.voice.VoiceCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -198,12 +200,18 @@ final class BotSoulCommands {
     /**
      * Engine-aware validation for {@code /bot soul voice on}: piper checks binary + model,
      * dreamsleeve checks the repo's {@code scripts/tts_server.py} and the voice-anchor
-     * reference clip. Reports the first concrete problem found.
+     * reference clip, pocket checks the installed {@code pocket-tts} binary. Reports the first
+     * concrete problem found.
      */
     static Optional<String> validateVoiceConfig(String engine, String binary, String model,
                                                  String dreamsleeveDir, String refAudio,
-                                                 Predicate<String> isFile) {
-        if ("dreamsleeve".equals(engine)) {
+                                                 String pocketDir, Predicate<String> isFile) {
+        if (SoulVoiceSettings.ENGINE_POCKET.equals(engine)) {
+            return isFile.test(PocketVoiceEngine.binaryPath(pocketDir == null ? "" : pocketDir).toString())
+                    ? Optional.empty()
+                    : Optional.of("Pocket TTS is not installed (Soul Voice → Eng… → Install).");
+        }
+        if (SoulVoiceSettings.ENGINE_DREAMSLEEVE.equals(engine)) {
             if (dreamsleeveDir == null || dreamsleeveDir.isBlank()) {
                 return Optional.of("Configure the dreamsleeve directory first.");
             }
@@ -311,6 +319,7 @@ final class BotSoulCommands {
                 Frens.CONFIG.getSoulVoiceModel(),
                 Frens.CONFIG.getSoulVoiceDreamsleeveDir(),
                 Frens.CONFIG.getSoulVoiceRefAudio(),
+                Frens.CONFIG.getSoulVoicePocketDir(),
                 path -> Files.isRegularFile(Path.of(path)));
         if (problem.isPresent()) {
             source.sendError(Text.literal(problem.get()));
@@ -419,21 +428,32 @@ final class BotSoulCommands {
         return "global voice";
     }
 
-    /** {@code /bot soul voice list} — installed Piper voices, the catalogue, and each profile's pick. */
+    /** {@code /bot soul voice list} — the active engine's catalogue, then each bot's/profile's pick. */
     private static int executeVoiceList(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
         ManualConfig cfg = Frens.CONFIG;
-        Path dir = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.voicesDir();
-        java.util.List<String> installed = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.installedVoiceNames(dir);
-        ChatUtils.sendSystemMessage(source, "Piper voices in " + dir + ": "
-                + (installed.isEmpty() ? "none" : String.join(", ", installed)));
-        StringBuilder catalogue = new StringBuilder("Catalogue (/bot soul voice install <name>):");
-        for (net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.CatalogVoice voice
-                : net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.VOICE_CATALOG) {
-            catalogue.append("\n  ").append(voice.name()).append(" — ").append(voice.description())
-                    .append(installed.contains(voice.name()) ? " [installed]" : "");
+        String engine = cfg.getSoulVoiceEngine();
+        if (SoulVoiceSettings.ENGINE_POCKET.equals(engine)) {
+            StringBuilder catalogue = new StringBuilder("Pocket TTS voices (all available, no download needed):");
+            for (VoiceCatalog.Entry entry : VoiceCatalog.forEngine(engine)) {
+                catalogue.append("\n  ").append(entry.name()).append(" — ").append(entry.description());
+            }
+            ChatUtils.sendSystemMessage(source, catalogue.toString());
+        } else if (SoulVoiceSettings.ENGINE_DREAMSLEEVE.equals(engine)) {
+            ChatUtils.sendSystemMessage(source,
+                    "Dreamsleeve clones a reference clip: /bot soul voice assign <bot> clone <ref.wav>");
+        } else {
+            Path dir = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.voicesDir();
+            java.util.List<String> installed = net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.installedVoiceNames(dir);
+            ChatUtils.sendSystemMessage(source, "Piper voices in " + dir + ": "
+                    + (installed.isEmpty() ? "none" : String.join(", ", installed)));
+            StringBuilder catalogue = new StringBuilder("Catalogue (/bot soul voice install <name>):");
+            for (VoiceCatalog.Entry entry : VoiceCatalog.forEngine(SoulVoiceSettings.ENGINE_PIPER)) {
+                catalogue.append("\n  ").append(entry.name()).append(" — ").append(entry.description())
+                        .append(installed.contains(entry.name()) ? " [installed]" : "");
+            }
+            ChatUtils.sendSystemMessage(source, catalogue.toString());
         }
-        ChatUtils.sendSystemMessage(source, catalogue.toString());
         StringBuilder picks = new StringBuilder("Voices (/bot soul voice assign <bot|profile> <voice[#speaker]> | clone <ref.wav> | default):");
         Optional<SoulRuntime> rt = SoulRuntime.current();
         for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(source.getServer())) {
@@ -453,12 +473,18 @@ final class BotSoulCommands {
         return 1;
     }
 
-    /** {@code /bot soul voice install <name>} — background download of one pinned catalogue voice. */
+    /** {@code /bot soul voice install <name>} — background download of one pinned Piper catalogue voice. */
     private static int executeVoiceInstall(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
         if (!Frens.isOperator(source)) {
             source.sendError(Text.literal("Only an operator may install voices."));
             return 0;
+        }
+        String engine = Frens.CONFIG.getSoulVoiceEngine();
+        if (!VoiceCatalog.needsDownload(engine)) {
+            ChatUtils.sendSystemMessage(source, "No download needed — " + engine
+                    + " voices are ready. /bot soul voice assign <bot> <name>.");
+            return 1;
         }
         String name = StringArgumentType.getString(context, "voice");
         java.util.Optional<net.wcfcarolina13.GameAI.souls.voice.PiperInstaller.CatalogVoice> maybe =
@@ -521,8 +547,14 @@ final class BotSoulCommands {
         }
         net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec =
                 net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec.parse(voiceOrNull);
+        String engine = cfg.getSoulVoiceEngine();
+        if (SoulVoiceSettings.ENGINE_POCKET.equals(engine)
+                && !VoiceCatalog.isKnown(SoulVoiceSettings.ENGINE_POCKET, spec.voice())) {
+            source.sendError(Text.literal("Unknown Pocket voice '" + spec.voice() + "'. /bot soul voice list."));
+            return 0;
+        }
         String defaultModel = cfg.getSoulVoiceModel();
-        if (defaultModel != null && !defaultModel.isBlank()) {
+        if (SoulVoiceSettings.ENGINE_PIPER.equals(engine) && defaultModel != null && !defaultModel.isBlank()) {
             String resolved = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
                     defaultModel, spec.voice(), Files::isRegularFile);
             String wanted = net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine.resolveModelPath(
@@ -537,7 +569,7 @@ final class BotSoulCommands {
                 spec.voice(), spec.speaker(), "", ""));
         cfg.save();
         ChatUtils.sendSystemMessage(source, profileId + " → " + describeSpec(spec)
-                + ". Takes effect on the next spoken line (Piper keeps one warm process per voice).");
+                + ". Takes effect on the next spoken line.");
         return 1;
     }
 
