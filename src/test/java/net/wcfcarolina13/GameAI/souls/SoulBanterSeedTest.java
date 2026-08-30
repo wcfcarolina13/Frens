@@ -256,4 +256,38 @@ class SoulBanterSeedTest {
         }
         assertTrue(recalls > 0, "RECALL must be reachable when an event exists");
     }
+
+    @Test
+    void eventPhrasesUseHumanTaskNamesNotRawFactValues() {
+        // 1.1.196 field bug: "(skill:sleep, skill)" leaked into the seed and the model invented a
+        // game mechanic called "the sleep skill" that both bots then talked about for an hour.
+        assertEquals("started woodcutting", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.TASK_STARTED, SoulTypes.Salience.NORMAL, 1,
+                Map.of("task", "skill:woodcut", "category", "skill"))));
+        assertEquals("finished sleeping", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.TASK_COMPLETED, SoulTypes.Salience.LOW, 1,
+                Map.of("task", "skill:sleep", "category", "skill", "state", "TASK_COMPLETED", "reason", ""))));
+        assertEquals("botched mining (no tool)", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.TASK_FAILED, SoulTypes.Salience.NORMAL, 1,
+                Map.of("task", "skill:mine", "category", "skill", "reason", "NO_TOOL"))));
+        assertEquals("slew a zombie", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.MOB_KILLED, SoulTypes.Salience.NORMAL, 1, Map.of("mob", "Zombie"))));
+        assertEquals("took a beating from a skeleton", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "4.0", "source", "skeleton"))));
+        assertEquals("took a beating", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1, Map.of("amount", "4.0", "source", ""))));
+        assertEquals("started a task", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.TASK_STARTED, SoulTypes.Salience.NORMAL, 1, Map.of())));
+    }
+
+    @Test
+    void sleepTasksRotateUnderTheSleepTopicNotTheWork() {
+        assertEquals("sleep", SoulBanterSeed.topicOf(event(SoulTypes.EventType.TASK_STARTED,
+                SoulTypes.Salience.LOW, 1, Map.of("task", "skill:sleep", "category", "skill"))));
+        assertEquals("the work", SoulBanterSeed.topicOf(event(SoulTypes.EventType.TASK_STARTED,
+                SoulTypes.Salience.LOW, 1, Map.of("task", "skill:woodcut", "category", "skill"))));
+        assertEquals(1, SoulBanterSeed.weightOf(event(SoulTypes.EventType.TASK_COMPLETED,
+                SoulTypes.Salience.NORMAL, 1, Map.of("task", "skill:sleep", "category", "skill"))));
+    }
 }

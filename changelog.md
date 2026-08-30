@@ -2,6 +2,34 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Ontology Phase 1 field fixes: seed provenance, humanized events, player-as-animal, turn merging; 1.1.197 (2026-08-29)
+
+First 1.1.196 session (3 min, two scenes) ran clean at the pipeline level but the transcript
+showed four content bugs, all traceable to specific lines:
+
+- **WORK-lane seeds were persisted as the player's words.** `SoulGroupConversationService`
+  only gave BANTER seeds the `[banter] ` marker; WORK seeds went in as `RotiWokeman: one of you
+  needles the other about started a task (skill:sleep, skill)…` and replayed in party history as
+  something the player had said — which is why the bots kept crediting Roti with bot events
+  ("Nice job on that sleep skill, Roti"). `SceneKind.isNarratorSeeded()` (BANTER + WORK) is now
+  the single rule; LOCAL/PLAYER still replay as real utterances.
+- **Raw event facts leaked into the seed.** `SoulBanterSeed.phraseFor` appended
+  `(value, value)` from the fact map, so the model saw `started a task (skill:sleep, skill)` and
+  invented a game mechanic called "the sleep skill". Facts are now rendered per type: `started
+  woodcutting`, `finished sleeping`, `botched mining (no tool)`, `slew a zombie`, `took a
+  beating from a skeleton`. A sleep *task* now rotates under the `sleep` topic at weight 1, same
+  as SLEEP/WAKE, so the demotion from 1.1.194 finally holds.
+- **"the first player x2 any of you have seen."** `nearbyAnimals` excluded owner/self by
+  display name, but entity names are TYPE names — every player arrives as `player`, so you plus
+  the other companion aggregated into `player x2` and the seen-registry hailed it as a first
+  sighting. Players are dropped from the animal list outright; companions are roster.
+- **Same speaker twice in a row.** The 3B model likes "Bob, Bob, Jake, Jake" (and once a
+  two-line scene spoken entirely by Bob). In multi-speaker scenes the validator now merges a
+  run of lines from one speaker into one turn (counted once against the per-bot cap); solo
+  scenes keep their line breaks as pacing. The group directives also ask for turn-taking.
+- Tests: +6 (conversation service, seed ×2, grounding, validator ×2); two validator tests that
+  had encoded the old "same speaker twice" behavior were rewritten. Souls suite 465/465.
+
 ## Conversation ontology Phase 1: change-driven cues + speech-act rotation; 1.1.196 (2026-08-29)
 
 Spec: `docs/superpowers/specs/2026-08-29-frens-soul-conversation-ontology-phase1.md`. Every

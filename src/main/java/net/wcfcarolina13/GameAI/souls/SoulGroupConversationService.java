@@ -90,10 +90,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
 
         long submitStartNanos = System.nanoTime();
-        // BANTER only: a synthetic narrator seed must never replay as a player utterance. A LOCAL
-        // turn carries a real thing the player said in earshot, so it takes the ordinary
+        // BANTER and WORK: a synthetic narrator seed must never replay as a player utterance. A
+        // LOCAL turn carries a real thing the player said in earshot, so it takes the ordinary
         // speaker-tagged form and replays normally.
-        String taggedMessage = turn.kind() == SoulGroupTypes.SceneKind.BANTER
+        String taggedMessage = turn.kind().isNarratorSeeded()
                 ? SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + turn.playerMessage()
                 : turn.ownerDisplayName() + ": " + turn.playerMessage();
         partyStore.beginHeardTurn(turn.key(), correlationId, taggedMessage, turn.acceptedAt())

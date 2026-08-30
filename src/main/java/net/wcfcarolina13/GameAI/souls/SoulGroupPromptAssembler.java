@@ -71,7 +71,8 @@ public final class SoulGroupPromptAssembler {
                                     + turn.ownerDisplayName() + " does not answer in this scene.]"
                             : "[A quiet moment. The companions chat briefly among themselves."
                                     + " Cue: " + turn.playerMessage()
-                                    + ". A few short lines only."
+                                    + ". A few short lines only, taking turns — never the same"
+                                    + " speaker twice in a row."
                                     + (turn.addressPlayer()
                                             ? " One of you may end by saying one short thing to "
                                                     + turn.ownerDisplayName()
@@ -105,6 +106,7 @@ public final class SoulGroupPromptAssembler {
             case "shelter" -> "building a shelter";
             case "fortify", "fortify_village", "fortifyvillage" -> "fortifying the village";
             case "hunt", "hunting" -> "hunting";
+            case "sleep", "sleeping" -> "sleeping";
             default -> t.replace('_', ' ');
         };
     }
@@ -139,7 +141,7 @@ public final class SoulGroupPromptAssembler {
         }
         return "[The companions are busy — " + who + ". They trade a short word or two about"
                 + " the work without stopping. Cue: " + turn.playerMessage()
-                + ". A few short lines only."
+                + ". A few short lines only, taking turns — never the same speaker twice in a row."
                 + (turn.addressPlayer()
                         ? " One of you may end by saying one short thing to " + owner
                                 + " — a question or a remark addressed to them."

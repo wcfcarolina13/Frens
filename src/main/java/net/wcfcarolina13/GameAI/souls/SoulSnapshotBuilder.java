@@ -391,7 +391,7 @@ public final class SoulSnapshotBuilder {
             // Splits the 2026-08-24 "Nothing" failure into empty-equipment vs model-ignored:
             // stand the player calls "geared" logging slots=0 means the gear is not real
             // equipment (e.g. a decor mod rendering display entities over a bare stand).
-            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+            org.slf4j.LoggerFactory.getLogger("frens-souls").debug(
                     "[souls] armorstand pos={} slots={} line={}",
                     stand.getBlockPos().toShortString(), occupiedSlots,
                     displayed.isEmpty() ? "-" : String.join(", ", displayed));
@@ -424,7 +424,7 @@ public final class SoulSnapshotBuilder {
             lines.add("Item displays showing: " + SoulItemDescriber.groupCounts(displayItems));
         }
         if (!allStands.isEmpty() || !frameItems.isEmpty() || !displayItems.isEmpty()) {
-            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+            org.slf4j.LoggerFactory.getLogger("frens-souls").debug(
                     "[souls] displays stands={} visible={} frameItems={} displayItems={} lines={}",
                     allStands.size(), visibleStands.size(), frameItems.size(), displayItems.size(),
                     lines.size());
@@ -887,6 +887,11 @@ public final class SoulSnapshotBuilder {
         List<String> nearbyAnimals = inputs.entities().stream()
                 .filter(e -> !e.hostile())
                 .filter(e -> !e.name().isBlank())
+                // Entity names are TYPE names, so players (the owner, other companions, anyone)
+                // all arrive as "player" and never match the owner/self names below. Without
+                // this they aggregate into "player x2" and the scene diff hails them as the
+                // first player anyone has seen (1.1.196 field bug). Companions are roster.
+                .filter(e -> !e.name().equalsIgnoreCase("player"))
                 .filter(e -> !e.name().equalsIgnoreCase(inputs.ownerName()))
                 .filter(e -> !e.name().equalsIgnoreCase(inputs.botName()))
                 .collect(Collectors.groupingBy(RawEntity::name, LinkedHashMap::new, Collectors.counting()))

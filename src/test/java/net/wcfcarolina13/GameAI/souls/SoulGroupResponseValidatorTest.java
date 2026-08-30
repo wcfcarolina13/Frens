@@ -46,12 +46,12 @@ class SoulGroupResponseValidatorTest {
     }
 
     @Test
-    void perBotCapDropsTheThirdLineForThatBot() {
+    void perBotCapDropsTheThirdTurnForThatBot() {
         var parse = validator.parse(
-                "Jake: one\nJake: two\nSara: hi\nJake: three", ROSTER);
+                "Jake: one\nSara: hi\nJake: two\nSara: bye\nJake: three", ROSTER);
         assertTrue(parse.accepted());
-        assertEquals(3, parse.lines().size());
-        assertEquals("hi", parse.lines().get(2).text());
+        assertEquals(4, parse.lines().size());
+        assertEquals("bye", parse.lines().get(3).text());
     }
 
     @Test
@@ -83,10 +83,12 @@ class SoulGroupResponseValidatorTest {
     void sceneCapBindsWithALargerRoster() {
         List<String> roster = List.of("A", "B", "C", "D");
         StringBuilder raw = new StringBuilder();
-        for (String name : roster) {
-            raw.append(name).append(": one\n").append(name).append(": two\n");
+        for (String word : List.of("one", "two")) {
+            for (String name : roster) {
+                raw.append(name).append(": ").append(word).append('\n');
+            }
         }
-        var parse = validator.parse(raw.toString(), roster); // 8 survive per-bot caps
+        var parse = validator.parse(raw.toString(), roster); // 8 turns survive per-bot caps
         assertTrue(parse.accepted());
         assertEquals(SoulGroupTypes.MAX_SCENE_LINES, parse.lines().size());
     }
@@ -237,5 +239,28 @@ class SoulGroupResponseValidatorTest {
         // Abbreviations need 4+ letters: "Rot" is not the player, "Roti" is.
         assertTrue(SoulGroupResponseValidator.addressesOwner("Nice one, Roti!", "rotiwokeman"));
         assertFalse(SoulGroupResponseValidator.addressesOwner("That rot won't wash out.", "rotiwokeman"));
+    }
+
+    @Test
+    void consecutiveLinesFromOneSpeakerMergeIntoASingleTurn() {
+        // 1.1.196 field bug: the 3B model answered "Bob, Bob, Jake, Jake" — the same voice twice
+        // with a playback pause between, and a two-line scene spoken entirely by one bot.
+        var parse = validator.parse("Jake: What's with the sleep?\nJake: I switched to bare hands.\n"
+                + "Sara: Not with that sword.\nSara: Don't give me a hard time.", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(2, parse.lines().size());
+        assertEquals(0, parse.lines().get(0).participantIndex());
+        assertEquals("What's with the sleep? I switched to bare hands.", parse.lines().get(0).text());
+        assertEquals(1, parse.lines().get(1).participantIndex());
+        assertEquals("Not with that sword. Don't give me a hard time.", parse.lines().get(1).text());
+    }
+
+    @Test
+    void mergedRunCountsOnceAgainstThePerBotCap() {
+        var parse = validator.parse("Jake: One.\nJake: Two.\nSara: Three.\nJake: Four.\nSara: Five.\nJake: Six.", ROSTER);
+        assertTrue(parse.accepted());
+        // Jake: "One. Two." (1 turn), Sara (1), Jake "Four." (2nd turn), Sara (2nd), Jake "Six." over the cap.
+        assertEquals(4, parse.lines().size());
+        assertEquals("Four.", parse.lines().get(2).text());
     }
 }

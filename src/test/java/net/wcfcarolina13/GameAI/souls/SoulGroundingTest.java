@@ -493,4 +493,22 @@ class SoulGroundingTest {
                 Optional.empty());
         assertEquals(Optional.of("Workshop"), SoulSnapshotBuilder.buildSituation(inputs).atBase());
     }
+
+    @Test
+    void nearbyAnimalsNeverListPlayersEvenWhenTheyAreNotTheOwnerOrSelf() {
+        // 1.1.196 field bug: entity names come from the entity TYPE ("player"), so the owner /
+        // self exclusion by display name never matched and a second companion became
+        // "player x2" — which the scene diff then announced as a first sighting.
+        List<SoulSnapshotBuilder.RawEntity> entities = List.of(
+                new SoulSnapshotBuilder.RawEntity("player", false, 1.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("player", false, 2.0D, 0.0D, 0.0D),
+                new SoulSnapshotBuilder.RawEntity("wolf", false, 5.0D, 0.0D, 0.0D));
+        SoulSnapshotBuilder.SituationInputs inputs = new SoulSnapshotBuilder.SituationInputs(
+                -1.0D, entities, "RotiWokeman", "Bob", "", List.of(), List.of(), List.of(), -1, -1, false, false, false,
+                "IDLE", false, false, false, 0,
+                false, false, false, false,
+                0L, -1, 0L,
+                Optional.empty(), 0, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        assertEquals(List.of("wolf"), SoulSnapshotBuilder.buildSituation(inputs).nearbyAnimals());
+    }
 }

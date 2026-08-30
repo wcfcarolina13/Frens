@@ -100,7 +100,7 @@ final class SoulBanterSeed {
         }
         List<SoulTypes.SoulEvent> picked = pickEvents(eventsPerBot, random);
         for (SoulTypes.SoulEvent event : picked) {
-            anchors.add(new Anchor(topicOf(event.type()), phraseFor(event), weightOf(event)));
+            anchors.add(new Anchor(topicOf(event), phraseFor(event), weightOf(event)));
         }
         SoulTypes.GroundingSnapshot first = rosterGroundings.isEmpty() ? null : rosterGroundings.get(0);
         if (first != null) {
@@ -309,6 +309,11 @@ final class SoulBanterSeed {
     }
 
     /** SLEEP and WAKE are one topic ("sleep"); the rest group by what they are about. */
+    /** A sleep *task* is the same topic as the SLEEP/WAKE journal events, so rotation demotes it too. */
+    static String topicOf(SoulTypes.SoulEvent event) {
+        return isSleepTask(event) ? "sleep" : topicOf(event.type());
+    }
+
     static String topicOf(SoulTypes.EventType type) {
         return switch (type) {
             case TASK_STARTED, TASK_COMPLETED, TASK_FAILED, TASK_PAUSED, TASK_CANCELLED -> "the work";
@@ -325,8 +330,9 @@ final class SoulBanterSeed {
         };
     }
 
-    private static int weightOf(SoulTypes.SoulEvent event) {
-        if (event.type() == SoulTypes.EventType.SLEEP || event.type() == SoulTypes.EventType.WAKE) {
+    static int weightOf(SoulTypes.SoulEvent event) {
+        if (event.type() == SoulTypes.EventType.SLEEP || event.type() == SoulTypes.EventType.WAKE
+                || isSleepTask(event)) {
             return 1; // routine — never let a nap outrank the world around the bots
         }
         return switch (event.salience()) {
@@ -336,33 +342,66 @@ final class SoulBanterSeed {
         };
     }
 
-    private static String phraseFor(SoulTypes.SoulEvent event) {
-        String base = switch (event.type()) {
-            case TASK_STARTED -> "started a task";
-            case TASK_COMPLETED -> "finished a task";
-            case TASK_FAILED -> "botched a task";
-            case TASK_PAUSED -> "set a task aside";
-            case TASK_CANCELLED -> "dropped a task";
-            case BOT_DAMAGE -> "took a beating";
+    /**
+     * One human phrase per journal event. Facts are rendered per type, never dumped raw: the
+     * old generic "(value, value)" suffix put "(skill:sleep, skill)" in front of the model, which
+     * promptly invented a game mechanic called "the sleep skill" (1.1.196 field bug).
+     */
+    static String phraseFor(SoulTypes.SoulEvent event) {
+        String task = humanTask(event);
+        String phrase = switch (event.type()) {
+            case TASK_STARTED -> task.isEmpty() ? "started a task" : "started " + task;
+            case TASK_COMPLETED -> task.isEmpty() ? "finished a task" : "finished " + task;
+            case TASK_FAILED -> (task.isEmpty() ? "botched a task" : "botched " + task) + reasonSuffix(event);
+            case TASK_PAUSED -> task.isEmpty() ? "set a task aside" : "set " + task + " aside";
+            case TASK_CANCELLED -> task.isEmpty() ? "dropped a task" : "dropped " + task;
+            case BOT_DAMAGE -> "took a beating" + fromSuffix(event, "source");
             case OWNER_DAMAGE -> "saw their friend get hurt";
             case COMBAT_STARTED -> "got into a fight";
             case COMBAT_ENDED -> "came out of a fight";
-            case DEATH -> "died recently";
+            case DEATH -> "died recently" + fromSuffix(event, "source");
             case RESPAWN -> "came back from the dead";
             case SLEEP -> "got some sleep";
             case WAKE -> "just woke up";
             case DIMENSION_CHANGED -> "travelled between worlds";
             case QUEST_STAGE_CHANGED -> "moved a quest along";
-            case MOB_KILLED -> "slew a mob";
+            case MOB_KILLED -> "slew a " + humanFact(event, "mob", "mob");
             case SELF_RESCUE -> "dug themselves out of trouble";
             case HOBBY_SESSION -> "spent time on a hobby";
             case HUNT_PROGRESS -> "made progress on a hunt";
             case DIRECT_CONVERSATION -> ""; // filtered upstream; defensive
         };
-        String factSuffix = event.facts().values().stream().limit(2)
-                .reduce((a, b) -> a + ", " + b).map(s -> " (" + s + ")").orElse("");
-        String phrase = base + factSuffix;
         return phrase.length() <= MAX_PHRASE_CHARS ? phrase : phrase.substring(0, MAX_PHRASE_CHARS);
+    }
+
+    private static boolean isSleepTask(SoulTypes.SoulEvent event) {
+        String task = event.facts().getOrDefault("task", "").trim().toLowerCase(Locale.ROOT);
+        return task.equals("skill:sleep") || task.equals("sleep");
+    }
+
+    /** "skill:woodcut" → "woodcutting"; "" when the event carries no task fact. */
+    private static String humanTask(SoulTypes.SoulEvent event) {
+        String task = event.facts().getOrDefault("task", "").trim();
+        if (task.isEmpty()) {
+            return "";
+        }
+        return isSleepTask(event) ? "sleeping" : SoulGroupPromptAssembler.humanizeTask(task);
+    }
+
+    /** A fact value as prose: "NO_TOOL" → "no tool", "Zombie" → "zombie"; {@code fallback} when absent. */
+    private static String humanFact(SoulTypes.SoulEvent event, String key, String fallback) {
+        String value = event.facts().getOrDefault(key, "").trim();
+        return value.isEmpty() ? fallback : value.toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    private static String reasonSuffix(SoulTypes.SoulEvent event) {
+        String reason = humanFact(event, "reason", "");
+        return reason.isEmpty() ? "" : " (" + reason + ")";
+    }
+
+    private static String fromSuffix(SoulTypes.SoulEvent event, String key) {
+        String source = humanFact(event, key, "");
+        return source.isEmpty() ? "" : " from a " + source;
     }
 
     /** Caps a raw phrase at {@link #MAX_PHRASE_CHARS}, same bound as {@link #phraseFor}. */

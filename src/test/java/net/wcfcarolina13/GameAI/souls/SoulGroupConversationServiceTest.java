@@ -187,6 +187,23 @@ class SoulGroupConversationServiceTest {
     }
 
     @Test
+    void workSeedIsTaggedWithTheBanterMarkerNotThePlayerName() throws Exception {
+        // 1.1.196 field bug: WORK-lane seeds were persisted as "<Player>: <seed>" and replayed as
+        // something the player said, so bots credited the player with the bots' own events.
+        SoulGroupTypes.GroupSceneTurn work = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.WORK, OWNER_ID, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(JAKE_ID, "frens:jake", "Jake", grounding(JAKE_ID, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(SARA_ID, "frens:jake", "Sara", grounding(SARA_ID, "Sara"))),
+                "one of you needles the other about the work", Instant.EPOCH, UUID.randomUUID());
+        var submission = service.submit(work).get(2, SECONDS);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, submission);
+        List<SoulTypes.ConversationRecord> records =
+                partyStore.recent(work.key(), 20, 12_000).get(2, SECONDS);
+        assertEquals(SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + "one of you needles the other about the work",
+                records.get(0).content());
+    }
+
+    @Test
     void banterFailuresAreSilentToThePlayer() throws Exception {
         provider.clear();
         provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(

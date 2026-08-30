@@ -159,6 +159,16 @@ public final class SoulGroupResponseValidator {
             if (body.isEmpty()) {
                 continue;
             }
+            // Multi-speaker scenes: a run of lines from one speaker is one turn. The 3B model
+            // likes "A, A, B, B", which played as the same voice twice with a pause between
+            // (1.1.196 field bug). Merging keeps every word and counts once against the per-bot
+            // cap. Solo scenes keep their lines — there the breaks are deliberate pacing.
+            int last = lines.size() - 1;
+            if (!soloRoster && last >= 0 && lines.get(last).participantIndex() == idx) {
+                lines.set(last, new SoulGroupTypes.SceneLine(idx,
+                        truncateLine(lines.get(last).text() + " " + body)));
+                continue;
+            }
             if (perBot[idx] >= SoulGroupTypes.MAX_LINES_PER_BOT) {
                 continue;
             }

@@ -44,6 +44,16 @@ public final class SoulGroupTypes {
         public boolean isAmbient() {
             return this != PLAYER;
         }
+
+        /**
+         * True when {@code playerMessage} is a synthetic director seed rather than words the
+         * player said. Such seeds persist under {@link SoulGroupPromptAssembler#BANTER_HEARD_PREFIX}
+         * so history never replays them as a player utterance (1.1.196 field bug: WORK seeds were
+         * stored as "&lt;Player&gt;: …" and the bots started crediting the player with bot events).
+         */
+        public boolean isNarratorSeeded() {
+            return this == BANTER || this == WORK;
+        }
     }
 
     /**
