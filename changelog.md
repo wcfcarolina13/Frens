@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Sleep task no longer journaled (co-sleep was writing four events per night); 1.1.199 (2026-08-30)
+
+The "bots start sleep in daylight and finish in six seconds" anomaly from the 1.1.196 field
+log was traced, not patched: `Co-sleep: commander RotiWokeman went to sleep` → both bots
+`beginSkill("sleep")` → the task completes the moment they are in bed → vanilla's 100-tick
+sleep timer skips the night → WAKE, and the next scene correctly says "it is day". Legitimate.
+What was wrong is the journal: every night skip wrote TASK_STARTED + TASK_COMPLETED for
+`skill:sleep` (the completion at NORMAL salience — louder than any LOW event) plus SLEEP + WAKE,
+so sleep out-ranked everything real in the seed until the 1.1.194/1.1.197 demotions papered
+over it. `SoulEventObserver.isSleepTask` now drops the task pair at the source; SLEEP/WAKE stay
+the single record of a night. `noteTask*` are package-private for the new observer test.
+Souls suite 497/497.
+
 ## Pocket TTS engine + in-game installer; conversation ontology Phase 2 (mind.json); 1.1.198 (2026-08-29)
 
 Two lanes shipped together. Specs: `docs/superpowers/specs/2026-08-29-frens-soul-pocket-tts-engine-design.md`,

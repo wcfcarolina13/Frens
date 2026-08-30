@@ -23,6 +23,7 @@ import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.SELF_RESCUE;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.SLEEP;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_CANCELLED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_COMPLETED;
+import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_STARTED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.TASK_FAILED;
 import static net.wcfcarolina13.GameAI.souls.SoulTypes.EventType.WAKE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -362,5 +363,29 @@ class SoulEventObserverTest {
         List<SoulTypes.SoulEvent> events() {
             return List.copyOf(events);
         }
+    }
+
+    @Test
+    void sleepTaskIsNeverJournaledBecauseSleepAndWakeAlreadyAre() {
+        // Co-sleep (commander in bed -> bots join) used to write four events per bot per night:
+        // TASK_STARTED + TASK_COMPLETED for "skill:sleep" a second apart, then SLEEP and WAKE 100
+        // ticks later when vanilla skipped the night. The task pair is pure duplication of the
+        // sleep transitions and, at NORMAL salience, out-ranked every real event in the seed.
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+        java.time.Instant t0 = java.time.Instant.ofEpochMilli(1_000L);
+
+        observer.noteTaskStarted(bot, "skill:sleep", t0, "skill", 10L);
+        observer.noteTaskFinished(bot, "skill:sleep", "skill", TASK_COMPLETED, "", 20L);
+        assertTrue(sink.events().isEmpty(), "sleep task must not reach the journal");
+
+        observer.noteTaskStarted(bot, "skill:woodcut", t0, "skill", 30L);
+        observer.noteTaskFinished(bot, "skill:woodcut", "skill", TASK_COMPLETED, "", 40L);
+        assertEquals(List.of(TASK_STARTED, TASK_COMPLETED),
+                sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+        assertTrue(SoulEventObserver.isSleepTask("sleep"));
+        assertTrue(SoulEventObserver.isSleepTask("SKILL:SLEEP"));
+        assertFalse(SoulEventObserver.isSleepTask("skill:woodcut"));
     }
 }

@@ -553,9 +553,19 @@ public final class SoulEventObserver {
         clearSession(botId);
     }
 
-    private void noteTaskStarted(UUID botId, String taskName, Instant startedAt, String category,
-                                  long worldTick) {
-        if (botId == null || !sink.accepts(botId)) {
+    /**
+     * The sleep task is never journaled: SLEEP/WAKE transitions from {@link #observe} already
+     * record the same fact, and the task pair (start + NORMAL-salience completion a second
+     * apart, every co-sleep night skip) was the single loudest thing in the journal.
+     */
+    static boolean isSleepTask(String taskName) {
+        String lower = taskName == null ? "" : taskName.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.equals("skill:sleep") || lower.equals("sleep");
+    }
+
+    void noteTaskStarted(UUID botId, String taskName, Instant startedAt, String category,
+                         long worldTick) {
+        if (botId == null || !sink.accepts(botId) || isSleepTask(taskName)) {
             return;
         }
         TaskSignature signature = new TaskSignature(nullToEmpty(taskName), startedAt);
@@ -568,9 +578,9 @@ public final class SoulEventObserver {
                 SoulTypes.Salience.LOW, List.of());
     }
 
-    private void noteTaskPaused(UUID botId, String taskName, String category, String reasonCategory,
-                                 long worldTick) {
-        if (botId == null || !sink.accepts(botId)) {
+    void noteTaskPaused(UUID botId, String taskName, String category, String reasonCategory,
+                        long worldTick) {
+        if (botId == null || !sink.accepts(botId) || isSleepTask(taskName)) {
             return;
         }
         Map<String, String> facts = factMap("task", nullToEmpty(taskName), "category", nullToEmpty(category),
@@ -579,9 +589,9 @@ public final class SoulEventObserver {
                 SoulTypes.Salience.LOW, List.of());
     }
 
-    private void noteTaskFinished(UUID botId, String taskName, String category, SoulTypes.EventType outcome,
-                                   String reasonCategory, long worldTick) {
-        if (botId == null || !sink.accepts(botId)) {
+    void noteTaskFinished(UUID botId, String taskName, String category, SoulTypes.EventType outcome,
+                          String reasonCategory, long worldTick) {
+        if (botId == null || !sink.accepts(botId) || isSleepTask(taskName)) {
             return;
         }
         Map<String, String> facts = factMap("task", nullToEmpty(taskName), "category", nullToEmpty(category),
