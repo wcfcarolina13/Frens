@@ -38,8 +38,14 @@ final class SoulBanterSeed {
         }
     }
 
-    /** Topics that come from journal events (RECALL material). */
+    /**
+     * Topics that come from journal events, plus the mind's day memories ({@code memory:<topic>})
+     * and unanswered threads — all RECALL material (conversation ontology Phase 2).
+     */
     static boolean isEventTopic(String topic) {
+        if (topic.startsWith("memory:") || topic.equals("unanswered question")) {
+            return true;
+        }
         return switch (topic) {
             case "the work", "getting hurt", "fighting", "dying", "sleep", "travel", "quests",
                     "getting stuck", "hobbies", "hunting" -> true;
@@ -93,10 +99,28 @@ final class SoulBanterSeed {
                           String playerName, String playerActivity, RandomGenerator random,
                           Set<String> recentTopics, List<Anchor> changeAnchors,
                           java.util.Collection<SoulSpeechAct> recentActs) {
+        return buildSeed(rosterGroundings, eventsPerBot, playerName, playerActivity, random,
+                recentTopics, changeAnchors, recentActs, List.of());
+    }
+
+    /**
+     * @param mindAnchors what the roster's minds contribute ({@link SoulMindOps#anchors}): day
+     *     memories at weight 4 (above grounding, below a change) and unanswered threads at 5 —
+     *     a HIGH event or a change still wins the primary pick
+     */
+    static Seed buildSeed(List<SoulTypes.GroundingSnapshot> rosterGroundings,
+                          List<List<SoulTypes.SoulEvent>> eventsPerBot,
+                          String playerName, String playerActivity, RandomGenerator random,
+                          Set<String> recentTopics, List<Anchor> changeAnchors,
+                          java.util.Collection<SoulSpeechAct> recentActs,
+                          List<Anchor> mindAnchors) {
         Set<String> recent = recentTopics == null ? Set.of() : recentTopics;
         List<Anchor> anchors = new ArrayList<>();
         if (changeAnchors != null) {
             anchors.addAll(changeAnchors);
+        }
+        if (mindAnchors != null) {
+            anchors.addAll(mindAnchors);
         }
         List<SoulTypes.SoulEvent> picked = pickEvents(eventsPerBot, random);
         for (SoulTypes.SoulEvent event : picked) {

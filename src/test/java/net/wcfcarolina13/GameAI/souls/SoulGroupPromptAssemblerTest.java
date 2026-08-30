@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -352,5 +353,76 @@ class SoulGroupPromptAssemblerTest {
         assertTrue(all.contains("Close by: campfire (cook food), 3x chest (storage)"), all);
         assertEquals(" (hungry)", SoulGroupPromptAssembler.hungerWord(5));
         assertEquals(" (peckish)", SoulGroupPromptAssembler.hungerWord(10));
+    }
+
+    // === Conversation ontology Phase 2: the mind reaches the prompt ===
+
+    private static SoulGroupTypes.GroupSceneTurn twoBotBanterTurn(UUID jake) {
+        UUID owner = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara"))),
+                "seed-text", Instant.EPOCH, UUID.randomUUID(), false);
+    }
+
+    private static List<SoulTypes.SoulProfile> twoProfiles() {
+        return List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Sara"));
+    }
+
+    @Test
+    void stanceClauseAndOpenThreadsReachThePrompt() {
+        UUID jake = UUID.randomUUID();
+        SoulTypes.SoulMind mind = new SoulTypes.SoulMind(1, new SoulTypes.Stance(1, 2, 3),
+                List.of(new SoulTypes.OpenThread(jake, "Did you find the iron?", 0L, false)),
+                List.of(), Set.of(), 0L, 1, -1);
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(jake) ? Optional.of(mind) : Optional.empty());
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m", twoBotBanterTurn(jake),
+                twoProfiles(), List.of(), Duration.ofSeconds(5));
+        String state = req.messages().get(2).content();
+        assertTrue(state.contains("Jake:") && state.contains("wary of Bradley, fed up with being ignored"), state);
+        String saraLine = state.lines().filter(l -> l.startsWith("Sara:")).findFirst().orElse("");
+        assertFalse(saraLine.contains("wary"), "only Jake has a mind: " + saraLine);
+        String threads = req.messages().get(3).content();
+        assertTrue(threads.startsWith("OPEN THREADS"), threads);
+        assertTrue(threads.contains("Jake still wants to know: \"Did you find the iron?\""), threads);
+        assertEquals(SoulTypes.Role.SYSTEM, req.messages().get(3).role());
+    }
+
+    @Test
+    void expiredThreadsAndBaselineStanceLeaveThePromptUntouched() {
+        UUID jake = UUID.randomUUID();
+        SoulTypes.SoulMind mind = new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE,
+                List.of(new SoulTypes.OpenThread(jake, "Did you find the iron?", 0L, true)),
+                List.of(), Set.of(), 0L, 1, -1);
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(id -> Optional.of(mind));
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m", twoBotBanterTurn(jake),
+                twoProfiles(), List.of(), Duration.ofSeconds(5));
+        assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("OPEN THREADS")));
+        assertFalse(req.messages().get(2).content().contains("wary"), req.messages().get(2).content());
+    }
+
+    @Test
+    void openThreadsBlockIsBounded() {
+        UUID jake = UUID.randomUUID();
+        String longQuestion = "Did you find the iron " + "and the coal ".repeat(40) + "yet?";
+        SoulTypes.SoulMind mind = new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE,
+                List.of(new SoulTypes.OpenThread(jake, longQuestion, 0L, false),
+                        new SoulTypes.OpenThread(jake, longQuestion, 1L, false)),
+                List.of(), Set.of(), 0L, 1, -1);
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(id -> Optional.of(mind));
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m", twoBotBanterTurn(jake),
+                twoProfiles(), List.of(), Duration.ofSeconds(5));
+        String threads = req.messages().get(3).content();
+        assertTrue(threads.startsWith("OPEN THREADS"), threads);
+        assertTrue(threads.length() <= SoulGroupPromptAssembler.MAX_THREADS_BLOCK_CHARS, "" + threads.length());
+    }
+
+    @Test
+    void noMindMeansNoThreadsBlock() {
+        SoulTypes.ProviderRequest req = new SoulGroupPromptAssembler().assemble(UUID.randomUUID(), "m",
+                twoBotBanterTurn(UUID.randomUUID()), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("OPEN THREADS")));
     }
 }

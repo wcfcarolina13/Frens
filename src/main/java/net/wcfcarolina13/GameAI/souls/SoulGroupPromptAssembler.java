@@ -5,7 +5,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Assembles the single bounded orchestration prompt for a group scene (PARTY channel).
@@ -34,9 +36,23 @@ public final class SoulGroupPromptAssembler {
     static final int MAX_STATE_CHARS_PER_BOT = 400;
     static final int MAX_SITUATION_CHARS = 800;
     static final int MAX_OUTPUT_TOKENS = 320;
+    /** Whole {@code OPEN THREADS} message, header included (spec Phase 2 §3: ≤200 chars). */
+    static final int MAX_THREADS_BLOCK_CHARS = 200;
+
+    /** Per-bot mind (stance, open threads) by bot id; empty when none is loaded. */
+    private final Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup;
 
     public SoulGroupPromptAssembler() {
-        // No collaborators — assembly is a pure function of its arguments.
+        // No mind: assembly is a pure function of its arguments.
+        this(id -> Optional.empty());
+    }
+
+    /**
+     * @param mindLookup cached-copy reader of a bot's mind — must never block (called on the
+     *     assembling thread for every roster member)
+     */
+    public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup) {
+        this.mindLookup = mindLookup == null ? id -> Optional.empty() : mindLookup;
     }
 
     /**
@@ -54,6 +70,7 @@ public final class SoulGroupPromptAssembler {
         messages.add(sceneContract());
         messages.add(castBlock(turn, profiles));
         messages.add(stateBlock(turn));
+        threadsBlock(turn).ifPresent(messages::add);
         messages.addAll(boundedHistory(partyHistory));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
@@ -224,12 +241,51 @@ public final class SoulGroupPromptAssembler {
             } else if (!bot.behaviorMode().isEmpty()) {
                 state.append(", ").append(bot.behaviorMode().toLowerCase(java.util.Locale.ROOT));
             }
+            // Stance toward the owner (conversation ontology Phase 2): a word ladder from the
+            // persisted mind, "" at baseline so an unremarkable bot reads exactly as before.
+            String stance = mindLookup.apply(participant.botId())
+                    .map(mind -> SoulMindOps.stanceClause(mind.playerStance(), turn.ownerDisplayName()))
+                    .orElse("");
+            if (!stance.isEmpty()) {
+                state.append(", ").append(stance);
+            }
             sb.append(truncate(state.toString(), MAX_STATE_CHARS_PER_BOT)).append('\n');
         }
         if (!turn.roster().isEmpty()) {
             sb.append(truncate(sharedSituation(turn.roster().get(0).grounding()), MAX_SITUATION_CHARS));
         }
         return new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString());
+    }
+
+    // === Open threads (questions the owner never answered; conversation ontology Phase 2) ===
+
+    /**
+     * {@code OPEN THREADS} message listing each roster member's non-expired questions, so the
+     * model can pick a thread back up instead of asking afresh. Empty when no participant has
+     * one; bounded to {@link #MAX_THREADS_BLOCK_CHARS} in total.
+     */
+    private Optional<SoulTypes.Message> threadsBlock(SoulGroupTypes.GroupSceneTurn turn) {
+        StringBuilder sb = new StringBuilder("OPEN THREADS\n");
+        boolean any = false;
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            if (mind.isEmpty()) {
+                continue;
+            }
+            for (SoulTypes.OpenThread thread : mind.get().threads()) {
+                if (thread.expired() || thread.question().isEmpty()) {
+                    continue;
+                }
+                any = true;
+                sb.append(participant.displayName()).append(" still wants to know: \"")
+                        .append(thread.question()).append("\"\n");
+            }
+        }
+        if (!any) {
+            return Optional.empty();
+        }
+        return Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
+                truncate(sb.toString(), MAX_THREADS_BLOCK_CHARS)));
     }
 
     /** One shared vicinity paragraph, taken from the first roster member's snapshot. */
