@@ -86,7 +86,7 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
         this.spawnServer = spawnServer;
     }
 
-    static Path binaryPath(String installDir) {
+    public static Path binaryPath(String installDir) {
         return Path.of(installDir, "venv", "bin", "pocket-tts");
     }
 
