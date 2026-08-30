@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Per-bot voices: Piper voice catalogue, per-profile assignment, multi-voice engine; 1.1.190 (2026-08-29)
+
+Bradley's ask after the pacing work: "can we introduce different voices?" Yes — the
+`voiceId` seam (= soul profile id) already reached both engines and was ignored by both.
+
+- **One voice per soul profile.** `SoulTypes.VoiceSpec` (Piper model name/path + optional
+  `#speaker` for multi-speaker models, or a Dreamsleeve clone anchor). Resolution order:
+  config assignment (`soulProfileVoices` in settings.json5) → the profile JSON's `"voice"`
+  block → the global voice settings. Blank fields always fall back to global.
+- **Piper runs one warm process per (model, speaker).** `PiperVoiceEngine` is now a router
+  keyed on the resolved model; a bare name resolves inside the voices dir next to the default
+  model (`en_US-ryan-medium` → `…/voices/en_US-ryan-medium.onnx`), a missing voice falls back to
+  the default with one warning per name, `--speaker N` selects a speaker in multi-speaker
+  models. Dreamsleeve picks `ref_audio`/`ref_text` per request, so Jake's clone and a second
+  bot's clone can coexist on the same warm server.
+- **Pinned voice catalogue + commands.** `/bot soul voice list` (installed voices, catalogue,
+  each profile's effective pick), `/bot soul voice install <name>` (background download,
+  size + sha256 verified — ryan, amy, joe, hfc_male, hfc_female, en_GB-alan, libritts_r with
+  904 speakers), `/bot soul voice assign <bot> <voice[#speaker]>` / `… clone <ref.wav> [| transcript]`
+  / `… default`. Assignments take effect on the next spoken line — no reload.
+- **Test hygiene:** `SoulProfileRegistry.require` now lazy-loads the built-ins; `SoulRuntimeTest.bindJake`
+  only passed when another suite had loaded them first.
+- Tests: +3 `SoulVoiceSpecTest`, +2 Piper command/resolution. Full suite green.
+
+Field checklist: `/bot soul voice list` shows lessac installed and Jake/Bob on the global voice;
+`/bot soul voice install en_US-ryan-medium` finishes with 25/50/75/100 % lines; `/bot soul voice
+assign bob en_US-ryan-medium` → Bob's next line is a different voice while Jake's is unchanged;
+`assign bob default` reverts.
+
 ## Global toggles viewport + scroll strip fixes; 1.1.189 (2026-08-29)
 
 Field report from the 1.1.188 test (screenshots): the expanded global-toggle list showed ONE row,
