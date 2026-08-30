@@ -15,6 +15,11 @@ import java.util.Set;
  * <p>The registry is mutated: keys visible now are added after the first-seen check, so the
  * FIRST call for an audience (no previous grounding) reports first sightings only and primes
  * the registry for genuine novelty from then on.
+ *
+ * <p>Phase 2: the registry passed in is the union of the roster's persisted {@code mind.json}
+ * seen-sets ({@link SoulTypes.SoulMind#seen()}), not a per-audience in-memory set — "the first
+ * wolves any of you have seen" now survives a relaunch and holds across audiences. The caller
+ * writes the mutated keys back to every roster member's mind ({@link SoulMindOps#withSeen}).
  */
 final class SoulSceneDiff {
 

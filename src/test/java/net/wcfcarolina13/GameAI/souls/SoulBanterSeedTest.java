@@ -290,4 +290,47 @@ class SoulBanterSeedTest {
         assertEquals(1, SoulBanterSeed.weightOf(event(SoulTypes.EventType.TASK_COMPLETED,
                 SoulTypes.Salience.NORMAL, 1, Map.of("task", "skill:sleep", "category", "skill"))));
     }
+
+    // === Conversation ontology Phase 2: mind anchors join the pool ===
+
+    @Test
+    void mindAnchorsJoinThePoolAndMemoryTopicsCountAsEvents() {
+        assertTrue(SoulBanterSeed.isEventTopic("memory:fighting"));
+        assertTrue(SoulBanterSeed.isEventTopic("unanswered question"));
+        assertFalse(SoulBanterSeed.isEventTopic("memory"));
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(grounding()), List.of(List.of()), "Roti", "",
+                new Random(3), Set.of(), List.of(), List.of(),
+                List.of(new SoulBanterSeed.Anchor("unanswered question", "Bob never got an answer about \"iron?\"", 5)));
+        assertTrue(seed.text().contains("never got an answer"), seed.text());
+    }
+
+    @Test
+    void memoryAnchorsMakeRecallEligibleAndLeadOftenOverGrounding() {
+        List<SoulBanterSeed.Anchor> memories = List.of(
+                new SoulBanterSeed.Anchor("memory:fighting", "remember when a zombie got the drop on Jake on day 2", 4));
+        int memoryLed = 0;
+        int recalls = 0;
+        for (int i = 0; i < 100; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                    "Bradley", "", new Random(i), Set.of(), List.of(), List.of(), memories);
+            if (seed.topic().equals("memory:fighting")) {
+                memoryLed++;
+            }
+            if (seed.act() == SoulSpeechAct.RECALL) {
+                recalls++;
+                // richGrounding carries a "hobbies" anchor, itself RECALL material — the guarantee
+                // is that RECALL lands on event-or-memory material, not on the memory specifically.
+                assertTrue(SoulBanterSeed.isEventTopic(seed.topic()), seed.text());
+            }
+        }
+        assertTrue(memoryLed >= 15, "a memory should lead fairly often: " + memoryLed + "/100");
+        assertTrue(recalls > 0, "RECALL must be eligible with only a memory anchor");
+    }
+
+    @Test
+    void eightArgOverloadIgnoresTheMind() {
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(grounding()), List.of(List.of()), "Roti", "",
+                new Random(3), Set.of(), List.of(), List.of());
+        assertFalse(seed.text().contains("never got an answer"), seed.text());
+    }
 }
