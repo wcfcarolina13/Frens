@@ -226,8 +226,13 @@ public final class SoulConversationService {
             org.slf4j.LoggerFactory.getLogger("frens-souls").info(
                     "[souls] knowledge correlationId={} lines={}", correlationId, relevantKnowledge);
         }
+        // What this bot remembers the player saying (digest memories) -- cached read only, so a
+        // cold or unloaded mind simply contributes nothing rather than blocking the turn.
+        List<String> aboutPlayer = store.cachedMind(turn.key().botId())
+                .map(mind -> SoulMemoryDigestOps.aboutLines(mind, turn.key().playerId()))
+                .orElse(List.of());
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), profile,
-                turn.grounding(), history, events, relevantKnowledge,
+                turn.grounding(), history, events, relevantKnowledge, aboutPlayer,
                 turn.playerMessage(), settings.timeout());
 
         stages.queueDepthAtSubmit = scheduler.queueDepth();

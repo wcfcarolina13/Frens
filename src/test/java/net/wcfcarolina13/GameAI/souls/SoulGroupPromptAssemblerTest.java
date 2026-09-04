@@ -425,4 +425,81 @@ class SoulGroupPromptAssemblerTest {
                 twoBotBanterTurn(UUID.randomUUID()), twoProfiles(), List.of(), Duration.ofSeconds(5));
         assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("OPEN THREADS")));
     }
+
+    // === ABOUT <owner> block (memory digest: what the owner has said, as each bot remembers) ===
+
+    private static SoulGroupTypes.GroupSceneTurn playerTurnWithOwner(UUID owner, UUID jake, UUID sara) {
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.PLAYER, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara"))),
+                "hi", Instant.EPOCH, UUID.randomUUID(), false);
+    }
+
+    private static SoulTypes.SoulMind mindRemembering(UUID owner, String... facts) {
+        List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
+        for (String fact : facts) {
+            memories.add(new SoulTypes.PlayerMemory(owner, 3, fact, 8, -1, List.of()));
+        }
+        return new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE, List.of(), List.of(), Set.of(),
+                0L, 1, -1, memories, List.of(), java.util.Map.of());
+    }
+
+    @Test
+    void aboutOwnerBlockNamesEachBotThatRemembersSomething() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind jakeMind = mindRemembering(owner, "Bradley hates the Nether");
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(jake) ? Optional.of(jakeMind) : Optional.empty());
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(),
+                Duration.ofSeconds(5));
+        String about = req.messages().stream()
+                .map(SoulTypes.Message::content)
+                .filter(c -> c.startsWith("ABOUT Bradley"))
+                .findFirst().orElse("");
+        assertTrue(about.startsWith("ABOUT Bradley (things Bradley said, as remembered)\n"), about);
+        assertTrue(about.contains("Jake remembers:"), about);
+        assertTrue(about.contains("- Bradley hates the Nether"), about);
+        assertFalse(about.contains("Sara remembers:"), about);
+        int idx = 0;
+        for (int i = 0; i < req.messages().size(); i++) {
+            if (req.messages().get(i).content().startsWith("ABOUT Bradley")) {
+                idx = i;
+            }
+        }
+        assertEquals(SoulTypes.Role.SYSTEM, req.messages().get(idx).role());
+        // Right after CURRENT STATE (no OPEN THREADS in this fixture).
+        assertTrue(req.messages().get(idx - 1).content().startsWith("CURRENT STATE"),
+                req.messages().get(idx - 1).content());
+    }
+
+    @Test
+    void noPlayerMemoriesMeansNoAboutBlock() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.ProviderRequest none = new SoulGroupPromptAssembler().assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        assertFalse(none.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
+
+        SoulGroupPromptAssembler emptyMinds = new SoulGroupPromptAssembler(
+                id -> Optional.of(mindRemembering(owner)));
+        SoulTypes.ProviderRequest req = emptyMinds.assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
+    }
+
+    @Test
+    void aboutBlockIgnoresMemoriesAboutOtherPlayers() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind other = mindRemembering(UUID.randomUUID(), "Someone else likes fishing");
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(id -> Optional.of(other));
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
+    }
 }

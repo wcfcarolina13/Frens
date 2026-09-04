@@ -287,6 +287,9 @@ public final class SoulBanterDirector {
             seenBefore.addAll(minds.get(i).seen());
             mindAnchors.addAll(SoulMindOps.anchors(minds.get(i), roster.get(i).displayName(),
                     currentDay, random));
+            // Player-memory anchors: something the player once said, off cooldown.
+            mindAnchors.addAll(SoulMemoryDigestOps.anchors(minds.get(i), player.getUuid(),
+                    player.getName().getString(), currentDay, random));
         }
         SoulBanterSeed.Seed seeded;
         synchronized (memory) {

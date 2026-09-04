@@ -768,4 +768,67 @@ class SoulPromptAssemblerTest {
         assertTrue(block.length() <= SoulPromptAssembler.MAX_OVERHEARD_CHARS + 40,
                 "block was " + block.length() + " chars");
     }
+
+    // === ABOUT <player> block (memory digest: what the player has said, as remembered) ===
+
+    /** Index of the first message whose content contains {@code needle}, or -1. */
+    private static int indexOfContaining(List<SoulTypes.Message> messages, String needle) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i).content().contains(needle)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Index of the first message whose content starts with {@code prefix}, or -1. */
+    private static int indexOfStartingWith(List<SoulTypes.Message> messages, String prefix) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i).content().startsWith(prefix)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @Test
+    void aboutPlayerBlockAppearsAfterStateWhenPresent() {
+        SoulTypes.ProviderRequest req = assembler.assemble(UUID.randomUUID(), "m", profile, grounding,
+                List.of(), List.of(), List.of(), List.of("- Roti hates the Nether"), "hi",
+                Duration.ofSeconds(5));
+        // The system contract names AUTHORITATIVE STATE in prose, so match the block itself.
+        int state = indexOfStartingWith(req.messages(), "AUTHORITATIVE STATE\n");
+        int about = indexOfStartingWith(req.messages(), "ABOUT ");
+        assertTrue(about > state, "ABOUT=" + about + " state=" + state);
+        assertEquals(state + 1, about, "the ABOUT block sits immediately after authoritative state");
+        assertEquals(SoulTypes.Role.SYSTEM, req.messages().get(about).role());
+        assertTrue(req.messages().get(about).content().startsWith(
+                "ABOUT Player (things they said, as remembered — not facts about the world)\n"),
+                req.messages().get(about).content());
+        assertTrue(req.messages().get(about).content().contains("Roti hates the Nether"));
+
+        SoulTypes.ProviderRequest none = assembler.assemble(UUID.randomUUID(), "m", profile, grounding,
+                List.of(), List.of(), List.of(), List.of(), "hi", Duration.ofSeconds(5));
+        assertEquals(-1, indexOfStartingWith(none.messages(), "ABOUT "));
+    }
+
+    @Test
+    void aboutBlockFallsBackToTheGenericNameWithoutAPlayerSnapshot() {
+        SoulTypes.ProviderRequest req = assembler.assemble(UUID.randomUUID(), "m", profile,
+                remoteGrounding, List.of(), List.of(), List.of(), List.of("- likes cats"), "hi",
+                Duration.ofSeconds(5));
+        int about = indexOfStartingWith(req.messages(), "ABOUT ");
+        assertTrue(about > 0);
+        assertTrue(req.messages().get(about).content().startsWith("ABOUT the player ("),
+                req.messages().get(about).content());
+    }
+
+    @Test
+    void nineArgOverloadStillAssemblesWithNoAboutBlock() {
+        SoulTypes.ProviderRequest req = assembler.assemble(UUID.randomUUID(), "m", profile, grounding,
+                List.of(), List.of(), List.of("- iron is found below y=64"), "hi",
+                Duration.ofSeconds(5));
+        assertEquals(-1, indexOfStartingWith(req.messages(), "ABOUT "));
+        assertTrue(indexOfContaining(req.messages(), "RELEVANT KNOWLEDGE") > 0);
+    }
 }

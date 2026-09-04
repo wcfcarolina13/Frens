@@ -67,9 +67,10 @@ public final class SoulPromptAssembler {
             String currentMessage,
             Duration timeout) {
         return assemble(correlationId, model, profile, grounding, priorHistory, recentEvents,
-                List.of(), currentMessage, timeout);
+                List.of(), List.of(), currentMessage, timeout);
     }
 
+    /** Pre-memory-digest shape: no {@code ABOUT <player>} block. */
     public SoulTypes.ProviderRequest assemble(
             UUID correlationId,
             String model,
@@ -80,11 +81,32 @@ public final class SoulPromptAssembler {
             List<String> relevantKnowledge,
             String currentMessage,
             Duration timeout) {
+        return assemble(correlationId, model, profile, grounding, priorHistory, recentEvents,
+                relevantKnowledge, List.of(), currentMessage, timeout);
+    }
+
+    /**
+     * @param aboutPlayer bounded {@code - fact} lines the bot remembers the player saying
+     *     (see {@code SoulMemoryDigestOps#aboutLines}). Remembered speech, never world truth —
+     *     the block says so in its own header so the model cannot promote it to fact.
+     */
+    public SoulTypes.ProviderRequest assemble(
+            UUID correlationId,
+            String model,
+            SoulTypes.SoulProfile profile,
+            SoulTypes.GroundingSnapshot grounding,
+            List<SoulTypes.ConversationRecord> priorHistory,
+            List<SoulTypes.SoulEvent> recentEvents,
+            List<String> relevantKnowledge,
+            List<String> aboutPlayer,
+            String currentMessage,
+            Duration timeout) {
         List<SoulTypes.Message> messages = new ArrayList<>();
         messages.add(systemContract());
         messages.add(identityMessage(profile));
         messages.addAll(profile.examples());
         messages.add(authoritativeState(grounding));
+        aboutBlock(grounding, aboutPlayer).ifPresent(messages::add);
         messages.addAll(boundedHistory(priorHistory));
         messages.addAll(boundedEvents(recentEvents));
         if (relevantKnowledge != null && !relevantKnowledge.isEmpty()) {
@@ -96,6 +118,27 @@ public final class SoulPromptAssembler {
         messages.add(new SoulTypes.Message(SoulTypes.Role.USER, currentMessage));
 
         return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
+    }
+
+    // === ABOUT <player> (digested memories of what the player has said) ===
+
+    /**
+     * The {@code ABOUT} block, immediately after AUTHORITATIVE STATE so present truth still wins
+     * any conflict. Absent entirely when nothing is remembered, keeping prompts byte-identical
+     * for a bot with no digested memories.
+     */
+    private Optional<SoulTypes.Message> aboutBlock(SoulTypes.GroundingSnapshot grounding,
+                                                   List<String> aboutPlayer) {
+        if (aboutPlayer == null || aboutPlayer.isEmpty()) {
+            return Optional.empty();
+        }
+        // REMOTE never reads the player snapshot (class invariant); the name falls back instead.
+        String playerName = grounding.reachability() == SoulTypes.Reachability.REMOTE
+                ? "the player"
+                : grounding.player().map(SoulTypes.PlayerSnapshot::name).orElse("the player");
+        return Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
+                "ABOUT " + playerName + " (things they said, as remembered \u2014 not facts about the world)\n"
+                        + String.join("\n", aboutPlayer)));
     }
 
     // === System contract (stable, provider-neutral, no interpolation) ===
