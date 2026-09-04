@@ -378,11 +378,32 @@ final class SoulMindOps {
                 mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay());
     }
 
+    static SoulTypes.SoulMind withPlayerMemories(SoulTypes.SoulMind mind, List<SoulTypes.PlayerMemory> playerMemories) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors());
+    }
+
+    static SoulTypes.SoulMind withArchivedPlayerMemories(SoulTypes.SoulMind mind,
+                                                          List<SoulTypes.PlayerMemory> archivedPlayerMemories) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors());
+    }
+
+    static SoulTypes.SoulMind withDigestCursors(SoulTypes.SoulMind mind,
+                                                Map<String, SoulTypes.ConversationCursor> digestCursors) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors);
+    }
+
     private static SoulTypes.SoulMind rebuild(SoulTypes.SoulMind mind, SoulTypes.Stance stance,
                                               List<SoulTypes.OpenThread> threads, List<SoulTypes.DayMemory> memories,
                                               Set<String> seen, long lastConsolidatedAtMs, int lastDay,
                                               int lastTaskTrustDay) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), stance, threads, memories, seen,
-                lastConsolidatedAtMs, lastDay, lastTaskTrustDay);
+                lastConsolidatedAtMs, lastDay, lastTaskTrustDay, mind.playerMemories(),
+                mind.archivedPlayerMemories(), mind.digestCursors());
     }
 }
