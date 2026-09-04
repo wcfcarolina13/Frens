@@ -3,6 +3,43 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
+## Session Handoff 2026-09-04 — next session starts here
+
+**State:** main = origin/main @ a82aad2 (pushed). Deployed JAR on all three Prism instances:
+1.1.202. Suite 679 green. Read `.ralph/guardrails.md` before touching code; `CLAUDE.md` here is
+gitignored but present locally.
+
+**Shipped today:** 1.1.200 (ollama4j shared-state fix + woodcut-loop diagnostic), 1.1.201 (soul
+memory digest = CONSOLIDATION phase 1: spec/plan under `docs/superpowers/`), 1.1.202 (torch-hold
+gate diagnostics, `CreeperEvasionPolicy`, the `BotCreeperDefenseService.isFusing` root-cause fix),
+Windows support for the Pocket TTS installer (unreleased, on main), README rewrite, merged field
+checklist `docs/testing/FIELD_SESSION_1.1.202.md` + `GUIDED_SESSION_PROTOCOL.md`.
+
+**Do next, as one build (1.1.203), same loop as today — implement → review → merge → push:**
+1. **Config sync stub fix.** `configNetworkManager` / `ConfigJsonUtil.configToJson/applyConfigJson`
+   are compile-time no-op stubs, so ALL global config (incl. the Voice toggle) is single-player
+   only. Make the sync real (S2C on join + on change), with unit tests for the JSON round-trip.
+   Detail in the "Multiplayer Voice Muting" section below.
+2. **Per-player voice mute masks** on top of it: replace the broadcast in
+   `BotDialoguePlayer.playSound` with a per-recipient loop, C2S payload for each client's mask,
+   consult it in `VoiceLineMuteService.isMuted(category, viewer)` (the `viewer` seam exists).
+3. **Model manager RAM warning** — read `OperatingSystemMXBean.getTotalMemorySize()`, warn when
+   a model's `recommendedRamGb` exceeds it (`OllamaModelInstaller.KnownModel`).
+4. **Grey out Dreamsleeve off macOS** in the voice engine chooser (`EngineRow` list).
+
+Then (separate builds): `InventoryIterator` refactor (bundle-aware slots for HungerService /
+MiningTool / CraftingHelper / ChestStoreService); second soul persona JSON draft; delete legacy
+`CompanionSpellsScreen` (still referenced from `FrensClient.java:38, 1578`).
+
+**Needs Bradley, not a session alone:** the guided field session on 1.1.202 (one merged checklist,
+he plays, Claude directs from `latest.log`); the doorway rework architecture decision; the
+ACTION REQUESTS design interview.
+
+**Rules that bit today:** never `git add -A` (untracked `logs/`, `voices/ab-test/`); the vault
+git-guard hook blocks any `git add/commit` text while the shell cwd is inside `~/pontus/vault`
+— `cd` out in a separate call; bump `mod_version` only when deploying; deploy only after the
+`pgrep … natives` check says the game is closed.
+
 ## Backlog Lineup 2026-09-03
 
 **Where things stand:** main at 1.1.199, deployed to all three Prism instances, 240 commits
