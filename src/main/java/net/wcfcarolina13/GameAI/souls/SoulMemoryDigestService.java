@@ -96,7 +96,20 @@ public final class SoulMemoryDigestService {
                     return digestOne(partyStore, botId, bot, day,
                             SoulGroupTypes.partyKey(ownerId), ownerId, name, true);
                 }))
-                .handle((ignored, error) -> null);
+                .handle((ignored, error) -> {
+                    if (error != null) {
+                        LOGGER.warn("[souls] memory digest sweep failed bot={} : {}", botId,
+                                describe(error));
+                    }
+                    return null;
+                });
+    }
+
+    /** Unwraps a {@link java.util.concurrent.CompletionException} to the class + message that caused it. */
+    private static String describe(Throwable error) {
+        Throwable cause = error.getCause() != null
+                && error instanceof java.util.concurrent.CompletionException ? error.getCause() : error;
+        return cause.getClass().getName() + ": " + cause.getMessage();
     }
 
     /** Runs {@code step} over {@code ids} strictly one after another; a null step is skipped. */
@@ -139,7 +152,7 @@ public final class SoulMemoryDigestService {
                 })
                 .handle((ignored, error) -> {
                     if (error != null) {
-                        log(botId, playerId, key, "provider-failed:INTERNAL", 0, 0);
+                        log(botId, playerId, key, "error:INTERNAL", 0, 0);
                     }
                     return null;
                 });
@@ -158,12 +171,18 @@ public final class SoulMemoryDigestService {
 
         return scheduler.submit(schedulerKey, 0L, () -> provider.generate(request))
                 .handle((result, error) -> Outcome.of(result, error, playerName))
-                .thenCompose(outcome -> store.updateMind(botId, mind -> SoulMemoryDigestOps.withCursor(
-                                SoulMindOps.withPlayerMemories(mind, SoulMemoryDigestOps.merge(
-                                        mind.playerMemories(), playerId, outcome.facts(), day, sources)),
-                                cursorKey, material.next()))
-                        .thenAccept(ignored -> log(botId, playerId, key, outcome.label(),
-                                outcome.facts().size(), material.playerLines())));
+                .thenCompose(outcome -> {
+                    if (outcome.skipWrite()) {
+                        log(botId, playerId, key, outcome.label(), 0, material.playerLines());
+                        return CompletableFuture.completedFuture((Void) null);
+                    }
+                    return store.updateMind(botId, mind -> SoulMemoryDigestOps.withCursor(
+                                    SoulMindOps.withPlayerMemories(mind, SoulMemoryDigestOps.merge(
+                                            mind.playerMemories(), playerId, outcome.facts(), day, sources)),
+                                    cursorKey, material.next()))
+                            .thenAccept(ignored -> log(botId, playerId, key, outcome.label(),
+                                    outcome.facts().size(), material.playerLines()));
+                });
     }
 
     /** Distinct correlation ids of the player lines this material was built from. */
@@ -180,20 +199,29 @@ public final class SoulMemoryDigestService {
     /**
      * The provider's answer reduced to a log label plus the validated facts. A {@code success=false}
      * result is a typed provider failure; an exceptional future is an unexpected internal one.
-     * Both advance the cursor with zero facts.
+     * Both advance the cursor with zero facts, except {@code CANCELLED} / {@code STALE_EPOCH}: the
+     * scheduler never actually ran the job (or ran a superseded one), so — like {@code too-few} —
+     * nothing was consumed and the cursor is left untouched for a later attempt.
      */
-    private record Outcome(List<String> facts, String label) {
+    private record Outcome(List<String> facts, String label, boolean skipWrite) {
 
         static Outcome of(SoulTypes.ProviderResult result, Throwable error, String playerName) {
             if (error != null || result == null) {
-                return new Outcome(List.of(), "provider-failed:INTERNAL");
+                return new Outcome(List.of(), "provider-failed:INTERNAL", false);
             }
             if (!result.success()) {
+                SoulTypes.FailureCode code = result.failureCode();
+                if (code == SoulTypes.FailureCode.CANCELLED) {
+                    return new Outcome(List.of(), "cancelled", true);
+                }
+                if (code == SoulTypes.FailureCode.STALE_EPOCH) {
+                    return new Outcome(List.of(), "stale-epoch", true);
+                }
                 return new Outcome(List.of(), "provider-failed:"
-                        + (result.failureCode() == null ? "INTERNAL" : result.failureCode().name()));
+                        + (code == null ? "INTERNAL" : code.name()), false);
             }
             List<String> facts = SoulMemoryDigestOps.validate(result.text(), playerName);
-            return new Outcome(facts, facts.isEmpty() ? "none" : "ok");
+            return new Outcome(facts, facts.isEmpty() ? "none" : "ok", false);
         }
     }
 

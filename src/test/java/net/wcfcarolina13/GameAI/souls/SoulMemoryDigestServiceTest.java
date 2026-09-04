@@ -110,6 +110,23 @@ class SoulMemoryDigestServiceTest {
     }
 
     @Test
+    void cancelledDoesNotAdvanceCursorOrWriteMemories() throws Exception {
+        SoulTypes.ConversationKey key =
+                new SoulTypes.ConversationKey(BOT_ID, PLAYER_ID, SoulTypes.Channel.DIRECT);
+        heard(key, "I hate the Nether", "I want to build a farm", "call the base Home",
+                "creepers scare me");
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(false,
+                "", SoulTypes.FailureCode.CANCELLED, "test", "test-model", 5L, null, null, null)));
+
+        service.digest(BOT_ID, "Jake", 3, Map.of(PLAYER_ID, "Roti")).get(5, SECONDS);
+
+        SoulTypes.SoulMind mind = store.mind(BOT_ID).get(5, SECONDS);
+        assertEquals(0, mind.playerMemories().size());
+        assertNull(mind.digestCursors().get("DIRECT:" + PLAYER_ID));
+        assertEquals(1, provider.requests().size());
+    }
+
+    @Test
     void tooFewLinesDoesNotCallProviderOrMoveCursor() throws Exception {
         SoulTypes.ConversationKey key =
                 new SoulTypes.ConversationKey(BOT_ID, PLAYER_ID, SoulTypes.Channel.DIRECT);
