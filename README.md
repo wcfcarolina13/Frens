@@ -1,6 +1,6 @@
 # Frens
 
-**An NPC companion mod for Minecraft that adds personality-driven bots with survival skills, optional AI/LLM hooks, and autonomous companion behaviors.**
+**An NPC companion mod for Minecraft that adds personality-driven bots with survival skills, autonomous companion behaviors, and optional local-LLM "souls" for conversation.**
 
 > This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a companion-focused NPC system with extensive skill automation, survival mechanics, optional AI/LLM infrastructure, and active UX/roadmap work.
 
@@ -8,7 +8,7 @@
 
 ### 🤖 Intelligent Bot Companions
 - **Multiple bots** can run concurrently, each with persistent inventory, stats, and personality
-- **Optional AI / natural-language infrastructure** - the repo already includes optional LLM routing, tool-calling, provider hooks, and per-bot controls, but core play does not depend on any provider
+- **Optional "souls"** - local-LLM conversation, banter and memory via Ollama, off by default; core play never depends on it (see below)
 - **Distinct personalities** - Jake is a pragmatic engineer, Bob is a sardonic ranger
 - **Death recovery** - bots ask if they should continue their last job after respawning
 - **Learning Mode v1** - operator-only demonstration capture for recording traces used to tune movement/build behavior offline
@@ -34,56 +34,57 @@
 - **Combat** - defends itself and nearby allies from hostiles
 - **Day/night cycle** - returns to base at sunset, sleeps, resumes at dawn
 
-### 💬 Optional AI / LLM Features
-Core bot functionality does **not** require an LLM provider.
+### 💬 Souls — optional local-LLM conversation (off by default)
 
-This repo already contains optional AI-facing infrastructure, including:
+Core bot functionality does **not** need an LLM, a voice engine, or any download. Everything in
+this section is opt-in, runs entirely on your machine, and is a documented no-op until you turn
+it on. With souls off, bots use the scripted dialogue lines that ship in the JAR.
 
-- world-level and per-bot LLM toggles
-- provider/client plumbing for optional runtime integrations
-- tool-calling / routing code paths
-- Learning Mode v1 demonstration capture for offline tuning and future ML/LLM workflows
+**What souls add** (per bot, `/bot soul enable <Bot>`): direct chat with a bot by name, group
+scenes ("bots, …"), ambient banter between bots when things are calm, opt-in reactions to
+nearby unaddressed chat, a per-bot mind (stance toward you, open questions, day memories) and,
+since 1.1.201, a **memory digest**: at each Minecraft day rollover the bot summarises what you
+said to it into a few short facts it can bring up later. `/bot soul memory <Bot>` shows them;
+`/bot soul reset <Bot>` forgets them; `/bot soul digest off` disables the digest.
 
-These systems are still partial and actively evolving, so they should be treated as optional layers on top of the main companion gameplay loop rather than mandatory setup.
+**Requirements for souls**
 
-### 🗺️ High-Level Roadmap
+- [Ollama](https://ollama.com) running locally (the mod talks to `http://127.0.0.1:11434` and
+  cannot install Ollama for you). Only the local Ollama provider is supported; nothing is sent to
+  a remote service.
+- A pulled chat model. The in-game model manager (Bot Control → LLM…) lists a few tested tags
+  with download size and a recommended-RAM guide; `llama3.1:8b` is what the prompts were tuned
+  on, `llama3.2:3b` is the light option. The manager shows sizes before downloading and does not
+  check your machine's RAM for you.
+- Master switch `soulsEnabled` (Bot Control) plus a per-bot enable. Banter, local chat and voice
+  each have their own switch and default off.
 
-Verified near-term work in the repo currently points at three big buckets:
+**Optional voice** (`Bot Control → Soul Voice`). Three engines; all are installed on request, never
+silently:
 
-- **Active polish:** fortify tower reliability, cavity/callout verification, guide clarity, keybind/help cleanup, and learning-trace playtesting/tuning
-- **Current optional AI work:** improving provider UX, memory/tool routing, and tightening the safety/clarity of AI-assisted control paths
-- **Future exploration:** using captured learning traces and optional LLM systems to improve control quality without making core companion gameplay depend on online AI services
+| Engine | What it is | Platforms | What the installer does |
+|---|---|---|---|
+| Piper | Fast CPU TTS, generic voices | macOS (Apple Silicon / Intel), Windows x64, Linux x64. ARM Windows/Linux: unsupported, the screen says so | Downloads pinned, sha256-checked release archives (~30 MB) and a voice model into `config/frens/piper/` |
+| Pocket TTS | CPU TTS, more natural, 21 preset voices | Needs `uv` or Python ≥ 3.10 on `PATH`. Detection currently looks in macOS/Linux locations only; **Windows is not yet supported by the installer** | Creates a Python venv in `config/frens/pocket-tts/` and `pip install`s `pocket-tts` (~850 MB incl. torch); first use pulls a 228 MB model into your Hugging Face cache |
+| Dreamsleeve | Voice-clone server on Apple Metal | macOS Apple Silicon only, configured by path; no installer | Nothing — you run the server yourself |
 
-Roadmap items here are intentionally high-level and based only on tracked tasks, current code, and changelog history.
+Every installer screen shows source, size and destination before you confirm, and detects an
+existing install. **Honest caveat:** souls and the voice engines have so far been field-tested
+only on one macOS Apple Silicon machine (M2 Pro, 32 GB). The Windows and Linux Piper paths are
+pinned but untested; please report what you see.
 
+**Load.** Soul generations and TTS run on your CPU/GPU alongside the game. The optional
+[LoadGoverner](https://github.com/wcfcarolina13) companion mod lowers bot activity while a
+generation is in flight; without it, expect frame dips on lighter machines during replies.
 
-### ⚙️ Building with AI/LLM support (optional)
+### 🧪 Learning Mode and the legacy AI runtime
 
-By default this project avoids bundling heavy AI runtimes. If you want to enable AI/LLM runtime packaging (which includes native runtimes and AI libraries), set the Gradle project property `aiEnabled` to `true` when building.
-
-Build examples:
-
-- Build normally (no AI runtime bundled):
-
-```bash
-./gradlew build
-```
-
-- Build with AI/LLM runtime packaging enabled:
-
-```bash
-./gradlew build -PaiEnabled=true
-```
-
-Enabling AI packaging will include large native libraries (e.g., PyTorch natives) and may significantly increase build times and the resulting JAR size. Use it only if you intend to run LLM providers locally or bundle them for deployment.
-
-To enable the flag permanently for your environment, add to `gradle.properties`:
-
-```text
-aiEnabled=true
-```
-
-If you do not bundle the AI runtime, you'll still need to provide a compatible LLM provider at runtime (install native engines or configure a remote provider). Refer to provider-specific docs for setup when enabling AI packaging.
+- **Learning Mode v1** - operator-only demonstration capture for recording traces used to tune
+  movement/build behavior offline. No LLM involved.
+- The repository still carries an older, separate LLM/tool-calling stack (ollama4j + DJL). It is
+  compile-only and **not** what souls use. Building with `./gradlew build -PaiEnabled=true`
+  bundles those native runtimes (large JAR, slow build); the normal `./gradlew build` does not,
+  and the default JAR never touches them at runtime.
 
 ### 📦 Persistence
 - **Inventory** - saved/loaded automatically between sessions
@@ -99,7 +100,7 @@ If you do not bundle the AI runtime, you'll still need to provide a compatible L
 2. Install [Fabric API](https://modrinth.com/mod/fabric-api)
 3. (Recommended) Install [Carpet Mod](https://modrinth.com/mod/carpet) for fake-player support
 4. Drop the Frens JAR into your `mods/` folder
-5. (Optional) Install/configure an LLM provider only if you want to experiment with the optional AI/LLM features (not required for normal gameplay)
+5. (Optional) Install [Ollama](https://ollama.com) and pull a model only if you want souls (see the Souls section); not required for normal gameplay
 
 ### Creating Downloadable GitHub Releases
 

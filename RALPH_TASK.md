@@ -710,6 +710,15 @@ New mob-proximity and context-triggered ambient lines. All would extend the exis
 - Pool split landed: [PetProximityReactionService.java:79-87](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L79-L87) defines `ANIMAL_WELL_BEHAVED_LINES` (broad tamed-non-wolf trigger, 90s cooldown) and `MOUNT_QUALITY_LINES` ("That's a quality animal", mount-only trigger via `hasNearbyMountAnimal` at [lines 213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232) covering tamed `AbstractHorseEntity` / any `CamelEntity` / `LlamaEntity` & `TraderLlamaEntity` as `AbstractHorseEntity` subclasses).
 - Cooldown bumped: [line 36](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L36) — `MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L`.
 
+## Installer portability (Backlogged 2026-09-04 — only ever tested on the M2 Pro Mac)
+
+Bradley asked whether the installers cater to the user's machine. They detect **platform**, not specs:
+- [ ] **Pocket TTS installer has no Windows support** — `PocketInstaller.uvCandidates/pythonCandidates` search Homebrew, python.org framework, `/usr/local` and `PATH` for `uv`/`python3`; no `uv.exe`/`python.exe`/`py` launcher, no `Scripts/` venv layout. A Windows user with Python installed gets "No Python 3.10+ or uv found". Add Windows candidates + venv `Scripts\python.exe` path, and test.
+- [ ] **Piper Windows x64 / Linux x64 paths are pinned (sha256) but untested** — zip extraction on Windows and the `.exe` name, `.so` completeness on Linux. ARM Windows/Linux are explicitly unsupported (screen says so). Needs one run each.
+- [ ] **No RAM/cores/GPU detection anywhere** — the Ollama model manager shows a recommended-RAM guide per model but does not read the machine's RAM; Pocket pins `OMP_NUM_THREADS=1`; Piper spawns one process per voice. A cheap win: read `Runtime.maxMemory` / `OperatingSystemMXBean.getTotalMemorySize()` and warn when a model's recommended RAM exceeds it.
+- [ ] **Dreamsleeve is Mac-Metal only by construction** — fine, but the engine chooser should grey it out off-macOS instead of letting the user configure a path that can never work.
+- [x] README now states all of the above honestly (2026-09-04).
+
 ## TTS Latency / System Load (Backlogged 2026-08-25)
 
 Bradley (field round on 1.1.167/168): soul TTS response "quite slow, and seems to bug the
