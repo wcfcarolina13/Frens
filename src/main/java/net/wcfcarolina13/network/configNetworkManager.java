@@ -92,6 +92,9 @@ public final class configNetworkManager {
             return;
         }
         try {
+            if (!ServerPlayNetworking.canSend(player, OpenConfigPayload.ID)) {
+                return;
+            }
             ServerPlayNetworking.send(player, new OpenConfigPayload(ConfigJsonUtil.configToJson()));
         } catch (Throwable t) {
             Frens.LOGGER.warn("sendOpenConfigPacket failed: {}", String.valueOf(t));
@@ -136,6 +139,20 @@ public final class configNetworkManager {
         return player != null && !(player instanceof net.wcfcarolina13.Entity.createFakePlayer);
     }
 
+    /**
+     * Server-side: true if {@code player} may edit the shared config — an op, or the host of an
+     * integrated (single-player) server, which has no ops.json entry when cheats are off.
+     */
+    private static boolean canEditConfig(MinecraftServer server, ServerPlayerEntity player) {
+        if (server == null || player == null) {
+            return false;
+        }
+        if (Frens.isOperator(player)) {
+            return true;
+        }
+        return server.isHost(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()));
+    }
+
     // ------------------------------------------------------------------ server receivers
 
     /**
@@ -150,7 +167,7 @@ public final class configNetworkManager {
             }
             String json = payload.configJson();
             context.server().execute(() -> {
-                if (!Frens.isOperator(sender)) {
+                if (!canEditConfig(context.server(), sender)) {
                     Frens.LOGGER.warn("Rejected config save from non-operator {}", sender.getName().getString());
                     sendConfigSync(sender);
                     return;
@@ -194,7 +211,7 @@ public final class configNetworkManager {
             String provider = payload.provider();
             String apiKey = payload.apiKey();
             context.server().execute(() -> {
-                if (!Frens.isOperator(sender)) {
+                if (!canEditConfig(context.server(), sender)) {
                     Frens.LOGGER.warn("Rejected API key save from non-operator {}", sender.getName().getString());
                     return;
                 }
@@ -224,7 +241,7 @@ public final class configNetworkManager {
             String apiKey = payload.apiKey();
             String url = payload.url();
             context.server().execute(() -> {
-                if (!Frens.isOperator(sender)) {
+                if (!canEditConfig(context.server(), sender)) {
                     Frens.LOGGER.warn("Rejected custom provider save from non-operator {}", sender.getName().getString());
                     return;
                 }
