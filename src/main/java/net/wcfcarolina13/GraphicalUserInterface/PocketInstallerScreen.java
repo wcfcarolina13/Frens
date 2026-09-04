@@ -167,8 +167,7 @@ public class PocketInstallerScreen extends Screen {
             drawRow(context, cx, y, true,
                     elide("Runtime: " + rt.version() + " (" + rt.executable() + ")", 64));
         } else {
-            drawRow(context, cx, y, false,
-                    "No Python 3.10+ or uv found — install uv from docs.astral.sh/uv");
+            drawRow(context, cx, y, false, elide(PocketInstaller.missingRuntimeHint(), 66));
         }
         y += 11;
         drawRow(context, cx, y, diskOk(p), "Disk space: need ~2 GB free — "

@@ -87,7 +87,12 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
     }
 
     public static Path binaryPath(String installDir) {
-        return Path.of(installDir, "venv", "bin", "pocket-tts");
+        return binaryPath(installDir, PocketInstaller.Platform.current());
+    }
+
+    /** The installer-managed venv's {@code pocket-tts} console script, per platform layout. */
+    static Path binaryPath(String installDir, PocketInstaller.Platform platform) {
+        return PocketInstaller.venvScript(Path.of(installDir, "venv"), "pocket-tts", platform);
     }
 
     static List<String> command(String installDir, int port) {
