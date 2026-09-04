@@ -758,9 +758,15 @@ public class FrensClient implements ClientModInitializer {
             tickLookedAtBotStatusPeek(client);
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ConfigSyncPayload.ID, (payload, context) -> {
+            String configJson = payload.configJson();
+            context.client().execute(() -> ConfigJsonUtil.applyConfigJson(configJson));
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (payload, context) -> {
-            ConfigJsonUtil.applyConfigJson(payload.configData());
+            String configJson = payload.configData();
             context.client().execute(() -> {
+                ConfigJsonUtil.applyConfigJson(configJson);
                 MinecraftClient client = MinecraftClient.getInstance();
                 Screen parent = client.currentScreen;
                 client.setScreen(new ConfigManager(Text.literal("AI Player Configuration"), parent));
