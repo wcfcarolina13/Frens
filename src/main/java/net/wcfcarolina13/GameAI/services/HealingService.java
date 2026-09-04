@@ -11,6 +11,8 @@ import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.PlayerUtils.BundleReachPolicy;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,15 +119,58 @@ public final class HealingService {
      */
     public static boolean hasAbundantFood(ServerPlayerEntity bot) {
         if (bot == null) return false;
-        PlayerInventory inv = bot.getInventory();
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack stack = inv.getStack(i);
-            if (stack.isEmpty() || stack.getCount() < 64) continue;
-            if (isPrecious(stack) || isForbidden(stack)) continue;
-            FoodComponent food = getFoodComponent(stack);
-            if (food != null && food.nutrition() > 0) return true;
+        // Bundle-aware: a stack tucked into a bundle still counts toward "plenty to eat".
+        return InventoryIterator.stream(bot)
+                .map(InventoryIterator.SlotRef::stack)
+                .anyMatch(stack -> stack.getCount() >= 64
+                        && !isPrecious(stack)
+                        && !isForbidden(stack)
+                        && getFoodComponent(stack) != null
+                        && getFoodComponent(stack).nutrition() > 0);
+    }
+
+    /** Foods {@link #findCheapestSafeFood} would consider eligible (ignoring the raw/cooked split). */
+    private static boolean isSafeEdible(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        FoodComponent food = getFoodComponent(stack);
+        if (food == null || food.nutrition() <= 0) return false;
+        return !isForbidden(stack) && !isPrecious(stack);
+    }
+
+    /**
+     * "No food in a direct slot, but there is food inside a bundle" recovery.
+     *
+     * <p>Pulls one safe edible out of a bundle so the slot-indexed eat path can reach it.
+     * {@code BundleService.extract} is <b>server-thread only</b>; {@link #stabilizeEat} runs on a
+     * worker thread, so the extraction is scheduled with the same
+     * {@code bot.getCommandSource().getServer().execute(...)} hop that path already uses for
+     * {@link #consumeFood}, then briefly waited on before the caller rescans.
+     *
+     * @return true when an extraction was performed (caller should rescan the inventory)
+     */
+    private static boolean tryReachBundledFood(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        int direct = InventoryIterator.countDirect(bot, HealingService::isSafeEdible);
+        int total = InventoryIterator.count(bot, HealingService::isSafeEdible);
+        // One bite is enough to unblock the eat path; the caller loops if it needs more.
+        if (BundleReachPolicy.extractionsNeeded(1, direct, total - direct) <= 0) {
+            return false;
         }
-        return false;
+        var server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return false;
+        }
+        if (server.isOnThread()) {
+            return BundleService.extractFirst(bot, HealingService::isSafeEdible).isPresent();
+        }
+        server.execute(() -> BundleService.extractFirst(bot, HealingService::isSafeEdible));
+        try {
+            Thread.sleep(60L); // let the scheduled extraction land before the rescan
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return InventoryIterator.countDirect(bot, HealingService::isSafeEdible) > direct;
     }
 
     private HealingService() {
@@ -210,6 +255,9 @@ public final class HealingService {
 
         PlayerInventory inv = bot.getInventory();
         OptionalInt foodSlot = findCheapestSafeFood(inv);
+        if (foodSlot.isEmpty() && tryReachBundledFood(bot)) {
+            foodSlot = findCheapestSafeFood(inv);
+        }
         if (foodSlot.isEmpty()) {
             // Last resort: eat rotten flesh if starving or hurt with no other food.
             // Hunger debuff is annoying but better than starving to death.
@@ -242,6 +290,9 @@ public final class HealingService {
 
             PlayerInventory inv = bot.getInventory();
             OptionalInt slot = findCheapestSafeFood(inv);
+            if (slot.isEmpty() && tryReachBundledFood(bot)) {
+                slot = findCheapestSafeFood(inv);
+            }
             if (slot.isEmpty()) {
                 // Desperate: try rotten flesh but only as the first bite
                 if (eaten == 0) slot = findDesperateFood(inv);
@@ -277,7 +328,10 @@ public final class HealingService {
         // Eat until fully satiated
         while (hunger.getFoodLevel() < 20) {
             OptionalInt foodSlot = findCheapestSafeFood(inv);
-            
+            if (foodSlot.isEmpty() && tryReachBundledFood(bot)) {
+                foodSlot = findCheapestSafeFood(inv);
+            }
+
             if (foodSlot.isEmpty()) {
                 if (consumed == 0) {
                     ChatUtils.sendChatMessages(bot.getCommandSource(), "I don't have any safe food to eat!");

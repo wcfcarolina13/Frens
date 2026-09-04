@@ -24,6 +24,7 @@ import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1186,10 +1187,19 @@ public final class SmeltingService {
         }
         String filterNorm = normalizeName(itemFilter);
         String filterSlug = filterNorm.replace(" ", "");
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
+        // Direct slots only: cookAllFoodSync moves stacks by slot index on the server thread, and a
+        // bundle extraction mid-batch would shift those indices. Bundled cookables are only reported.
+        int bundledCookables = 0;
+        for (InventoryIterator.SlotRef<ItemStack> ref : InventoryIterator.stream(bot).toList()) {
+            ItemStack stack = ref.stack();
             if (stack.isEmpty()) continue;
             if (isFuelItem(stack, world)) {
+                continue;
+            }
+            if (!ref.isDirect()) {
+                if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
+                    bundledCookables += stack.getCount();
+                }
                 continue;
             }
             String stackNameNorm = normalizeName(stack.getName().getString());
@@ -1202,6 +1212,10 @@ public final class SmeltingService {
             if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
                 found.computeIfAbsent(stack.getItem(), k -> new ArrayList<>()).add(stack.copy());
             }
+        }
+        if (bundledCookables > 0) {
+            LOGGER.debug("{} has {} cookable item(s) sitting inside bundles — not queued for the furnace.",
+                    bot.getName().getString(), bundledCookables);
         }
         return found;
     }

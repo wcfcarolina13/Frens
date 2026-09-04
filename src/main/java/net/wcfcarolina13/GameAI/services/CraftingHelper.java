@@ -37,6 +37,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.List;
+import net.wcfcarolina13.PlayerUtils.BundleReachPolicy;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Map;
@@ -500,19 +502,19 @@ public final class CraftingHelper {
         return crafts;
     }
 
+    private static boolean isPlank(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS);
+    }
+
+    /** Bundle-aware plank count. Pair every consume with {@link #reachForItem} first. */
     private static int countPlanks(ServerPlayerEntity bot) {
-        int total = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            if (stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) {
-                total += stack.getCount();
-            }
-        }
-        return total;
+        return InventoryIterator.count(bot, CraftingHelper::isPlank);
     }
 
     private static boolean consumePlanks(ServerPlayerEntity bot, int needed) {
+        // Bundle-aware counts feed the "can I craft this?" gate, but decrementing a bundled view is a
+        // no-op — pull the shortfall into real slots before touching any stack.
+        reachForItem(bot, CraftingHelper::isPlank, needed);
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
@@ -2102,18 +2104,43 @@ public final class CraftingHelper {
         return crafts;
     }
 
+    /** Bundle-aware item count. Pair every consume with {@link #reachForItem} first. */
     private static int countItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
-        int total = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isOf(item)) {
-                total += stack.getCount();
-            }
+        if (item == null) {
+            return 0;
         }
-        return total;
+        return InventoryIterator.count(bot, stack -> stack.isOf(item));
+    }
+
+    /**
+     * Pulls bundled copies of {@code match} into direct inventory slots until the direct supply covers
+     * {@code needed} (or the bundles run dry).
+     *
+     * <p>Mutation path — <b>server thread only</b>, same as its callers ({@code consumeItem} /
+     * {@code consumePlanks} decrement live stacks, so they are already server-thread bound).
+     */
+    private static void reachForItem(ServerPlayerEntity bot,
+                                     java.util.function.Predicate<ItemStack> match,
+                                     int needed) {
+        if (bot == null || match == null || needed <= 0) {
+            return;
+        }
+        int direct = InventoryIterator.countDirect(bot, match);
+        int bundled = InventoryIterator.count(bot, match) - direct;
+        int attempts = BundleReachPolicy.extractionsNeeded(needed, direct, bundled);
+        while (attempts > 0) {
+            if (BundleService.extractFirst(bot, match).isEmpty()) {
+                return;
+            }
+            direct = InventoryIterator.countDirect(bot, match);
+            bundled = InventoryIterator.count(bot, match) - direct;
+            attempts = BundleReachPolicy.extractionsNeeded(needed, direct, bundled);
+        }
     }
 
     private static void consumeItem(ServerPlayerEntity bot, net.minecraft.item.Item item, int needed) {
+        // See consumePlanks: bundled stacks are read-only views, so reach for them before decrementing.
+        reachForItem(bot, stack -> stack.isOf(item), needed);
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
@@ -2960,6 +2987,10 @@ public final class CraftingHelper {
         int missing = neededExtra - planks;
         int planksPerLog = 4;
         int logsNeeded = (int) Math.ceil(missing / (double) planksPerLog);
+
+        // Logs stashed in a bundle are invisible to the slot loop below and cannot be decremented in
+        // place — pull them into real slots first.
+        reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded);
 
         for (int i = 0; i < bot.getInventory().size() && logsNeeded > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);

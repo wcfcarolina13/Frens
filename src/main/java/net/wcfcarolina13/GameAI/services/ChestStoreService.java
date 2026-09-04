@@ -38,6 +38,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 
 public final class ChestStoreService {
 
@@ -385,15 +386,9 @@ public final class ChestStoreService {
      * Count total scaffold-type blocks in the bot's inventory.
      */
     public static int countScaffoldInInventory(ServerPlayerEntity bot) {
-        if (bot == null) return 0;
-        int count = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && SCAFFOLD_ITEMS.contains(stack.getItem())) {
-                count += stack.getCount();
-            }
-        }
-        return count;
+        // Bundle-aware: scaffold blocks packed into a bundle still belong to the bot's reserve.
+        return InventoryIterator.count(bot,
+                stack -> !stack.isEmpty() && SCAFFOLD_ITEMS.contains(stack.getItem()));
     }
 
     /**
@@ -652,17 +647,11 @@ public final class ChestStoreService {
     }
 
     private static int countItem(ServerPlayerEntity bot, Item item) {
-        if (bot == null || item == null) {
+        if (item == null) {
             return 0;
         }
-        int total = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isOf(item)) {
-                total += stack.getCount();
-            }
-        }
-        return total;
+        // Bundle-aware count.
+        return InventoryIterator.count(bot, stack -> stack.isOf(item));
     }
 
     public static int depositAll(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos) {
@@ -1460,6 +1449,9 @@ public final class ChestStoreService {
         MovementService.nudgeTowardUntilClose(bot, step, 2.25D, 1400L, 0.22, "store-doorway-step");
     }
 
+    // Direct slots only, deliberately: this is a generic Inventory->Inventory mover (chest side
+    // included), so it has no bot handle to extract with. FOLLOW-UP: items sitting inside a bundle
+    // are never offloaded to a chest — add a bot-aware pre-pass if offloading bundled stock matters.
     private static int moveItems(Inventory from, Inventory to, Predicate<ItemStack> filter, int amount) {
         int moved = 0;
         for (int i = 0; i < from.size() && moved < amount; i++) {

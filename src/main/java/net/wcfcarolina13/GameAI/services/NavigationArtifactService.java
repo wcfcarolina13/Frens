@@ -798,6 +798,24 @@ public final class NavigationArtifactService {
     }
 
     /**
+     * Total nutrition of travel-usable food carried by the bot, bundle contents included.
+     *
+     * <p>Read-only: the travel budget is an estimate, and the bot can always be made to reach into a
+     * bundle later (see {@link #extractFoodFromContainers}), so counting bundled food here is honest
+     * rather than over-promising.
+     */
+    private static int inventoryFoodNutrition(ServerPlayerEntity bot) {
+        return net.wcfcarolina13.PlayerUtils.InventoryIterator.stream(bot)
+                .map(net.wcfcarolina13.PlayerUtils.InventoryIterator.SlotRef::stack)
+                .filter(HealingService::isTravelUsableFood)
+                .mapToInt(stack -> {
+                    FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
+                    return food == null ? 0 : food.nutrition() * stack.getCount();
+                })
+                .sum();
+    }
+
+    /**
      * Extract usable food from containers (bundles, shulker boxes) into the bot's
      * main inventory so the fast-travel food budget can account for it.
      * Only extracts what is needed for the journey. Must be called on the server thread.
@@ -960,14 +978,7 @@ public final class NavigationArtifactService {
                 // doesn't have enough for the journey.
                 double estHungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
                 int estNeeded = (int) Math.ceil(estHungerCost) + MIN_POST_TRAVEL_FOOD;
-                int mainFood = bot.getHungerManager().getFoodLevel();
-                for (int i = 0; i < bot.getInventory().size(); i++) {
-                    ItemStack s = bot.getInventory().getStack(i);
-                    if (HealingService.isTravelUsableFood(s)) {
-                        FoodComponent f = s.getComponents().get(DataComponentTypes.FOOD);
-                        if (f != null) mainFood += f.nutrition() * s.getCount();
-                    }
-                }
+                int mainFood = bot.getHungerManager().getFoodLevel() + inventoryFoodNutrition(bot);
                 if (mainFood < estNeeded) {
                     extractFoodFromContainers(bot, estNeeded - mainFood);
                 }
@@ -976,14 +987,7 @@ public final class NavigationArtifactService {
                 // The bot could eat before/during travel, so inventory food counts toward the budget.
                 double hungerCost = travelDistance / HUNGER_DISTANCE_DIVISOR;
                 int currentFood = bot.getHungerManager().getFoodLevel();
-                int inventoryNutrition = 0;
-                for (int i = 0; i < bot.getInventory().size(); i++) {
-                    ItemStack stack = bot.getInventory().getStack(i);
-                    if (HealingService.isTravelUsableFood(stack)) {
-                        FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
-                        inventoryNutrition += food.nutrition() * stack.getCount();
-                    }
-                }
+                int inventoryNutrition = inventoryFoodNutrition(bot);
                 int totalBudget = currentFood + inventoryNutrition;
                 int projectedFood = totalBudget - (int) Math.ceil(hungerCost);
                 if (projectedFood < MIN_POST_TRAVEL_FOOD) {
