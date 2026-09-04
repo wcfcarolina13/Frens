@@ -2,6 +2,33 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Pocket TTS installer: Windows support (unreleased, on top of 1.1.202; 2026-09-04)
+
+Bradley asked whether the installers cater to the user's machine. They detect platform, not
+specs, and the Pocket installer could not find Python on Windows at all (it searched Homebrew,
+python.org framework, `/usr/local` and `PATH` for `uv`/`python3` only). Commits `efd13c7`,
+`7944410`:
+- One injectable `Platform` seam (`windows`, home, `%LOCALAPPDATA%`, `%USERPROFILE%`, PATH split
+  by `File.pathSeparator`). POSIX candidate lists are byte-identical to before (pinned by test).
+- Windows uv candidates: `uv.exe` on PATH, `%USERPROFILE%\.local\bin`, `%LOCALAPPDATA%\Programs\uv`.
+  Python: the `py` launcher (`py -3.13 … -3.10`, PATH + `%WINDIR%`), then
+  `%LOCALAPPDATA%\Programs\Python\Python31x\python.exe`, then `python.exe`/`python3.exe` on PATH;
+  any path containing `windowsapps` (case-insensitive) is skipped — the Microsoft Store alias
+  stub would open the Store instead of running.
+- venv layout through one helper: `Scripts\python.exe` / `Scripts\pocket-tts.exe` on Windows,
+  `bin/` elsewhere; installer (create, pip install, smoke test) and `PocketVoiceEngine` launch
+  both use it. No shell wrapping, no chmod on Windows.
+- Review caught a false positive the py launcher introduced: `py -3.12` prints
+  `Python 3.12 not found!` with a non-zero exit, which the substring version gate accepted.
+  `runForOutput` now returns "" on non-zero exit and the regex is anchored to the first line.
+  The installer screen's Windows hint was shortened so the tail-keeping `elide` no longer cuts
+  off the diagnosis; the selected runtime row shows the launcher args.
+- Tests 666 → 676 (+10 platform tests, then the py-launcher regression test).
+- **Unverified without a Windows machine**: `pocket-tts.exe` console-script name, process start
+  without a shell, `Files.isExecutable` on `.exe` under the game JVM. `pocket-tts` 3.0.2 is a
+  pure-Python wheel (checked on PyPI) depending on `torch>=2.5`, which ships Windows wheels, so
+  no known blocker — but the field verdict is still "please report".
+
 ## Torch-hold diagnostics, creeper evasion policy + the real creeper bug; merged field checklist; 1.1.202 (2026-09-04)
 
 Prep for the first guided field session (Bradley plays one long session, Claude directs from the
