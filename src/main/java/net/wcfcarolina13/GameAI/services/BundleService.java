@@ -283,11 +283,22 @@ public final class BundleService {
         bundleStack.set(DataComponentTypes.BUNDLE_CONTENTS, builder.build());
 
         ItemStack extracted = target.copy();
-        if (!inventory.insertStack(target)) {
-            // Roll back: restore the original bundle contents untouched.
+        // insertStack() returns true if ANY item moved and mutates `target` down to the remainder.
+        inventory.insertStack(target);
+        if (target.getCount() >= extracted.getCount()) {
+            // Nothing moved. Roll back: restore the original bundle contents untouched.
             bundleStack.set(DataComponentTypes.BUNDLE_CONTENTS, contents);
             LOGGER.debug("Bundle extract failed for {}: inventory full", bot.getName().getString());
             return Optional.empty();
+        }
+        if (!target.isEmpty()) {
+            // Partial insert: put the un-inserted remainder back into the bundle so it isn't lost.
+            BundleContentsComponent.Builder rebuild =
+                    new BundleContentsComponent.Builder(bundleStack.getOrDefault(
+                            DataComponentTypes.BUNDLE_CONTENTS, BundleContentsComponent.DEFAULT));
+            rebuild.add(target);
+            bundleStack.set(DataComponentTypes.BUNDLE_CONTENTS, rebuild.build());
+            return Optional.of(extracted.copyWithCount(extracted.getCount() - target.getCount()));
         }
         return Optional.of(extracted);
     }

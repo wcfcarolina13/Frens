@@ -312,8 +312,28 @@ public final class BotFleeService {
         return failedAt != null && failedAt > 0 && (nowTick - failedAt) <= Math.max(1L, maxAgeTicks);
     }
 
+    /** Staleness window for the remembered surface-recovery failure reason: 1200 ticks (60s). */
+    static final long SURFACE_RECOVERY_REASON_FRESH_TICKS = 1200L;
+
+    /**
+     * Reason for the most recent surface-recovery failure, but only while it is still fresh
+     * (within {@link #SURFACE_RECOVERY_REASON_FRESH_TICKS} of now) — otherwise the
+     * {@code [guard-escape]} log would name a failure from minutes ago.
+     */
     public static String getRecentSurfaceRecoveryFailureReason(UUID botId) {
-        return botId == null ? null : SURFACE_RECOVERY_FAILURE_REASON.get(botId);
+        if (botId == null) {
+            return null;
+        }
+        Long failedAt = SURFACE_RECOVERY_FAILURE_TICK.get(botId);
+        if (failedAt == null) {
+            return "";
+        }
+        long nowTick = net.wcfcarolina13.Frens.serverInstance != null
+                ? net.wcfcarolina13.Frens.serverInstance.getTicks() : 0L;
+        if (!net.wcfcarolina13.PlayerUtils.TickFreshness.isFresh(failedAt, nowTick, SURFACE_RECOVERY_REASON_FRESH_TICKS)) {
+            return "";
+        }
+        return SURFACE_RECOVERY_FAILURE_REASON.get(botId);
     }
 
     public static boolean hasPendingInterruptedSurvival(UUID botId) {

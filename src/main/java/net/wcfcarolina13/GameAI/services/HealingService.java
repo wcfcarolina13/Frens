@@ -163,14 +163,25 @@ public final class HealingService {
         if (server.isOnThread()) {
             return BundleService.extractFirst(bot, HealingService::isSafeEdible).isPresent();
         }
-        server.execute(() -> BundleService.extractFirst(bot, HealingService::isSafeEdible));
+        // Worker thread: hop to the server thread and wait on the result (see
+        // SmeltingService.cookAllFoodSync for the established pattern).
+        java.util.concurrent.CompletableFuture<Boolean> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(BundleService.extractFirst(bot, HealingService::isSafeEdible).isPresent());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
         try {
-            Thread.sleep(60L); // let the scheduled extraction land before the rescan
+            return Boolean.TRUE.equals(future.get(2, java.util.concurrent.TimeUnit.SECONDS));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
+        } catch (Exception e) {
+            LOGGER.debug("Bundled food reach failed for {}: {}", bot.getName().getString(), e.toString());
+            return false;
         }
-        return InventoryIterator.countDirect(bot, HealingService::isSafeEdible) > direct;
     }
 
     private HealingService() {

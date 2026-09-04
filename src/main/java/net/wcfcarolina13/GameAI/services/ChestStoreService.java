@@ -386,8 +386,10 @@ public final class ChestStoreService {
      * Count total scaffold-type blocks in the bot's inventory.
      */
     public static int countScaffoldInInventory(ServerPlayerEntity bot) {
-        // Bundle-aware: scaffold blocks packed into a bundle still belong to the bot's reserve.
-        return InventoryIterator.count(bot,
+        // Direct-only on purpose: this must match what the escape pillar can actually use —
+        // counterpart is BotFleeService.countScaffoldBlocks (bundled scaffold becomes usable
+        // only once the escape path learns to extract from bundles — follow-up).
+        return InventoryIterator.countDirect(bot,
                 stack -> !stack.isEmpty() && SCAFFOLD_ITEMS.contains(stack.getItem()));
     }
 
