@@ -47,7 +47,7 @@ fortifyForcePlaceEnabled, globalTeleportDuringSkills (nullable tri-state already
 fortBufferRadius, undergroundLingerMinutes, undergroundProximityBlocks, survivalRecruitmentMode,
 soulsEnabled, soulPartyEnabled, soulBanterEnabled, soulLocalChatEnabled, soulBanterActiveEnabled,
 soulMemoryDigestEnabled, dialogueScriptedRate, soulBanterIdleRate, soulBanterActiveRate,
-soulLocalRate, soulVoiceEnabled, botControlsByWorld (Map<String, Map<String, BotControlSettings>>)
+soulLocalRate, soulVoiceEnabled, botControlsByWorld (Map<String alias, Map<String worldKey, BotControlSettings>>)
 ```
 
 `static SharedConfig capture(ManualConfig)` and `void applyTo(ManualConfig)`. `applyTo` uses the
@@ -92,9 +92,10 @@ Client (`FrensClient`): receiver for `ConfigSyncPayload` applies on the client t
 `OpenConfigPayload` receiver moves its `applyConfigJson` inside `client.execute`.
 
 Single-player: client and server share `Frens.CONFIG`; capture → apply onto the same object is a
-self-merge and is harmless. Known limitation, documented in the changelog: on a dedicated server
-the synced values live in the client's in-memory `Frens.CONFIG`, so a later client-side
-`save()` writes the server's globals into that client's local `settings.json5`.
+self-merge and is harmless. Dedicated server (added after the final review): the client sets a
+transient `remoteAuthoritative` flag on the first remote sync (`save()` becomes a no-op), keeps a
+pre-sync `SharedConfig` snapshot, and restores it on DISCONNECT, so server globals never reach
+the client's local `settings.json5`.
 
 ### 4. Per-player voice mute masks
 

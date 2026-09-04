@@ -2,6 +2,53 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Real config sync, per-player voice mute masks, RAM warning on the Download button, Dreamsleeve greyed off macOS; 1.1.203 (2026-09-04)
+
+Four backlog items from the 2026-09-04 handoff, one build. Spec
+`docs/superpowers/specs/2026-09-04-frens-config-sync-and-voice-mute-masks-design.md`, plan under
+`docs/superpowers/plans/`, subagent-driven implementation with a review per task and a final
+whole-branch review. Branch `feat/1.1.203-config-sync-mute-masks`, merged `--no-ff`.
+
+- **Config sync is real (commits `8296e7c`, `4750d1d`, `f58c1b8`).** `configNetworkManager` and
+  `ConfigJsonUtil` were compile-time no-op stubs, so every global toggle (Voice, dialogue rates,
+  soul switches, per-bot controls) was single-player-only. New `FilingSystem/SharedConfig` is an
+  explicit allowlist DTO (25 fields, boxed so an absent field merges as "keep") — no API keys,
+  model lists, skins, ownership, spawn points or soul-voice paths ever leave the server. S2C
+  `ConfigSyncPayload` (`frens:config_sync`) on JOIN and after every accepted change; C2S
+  `SaveConfigPayload` now has a receiver gated to operators **or the integrated-server host**
+  (review caught that `isOperator` alone locks out a cheats-off single-player world); rejected
+  saves get a re-sync so the client reverts. API-key / custom-provider receivers are operator-only
+  and never echoed. Receivers register once in `onInitialize` (the old stubs were called per
+  `SERVER_STARTING`, which would have double-registered on world reload). 9 round-trip tests.
+- **Dedicated-server guard (commit `e92120e`, final-review find).** Synced globals live in the
+  client's in-memory `Frens.CONFIG`; a later client-side `save()` would have written the server's
+  globals into that client's `settings.json5` (and a single-player world opened afterwards would
+  run them). `ManualConfig` now carries a transient `remoteAuthoritative` flag — `save()` is a
+  no-op while connected to a remote server — and the client captures a pre-sync `SharedConfig`
+  snapshot on the first remote sync and restores it on DISCONNECT. Single-player never sets it.
+- **Per-player voice mute masks (commit `824b457`).** `BotDialoguePlayer.playSound` no longer
+  broadcasts: it loops the world's real players within vanilla's 16-block radius and sends
+  `PlaySoundFromEntityS2CPacket` per recipient, skipping anyone for whom
+  `VoiceLineMuteService.isMuted(category, viewer)` is true. Each client sends its category mask
+  over C2S `VoiceMuteMaskPayload` on JOIN and whenever the Voice "Adv…" screen changes it; the
+  server keeps masks in memory (validated against the enum, cleared on disconnect). The server's
+  own `settings.json5` mask is the admin baseline and still mutes for everyone. In single-player
+  the client mask and the baseline are the same list, so nothing changes there. 6 tests.
+- **Model manager RAM warning (commit `4140493`).** The red "(recommends ≥N GB RAM)" note already
+  existed since 1.1.173; the shortfall is now one helper (`OllamaModelInstaller.ramShortfallGb`)
+  and the Download button itself reads `Download ⚠` when the machine is under the model's guide.
+- **Dreamsleeve off macOS (same commit).** `SoulVoiceSettings.dreamsleeveSupportedOn(osName)`;
+  the engine chooser greys the row, says "macOS only — Qwen3-TTS server runs on Apple silicon",
+  and disables the button. A persisted `dreamsleeve` selection on another OS is not migrated
+  (it already failed there).
+- Known cost of the guard: while connected to a remote server, *no* client-side `save()` persists — host-local edits (voice engine choice, API keys) made in that state are dropped on disconnect; make them in single-player. The `OpenConfigPayload` path (`/config` command) got the same guard in the integration commit.
+- Tests 679 → 704. Deferred minors (in the branch ledger, none blocking): mask receiver is
+  unthrottled (memory bounded); wire cap 64 vs 9 category ids; the 16-block radius re-derives
+  vanilla's constant.
+- **Field checks:** voice toggle / dialogue rate changes on a LAN or dedicated server reach the
+  bots; muting a category in one client leaves the other client hearing it; opening a
+  single-player world after leaving a server keeps the local settings.
+
 ## Pocket TTS installer: Windows support (unreleased, on top of 1.1.202; 2026-09-04)
 
 Bradley asked whether the installers cater to the user's machine. They detect platform, not

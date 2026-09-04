@@ -805,7 +805,13 @@ public class FrensClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (payload, context) -> {
             String configJson = payload.configData();
-            context.client().execute(() -> {
+            MinecraftClient openClient = context.client();
+            openClient.execute(() -> {
+                // Same guard as the ConfigSyncPayload path: a remote server's globals must never
+                // become this client's local settings. No-op once the JOIN sync already ran.
+                if (!openClient.isInSingleplayer()) {
+                    enterRemoteConfig();
+                }
                 ConfigJsonUtil.applyConfigJson(configJson);
                 MinecraftClient client = MinecraftClient.getInstance();
                 Screen parent = client.currentScreen;
