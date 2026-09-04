@@ -181,6 +181,46 @@ class SoulMemoryDigestServiceTest {
                 .contains("Roti: creepers scare me"));
     }
 
+    @Test
+    void resetDuringAnInFlightDigestIsNotUndone() throws Exception {
+        SoulTypes.ConversationKey key =
+                new SoulTypes.ConversationKey(BOT_ID, PLAYER_ID, SoulTypes.Channel.DIRECT);
+
+        // A first digest so the player has memories AND a stored cursor for the reset to clear;
+        // without a prior cursor the "reset happened" signal would be indistinguishable from a
+        // never-digested conversation.
+        heard(key, "I hate the Nether", "I want to build a farm", "call the base Home",
+                "creepers scare me");
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(true,
+                "- Roti hates the Nether\n", null, "test", "test-model", 5L, null, null, null)));
+        service.digest(BOT_ID, "Jake", 3, Map.of(PLAYER_ID, "Roti")).get(5, SECONDS);
+        assertEquals(1, store.mind(BOT_ID).get(5, SECONDS).playerMemories().size());
+
+        // Day two: four more lines, and a provider call that hangs until we let it finish.
+        heard(key, "I found diamonds", "the village is north", "call the mine Deep",
+                "I am tired of skeletons");
+        CompletableFuture<SoulTypes.ProviderResult> inFlight = new CompletableFuture<>();
+        provider.enqueue(inFlight);
+        CompletableFuture<Void> digest = service.digest(BOT_ID, "Jake", 4, Map.of(PLAYER_ID, "Roti"));
+
+        // The reset lands while the provider call is still outstanding.
+        while (provider.requests().size() < 2) {
+            Thread.sleep(10);
+        }
+        store.updateMind(BOT_ID, m -> SoulMemoryDigestOps.archiveFor(m, PLAYER_ID)).get(5, SECONDS);
+
+        inFlight.complete(new SoulTypes.ProviderResult(true,
+                "- Roti found diamonds\n- Roti calls the mine Deep\n", null, "test", "test-model",
+                5L, null, null, null));
+        digest.get(5, SECONDS);
+
+        SoulTypes.SoulMind mind = store.mind(BOT_ID).get(5, SECONDS);
+        assertEquals(List.of(), mind.playerMemories());
+        assertNull(mind.digestCursors().get("DIRECT:" + PLAYER_ID));
+        assertEquals(1, mind.archivedPlayerMemories().size());
+        assertEquals(2, provider.requests().size());
+    }
+
     private void heard(SoulTypes.ConversationKey key, String... lines) throws Exception {
         for (String line : lines) {
             store.beginHeardTurn(key, UUID.randomUUID(), line, Instant.EPOCH).get(5, SECONDS);
@@ -191,7 +231,8 @@ class SoulMemoryDigestServiceTest {
 
     private static final class FakeProvider implements SoulModelProvider {
         private final Deque<CompletableFuture<SoulTypes.ProviderResult>> results = new ArrayDeque<>();
-        private final List<SoulTypes.ProviderRequest> requests = new ArrayList<>();
+        private final List<SoulTypes.ProviderRequest> requests =
+                java.util.Collections.synchronizedList(new ArrayList<>());
 
         void enqueue(CompletableFuture<SoulTypes.ProviderResult> result) {
             results.addLast(result);

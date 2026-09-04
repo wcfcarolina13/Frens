@@ -21,6 +21,8 @@ track is validation-bound before anything new starts. Suite 621 green.
       night, inspect `mind.json` for the new `playerMemories` / `digestCursors`, listen for a recall
       in banter, run `/bot soul memory Jake`, then `/bot soul reset Jake` and confirm the list is
       empty and `archivedPlayerMemories` holds them. Also exercise `/bot soul digest on|off|status`.
+      - Confirm a party-scene fact is attributed to the right player.
+      - Reset while a rollover digest is running → memories stay empty.
 - [ ] **Post-session autopsy** in the established pattern; fixes as one build.
 
 ### Lane 2 — bugs already on the table

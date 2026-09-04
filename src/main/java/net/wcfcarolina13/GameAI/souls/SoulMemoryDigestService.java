@@ -12,6 +12,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -29,6 +30,9 @@ import java.util.function.BooleanSupplier;
  * {@code too-few} (nothing was consumed) and {@code disabled} (nothing ran): re-digesting the same
  * lines tomorrow would not change the answer, and a persistent provider outage must not accumulate
  * an ever-growing backlog.
+ *
+ * <p>The single write re-reads the cursor it gathered from and becomes a no-op ({@code superseded})
+ * when it no longer matches, so a reset landing mid-flight is never silently undone.
  */
 public final class SoulMemoryDigestService {
 
@@ -147,12 +151,14 @@ public final class SoulMemoryDigestService {
                             return CompletableFuture.completedFuture(null);
                         }
                         return generate(botId, botName, day, key, playerId, playerName, cursorKey,
-                                material);
+                                material, from);
                     });
                 })
                 .handle((ignored, error) -> {
                     if (error != null) {
                         log(botId, playerId, key, "error:INTERNAL", 0, 0);
+                        LOGGER.warn("[souls] memory digest failed bot={} player={} : {}", botId,
+                                playerId, describe(error));
                     }
                     return null;
                 });
@@ -161,7 +167,8 @@ public final class SoulMemoryDigestService {
     private CompletableFuture<Void> generate(UUID botId, String botName, int day,
                                              SoulTypes.ConversationKey key, UUID playerId,
                                              String playerName, String cursorKey,
-                                             SoulMemoryDigestOps.Material material) {
+                                             SoulMemoryDigestOps.Material material,
+                                             SoulTypes.ConversationCursor from) {
         UUID correlationId = UUID.randomUUID();
         SoulTypes.ProviderRequest request = buildRequest(correlationId, model, botName, playerName,
                 material.text(), timeout);
@@ -176,12 +183,29 @@ public final class SoulMemoryDigestService {
                         log(botId, playerId, key, outcome.label(), 0, material.playerLines());
                         return CompletableFuture.completedFuture((Void) null);
                     }
-                    return store.updateMind(botId, mind -> SoulMemoryDigestOps.withCursor(
-                                    SoulMindOps.withPlayerMemories(mind, SoulMemoryDigestOps.merge(
-                                            mind.playerMemories(), playerId, outcome.facts(), day, sources)),
-                                    cursorKey, material.next()))
-                            .thenAccept(ignored -> log(botId, playerId, key, outcome.label(),
-                                    outcome.facts().size(), material.playerLines()));
+                    // A reset (SoulRuntime.reset -> SoulMemoryDigestOps.archiveFor) that landed
+                    // while the provider call was in flight cleared this player's memories and
+                    // cursors. Writing now would silently resurrect them, so re-check the cursor
+                    // inside the write and abandon the digest if it moved.
+                    AtomicBoolean superseded = new AtomicBoolean();
+                    return store.updateMind(botId, mind -> {
+                                if (!SoulMemoryDigestOps.cursorFor(mind, cursorKey).equals(from)) {
+                                    superseded.set(true);
+                                    return mind;
+                                }
+                                return SoulMemoryDigestOps.withCursor(
+                                        SoulMindOps.withPlayerMemories(mind, SoulMemoryDigestOps.merge(
+                                                mind.playerMemories(), playerId, outcome.facts(), day, sources)),
+                                        cursorKey, material.next());
+                            })
+                            .thenAccept(ignored -> {
+                                if (superseded.get()) {
+                                    log(botId, playerId, key, "superseded", 0, material.playerLines());
+                                } else {
+                                    log(botId, playerId, key, outcome.label(),
+                                            outcome.facts().size(), material.playerLines());
+                                }
+                            });
                 });
     }
 

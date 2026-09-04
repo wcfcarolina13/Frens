@@ -341,7 +341,8 @@ public final class SoulTypes {
      * the Minecraft day number last consolidated (-1 never), {@code lastTaskTrustDay} the day
      * the "player gave a task" trust bump was last granted (-1 never). {@code playerMemories}
      * holds live LLM-digested claims about what the player has said, {@code archivedPlayerMemories}
-     * the ones evicted for salience/cap reasons but kept for audit, and {@code digestCursors}
+     * the ones a {@code /bot soul reset} moved aside for audit (only reset archives; decay and
+     * cap eviction drop memories outright), and {@code digestCursors}
      * the per-conversation-key cursor of how far the digest has consumed each transcript.
      */
     public record SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,

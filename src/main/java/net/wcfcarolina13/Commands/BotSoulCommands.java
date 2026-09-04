@@ -871,7 +871,8 @@ final class BotSoulCommands {
             return 1;
         }
         for (SoulTypes.PlayerMemory m : mine) {
-            ChatUtils.sendSystemMessage(source, "day " + m.day() + " · " + m.salience() + " · " + m.fact());
+            ChatUtils.sendSystemMessage(source, "day " + m.day() + " · salience " + m.salience()
+                    + " · " + m.fact());
         }
         return 1;
     }
@@ -888,6 +889,10 @@ final class BotSoulCommands {
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
+        if (config == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
         config.setSoulMemoryDigestEnabled(enabled);
         config.save();
         ChatUtils.sendSystemMessage(source, "Memory digest set to " + (enabled ? "on" : "off") + ".");

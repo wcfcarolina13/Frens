@@ -78,6 +78,17 @@ Tests **624 → 652** (+28), `./gradlew build` green. JAR:
 Tell Jake three things · sleep through a night · inspect `mind.json` for the new
 `playerMemories`/`digestCursors` · listen for a recall in banter · run `/bot soul memory Jake` ·
 then `/bot soul reset Jake` and confirm the list is empty and `archivedPlayerMemories` holds them.
+Added after final review: confirm a party-scene fact is attributed to the right player, and reset
+while a rollover digest is running → memories stay empty.
+
+### Final-review fixes (same version)
+
+Reset-vs-digest race guard — the digest's single write now re-checks the cursor it gathered from
+and no-ops (`outcome=superseded`) when a reset cleared it mid-flight, so an in-flight digest can no
+longer resurrect memories `/bot soul reset` just archived. Plus: a per-pair failure now logs a WARN
+with the unwrapped cause (counts only, never transcript text), `/bot soul memory` labels the number
+(`day N · salience S · fact`) per spec §8, and `/bot soul digest on|off` got the same
+`Frens.CONFIG == null` guard the status subcommand has.
 
 ## Shared skill state moved off FunctionCallerV2; wooden-fallback reset diagnostic; 1.1.200 (2026-09-03)
 
