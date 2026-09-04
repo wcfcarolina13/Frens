@@ -41,9 +41,11 @@ public class SoulVoiceEngineScreen extends Screen {
     /**
      * One engine's presentation. {@code installer} is null when the engine cannot be set up
      * from in-game (Dreamsleeve); {@code shortName} is what fits on the 130 px button.
+     * {@code supported} is false when the engine cannot run on this platform at all — the row
+     * is then drawn grey and its button is inactive.
      */
     private record EngineRow(String id, String shortName, String title, String blurb,
-                             boolean available, Runnable installer) {
+                             boolean available, Runnable installer, boolean supported) {
     }
 
     private final Screen parent;
@@ -81,14 +83,18 @@ public class SoulVoiceEngineScreen extends Screen {
     }
 
     private List<EngineRow> buildRows(ManualConfig cfg) {
-        boolean dsAvail = cfg != null && dreamsleeveAvailable(cfg);
+        boolean dsSupported = SoulVoiceSettings.dreamsleeveSupportedOn(System.getProperty("os.name"));
+        boolean dsAvail = dsSupported && cfg != null && dreamsleeveAvailable(cfg);
         boolean pocketAvail = cfg != null && pocketAvailable(cfg);
         boolean piperAvail = cfg != null && piperAvailable(cfg);
         List<EngineRow> out = new ArrayList<>(3);
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_DREAMSLEEVE, "Dreamsleeve",
                 "Dreamsleeve — cloned bot voice",
-                "§7Best quality. Uses the GPU. " + (dsAvail ? "Available." : "Not set up on this machine."),
-                dsAvail, null));
+                dsSupported
+                        ? "§7Best quality. Uses the GPU. "
+                                + (dsAvail ? "Available." : "Not set up on this machine.")
+                        : "§8macOS only — Qwen3-TTS server runs on Apple silicon.",
+                dsAvail, null, dsSupported));
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_POCKET, "Pocket",
                 "Pocket TTS — natural CPU voices",
                 "§7Kyutai, 100M params, 21 presets. " + (pocketAvail ? "Installed." : "One-time ~1 GB install."),
@@ -96,7 +102,7 @@ public class SoulVoiceEngineScreen extends Screen {
                     if (this.client != null) {
                         this.client.setScreen(new PocketInstallerScreen(this));
                     }
-                }));
+                }, true));
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_PIPER, "Piper",
                 "Piper — lightweight generic voice",
                 "§7Fast, CPU-only, frees the GPU. " + (piperAvail ? "Installed." : "One-time ~80 MB download."),
@@ -104,7 +110,7 @@ public class SoulVoiceEngineScreen extends Screen {
                     if (this.client != null) {
                         this.client.setScreen(new PiperInstallerScreen(this));
                     }
-                }));
+                }, true));
         return out;
     }
 
@@ -120,7 +126,8 @@ public class SoulVoiceEngineScreen extends Screen {
             EngineRow row = rows.get(i);
             boolean isCurrent = row.id().equals(current);
             int y = cy + 40 + i * ROW_H;
-            String label = isCurrent && row.available() ? "§a" + row.shortName() + " ✔"
+            String label = !row.supported() ? "macOS only"
+                    : isCurrent && row.available() ? "§a" + row.shortName() + " ✔"
                     : row.available() ? "Use " + row.shortName()
                     : "Install " + row.shortName() + "…";
             ButtonWidget button = ButtonWidget.builder(Text.literal(label), b -> {
@@ -131,7 +138,9 @@ public class SoulVoiceEngineScreen extends Screen {
                         }
                     })
                     .dimensions(cx + POPUP_WIDTH - PAD - BTN_W, y + 4, BTN_W, 20).build();
-            button.active = !(row.available() && isCurrent) && (row.available() || row.installer() != null);
+            button.active = row.supported()
+                    && !(row.available() && isCurrent)
+                    && (row.available() || row.installer() != null);
             addDrawableChild(button);
         }
 
@@ -165,8 +174,10 @@ public class SoulVoiceEngineScreen extends Screen {
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
             int y = cy + 40 + i * ROW_H;
-            context.drawTextWithShadow(this.textRenderer, row.title(), cx + PAD, y + 2, 0xFFEFEFEF);
-            context.drawTextWithShadow(this.textRenderer, row.blurb(), cx + PAD, y + 14, 0xFFB0B0B0);
+            int titleColor = row.supported() ? 0xFFEFEFEF : 0xFF707070;
+            int blurbColor = row.supported() ? 0xFFB0B0B0 : 0xFF707070;
+            context.drawTextWithShadow(this.textRenderer, row.title(), cx + PAD, y + 2, titleColor);
+            context.drawTextWithShadow(this.textRenderer, row.blurb(), cx + PAD, y + 14, blurbColor);
         }
 
         super.render(context, mouseX, mouseY, delta);

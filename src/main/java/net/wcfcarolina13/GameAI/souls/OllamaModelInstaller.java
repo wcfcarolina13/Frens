@@ -66,6 +66,26 @@ public final class OllamaModelInstaller {
     private OllamaModelInstaller() {
     }
 
+    /** 1 GiB, the unit the manager reports RAM in. */
+    private static final long BYTES_PER_GB = 1073741824L;
+
+    /**
+     * How many whole GB of RAM this machine is short of the model's recommendation, rounded up.
+     *
+     * <p>Returns 0 when the total is unknown ({@code <= 0}) or already sufficient, so callers can
+     * treat "> 0" as "warn the user".
+     */
+    public static int ramShortfallGb(KnownModel model, long totalRamBytes) {
+        if (model == null || totalRamBytes <= 0) {
+            return 0;
+        }
+        long needed = (long) (model.recommendedRamGb() * BYTES_PER_GB);
+        if (totalRamBytes >= needed) {
+            return 0;
+        }
+        return (int) ((needed - totalRamBytes + BYTES_PER_GB - 1) / BYTES_PER_GB);
+    }
+
     // ── Background job (screen-independent, survives menu close/reopen) ──────
 
     private static final java.util.concurrent.atomic.AtomicReference<InstallJob> ACTIVE_JOB =
