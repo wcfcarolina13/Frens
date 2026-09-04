@@ -387,8 +387,9 @@ public final class ChestStoreService {
      */
     public static int countScaffoldInInventory(ServerPlayerEntity bot) {
         // Direct-only on purpose: this must match what the escape pillar can actually use —
-        // counterpart is BotFleeService.countScaffoldBlocks (bundled scaffold becomes usable
-        // only once the escape path learns to extract from bundles — follow-up).
+        // counterpart is BotFleeService.countScaffoldBlocks. The escape path now extracts bundled
+        // scaffold on demand (BotFleeService.ensureScaffoldReachable) before it gives up, so both
+        // counts stay a "placeable right now" measure.
         return InventoryIterator.countDirect(bot,
                 stack -> !stack.isEmpty() && SCAFFOLD_ITEMS.contains(stack.getItem()));
     }

@@ -2650,6 +2650,7 @@ public final class BotFleeService {
                     return true;
                 }
                 // Movement failed — pillar up first (fast escape from surface pits/overhangs)
+                ensureScaffoldReachable(bot, 2);
                 if (countScaffoldBlocks(bot) >= 2 && tryPillarOperationalSurfaceRecovery(bot, world)) {
                     SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
                     SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
@@ -2673,6 +2674,7 @@ public final class BotFleeService {
             }
 
             // Try pillar escape before heavy ascent — fast for shallow surface pits.
+            ensureScaffoldReachable(bot, 2);
             if (countScaffoldBlocks(bot) >= 2 && tryPillarOperationalSurfaceRecovery(bot, world)) {
                 SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
                 SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
@@ -2849,6 +2851,7 @@ public final class BotFleeService {
     }
 
     private static boolean tryPillarOperationalSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
+        ensureScaffoldReachable(bot, 2);
         int scaffoldCount = countScaffoldBlocks(bot);
         if (scaffoldCount <= 0) {
             LOGGER.info("ensureAtSurface: {} pillar recovery skipped (no scaffold blocks)",
@@ -3064,6 +3067,38 @@ public final class BotFleeService {
                 bot.getBlockPos().toShortString(),
                 SafePositionService.summarizeSurfaceAssessment(assessment));
         return ready;
+    }
+
+    /**
+     * Direct-slot scaffold is what the pillar can actually place, so before giving up for lack of
+     * scaffold we pull bundled scaffold into direct slots. Safe from worker threads:
+     * {@link BundleService#reachFirst} does the server-thread hop internally.
+     *
+     * @param needed how many scaffold blocks the caller wants available directly
+     */
+    private static void ensureScaffoldReachable(ServerPlayerEntity bot, int needed) {
+        if (bot == null) {
+            return;
+        }
+        java.util.function.Predicate<ItemStack> isScaffold =
+                stack -> !stack.isEmpty() && ScaffoldService.SCAFFOLD_BLOCKS.contains(stack.getItem());
+        int direct = net.wcfcarolina13.PlayerUtils.InventoryIterator.countDirect(bot, isScaffold);
+        int bundled = net.wcfcarolina13.PlayerUtils.InventoryIterator.count(bot, isScaffold) - direct;
+        int extractions = net.wcfcarolina13.PlayerUtils.BundleReachPolicy.extractionsNeeded(needed, direct, bundled);
+        if (extractions <= 0) {
+            return;
+        }
+        int pulled = 0;
+        for (int i = 0; i < extractions; i++) {
+            if (!BundleService.reachFirst(bot, isScaffold)) {
+                break;
+            }
+            pulled++;
+        }
+        if (pulled > 0) {
+            LOGGER.info("ensureAtSurface: {} pulled {} scaffold stack(s) out of bundles for pillar recovery",
+                    bot.getName().getString(), pulled);
+        }
     }
 
     private static int countScaffoldBlocks(ServerPlayerEntity bot) {

@@ -342,6 +342,43 @@ public final class BundleService {
         return Optional.empty();
     }
 
+    /**
+     * Thread-safe wrapper around {@link #extractFirst}: pulls the first bundled stack matching
+     * {@code match} into a direct inventory slot, hopping to the server thread when called from a
+     * worker thread (inventory mutation is server-thread only).
+     *
+     * @return true iff a stack was moved out of a bundle into a direct slot.
+     */
+    public static boolean reachFirst(ServerPlayerEntity bot, java.util.function.Predicate<ItemStack> match) {
+        if (bot == null || match == null) {
+            return false;
+        }
+        var server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return false;
+        }
+        if (server.isOnThread()) {
+            return extractFirst(bot, match).isPresent();
+        }
+        java.util.concurrent.CompletableFuture<Boolean> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(extractFirst(bot, match).isPresent());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return Boolean.TRUE.equals(future.get(2, java.util.concurrent.TimeUnit.SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            LOGGER.debug("Bundle reach failed for {}: {}", bot.getName().getString(), e.toString());
+            return false;
+        }
+    }
+
     private static boolean isInventoryFull(ServerPlayerEntity player) {
         if (player == null) {
             return false;
