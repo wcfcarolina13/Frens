@@ -1,5 +1,5 @@
 ---
-task: "Backlog lineup 2026-09-03. (1) DONE in 1.1.200: ollama4j NoClassDefFoundError fix + woodcut-loop diagnostic (soul follow-ups were already closed). Next: (2) field session on that build with the merged 1.1.176→1.1.199 checklists; (3) CONSOLIDATION design interview + spec; then P1 gameplay bugs. 1.1.199 deployed everywhere; 1.1.185–1.1.199 have only had a 4-min smoke run."
+task: "Backlog lineup 2026-09-03. DONE: 1.1.200 (ollama4j shared-state fix + woodcut-loop diagnostic); 1.1.201 (soul memory digest = CONSOLIDATION phase 1, merged 2026-09-04, deployed). NEXT: field session on 1.1.201 — merged 1.1.176→1.1.199 checklists + the memory-digest checklist under Lane 1; then P1 gameplay bugs; then ACTION REQUESTS (design interview first)."
 test_command: "./gradlew build -x test"
 ---
 
