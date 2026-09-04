@@ -3,7 +3,36 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-04 (night) — next session starts here
+## Session Handoff 2026-09-04 (late) — next session starts here
+
+**State:** main = origin/main @ 1.1.205 (pushed, deployed to all three Prism instances). Suite 767 green.
+
+**Shipped in 1.1.205 (loose ends from the backlog run, items 1–5):** FarmSkill/RideSyncService hotbar
+access honours the hotbar lock; escape pillar pulls scaffold out of bundles (`BundleService.reachFirst`
+shared thread hop); bundle-aware tool/armor/weapon selection (strictly-better rule, 100-tick combat rate
+limit); travel-wait offload is real via `TaskService.runAmbient` (60 s interval + failure latch, follow
+suspend/resume mirrored from SkillManager); furnace fuel offload fallback (`FuelOffloadPolicy`,
+`FurnaceOffloadService`) when no chest can be found or placed. Details + field checks in `changelog.md`.
+
+**Field checks pending:** `docs/testing/FIELD_SESSION_1.1.202.md` Phases 6b/6c plus the 1.1.205 list in
+the changelog (add a Phase 6d when convenient).
+
+**Code follow-ups:** `ToolSelector.onSlotClick` mutates inventory off the server thread (pre-existing);
+`FarmSkill.ensureHotbarAccess` unlocked-with-full-hotbar targets slot 0 now; travel-wait offload latch
+fires on any false (incl. `/bot stop` abort) and stamps the interval even when the slot was busy;
+`getRecentSurfaceRecoveryFailureReason` null-vs-"" contract.
+
+**Remaining autonomous candidates (from the 2026-09-04 list):** command pruning review (`look_player`,
+`direction reset`, Actions-tab Regroup duplicate); water location memory + fishing reach; crafting
+helper "report missing inputs"; ScaffoldService/LeafClearService extraction; FortifyVillageSkill Phase 2;
+ontology Phase 3 / second scripted-text personality (spec first).
+
+**Needs Bradley:** guided field session; woodcut fallback restart loop repro; doorway rework decision;
+ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-04 (night) — superseded
 
 **State:** main = origin/main @ 1.1.204 (pushed, deployed to all three Prism instances). Suite 750 green.
 
@@ -578,7 +607,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Inventory & Storage
 
-- [ ] **Furnace offload fallback**: When no chest is available but furnaces are nearby, dump fuel-eligible items (leaves, sticks, planks) into the fuel slot and smeltable items into the input slot. Especially useful during patrol when bot accumulates items with no chest infrastructure.
+- [x] **Furnace offload fallback** ✅ 1.1.205 (`FurnaceOffloadService` + `FuelOffloadPolicy`; verify in field). Was: When no chest is available but furnaces are nearby, dump fuel-eligible items (leaves, sticks, planks) into the fuel slot and smeltable items into the input slot. Especially useful during patrol when bot accumulates items with no chest infrastructure.
 - [x] **Craft chest from wood** — ✅ already done. [ToolProvisionService.ensureChest](src/main/java/net/wcfcarolina13/GameAI/services/ToolProvisionService.java) crafts an 8-plank chest when planks/logs are available. Wired into [ChestStoreService.java:588](src/main/java/net/wcfcarolina13/GameAI/services/ChestStoreService.java#L588) (offload path), HuntSkill (camp), FishingSkill.
 - [ ] Shift-click, double-click, drag support in inventory UI
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)

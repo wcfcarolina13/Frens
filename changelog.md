@@ -2,6 +2,63 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Loose ends from the backlog run: hotbar-lock copies, bundled scaffold escape, bundle-aware tools, travel-wait offload, furnace fuel fallback; 1.1.205 (2026-09-04)
+
+Bradley picked items 1–5 from the "what else can you work through" list. Same loop: scope → implement
+per item → batch review → fix wave → re-review.
+
+- **`FarmSkill` / `RideSyncService` hotbar access honours the hotbar lock (commit `c254e21`).** Both
+  private `ensureHotbarAccess` copies now go through `ScaffoldSlotPolicy.resolveHotbarTarget` and return
+  -1 under lock with an out-of-hotbar slot; 2 previously unguarded FarmSkill callers (`scoopWater`
+  retry-select, `pickupWater`) and both RideSyncService callers (boat/minecart place) now bail instead
+  of using whatever sat in slot 0.
+- **Escape pillar reaches scaffold inside bundles (commit `a9402ff`).** `BundleService.reachFirst(bot,
+  pred)` is the shared thread hop (on-thread fast path, else `server.execute` + 2 s future); HealingService
+  now uses it instead of its private copy. `BotFleeService.ensureScaffoldReachable(bot, 2)` runs before
+  both `countScaffoldBlocks >= 2` gates and at the top of `tryPillarOperationalSurfaceRecovery`, pulling
+  up to two scaffold stacks out of bundles (`ensureAtSurface: … pulled N scaffold stack(s) out of
+  bundles`). `countScaffoldBlocks` stays direct-only — it describes what the pillar can place now.
+- **Travel-wait offload is real (commit `39b48d9`).** `TaskService.runAmbient(source, bot, name,
+  Runnable)` is the generic "run this as an AMBIENT task on a worker thread" the codebase lacked (the
+  ticket is created inside the worker so `/bot stop` interrupts it; own daemon executor with
+  shutdown/restart wired beside BotIdleHobbiesService's). `DropSweeper.attemptChestStoreExistingOnly`
+  is the extracted existing-chests-only loop (DropSweeper's own behaviour unchanged). TravelWaitService
+  OFFLOAD_EXISTING now dispatches it; the AMBIENT ticket makes the next tick read HOBBY/keep-running, so
+  it never re-dispatches. Field-check: a bot in FOLLOW mode may fight the offload walk (runAmbient does
+  none of SkillManager's follow-mode save/restore).
+- **Bundle-aware tool / armor / weapon selection (commit `e0b1c85`).** Reach-first only when a bundled
+  item is *strictly better* (`BundleReachPolicy.shouldReachForBetter(bestDirect, bestBundled,
+  rateLimited)`, 4 tests): `ToolSelector.selectBestToolForBlock` re-runs its speed comparator over
+  bundled refs when no direct tool beats speed 1.0; `MiningTool.switchToTool` gets an `allowBundleReach`
+  overload as a backstop; `armorUtils.autoEquipArmor` extracts a bundled piece only if it beats both the
+  best direct candidate and the equipped one; `CombatInventoryManager` weapon (strictly better) and
+  shield (none direct) with a 100-tick per-bot rate limit. Vanilla gear is `maxCount 1` so the bot
+  never bundles it itself — these paths fire when a player hand-packs gear into a bot's bundle.
+- **Furnace fuel offload fallback (commit `0202853`; P2).** When a deposit finds no chest and cannot
+  place one, `FurnaceOffloadService.depositFuel(source, bot, 12)` gives fuel away to nearby furnaces:
+  pure `FuelOffloadPolicy` orders giveaways leaf litter → leaves/saplings → sticks → surplus planks
+  (reserve = max(scaffold reserve, 32), consumed across stacks in slot order; 8 tests), protected zones
+  and differently-fuelled furnaces are skipped, the insert into slot 1 runs on the server thread, abort
+  is honoured between furnaces, max 4 furnaces. Wired at `ChestStoreService.handleTransfer`'s terminal
+  no-chest point and `DropSweeper.attemptChestStore` after the place-chest fall-through; chat says
+  "No chest nearby - dropped fuel into a furnace instead." Worker-thread entry; returns false on the
+  server thread.
+- **Review fix wave (commit `4c8c128`).** Travel-wait offload now has a 60 s interval and a permanent
+  failure latch per pending request (a chest that takes nothing is not walked to again;
+  `TravelWaitPolicy.shouldDispatchOffload`); `runAmbient` reserves the bot's slot atomically before
+  submitting (two same-tick dispatches could race the in-worker ticket) and mirrors `SkillManager.
+  runSkill`'s follow-mode suspend/resume (extracted to public helpers) and `AutoFaceEntity` flag around
+  the body; combat reach consumes its 100-tick stamp only when it actually reaches, and the per-bot map
+  is cleared on unregister; the furnace pre-check rejects a slot holding a different fuel.
+- Tests 750 → 767. Follow-ups: `ToolSelector` already mutated inventory off the server thread before
+  this change (pre-existing; the new reach hop makes its pre-hop scan slightly staler) — worth moving
+  its `onSlotClick` under `callOnServer`; `FarmSkill.ensureHotbarAccess` unlocked-with-full-hotbar now
+  targets slot 0 instead of the selected slot (ScaffoldSlotPolicy semantics).
+- **Field checks:** boat + sword outside hotbar → no wrong-item swing (FarmSkill/RideSync variants);
+  cobblestone only in a bundle, wedged in a hole → `pulled N scaffold stack(s) out of bundles` then a
+  pillar; `/bot come` on cooldown with hobbies off and a full inventory near a registered chest → one
+  offload walk, then travel; a hand-packed diamond pickaxe in a bundle → mining pulls it out; no chest
+  anywhere, leaves/sticks in inventory, furnace nearby → "dropped fuel into a furnace instead".
 ## Backlog run: bundle-aware inventory, Spells key → inventory tab, Silas persona, pillar-failure diagnostics, travel-wait; 1.1.204 (2026-09-04)
 
 Bradley asked for the six items I had listed as workable without him, in the order recommended.
