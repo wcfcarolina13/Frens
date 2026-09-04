@@ -60,8 +60,12 @@ public final class BotTorchHoldService {
     /** Slot the bot had selected before we put the torch in hand. -1 = no override. */
     private static final ConcurrentHashMap<UUID, Integer> SAVED_SELECTED_SLOT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_EVAL_TICK = new ConcurrentHashMap<>();
-    /** Last reason we declined to hold a torch — only re-logged when the reason changes. */
-    private static final ConcurrentHashMap<UUID, String> LAST_REJECT_REASON = new ConcurrentHashMap<>();
+    /**
+     * Last verdict line logged for a bot (verdict + gate + measured values).
+     * Diagnostics are state-change-only: we only emit a line when this changes,
+     * so a 5-tick evaluation loop does not flood the field log.
+     */
+    private static final ConcurrentHashMap<UUID, String> LAST_VERDICT = new ConcurrentHashMap<>();
 
     private BotTorchHoldService() {}
 
@@ -101,8 +105,8 @@ public final class BotTorchHoldService {
             }
         }
 
-        String rejectReason = evalHoldRejection(bot, world, id);
-        boolean shouldHold = rejectReason == null;
+        Verdict verdict = evalHold(bot, world, id);
+        boolean shouldHold = verdict.gate == null;
 
         if (shouldHold) {
             int torchSlot = findTorchHotbarSlot(bot);
@@ -112,7 +116,7 @@ public final class BotTorchHoldService {
                 promoted = torchSlot >= 0;
             }
             if (torchSlot < 0) {
-                logRejectIfChanged(bot, id, "no-torch-in-inventory");
+                logVerdictIfChanged(bot, id, new Verdict("no-torch-in-inventory", -1.0D, verdict.light, null), "");
                 return;
             }
             if (currentSlot != torchSlot) {
@@ -120,60 +124,89 @@ public final class BotTorchHoldService {
                     SAVED_SELECTED_SLOT.put(id, currentSlot);
                 }
                 BotActions.selectHotbarSlot(bot, torchSlot);
-                LAST_REJECT_REASON.remove(id);
-                LOGGER.info("torch-hold: {} {} torch in slot {} (savedSlot={})",
-                        bot.getName().getString(),
-                        promoted ? "promoted+held" : "held",
-                        torchSlot, currentSlot);
             }
+            logVerdictIfChanged(bot, id, verdict,
+                    String.format(" action=%s slot=%d savedSlot=%d",
+                            promoted ? "promoted+held" : "held", torchSlot, currentSlot));
         } else if (savedSlot != null) {
             BotActions.selectHotbarSlot(bot, savedSlot);
             SAVED_SELECTED_SLOT.remove(id);
-            LOGGER.info("torch-hold: {} yielded back to slot {} ({})",
-                    bot.getName().getString(), savedSlot, rejectReason);
-            LAST_REJECT_REASON.put(id, rejectReason);
+            logVerdictIfChanged(bot, id, verdict, String.format(" action=yield slot=%d", savedSlot));
         } else {
-            logRejectIfChanged(bot, id, rejectReason);
-        }
-    }
-
-    private static void logRejectIfChanged(ServerPlayerEntity bot, UUID id, String reason) {
-        if (reason == null) return;
-        String prev = LAST_REJECT_REASON.get(id);
-        if (!reason.equals(prev)) {
-            LAST_REJECT_REASON.put(id, reason);
-            LOGGER.info("torch-hold: {} not holding ({})", bot.getName().getString(), reason);
+            logVerdictIfChanged(bot, id, verdict, "");
         }
     }
 
     /**
-     * Returns null if the bot should hold a torch right now, otherwise a short
-     * reason string for diagnostic logging. Reasons are stable so we can
-     * cheaply suppress repeat lines on the rejection-changed path.
+     * Emits one INFO diagnostic line, but only when the verdict for this bot has
+     * actually changed since the last evaluation. Format:
+     * {@code [torch-hold] Jake verdict=reject gate=audible-hostile-8 dist=5.2 light=4}
      */
-    private static String evalHoldRejection(ServerPlayerEntity bot, ServerWorld world, UUID id) {
-        Mode mode = BotEventHandler.getModePublic(bot);
-        if (mode != Mode.IDLE && mode != Mode.FOLLOW) return "mode-" + mode;
-        if (TaskService.hasActiveTask(id)) return "active-task";
-        if (bot.isUsingItem()) return "using-item";
-        if (bot.hasVehicle()) return "mounted";
-        if (bot.isSleeping()) return "sleeping";
+    private static void logVerdictIfChanged(ServerPlayerEntity bot, UUID id, Verdict verdict, String suffix) {
+        String line = String.format("[torch-hold] %s verdict=%s gate=%s dist=%s light=%d%s%s",
+                bot.getName().getString(),
+                verdict.gate == null ? "hold" : "reject",
+                verdict.gate == null ? "none" : verdict.gate,
+                verdict.dist < 0 ? "n/a" : String.format("%.1f", verdict.dist),
+                verdict.light,
+                verdict.detail == null ? "" : " mob=" + verdict.detail,
+                suffix);
+        String prev = LAST_VERDICT.get(id);
+        if (!line.equals(prev)) {
+            LAST_VERDICT.put(id, line);
+            LOGGER.info(line);
+        }
+    }
 
+    /** Immutable evaluation result: which gate rejected (null = hold) plus the measured values. */
+    private static final class Verdict {
+        final String gate;
+        final double dist;
+        final int light;
+        final String detail;
+
+        Verdict(String gate, double dist, int light, String detail) {
+            this.gate = gate;
+            this.dist = dist;
+            this.light = light;
+            this.detail = detail;
+        }
+    }
+
+    /**
+     * Evaluates every hold gate in order and returns the first rejecting gate
+     * (or a gate of {@code null} meaning "hold a torch now"), along with the
+     * measured values that drove the decision. Gate names are stable strings and
+     * carry their threshold where one exists (e.g. {@code audible-hostile-8}) so
+     * a field log line is self-explanatory. This method has NO side effects and
+     * changes no gate's logic — it only reports.
+     */
+    private static Verdict evalHold(ServerPlayerEntity bot, ServerWorld world, UUID id) {
         int light = world.getLightLevel(bot.getBlockPos());
-        if (light > LIGHT_THRESHOLD) return "light-" + light;
+
+        Mode mode = BotEventHandler.getModePublic(bot);
+        if (mode != Mode.IDLE && mode != Mode.FOLLOW) return new Verdict("mode-" + mode, -1.0D, light, null);
+        if (TaskService.hasActiveTask(id)) return new Verdict("active-task", -1.0D, light, null);
+        if (bot.isUsingItem()) return new Verdict("using-item", -1.0D, light, null);
+        if (bot.hasVehicle()) return new Verdict("mounted", -1.0D, light, null);
+        if (bot.isSleeping()) return new Verdict("sleeping", -1.0D, light, null);
+
+        if (light > LIGHT_THRESHOLD) return new Verdict("light-above-" + LIGHT_THRESHOLD, -1.0D, light, null);
 
         // Combat suppression — visible OR audible hostile.
         List<Entity> visible = BotThreatService.findHostilesAround(bot, VISIBLE_HOSTILE_RADIUS);
         for (Entity hostile : visible) {
-            double distSq = hostile.squaredDistanceTo(bot);
-            if (distSq <= AUDIBLE_HOSTILE_RADIUS * AUDIBLE_HOSTILE_RADIUS) {
-                return "audible-hostile-" + hostile.getType().toString();
+            double dist = Math.sqrt(hostile.squaredDistanceTo(bot));
+            if (dist <= AUDIBLE_HOSTILE_RADIUS) {
+                return new Verdict("audible-hostile-" + (int) AUDIBLE_HOSTILE_RADIUS,
+                        dist, light, hostile.getType().toString());
             }
             if (EntityVisibilityUtil.canSee(bot, hostile)) {
-                return "visible-hostile-" + hostile.getType().toString();
+                return new Verdict("visible-hostile-" + (int) VISIBLE_HOSTILE_RADIUS,
+                        dist, light, hostile.getType().toString());
             }
         }
-        return null;
+        return new Verdict(null, -1.0D, light, null);
     }
 
     /** Returns the hotbar slot (0–8) holding a torch, or -1 if none. */
@@ -266,6 +299,6 @@ public final class BotTorchHoldService {
     public static void reset() {
         SAVED_SELECTED_SLOT.clear();
         LAST_EVAL_TICK.clear();
-        LAST_REJECT_REASON.clear();
+        LAST_VERDICT.clear();
     }
 }
