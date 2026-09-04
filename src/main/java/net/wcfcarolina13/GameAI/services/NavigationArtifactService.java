@@ -943,6 +943,10 @@ public final class NavigationArtifactService {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return false;
         }
+        if (bot.isRemoved()) {
+            LOGGER.debug("beginDelayedTravel skipped: bot {} is removed (died or despawned).", botAlias);
+            return false;
+        }
 
         double travelDistance = bot.getBlockPos().getManhattanDistance(destination);
 
@@ -967,9 +971,12 @@ public final class NavigationArtifactService {
                             "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
                             + destLabel + "; I'll keep busy meanwhile.\u00A7r");
                     final int retryDelayTicks = delayTicks;
+                    // Take the freshly re-resolved bot from the wait service — the original entity
+                    // is dead after a respawn and retrying against it is a no-op.
                     TravelWaitService.enqueue(bot, remainingTicks, destLabel,
-                            () -> beginDelayedTravel(server, bot, botAlias, destination, dimension, retryDelayTicks,
-                                    ownerUuid, skipGates, suppressOwnerNotify, skipArtifactGate, magicTravel));
+                            (srv, freshBot) -> beginDelayedTravel(srv, freshBot, botAlias, destination, dimension,
+                                    retryDelayTicks, ownerUuid, skipGates, suppressOwnerNotify, skipArtifactGate,
+                                    magicTravel));
                     return false;
                 }
             }

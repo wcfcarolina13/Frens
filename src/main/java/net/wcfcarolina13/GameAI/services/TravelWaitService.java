@@ -11,6 +11,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 
 /**
  * Keeps a bot useful while a fast-travel cooldown runs, then travels when it expires.
@@ -44,7 +45,13 @@ public final class TravelWaitService {
 
     private static final class PendingTravel {
         final String label;
-        final Runnable retryTravel;
+        /**
+         * Retry hook. Takes the server and a <em>freshly re-resolved</em> bot instance: a bot that
+         * dies and respawns is a brand-new {@code createFakePlayer}, and the DISCONNECT cancel never
+         * fires for bots (FakeClientConnection's disconnect is a no-op), so capturing the live entity
+         * in the lambda would retry against a removed corpse.
+         */
+        final BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel;
         final long startedTick;
         int retries;
         long lastChestProbeTick = Long.MIN_VALUE;
@@ -52,7 +59,7 @@ public final class TravelWaitService {
         long lastHobbyNudgeTick = Long.MIN_VALUE;
         TravelWaitPolicy.Action lastAction;
 
-        PendingTravel(String label, Runnable retryTravel, long startedTick) {
+        PendingTravel(String label, BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel, long startedTick) {
             this.label = label;
             this.retryTravel = retryTravel;
             this.startedTick = startedTick;
@@ -63,12 +70,18 @@ public final class TravelWaitService {
      * Records a travel refused by the cooldown gate. One request per bot; a newer request replaces
      * any prior one. The owner is told once, up front.
      */
-    public static boolean enqueue(ServerPlayerEntity bot, long remainingTicks, String label, Runnable retryTravel) {
+    public static boolean enqueue(ServerPlayerEntity bot, long remainingTicks, String label,
+                                  BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel) {
         if (bot == null || retryTravel == null) {
             return false;
         }
         MinecraftServer server = bot.getEntityWorld() instanceof ServerWorld world ? world.getServer() : null;
-        long now = server != null ? server.getOverworld().getTime() : 0L;
+        if (server == null) {
+            // Without a server clock there is no meaningful startedTick or cooldown evaluation.
+            LOGGER.debug("travel-wait enqueue skipped: no server for {}", bot.getName().getString());
+            return false;
+        }
+        long now = server.getOverworld().getTime();
         String dest = label == null || label.isBlank() ? "their destination" : label;
 
         PENDING.put(bot.getUuid(), new PendingTravel(dest, retryTravel, now));
@@ -103,9 +116,13 @@ public final class TravelWaitService {
             UUID uuid = entry.getKey();
             PendingTravel pending = entry.getValue();
 
+            // Always re-resolve by UUID: a respawned bot is a new entity instance, and nothing
+            // cancels the request on death (bot disconnects are no-ops).
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(uuid);
             if (bot == null || bot.isRemoved() || !bot.isAlive()) {
                 it.remove();
+                LOGGER.info("travel-wait dropping request for {} (bot gone or removed); dest={}",
+                        uuid, pending.label);
                 continue;
             }
 
@@ -116,6 +133,8 @@ public final class TravelWaitService {
                     .map(info -> info.origin() == TaskService.Origin.AMBIENT)
                     .orElse(false);
 
+            // Note: the probe only runs while no task is active, so `chestNearby` can be stale for
+            // up to CHEST_PROBE_INTERVAL_TICKS (200t) after a hobby ends — it is a hint, not a fact.
             if (remaining > 0 && !taskActive
                     && now - pending.lastChestProbeTick >= CHEST_PROBE_INTERVAL_TICKS) {
                 pending.lastChestProbeTick = now;
@@ -134,6 +153,10 @@ public final class TravelWaitService {
             if (action != pending.lastAction) {
                 pending.lastAction = action;
                 LOGGER.info("{}: {}", bot.getName().getString(), TravelWaitPolicy.describe(inputs, action));
+                if (action == TravelWaitPolicy.Action.OFFLOAD_EXISTING) {
+                    // Logged once per transition — this fires every tick otherwise.
+                    LOGGER.info("travel-wait offload deferred (no worker launch path)");
+                }
             }
 
             switch (action) {
@@ -150,7 +173,7 @@ public final class TravelWaitService {
                     // The gate may re-enqueue if something re-armed the cooldown; the retry count
                     // carried below caps that loop.
                     int carried = pending.retries;
-                    pending.retryTravel.run();
+                    pending.retryTravel.accept(server, bot);
                     PendingTravel requeued = PENDING.get(uuid);
                     if (requeued != null && requeued.retries == 0) {
                         requeued.retries = carried;
@@ -162,8 +185,7 @@ public final class TravelWaitService {
                         BotIdleHobbiesService.requestDecisionNow(bot);
                     }
                 }
-                case OFFLOAD_EXISTING -> LOGGER.info("travel-wait offload deferred (no worker launch path)");
-                case WAIT -> {
+                case OFFLOAD_EXISTING, WAIT -> {
                     // nothing to do
                 }
             }
