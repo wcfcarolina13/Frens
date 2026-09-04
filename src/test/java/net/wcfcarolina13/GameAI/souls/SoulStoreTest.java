@@ -13,8 +13,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -614,5 +616,55 @@ class SoulStoreTest {
         assertEquals(2, store.eventsSince(bot, Instant.ofEpochMilli(2500L)).get(2, SECONDS).size());
         assertEquals(3, store.trimEvents(bot, 2).get(2, SECONDS));
         assertEquals(2, store.recentEvents(bot, 10).get(2, SECONDS).size());
+    }
+
+    @Test
+    void heardTurnPersistsParticipantsAndLegacyRecordsReadAsEmpty() throws Exception {
+        UUID bot = UUID.randomUUID(), player = UUID.randomUUID(), other = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(bot, player, SoulTypes.Channel.PARTY);
+        store.beginHeardTurn(key, UUID.randomUUID(), "Roti: hi", Instant.EPOCH, List.of(bot, other)).get();
+        store.beginHeardTurn(key, UUID.randomUUID(), "Roti: again", Instant.EPOCH).get();
+        List<SoulTypes.ConversationRecord> recs = store.recordsSince(key, new SoulTypes.ConversationCursor(0L, 0L)).get();
+        assertEquals(2, recs.size());
+        assertEquals(List.of(bot, other), recs.get(0).participants());
+        assertTrue(recs.get(1).participants().isEmpty());
+    }
+
+    @Test
+    void recordsSinceHonoursCursorAndEpochChange() throws Exception {
+        UUID bot = UUID.randomUUID(), player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(bot, player, SoulTypes.Channel.DIRECT);
+        for (int i = 0; i < 3; i++) store.beginHeardTurn(key, UUID.randomUUID(), "m" + i, Instant.EPOCH).get();
+        assertEquals(1, store.recordsSince(key, new SoulTypes.ConversationCursor(0L, 2L)).get().size());
+        long newEpoch = store.archiveAndReset(key).get();
+        store.beginHeardTurn(key, UUID.randomUUID(), "fresh", Instant.EPOCH).get();
+        List<SoulTypes.ConversationRecord> after = store.recordsSince(key, new SoulTypes.ConversationCursor(0L, 2L)).get();
+        assertEquals(1, after.size());
+        assertEquals(newEpoch, after.get(0).epoch());
+        assertEquals("fresh", after.get(0).content());
+    }
+
+    @Test
+    void listsBotDirectoriesAndConversationPlayers() throws Exception {
+        UUID bot = UUID.randomUUID(), p1 = UUID.randomUUID(), p2 = UUID.randomUUID();
+        store.beginHeardTurn(new SoulTypes.ConversationKey(bot, p1, SoulTypes.Channel.DIRECT), UUID.randomUUID(), "a", Instant.EPOCH).get();
+        store.beginHeardTurn(new SoulTypes.ConversationKey(bot, p2, SoulTypes.Channel.DIRECT), UUID.randomUUID(), "b", Instant.EPOCH).get();
+        assertEquals(Set.of(p1, p2), new HashSet<>(store.conversationPlayers(bot).get()));
+        assertTrue(store.botDirectories().get().contains(bot));
+        assertTrue(store.conversationPlayers(UUID.randomUUID()).get().isEmpty());
+    }
+
+    @Test
+    void mindJsonWithoutDigestFieldsLoadsWithEmpties() throws Exception {
+        UUID bot = UUID.randomUUID();
+        Path dir = worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("mind.json"), "{\"schemaVersion\":1,\"playerStance\":{\"trust\":3,\"exasperation\":0,\"curiosity\":3},"
+                + "\"threads\":[],\"memories\":[],\"seen\":[],\"lastConsolidatedAtMs\":0,\"lastDay\":-1,\"lastTaskTrustDay\":-1}");
+        SoulTypes.SoulMind mind = store.mind(bot).get();
+        assertTrue(mind.playerMemories().isEmpty());
+        assertTrue(mind.digestCursors().isEmpty());
+        SoulTypes.SoulMind saved = store.updateMind(bot, m -> SoulMemoryDigestOps.withCursor(m, "DIRECT:x", new SoulTypes.ConversationCursor(2L, 5L))).get();
+        assertEquals(new SoulTypes.ConversationCursor(2L, 5L), saved.digestCursors().get("DIRECT:x"));
     }
 }
