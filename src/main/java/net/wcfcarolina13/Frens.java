@@ -833,6 +833,7 @@ public class Frens implements ModInitializer {
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.LockableBlockService.saveAllWorlds(server);
+            net.wcfcarolina13.GameAI.services.TravelWaitService.clear();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
                 if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
@@ -957,6 +958,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
             net.wcfcarolina13.GameAI.services.LockableBlockService.clearLockMode(player.getUuid());
             net.wcfcarolina13.ChatUtils.VoiceLineMuteService.clearPlayerMask(player.getUuid());
+            net.wcfcarolina13.GameAI.services.TravelWaitService.cancel(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }
@@ -1203,6 +1205,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.TravelWaitService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotMutualAidService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotInventoryFullDialogueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);

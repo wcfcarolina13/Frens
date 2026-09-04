@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TravelWaitPolicyTest {
@@ -90,5 +91,28 @@ class TravelWaitPolicyTest {
         TravelWaitPolicy.Action action = TravelWaitPolicy.decide(in);
         String description = TravelWaitPolicy.describe(in, action);
         assertTrue(description.contains(action.name()));
+    }
+
+    @Test
+    void fullnessComputesOccupiedFraction() {
+        assertEquals(0.5f, TravelWaitPolicy.fullness(18, 36), 0.0001f);
+        assertEquals(0f, TravelWaitPolicy.fullness(0, 36), 0.0001f);
+        assertEquals(1f, TravelWaitPolicy.fullness(36, 36), 0.0001f);
+    }
+
+    @Test
+    void fullnessClampsAndHandlesBadSize() {
+        assertEquals(0f, TravelWaitPolicy.fullness(5, 0), 0.0001f);
+        assertEquals(0f, TravelWaitPolicy.fullness(5, -3), 0.0001f);
+        assertEquals(1f, TravelWaitPolicy.fullness(40, 36), 0.0001f);
+        assertEquals(0f, TravelWaitPolicy.fullness(-4, 36), 0.0001f);
+    }
+
+    @Test
+    void retryCapAllowsThreeAttempts() {
+        assertTrue(TravelWaitPolicy.canRetry(0));
+        assertTrue(TravelWaitPolicy.canRetry(TravelWaitPolicy.MAX_TRAVEL_RETRIES - 1));
+        assertFalse(TravelWaitPolicy.canRetry(TravelWaitPolicy.MAX_TRAVEL_RETRIES));
+        assertFalse(TravelWaitPolicy.canRetry(TravelWaitPolicy.MAX_TRAVEL_RETRIES + 5));
     }
 }

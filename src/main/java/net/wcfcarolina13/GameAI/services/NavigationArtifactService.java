@@ -961,12 +961,15 @@ public final class NavigationArtifactService {
                 long elapsed = now - lastDeparture;
                 if (elapsed < TRAVEL_COOLDOWN_TICKS) {
                     long remainingTicks = TRAVEL_COOLDOWN_TICKS - elapsed;
-                    int remainingSec = Math.max(1, (int) (remainingTicks / 20));
-                    String timeStr = remainingSec >= 60
-                            ? (remainingSec / 60) + "m " + (remainingSec % 60) + "s"
-                            : remainingSec + "s";
+                    String timeStr = TravelWaitService.formatWait(remainingTicks);
+                    String destLabel = destination.toShortString();
                     notifyOwner(server, ownerUuid,
-                            "\u00A7c" + botAlias + " needs to rest before traveling again (" + timeStr + " remaining).\u00A7r");
+                            "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
+                            + destLabel + "; I'll keep busy meanwhile.\u00A7r");
+                    final int retryDelayTicks = delayTicks;
+                    TravelWaitService.enqueue(bot, remainingTicks, destLabel,
+                            () -> beginDelayedTravel(server, bot, botAlias, destination, dimension, retryDelayTicks,
+                                    ownerUuid, skipGates, suppressOwnerNotify, skipArtifactGate, magicTravel));
                     return false;
                 }
             }

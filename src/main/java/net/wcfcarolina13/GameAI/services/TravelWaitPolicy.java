@@ -28,7 +28,23 @@ public final class TravelWaitPolicy {
     /** Inventory fullness fraction at/above which offload to an existing chest is worthwhile. */
     public static final float OFFLOAD_FULLNESS_THRESHOLD = 0.85f;
 
+    /** Maximum times a queued travel may be retried before the request is dropped. */
+    public static final int MAX_TRAVEL_RETRIES = 3;
+
     private TravelWaitPolicy() {
+    }
+
+    /** True while a queued travel that has already been retried {@code retries} times may retry again. */
+    public static boolean canRetry(int retries) {
+        return retries < MAX_TRAVEL_RETRIES;
+    }
+
+    /** Occupied-slot fraction, clamped to [0,1]; a non-positive size reads as empty. */
+    public static float fullness(int occupied, int size) {
+        if (size <= 0) {
+            return 0f;
+        }
+        return clampFullness((float) occupied / (float) size);
     }
 
     public static Action decide(Inputs in) {

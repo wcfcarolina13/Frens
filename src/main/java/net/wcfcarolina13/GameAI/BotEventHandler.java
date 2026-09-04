@@ -805,6 +805,7 @@ public class BotEventHandler {
     public static void noteStopCommand(UUID botUuid) {
         if (botUuid == null || server == null) return;
         STOP_COMMAND_GRACE_UNTIL_TICK.put(botUuid, (long) server.getTicks() + 60L);
+        net.wcfcarolina13.GameAI.services.TravelWaitService.cancel(botUuid);
     }
 
     /** Returns true if the bot is within the stop-command grace window (60 ticks after /bot stop). */
