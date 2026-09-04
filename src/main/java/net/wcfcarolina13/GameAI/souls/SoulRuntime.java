@@ -773,11 +773,18 @@ public final class SoulRuntime {
     public void onNewDay(UUID botId, int day, String biome) {
         Objects.requireNonNull(botId, "botId");
         Map<UUID, String> names = new HashMap<>();
+        Map<UUID, String> digestNames = new HashMap<>();
         MinecraftServer srv = server;
         String botName = "the bot";
         if (srv != null) {
             for (net.minecraft.server.network.ServerPlayerEntity online : srv.getPlayerManager().getPlayerList()) {
                 names.put(online.getUuid(), online.getName().getString());
+                // Bots are ServerPlayerEntities too. Mind consolidation still wants their names
+                // (it narrates who did what), but the digest treats a named id as a SUBJECT to
+                // remember things about, so registered bots are held out of the digest's map.
+                if (!net.wcfcarolina13.GameAI.BotEventHandler.isRegisteredBot(online)) {
+                    digestNames.put(online.getUuid(), online.getName().getString());
+                }
             }
             net.minecraft.server.network.ServerPlayerEntity bot = srv.getPlayerManager().getPlayer(botId);
             if (bot != null) {
@@ -795,7 +802,7 @@ public final class SoulRuntime {
                 .thenCompose(mind -> {
                     SoulMemoryDigestService d = pipelineRef.get().digest();
                     return d == null ? CompletableFuture.completedFuture(mind)
-                            : d.digest(botId, digestBotName, day, names).thenApply(v -> mind);
+                            : d.digest(botId, digestBotName, day, digestNames).thenApply(v -> mind);
                 })
                 .thenAccept(mind -> LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
                         botId, day, mind.memories().size()))
@@ -926,9 +933,14 @@ public final class SoulRuntime {
                     }
                 },
                 delivery::deliverStatus);
-        // TODO(task 7): replace `() -> true` with the ManualConfig soul-memory-digest getter.
+        // Live supplier like the banter switch above: /bot soul digest on|off takes effect on the
+        // next day rollover with no pipeline reload. Absent config = on (the field default).
         SoulMemoryDigestService digest = new SoulMemoryDigestService(
-                store, partyStore, scheduler, provider, settings.model(), settings.timeout(), () -> true);
+                store, partyStore, scheduler, provider, settings.model(), settings.timeout(),
+                () -> {
+                    ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                    return cfg == null || cfg.isSoulMemoryDigestEnabled();
+                });
         return new Pipeline(settings, provider, scheduler, conversationService, voice, groupService, digest);
     }
 

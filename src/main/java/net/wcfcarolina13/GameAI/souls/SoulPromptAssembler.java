@@ -20,6 +20,8 @@ import java.util.UUID;
  *   <li>system contract — stable, provider-neutral, contains no interpolated data</li>
  *   <li>authored identity — the profile's identity/values/boundaries plus its authored examples</li>
  *   <li>authoritative state — the current grounding snapshot, rendered by Frens (never invented)</li>
+ *   <li>{@code ABOUT <player>} — digested memories of what this player has said, when any exist;
+ *       deliberately AFTER authoritative state so present truth always wins over a memory</li>
  *   <li>bounded prior role history — USER/ASSISTANT turns, most-recent-first budget, chronological order</li>
  *   <li>bounded recent witnessed events — factual, provider-supplied, SYSTEM role</li>
  *   <li>{@code PRESENT MOMENT} marker message</li>

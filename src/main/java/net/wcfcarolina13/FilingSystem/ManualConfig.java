@@ -128,6 +128,11 @@ public class ManualConfig {
     // Active banter: companions chat while WORKING (skill running / actively following) —
     // a second lane in SoulBanterDirector with its own cadence. Default-OFF like banter.
     private boolean soulBanterActiveEnabled = false;
+    // Player-memory digest: at each Minecraft day rollover a soul-bound bot distils what it heard
+    // from each player into durable memories. Default-ON — it costs one small local LLM call per
+    // (bot, player) with fresh conversation, and everything downstream of it (recall, ABOUT block)
+    // degrades to the pre-digest behaviour when it is off.
+    private boolean soulMemoryDigestEnabled = true;
     // Dialogue pacing sliders (0–100, 50 = shipped cadence). Never "off": the toggles above
     // and the lane masters (Scripted Text/Voice, Soul Chat/Voice) are the kill switches.
     private int dialogueScriptedRate = 50;
@@ -941,6 +946,9 @@ public class ManualConfig {
 
     public boolean isSoulBanterActiveEnabled() { return soulBanterActiveEnabled; }
     public void setSoulBanterActiveEnabled(boolean v) { this.soulBanterActiveEnabled = v; }
+
+    public boolean isSoulMemoryDigestEnabled() { return soulMemoryDigestEnabled; }
+    public void setSoulMemoryDigestEnabled(boolean v) { this.soulMemoryDigestEnabled = v; }
 
     private static int clampRate(int rate) { return Math.max(0, Math.min(100, rate)); }
     public int getDialogueScriptedRate() { return clampRate(dialogueScriptedRate); }
