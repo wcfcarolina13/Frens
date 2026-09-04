@@ -246,6 +246,17 @@ public final class ChestStoreService {
                 }
             }
             if (chestPos == null) {
+                // Fallback: no chest to be found or placed. Dump cheap fuel (leaf litter, leaves,
+                // sticks, surplus planks) into a nearby furnace rather than staying stuck full.
+                if (deposit) {
+                    ServerPlayerEntity fuelBot = callOnServer(server, () -> server.getPlayerManager().getPlayer(botId), 800, null);
+                    if (fuelBot != null && !fuelBot.isRemoved()
+                            && FurnaceOffloadService.depositFuel(fuelBot.getCommandSource(), fuelBot, 12)) {
+                        server.execute(() -> ChatUtils.sendSystemMessage(source,
+                                "No chest nearby - dropped fuel into a furnace instead."));
+                        return;
+                    }
+                }
                 String msg = deposit
                         ? "No chest targeted or nearby; I couldn't place one to deposit into."
                         : "No chest targeted or nearby to withdraw from. Look at a chest or stand near one.";
@@ -398,6 +409,11 @@ public final class ChestStoreService {
      * Wrap a deposit filter to enforce a scaffold reserve: once the bot's scaffold
      * inventory drops to SCAFFOLD_RESERVE, stop allowing scaffold-type items through.
      */
+    /** Number of scaffold-type items always kept in the bot's inventory. */
+    public static int scaffoldReserve() {
+        return SCAFFOLD_RESERVE;
+    }
+
     static Predicate<ItemStack> withScaffoldReserve(ServerPlayerEntity bot, Predicate<ItemStack> inner) {
         if (bot == null) return inner;
         return stack -> {

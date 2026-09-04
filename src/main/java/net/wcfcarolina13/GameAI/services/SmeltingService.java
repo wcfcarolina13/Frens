@@ -915,6 +915,29 @@ public final class SmeltingService {
         return nearestPreferred != null ? nearestPreferred : nearestFallback;
     }
 
+    /**
+     * Package-visible furnace scan for the fuel-offload fallback: every furnace-like station in
+     * the box, sorted nearest-first. Unlike {@link #findNearestFurnace} this returns all matches
+     * so the caller can skip protected or occupied furnaces.
+     */
+    static List<BlockPos> findNearbyFurnaces(ServerWorld world, BlockPos origin, int radius, int ySpan) {
+        if (world == null || origin == null) {
+            return List.of();
+        }
+        List<BlockPos> found = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius))) {
+            if (!isFurnaceLike(world, pos)) continue;
+            found.add(pos.toImmutable());
+        }
+        found.sort(Comparator.comparingDouble(origin::getSquaredDistance));
+        return found;
+    }
+
+    /** Package-visible wrapper around {@link #chooseApproach} for the fuel-offload fallback. */
+    static BlockPos approachFor(ServerWorld world, BlockPos station) {
+        return chooseApproach(world, station);
+    }
+
     private static BlockPos chooseApproach(ServerWorld world, BlockPos station) {
         if (world == null || station == null) return null;
         List<BlockPos> options = findStandableOptions(world, station, 2);
@@ -1263,7 +1286,7 @@ public final class SmeltingService {
         return lower.replaceAll("\\s+", " ");
     }
 
-    private static boolean isFuelItem(ItemStack stack, ServerWorld world) {
+    static boolean isFuelItem(ItemStack stack, ServerWorld world) {
         if (stack == null || world == null || stack.isEmpty()) {
             return false;
         }

@@ -353,7 +353,19 @@ public final class DropSweeper {
         BlockPos placed = ChestStoreService.placeChestNearBot(source, player, false);
         if (placed != null) {
             int moved = ChestStoreService.depositMatchingWalkOnly(source, player, placed, DropSweeper::isChestOffloadCandidate);
-            return moved > 0;
+            if (moved > 0) {
+                return true;
+            }
+        }
+        // No chest found and none could be placed (or the placed one took nothing): give cheap
+        // fuel items to a nearby furnace instead of dropping them.
+        if (net.wcfcarolina13.GameAI.services.FurnaceOffloadService.depositFuel(source, player, 12)) {
+            var srv = source.getServer();
+            if (srv != null) {
+                srv.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(source,
+                        "No chest nearby - dropped fuel into a furnace instead."));
+            }
+            return true;
         }
         return false;
     }
