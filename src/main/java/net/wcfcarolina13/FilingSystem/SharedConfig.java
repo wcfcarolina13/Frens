@@ -90,13 +90,17 @@ public class SharedConfig {
         if (textDialogueEnabled != null) config.setTextDialogueEnabled(textDialogueEnabled);
         if (voicedDialogueEnabled != null) config.setVoicedDialogueEnabled(voicedDialogueEnabled);
         if (mutedTextCategories != null) {
-            List<String> live = config.getMutedTextCategories();
-            live.clear();
+            // Copy into a temporary FIRST so capture(cfg).applyTo(cfg) (same instance, or a
+            // snapshot sharing the live list) cannot clear the source out from under us.
+            List<String> staged = new ArrayList<>();
             for (String category : mutedTextCategories) {
-                if (category != null && !category.isBlank() && !live.contains(category)) {
-                    live.add(category);
+                if (category != null && !category.isBlank() && !staged.contains(category)) {
+                    staged.add(category);
                 }
             }
+            List<String> live = config.getMutedTextCategories();
+            live.clear();
+            live.addAll(staged);
         }
         if (gameplayTipsEnabled != null) config.setGameplayTipsEnabled(gameplayTipsEnabled);
         if (idleHobbiesAnywhereEnabled != null) config.setIdleHobbiesAnywhereEnabled(idleHobbiesAnywhereEnabled);
@@ -120,9 +124,10 @@ public class SharedConfig {
         if (soulLocalRate != null) config.setSoulLocalRate(soulLocalRate);
         if (soulVoiceEnabled != null) config.setSoulVoiceEnabled(soulVoiceEnabled);
         if (botControlsByWorld != null) {
+            Map<String, Map<String, ManualConfig.BotControlSettings>> staged = copyBotControls(botControlsByWorld);
             Map<String, Map<String, ManualConfig.BotControlSettings>> live = config.getBotControlsByWorld();
             live.clear();
-            live.putAll(copyBotControls(botControlsByWorld));
+            live.putAll(staged);
         }
     }
 

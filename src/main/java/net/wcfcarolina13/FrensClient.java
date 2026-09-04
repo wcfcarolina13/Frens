@@ -66,6 +66,40 @@ import org.lwjgl.glfw.GLFW;
 
 public class FrensClient implements ClientModInitializer {
 
+    /**
+     * Snapshot of the local (on-disk) global config, taken on the FIRST config sync of a remote
+     * connection. Restored on disconnect so a dedicated server's globals never leak into the
+     * player's own settings.json5 or a later single-player session.
+     */
+    private static net.wcfcarolina13.FilingSystem.SharedConfig preSyncSnapshot = null;
+
+    /** Marks Frens.CONFIG as remote-authoritative, capturing the local globals once per connection. */
+    private static void enterRemoteConfig() {
+        net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+        if (cfg == null) {
+            return;
+        }
+        if (preSyncSnapshot == null) {
+            preSyncSnapshot = net.wcfcarolina13.FilingSystem.SharedConfig.capture(cfg);
+        }
+        cfg.setRemoteAuthoritative(true);
+    }
+
+    /** Restores the pre-sync local globals and re-enables local saving. */
+    private static void leaveRemoteConfig() {
+        net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+        if (cfg == null) {
+            preSyncSnapshot = null;
+            return;
+        }
+        if (preSyncSnapshot != null) {
+            preSyncSnapshot.applyTo(cfg);
+            preSyncSnapshot = null;
+        }
+        cfg.setRemoteAuthoritative(false);
+    }
+
+
     // Note: overhead dialogue is best-effort UX; keep logging light.
 
     public enum CompanionShortcut {
@@ -760,7 +794,13 @@ public class FrensClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ConfigSyncPayload.ID, (payload, context) -> {
             String configJson = payload.configJson();
-            context.client().execute(() -> ConfigJsonUtil.applyConfigJson(configJson));
+            MinecraftClient syncClient = context.client();
+            syncClient.execute(() -> {
+                if (!syncClient.isInSingleplayer()) {
+                    enterRemoteConfig();
+                }
+                ConfigJsonUtil.applyConfigJson(configJson);
+            });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (payload, context) -> {
@@ -1065,8 +1105,10 @@ public class FrensClient implements ClientModInitializer {
                 net.wcfcarolina13.GraphicalUserInterface.StoreTargetPickerOverlay.onClientTick(client));
         ClientTickEvents.END_CLIENT_TICK.register(client ->
                 net.wcfcarolina13.ui.SoulVoiceClientPlayer.onClientTick(client));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) ->
-                net.wcfcarolina13.ui.SoulVoiceClientPlayer.stopAll());
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            net.wcfcarolina13.ui.SoulVoiceClientPlayer.stopAll();
+            leaveRemoteConfig();
+        });
         // Push this client's personal voice-category mute mask on join so the server can skip
         // muted categories per recipient instead of muting them for everyone.
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
