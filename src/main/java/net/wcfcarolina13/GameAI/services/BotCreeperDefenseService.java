@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentMap;
  *
  * <p>Pre-empts skills, drop-sweep, follow, and idle hobbies when any
  * {@link CreeperEntity} within {@link #SCAN_RADIUS} blocks of the bot has
- * {@link CreeperEntity#isIgnited()} == true. Drives the bot directly away
+ * {@link CreeperEntity#isIgnited()} == true OR {@code getFuseSpeed() > 0} (proximity swelling). Drives the bot directly away
  * from the creeper at sprint speed until safe distance is held with
  * hysteresis, then releases control. Charged creepers get a larger safe
  * distance because their blast radius is ~2x normal.</p>
@@ -212,11 +212,22 @@ public final class BotCreeperDefenseService {
         return true;
     }
 
+    /**
+     * "About to blow" for either ignition path. {@code isIgnited()} is only set by flint & steel /
+     * {@code CreeperIgniteGoal}; a creeper swelling from player proximity has {@code getFuseSpeed() > 0}
+     * and {@code isIgnited() == false} (vanilla {@code tick()} sets fuse speed 1 when ignited, so the
+     * fuse-speed check subsumes the flag). Filtering on the flag alone meant the interrupt never fired
+     * for the ordinary case — the 2026-05-09 "still doesn't back off" report.
+     */
+    static boolean isFusing(CreeperEntity c) {
+        return c.isIgnited() || c.getFuseSpeed() > 0;
+    }
+
     private static CreeperEntity pickThreat(ServerPlayerEntity bot, ServerWorld world) {
         Box box = bot.getBoundingBox().expand(SCAN_RADIUS, SCAN_RADIUS / 2.0D, SCAN_RADIUS);
         List<CreeperEntity> candidates = world.getEntitiesByClass(
                 CreeperEntity.class, box,
-                c -> c.isAlive() && c.isIgnited());
+                c -> c.isAlive() && isFusing(c));
         if (candidates.isEmpty()) return null;
 
         CreeperEntity best = null;
@@ -243,7 +254,7 @@ public final class BotCreeperDefenseService {
     private static boolean isStillThreat(ServerPlayerEntity bot, CreeperEntity creeper, long ticksSinceStart) {
         if (ticksSinceStart > MAX_BACKOFF_TICKS) return false;
         if (creeper == null || creeper.isRemoved() || !creeper.isAlive()) return false;
-        if (!creeper.isIgnited()) return false;
+        if (!isFusing(creeper)) return false;
         // If creeper is in another world (rare), treat as resolved.
         return creeper.getEntityWorld() == bot.getEntityWorld();
     }
