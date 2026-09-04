@@ -1,6 +1,6 @@
 # Changelog & History
 
-Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
 ## Shared skill state moved off FunctionCallerV2; wooden-fallback reset diagnostic; 1.1.200 (2026-09-03)
 

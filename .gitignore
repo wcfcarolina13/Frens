@@ -103,6 +103,7 @@ fabric-example-mod/
 
 # Claude Code project instructions
 CLAUDE.md
+AGENTS.md
 
 # Release JARs (don't commit large binaries)
 releases/

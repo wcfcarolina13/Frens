@@ -521,6 +521,14 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Construction (Blocked — formerly active task)
 
+#### Carried over from the retired `TODO.md` (written 2026-02-25, never revisited)
+- [ ] Playtest fortify tower reliability pass (top-block repair verification, scaffold summit step/return, deferred cleanup backoff) on live server and tune retry/backoff values from `latest.log`.
+- [ ] Playtest Learning Mode v1 on a live fortify/scaffold scenario (`pillaring_to_roof`) and confirm trace quality + overhead at `detail=balanced`; tune snapshot radius/tick rates if needed.
+- [ ] Capture at least one intentional failed pillar/summit demo (`/bot learn stop fail`) to tune generalized scaffold retry/recenter thresholds from trace timing.
+- [ ] Playtest fortify tower cavity-ignore flow (`report_cavities` particles + user-guided repair) on live server and adjust thresholds if needed.
+- [ ] Generate and map audio for fortify cavity callouts (5 variants) listed in `AUDIO_NEEDED.md`.
+
+
 - [ ] **Construction parity baseline**: Establish measurable parity for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other block-placement paths
 - [ ] **Shared construction reach/scaffold**: Standardize feet-based reach, LOS-aware recovery, scaffold stance rules in the generic service layer
 - [ ] **Generic schematic bottlenecks**: Remove remaining bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService`
