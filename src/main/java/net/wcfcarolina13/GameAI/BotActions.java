@@ -380,6 +380,7 @@ public final class BotActions {
 
         if (bestSlot != -1 && bestScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
+            if (hotbarSlot < 0) return false;
             selectHotbarSlot(bot, hotbarSlot);
             boolean swapped = combatWeaponScore(bot, bot.getMainHandStack()) > 0;
             if (swapped && priorWasFiltered) {
@@ -403,6 +404,7 @@ public final class BotActions {
 
         if (fallbackSlot != -1 && fallbackScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, fallbackSlot);
+            if (hotbarSlot < 0) return false;
             selectHotbarSlot(bot, hotbarSlot);
             // Request fallback refresh so the fallback service tries to get a real weapon
             DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
@@ -446,6 +448,7 @@ public final class BotActions {
 
         if (bestSlot != -1 && bestScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
+            if (hotbarSlot < 0) return false;
             selectHotbarSlot(bot, hotbarSlot);
             if (meleeWeaponScore(bot.getMainHandStack()) > 0) {
                 if (priorWasFiltered) {
@@ -470,6 +473,7 @@ public final class BotActions {
 
         if (fallbackSlot != -1 && fallbackScore > 0) {
             int hotbarSlot = ensureHotbarAccess(bot, inventory, fallbackSlot);
+            if (hotbarSlot < 0) return false;
             selectHotbarSlot(bot, hotbarSlot);
             DurabilityFallbackService.requestRefresh(bot, DurabilityFallbackService.GearCategory.SWORD);
             if (priorWasFiltered) {
@@ -1053,6 +1057,9 @@ public final class BotActions {
             }
             PlayerInventory inventory = bot.getInventory();
             slot = ensureHotbarAccess(bot, inventory, slot);
+            if (slot < 0) {
+                return new PlaceResult(false, "no-block-item-available");
+            }
             ItemStack stack = inventory.getStack(slot);
             if (!(stack.getItem() instanceof BlockItem blockItem)) {
                 return new PlaceResult(false, "selected-item-not-block");
@@ -1133,6 +1140,9 @@ public final class BotActions {
             }
             PlayerInventory inventory = bot.getInventory();
             slot = ensureHotbarAccess(bot, inventory, slot);
+            if (slot < 0) {
+                return new PlaceResult(false, "no-block-item-available");
+            }
             ItemStack stack = inventory.getStack(slot);
             if (!(stack.getItem() instanceof BlockItem blockItem)) {
                 return new PlaceResult(false, "selected-item-not-block");
@@ -2316,17 +2326,23 @@ public final class BotActions {
         return -1;
     }
 
+    /**
+     * Resolve a usable hotbar slot for {@code slot}, swapping the stack into the hotbar
+     * when needed. Returns -1 when the hotbar is locked and the item lives outside it —
+     * callers must treat that as "item unavailable" rather than clamping to slot 0.
+     */
     private static int ensureHotbarAccess(ServerPlayerEntity bot, PlayerInventory inventory, int slot) {
-        if (HotbarLockService.isLocked(bot)) {
-            HotbarLockService.maybeLogBlocked(bot, "ensure-hotbar");
-            return slot;
+        boolean locked = HotbarLockService.isLocked(bot);
+        int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
+                slot, findEmptyHotbarSlot(inventory), locked);
+        if (locked) {
+            if (target != slot) {
+                HotbarLockService.maybeLogBlocked(bot, "ensure-hotbar");
+            }
+            return target;
         }
-        if (slot < 9) {
+        if (target == slot) {
             return slot;
-        }
-        int target = findEmptyHotbarSlot(inventory);
-        if (target == -1) {
-            target = 0;
         }
         swapInventoryStacks(inventory, slot, target);
         return target;
@@ -2570,6 +2586,7 @@ public final class BotActions {
             int score = rangedWeaponScore(bot, stack);
             if (score > bestScore) {
                 int hotbarSlot = ensureHotbarAccess(bot, inventory, i);
+                if (hotbarSlot < 0) continue;
                 ItemStack moved = inventory.getStack(hotbarSlot);
                 best = new Selection(Hand.MAIN_HAND, moved);
                 bestScore = rangedWeaponScore(bot, moved);

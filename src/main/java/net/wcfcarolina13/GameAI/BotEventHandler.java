@@ -3376,8 +3376,17 @@ public class BotEventHandler {
                 CompletableFuture.runAsync(() -> {
                     try {
                         boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
-                        if (!escaped) {
-                            LOGGER.warn("Guard escape: {} failed — cooldown 30s", bot.getName().getString());
+                        boolean atSurfaceNow = BotFleeService.isAtSurface(bot, sw);
+                        if (net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy
+                                .shouldApplyEscapeCooldown(escaped, atSurfaceNow)) {
+                            if (!escaped) {
+                                LOGGER.warn("Guard escape: {} failed — cooldown 30s", bot.getName().getString());
+                            } else {
+                                String reason = BotFleeService
+                                        .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
+                                LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
+                                        bot.getName().getString(), reason == null ? "" : reason);
+                            }
                             GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
                         } else {
                             LOGGER.info("Guard escape: {} succeeded", bot.getName().getString());
@@ -3448,8 +3457,17 @@ public class BotEventHandler {
                 CompletableFuture.runAsync(() -> {
                     try {
                         boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
-                        if (!escaped) {
-                            LOGGER.warn("Patrol escape: {} failed — cooldown 30s", bot.getName().getString());
+                        boolean atSurfaceNow = BotFleeService.isAtSurface(bot, sw);
+                        if (net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy
+                                .shouldApplyEscapeCooldown(escaped, atSurfaceNow)) {
+                            if (!escaped) {
+                                LOGGER.warn("Patrol escape: {} failed — cooldown 30s", bot.getName().getString());
+                            } else {
+                                String reason = BotFleeService
+                                        .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
+                                LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
+                                        bot.getName().getString(), reason == null ? "" : reason);
+                            }
                             GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
                         } else {
                             LOGGER.info("Patrol escape: {} succeeded", bot.getName().getString());

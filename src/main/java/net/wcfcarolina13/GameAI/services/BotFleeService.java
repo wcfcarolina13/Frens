@@ -2840,10 +2840,17 @@ public final class BotFleeService {
         LOGGER.info("ensureAtSurface: {} pillar recovery steps={}",
                 bot.getName().getString(), pillarSteps);
 
-        List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps);
+        ScaffoldService.PillarResult pillarResult = ScaffoldService.pillarUpDetailed(bot, pillarSteps);
+        List<BlockPos> placed = pillarResult.placed();
         if (placed.isEmpty()) {
-            LOGGER.info("ensureAtSurface: {} pillar recovery placed no blocks",
-                    bot.getName().getString());
+            String reason = pillarResult.reason() == null || pillarResult.reason().isEmpty()
+                    ? "unknown" : pillarResult.reason();
+            LOGGER.info("ensureAtSurface: {} pillar recovery placed no blocks reason={} steps={}",
+                    bot.getName().getString(), reason, pillarSteps);
+            long nowTick = bot.getCommandSource().getServer() != null
+                    ? bot.getCommandSource().getServer().getTicks() : 0L;
+            SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
+            SURFACE_RECOVERY_FAILURE_REASON.put(bot.getUuid(), "pillar:" + reason);
             return false;
         }
 

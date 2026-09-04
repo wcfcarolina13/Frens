@@ -254,13 +254,31 @@ public final class ScaffoldService {
     }
 
     /**
+     * Outcome of a pillar attempt: the blocks placed plus the reason the loop stopped early.
+     *
+     * @param placed positions successfully placed (may be empty)
+     * @param reason "" when the pillar completed all steps or placed at least one block;
+     *               otherwise a short kebab-case break reason
+     */
+    public record PillarResult(List<BlockPos> placed, String reason) {}
+
+    /**
      * Pillar up and return the list of positions placed.
      */
     public static List<BlockPos> pillarUpWithPositions(ServerPlayerEntity bot, int steps) {
+        return pillarUpDetailed(bot, steps).placed();
+    }
+
+    /**
+     * Pillar up, reporting both the placed positions and (when nothing was placed)
+     * the reason the per-step loop broke out.
+     */
+    public static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps) {
         List<BlockPos> positions = new ArrayList<>();
+        String breakReason = "";
 
         if (bot == null || steps <= 0 || steps > MAX_SCAFFOLD_HEIGHT) {
-            return positions;
+            return new PillarResult(positions, "invalid-steps");
         }
 
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
@@ -268,6 +286,7 @@ public final class ScaffoldService {
         for (int i = 0; i < steps; i++) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 LOGGER.debug("pillarUp step {}/{}: aborted", i, steps);
+                breakReason = "aborted";
                 break;
             }
 
@@ -276,6 +295,7 @@ public final class ScaffoldService {
 
             if (!waitForOnGround(bot, LAND_TIMEOUT_MS)) {
                 LOGGER.info("pillarUp step {}/{}: not on ground (Y={})", i, steps, bot.getY());
+                breakReason = "not-on-ground";
                 break;
             }
             stabilizePillarStance(bot, PILLAR_RECENTER_TIMEOUT_MS);
@@ -312,6 +332,7 @@ public final class ScaffoldService {
                     if (adjusted == null) {
                         LOGGER.info("pillarUp step {}/{}: feet occupied by {} at {}, no air within 2 above — skipping",
                                 i, steps, feetState.getBlock().getName().getString(), targetPos.toShortString());
+                        breakReason = "feet-occupied";
                         break;
                     }
                     LOGGER.info("pillarUp step {}/{}: feet occupied by {}, targeting {} instead",
@@ -331,6 +352,7 @@ public final class ScaffoldService {
                         && BotHomeService.findBaseNearPosition(world.getServer(), world, headSpace).isPresent()) {
                     LOGGER.info("pillarUp step {}/{}: overhead at {} is inside a registered base — aborting pillar",
                             i, steps, headSpace.toShortString());
+                    breakReason = "overhead-in-base";
                     break;
                 }
                 // Try mining the overhead block instead of giving up — works bare-handed
@@ -342,6 +364,7 @@ public final class ScaffoldService {
                     if (mineResult != null && mineResult.startsWith("\u26a0\ufe0f")) {
                         LOGGER.info("pillarUp step {}/{}: cannot clear overhead at {}: {}",
                                 i, steps, headSpace.toShortString(), mineResult);
+                        breakReason = "overhead-mine-failed";
                         break;
                     }
                     // Verify block was actually cleared
@@ -349,6 +372,7 @@ public final class ScaffoldService {
                             && !world.getBlockState(headSpace).getCollisionShape(world, headSpace).isEmpty()) {
                         LOGGER.info("pillarUp step {}/{}: overhead still blocked after mining at {}",
                                 i, steps, headSpace.toShortString());
+                        breakReason = "overhead-mine-failed";
                         break;
                     }
                     LOGGER.info("pillarUp step {}/{}: cleared overhead at {}", i, steps, headSpace.toShortString());
@@ -356,6 +380,7 @@ public final class ScaffoldService {
                 } catch (Exception e) {
                     LOGGER.info("pillarUp step {}/{}: overhead mining failed at {}: {}",
                             i, steps, headSpace.toShortString(), e.getMessage());
+                    breakReason = "overhead-mine-failed";
                     break;
                 }
             }
@@ -364,6 +389,7 @@ public final class ScaffoldService {
 
             if (!waitForAirborne(bot, JUMP_TIMEOUT_MS)) {
                 LOGGER.info("pillarUp step {}/{}: failed to become airborne", i, steps);
+                breakReason = "not-airborne";
                 break;
             }
 
@@ -371,6 +397,7 @@ public final class ScaffoldService {
                 LOGGER.info("pillarUp step {}/{}: missed place window", i, steps);
                 if (bot.isOnGround()) {
                     BotActions.stop(bot);
+                    breakReason = "missed-place-window";
                     break;
                 }
             }
@@ -379,6 +406,7 @@ public final class ScaffoldService {
             if (!placement.success()) {
                 LOGGER.info("pillarUp step {}/{}: failed to place at {} reason={}",
                         i, steps, targetPos.toShortString(), placement.reason());
+                breakReason = "place-rejected:" + (placement.reason() == null ? "unknown" : placement.reason());
                 break;
             }
             targetPos = placement.placedPos() != null ? placement.placedPos() : targetPos;
@@ -387,12 +415,13 @@ public final class ScaffoldService {
             if (!waitForYIncrease(bot, targetPos.getY(), 1000L)) {
                 LOGGER.info("pillarUp step {}/{}: Y didn't increase after placing at {}", i, steps, targetPos.toShortString());
                 BotActions.stop(bot);
+                breakReason = "no-y-increase";
                 break;
             }
         }
 
         LOGGER.debug("pillarUp complete: {}/{} steps, placed={}", positions.size(), steps, positions);
-        return positions;
+        return new PillarResult(positions, positions.isEmpty() ? breakReason : "");
     }
 
     /**
