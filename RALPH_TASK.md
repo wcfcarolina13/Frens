@@ -1,5 +1,5 @@
 ---
-task: "Backlog lineup 2026-09-03. Order: (1) fix ollama4j NoClassDefFoundError in idle hobbies + three small soul follow-ups as one build; (2) field session on that build with the merged 1.1.176→1.1.199 checklists; (3) CONSOLIDATION design interview + spec; then P1 gameplay bugs. 1.1.199 deployed everywhere; 1.1.185–1.1.199 have only had a 4-min smoke run."
+task: "Backlog lineup 2026-09-03. (1) DONE in 1.1.200: ollama4j NoClassDefFoundError fix + woodcut-loop diagnostic (soul follow-ups were already closed). Next: (2) field session on that build with the merged 1.1.176→1.1.199 checklists; (3) CONSOLIDATION design interview + spec; then P1 gameplay bugs. 1.1.199 deployed everywhere; 1.1.185–1.1.199 have only had a 4-min smoke run."
 test_command: "./gradlew build -x test"
 ---
 
@@ -20,15 +20,24 @@ track is validation-bound before anything new starts. Suite 621 green.
 - [ ] **Post-session autopsy** in the established pattern; fixes as one build.
 
 ### Lane 2 — bugs already on the table
-- [ ] **ollama4j `NoClassDefFoundError` in idle hobbies** (NEW, 1.1.199 log 01:14:01):
-      `[ambient-hobby-1/WARN]: Shared state unavailable for idle-hobbies: NoClassDefFoundError
-      io/github/amithkoujalgi/ollama4j/core/exceptions/OllamaBaseException`. The LLM runtime is
-      compile-only by default; something on the hobby path references it unconditionally. Fix first.
-- [ ] **Soul follow-ups deferred in 1.1.178/1.1.179**: (a) salience scorer bot-name match needs word
-      boundaries (short names like "Al"/"Sam" substring-match); (b) `vetoed:roster-lost` does not push
-      the cooldown so repeated capture failures retry every line; (c) `SoulPlayerActivity.clear()` has
-      no production call site and there is no per-player eviction on disconnect — static maps grow
-      all session, stale activity survives rejoin.
+- [x] **ollama4j `NoClassDefFoundError` in idle hobbies** ✅ 2026-09-03, commit `7123d83` (1.1.200).
+      Root cause: the shared skill-state map was a static on `FunctionCallerV2`, whose static init
+      constructs `OllamaAPI`; ollama4j is excluded from non-AI JARs, so every non-LLM caller (idle
+      hobbies, auto-hunt, come-recovery, `/bot` skill commands) got a throwaway empty map.
+      `SharedStateService` now owns the map; regression test guards the dependency.
+- [ ] **Woodcut fallback restart loop** (NEW, 1.1.199 log 01:14:01–01:14:04): the idle wooden
+      fallback restarted a doomed one-tree woodcut 34× in 3 s (bot has no axe; `WoodcutSkill.
+      prepareWoodcutTooling` refuses, `maybeHandleIdleWoodenFallback` fires again next tick). The
+      12 s cooldown (`NEXT_WOODEN_FALLBACK_TICK`) is wiped whenever `computeAccessibleIdleFallback
+      Signature` changes between ticks — nothing in the log shows what changes. 1.1.200 adds an INFO
+      line at that reset (`signature changed A -> B with N ticks of cooldown left`). Field session:
+      reproduce with an axeless bot near trees, read the line, then fix at the source. Product
+      question underneath: should the axeless fallback punch one tree instead of refusing?
+- [x] **Soul follow-ups deferred in 1.1.178/1.1.179** — all three were already closed and the
+      handoff above was stale: word-boundary bot-name match (`SoulLocalSalience.
+      mentionsBotNotLeading`, regex `\b`), `vetoed:roster-lost` pushes `nextEligibleAtMs`
+      (`SoulLocalDirector` ~L262), `SoulPlayerActivity.clear()` on runtime shutdown +
+      `forget(playerId)` on disconnect (`SoulRuntime` L434 / L697). Verified in code 2026-09-03.
 - [ ] **Bob's own TTS reference sample** — still shares Jake's Dreamsleeve clone (open since 1.1.184).
 - [ ] **P1 gameplay** (detail in the P1 section below): creeper back-away, BotTorchHoldService not
       firing (diagnostic-first), doorway/pressure-plate stalls (multi-day rework — discuss the

@@ -2,6 +2,35 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## Shared skill state moved off FunctionCallerV2; wooden-fallback reset diagnostic; 1.1.200 (2026-09-03)
+
+Backlog lineup day (see the dated section at the top of `RALPH_TASK.md`). One real bug from the
+1.1.199 smoke log, one instrumented, three stale follow-ups struck.
+
+- **`Shared state unavailable for idle-hobbies: NoClassDefFoundError …OllamaBaseException`** —
+  the cross-skill shared-state map was a `static final` on `FunctionCallerV2`, whose static
+  initializer does `new OllamaAPI(host)`. ollama4j is `compileOnly` and the shadow jar excludes
+  `io/github/amithkoujalgi/**` unless `-PaiEnabled=true`, so the first non-LLM caller to touch the
+  class failed verification. `SharedStateService.safeSharedState` caught the Throwable and handed
+  back a fresh `HashMap`, so idle hobbies, auto-hunt, come-recovery and `/bot` skill commands each
+  ran on private, empty state instead of the shared one (e.g. `collectDirt.square.*` written by one
+  path was invisible to the next). `SharedStateService` now owns the map; `FunctionCallerV2.
+  sharedState` is initialised from it; `modCommandRegistry.safeSharedState` delegates. The guard
+  and its warn/debug ladder are gone — nothing can fail. `SharedStateServiceTest` asserts one
+  stable map and reads the service's source to keep `FunctionCaller` out of it. Suite 624 green.
+- **Woodcut fallback restart loop (not fixed, instrumented).** Same log, 01:14:01–01:14:04: `Idle
+  wooden fallback: starting one-tree woodcut for Jake` 34 times in three seconds, each one failing
+  in the same tick with `I have no axe and can't make or find one`. `maybeHandleIdleWoodenFallback`
+  sets a 240-tick cooldown when it starts the woodcut, but the cooldown is dropped whenever
+  `ToolProvisionService.computeAccessibleIdleFallbackSignature` (inventory + reachable container
+  slots, hashed by item id / count / slot / pos) differs from the previous tick — and the log has no
+  evidence of what differs. Rather than guess, the reset now logs at INFO: `signature changed A -> B
+  with N ticks of cooldown left; resetting`. Reproduce with an axeless bot near trees; the line names
+  the culprit. Tracked in RALPH_TASK.md Lane 2.
+- **Struck from the handoff as already done**: the 1.1.178 "follow-ups not yet actioned" (salience
+  word-boundary match, roster-lost cooldown, `SoulPlayerActivity` eviction) all shipped in 1.1.178's
+  fix wave and 1.1.179 — the RALPH_TASK handoff predated them.
+
 ## Sleep task no longer journaled (co-sleep was writing four events per night); 1.1.199 (2026-08-30)
 
 The "bots start sleep in daylight and finish in six seconds" anomaly from the 1.1.196 field
