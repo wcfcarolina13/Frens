@@ -894,6 +894,13 @@ public class ManualConfig {
         }
     }
 
+    public List<String> getMutedTextCategories() {
+        if (mutedTextCategories == null) {
+            mutedTextCategories = new ArrayList<>();
+        }
+        return mutedTextCategories;
+    }
+
     public boolean isGameplayTipsEnabled() {
         return gameplayTipsEnabled;
     }
