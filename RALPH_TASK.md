@@ -1,9 +1,59 @@
 ---
-task: "Soul track: field-test iteration loop. 1.1.184 deployed (engagement + separation + pacing + prime commands + Bob persona + live-settings apply + admin-menu clamp). Awaiting next field session. Next queue item after validation: CONSOLIDATION (needs design interview). Open voice-track item: Bob needs his own TTS reference sample."
+task: "Backlog lineup 2026-09-03. Order: (1) fix ollama4j NoClassDefFoundError in idle hobbies + three small soul follow-ups as one build; (2) field session on that build with the merged 1.1.176→1.1.199 checklists; (3) CONSOLIDATION design interview + spec; then P1 gameplay bugs. 1.1.199 deployed everywhere; 1.1.185–1.1.199 have only had a 4-min smoke run."
 test_command: "./gradlew build -x test"
 ---
 
+## Backlog Lineup 2026-09-03
 
+**Where things stand:** main at 1.1.199, deployed to all three Prism instances, 240 commits
+unpushed to origin (Bradley must say push). Everything 1.1.185→1.1.199 shipped 2026-08-29/30 and
+has only had a four-minute smoke run (1.21.11 `latest.log`, 01:13–01:17 on 08-30), so the soul
+track is validation-bound before anything new starts. Suite 621 green.
+
+### Lane 1 — validate what shipped (blocks the soul track)
+- [ ] **Field session on the next build** running the merged checklists in `changelog.md`: group
+      chat (1.1.176), banter (1.1.177), local chat (1.1.178), solo remarks + player-addressed banter
+      (1.1.181), pacing sliders (1.1.188), per-bot voices (1.1.190–1.1.192), ontology Phase 1+2 seeds
+      / open threads / day memories (1.1.196–1.1.198), Pocket TTS install + voice quality (1.1.198).
+      Still-open 1.1.175 items too: Piper install retry on macOS, llama3.2:3b speed vs 8B, streaming
+      first-word latency.
+- [ ] **Post-session autopsy** in the established pattern; fixes as one build.
+
+### Lane 2 — bugs already on the table
+- [ ] **ollama4j `NoClassDefFoundError` in idle hobbies** (NEW, 1.1.199 log 01:14:01):
+      `[ambient-hobby-1/WARN]: Shared state unavailable for idle-hobbies: NoClassDefFoundError
+      io/github/amithkoujalgi/ollama4j/core/exceptions/OllamaBaseException`. The LLM runtime is
+      compile-only by default; something on the hobby path references it unconditionally. Fix first.
+- [ ] **Soul follow-ups deferred in 1.1.178/1.1.179**: (a) salience scorer bot-name match needs word
+      boundaries (short names like "Al"/"Sam" substring-match); (b) `vetoed:roster-lost` does not push
+      the cooldown so repeated capture failures retry every line; (c) `SoulPlayerActivity.clear()` has
+      no production call site and there is no per-player eviction on disconnect — static maps grow
+      all session, stale activity survives rejoin.
+- [ ] **Bob's own TTS reference sample** — still shares Jake's Dreamsleeve clone (open since 1.1.184).
+- [ ] **P1 gameplay** (detail in the P1 section below): creeper back-away, BotTorchHoldService not
+      firing (diagnostic-first), doorway/pressure-plate stalls (multi-day rework — discuss the
+      door-plan architecture with Bradley first). Slot after the field session; they need in-game time.
+
+### Lane 3 — next features, in queue order
+- [ ] **CONSOLIDATION** — durable cross-surface memory; fold DM / PARTY / banter / local into one
+      whole. Design interview + spec first (`docs/superpowers/specs/`), then plan, then implement.
+- [ ] **Action requests** — follows consolidation.
+- [ ] Smaller candidates named in specs but not built: second soul personality (engagement spec calls
+      it the highest-leverage follow-up), ontology Phase 3 (bot↔bot stance, typed relation facts,
+      structured output, novelty rejection), Pocket voice cloning (HF-gated), per-player voice mute
+      masks (gated on the stubbed config sync — see Multiplayer Voice Muting below).
+
+### Housekeeping (one commit)
+- [ ] Decide on pushing the 240 commits.
+- [ ] `AGENTS.md` is untracked and still carries the broken `net.minecraft.client.main.Main` pgrep
+      check that `CLAUDE.md` replaced on 2026-08-29 — sync or delete.
+- [ ] `CLAUDE.md` + `AGENTS.md` say "No automated tests exist"; 71 test files / 621-test suite run
+      every session while CI still does `build -x test`.
+- [ ] `TODO.md` is from February and `changelog.md` line 3 still calls it the source of truth —
+      RALPH_TASK.md is the source of truth per CLAUDE.md.
+- [ ] Vault: `01-Wiki/Game-Development/Frens.md` frozen at v1.1.0; the March backlog note lists voice
+      packs and a second personality as open when both shipped (per-bot voices 1.1.190, Bob persona
+      1.1.184).
 
 ## Session Handoff 2026-08-26 (later) — ambient/local chat shipped (1.1.178)
 
