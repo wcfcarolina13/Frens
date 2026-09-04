@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.202-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.203-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.202** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.203** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -13,7 +13,7 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 - Every item has three sub-lines: **Bradley does** / **Claude watches for** / **Pass when**.
 - Record-keeping rule inherited from `SOUL_COMMUNICATION_PILOT.md`: log **correlation ids and outcomes, never message bodies**.
 - Related runbooks — link, don't duplicate: [`SOUL_COMMUNICATION_PILOT.md`](SOUL_COMMUNICATION_PILOT.md) (its "Manual — to be executed in-game" section is still the authority for DM edge cases: disconnect/death/dimension, restart persistence, remote perception leakage, reserved deterministic routing) and [`IN_GAME_AUDIT_MASTER.md`](IN_GAME_AUDIT_MASTER.md) (Fast Daily Smoke + Full Reliability Sweep for the non-soul stack).
-- Useful greps: `[souls]`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
+- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
 - Veto vocabulary in the log: `vetoed:cooldown`, `vetoed:salience`, `vetoed:danger`, `vetoed:roster-lost`, `vetoed:hard-reject`, `vetoed:changed-before-capture`, `vetoed:muted`.
 
 ---
@@ -242,6 +242,63 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 - [ ] **At most one bot comments on the same thing (1.1.184)**
   - Bradley does: stand two bots near a parrot.
   - Pass when: at most one of them comments.
+
+---
+
+## Phase 6b — Config sync and per-player mute masks (1.1.203)
+
+Single-player items first (same world, no extra client). The LAN pair needs a **second Frens
+client** — open the world to LAN from the 1.21.11 instance and join it from a second 1.21.11
+launch (Prism: right-click the instance → *Launch* again, or a copy of the instance); the
+`1.21.10 TEST` instance cannot join a 1.21.11 world. Skip the pair if only one client is
+available and record it under "Not covered".
+
+- [ ] **Cheats-off single-player still saves (1.1.203, review fix)**
+  - Bradley does: in a world created with cheats **off**, flip any global toggle (e.g. Gameplay
+    Tips) in Bot Control, close the screen, reopen it.
+  - Claude watches for: **no** `Rejected config save from non-operator` in `latest.log`.
+  - Pass when: the toggle stays flipped after reopen and after `/reload`-free relog.
+- [ ] **Mute screen sends a mask, not a global save (1.1.203)**
+  - Bradley does: mute `reactions` in the Voice "Adv…" menu.
+  - Claude watches for: the next reactions line logging `[VoicedDialogue] Muted (category reactions)`
+    (baseline path — single-player shares the list) and no `sendSaveConfigPacket` debug noise.
+  - Pass when: the line is silent in voice; text fallback unaffected.
+- [ ] **RAM warning on the Download button (1.1.203)**
+  - Bradley does: LLM chip → model manager.
+  - Pass when: on this 32 GB machine every button reads `Download`/`Use`/`In use ✔` with **no** ⚠
+    and no red RAM note (nothing recommends more than 12 GB). If any ⚠ shows, that's a fail —
+    record the model tag.
+- [ ] **Dreamsleeve row on macOS (1.1.203)**
+  - Bradley does: Soul Voice engine chooser.
+  - Pass when: the Dreamsleeve row is **not** greyed and reads "Available." / "Use Dreamsleeve" as
+    before (the grey-out must only trigger off macOS).
+
+**LAN pair (optional — needs a second client; host = H, guest = G)**
+
+- [ ] **Sync on join**
+  - Bradley does: on H set the scripted dialogue rate to a non-default value and mute
+    `ambient_chatter` **text**; then join from G and open the same screens.
+  - Claude watches for: nothing — this is a UI check. (`sendConfigSync failed` in the log = fail.)
+  - Pass when: G shows H's rate and text mask on open.
+- [ ] **Guest edit is rejected and reverted**
+  - Bradley does: on G (not op) flip the Voice master and close the screen.
+  - Claude watches for: `Rejected config save from non-operator <G>`.
+  - Pass when: G's screen shows the old value again on reopen and H is unchanged.
+- [ ] **Op edit propagates**
+  - Bradley does: `/op <G>` on H; on G flip the Voice master.
+  - Claude watches for: no rejection line; bots stop/start scripted voice for **both** clients.
+  - Pass when: H's screen shows G's change on reopen without a relog.
+- [ ] **Per-player mute (the point of 1.1.203)**
+  - Bradley does: on G mute `ambient_chatter` **voice**; stand both clients near a chatting bot.
+  - Claude watches for: `[VoicedDialogue] sound … category ambient_chatter -> 1 recipient(s), 1 muted`
+    (DEBUG — enable `frens` debug logging or accept the ear test).
+  - Pass when: H still hears the line, G does not; text/subtitle unaffected on both.
+- [ ] **Guest's local settings survive the visit**
+  - Bradley does: before joining, note G's local Gameplay Tips + dialogue rate values; join H's
+    world (whose values differ); leave; open a **single-player** world on G.
+  - Claude watches for: `[config] save skipped — config is remote-authoritative` (DEBUG) while G
+    was connected, none after leaving.
+  - Pass when: G's single-player values are its own, not H's.
 
 ---
 
