@@ -3,7 +3,33 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-04 (evening) — next session starts here
+## Session Handoff 2026-09-04 (night) — next session starts here
+
+**State:** main = origin/main @ 1.1.204 (pushed, deployed to all three Prism instances). Suite 750 green.
+
+**Shipped in 1.1.204 (backlog run, six items):** bundle-aware inventory (`InventoryIterator`,
+`BundleService.extract`, extract-first consumes); Spells key → inventory Spells tab (legacy
+`CompanionSpellsScreen` deleted; non-op >8 blocks now gets "Out of range"); third persona Silas;
+pillar-failure `reason=` + guard/patrol escape cooldown when still below surface + hotbar-lock guard;
+`TravelWaitPolicy`/`TravelWaitService` (hobbies while a fast-travel cooldown runs, auto-travel after;
+offload-to-existing-chest decided but deferred — no tick-safe worker launch); housekeeping verified.
+Details + field checks in `changelog.md` (1.1.204 entry).
+
+**Field checks now pending for 1.1.203 + 1.1.204:** `docs/testing/FIELD_SESSION_1.1.202.md` Phase 6b
+(config sync / mute masks) plus the 1.1.204 list in the changelog entry (Spells key, `/bot come` on
+cooldown, wedged-bot `reason=`, Silas banter, bundled-plank crafting).
+
+**Code follow-ups named in comments:** bundled scaffold extraction in the escape path
+(`BotFleeService.countScaffoldBlocks`); `FarmSkill`/`RideSyncService` private `ensureHotbarAccess`
+copies under hotbar lock; MiningTool/armor/combat tool selection direct-only; travel-wait
+OFFLOAD_EXISTING worker launch; `getRecentSurfaceRecoveryFailureReason` null-vs-"" contract.
+
+**Needs Bradley:** the guided field session; woodcut fallback restart loop repro; doorway rework
+architecture decision; ACTION REQUESTS design interview; Bob's own TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-04 (evening) — superseded
 
 **State:** main = origin/main @ 1.1.203 merge (see git log). Deployed JAR on all three Prism instances:
 1.1.203 (if the deploy line in changelog says so; otherwise 1.1.202). Suite 704 green.
@@ -118,16 +144,11 @@ track is validation-bound before anything new starts. Suite 621 green.
       masks (gated on the stubbed config sync — see Multiplayer Voice Muting below).
 
 ### Housekeeping (one commit)
-- [ ] Decide on pushing the 240 commits.
-- [ ] `AGENTS.md` is untracked and still carries the broken `net.minecraft.client.main.Main` pgrep
-      check that `CLAUDE.md` replaced on 2026-08-29 — sync or delete.
-- [ ] `CLAUDE.md` + `AGENTS.md` say "No automated tests exist"; 71 test files / 621-test suite run
-      every session while CI still does `build -x test`.
-- [ ] `TODO.md` is from February and `changelog.md` line 3 still calls it the source of truth —
-      RALPH_TASK.md is the source of truth per CLAUDE.md.
-- [ ] Vault: `01-Wiki/Game-Development/Frens.md` frozen at v1.1.0; the March backlog note lists voice
-      packs and a second personality as open when both shipped (per-bot voices 1.1.190, Bob persona
-      1.1.184).
+- [x] Decide on pushing the 240 commits. ✅ pushed 2026-09-04 (main = origin/main from 1.1.203 on).
+- [x] `AGENTS.md` pgrep check — already synced to the natives pattern on 2026-09-03 (verified 2026-09-04).
+- [x] `CLAUDE.md` + `AGENTS.md` "No automated tests" wording — gone as of 2026-09-03 (verified 2026-09-04); CI still `build -x test`.
+- [x] `TODO.md` retired 2026-09-03; changelog header already points at RALPH_TASK.md (verified 2026-09-04).
+- [x] Vault: `Frens.md` now says main 1.1.203 pushed (vault commit e8f9d83, 2026-09-04); the March backlog note was already updated 2026-09-03.
 
 ## Session Handoff 2026-08-26 (later) — ambient/local chat shipped (1.1.178)
 
@@ -548,10 +569,10 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] **Elder Scrolls-style dialogue menu**: Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal**: Conversation topics, quests, important information with simple filter search
 - [x] **Drop-sweep cobblestone loop**: ✅ shipped. Two-layer fix: (1) [DropSweeper.ensureSpaceForDropSweep:284-286](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L284-L286) only drops items when `chestStoreSucceeded` is true — no offload target → no drop. (2) per-bot TTL self-drop suppression in 1.1.70 (commit `247005e`) — [DropSweeper.java:216-217](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L216-L217) calls `CraftingHelper.isRecentlySelfDropped` to reject pickup of items the bot itself dropped within the last 5 min, killing the inter-sweep reacquisition loop even if guard #1 partially fails.
-- [ ] **Idle during fast-travel cooldown**: When a bot wants to fast-travel but has an active cooldown, it should do useful things while waiting (idle hobbies if enabled, chest offloading to nearby existing chests if disabled), then fast-travel when cooldown expires. Currently the bot just sits idle. For sunset→home specifically, don't build new chests — only use existing ones.
+- [x] **Idle during fast-travel cooldown** ✅ 1.1.204 — `TravelWaitService` (hobbies + auto-travel; offload-existing deferred). Was: When a bot wants to fast-travel but has an active cooldown, it should do useful things while waiting (idle hobbies if enabled, chest offloading to nearby existing chests if disabled), then fast-travel when cooldown expires. Currently the bot just sits idle. For sunset→home specifically, don't build new chests — only use existing ones.
 - [x] **Axe retrieval from nearby chests**: When the bot runs out of axes during woodcut, check nearby registered chests (via BotChestRegistryService) for wooden/stone/copper axes — nothing better than copper, nothing enchanted. Take one and continue. Currently the bot just stops or mines with bare hands/wrong tool.
-- [ ] **Bundle-aware inventory scanning**: Partially shipped. Audited 2026-05-06: lodestone compass ([LodestoneCompassService](src/main/java/net/wcfcarolina13/GameAI/services/LodestoneCompassService.java)), navigation artifacts ([NavigationArtifactService:312](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L312)), [HoneyCollectSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HoneyCollectSkill.java), and [BundleService](src/main/java/net/wcfcarolina13/GameAI/services/BundleService.java) + [ArtifactScanner](src/main/java/net/wcfcarolina13/GameAI/services/ArtifactScanner.java) all read `BUNDLE_CONTENTS`. Still raw-slot in food detection (HungerService, isFoodItem, cookAllFoodSync), tool selection (MiningTool, armorUtils, CombatInventoryManager), crafting material checks (CraftingHelper), chest offloading (ChestStoreService). Consider a shared `InventoryIterator` utility that yields both direct slots and bundle contents, so every caller gets bundle support automatically.
-- [ ] **Escape-with-full-inventory**: Guard/patrol stuck escape (pillar via `ensureAtSurfaceForHobby`) fails when inventory has no room for scaffold blocks — `"pillar recovery placed no blocks"` repeated every ~12s. Bot stuck in 1-block hole with full cobblestone inventory. Consider: temporarily drop a non-essential stack, pillar out, pick it back up. Or: use cobblestone directly as scaffold material.
+- [x] **Bundle-aware inventory scanning** ✅ 1.1.204 (`InventoryIterator` + extract-first; MiningTool/armor/combat selection still direct-only). Was: Partially shipped. Audited 2026-05-06: lodestone compass ([LodestoneCompassService](src/main/java/net/wcfcarolina13/GameAI/services/LodestoneCompassService.java)), navigation artifacts ([NavigationArtifactService:312](src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java#L312)), [HoneyCollectSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HoneyCollectSkill.java), and [BundleService](src/main/java/net/wcfcarolina13/GameAI/services/BundleService.java) + [ArtifactScanner](src/main/java/net/wcfcarolina13/GameAI/services/ArtifactScanner.java) all read `BUNDLE_CONTENTS`. Still raw-slot in food detection (HungerService, isFoodItem, cookAllFoodSync), tool selection (MiningTool, armorUtils, CombatInventoryManager), crafting material checks (CraftingHelper), chest offloading (ChestStoreService). Consider a shared `InventoryIterator` utility that yields both direct slots and bundle contents, so every caller gets bundle support automatically.
+- [x] **Escape-with-full-inventory** ✅ 1.1.204 — inventory hypothesis disproved; shipped pillar `reason=` plumbing + escape cooldown when still below surface + hotbar-lock guard; verify in field. Was: Guard/patrol stuck escape (pillar via `ensureAtSurfaceForHobby`) fails when inventory has no room for scaffold blocks — `"pillar recovery placed no blocks"` repeated every ~12s. Bot stuck in 1-block hole with full cobblestone inventory. Consider: temporarily drop a non-essential stack, pillar out, pick it back up. Or: use cobblestone directly as scaffold material.
 
 ## P2 — Medium
 

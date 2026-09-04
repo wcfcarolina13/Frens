@@ -2,6 +2,81 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Backlog run: bundle-aware inventory, Spells key → inventory tab, Silas persona, pillar-failure diagnostics, travel-wait; 1.1.204 (2026-09-04)
+
+Bradley asked for the six items I had listed as workable without him, in the order recommended.
+Each item was scoped by a read-only agent first, implemented by its own agent, then reviewed as a
+batch. Housekeeping (item 3) turned out to be already done on 09-03 except the vault note.
+
+- **Bundle-aware inventory scanning (commits `4e221dc`, `8c61ed7`; P1 item).** New
+  `PlayerUtils/InventoryIterator` — a slot-indexed stream over the player inventory that yields
+  each direct slot and then its bundle contents (`SlotRef(slot, bundleIndex, stack)`,
+  `isDirect()`), with `count` / `countDirect` / `findFirst` and a generic `flatten` core that is
+  unit-tested with String stand-ins (the test policy forbids Minecraft classes). `BundleService.
+  extract(bot, slot, index)` / `extractFirst(bot, predicate)` pull one stack out of a bundle into
+  a free slot (server thread; ported from the NavigationArtifactService rebuild template).
+  Migrated read sites: `HealingService.hasAbundantFood`, both `NavigationArtifactService` food-
+  budget loops (nutrition-weighted), `CraftingHelper.countItem/countPlanks`, `ChestStoreService.
+  countItem/countScaffoldInInventory`, `SmeltingService.findCookables` (direct only + a DEBUG
+  tally of bundled cookables). The rule that keeps counts honest: every paired consume
+  (`consumeItem`, `consumePlanks`, the plank-from-log decrement, the three "no food" paths in
+  HealingService) now extracts from bundles first, driven by `BundleReachPolicy.
+  extractionsNeeded(needed, direct, bundled)`. Left direct-only with a comment: `ChestStoreService.
+  moveItems` (takes bare Inventories), MiningTool/armorUtils/CombatInventoryManager tool selection.
+  Behaviour change to watch: bundled scaffold now counts toward the offload reserve gate.
+- **Spells key → inventory Spells tab (commit `66a8799`).** The backlog said "delete legacy
+  `CompanionSpellsScreen`", but it was still the live target of the dedicated Spells keybind.
+  The keybind now pre-arms `BotPlayerInventoryScreen.requestSpellsTab()` (5 s window) and sends
+  `/bot open <alias>`; the legacy class is gone. Behaviour change: the route now goes through the
+  server-side inventory open, so a **non-op** more than 8 blocks from the bot gets "Out of range"
+  instead of a menu. Single-player host is op — unaffected.
+- **Third soul persona: Silas (commit `8527e26`).** Superstitious old miner — laconic, reads
+  omens, banter hooks name Jake and Bob. `data/frens/souls/silas.json`, registered in
+  `SoulProfileRegistry` (personas are a hard-coded list, not a directory scan); `BotSoulCommands.
+  profileId` now resolves through the registry. Assign: name a bot `Silas`, `/bot soul enable
+  Silas`, optionally `/bot soul voice assign Silas george` (Pocket preset "gruff older man").
+  No baked `voice` block — `voiceFor` is engine-blind, same as Jake/Bob. 3 registry tests.
+- **Pillar-failure diagnostics + escape cooldown (commit `c106fcb`; P1 "escape with full
+  inventory").** Scoping disproved the inventory hypothesis: cobblestone is in the scaffold
+  allowlist, the whole inventory is scanned, and a full hotbar is force-swapped. The real gaps:
+  (1) `ScaffoldService.pillarUpWithPositions`'s per-step break reason never reached the caller,
+  so the log said only "placed no blocks" — `pillarUpDetailed` returns `PillarResult(placed,
+  reason)` and BotFleeService logs `reason=` and records it in the surface-recovery failure
+  memory; (2) the guard/patrol 30 s escape cooldown only fired when recovery *reported* failure —
+  it now also fires when the bot is still below surface afterwards (`[guard-escape] … still
+  below surface after recovery; cooldown 30s reason=…`), ending the 12 s retry loop; (3) latent:
+  `ensureHotbarAccess` under a hotbar lock returned an unreachable slot ≥ 9 that was clamped to 0
+  — it now returns -1 and all six call sites handle it (weapon selection returns false instead of
+  swinging the wrong item under lock — field-check). Pure `ScaffoldSlotPolicy` + tests.
+- **Travel-wait (commits `a9ebb46`, `ae22a52`, `0849cdc`; P1 "idle during fast-travel cooldown").**
+  Scoping showed sunset return and sunrise resume already clear the cooldown on purpose (the
+  2026-04-07 bypass), so the idle wait only bit the `/bot come`-class callers that hit the gate
+  in `NavigationArtifactService.beginDelayedTravel` and got nothing but a chat line. New pure
+  `TravelWaitPolicy` (WAIT / HOBBY / OFFLOAD_EXISTING / TRAVEL_NOW from cooldown remaining,
+  hobbies enabled, hobby running, task active, nearby existing chest, inventory fullness; 16
+  tests) and `TravelWaitService`: the gate now enqueues one pending request per bot ("resting
+  Xm Ys before traveling to …; I'll keep busy meanwhile"), the END_SERVER_TICK loop nudges idle
+  hobbies (`requestDecisionNow`, once per 600 ticks) while waiting and re-runs the travel when
+  the cooldown expires (retry cap 3; the bot is re-resolved by UUID so a respawn can't leave a
+  stale entity in the lambda). Cancelled on `/bot stop`, disconnect, SERVER_STOPPING. **Offload
+  to existing chests is decided but deferred**: every `depositMatchingWalkOnly` caller runs
+  blocking on a skill thread and there is no tick-safe worker launch — it logs once per
+  transition instead. First-ever caller of `getRemainingCooldownTicks` (uses overworld time,
+  matching the gate).
+- **Review fix wave (commit `0fbba45`).** `BundleService.extract` no longer loses the remainder
+  of a partial insert (rebuilds the bundle with it and reports the inserted count); the
+  worker-thread food reach uses the `CompletableFuture` + `get(2 s)` hop instead of a 60 ms sleep;
+  the chest-offload scaffold reserve went back to direct-only counting so it matches what the
+  escape pillar can actually use; the `[guard-escape]` reason is dropped after 60 s
+  (`PlayerUtils/TickFreshness`).
+- Tests 704 → 750. Follow-ups named in code comments: bundled scaffold extraction in the escape
+  path; `FarmSkill`/`RideSyncService` private `ensureHotbarAccess` copies still return an
+  unreachable slot under hotbar lock; MiningTool/armor/combat tool selection still direct-only.
+- **Field checks:** Spells key opens the inventory on the Spells tab; `/bot come` while on
+  cooldown → bot does a hobby then travels when the cooldown ends; a bot wedged in a hole logs
+  `reason=` and backs off 30 s; Silas talks like a miner and names Jake/Bob in banter; crafting
+  with planks only inside a bundle succeeds.
+
 ## Real config sync, per-player voice mute masks, RAM warning on the Download button, Dreamsleeve greyed off macOS; 1.1.203 (2026-09-04)
 
 Four backlog items from the 2026-09-04 handoff, one build. Spec
