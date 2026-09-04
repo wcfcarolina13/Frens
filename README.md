@@ -65,7 +65,7 @@ silently:
 | Engine | What it is | Platforms | What the installer does |
 |---|---|---|---|
 | Piper | Fast CPU TTS, generic voices | macOS (Apple Silicon / Intel), Windows x64, Linux x64. ARM Windows/Linux: unsupported, the screen says so | Downloads pinned, sha256-checked release archives (~30 MB) and a voice model into `config/frens/piper/` |
-| Pocket TTS | CPU TTS, more natural, 21 preset voices | Needs `uv` or Python ≥ 3.10 on `PATH`. Detection currently looks in macOS/Linux locations only; **Windows is not yet supported by the installer** | Creates a Python venv in `config/frens/pocket-tts/` and `pip install`s `pocket-tts` (~850 MB incl. torch); first use pulls a 228 MB model into your Hugging Face cache |
+| Pocket TTS | CPU TTS, more natural, 21 preset voices | Needs `uv` or Python ≥ 3.10. macOS and Linux: Homebrew, python.org, `/usr/local`, `PATH`. Windows: `uv.exe`, the `py` launcher, python.org installs, `PATH` (Store alias stub skipped) — **Windows path written but not yet run on a Windows machine** | Creates a Python venv in `config/frens/pocket-tts/` and `pip install`s `pocket-tts` (~850 MB incl. torch); first use pulls a 228 MB model into your Hugging Face cache |
 | Dreamsleeve | Voice-clone server on Apple Metal | macOS Apple Silicon only, configured by path; no installer | Nothing — you run the server yourself |
 
 Every installer screen shows source, size and destination before you confirm, and detects an

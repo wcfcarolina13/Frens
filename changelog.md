@@ -23,7 +23,7 @@ python.org framework, `/usr/local` and `PATH` for `uv`/`python3` only). Commits 
   `runForOutput` now returns "" on non-zero exit and the regex is anchored to the first line.
   The installer screen's Windows hint was shortened so the tail-keeping `elide` no longer cuts
   off the diagnosis; the selected runtime row shows the launcher args.
-- Tests 666 → 676 (+10 platform tests, then the py-launcher regression test).
+- Tests 666 → 679 (+10 platform tests, +3 review-fix tests).
 - **Unverified without a Windows machine**: `pocket-tts.exe` console-script name, process start
   without a shell, `Files.isExecutable` on `.exe` under the game JVM. `pocket-tts` 3.0.2 is a
   pure-Python wheel (checked on PyPI) depending on `torch>=2.5`, which ships Windows wheels, so
