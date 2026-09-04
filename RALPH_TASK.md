@@ -17,6 +17,12 @@ track is validation-bound before anything new starts. Suite 621 green.
       / open threads / day memories (1.1.196–1.1.198), Pocket TTS install + voice quality (1.1.198).
       Still-open 1.1.175 items too: Piper install retry on macOS, llama3.2:3b speed vs 8B, streaming
       first-word latency.
+- [ ] **Memory digest field checklist** (1.1.201, spec §10): tell Jake three things, sleep through a
+      night, inspect `mind.json` for the new `playerMemories` / `digestCursors`, listen for a recall
+      in banter, run `/bot soul memory Jake`, then `/bot soul reset Jake` and confirm the list is
+      empty and `archivedPlayerMemories` holds them. Also exercise `/bot soul digest on|off|status`.
+      - Confirm a party-scene fact is attributed to the right player.
+      - Reset while a rollover digest is running → memories stay empty.
 - [ ] **Post-session autopsy** in the established pattern; fixes as one build.
 
 ### Lane 2 — bugs already on the table
@@ -44,8 +50,9 @@ track is validation-bound before anything new starts. Suite 621 green.
       door-plan architecture with Bradley first). Slot after the field session; they need in-game time.
 
 ### Lane 3 — next features, in queue order
-- [ ] **CONSOLIDATION** — durable cross-surface memory; fold DM / PARTY / banter / local into one
+- [x] **CONSOLIDATION** — durable cross-surface memory; fold DM / PARTY / banter / local into one
       whole. Design interview + spec first (`docs/superpowers/specs/`), then plan, then implement.
+      ✅ 2026-09-04 (1.1.201) — phase 1 shipped as the memory digest; field-test pending.
 - [ ] **Action requests** — follows consolidation.
 - [ ] Smaller candidates named in specs but not built: second soul personality (engagement spec calls
       it the highest-leverage follow-up), ontology Phase 3 (bot↔bot stance, typed relation facts,

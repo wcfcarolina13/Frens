@@ -141,10 +141,17 @@ final class SoulMindOps {
         return withStance(mind, new SoulTypes.Stance(s.trust(), s.exasperation(), s.curiosity() + 1));
     }
 
-    /** Marks every memory of {@code topic} as recalled on {@code day} (cools it for {@link #RECALL_COOLDOWN_DAYS}). */
+    /**
+     * Marks every memory of {@code topic} as recalled on {@code day} (cools it for
+     * {@link #RECALL_COOLDOWN_DAYS}). A {@code said:} key is a player-memory fact key, not a day
+     * topic, so it dispatches to {@link SoulMemoryDigestOps#noteRecalled} instead.
+     */
     static SoulTypes.SoulMind noteRecalled(SoulTypes.SoulMind mind, String topic, int day) {
         if (topic == null || topic.isEmpty()) {
             return mind;
+        }
+        if (topic.startsWith(SoulMemoryDigestOps.FACT_KEY_PREFIX)) {
+            return SoulMemoryDigestOps.noteRecalled(mind, topic, day);
         }
         boolean changed = false;
         List<SoulTypes.DayMemory> memories = new ArrayList<>(mind.memories().size());
@@ -274,7 +281,8 @@ final class SoulMindOps {
         SoulTypes.Stance b = SoulTypes.Stance.BASELINE;
         SoulTypes.Stance decayed = new SoulTypes.Stance(stepToward(s.trust(), b.trust()),
                 stepToward(s.exasperation(), b.exasperation()), stepToward(s.curiosity(), b.curiosity()));
-        return rebuild(mind, decayed, mind.threads(), memories, mind.seen(), nowMs, day, mind.lastTaskTrustDay());
+        return SoulMemoryDigestOps.decay(
+                rebuild(mind, decayed, mind.threads(), memories, mind.seen(), nowMs, day, mind.lastTaskTrustDay()));
     }
 
     // === prompt + seed views ===
@@ -378,11 +386,32 @@ final class SoulMindOps {
                 mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay());
     }
 
+    static SoulTypes.SoulMind withPlayerMemories(SoulTypes.SoulMind mind, List<SoulTypes.PlayerMemory> playerMemories) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors());
+    }
+
+    static SoulTypes.SoulMind withArchivedPlayerMemories(SoulTypes.SoulMind mind,
+                                                          List<SoulTypes.PlayerMemory> archivedPlayerMemories) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors());
+    }
+
+    static SoulTypes.SoulMind withDigestCursors(SoulTypes.SoulMind mind,
+                                                Map<String, SoulTypes.ConversationCursor> digestCursors) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors);
+    }
+
     private static SoulTypes.SoulMind rebuild(SoulTypes.SoulMind mind, SoulTypes.Stance stance,
                                               List<SoulTypes.OpenThread> threads, List<SoulTypes.DayMemory> memories,
                                               Set<String> seen, long lastConsolidatedAtMs, int lastDay,
                                               int lastTaskTrustDay) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), stance, threads, memories, seen,
-                lastConsolidatedAtMs, lastDay, lastTaskTrustDay);
+                lastConsolidatedAtMs, lastDay, lastTaskTrustDay, mind.playerMemories(),
+                mind.archivedPlayerMemories(), mind.digestCursors());
     }
 }

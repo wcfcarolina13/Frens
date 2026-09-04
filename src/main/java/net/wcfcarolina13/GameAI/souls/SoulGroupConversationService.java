@@ -96,7 +96,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         String taggedMessage = turn.kind().isNarratorSeeded()
                 ? SoulGroupPromptAssembler.BANTER_HEARD_PREFIX + turn.playerMessage()
                 : turn.ownerDisplayName() + ": " + turn.playerMessage();
-        partyStore.beginHeardTurn(turn.key(), correlationId, taggedMessage, turn.acceptedAt())
+        partyStore.beginHeardTurn(turn.key(), correlationId, taggedMessage, turn.acceptedAt(),
+                turn.roster().stream().map(SoulGroupTypes.SceneParticipant::botId).toList())
                 .whenComplete((token, tokenError) -> {
                     if (tokenError != null) {
                         LOGGER.info("[souls] scene correlationId={} owner={} kind={} outcome=no-token error={}",

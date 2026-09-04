@@ -108,7 +108,7 @@ public final class SoulTypes {
     public record ConversationRecord(UUID correlationId, long epoch, long sequence,
                                       TurnKind kind, String content, Instant occurredAt,
                                       String provider, String model, Long elapsedMillis,
-                                      FailureCode failureCode) {
+                                      FailureCode failureCode, List<UUID> participants) {
         public ConversationRecord {
             Objects.requireNonNull(correlationId, "correlationId");
             Objects.requireNonNull(kind, "kind");
@@ -117,6 +117,16 @@ public final class SoulTypes {
             provider = provider == null ? "" : provider;
             model = model == null ? "" : model;
             // elapsedMillis and failureCode are optional provider metadata and may be null.
+            participants = participants == null ? List.of() : List.copyOf(participants);
+        }
+
+        /** Pre-participants shape; defaults {@code participants} to empty. */
+        public ConversationRecord(UUID correlationId, long epoch, long sequence,
+                                   TurnKind kind, String content, Instant occurredAt,
+                                   String provider, String model, Long elapsedMillis,
+                                   FailureCode failureCode) {
+            this(correlationId, epoch, sequence, kind, content, occurredAt, provider, model,
+                    elapsedMillis, failureCode, null);
         }
     }
 
@@ -314,21 +324,48 @@ public final class SoulTypes {
         }
     }
 
+    /** One thing the bot remembers a player SAYING (spec 2026-09-04 §3). Claims, never world truth. */
+    public record PlayerMemory(UUID playerId, int day, String fact, int salience, int lastRecalledDay,
+                               List<UUID> sourceCorrelationIds) {
+        public PlayerMemory {
+            Objects.requireNonNull(playerId, "playerId");
+            fact = fact == null ? "" : fact.trim();
+            sourceCorrelationIds = sourceCorrelationIds == null ? List.of() : List.copyOf(sourceCorrelationIds);
+        }
+    }
+
     /**
      * Per-bot persistent mind: stance toward the player, open threads, day memories, and the
      * first-sighting registry ({@code seen}, kept in insertion order so the oldest key is the
      * one evicted at the cap). {@code lastConsolidatedAtMs} is epoch millis, {@code lastDay}
      * the Minecraft day number last consolidated (-1 never), {@code lastTaskTrustDay} the day
-     * the "player gave a task" trust bump was last granted (-1 never).
+     * the "player gave a task" trust bump was last granted (-1 never). {@code playerMemories}
+     * holds live LLM-digested claims about what the player has said, {@code archivedPlayerMemories}
+     * the ones a {@code /bot soul reset} moved aside for audit (only reset archives; decay and
+     * cap eviction drop memories outright), and {@code digestCursors}
+     * the per-conversation-key cursor of how far the digest has consumed each transcript.
      */
     public record SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
                            List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
-                           int lastDay, int lastTaskTrustDay) {
+                           int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
+                           List<PlayerMemory> archivedPlayerMemories,
+                           Map<String, ConversationCursor> digestCursors) {
         public SoulMind {
             playerStance = playerStance == null ? Stance.BASELINE : playerStance;
             threads = threads == null ? List.of() : List.copyOf(threads);
             memories = memories == null ? List.of() : List.copyOf(memories);
             seen = seen == null ? Set.of() : Collections.unmodifiableSet(new LinkedHashSet<>(seen));
+            playerMemories = playerMemories == null ? List.of() : List.copyOf(playerMemories);
+            archivedPlayerMemories = archivedPlayerMemories == null ? List.of() : List.copyOf(archivedPlayerMemories);
+            digestCursors = digestCursors == null ? Map.of() : Map.copyOf(digestCursors);
+        }
+
+        /** Pre-player-memory shape; defaults the three new fields to empty. */
+        public SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
+                        List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
+                        int lastDay, int lastTaskTrustDay) {
+            this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
+                    lastDay, lastTaskTrustDay, List.of(), List.of(), Map.of());
         }
 
         public static SoulMind empty() {

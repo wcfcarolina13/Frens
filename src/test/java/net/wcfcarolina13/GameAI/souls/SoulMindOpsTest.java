@@ -126,4 +126,17 @@ class SoulMindOpsTest {
         assertEquals(SoulMindOps.MAX_SEEN, m.seen().size());
         assertFalse(m.seen().contains("k0"));
     }
+
+    @Test
+    void consolidateDecaysPlayerMemoriesAndNoteRecalledDispatchesSaidKeys() {
+        UUID p = UUID.randomUUID();
+        SoulTypes.SoulMind m = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(p, 1, "Roti wants a farm", 2, -1, List.of())));
+        SoulTypes.SoulMind c = SoulMindOps.consolidate(m, List.of(), 5, "plains", id -> "Roti", 1_000L);
+        assertEquals(1, c.playerMemories().get(0).salience());
+        String key = SoulMemoryDigestOps.factKey("Roti wants a farm");
+        SoulTypes.SoulMind r = SoulMindOps.noteRecalled(c, key, 5);
+        assertEquals(4, r.playerMemories().get(0).salience());
+        assertEquals(5, r.playerMemories().get(0).lastRecalledDay());
+    }
 }

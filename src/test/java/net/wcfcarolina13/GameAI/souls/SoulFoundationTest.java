@@ -4,7 +4,9 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -267,5 +269,23 @@ class SoulFoundationTest {
         ManualConfig config = newRealConfig();
         config.setSoulModel("  llama3  ");
         assertEquals("llama3", config.getSoulModel());
+    }
+
+    @Test
+    void mindAndRecordCompatConstructorsDefaultNewFields() {
+        SoulTypes.SoulMind legacy = new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE, List.of(), List.of(),
+                Set.of(), 0L, -1, -1);
+        assertTrue(legacy.playerMemories().isEmpty());
+        assertTrue(legacy.archivedPlayerMemories().isEmpty());
+        assertTrue(legacy.digestCursors().isEmpty());
+        assertEquals(legacy, SoulTypes.SoulMind.empty());
+
+        SoulTypes.ConversationRecord rec = new SoulTypes.ConversationRecord(UUID.randomUUID(), 0L, 0L,
+                SoulTypes.TurnKind.HEARD, "hi", Instant.EPOCH, "", "", null, null);
+        assertTrue(rec.participants().isEmpty());
+
+        SoulTypes.PlayerMemory pm = new SoulTypes.PlayerMemory(UUID.randomUUID(), 3, "  Roti hates the Nether ", 10, -1, null);
+        assertEquals("Roti hates the Nether", pm.fact());
+        assertTrue(pm.sourceCorrelationIds().isEmpty());
     }
 }

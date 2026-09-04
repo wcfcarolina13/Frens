@@ -71,6 +71,7 @@ public final class SoulGroupPromptAssembler {
         messages.add(castBlock(turn, profiles));
         messages.add(stateBlock(turn));
         threadsBlock(turn).ifPresent(messages::add);
+        aboutBlock(turn).ifPresent(messages::add);
         messages.addAll(boundedHistory(partyHistory));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
@@ -286,6 +287,38 @@ public final class SoulGroupPromptAssembler {
         }
         return Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
                 truncate(sb.toString(), MAX_THREADS_BLOCK_CHARS)));
+    }
+
+    // === ABOUT <owner> (digested memories of what the owner has said) ===
+
+    /**
+     * {@code ABOUT} block: per roster member, the facts that bot remembers the owner saying.
+     * Remembered speech, never world truth — the header says so, and the block sits after
+     * CURRENT STATE so present truth still wins any conflict. Bots with nothing remembered are
+     * skipped; when no bot has anything the block is absent entirely. Each bot's lines are
+     * already bounded by {@code SoulMemoryDigestOps#aboutLines}.
+     */
+    private Optional<SoulTypes.Message> aboutBlock(SoulGroupTypes.GroupSceneTurn turn) {
+        String owner = turn.ownerDisplayName();
+        StringBuilder sb = new StringBuilder("ABOUT " + owner
+                + " (things " + owner + " said, as remembered)\n");
+        boolean any = false;
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            if (mind.isEmpty()) {
+                continue;
+            }
+            List<String> lines = SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId());
+            if (lines.isEmpty()) {
+                continue;
+            }
+            any = true;
+            sb.append(participant.displayName()).append(" remembers:\n")
+                    .append(String.join("\n", lines)).append('\n');
+        }
+        return any
+                ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))
+                : Optional.empty();
     }
 
     /** One shared vicinity paragraph, taken from the first roster member's snapshot. */

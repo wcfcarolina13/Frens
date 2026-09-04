@@ -2,6 +2,94 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul memory digest — bots remember what you said; 1.1.201 (2026-09-04)
+
+Consolidation phase 1. A soul-bound bot now distils **what the player said to it** into durable
+one-line memories at each Minecraft day rollover, and recalls them anywhere that player is
+present. Before this, nothing a player *said* survived the bounded transcript tail — Phase 2 day
+memories came only from the world-event journal.
+
+Spec: `docs/superpowers/specs/2026-09-04-frens-soul-memory-digest-design.md`.
+Plan: `docs/superpowers/plans/2026-09-04-soul-memory-digest.md` (7 tasks, one commit each).
+
+### What each task added
+
+- **Task 1 — types.** `SoulTypes.PlayerMemory(playerId, day, fact, salience, lastRecalledDay,
+  sourceCorrelationIds)`; `SoulMind` gains `playerMemories`, `archivedPlayerMemories` and
+  `digestCursors`; `ConversationRecord` gains `participants`. All fields trailing, all with
+  compat constructors at the old arity, so a `mind.json` written by 1.1.200 loads with empties
+  and every existing call site stayed source-stable. Schema version stays 1.
+- **Task 2 — `SoulMemoryDigestOps`** (new, pure, unit-tested): gather/filter (FAILURE records and
+  narrator prefixes dropped, LOCAL kept), the presence rule (roster `participants`, falling back
+  to SPOKEN for old records), the min-lines gate and material cap, validation of model output,
+  Jaccard merge with dedupe bump, per-day decay and eviction, the recall bump, `ABOUT` line
+  rendering, and reset archival.
+- **Task 3 — store readers.** `SoulStore.recordsSince` (crosses an epoch change),
+  `conversationPlayers`, `botDirectories`, and a `beginHeardTurn` overload that records the party
+  roster on HEARD records.
+- **Task 4 — `SoulMemoryDigestService`** (new): one generation per (bot, player) with fresh
+  material, submitted through the existing `SoulGenerationScheduler` and written back through
+  `SoulStore.updateMind`. The cursor advances on **every** outcome — success, empty digest, model
+  failure — except cancellation, so a failing model can never wedge a pair into re-digesting the
+  same material forever.
+- **Task 5 — runtime wiring.** `SoulRuntime.onNewDay` runs the digest after event consolidation;
+  `/bot soul reset <Bot>` archives that caller's player memories and drops their digest cursors;
+  memory decay and recall dispatch hang off the same hook.
+- **Task 6 — injection.** `ABOUT <Player>` block in both the DM (`SoulPromptAssembler`) and group
+  (`SoulGroupPromptAssembler`) prompts, placed **after** the authoritative state so present truth
+  always beats a memory, and rendered under the existing recalled-content framing (untrusted
+  conversational content, never world truth). Player-memory anchors feed `SoulBanterSeed` at
+  weight 4, topic `memory:said`.
+- **Task 7 — this one.** Config toggle, commands, changelog, version.
+
+### Constants (spec §3/§5/§6)
+
+MIN_PLAYER_LINES 4 · MAX_RECORDS 40 · MAX_MATERIAL_CHARS 2000 · MAX_FACTS 5 · MAX_FACT_CHARS 100 ·
+RUNAWAY_LINES 8 · INITIAL_SALIENCE 10 · MAX_SALIENCE 10 · RECALL_BUMP 3 · DUP_BUMP 2 ·
+MAX_PER_PLAYER 24 · MAX_ARCHIVED 100 · DUP_JACCARD 0.6 · MAX_ABOUT_LINES 5 · MAX_ABOUT_CHARS 300 ·
+anchor weight 4 (`SoulMindOps.MEMORY_ANCHOR_WEIGHT`) · recall cooldown 3 days.
+
+Salience starts at 10, decays 1/day, +3 on recall (cap 10), evicted at 0 — an unrefreshed memory
+lasts about ten days, a recalled one indefinitely.
+
+### Commands and the toggle
+
+- `/bot soul memory <Bot>` — lists what that bot remembers **about you**, newest day first, as
+  `day N · salience S · fact`, or `"<Bot> doesn't remember anything about you yet."` Same guard
+  sequence as `reset`: player actor, registered bot, `isPrivateSoulAuthorized`, runtime present —
+  and like `reset` it only ever reads the *actor's own* memories, so an operator running it on
+  someone else's bot still cannot read another player's memories. Reads the cached mind; no store
+  round-trip on the server thread.
+- `/bot soul digest on|off|status` — operator-gated kill switch. `status` prints
+  `"Memory digest is ON/OFF. Runs at each Minecraft day rollover for soul-bound bots."`
+- `ManualConfig.soulMemoryDigestEnabled`, default **true**, read through a live supplier (like the
+  banter switch) so a toggle needs no pipeline reload. Off means the digest stops *forming* new
+  memories; existing ones still decay and still render — turning it off is not amnesia, `reset` is.
+
+Also folded in here: `onNewDay` now hands the digest a names map with registered bots held out
+(bots are `ServerPlayerEntity`s too, and a named id is a digest *subject*; mind consolidation still
+gets the full map because it narrates who did what).
+
+Tests **624 → 652** (+28), `./gradlew build` green. JAR:
+`build/libs/frens-1.1.201-release+1.21.11.jar` — built, not deployed.
+
+### Field checklist (spec §10, next session)
+
+Tell Jake three things · sleep through a night · inspect `mind.json` for the new
+`playerMemories`/`digestCursors` · listen for a recall in banter · run `/bot soul memory Jake` ·
+then `/bot soul reset Jake` and confirm the list is empty and `archivedPlayerMemories` holds them.
+Added after final review: confirm a party-scene fact is attributed to the right player, and reset
+while a rollover digest is running → memories stay empty.
+
+### Final-review fixes (same version)
+
+Reset-vs-digest race guard — the digest's single write now re-checks the cursor it gathered from
+and no-ops (`outcome=superseded`) when a reset cleared it mid-flight, so an in-flight digest can no
+longer resurrect memories `/bot soul reset` just archived. Plus: a per-pair failure now logs a WARN
+with the unwrapped cause (counts only, never transcript text), `/bot soul memory` labels the number
+(`day N · salience S · fact`) per spec §8, and `/bot soul digest on|off` got the same
+`Frens.CONFIG == null` guard the status subcommand has.
+
 ## Shared skill state moved off FunctionCallerV2; wooden-fallback reset diagnostic; 1.1.200 (2026-09-03)
 
 Backlog lineup day (see the dated section at the top of `RALPH_TASK.md`). One real bug from the

@@ -101,8 +101,8 @@ quotes. If nothing is worth remembering, reply with exactly "- none".
 USER: <material>
 ```
 Validation (pure, per line, `SoulMemoryDigestOps.validate`): strip via
-`SoulResponseValidator.sanitizeBase`; drop blank lines; whole output rejected if >8 non-blank
-lines (runaway); each kept line must start with `- `, be ≤100 chars after the dash, contain no
+`SoulResponseValidator.sanitizeBase`; drop blank lines; whole output rejected if more than 8 `- `
+lines (runaway; prose lines are ignored); each kept line must start with `- `, be ≤100 chars after the dash, contain no
 `§` or control chars, and contain the player's name (case-insensitive) or the word "they"; `-
 none` alone → empty result. Everything else per line is dropped silently (count logged).
 

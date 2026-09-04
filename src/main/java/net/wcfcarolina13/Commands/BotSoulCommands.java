@@ -25,6 +25,8 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,7 +34,8 @@ import java.util.function.Predicate;
 
 /**
  * Explicit `/bot soul` pilot controls: {@code status [bot]}, {@code system <on|off>},
- * {@code model <model>}, {@code enable <bot>}, {@code disable <bot>}, {@code reset <bot>}.
+ * {@code model <model>}, {@code enable <bot>}, {@code disable <bot>}, {@code reset <bot>},
+ * {@code memory <bot>}, {@code digest <on|off|status>}.
  *
  * <p>{@code system}/{@code model} require {@link Frens#isOperator(ServerCommandSource)}: they
  * write {@link ManualConfig}, call {@link ManualConfig#save()}, and then AWAIT
@@ -100,6 +103,14 @@ final class BotSoulCommands {
                         .then(CommandManager.argument("bot", EntityArgumentType.player())
                                 .executes(context -> executeReset(context,
                                         EntityArgumentType.getPlayer(context, "bot")))))
+                .then(CommandManager.literal("memory")
+                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                .executes(context -> executeMemory(context,
+                                        EntityArgumentType.getPlayer(context, "bot")))))
+                .then(CommandManager.literal("digest")
+                        .then(CommandManager.literal("on").executes(ctx -> executeDigestToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeDigestToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeDigestStatus)))
                 .then(CommandManager.literal("voice")
                         .then(CommandManager.literal("on").executes(BotSoulCommands::executeVoiceOn))
                         .then(CommandManager.literal("off").executes(BotSoulCommands::executeVoiceOff))
@@ -818,6 +829,83 @@ final class BotSoulCommands {
                         "Archived your conversation with " + botName + "; new epoch " + newEpoch + ".");
             }
         }));
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul memory <bot>} — what this bot remembers about YOU. Same guard sequence as
+     * {@code reset}: the actor's own memories only, so an operator running it on someone else's
+     * bot still never reads another player's memories.
+     */
+    private static int executeMemory(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            source.sendError(Text.literal(bot.getName().getString() + " is not a Frens bot."));
+            return 0;
+        }
+        if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {
+            source.sendError(Text.literal(
+                    "You are not authorized to read soul memories for " + bot.getName().getString() + "."));
+            return 0;
+        }
+        Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
+        if (maybeRuntime.isEmpty()) {
+            source.sendError(Text.literal("Soul runtime is not currently running."));
+            return 0;
+        }
+        String botName = bot.getName().getString();
+        List<SoulTypes.PlayerMemory> mine = maybeRuntime.get().cachedMind(bot.getUuid())
+                .map(SoulTypes.SoulMind::playerMemories)
+                .orElse(List.of())
+                .stream()
+                .filter(m -> actor.getUuid().equals(m.playerId()))
+                .sorted(Comparator.comparingInt(SoulTypes.PlayerMemory::day).reversed())
+                .toList();
+        if (mine.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, botName + " doesn't remember anything about you yet.");
+            return 1;
+        }
+        for (SoulTypes.PlayerMemory m : mine) {
+            ChatUtils.sendSystemMessage(source, "day " + m.day() + " · salience " + m.salience()
+                    + " · " + m.fact());
+        }
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul digest on|off} — operator-only kill switch for the day-rollover player
+     * memory digest. Like the banter switch, the service reads it through a live supplier, so no
+     * pipeline reload is needed; the change lands at the next day rollover.
+     */
+    private static int executeDigestToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the memory digest switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        if (config == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        config.setSoulMemoryDigestEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Memory digest set to " + (enabled ? "on" : "off") + ".");
+        return 1;
+    }
+
+    /** {@code /bot soul digest status} — enablement plus when the digest actually runs. */
+    private static int executeDigestStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config == null || config.isSoulMemoryDigestEnabled();
+        ChatUtils.sendSystemMessage(source, "Memory digest is " + (enabled ? "ON" : "OFF")
+                + ". Runs at each Minecraft day rollover for soul-bound bots.");
         return 1;
     }
 

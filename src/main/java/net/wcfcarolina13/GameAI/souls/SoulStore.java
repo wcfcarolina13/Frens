@@ -172,6 +172,18 @@ public final class SoulStore {
 
     public CompletableFuture<SoulTypes.TurnToken> beginHeardTurn(
             SoulTypes.ConversationKey key, UUID correlationId, String content, Instant occurredAt) {
+        return beginHeardTurn(key, correlationId, content, occurredAt, List.of());
+    }
+
+    /**
+     * As {@link #beginHeardTurn(SoulTypes.ConversationKey, UUID, String, Instant)}, but records
+     * {@code participants} on the HEARD record — who was present/addressed for this turn, which
+     * the party channel needs and the memory digest reads back. Pre-participants records on disk
+     * deserialize with an empty list.
+     */
+    public CompletableFuture<SoulTypes.TurnToken> beginHeardTurn(
+            SoulTypes.ConversationKey key, UUID correlationId, String content, Instant occurredAt,
+            List<UUID> participants) {
         return submit(() -> {
             SoulTypes.SoulState state = loadState(key.botId());
             String cursorKey = cursorKey(key);
@@ -182,7 +194,7 @@ public final class SoulStore {
 
             SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                     correlationId, cursor.epoch(), sequence, SoulTypes.TurnKind.HEARD,
-                    content, occurredAt, "", "", null, null);
+                    content, occurredAt, "", "", null, null, participants);
             appendRecord(activeFile(key.botId(), key.playerId()), record);
             // Advance the cache before persisting the cursor: if persistCursor itself throws
             // (an ordinary same-process I/O failure -- the executor survives and keeps serving
@@ -612,6 +624,83 @@ public final class SoulStore {
                 saveMind(botId, next);
             }
             return next;
+        });
+    }
+
+    /**
+     * Bot ids with an on-disk directory under the store root, i.e. every bot this store has ever
+     * persisted anything for. Directory names that are not UUIDs (stray files a user dropped in)
+     * are skipped; a store whose root does not exist yet yields an empty list.
+     */
+    public CompletableFuture<List<UUID>> botDirectories() {
+        return submit(() -> {
+            if (!Files.isDirectory(root)) {
+                return List.of();
+            }
+            List<UUID> ids = new ArrayList<>();
+            try (Stream<Path> entries = Files.list(root)) {
+                for (Path entry : entries.toList()) {
+                    if (!Files.isDirectory(entry)) {
+                        continue;
+                    }
+                    try {
+                        ids.add(UUID.fromString(entry.getFileName().toString()));
+                    } catch (IllegalArgumentException notAUuid) {
+                        // Not a bot directory -- ignore.
+                    }
+                }
+            }
+            return List.copyOf(ids);
+        });
+    }
+
+    /** Players {@code botId} has a live transcript for (a {@code conversations/<player>/active.jsonl}). */
+    public CompletableFuture<List<UUID>> conversationPlayers(UUID botId) {
+        return submit(() -> {
+            Path dir = conversationsDir(botId);
+            if (!Files.isDirectory(dir)) {
+                return List.of();
+            }
+            List<UUID> ids = new ArrayList<>();
+            try (Stream<Path> entries = Files.list(dir)) {
+                for (Path entry : entries.toList()) {
+                    if (!Files.isDirectory(entry) || !Files.exists(entry.resolve("active.jsonl"))) {
+                        continue;
+                    }
+                    try {
+                        ids.add(UUID.fromString(entry.getFileName().toString()));
+                    } catch (IllegalArgumentException notAUuid) {
+                        // Not a player directory -- ignore.
+                    }
+                }
+            }
+            return List.copyOf(ids);
+        });
+    }
+
+    /**
+     * Records in the conversation's live transcript at or after {@code cursor}, in file order.
+     *
+     * <p>Only the current epoch is returned: the transcript's highest epoch wins, so a reader
+     * holding a cursor from before an {@link #archiveAndReset} sees the whole fresh conversation
+     * rather than nothing. Within that epoch, the cursor's {@code nextSequence} filters only when
+     * {@code cursor.epoch()} is that same current epoch.
+     */
+    public CompletableFuture<List<SoulTypes.ConversationRecord>> recordsSince(
+            SoulTypes.ConversationKey key, SoulTypes.ConversationCursor cursor) {
+        return submit(() -> {
+            List<SoulTypes.ConversationRecord> all = loadTranscript(
+                    activeFile(key.botId(), key.playerId()), SoulTypes.ConversationRecord.class, cursorKey(key));
+            if (all.isEmpty()) {
+                return List.of();
+            }
+            long currentEpoch = all.stream()
+                    .mapToLong(SoulTypes.ConversationRecord::epoch).max().orElseThrow();
+            boolean applySequence = cursor.epoch() == currentEpoch;
+            return all.stream()
+                    .filter(record -> record.epoch() == currentEpoch)
+                    .filter(record -> !applySequence || record.sequence() >= cursor.nextSequence())
+                    .toList();
         });
     }
 
