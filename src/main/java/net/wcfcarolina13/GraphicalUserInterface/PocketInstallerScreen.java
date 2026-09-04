@@ -164,8 +164,10 @@ public class PocketInstallerScreen extends Screen {
         // Runtime check
         PocketInstaller.Runtime rt = p.runtime();
         if (rt != null) {
+            String cmd = rt.args().isEmpty() ? rt.executable().toString()
+                    : rt.executable() + " " + String.join(" ", rt.args());
             drawRow(context, cx, y, true,
-                    elide("Runtime: " + rt.version() + " (" + rt.executable() + ")", 64));
+                    elide("Runtime: " + rt.version() + " (" + cmd + ")", 64));
         } else {
             drawRow(context, cx, y, false, elide(PocketInstaller.missingRuntimeHint(), 66));
         }

@@ -51,7 +51,7 @@ public final class PocketInstaller {
     private static final long PROBE_TIMEOUT_SECONDS = 10;
     private static final long STEP_TIMEOUT_MINUTES = 30;
     private static final long SMOKE_TIMEOUT_SECONDS = 150;
-    private static final Pattern PYTHON_VERSION = Pattern.compile("Python (\\d+)\\.(\\d+)");
+    private static final Pattern PYTHON_VERSION = Pattern.compile("^Python (\\d+)\\.(\\d+)");
     /** Interpreter minor versions we look for, newest first. */
     private static final List<String> MINORS = List.of("3.13", "3.12", "3.11", "3.10");
 
@@ -181,7 +181,12 @@ public final class PocketInstaller {
         if (versionLine == null) {
             return false;
         }
-        Matcher m = PYTHON_VERSION.matcher(versionLine);
+        String firstLine = versionLine.strip();
+        int nl = firstLine.indexOf('\n');
+        if (nl >= 0) {
+            firstLine = firstLine.substring(0, nl).strip();
+        }
+        Matcher m = PYTHON_VERSION.matcher(firstLine);
         if (!m.find()) {
             return false;
         }
@@ -267,7 +272,7 @@ public final class PocketInstaller {
      * would pop a shop window at the user mid-detection. Never a candidate.
      */
     private static boolean storeAliasStub(Path p) {
-        return p.toString().contains("WindowsApps");
+        return p.toString().toLowerCase(Locale.ROOT).contains("windowsapps");
     }
 
     private static void addCandidate(List<Candidate> out, Path exe, List<String> args) {
@@ -356,12 +361,17 @@ public final class PocketInstaller {
     /** One-line variant of {@link #missingRuntimeMessage} for the installer screen row. */
     public static String missingRuntimeHint() {
         return Platform.current().windows()
-                ? "No Python 3.10+ or uv found — install uv (docs.astral.sh/uv) or python.org 3.12"
-                + " (tick 'Add to PATH')"
+                ? "No Python 3.10+/uv found. Install uv or python.org 3.12, Add PATH."
                 : "No Python 3.10+ or uv found — install uv from docs.astral.sh/uv";
     }
 
-    /** Merged stdout+stderr of a short probe command; any failure or timeout reads as {@code ""}. */
+    /**
+     * Merged stdout+stderr of a short probe command; any failure, timeout, or non-zero exit
+     * reads as {@code ""}. A non-zero exit matters here: the Windows {@code py -3.12} launcher
+     * prints a line shaped like a version string (e.g. {@code "Python 3.12 not found!"}) on
+     * stderr while exiting non-zero when that interpreter isn't installed, and that text must
+     * not be mistaken for a passing version probe.
+     */
     private static String runForOutput(List<String> cmd) {
         Process p = null;
         try {
@@ -369,6 +379,9 @@ public final class PocketInstaller {
             byte[] out = p.getInputStream().readAllBytes();
             if (!p.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
+                return "";
+            }
+            if (p.exitValue() != 0) {
                 return "";
             }
             return new String(out, StandardCharsets.UTF_8);
@@ -393,6 +406,9 @@ public final class PocketInstaller {
         boolean alreadyInstalled = Files.isExecutable(binary);
 
         Platform platform = Platform.current();
+        // Files::isExecutable is POSIX-permission-based on POSIX and ACL-based on Windows;
+        // the Windows path has not been verified against real installs (uv/python.org/Store
+        // layouts) — if candidates are wrongly skipped there, check this predicate first.
         Runtime runtime = findRuntime(uvCandidates(platform), pythonCandidates(platform),
                 Files::isExecutable, PocketInstaller::runForOutput).orElse(null);
 

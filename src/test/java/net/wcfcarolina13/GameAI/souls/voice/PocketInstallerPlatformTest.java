@@ -92,6 +92,23 @@ class PocketInstallerPlatformTest {
     }
 
     @Test
+    void windowsAppsStubIsExcludedCaseInsensitively() {
+        // Real-world PATH entries and drive letters vary in case (e.g. "windowsapps",
+        // "WindowsApps"); the exclusion must not be case-sensitive.
+        Path lowerCaseStore = Path.of(LOCAL + "/Microsoft/windowsapps");
+        PocketInstaller.Platform lowerWin = new PocketInstaller.Platform(
+                true, USER, LOCAL, USER, WINDIR, List.of(PATH_BIN, lowerCaseStore));
+        for (PocketInstaller.Candidate c : PocketInstaller.pythonCandidates(lowerWin)) {
+            assertFalse(c.executable().toString().toLowerCase(java.util.Locale.ROOT)
+                    .contains("windowsapps"), c.toString());
+        }
+        for (PocketInstaller.Candidate c : PocketInstaller.uvCandidates(lowerWin)) {
+            assertFalse(c.executable().toString().toLowerCase(java.util.Locale.ROOT)
+                    .contains("windowsapps"), c.toString());
+        }
+    }
+
+    @Test
     void pyLauncherProbeRunsWithItsVersionArg() {
         Path launcher = Path.of(WINDIR, "py.exe");
         List<PocketInstaller.Candidate> pys = List.of(

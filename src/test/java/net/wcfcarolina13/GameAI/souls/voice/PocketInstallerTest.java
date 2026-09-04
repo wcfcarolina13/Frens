@@ -44,6 +44,25 @@ class PocketInstallerTest {
     }
 
     @Test
+    void pythonVersionAnchoredToLineStart() {
+        // A version-shaped string that isn't the first line must not leak through find()-style
+        // matching anywhere in the text.
+        assertFalse(PocketInstaller.pythonVersionOk("permission denied\nPython 3.12.0"));
+        assertTrue(PocketInstaller.pythonVersionOk("  Python 3.12.0 \n"));
+    }
+
+    @Test
+    void launcherNotFoundMessageYieldsNoRuntimeWhenProbeReturnsEmpty() {
+        // Models the fixed runForOutput: the Windows `py -3.12` launcher prints
+        // "Python 3.12 not found!" on stderr and exits non-zero, and runForOutput now maps any
+        // non-zero exit to "" rather than the merged output — so the fake here returns "" for
+        // that candidate exactly as the real probe now would.
+        Path py = Path.of("/usr/bin/py.exe");
+        assertTrue(PocketInstaller.findRuntime(List.of(), cands(py), p -> true,
+                cmd -> "").isEmpty());
+    }
+
+    @Test
     void commandsPerRuntimeKind() {
         Path venv = Path.of("/cfg/pocket-tts/venv");
         PocketInstaller.Runtime uv = new PocketInstaller.Runtime(Path.of("/opt/homebrew/bin/uv"), "uv", "uv 0.8.0");
