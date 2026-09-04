@@ -1331,6 +1331,10 @@ public final class RideSyncService {
                 return false;
             }
             int hotbarSlot = ensureHotbarAccess(bot, boatSlot);
+            if (hotbarSlot < 0) {
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "boat-place:hotbar-locked");
+                return false;
+            }
             // Combat logic tends to snap to slot 0, so place the boat there.
             int targetSlot = 0;
             if (hotbarSlot != targetSlot) {
@@ -1651,23 +1655,29 @@ public final class RideSyncService {
         return -1;
     }
 
+    /**
+     * Resolve a usable hotbar slot for {@code slot}, swapping the stack into the hotbar
+     * when needed. Returns -1 when the hotbar is locked and the item lives outside it —
+     * callers must treat that as "item unavailable" rather than clamping to slot 0.
+     */
     private static int ensureHotbarAccess(ServerPlayerEntity bot, int slot) {
         if (bot == null) {
             return slot;
         }
-        if (slot >= 0 && slot < 9) {
-            return slot;
-        }
-        // Find empty hotbar slot.
-        int target = -1;
+        boolean locked = HotbarLockService.isLocked(bot);
+        int empty = -1;
         for (int i = 0; i < 9; i++) {
             if (bot.getInventory().getStack(i).isEmpty()) {
-                target = i;
+                empty = i;
                 break;
             }
         }
-        if (target == -1) {
-            target = 0;
+        int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(slot, empty, locked);
+        if (locked) {
+            return target;
+        }
+        if (target == slot) {
+            return slot;
         }
         swapInventoryStacks(bot, slot, target);
         return target;
@@ -2569,6 +2579,10 @@ public final class RideSyncService {
 
         // Equip the minecart item to hotbar slot 0.
         int hotbarSlot = ensureHotbarAccess(bot, cartSlot);
+        if (hotbarSlot < 0) {
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:hotbar-locked");
+            return false;
+        }
         int targetSlot = 0;
         if (hotbarSlot != targetSlot) {
             swapInventoryStacks(bot, hotbarSlot, targetSlot);

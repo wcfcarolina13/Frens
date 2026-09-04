@@ -3095,7 +3095,9 @@ public class FarmSkill implements Skill {
             if (retry == -1) retry = findInventoryItemSlot(bot.getInventory(), Items.BUCKET);
             if (retry != -1) {
                 retry = ensureHotbarAccess(bot, retry);
-                selectHotbarSlot(bot, retry);
+                if (retry != -1) {
+                    selectHotbarSlot(bot, retry);
+                }
             }
         }
         if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
@@ -4076,6 +4078,10 @@ public class FarmSkill implements Skill {
             return false;
         }
         bucketSlot = ensureHotbarAccess(bot, bucketSlot);
+        if (bucketSlot == -1) {
+            LOGGER.warn("pickupWater: hotbar locked, could not access bucket for {}", pos);
+            return false;
+        }
         selectHotbarSlot(bot, bucketSlot);
         BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.UP, pos, false);
         ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
@@ -4142,13 +4148,22 @@ public class FarmSkill implements Skill {
         return ensureHotbarAccess(bot, slot);
     }
 
+    /**
+     * Resolve a usable hotbar slot for {@code slot}, swapping the stack into the hotbar
+     * when needed. Returns -1 when the hotbar is locked and the item lives outside it —
+     * callers must treat that as "item unavailable" rather than clamping to slot 0.
+     */
     private static int ensureHotbarAccess(ServerPlayerEntity bot, int slot) {
         PlayerInventory inventory = bot.getInventory();
-        if (slot < 9) {
+        boolean locked = net.wcfcarolina13.GameAI.services.HotbarLockService.isLocked(bot);
+        int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
+                slot, findEmptyHotbarSlot(inventory), locked);
+        if (locked) {
+            return target;
+        }
+        if (target == slot) {
             return slot;
         }
-        int empty = findEmptyHotbarSlot(inventory);
-        int target = empty == -1 ? inventory.getSelectedSlot() : empty;
         swapStacks(inventory, slot, target);
         return target;
     }
