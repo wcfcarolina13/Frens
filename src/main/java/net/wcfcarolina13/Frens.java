@@ -499,6 +499,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ConfigSyncPayload.ID, net.wcfcarolina13.network.ConfigSyncPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.VoiceMuteMaskPayload.ID, net.wcfcarolina13.network.VoiceMuteMaskPayload.CODEC);
 
         // Bases manager UI payloads
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestBasesPayload.ID, net.wcfcarolina13.network.RequestBasesPayload.CODEC);
@@ -955,6 +956,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
             net.wcfcarolina13.GameAI.services.LockableBlockService.clearLockMode(player.getUuid());
+            net.wcfcarolina13.ChatUtils.VoiceLineMuteService.clearPlayerMask(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }

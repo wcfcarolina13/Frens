@@ -891,7 +891,7 @@ public final class BotDialoguePlayer {
      * @param sound The sound event to play
      * @return true if the sound was played successfully
      */
-    private static boolean playSound(ServerPlayerEntity bot, SoundEvent sound) {
+    private static boolean playSound(ServerPlayerEntity bot, SoundEvent sound, VoiceLineCategory category) {
         if (bot == null || sound == null) {
             return false;
         }
@@ -905,20 +905,41 @@ public final class BotDialoguePlayer {
             double x = bot.getX();
             double y = bot.getY();
             double z = bot.getZ();
-            
-            // Use playSoundFromEntity for proper 3D positional audio that follows the entity
-            // This creates realistic distance-based attenuation
-            world.playSoundFromEntity(
-                    null,           // Player to exclude (null = play for everyone)
-                    bot,            // The entity the sound emanates from
-                    sound,
-                    SoundCategory.VOICE,
-                    VOLUME,
-                    PITCH
-            );
 
-            LOGGER.info("[VoicedDialogue] Played sound {} at ({}, {}, {})", 
+            // Vanilla's audible radius for an entity sound: 16 blocks, scaled by volume above 1.
+            double radius = VOLUME > 1.0f ? 16.0D * VOLUME : 16.0D;
+            double radiusSq = radius * radius;
+            long seed = world.getRandom().nextLong();
+            int sent = 0;
+            int skipped = 0;
+
+            // Per-recipient send (instead of world.playSoundFromEntity) so a player's own voice
+            // category mask silences the line for them alone. category == null => everyone in range.
+            for (ServerPlayerEntity listener : world.getPlayers()) {
+                if (listener instanceof net.wcfcarolina13.Entity.createFakePlayer) {
+                    continue;
+                }
+                if (listener.squaredDistanceTo(bot) > radiusSq) {
+                    continue;
+                }
+                if (category != null && VoiceLineMuteService.isMuted(category, listener)) {
+                    skipped++;
+                    continue;
+                }
+                listener.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.PlaySoundFromEntityS2CPacket(
+                        net.minecraft.registry.entry.RegistryEntry.of(sound),
+                        SoundCategory.VOICE,
+                        bot,
+                        VOLUME,
+                        PITCH,
+                        seed));
+                sent++;
+            }
+
+            LOGGER.info("[VoicedDialogue] Played sound {} at ({}, {}, {})",
                     sound.id(), x, y, z);
+            LOGGER.debug("[VoicedDialogue] sound {} category {} -> {} recipient(s), {} muted",
+                    sound.id(), category == null ? "none" : category.id(), sent, skipped);
             return true;
 
         } catch (Exception e) {
@@ -1028,7 +1049,7 @@ public final class BotDialoguePlayer {
             return PlayResult.THROTTLED;
         }
 
-        boolean played = playSound(bot, sound);
+        boolean played = playSound(bot, sound, muteCategory);
         if (!played) {
             return PlayResult.FAILED;
         }
@@ -1127,6 +1148,6 @@ public final class BotDialoguePlayer {
         if (bot == null || sound == null) {
             return false;
         }
-        return playSound(bot, sound);
+        return playSound(bot, sound, null);
     }
 }

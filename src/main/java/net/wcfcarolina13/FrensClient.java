@@ -1067,6 +1067,18 @@ public class FrensClient implements ClientModInitializer {
                 net.wcfcarolina13.ui.SoulVoiceClientPlayer.onClientTick(client));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) ->
                 net.wcfcarolina13.ui.SoulVoiceClientPlayer.stopAll());
+        // Push this client's personal voice-category mute mask on join so the server can skip
+        // muted categories per recipient instead of muting them for everyone.
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            try {
+                net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                if (cfg != null) {
+                    net.wcfcarolina13.network.configNetworkManager.sendVoiceMuteMask(cfg.getMutedVoiceCategories());
+                }
+            } catch (Throwable t) {
+                net.wcfcarolina13.Frens.LOGGER.debug("voice mute mask join send failed: {}", String.valueOf(t));
+            }
+        });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client ->
                 net.wcfcarolina13.ui.SoulVoiceClientPlayer.shutdown());
 

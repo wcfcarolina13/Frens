@@ -36,6 +36,22 @@ public final class configNetworkManager {
         }
     }
 
+    /** Client-side: push this player's personal voice-category mute mask to the server. */
+    public static void sendVoiceMuteMask(java.util.List<String> mutedCategoryIds) {
+        java.util.List<String> ids = mutedCategoryIds == null
+                ? java.util.List.of()
+                : java.util.List.copyOf(mutedCategoryIds);
+        try {
+            if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(VoiceMuteMaskPayload.ID)) {
+                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new VoiceMuteMaskPayload(ids));
+            } else {
+                Frens.LOGGER.debug("sendVoiceMuteMask: server cannot receive frens:voice_mute_mask, skipping");
+            }
+        } catch (Throwable t) {
+            Frens.LOGGER.debug("sendVoiceMuteMask failed: {}", String.valueOf(t));
+        }
+    }
+
     /** Client-side: push an API key for {@code provider} to the server (operator-only server-side). */
     public static void sendSaveAPIPacket(String provider, String apiKey) {
         if (provider == null || apiKey == null) {
@@ -155,6 +171,19 @@ public final class configNetworkManager {
                 }
                 broadcastConfigSync(context.server());
             });
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(VoiceMuteMaskPayload.ID, (payload, context) -> {
+            ServerPlayerEntity sender = context.player();
+            if (sender == null) {
+                return;
+            }
+            java.util.UUID senderId = sender.getUuid();
+            java.util.List<String> ids = payload.mutedCategoryIds() == null
+                    ? java.util.List.of()
+                    : java.util.List.copyOf(payload.mutedCategoryIds());
+            context.server().execute(() ->
+                    net.wcfcarolina13.ChatUtils.VoiceLineMuteService.setPlayerMask(senderId, ids));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(SaveAPIKeyPayload.ID, (payload, context) -> {
