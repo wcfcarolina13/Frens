@@ -4,6 +4,7 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.wcfcarolina13.GameAI.DropSweeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,9 +22,11 @@ import java.util.function.BiConsumer;
  * pure-logic {@link TravelWaitPolicy}: hobbies are nudged while waiting, and the original travel is
  * retried the moment the cooldown expires.
  *
- * <p>{@link TravelWaitPolicy.Action#OFFLOAD_EXISTING} is currently treated as WAIT — see
- * {@code onServerTick} — because every {@code ChestStoreService.depositMatchingWalkOnly} caller
- * runs inside a skill/worker thread and there is no clean worker-launch path from a tick handler.
+ * <p>{@link TravelWaitPolicy.Action#OFFLOAD_EXISTING} launches a real offload:
+ * {@link TaskService#runAmbient} registers an AMBIENT task and runs
+ * {@code DropSweeper.attemptChestStoreExistingOnly} on a worker thread, so the walk-and-deposit is
+ * abort-aware and occupies the bot's single task slot (subsequent ticks therefore see
+ * {@code taskActive} and do not re-dispatch).
  */
 public final class TravelWaitService {
 
@@ -155,7 +158,7 @@ public final class TravelWaitService {
                 LOGGER.info("{}: {}", bot.getName().getString(), TravelWaitPolicy.describe(inputs, action));
                 if (action == TravelWaitPolicy.Action.OFFLOAD_EXISTING) {
                     // Logged once per transition — this fires every tick otherwise.
-                    LOGGER.info("travel-wait offload deferred (no worker launch path)");
+                    LOGGER.info("travel-wait offloading to existing chest");
                 }
             }
 
@@ -180,12 +183,26 @@ public final class TravelWaitService {
                     }
                 }
                 case HOBBY -> {
-                    if (!hobbyRunning && now - pending.lastHobbyNudgeTick >= HOBBY_NUDGE_INTERVAL_TICKS) {
+                    // shouldNudgeHobby keeps the nudge off while any task holds the slot — including
+                    // an offload this service started, which surfaces here as hobbyRunning=AMBIENT.
+                    if (!hobbyRunning && TravelWaitPolicy.shouldNudgeHobby(inputs)
+                            && now - pending.lastHobbyNudgeTick >= HOBBY_NUDGE_INTERVAL_TICKS) {
                         pending.lastHobbyNudgeTick = now;
                         BotIdleHobbiesService.requestDecisionNow(bot);
                     }
                 }
-                case OFFLOAD_EXISTING, WAIT -> {
+                case OFFLOAD_EXISTING -> {
+                    // Only dispatched while no task is active (the policy gates on !taskActive), and
+                    // runAmbient itself refuses if the slot is taken, so this cannot stack.
+                    boolean started = TaskService.runAmbient(
+                            bot.getCommandSource(), bot, "travel-wait-offload",
+                            () -> DropSweeper.attemptChestStoreExistingOnly(bot.getCommandSource(), bot));
+                    if (!started) {
+                        LOGGER.debug("travel-wait offload not started for {} (slot busy)",
+                                bot.getName().getString());
+                    }
+                }
+                case WAIT -> {
                     // nothing to do
                 }
             }

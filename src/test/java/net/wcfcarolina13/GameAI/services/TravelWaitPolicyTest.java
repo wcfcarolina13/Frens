@@ -115,4 +115,21 @@ class TravelWaitPolicyTest {
         assertFalse(TravelWaitPolicy.canRetry(TravelWaitPolicy.MAX_TRAVEL_RETRIES));
         assertFalse(TravelWaitPolicy.canRetry(TravelWaitPolicy.MAX_TRAVEL_RETRIES + 5));
     }
+
+    @Test
+    void nudgeHobbyRequiresHobbiesEnabledAndNoActiveTask() {
+        // hobbies on, slot free -> nudge
+        assertTrue(TravelWaitPolicy.shouldNudgeHobby(
+                new TravelWaitPolicy.Inputs(1200L, true, false, false, false, 0.1f)));
+        // hobbies on but a task (e.g. the travel-wait offload) holds the slot -> no nudge
+        assertFalse(TravelWaitPolicy.shouldNudgeHobby(
+                new TravelWaitPolicy.Inputs(1200L, true, true, true, false, 0.1f)));
+    }
+
+    @Test
+    void nudgeHobbyIsFalseWhenHobbiesDisabledOrInputsMissing() {
+        assertFalse(TravelWaitPolicy.shouldNudgeHobby(
+                new TravelWaitPolicy.Inputs(1200L, false, false, false, false, 0.1f)));
+        assertFalse(TravelWaitPolicy.shouldNudgeHobby(null));
+    }
 }

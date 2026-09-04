@@ -17,7 +17,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class TaskService {
@@ -309,6 +313,82 @@ public final class TaskService {
             t.setOpenEnded(true);
         });
         return ticketOpt;
+    }
+
+    private static final AtomicInteger AMBIENT_RUNNER_THREAD_ID = new AtomicInteger(0);
+    private static volatile ExecutorService AMBIENT_RUNNER = createAmbientRunner();
+
+    private static ExecutorService createAmbientRunner() {
+        return Executors.newCachedThreadPool(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "ambient-runner-" + AMBIENT_RUNNER_THREAD_ID.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+    }
+
+    /** Interrupt all in-flight {@link #runAmbient} bodies. Called during server shutdown. */
+    public static void shutdownExecutors() {
+        AMBIENT_RUNNER.shutdownNow();
+    }
+
+    /** Re-create the ambient runner executor if it was shut down. Called from {@code SERVER_STARTED}. */
+    public static void restartExecutors() {
+        if (AMBIENT_RUNNER.isShutdown()) {
+            AMBIENT_RUNNER = createAmbientRunner();
+        }
+    }
+
+    /**
+     * Runs {@code body} on a worker thread as a registered AMBIENT task for {@code bot}.
+     * <p>
+     * This is the generic counterpart to {@code BotIdleHobbiesService.startAmbientSkill}: the ticket
+     * is created <em>inside</em> the worker and the worker thread is attached to it, which is what
+     * makes {@code /bot stop} able to interrupt the body. Callers that are not skills (tick-driven
+     * services) use this to get abort-aware, single-slot background work.
+     *
+     * @return false if the bot already has an active task or the work could not be submitted.
+     */
+    public static boolean runAmbient(ServerCommandSource source,
+                                     ServerPlayerEntity bot,
+                                     String name,
+                                     Runnable body) {
+        if (SERVER_STOPPING || source == null || bot == null || body == null || name == null) {
+            return false;
+        }
+        UUID botUuid = bot.getUuid();
+        if (hasActiveTask(botUuid)) {
+            return false;
+        }
+        ExecutorService executor = AMBIENT_RUNNER;
+        if (executor.isShutdown()) {
+            return false;
+        }
+        try {
+            executor.submit(() -> {
+                Optional<TaskTicket> ticketOpt = beginAmbientSkill(name, source, botUuid);
+                if (ticketOpt.isEmpty()) {
+                    return;
+                }
+                TaskTicket ticket = ticketOpt.get();
+                attachExecutingThread(ticket, Thread.currentThread());
+                boolean success = false;
+                try {
+                    body.run();
+                    success = !isAbortRequested(botUuid);
+                } catch (Throwable t) {
+                    LOGGER.warn("Ambient task '{}' for bot {} failed: {}", name, botUuid, t.toString(), t);
+                } finally {
+                    complete(ticket, success);
+                }
+            });
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not submit ambient task '{}' for bot {}: {}", name, botUuid, e.toString());
+            return false;
+        }
     }
 
     public static Optional<String> getActiveTaskName(UUID botUuid) {

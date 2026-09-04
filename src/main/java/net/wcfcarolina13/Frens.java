@@ -748,6 +748,7 @@ public class Frens implements ModInitializer {
             // still alive (server starting fresh inside a new JVM).
             net.wcfcarolina13.PlayerUtils.MiningTool.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.restartExecutors();
+            net.wcfcarolina13.GameAI.services.TaskService.restartExecutors();
             net.wcfcarolina13.GameAI.BotEventHandler.restartExecutors();
             net.wcfcarolina13.Commands.modCommandRegistry.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.restartExecutors();
@@ -822,6 +823,7 @@ public class Frens implements ModInitializer {
             // from submitting new server.execute() tasks that keep the shutdown loop alive.
             net.wcfcarolina13.PlayerUtils.MiningTool.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.shutdownExecutors();
+            net.wcfcarolina13.GameAI.services.TaskService.shutdownExecutors();
             net.wcfcarolina13.GameAI.BotEventHandler.shutdownExecutors();
             net.wcfcarolina13.Commands.modCommandRegistry.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.shutdownExecutors();

@@ -310,11 +310,19 @@ public final class DropSweeper {
         CraftingHelper.ensureCraftingStation(player, source);
     }
 
-    private static boolean attemptChestStore(ServerCommandSource source, ServerPlayerEntity player) {
+    /**
+     * Offloads into an <em>already existing</em> nearby chest only; never places a new chest.
+     * <p>
+     * Extracted from {@link #attemptChestStore} so tick-driven callers (e.g. travel-wait) can reuse
+     * the existing-chest half without inheriting the place-a-chest fall-through.
+     *
+     * @return true if anything was actually stored.
+     */
+    public static boolean attemptChestStoreExistingOnly(ServerCommandSource source, ServerPlayerEntity player) {
         if (source == null || player == null) {
             return false;
         }
-        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+        if (!(player.getEntityWorld() instanceof ServerWorld)) {
             return false;
         }
         for (ChestStoreService.StorageChestCandidate candidate : ChestStoreService.listDepositChestCandidates(
@@ -328,6 +336,19 @@ public final class DropSweeper {
             if (moved > 0) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean attemptChestStore(ServerCommandSource source, ServerPlayerEntity player) {
+        if (source == null || player == null) {
+            return false;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (attemptChestStoreExistingOnly(source, player)) {
+            return true;
         }
         BlockPos placed = ChestStoreService.placeChestNearBot(source, player, false);
         if (placed != null) {

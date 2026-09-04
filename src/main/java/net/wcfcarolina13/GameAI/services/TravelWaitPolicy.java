@@ -73,6 +73,17 @@ public final class TravelWaitPolicy {
         return Action.WAIT;
     }
 
+    /**
+     * True when a HOBBY decision should actually nudge the idle-hobby scheduler.
+     * <p>
+     * A HOBBY action can be reached while some other task already occupies the bot's single task
+     * slot (including an ambient offload started by travel-wait itself); nudging then would be a
+     * no-op at best and a re-dispatch attempt every tick at worst.
+     */
+    public static boolean shouldNudgeHobby(Inputs in) {
+        return in != null && in.hobbiesEnabled() && !in.taskActive();
+    }
+
     public static String describe(Inputs in, Action a) {
         if (in == null) {
             return "travel-wait remaining=? hobbies=? running=? task=? chest=? full=? -> " + a;
