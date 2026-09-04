@@ -52,6 +52,7 @@ import net.wcfcarolina13.GameAI.services.GuardPatrolService;
 import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.BotRescueService;
 import net.wcfcarolina13.GameAI.services.BotThreatService;
+import net.wcfcarolina13.GameAI.services.CreeperEvasionPolicy;
 import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotStuckService;
 import net.wcfcarolina13.GameAI.services.BotRLActionService;
@@ -240,6 +241,8 @@ public class BotEventHandler {
     /** Per-bot creeper-flee progress tracking — when distance isn't improving, force shield. */
     private record CreeperFleeMemory(UUID creeperUuid, double lastDistance, long lastTick, int stuckTicks) {}
     private static final Map<UUID, CreeperFleeMemory> CREEPER_FLEE_STATE = new ConcurrentHashMap<>();
+    /** Last creeper evasion decision line logged per bot — diagnostics are state-change-only. */
+    private static final Map<UUID, String> CREEPER_DECISION_LOG_STATE = new ConcurrentHashMap<>();
 
     private static final Map<UUID, Long> FOLLOW_LAST_VERTICAL_ASSIST_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE = new ConcurrentHashMap<>();
@@ -3903,8 +3906,9 @@ public class BotEventHandler {
         // earlier and shield from further away. If the bot can't make distance
         // (cornered, blocked, hitting a wall), force the shield up regardless.
         if (creeperThreat) {
-            boolean chargedCreeper = closest instanceof net.minecraft.entity.mob.CreeperEntity creeperEntity
-                    && creeperEntity.isCharged();
+            net.minecraft.entity.mob.CreeperEntity creeperEntity =
+                    closest instanceof net.minecraft.entity.mob.CreeperEntity ce ? ce : null;
+            boolean chargedCreeper = creeperEntity != null && creeperEntity.isCharged();
             double creeperEngagementRadius = chargedCreeper ? 12.0D : 6.0D;
             double creeperShieldRadius = chargedCreeper ? 8.0D : 4.5D;
             double fleeMoveDist = chargedCreeper ? 24.0D : 12.0D;
@@ -3913,10 +3917,17 @@ public class BotEventHandler {
                 boolean onlyCreepers = actionable.stream()
                         .allMatch(e -> e.getType() == EntityType.CREEPER);
                 boolean hasMelee = BotActions.hasMeleeWeapon(bot);
-                // Block-and-shield trick is only sane against normal creepers — a single
-                // block barrier doesn't survive a charged blast at point-blank range.
-                if (!chargedCreeper && onlyCreepers && hasMelee && distance <= 4.5D
-                        && SkillPreferences.emergencyTactics(bot)) {
+                // "Armed" for policy purposes: able AND permitted to stand and
+                // run the block-and-shield trick.
+                boolean armed = onlyCreepers && hasMelee && SkillPreferences.emergencyTactics(bot);
+                CreeperEvasionPolicy.FuseState fuseState = creeperFuseState(creeperEntity);
+                float maxHealth = bot.getMaxHealth();
+                double healthFraction = maxHealth <= 0.0F ? 1.0D : bot.getHealth() / (double) maxHealth;
+                CreeperEvasionPolicy.Decision decision = CreeperEvasionPolicy.decide(
+                        distance, armed, chargedCreeper, fuseState, healthFraction);
+                logCreeperDecisionIfChanged(bot, decision, distance, armed, fuseState);
+
+                if (decision == CreeperEvasionPolicy.Decision.STAY) {
                     double cdx = closest.getX() - bot.getX();
                     double cdz = closest.getZ() - bot.getZ();
                     double clen = Math.sqrt(cdx * cdx + cdz * cdz);
@@ -3930,6 +3941,8 @@ public class BotEventHandler {
                     BotActions.raiseShieldFacing(bot, closest);
                     return true;
                 }
+
+                boolean backAway = decision == CreeperEvasionPolicy.Decision.BACK_AWAY;
 
                 // Track flee progress per bot. If the bot doesn't gain ground over
                 // ~1s, treat it as "can't make distance" and force the shield even
@@ -3954,7 +3967,8 @@ public class BotEventHandler {
 
                 boolean hasShield = bot.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD)
                         || bot.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
-                if (distance <= creeperShieldRadius || (cantMakeDistance && hasShield)) {
+                // BACK_AWAY always retreats under shield — that is the point of it.
+                if (backAway || distance <= creeperShieldRadius || (cantMakeDistance && hasShield)) {
                     BotActions.raiseShieldFacing(bot, closest);
                 }
                 double dx = bot.getX() - closest.getX();
@@ -3965,13 +3979,16 @@ public class BotEventHandler {
                         bot.getX() + (dx / len) * fleeMoveDist,
                         bot.getY(),
                         bot.getZ() + (dz / len) * fleeMoveDist);
-                BotActions.sprint(bot, true);
-                FollowMovementService.moveToward(bot, fleeTarget, 1.0, true, null);
+                // BACK_AWAY walks so the shield stays up and facing holds; FLEE_SPRINT breaks contact.
+                boolean sprint = !backAway;
+                BotActions.sprint(bot, sprint);
+                FollowMovementService.moveToward(bot, fleeTarget, 1.0, sprint, null);
                 return true;
             } else {
                 // Out of engagement range — drop any stale flee memory so we don't
                 // misattribute "no progress" once the creeper closes in again.
                 CREEPER_FLEE_STATE.remove(bot.getUuid());
+                CREEPER_DECISION_LOG_STATE.remove(bot.getUuid());
             }
         }
 
@@ -4252,6 +4269,44 @@ public class BotEventHandler {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Maps a live creeper onto the Minecraft-free fuse enum used by
+     * {@link CreeperEvasionPolicy}. {@code isIgnited()} means flint-and-steel /
+     * goal ignition (undefusable); {@code getFuseSpeed() > 0} is the general
+     * "currently swelling" signal, which is what a proximity fuse sets.
+     */
+    private static CreeperEvasionPolicy.FuseState creeperFuseState(
+            net.minecraft.entity.mob.CreeperEntity creeper) {
+        if (creeper == null) return CreeperEvasionPolicy.FuseState.NONE;
+        if (creeper.isIgnited()) return CreeperEvasionPolicy.FuseState.IGNITED;
+        if (creeper.getFuseSpeed() > 0) return CreeperEvasionPolicy.FuseState.SWELLING;
+        return CreeperEvasionPolicy.FuseState.NONE;
+    }
+
+    /**
+     * State-change-only INFO diagnostic for the creeper evasion decision. Format:
+     * {@code [creeper] Jake decision=BACK_AWAY dist=2.8 armed=true fuse=SWELLING}
+     * The line is only emitted when the decision (or the coarse inputs) change,
+     * so a per-tick combat loop does not flood the field log.
+     */
+    private static void logCreeperDecisionIfChanged(ServerPlayerEntity bot,
+                                                    CreeperEvasionPolicy.Decision decision,
+                                                    double distance,
+                                                    boolean armed,
+                                                    CreeperEvasionPolicy.FuseState fuse) {
+        // Distance is reported but NOT part of the change key — it drifts every
+        // tick and would defeat the state-change suppression.
+        String key = decision + "|" + armed + "|" + fuse;
+        UUID botId = bot.getUuid();
+        String prev = CREEPER_DECISION_LOG_STATE.get(botId);
+        if (!key.equals(prev)) {
+            CREEPER_DECISION_LOG_STATE.put(botId, key);
+            LOGGER.info("[creeper] {} decision={} dist={} armed={} fuse={}",
+                    bot.getName().getString(), decision,
+                    String.format("%.1f", distance), armed, fuse);
+        }
     }
 
     private static boolean shouldHoldShoreAgainstDrowned(ServerPlayerEntity bot, Entity hostile) {
