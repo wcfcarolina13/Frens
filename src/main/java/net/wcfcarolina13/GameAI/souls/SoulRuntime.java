@@ -84,7 +84,8 @@ public final class SoulRuntime {
                              SoulGenerationScheduler scheduler,
                              SoulConversationService conversationService,
                              SoulVoiceService voice,
-                             SoulGroupConversationService groupService) {
+                             SoulGroupConversationService groupService,
+                             SoulMemoryDigestService digest) {
     }
 
     /** Public API contract consumed by later tasks' chat/command routing. */
@@ -153,6 +154,7 @@ public final class SoulRuntime {
                 Objects.requireNonNull(scheduler, "scheduler"),
                 Objects.requireNonNull(conversationService, "conversationService"),
                 SoulVoiceService.disabled(),
+                null,
                 null));
     }
 
@@ -764,18 +766,25 @@ public final class SoulRuntime {
 
     /**
      * Day rollover (server thread, from {@link SoulEventObserver}): consolidates the journal
-     * since the last consolidation into day memories, decays the stance, then trims the journal.
-     * Player names are captured here so the store thread never touches entities.
+     * since the last consolidation into day memories, decays the stance, then trims the journal
+     * and runs the player-memory digest. Player and bot names are captured here so the store
+     * thread never touches entities.
      */
     public void onNewDay(UUID botId, int day, String biome) {
         Objects.requireNonNull(botId, "botId");
         Map<UUID, String> names = new HashMap<>();
         MinecraftServer srv = server;
+        String botName = "the bot";
         if (srv != null) {
             for (net.minecraft.server.network.ServerPlayerEntity online : srv.getPlayerManager().getPlayerList()) {
                 names.put(online.getUuid(), online.getName().getString());
             }
+            net.minecraft.server.network.ServerPlayerEntity bot = srv.getPlayerManager().getPlayer(botId);
+            if (bot != null) {
+                botName = bot.getName().getString();
+            }
         }
+        String digestBotName = botName;
         long lastMs = store.cachedMind(botId).map(SoulTypes.SoulMind::lastConsolidatedAtMs).orElse(0L);
         Instant since = lastMs <= 0L ? Instant.EPOCH : Instant.ofEpochMilli(lastMs);
         store.eventsSince(botId, since)
@@ -783,6 +792,11 @@ public final class SoulRuntime {
                         m, events, day, biome, id -> names.getOrDefault(id, "someone"),
                         System.currentTimeMillis())))
                 .thenCompose(mind -> store.trimEvents(botId, 200).thenApply(trimmed -> mind))
+                .thenCompose(mind -> {
+                    SoulMemoryDigestService d = pipelineRef.get().digest();
+                    return d == null ? CompletableFuture.completedFuture(mind)
+                            : d.digest(botId, digestBotName, day, names).thenApply(v -> mind);
+                })
                 .thenAccept(mind -> LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
                         botId, day, mind.memories().size()))
                 .exceptionally(ex -> {
@@ -912,7 +926,10 @@ public final class SoulRuntime {
                     }
                 },
                 delivery::deliverStatus);
-        return new Pipeline(settings, provider, scheduler, conversationService, voice, groupService);
+        // TODO(task 7): replace `() -> true` with the ManualConfig soul-memory-digest getter.
+        SoulMemoryDigestService digest = new SoulMemoryDigestService(
+                store, partyStore, scheduler, provider, settings.model(), settings.timeout(), () -> true);
+        return new Pipeline(settings, provider, scheduler, conversationService, voice, groupService, digest);
     }
 
     /** Case-insensitive lookup of a non-empty voice assignment keyed by bot name or profile id. */
@@ -1114,6 +1131,23 @@ public final class SoulRuntime {
             if (err == null) {
                 synchronized (lifecycleLock) {
                     pipelineRef.get().conversationService().invalidate(key, newEpoch);
+                }
+                // Fire-and-forget: the reset's epoch is already the caller's answer, so nothing
+                // here may fail the future this callback runs on -- hence the try/catch around
+                // the submission itself as well as the exceptionally on its result.
+                try {
+                    CompletableFuture<SoulTypes.SoulMind> archived = store.updateMind(
+                            key.botId(), m -> SoulMemoryDigestOps.archiveFor(m, key.playerId()));
+                    if (archived != null) {
+                        archived.exceptionally(ex -> {
+                            LOGGER.warn("[souls] memory archive failed for bot {} player {}: {}",
+                                    key.botId(), key.playerId(), ex.toString());
+                            return null;
+                        });
+                    }
+                } catch (RuntimeException ex) {
+                    LOGGER.warn("[souls] memory archive submit failed for bot {} player {}: {}",
+                            key.botId(), key.playerId(), ex.toString());
                 }
             }
         });
