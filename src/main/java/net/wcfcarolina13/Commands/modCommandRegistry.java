@@ -8143,10 +8143,10 @@ public class modCommandRegistry {
             //
             // We MUST NOT fall back to running the skill synchronously here:
             //   1. We're on the server tick thread — long skills would freeze the server.
-            //   2. Constructing SkillContext eagerly via FunctionCallerV2.getSharedState() can
-            //      trigger that class's static initializer, which constructs OllamaAPI, which
-            //      transitively requires the (compile-only) ollama4j classes — producing a
-            //      NoClassDefFoundError that escapes catch (Exception) and crashes the server.
+            //   2. Historically, building SkillContext via FunctionCallerV2.getSharedState() could
+            //      trigger that class's static initializer (constructs OllamaAPI → NoClassDefFoundError
+            //      on non-AI builds). The map now lives in SharedStateService, but keep the
+            //      synchronous-fallback ban for reason 1.
             // Surface a clear error to the user instead.
             LOGGER.error("Failed to queue skill '{}' for bot {} — executor rejected the task. "
                             + "The skill executor is likely shut down (this can happen after exit-to-title "
@@ -8880,12 +8880,6 @@ public class modCommandRegistry {
     }
 
     private static Map<String, Object> safeSharedState() {
-        try {
-            return FunctionCallerV2.getSharedState();
-        } catch (Throwable t) {
-            net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.safeSharedState unavailable: "
-                    + t.getClass().getSimpleName());
-            return new HashMap<>();
-        }
+        return net.wcfcarolina13.GameAI.services.SharedStateService.safeSharedState("command");
     }
 }

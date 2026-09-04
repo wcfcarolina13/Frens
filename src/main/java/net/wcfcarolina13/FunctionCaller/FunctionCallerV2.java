@@ -115,7 +115,8 @@ public class FunctionCallerV2 {
         return t;
     });
 
-    private static final Map<String, Object> sharedState = new ConcurrentHashMap<>();  // Updated to Map<String, Object>
+    // Owned by SharedStateService so non-LLM callers never have to load this class (ollama4j is compile-only by default).
+    private static final Map<String, Object> sharedState = net.wcfcarolina13.GameAI.services.SharedStateService.sharedState();
 
     private static ServerCommandSource currentBotSource() {
         return ACTIVE_BOT_SOURCE.get();

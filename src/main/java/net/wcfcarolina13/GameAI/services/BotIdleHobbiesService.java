@@ -1155,6 +1155,14 @@ public final class BotIdleHobbiesService {
         int signature = ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world);
         Integer lastSignature = LAST_WOODEN_FALLBACK_SIGNATURE.get(botUuid);
         if (lastSignature == null || lastSignature.intValue() != signature) {
+            Long pendingCooldown = NEXT_WOODEN_FALLBACK_TICK.get(botUuid);
+            if (lastSignature != null && pendingCooldown != null && nowTick < pendingCooldown) {
+                // Diagnostic for the 1.1.199 field log: the fallback restarted a doomed one-tree
+                // woodcut ~14×/s. Something flips this signature between ticks and wipes the
+                // 12 s cooldown; log what so the field session can name it.
+                LOGGER.info("Idle wooden fallback: {} signature changed {} -> {} with {} ticks of cooldown left; resetting",
+                        bot.getName().getString(), lastSignature, signature, pendingCooldown - nowTick);
+            }
             LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, signature);
             NEXT_WOODEN_FALLBACK_TICK.remove(botUuid);
         }

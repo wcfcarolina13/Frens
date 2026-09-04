@@ -1,39 +1,35 @@
 package net.wcfcarolina13.GameAI.services;
 
-import net.wcfcarolina13.FunctionCaller.FunctionCallerV2;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Cross-platform safe accessor for shared skill state.
+ * Owner of the cross-skill shared state map.
+ *
+ * <p>This map used to be a static field on {@code FunctionCallerV2}. That class's static
+ * initializer constructs an {@code OllamaAPI}, and ollama4j is compile-only unless the mod is
+ * built with {@code -PaiEnabled=true}, so in a normal build the first non-LLM caller (idle
+ * hobbies, auto-hunt, come-recovery, {@code /bot} skill commands) hit a
+ * {@code NoClassDefFoundError} and silently fell back to a throwaway empty map. The map now lives
+ * here, free of any LLM dependency; {@code FunctionCallerV2} borrows it.
  */
 public final class SharedStateService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("shared-state");
-    private static final Set<String> WARNED_CALLERS = ConcurrentHashMap.newKeySet();
+    private static final Map<String, Object> SHARED_STATE = new ConcurrentHashMap<>();
 
     private SharedStateService() {
     }
 
+    /** The single shared skill-state map. */
+    public static Map<String, Object> sharedState() {
+        return SHARED_STATE;
+    }
+
+    /**
+     * Kept for call-site compatibility. Formerly guarded a call into {@code FunctionCallerV2} that
+     * could fail on non-AI builds; the map is now owned here and nothing can fail.
+     */
     public static Map<String, Object> safeSharedState(String callerTag) {
-        try {
-            return FunctionCallerV2.getSharedState();
-        } catch (Throwable t) {
-            String tag = callerTag == null || callerTag.isBlank() ? "unknown-caller" : callerTag;
-            if (WARNED_CALLERS.add(tag)) {
-                LOGGER.warn("Shared state unavailable for {}: {}",
-                        tag,
-                        t.getClass().getSimpleName(),
-                        t);
-            } else {
-                LOGGER.debug("Shared state still unavailable for {}: {}", tag, t.getClass().getSimpleName());
-            }
-            return new HashMap<>();
-        }
+        return SHARED_STATE;
     }
 }
