@@ -37,7 +37,6 @@ import net.wcfcarolina13.GraphicalUserInterface.CraftingHistoryScreen;
 import net.wcfcarolina13.GraphicalUserInterface.ConfigManager;
 import net.wcfcarolina13.GraphicalUserInterface.CompanionHotkeyOverlayHud;
 import net.wcfcarolina13.GraphicalUserInterface.HuntablesScreen;
-import net.wcfcarolina13.GraphicalUserInterface.CompanionSpellsScreen;
 import net.wcfcarolina13.GraphicalUserInterface.RecruitmentDialogueScreen;
 import net.wcfcarolina13.GraphicalUserInterface.SleepCommandHintHud;
 import net.wcfcarolina13.GraphicalUserInterface.WorldModeSelectionScreen;
@@ -1745,7 +1744,12 @@ public class FrensClient implements ClientModInitializer {
 
         String alias = getRecruitmentBotAlias();
         playMagicUiSound(client);
-        client.setScreen(new CompanionSpellsScreen(null, alias));
+        // Open the canonical bot inventory screen preselected to its Spells tab.
+        // The screen is server-opened (BOT_PLAYER_INV_HANDLER), so flag the
+        // request first, then ask the server to open the inventory.
+        BotPlayerInventoryScreen.requestSpellsTab();
+        String target = formatBotTarget(alias);
+        sendChatCommand(client, target.isEmpty() ? "bot open" : ("bot open " + target));
         return true;
     }
 

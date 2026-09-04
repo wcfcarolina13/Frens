@@ -61,6 +61,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     /** Set by BotGuideScreen before sending GuideOpenInventoryPayload to start on Admin tab. */
     static boolean pendingAdminTab = false;
+
+    // Set by FrensClient's Spells keybind route just before it asks the server to
+    // open this bot's inventory; consumed once in init() to land on the Spells tab.
+    private static boolean pendingSpellsTab = false;
+    private static long pendingSpellsTabAtMs = 0L;
+    private static final long PENDING_SPELLS_TAB_WINDOW_MS = 5000L;
+
+    /**
+     * Request that the next inventory screen opened by the server starts on the
+     * Spells tab. Call immediately before triggering the server-side open (e.g.
+     * {@code /bot open <alias>}). The request expires after a few seconds so a
+     * refused open never leaks into a later, unrelated inventory open.
+     */
+    public static void requestSpellsTab() {
+        pendingSpellsTab = true;
+        pendingSpellsTabAtMs = System.currentTimeMillis();
+    }
     /** Cursor position saved by BotGuideScreen so the guide-open transition doesn't center it. */
     static double pendingAdminCursorX = -1, pendingAdminCursorY = -1;
 
@@ -825,6 +842,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 guideRemoteOpen = false;
                 guideRemoteFullAccess = false;
                 guideRemoteAccessReason = "";
+                if (pendingSpellsTab) {
+                    boolean fresh = System.currentTimeMillis() - pendingSpellsTabAtMs
+                            <= PENDING_SPELLS_TAB_WINDOW_MS;
+                    pendingSpellsTab = false;
+                    if (fresh) {
+                        this.overlayCategory = TopicCategory.SPELL;
+                        toggleTopicsExpanded(true);
+                    }
+                }
             }
         }
     }
@@ -6563,14 +6589,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     /**
      * Switch the topic overlay panel to the Spells tab in-place instead of
-     * opening the legacy {@link CompanionSpellsScreen}. Keeps the player in
+     * opening a separate spells screen. Keeps the player in
      * the same inventory screen and gives them one canonical spell list
      * (including Summon / Enchant / Anvil which previously only lived on the
      * legacy screen).
      *
-     * <p>The legacy screen is still reached via the dedicated `KEY_OPEN_SPELLS`
-     * keybind path in {@link net.wcfcarolina13.FrensClient} — that's an
-     * intentional second access route, NOT dead code.
+     * <p>The dedicated `KEY_OPEN_SPELLS` keybind in
+     * {@link net.wcfcarolina13.FrensClient} reaches the same tab by calling
+     * {@link #requestSpellsTab()} before asking the server to open this screen.
      */
     private void switchToSpellsTab() {
         if (this.client != null && this.client.player != null) {
