@@ -121,4 +121,66 @@ class SoulMemoryDigestOpsTest {
         assertEquals(1, archived.archivedPlayerMemories().size());
         assertTrue(archived.digestCursors().isEmpty());
     }
+
+    @Test void archiveForOnlyDropsCursorsAndMemoriesForThatPlayer() {
+        UUID other = UUID.randomUUID();
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti hates the Nether", 5, -1, List.of()),
+                new SoulTypes.PlayerMemory(other, 1, "Sam likes cats", 5, -1, List.of())));
+        mind = SoulMemoryDigestOps.withCursor(mind, "DIRECT:" + PLAYER, new SoulTypes.ConversationCursor(1L, 3L));
+        mind = SoulMemoryDigestOps.withCursor(mind, "PARTY:" + PLAYER, new SoulTypes.ConversationCursor(1L, 4L));
+        mind = SoulMemoryDigestOps.withCursor(mind, "DIRECT:" + other, new SoulTypes.ConversationCursor(1L, 5L));
+
+        SoulTypes.SoulMind archived = SoulMemoryDigestOps.archiveFor(mind, PLAYER);
+
+        assertEquals(List.of("DIRECT:" + other), new ArrayList<>(archived.digestCursors().keySet()));
+        assertTrue(archived.playerMemories().stream().anyMatch(m -> m.playerId().equals(other)));
+        assertFalse(archived.playerMemories().stream().anyMatch(m -> m.playerId().equals(PLAYER)));
+        assertEquals(1, archived.archivedPlayerMemories().size());
+        assertEquals(PLAYER, archived.archivedPlayerMemories().get(0).playerId());
+    }
+
+    @Test void aboutLinesCapsLineCountInSalienceDescendingOrder() {
+        List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            memories.add(new SoulTypes.PlayerMemory(PLAYER, i, "Roti fact " + i, i + 1, -1, List.of()));
+        }
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), memories);
+
+        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER);
+
+        assertEquals(SoulMemoryDigestOps.MAX_ABOUT_LINES, lines.size());
+        assertEquals(List.of("- Roti fact 7", "- Roti fact 6", "- Roti fact 5", "- Roti fact 4", "- Roti fact 3"), lines);
+    }
+
+    @Test void aboutLinesStopsBeforeExceedingCharCap() {
+        List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            String fact = "Roti " + ("fact" + i).repeat(1) + " " + "z".repeat(85);
+            memories.add(new SoulTypes.PlayerMemory(PLAYER, i, fact, 5 - i, -1, List.of()));
+        }
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), memories);
+
+        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER);
+
+        assertTrue(lines.size() < 5);
+        assertTrue(String.join("\n", lines).length() <= SoulMemoryDigestOps.MAX_ABOUT_CHARS);
+    }
+
+    @Test void archiveForKeepsNewestWithinMaxArchivedCap() {
+        List<SoulTypes.PlayerMemory> already = new ArrayList<>();
+        for (int i = 0; i < SoulMemoryDigestOps.MAX_ARCHIVED; i++) {
+            already.add(new SoulTypes.PlayerMemory(UUID.randomUUID(), i, "old fact " + i, 1, -1, List.of()));
+        }
+        SoulTypes.SoulMind mind = SoulMindOps.withArchivedPlayerMemories(SoulTypes.SoulMind.empty(), already);
+        mind = SoulMindOps.withPlayerMemories(mind, List.of(
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti new fact one", 5, -1, List.of()),
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti new fact two", 5, -1, List.of())));
+
+        SoulTypes.SoulMind archived = SoulMemoryDigestOps.archiveFor(mind, PLAYER);
+
+        assertEquals(SoulMemoryDigestOps.MAX_ARCHIVED, archived.archivedPlayerMemories().size());
+        assertEquals("Roti new fact one", archived.archivedPlayerMemories().get(0).fact());
+        assertEquals("Roti new fact two", archived.archivedPlayerMemories().get(1).fact());
+    }
 }
