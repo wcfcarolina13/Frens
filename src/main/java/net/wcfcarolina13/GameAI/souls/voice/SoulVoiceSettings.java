@@ -86,4 +86,17 @@ public record SoulVoiceSettings(boolean enabled, boolean valid, String validatio
             }
         }
     }
+
+    /**
+     * Whether the Dreamsleeve engine can run on this platform. The Qwen3-TTS warm server it
+     * drives is an Apple-silicon/macOS setup, so every other OS greys the row out.
+     */
+    public static boolean dreamsleeveSupportedOn(String osName) {
+        if (osName == null || osName.isBlank()) {
+            return false;
+        }
+        String os = osName.toLowerCase(Locale.ROOT);
+        return os.contains("mac") || os.contains("darwin");
+    }
+
 }

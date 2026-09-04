@@ -280,9 +280,29 @@ public class ManualConfig {
     private static final Object SAVE_LOCK = new Object();
 
     /**
+     * True while this client is connected to a remote (dedicated) server whose global config has
+     * been synced into this in-memory instance. Transient so Gson never serializes it.
+     */
+    private transient volatile boolean remoteAuthoritative;
+
+    /** Marks (or unmarks) this config as holding a remote server's globals. */
+    public void setRemoteAuthoritative(boolean remoteAuthoritative) {
+        this.remoteAuthoritative = remoteAuthoritative;
+    }
+
+    /** @return true when these values came from a remote server and must not hit local disk. */
+    public boolean isRemoteAuthoritative() {
+        return remoteAuthoritative;
+    }
+
+    /**
      * Saves the current configuration to the settings.json5 file.
      */
     public void save() {
+        if (remoteAuthoritative) {
+            LOGGER.debug("[config] save skipped — config is remote-authoritative while connected to a server");
+            return;
+        }
         synchronized (SAVE_LOCK) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             try (FileWriter writer = new FileWriter(filePath())) {
@@ -892,6 +912,13 @@ public class ManualConfig {
         } else {
             mutedTextCategories.remove(categoryId);
         }
+    }
+
+    public List<String> getMutedTextCategories() {
+        if (mutedTextCategories == null) {
+            mutedTextCategories = new ArrayList<>();
+        }
+        return mutedTextCategories;
     }
 
     public boolean isGameplayTipsEnabled() {

@@ -496,8 +496,10 @@ public class Frens implements ModInitializer {
         // registering the packets on the global entrypoint to recognise them
         PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ConfigSyncPayload.ID, net.wcfcarolina13.network.ConfigSyncPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.VoiceMuteMaskPayload.ID, net.wcfcarolina13.network.VoiceMuteMaskPayload.CODEC);
 
         // Bases manager UI payloads
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestBasesPayload.ID, net.wcfcarolina13.network.RequestBasesPayload.CODEC);
@@ -633,6 +635,10 @@ public class Frens implements ModInitializer {
                                     new net.wcfcarolina13.network.LockModeStatePayload(active));
                         }));
 
+        // Config sync C2S receivers (registered once per JVM — global receivers persist
+        // across world reloads, so this must not live in SERVER_STARTING).
+        configNetworkManager.registerServerReceivers();
+
         // Player preserve expensive gear C2S receivers
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(UpdatePlayerPreservePayload.ID, (payload, context) -> {
             ServerPlayerEntity sender = context.player();
@@ -749,9 +755,6 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.restartExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.restartExecutor();
-            configNetworkManager.registerServerModelNameSaveReceiver(server);
-            configNetworkManager.registerServerAPIKeySaveReceiver(server);
-            configNetworkManager.registerServerCustomProviderSaveReceiver(server);
             serverInstance = server;
             net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
             net.wcfcarolina13.GameAI.souls.SoulEventObserver.initializeProduction();
@@ -919,6 +922,8 @@ public class Frens implements ModInitializer {
             // Sync survival recruitment state to real players on join.
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
                 net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(player);
+                // Push the authoritative global config so dedicated-server clients match the host.
+                configNetworkManager.sendConfigSync(player);
                 // Deliver any travel notifications queued while this player was offline.
                 net.wcfcarolina13.GameAI.services.NavigationArtifactService.drainQueuedNotifications(player);
             }
@@ -951,6 +956,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());
             net.wcfcarolina13.GameAI.services.LockableBlockService.clearLockMode(player.getUuid());
+            net.wcfcarolina13.ChatUtils.VoiceLineMuteService.clearPlayerMask(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }

@@ -3,7 +3,28 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-04 — next session starts here
+## Session Handoff 2026-09-04 (evening) — next session starts here
+
+**State:** main = origin/main @ 1.1.203 merge (see git log). Deployed JAR on all three Prism instances:
+1.1.203 (if the deploy line in changelog says so; otherwise 1.1.202). Suite 704 green.
+
+**Shipped in 1.1.203 (one build, four items):** real config sync (S2C on join/change, operator-or-host
+gated C2S save, `SharedConfig` allowlist, dedicated-server `remoteAuthoritative` guard), per-player
+voice mute masks (per-recipient sound send + `VoiceMuteMaskPayload`), model-manager RAM shortfall on
+the Download button, Dreamsleeve greyed off macOS. Spec/plan under `docs/superpowers/`.
+
+**Field checks for 1.1.203 (add to the guided session):** LAN/dedicated — Voice toggle and dialogue
+rates reach bots; muting a category in one client leaves another client hearing it; opening a
+single-player world after leaving a server keeps local settings; single-player saves still work with
+cheats off.
+
+**Do next (separate builds):** `InventoryIterator` refactor; second soul persona JSON draft; delete
+legacy `CompanionSpellsScreen`. Deferred minors from the 1.1.203 branch: mask receiver unthrottled;
+wire cap 64 vs 9 ids; while on a remote server no client-side `save()` persists.
+
+---
+
+## Session Handoff 2026-09-04 (morning) — superseded
 
 **State:** main = origin/main @ a82aad2 (pushed). Deployed JAR on all three Prism instances:
 1.1.202. Suite 679 green. Read `.ralph/guardrails.md` before touching code; `CLAUDE.md` here is
@@ -786,12 +807,12 @@ is empty in live config.
 Voiced-line category muting shipped global-only (settings.json5 mask, `ConfigureVoiceCategoriesScreen`
 via the Voice row "Adv…" chip in Bot Control). Deferred multiplayer half:
 
-- [ ] **Per-player mute masks** — on a dedicated server the current design mutes for everyone
+- [x] **Per-player mute masks** (✅ 1.1.203, 2026-09-04) — on a dedicated server the current design mutes for everyone
       (`playSoundFromEntity` broadcasts). Fix: replace the broadcast in `BotDialoguePlayer.playSound`
       with a per-recipient send loop, sync each Frens client's mask via a small C2S payload, and
       consult it in `VoiceLineMuteService.isMuted(category, viewer)` — the `viewer` param is already
       threaded as the seam. Settings.json5 mask becomes the server-admin baseline.
-- [ ] **Fix the stubbed config sync** — prerequisite: `configNetworkManager` /
+- [x] **Fix the stubbed config sync** (✅ 1.1.203, 2026-09-04) — prerequisite: `configNetworkManager` /
       `ConfigJsonUtil.configToJson/applyConfigJson` are compile-time no-op stubs, so ALL global
       config (including the existing Voice toggle) is effectively single-player-only today.
 

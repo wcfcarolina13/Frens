@@ -8,7 +8,6 @@ import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.ChatUtils.VoiceLineCategory;
 import net.wcfcarolina13.Frens;
-import net.wcfcarolina13.network.ConfigJsonUtil;
 import net.wcfcarolina13.network.configNetworkManager;
 
 /**
@@ -100,7 +99,9 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
 
     private void persist() {
         Frens.CONFIG.save();
-        configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
+        // Voice-category muting is per-player: push only this client's mask, never the whole
+        // config (which would rewrite the server's shared globals).
+        configNetworkManager.sendVoiceMuteMask(Frens.CONFIG.getMutedVoiceCategories());
     }
 
     private void rebuild() {

@@ -95,7 +95,10 @@ public class SoulModelManagerScreen extends Screen {
         if (s.isInstalled(model.tag())) {
             return Text.literal("Use");
         }
-        return Text.literal("Download");
+        // Surface the RAM warning where the click happens, not only in the description.
+        return Text.literal(OllamaModelInstaller.ramShortfallGb(model, s.totalRamBytes()) > 0
+                ? "Download ⚠"
+                : "Download");
     }
 
     private void onModelButton(OllamaModelInstaller.KnownModel model) {
@@ -168,8 +171,7 @@ public class SoulModelManagerScreen extends Screen {
             int rowY = cy + 72;
             for (OllamaModelInstaller.KnownModel m : OllamaModelInstaller.KNOWN_MODELS) {
                 boolean installed = s.isInstalled(m.tag());
-                boolean ramOk = s.totalRamBytes() <= 0
-                        || s.totalRamBytes() >= (long) (m.recommendedRamGb() * 1073741824L);
+                boolean ramOk = OllamaModelInstaller.ramShortfallGb(m, s.totalRamBytes()) <= 0;
                 context.drawTextWithShadow(this.textRenderer,
                         m.label() + " §7(" + m.tag() + ")"
                                 + (installed ? " §a· installed" : String.format(" §7· %.1f GB download", m.downloadGb())),
