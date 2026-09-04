@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.203-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.204-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.203** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.204** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -13,7 +13,7 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 - Every item has three sub-lines: **Bradley does** / **Claude watches for** / **Pass when**.
 - Record-keeping rule inherited from `SOUL_COMMUNICATION_PILOT.md`: log **correlation ids and outcomes, never message bodies**.
 - Related runbooks — link, don't duplicate: [`SOUL_COMMUNICATION_PILOT.md`](SOUL_COMMUNICATION_PILOT.md) (its "Manual — to be executed in-game" section is still the authority for DM edge cases: disconnect/death/dimension, restart persistence, remote perception leakage, reserved deterministic routing) and [`IN_GAME_AUDIT_MASTER.md`](IN_GAME_AUDIT_MASTER.md) (Fast Daily Smoke + Full Reliability Sweep for the non-soul stack).
-- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
+- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `travel-wait`, `[guard-escape]`, `placed no blocks reason=`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
 - Veto vocabulary in the log: `vetoed:cooldown`, `vetoed:salience`, `vetoed:danger`, `vetoed:roster-lost`, `vetoed:hard-reject`, `vetoed:changed-before-capture`, `vetoed:muted`.
 
 ---
@@ -299,6 +299,67 @@ available and record it under "Not covered".
   - Claude watches for: `[config] save skipped — config is remote-authoritative` (DEBUG) while G
     was connected, none after leaving.
   - Pass when: G's single-player values are its own, not H's.
+
+---
+
+## Phase 6c — Backlog run (1.1.204): bundles, Spells key, Silas, pillar reason, travel-wait
+
+All single-player. Do the Silas item early if you want him in the roster for Phases 2–4 banter
+(three bots), otherwise run it here.
+
+- [ ] **Spells key opens the inventory Spells tab (1.1.204)**
+  - Bradley does: look at Jake, press the Spells keybind; then press it from the radial (slot 3).
+  - Claude watches for: nothing in the log on success; `Out of range or wrong dimension` in chat = fail
+    (should not happen — the host is op).
+  - Pass when: the **bot inventory** screen opens already on the Spells tab both times, Enchant/Anvil
+    buttons behave as before, and the old standalone spells popup never appears.
+- [ ] **Crafting with planks only inside a bundle (1.1.204)**
+  - Bradley does: put all of Jake's planks into a bundle (nothing loose), give a task that needs
+    planks (e.g. `/bot skill woodcut` with no axe → it crafts one, or ask for a crafting table).
+  - Claude watches for: no `no planks` / crafting refusal; the planks reappear as a loose stack
+    (extract-first) right before the craft.
+  - Pass when: the craft succeeds; the bundle is lighter by exactly what was used.
+- [ ] **Bundled food counts (1.1.204)**
+  - Bradley does: bag Jake's only food in a bundle, `/bot set hunger 6 Jake`.
+  - Claude watches for: the eat path pulling food out of the bundle (one stack becomes loose) then
+    eating; **no** 2 s stall on the tick thread (TPS steady).
+  - Pass when: he eats within a few seconds; food bar rises.
+- [ ] **Silas persona (1.1.204)**
+  - Bradley does: spawn a bot named `Silas`, `/bot soul enable Silas`, optionally
+    `/bot soul voice assign Silas george`; talk to him; let banter run with Jake and Bob nearby.
+  - Claude watches for: `[souls]` lines resolving profile `frens:silas` (not `frens:jake`); no
+    profile-not-found warnings.
+  - Pass when: he answers in the laconic omen-reading register, mentions Jake or Bob by name in at
+    least one banter line, and never breaks into Jake's voice/persona.
+- [ ] **Wedged bot: pillar reason + 30 s back-off (1.1.204, P1 escape)**
+  - Bradley does: dig a 1×1×2 hole under a guarding/patrolling bot with cobblestone in inventory;
+    cover the top with a block so pillaring is impossible.
+  - Claude watches for: `pillar recovery placed no blocks reason=<x>` (x names the actual break —
+    `feet-occupied`, `overhead-mine-failed`, `not-airborne`, `place-rejected:…`), then
+    `[guard-escape] <bot> still below surface after recovery; cooldown 30s reason=<x>`.
+  - Pass when: the reason is a concrete break, not blank, and the retry spacing becomes ≥30 s
+    (was ~12 s). Remove the cover: he pillars out on the next attempt.
+- [ ] **Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle)**
+  - Bradley does: with idle hobbies **on**, give Jake a lodestone compass + a registered base; do
+    one fast-travel (`/bot come` from far away), then immediately `/bot come` again from ≥100 blocks.
+  - Claude watches for: chat `Jake is resting Xm Ys before traveling to …; I'll keep busy
+    meanwhile`; `travel-wait enqueued Jake remaining=…t`; a `-> HOBBY` policy line; a hobby
+    task starting; later `travel-wait cooldown expired for Jake (waited …t); retrying travel`.
+  - Pass when: he does a hobby instead of standing still, then fast-travels on his own when the
+    cooldown ends (≤3 min), with no repeated `giving up … after 3 retries`.
+- [ ] **Travel-wait cancels on stop (1.1.204)**
+  - Bradley does: during the wait above, `/bot stop Jake`.
+  - Pass when: no `retrying travel` line fires later — he stays put.
+- [ ] **Travel-wait offload stays deferred (1.1.204, known)**
+  - Bradley does: same setup with hobbies **off**, inventory ≥85 % full, a registered chest nearby.
+  - Claude watches for: exactly one `travel-wait offload deferred (no worker launch path)` per
+    wait — not one per tick.
+  - Pass when: the line appears once and the bot travels when the cooldown ends. (Real offload is a
+    follow-up; this item just proves the log isn't spamming.)
+- [ ] **Hotbar-lock combat honesty (1.1.204, side effect)**
+  - Bradley does: put Jake in a boat with his sword outside the hotbar, spawn a zombie nearby.
+  - Pass when: he does not swing a random item; either he dismounts and fights or stays passive —
+    no wrong-item swings. Record what he did.
 
 ---
 
