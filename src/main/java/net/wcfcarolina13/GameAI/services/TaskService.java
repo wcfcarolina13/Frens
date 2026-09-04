@@ -315,6 +315,14 @@ public final class TaskService {
         return ticketOpt;
     }
 
+    /**
+     * Bots with a {@link #runAmbient} submit in flight. Reserved on the calling thread before the
+     * submit and released in the worker's finally (or on submit failure), because the ticket that
+     * would otherwise serialise callers is created inside the worker.
+     */
+    private static final java.util.Set<UUID> IN_FLIGHT_AMBIENT =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     private static final AtomicInteger AMBIENT_RUNNER_THREAD_ID = new AtomicInteger(0);
     private static volatile ExecutorService AMBIENT_RUNNER = createAmbientRunner();
 
@@ -366,26 +374,50 @@ public final class TaskService {
         if (executor.isShutdown()) {
             return false;
         }
+        // Reserve the slot on the CALLING thread. The ticket is only created inside the worker, so
+        // two tick-driven callers could otherwise both pass hasActiveTask and submit; the loser then
+        // returned silently from beginAmbientSkill. This set closes that window.
+        if (!IN_FLIGHT_AMBIENT.add(botUuid)) {
+            LOGGER.debug("Ambient task '{}' refused for bot {}: another ambient submit is in flight",
+                    name, botUuid);
+            return false;
+        }
         try {
             executor.submit(() -> {
-                Optional<TaskTicket> ticketOpt = beginAmbientSkill(name, source, botUuid);
-                if (ticketOpt.isEmpty()) {
-                    return;
-                }
-                TaskTicket ticket = ticketOpt.get();
-                attachExecutingThread(ticket, Thread.currentThread());
-                boolean success = false;
                 try {
-                    body.run();
-                    success = !isAbortRequested(botUuid);
-                } catch (Throwable t) {
-                    LOGGER.warn("Ambient task '{}' for bot {} failed: {}", name, botUuid, t.toString(), t);
+                    Optional<TaskTicket> ticketOpt = beginAmbientSkill(name, source, botUuid);
+                    if (ticketOpt.isEmpty()) {
+                        LOGGER.debug("Ambient task '{}' for bot {} could not acquire a ticket", name, botUuid);
+                        return;
+                    }
+                    TaskTicket ticket = ticketOpt.get();
+                    attachExecutingThread(ticket, Thread.currentThread());
+                    // Mirror what SkillManager.runSkill does around skill.execute(): hand movement
+                    // to the task and suppress idle head rotation for its duration.
+                    net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume =
+                            net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
+                    net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(true);
+                    boolean success = false;
+                    try {
+                        body.run();
+                        success = !isAbortRequested(botUuid);
+                    } catch (Throwable t) {
+                        LOGGER.warn("Ambient task '{}' for bot {} failed: {}", name, botUuid, t.toString(), t);
+                    } finally {
+                        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
+                        if (!isAbortRequested(botUuid)) {
+                            net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(
+                                    bot, source.getServer(), followResume);
+                        }
+                        complete(ticket, success);
+                    }
                 } finally {
-                    complete(ticket, success);
+                    IN_FLIGHT_AMBIENT.remove(botUuid);
                 }
             });
             return true;
         } catch (RuntimeException e) {
+            IN_FLIGHT_AMBIENT.remove(botUuid);
             LOGGER.warn("Could not submit ambient task '{}' for bot {}: {}", name, botUuid, e.toString());
             return false;
         }

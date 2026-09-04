@@ -98,6 +98,69 @@ public final class SkillManager {
         return SKILLS.get(name);
     }
 
+    /**
+     * Follow/come state captured before a task takes over the bot's movement, so it can be handed
+     * back afterwards. Null fields mean "there was nothing to restore".
+     */
+    public record FollowResumeState(UUID followUuid,
+                                    net.minecraft.util.math.BlockPos fixedGoal,
+                                    double stopRange,
+                                    boolean allowRecoverySkills) {
+    }
+
+    /**
+     * Captures the bot's follow/come state and stops following, so a task owns movement outright.
+     * Shared with TaskService.runAmbient so tick-driven ambient work behaves like a skill.
+     *
+     * @return the state to hand to {@link #resumeFollowMode}; never null
+     */
+    public static FollowResumeState suspendFollowMode(ServerPlayerEntity botPlayer) {
+        if (botPlayer == null || BotEventHandler.getCurrentMode(botPlayer) != BotEventHandler.Mode.FOLLOW) {
+            return new FollowResumeState(null, null, 0.0D, true);
+        }
+        UUID followUuid = BotEventHandler.getFollowTargetUuid(botPlayer);
+        net.minecraft.util.math.BlockPos fixedGoal = null;
+        double stopRange = 0.0D;
+        boolean allowRecoverySkills = true;
+        BotCommandStateService.State st = BotCommandStateService.stateFor(botPlayer);
+        if (st != null) {
+            fixedGoal = st.followFixedGoal;
+            stopRange = st.followStopRange;
+            allowRecoverySkills = st.comeAllowRecoverySkills;
+        }
+        BotEventHandler.stopFollowing(botPlayer);
+        return new FollowResumeState(followUuid, fixedGoal, stopRange, allowRecoverySkills);
+    }
+
+    /** Restores what {@link #suspendFollowMode} captured. Safe with nulls / nothing to restore. */
+    public static void resumeFollowMode(ServerPlayerEntity botPlayer,
+                                        net.minecraft.server.MinecraftServer server,
+                                        FollowResumeState resume) {
+        if (botPlayer == null || resume == null || server == null) {
+            return;
+        }
+        if (resume.fixedGoal() != null) {
+            ServerPlayerEntity target = resume.followUuid() != null
+                    ? server.getPlayerManager().getPlayer(resume.followUuid())
+                    : null;
+            double stopRange = resume.stopRange() > 0.0D ? resume.stopRange() : 3.2D;
+            BotEventHandler.setComeModeWalk(botPlayer, target, resume.fixedGoal(), stopRange,
+                    resume.allowRecoverySkills());
+            LOGGER.info("[FollowAssert] task-resume bot={} mode=come goal={} allowRecovery={}",
+                    botPlayer.getName().getString(),
+                    resume.fixedGoal().toShortString(),
+                    resume.allowRecoverySkills());
+        } else if (resume.followUuid() != null) {
+            ServerPlayerEntity target = server.getPlayerManager().getPlayer(resume.followUuid());
+            if (target != null) {
+                BotEventHandler.setFollowMode(botPlayer, target);
+                LOGGER.info("[FollowAssert] task-resume bot={} mode=follow target={}",
+                        botPlayer.getName().getString(),
+                        target.getName().getString());
+            }
+        }
+    }
+
     public static SkillExecutionResult runSkill(String name, SkillContext context) {
         Skill skill = SKILLS.get(name);
         if (skill == null) {
@@ -150,21 +213,7 @@ public final class SkillManager {
             }
         }
 
-        UUID resumeFollowUuid = null;
-        net.minecraft.util.math.BlockPos resumeFixedGoal = null;
-        double resumeStopRange = 0.0D;
-        boolean resumeAllowRecoverySkills = true;
-        if (botPlayer != null && BotEventHandler.getCurrentMode(botPlayer) == BotEventHandler.Mode.FOLLOW) {
-            UUID currentFollow = BotEventHandler.getFollowTargetUuid(botPlayer);
-            resumeFollowUuid = currentFollow;
-            BotCommandStateService.State st = BotCommandStateService.stateFor(botPlayer);
-            if (st != null) {
-                resumeFixedGoal = st.followFixedGoal;
-                resumeStopRange = st.followStopRange;
-                resumeAllowRecoverySkills = st.comeAllowRecoverySkills;
-            }
-            BotEventHandler.stopFollowing(botPlayer);
-        }
+        FollowResumeState followResume = suspendFollowMode(botPlayer);
 
         BotEventHandler.setExternalOverrideActive(true);
         AutoFaceEntity.setBotExecutingTask(true);
@@ -227,26 +276,8 @@ public final class SkillManager {
                 botPlayer.setPitch(0);
             }
             BotEventHandler.setExternalOverrideActive(false);
-            if (botPlayer != null && !abortRequested) {
-                if (resumeFixedGoal != null) {
-                    ServerPlayerEntity target = resumeFollowUuid != null
-                            ? context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid)
-                            : null;
-                    double stopRange = resumeStopRange > 0.0D ? resumeStopRange : 3.2D;
-                    BotEventHandler.setComeModeWalk(botPlayer, target, resumeFixedGoal, stopRange, resumeAllowRecoverySkills);
-                    LOGGER.info("[FollowAssert] task-resume bot={} mode=come goal={} allowRecovery={}",
-                            botPlayer.getName().getString(),
-                            resumeFixedGoal.toShortString(),
-                            resumeAllowRecoverySkills);
-                } else if (resumeFollowUuid != null) {
-                    ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
-                    if (target != null) {
-                        BotEventHandler.setFollowMode(botPlayer, target);
-                        LOGGER.info("[FollowAssert] task-resume bot={} mode=follow target={}",
-                                botPlayer.getName().getString(),
-                                target.getName().getString());
-                    }
-                }
+            if (!abortRequested) {
+                resumeFollowMode(botPlayer, context.botSource().getServer(), followResume);
             }
             boolean success = result != null && result.success() && !abortRequested;
             TaskService.complete(ticket, success);

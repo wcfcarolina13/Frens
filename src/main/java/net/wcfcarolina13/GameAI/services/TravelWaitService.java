@@ -60,6 +60,10 @@ public final class TravelWaitService {
         long lastChestProbeTick = Long.MIN_VALUE;
         boolean chestNearby;
         long lastHobbyNudgeTick = Long.MIN_VALUE;
+        /** Tick of the last OFFLOAD_EXISTING dispatch; MIN_VALUE until the first one. */
+        long lastOffloadTick = Long.MIN_VALUE;
+        /** Latched once an offload attempt reports failure; no further offloads for this request. */
+        volatile boolean offloadFailed;
         TravelWaitPolicy.Action lastAction;
 
         PendingTravel(String label, BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel, long startedTick) {
@@ -193,13 +197,30 @@ public final class TravelWaitService {
                 }
                 case OFFLOAD_EXISTING -> {
                     // Only dispatched while no task is active (the policy gates on !taskActive), and
-                    // runAmbient itself refuses if the slot is taken, so this cannot stack.
-                    boolean started = TaskService.runAmbient(
-                            bot.getCommandSource(), bot, "travel-wait-offload",
-                            () -> DropSweeper.attemptChestStoreExistingOnly(bot.getCommandSource(), bot));
-                    if (!started) {
-                        LOGGER.debug("travel-wait offload not started for {} (slot busy)",
-                                bot.getName().getString());
+                    // runAmbient itself refuses if the slot is taken, so this cannot stack. The
+                    // policy backoff+latch stops a chest that accepts nothing from being walked to
+                    // over and over for the whole cooldown.
+                    if (TravelWaitPolicy.shouldDispatchOffload(now, pending.lastOffloadTick,
+                            pending.offloadFailed)) {
+                        pending.lastOffloadTick = now;
+                        PendingTravel target = pending;
+                        boolean started = TaskService.runAmbient(
+                                bot.getCommandSource(), bot, "travel-wait-offload",
+                                () -> {
+                                    boolean moved = DropSweeper.attemptChestStoreExistingOnly(
+                                            bot.getCommandSource(), bot);
+                                    if (!moved) {
+                                        // Latch: nothing was accepted, so retrying is pure walking.
+                                        target.offloadFailed = true;
+                                        LOGGER.info("travel-wait offload accepted nothing for {}; "
+                                                + "no further offload attempts for this request",
+                                                bot.getName().getString());
+                                    }
+                                });
+                        if (!started) {
+                            LOGGER.debug("travel-wait offload not started for {} (slot busy)",
+                                    bot.getName().getString());
+                        }
                     }
                 }
                 case WAIT -> {

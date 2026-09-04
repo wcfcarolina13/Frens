@@ -49,6 +49,13 @@ public final class CombatInventoryManager {
     private CombatInventoryManager() {
     }
 
+    /** Drops the bundle-reach cooldown stamp for a bot that is no longer tracked. */
+    public static void forgetBot(java.util.UUID botUuid) {
+        if (botUuid != null) {
+            LAST_BUNDLE_REACH_TICK.remove(botUuid);
+        }
+    }
+
     /**
      * Rate-limit gate for the bundle-reach paths below. {@code ensureCombatLoadout} is called from
      * per-tick server loops (AutoFaceEntity, idle hobbies), so an unbounded reach attempt would scan
@@ -159,9 +166,12 @@ public final class CombatInventoryManager {
         if (shieldSlot.isEmpty()) {
             // Nothing in a direct slot — a shield may still be inside a bundle. Only worth the hop
             // when the bundle-aware count exceeds the direct count, and only once per cooldown.
+            // Score check first: bundleReachRateLimited() consumes the cooldown stamp, so it must
+            // only run once we actually intend to reach.
             if (InventoryIterator.countDirect(bot, usableShield) == 0
                     && InventoryIterator.count(bot, usableShield) > 0
-                    && BundleReachPolicy.shouldReachForBetter(-1, 0, bundleReachRateLimited(bot))
+                    && BundleReachPolicy.shouldReachForBetter(-1, 0, false)
+                    && !bundleReachRateLimited(bot)
                     && net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, usableShield)) {
                 shieldSlot = findItemSlot(inventory, usableShield);
             }
@@ -332,7 +342,12 @@ public final class CombatInventoryManager {
         }
         int directScore = bestDirectScore == Double.NEGATIVE_INFINITY ? -1 : (int) Math.round(bestDirectScore);
         int bundledScore = (int) Math.round(bestBundledScore);
-        if (!BundleReachPolicy.shouldReachForBetter(directScore, bundledScore, bundleReachRateLimited(bot))) {
+        // Evaluate the score first — bundleReachRateLimited() stamps the cooldown, and burning it on
+        // a candidate the score check rejects would block a genuinely better weapon for 100 ticks.
+        if (!BundleReachPolicy.shouldReachForBetter(directScore, bundledScore, false)) {
+            return false;
+        }
+        if (bundleReachRateLimited(bot)) {
             return false;
         }
         final ItemStack wanted = bestBundled;

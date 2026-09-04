@@ -132,4 +132,30 @@ class TravelWaitPolicyTest {
                 new TravelWaitPolicy.Inputs(1200L, false, false, false, false, 0.1f)));
         assertFalse(TravelWaitPolicy.shouldNudgeHobby(null));
     }
+
+    @Test
+    void offloadDispatchesOnceThenBacksOff() {
+        // Never dispatched before -> allowed.
+        assertTrue(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE, false));
+        // Just dispatched -> throttled for the full interval.
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(1000L, 1000L, false));
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(
+                1000L + TravelWaitPolicy.OFFLOAD_INTERVAL_TICKS - 1, 1000L, false));
+        // Interval elapsed -> allowed again.
+        assertTrue(TravelWaitPolicy.shouldDispatchOffload(
+                1000L + TravelWaitPolicy.OFFLOAD_INTERVAL_TICKS, 1000L, false));
+    }
+
+    @Test
+    void offloadFailureLatchesOffPermanently() {
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE, true));
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(
+                1000L + TravelWaitPolicy.OFFLOAD_INTERVAL_TICKS * 10, 1000L, true));
+    }
+
+    @Test
+    void offloadRearmsAfterWorldTimeRewind() {
+        // A world-time rewind must not lock the request out until the clock catches up.
+        assertTrue(TravelWaitPolicy.shouldDispatchOffload(50L, 5000L, false));
+    }
 }

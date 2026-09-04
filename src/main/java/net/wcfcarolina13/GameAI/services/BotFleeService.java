@@ -2851,6 +2851,8 @@ public final class BotFleeService {
     }
 
     private static boolean tryPillarOperationalSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
+        // Kept despite the callers' own ensureScaffoldReachable: the post-ascent call site runs after
+        // escapeToSurface, which can consume the direct scaffold those earlier pulls provided.
         ensureScaffoldReachable(bot, 2);
         int scaffoldCount = countScaffoldBlocks(bot);
         if (scaffoldCount <= 0) {

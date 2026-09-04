@@ -772,6 +772,7 @@ public class BotEventHandler {
         net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(uuid);
         BotRegistry.unregister(uuid);
         net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldowns(uuid);
+        net.wcfcarolina13.PlayerUtils.CombatInventoryManager.forgetBot(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);

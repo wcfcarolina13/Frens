@@ -28,6 +28,9 @@ public final class TravelWaitPolicy {
     /** Inventory fullness fraction at/above which offload to an existing chest is worthwhile. */
     public static final float OFFLOAD_FULLNESS_THRESHOLD = 0.85f;
 
+    /** Minimum ticks between two OFFLOAD_EXISTING dispatches for the same pending request (60s). */
+    public static final long OFFLOAD_INTERVAL_TICKS = 1200L;
+
     /** Maximum times a queued travel may be retried before the request is dropped. */
     public static final int MAX_TRAVEL_RETRIES = 3;
 
@@ -80,6 +83,31 @@ public final class TravelWaitPolicy {
      * slot (including an ambient offload started by travel-wait itself); nudging then would be a
      * no-op at best and a re-dispatch attempt every tick at worst.
      */
+    /**
+     * Whether an {@link Action#OFFLOAD_EXISTING} decision may actually dispatch an offload run.
+     *
+     * <p>The action holds for as long as the inventory stays full and a chest is remembered nearby,
+     * so without a backoff the service would walk the bot to the same chest every tick. Two gates:
+     * a {@link #OFFLOAD_INTERVAL_TICKS} interval, and a hard latch — once an offload attempt has
+     * reported failure (a chest that accepts nothing) the request never dispatches again and falls
+     * back to HOBBY/WAIT.
+     *
+     * @param nowTick         current world tick
+     * @param lastOffloadTick tick of the last dispatch, or {@link Long#MIN_VALUE} when never
+     * @param offloadFailed   true once an offload attempt returned false
+     */
+    public static boolean shouldDispatchOffload(long nowTick, long lastOffloadTick, boolean offloadFailed) {
+        if (offloadFailed) {
+            return false;
+        }
+        if (lastOffloadTick == Long.MIN_VALUE) {
+            return true;
+        }
+        long elapsed = nowTick - lastOffloadTick;
+        // A world-time rewind (negative elapsed) re-arms rather than locking the request out.
+        return elapsed < 0 || elapsed >= OFFLOAD_INTERVAL_TICKS;
+    }
+
     public static boolean shouldNudgeHobby(Inputs in) {
         return in != null && in.hobbiesEnabled() && !in.taskActive();
     }

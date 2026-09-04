@@ -58,7 +58,16 @@ public final class FurnaceOffloadService {
             return false;
         }
         MinecraftServer server = source.getServer();
-        if (server == null || server.isOnThread() || TaskService.isServerStopping()) {
+        if (server == null) {
+            return false;
+        }
+        if (server.isOnThread()) {
+            // This routine blocks on callOnServer round-trips; running it on the server thread
+            // would deadlock, so callers must hand it to a worker.
+            LOGGER.debug("[furnace-offload] refused: called on the server thread");
+            return false;
+        }
+        if (TaskService.isServerStopping()) {
             return false;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
@@ -73,6 +82,12 @@ public final class FurnaceOffloadService {
         List<Candidate> giveaways = FuelOffloadPolicy.giveaways(snapshot, DEFAULT_PLANK_RESERVE);
         if (giveaways.isEmpty()) {
             return false;
+        }
+
+        // Item ids we are actually offering; a fuel slot holding anything else cannot be topped up.
+        java.util.Set<String> giveawayItemIds = new java.util.HashSet<>();
+        for (Candidate c : giveaways) {
+            giveawayItemIds.add(c.itemId());
         }
 
         BlockPos origin = bot.getBlockPos();
@@ -91,7 +106,7 @@ public final class FurnaceOffloadService {
             if (ProtectedZoneService.isProtectedForBot(botId, furnacePos, world, null)) {
                 continue;
             }
-            if (!callOnServer(server, () -> fuelSlotAccepts(world, furnacePos), Boolean.FALSE)) {
+            if (!callOnServer(server, () -> fuelSlotAccepts(world, furnacePos, giveawayItemIds), Boolean.FALSE)) {
                 continue;
             }
             visited++;
@@ -145,8 +160,13 @@ public final class FurnaceOffloadService {
         return out;
     }
 
-    /** Server thread only: is this furnace's fuel slot empty, or holding something we can top up? */
-    private static boolean fuelSlotAccepts(ServerWorld world, BlockPos pos) {
+    /**
+     * Server thread only: is this furnace's fuel slot empty, or holding one of the items we are
+     * about to give away with room to spare?
+     *
+     * @param giveawayItemIds item ids (matching {@code Candidate.itemId()}) the bot intends to insert
+     */
+    private static boolean fuelSlotAccepts(ServerWorld world, BlockPos pos, java.util.Set<String> giveawayItemIds) {
         if (!(world.getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
             return false;
         }
@@ -158,7 +178,7 @@ public final class FurnaceOffloadService {
             return false;
         }
         // Occupied by a different item — leave it alone; vanilla furnaces hold one fuel type.
-        return true;
+        return giveawayItemIds != null && giveawayItemIds.contains(fuel.getItem().toString());
     }
 
     /** Server thread only. Returns the number of items moved. */
