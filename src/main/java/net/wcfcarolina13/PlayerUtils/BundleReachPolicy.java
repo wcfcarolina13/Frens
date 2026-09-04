@@ -36,4 +36,25 @@ public final class BundleReachPolicy {
         }
         return Math.min(needed - safeDirect, safeBundled);
     }
+
+    /**
+     * Whether a "reach into a bundle" extraction is worth doing for a <em>quality</em> upgrade
+     * (best tool / best armor piece / best weapon), as opposed to the quantity rule above.
+     *
+     * <p>Selection code compares candidates by score. A bundled candidate is only worth extracting
+     * when it is strictly better than the best candidate already sitting in a direct slot —
+     * extracting an equal-or-worse item just churns the inventory. Callers additionally pass a
+     * rate-limit flag so per-tick paths (combat loadout) cannot hammer the extraction path.
+     *
+     * @param bestDirectScore  score of the best direct-slot candidate, or {@code -1} when there is none
+     * @param bestBundledScore score of the best bundled candidate, or {@code -1} when there is none
+     * @param rateLimited      true when the caller's cooldown has not yet elapsed
+     * @return true iff the bundled candidate is strictly better and the caller is not rate-limited
+     */
+    public static boolean shouldReachForBetter(int bestDirectScore, int bestBundledScore, boolean rateLimited) {
+        if (rateLimited) {
+            return false;
+        }
+        return bestBundledScore > bestDirectScore;
+    }
 }

@@ -21,6 +21,17 @@ public class ToolSelector {
     private static final Logger LOGGER = LoggerFactory.getLogger("tool-selector");
 
     public static ItemStack selectBestToolForBlock(ServerPlayerEntity bot, BlockState blockState) {
+        return selectBestToolForBlock(bot, blockState, true);
+    }
+
+    /**
+     * @param allowBundleReach when true and no direct-slot tool beats bare hands, a strictly better
+     *                         tool sitting inside a bundle is pulled into a direct slot
+     *                         ({@code BundleService.reachFirst}, which hops to the server thread as
+     *                         needed) and the scan is retried exactly once. Mining callers run on
+     *                         {@code MiningTool}'s worker executor.
+     */
+    private static ItemStack selectBestToolForBlock(ServerPlayerEntity bot, BlockState blockState, boolean allowBundleReach) {
         List<ItemStack> hotbarItems = hotBarUtils.getHotbarItems(bot);
         ItemStack bestTool = ItemStack.EMPTY;
         float highestSpeed = 0.0f;
@@ -97,6 +108,14 @@ public class ToolSelector {
 
         // If no tool with speed > 1.0 was found, use current selection
         if (highestSpeed <= 1.0f) {
+            // Bundle-aware last resort: a usable tool may be sitting inside a bundle, invisible to the
+            // direct-slot scans above. Extract it only when it is strictly better than what we found.
+            if (allowBundleReach) {
+                ItemStack reached = reachBetterBundledTool(bot, blockState, highestSpeed);
+                if (!reached.isEmpty()) {
+                    return selectBestToolForBlock(bot, blockState, false);
+                }
+            }
             // If the reason nothing was found is that a preserved tool is below threshold,
             // request fallback refresh for the appropriate category.
             ItemStack held = hotBarUtils.getSelectedHotbarItemStack(bot);
@@ -115,6 +134,51 @@ public class ToolSelector {
         }
 
         return bestTool;
+    }
+
+    /**
+     * Looks for a bundled tool that mines {@code blockState} strictly faster than {@code bestDirectSpeed}
+     * and, if found, pulls it into a direct inventory slot. Bundled stacks yielded by
+     * {@link InventoryIterator} are read-only views — they are never selected or equipped directly.
+     *
+     * @return the (non-empty) bundled candidate that was extracted, or {@link ItemStack#EMPTY}
+     */
+    private static ItemStack reachBetterBundledTool(ServerPlayerEntity bot, BlockState blockState, float bestDirectSpeed) {
+        if (bot == null || blockState == null) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack bestBundled = ItemStack.EMPTY;
+        float bestBundledSpeed = 0.0f;
+        for (var ref : InventoryIterator.stream(bot).toList()) {
+            if (ref.isDirect()) {
+                continue;
+            }
+            ItemStack stack = ref.stack();
+            if (stack.isEmpty() || isWeaponOnlyItem(stack)) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            float speed = stack.getMiningSpeedMultiplier(blockState);
+            if (speed > bestBundledSpeed) {
+                bestBundledSpeed = speed;
+                bestBundled = stack;
+            }
+        }
+        if (bestBundled.isEmpty() || bestBundledSpeed <= 1.0f) {
+            return ItemStack.EMPTY;
+        }
+        // Compare on a common integer scale so the decision itself stays unit-testable.
+        if (!BundleReachPolicy.shouldReachForBetter(
+                Math.round(bestDirectSpeed * 100.0f), Math.round(bestBundledSpeed * 100.0f), false)) {
+            return ItemStack.EMPTY;
+        }
+        final ItemStack wanted = bestBundled;
+        boolean reached = net.wcfcarolina13.GameAI.services.BundleService.reachFirst(
+                bot, stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted));
+        if (!reached) {
+            return ItemStack.EMPTY;
+        }
+        LOGGER.info("Tool select: reached {} out of a bundle (speed {} > {})",
+                wanted.getItem(), bestBundledSpeed, bestDirectSpeed);
+        return wanted;
     }
 
     private static boolean isWeaponOnlyItem(ItemStack stack) {

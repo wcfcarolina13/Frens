@@ -370,6 +370,18 @@ public class MiningTool {
     }
 
     private static boolean switchToTool(ServerPlayerEntity bot, ItemStack tool) {
+        return switchToTool(bot, tool, true);
+    }
+
+    /**
+     * Selects {@code tool} into the main hand.
+     *
+     * <p>Bundle-aware: if the tool exists only inside a bundle, {@code allowBundleReach} lets us pull
+     * one copy into a direct slot ({@link net.wcfcarolina13.GameAI.services.BundleService#reachFirst})
+     * and rescan exactly once. Mining runs on {@code MINING_EXECUTOR} worker threads as well as on the
+     * server thread (the re-poll path); {@code reachFirst} handles the hop either way.
+     */
+    private static boolean switchToTool(ServerPlayerEntity bot, ItemStack tool, boolean allowBundleReach) {
         if (tool == null || tool.isEmpty()) {
             return false;
         }
@@ -395,6 +407,20 @@ public class MiningTool {
             swapStacks(inventory, i, target);
             BotActions.selectHotbarSlot(bot, target);
             return true;
+        }
+
+        if (allowBundleReach) {
+            ItemStack wanted = tool;
+            java.util.function.Predicate<ItemStack> match =
+                    stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted);
+            // Only worth a bundle hop when nothing matching sits in a direct slot but a bundle holds one.
+            if (InventoryIterator.countDirect(bot, match) == 0
+                    && InventoryIterator.count(bot, match) > 0
+                    && net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, match)) {
+                LOGGER.info("Tool switch: reached {} out of a bundle for {}",
+                        wanted.getItem(), bot.getName().getString());
+                return switchToTool(bot, wanted, false);
+            }
         }
         return false;
     }

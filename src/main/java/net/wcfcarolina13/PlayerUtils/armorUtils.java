@@ -45,6 +45,12 @@ public class armorUtils {
 
             // Find the best armor piece in the inventory for this slot
             int bestArmorSlot = findBestArmorSlot(bot, inventory, slot);
+            // Bundle-aware: a strictly better piece may be sitting inside a bundle, invisible to the
+            // direct-slot scan. Pull it out, then redo the scan so the normal equip logic runs on a
+            // real direct slot (bundled stacks are read-only views and must never be equipped).
+            if (reachBetterBundledArmor(bot, slot, bestArmorSlot >= 0 ? getArmorScore(inventory.getStack(bestArmorSlot), slot) : -1.0)) {
+                bestArmorSlot = findBestArmorSlot(bot, inventory, slot);
+            }
             ItemStack bestArmor = bestArmorSlot >= 0 ? inventory.getStack(bestArmorSlot) : ItemStack.EMPTY;
 
             // Equip the armor if it's better than what's currently equipped
@@ -101,6 +107,58 @@ public class armorUtils {
                     player.networkHandler.sendPacket(new EntityEquipmentUpdateS2CPacket(bot.getId(), equipmentUpdates))
             );
         }
+    }
+
+    /**
+     * Extracts a bundled armor piece for {@code slot} when it scores strictly better than the best
+     * direct-slot candidate. Runs wherever {@code autoEquipArmor} runs (server tick and bot-command
+     * paths); {@code BundleService.reachFirst} performs the server-thread hop when needed.
+     *
+     * @param bestDirectScore score of the best direct candidate, or a negative value when there is none
+     * @return true when a piece was moved out of a bundle into a direct slot
+     */
+    private static boolean reachBetterBundledArmor(ServerPlayerEntity bot, EquipmentSlot slot, double bestDirectScore) {
+        if (bot == null) {
+            return false;
+        }
+        ItemStack bestBundled = ItemStack.EMPTY;
+        double bestBundledScore = -1.0;
+        for (var ref : InventoryIterator.stream(bot).toList()) {
+            if (ref.isDirect()) {
+                continue;
+            }
+            ItemStack stack = ref.stack();
+            if (stack.isEmpty() || !isArmorForSlot(stack, slot)) {
+                continue;
+            }
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) {
+                continue;
+            }
+            double score = getArmorScore(stack, slot);
+            if (score > bestBundledScore) {
+                bestBundledScore = score;
+                bestBundled = stack;
+            }
+        }
+        if (bestBundled.isEmpty()) {
+            return false;
+        }
+        // Also require the bundled piece to beat what is already equipped, so we do not churn.
+        ItemStack equipped = bot.getEquippedStack(slot);
+        double equippedScore = isValidArmorForSlot(equipped, slot) ? getArmorScore(equipped, slot) : -1.0;
+        double directBaseline = Math.max(bestDirectScore, equippedScore);
+        if (!BundleReachPolicy.shouldReachForBetter(
+                (int) Math.round(directBaseline * 100.0), (int) Math.round(bestBundledScore * 100.0), false)) {
+            return false;
+        }
+        final ItemStack wanted = bestBundled;
+        boolean reached = net.wcfcarolina13.GameAI.services.BundleService.reachFirst(
+                bot, stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted));
+        if (reached) {
+            LOGGER.info("Armor auto-equip: reached {} out of a bundle for {} ({})",
+                    wanted.getItem(), slot.getName(), bot.getName().getString());
+        }
+        return reached;
     }
 
     private static boolean isArmorForSlot(ItemStack stack, EquipmentSlot slot) {

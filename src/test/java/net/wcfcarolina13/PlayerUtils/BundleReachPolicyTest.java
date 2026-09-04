@@ -4,6 +4,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BundleReachPolicyTest {
 
@@ -47,5 +49,32 @@ class BundleReachPolicyTest {
         assertEquals(0, BundleReachPolicy.extractionsNeeded(5, -2, -7));
         assertEquals(5, BundleReachPolicy.extractionsNeeded(5, -2, 9));
         assertEquals(0, BundleReachPolicy.extractionsNeeded(5, 9, -1));
+    }
+
+    @Test
+    @DisplayName("strictly better bundled candidate is worth extracting")
+    void bundledStrictlyBetter() {
+        assertTrue(BundleReachPolicy.shouldReachForBetter(10, 20, false));
+    }
+
+    @Test
+    @DisplayName("bundled candidate that only ties the direct best is not extracted")
+    void bundledTieNotExtracted() {
+        assertFalse(BundleReachPolicy.shouldReachForBetter(20, 20, false));
+        assertFalse(BundleReachPolicy.shouldReachForBetter(30, 20, false));
+    }
+
+    @Test
+    @DisplayName("no direct candidate (-1) means any bundled candidate wins")
+    void noDirectCandidate() {
+        assertTrue(BundleReachPolicy.shouldReachForBetter(-1, 0, false));
+        assertFalse(BundleReachPolicy.shouldReachForBetter(-1, -1, false));
+    }
+
+    @Test
+    @DisplayName("rate limiting suppresses the reach even when the bundled item is better")
+    void rateLimitedSuppresses() {
+        assertFalse(BundleReachPolicy.shouldReachForBetter(10, 99, true));
+        assertFalse(BundleReachPolicy.shouldReachForBetter(-1, 99, true));
     }
 }

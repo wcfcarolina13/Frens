@@ -41,7 +41,31 @@ public final class CombatInventoryManager {
     private static final float CRITICAL_HEALTH_THRESHOLD = 12.0F;
     private static final double HOSTILE_ALERT_DISTANCE_SQ = 36.0D; // 6 blocks
 
+    /** Minimum server ticks between bundle-reach attempts, per bot (this runs on the server tick). */
+    private static final long BUNDLE_REACH_COOLDOWN_TICKS = 100L;
+    private static final java.util.Map<java.util.UUID, Long> LAST_BUNDLE_REACH_TICK =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private CombatInventoryManager() {
+    }
+
+    /**
+     * Rate-limit gate for the bundle-reach paths below. {@code ensureCombatLoadout} is called from
+     * per-tick server loops (AutoFaceEntity, idle hobbies), so an unbounded reach attempt would scan
+     * bundles every tick. Consumes the cooldown when it returns false (i.e. when a reach may proceed).
+     */
+    private static boolean bundleReachRateLimited(ServerPlayerEntity bot) {
+        if (bot == null || bot.getEntityWorld() == null) {
+            return true;
+        }
+        long now = bot.getEntityWorld().getTime();
+        java.util.UUID id = bot.getUuid();
+        Long last = LAST_BUNDLE_REACH_TICK.get(id);
+        if (last != null && now - last < BUNDLE_REACH_COOLDOWN_TICKS && now >= last) {
+            return true;
+        }
+        LAST_BUNDLE_REACH_TICK.put(id, now);
+        return false;
     }
 
     /**
@@ -129,10 +153,21 @@ public final class CombatInventoryManager {
             return; // Already holding a shield
         }
 
-        OptionalInt shieldSlot = findItemSlot(inventory, stack ->
-                isShieldStack(stack) && !DurabilityPolicyService.shouldAvoid(bot, stack));
+        java.util.function.Predicate<ItemStack> usableShield = stack ->
+                isShieldStack(stack) && !DurabilityPolicyService.shouldAvoid(bot, stack);
+        OptionalInt shieldSlot = findItemSlot(inventory, usableShield);
         if (shieldSlot.isEmpty()) {
-            return;
+            // Nothing in a direct slot — a shield may still be inside a bundle. Only worth the hop
+            // when the bundle-aware count exceeds the direct count, and only once per cooldown.
+            if (InventoryIterator.countDirect(bot, usableShield) == 0
+                    && InventoryIterator.count(bot, usableShield) > 0
+                    && BundleReachPolicy.shouldReachForBetter(-1, 0, bundleReachRateLimited(bot))
+                    && net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, usableShield)) {
+                shieldSlot = findItemSlot(inventory, usableShield);
+            }
+            if (shieldSlot.isEmpty()) {
+                return;
+            }
         }
 
         ItemStack shieldStack = inventory.getStack(shieldSlot.getAsInt());
@@ -148,6 +183,11 @@ public final class CombatInventoryManager {
                 && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
         OptionalInt bestWeaponSlot = findBestWeaponSlot(bot, inventory);
+        // Bundle-aware: a strictly better weapon may be sitting inside a bundle. Extract it and
+        // rescan direct slots (bundled stacks are read-only views and are never selected directly).
+        if (reachBetterBundledWeapon(bot, inventory, bestWeaponSlot)) {
+            bestWeaponSlot = findBestWeaponSlot(bot, inventory);
+        }
         if (bestWeaponSlot.isEmpty()) {
             // If the currently-held weapon is preserved-below-threshold, request fallback for SWORD category.
             if (!priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld)) {
@@ -252,6 +292,52 @@ public final class CombatInventoryManager {
         }
 
         return fallbackIndex >= 0 ? OptionalInt.of(fallbackIndex) : OptionalInt.empty();
+    }
+
+    /**
+     * Pulls a bundled weapon into a direct slot when it scores strictly better than the best direct
+     * candidate. Server thread (see the class javadoc); {@code reachFirst} takes its on-thread fast
+     * path here. Gated by {@link #bundleReachRateLimited} because callers tick every server tick.
+     *
+     * @return true when a weapon was moved out of a bundle
+     */
+    private static boolean reachBetterBundledWeapon(ServerPlayerEntity bot,
+                                                    PlayerInventory inventory,
+                                                    OptionalInt bestDirectSlot) {
+        if (bot == null || inventory == null) {
+            return false;
+        }
+        double bestDirectScore = bestDirectSlot.isPresent()
+                ? evaluateWeapon(inventory.getStack(bestDirectSlot.getAsInt()))
+                : Double.NEGATIVE_INFINITY;
+
+        ItemStack bestBundled = ItemStack.EMPTY;
+        double bestBundledScore = Double.NEGATIVE_INFINITY;
+        for (var ref : InventoryIterator.stream(bot).toList()) {
+            if (ref.isDirect()) {
+                continue;
+            }
+            ItemStack stack = ref.stack();
+            if (stack.isEmpty() || DurabilityPolicyService.shouldAvoid(bot, stack)) {
+                continue;
+            }
+            double score = evaluateWeapon(stack);
+            if (score > bestBundledScore) {
+                bestBundledScore = score;
+                bestBundled = stack;
+            }
+        }
+        if (bestBundled.isEmpty() || bestBundledScore == Double.NEGATIVE_INFINITY) {
+            return false;
+        }
+        int directScore = bestDirectScore == Double.NEGATIVE_INFINITY ? -1 : (int) Math.round(bestDirectScore);
+        int bundledScore = (int) Math.round(bestBundledScore);
+        if (!BundleReachPolicy.shouldReachForBetter(directScore, bundledScore, bundleReachRateLimited(bot))) {
+            return false;
+        }
+        final ItemStack wanted = bestBundled;
+        return net.wcfcarolina13.GameAI.services.BundleService.reachFirst(
+                bot, stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted));
     }
 
     private static double evaluateWeapon(ItemStack stack) {
