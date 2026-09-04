@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Torch-hold diagnostics, creeper evasion policy + the real creeper bug; merged field checklist; 1.1.202 (2026-09-04)
+
+Prep for the first guided field session (Bradley plays one long session, Claude directs from the
+log — protocol in `docs/testing/GUIDED_SESSION_PROTOCOL.md`; the single merged checklist covering
+1.1.175 → 1.1.202 is `docs/testing/FIELD_SESSION_1.1.202.md`, 82 items in 11 phases).
+
+- **`[torch-hold]` diagnostics (commit `d217456`).** `BotTorchHoldService.evalHoldRejection` became
+  `evalHold` returning a `Verdict(gate, dist, light, mob)`; every path logs through one
+  state-change-suppressed INFO line: `[torch-hold] Jake verdict=reject gate=audible-hostile-8
+  dist=5.2 light=4 mob=entity.minecraft.zombie` / `verdict=hold gate=none … action=promoted+held
+  slot=4 savedSlot=0`. Gate names carry their threshold (`light-above-7`, `audible-hostile-8`,
+  `visible-hostile-16`, `no-torch-in-inventory`, `mode-<M>`, `active-task`, `using-item`,
+  `mounted`, `sleeping`). No gate logic changed — this build exists to name the rejecting gate.
+- **`CreeperEvasionPolicy` (commit `c768204`).** The decision in `BotEventHandler.engageHostiles`
+  (distance / armed / fuse state / health → STAY | BACK_AWAY | FLEE_SPRINT) is now a pure class with
+  13 tests; the call site delegates with today's thresholds unchanged. New rule: an ARMED bot within
+  4.5 blocks of a fusing creeper also BACK_AWAYs (shield up, walk, no sprint so the shield keeps
+  facing) — 3-block vanilla blast + 1.5 reaction margin, equal to the block-and-shield radius so it
+  strictly pre-empts that trick. Fuse accessors verified by `javap` against the yarn 1.21.11 jar:
+  `getFuseSpeed()`, `isIgnited()`, `isCharged()`; `currentFuseTime` is private, and `tick()` sets
+  fuse speed 1 when ignited, so `getFuseSpeed() > 0` is the authoritative "swelling" signal.
+  Diagnostic: `[creeper] Jake decision=BACK_AWAY dist=2.8 armed=true fuse=SWELLING` on change.
+- **The actual "still doesn't back off" bug (this commit).** `BotCreeperDefenseService` — the
+  always-on interrupt whose javadoc says it covers "a creeper fusing next to a bot mid-anything" —
+  filtered candidates on `c.isIgnited()`. Vanilla sets that flag only from flint & steel /
+  `CreeperIgniteGoal`; a creeper swelling from proximity has `getFuseSpeed() > 0` and
+  `isIgnited() == false`. So the interrupt never fired in ordinary play; only the in-combat flee in
+  `engageHostiles` ever ran. `isFusing(c) = isIgnited() || getFuseSpeed() > 0` now gates both the
+  scan and the per-threat check. Field item in Phase 8 of the checklist verifies all three cases
+  (unarmed / armed / mid-skill) without flint & steel.
+- Suite 653 → 666. Deployed to all three Prism instances.
+
 ## Soul memory digest — bots remember what you said; 1.1.201 (2026-09-04)
 
 Consolidation phase 1. A soul-bound bot now distils **what the player said to it** into durable
