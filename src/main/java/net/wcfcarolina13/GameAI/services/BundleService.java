@@ -12,8 +12,11 @@ import org.apache.commons.lang3.math.Fraction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public final class BundleService {
     private static final Logger LOGGER = LoggerFactory.getLogger("bundle-service");
@@ -221,6 +224,111 @@ public final class BundleService {
             }
         }
         return slots;
+    }
+
+    /**
+     * Extracts a single bundled entry back into the bot's inventory.
+     *
+     * <p>Rebuilds the bundle in {@code slot} without the entry at {@code bundleIndex} and inserts the
+     * removed stack into the inventory via {@code PlayerInventory.insertStack}. If insertion fails
+     * (inventory full), the removed stack is put back into the bundle and {@link Optional#empty()} is
+     * returned, leaving the bot's inventory unchanged.
+     *
+     * <p><b>Server thread only</b> — mutates inventory and item components. Callers are responsible
+     * for scheduling (see {@code NavigationArtifactService}'s food-extraction path for the pattern).
+     *
+     * <p>Not covered by the JUnit suite: the project's test policy forbids {@code net.minecraft.*}
+     * types in tests, so this method is verified in-game only. The pure traversal it builds on is
+     * tested via {@code InventoryIteratorTest}.
+     *
+     * @return the extracted stack (a copy of the bundle entry) on success, empty otherwise
+     */
+    public static Optional<ItemStack> extract(ServerPlayerEntity bot, int slot, int bundleIndex) {
+        if (bot == null || bundleIndex < 0) {
+            return Optional.empty();
+        }
+        PlayerInventory inventory = bot.getInventory();
+        if (inventory == null || slot < 0 || slot >= inventory.size()) {
+            return Optional.empty();
+        }
+        ItemStack bundleStack = inventory.getStack(slot);
+        if (bundleStack.isEmpty()) {
+            return Optional.empty();
+        }
+        BundleContentsComponent contents = bundleStack.get(DataComponentTypes.BUNDLE_CONTENTS);
+        if (contents == null || contents.size() <= 0) {
+            return Optional.empty();
+        }
+
+        List<ItemStack> remaining = new ArrayList<>();
+        ItemStack target = ItemStack.EMPTY;
+        int idx = 0;
+        for (ItemStack bundled : contents.iterate()) {
+            if (idx == bundleIndex && target.isEmpty()) {
+                target = bundled.copy();
+            } else {
+                remaining.add(bundled.copy());
+            }
+            idx++;
+        }
+        if (target.isEmpty()) {
+            return Optional.empty();
+        }
+
+        BundleContentsComponent.Builder builder =
+                new BundleContentsComponent.Builder(BundleContentsComponent.DEFAULT);
+        for (ItemStack item : remaining) {
+            builder.add(item);
+        }
+        bundleStack.set(DataComponentTypes.BUNDLE_CONTENTS, builder.build());
+
+        ItemStack extracted = target.copy();
+        if (!inventory.insertStack(target)) {
+            // Roll back: restore the original bundle contents untouched.
+            bundleStack.set(DataComponentTypes.BUNDLE_CONTENTS, contents);
+            LOGGER.debug("Bundle extract failed for {}: inventory full", bot.getName().getString());
+            return Optional.empty();
+        }
+        return Optional.of(extracted);
+    }
+
+    /**
+     * Finds the first <em>bundled</em> stack matching {@code match} and extracts it.
+     *
+     * <p><b>Server thread only</b> (see {@link #extract}). Not unit-testable under the project's
+     * no-{@code net.minecraft.*}-in-tests policy.
+     *
+     * @return the direct inventory slot the extracted stack landed in, or empty if nothing matched
+     *         or the extraction/insertion failed
+     */
+    public static Optional<Integer> extractFirst(ServerPlayerEntity bot, java.util.function.Predicate<ItemStack> match) {
+        if (bot == null || match == null) {
+            return Optional.empty();
+        }
+        var hit = InventoryIterator.stream(bot)
+                .filter(ref -> !ref.isDirect())
+                .filter(ref -> match.test(ref.stack()))
+                .findFirst();
+        if (hit.isEmpty()) {
+            return Optional.empty();
+        }
+        InventoryIterator.SlotRef<ItemStack> ref = hit.get();
+        Optional<ItemStack> extracted = extract(bot, ref.slot(), ref.bundleIndex());
+        if (extracted.isEmpty()) {
+            return Optional.empty();
+        }
+        ItemStack wanted = extracted.get();
+        PlayerInventory inventory = bot.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack candidate = inventory.getStack(i);
+            if (candidate.isEmpty() || !ItemStack.areItemsAndComponentsEqual(candidate, wanted)) {
+                continue;
+            }
+            if (candidate.getCount() >= wanted.getCount()) {
+                return Optional.of(i);
+            }
+        }
+        return Optional.empty();
     }
 
     private static boolean isInventoryFull(ServerPlayerEntity player) {
