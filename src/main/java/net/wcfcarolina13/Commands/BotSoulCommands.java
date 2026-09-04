@@ -157,13 +157,10 @@ final class BotSoulCommands {
             return Optional.empty();
         }
         String normalized = rawAlias.trim().toLowerCase(Locale.ROOT);
-        if (normalized.equals("jake") || normalized.equals("frens:jake")) {
-            return Optional.of("frens:jake");
-        }
-        if (normalized.equals("bob") || normalized.equals("frens:bob")) {
-            return Optional.of("frens:bob");
-        }
-        return Optional.empty();
+        // Resolved against the registry rather than a hard-coded name list, so a newly shipped
+        // built-in profile (silas.json, 2026-09-04) is addressable the moment it loads.
+        String bare = normalized.startsWith("frens:") ? normalized.substring("frens:".length()) : normalized;
+        return net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.profileIdForBotName(bare);
     }
 
     /**

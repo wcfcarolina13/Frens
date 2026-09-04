@@ -379,6 +379,7 @@ public class BotControlScreen extends Screen {
         LinkedHashSet<String> aliasSet = new LinkedHashSet<>(Frens.CONFIG.getBotGameProfile().keySet());
         aliasSet.add("Jake");
         aliasSet.add("Bob");
+        aliasSet.add("Silas");
         aliasSet.add("default");
         List<String> sorted = new ArrayList<>(aliasSet);
         sorted.sort(Comparator.comparing(name ->

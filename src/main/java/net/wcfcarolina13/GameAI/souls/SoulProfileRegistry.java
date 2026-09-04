@@ -29,6 +29,7 @@ public final class SoulProfileRegistry {
 
     private static final String BUILT_IN_JAKE_RESOURCE = "data/frens/souls/jake.json";
     private static final String BUILT_IN_BOB_RESOURCE = "data/frens/souls/bob.json";
+    private static final String BUILT_IN_SILAS_RESOURCE = "data/frens/souls/silas.json";
 
     private static final Map<String, SoulTypes.SoulProfile> PROFILES = new ConcurrentHashMap<>();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -50,7 +51,7 @@ public final class SoulProfileRegistry {
         // registry half-loaded with the loaded flag unset, where a retry would then throw
         // "Duplicate soul profile id" for the profile that DID load (review minor). A profile
         // that fails to parse is logged and skipped; the others still work.
-        for (String resource : new String[] {BUILT_IN_JAKE_RESOURCE, BUILT_IN_BOB_RESOURCE}) {
+        for (String resource : new String[] {BUILT_IN_JAKE_RESOURCE, BUILT_IN_BOB_RESOURCE, BUILT_IN_SILAS_RESOURCE}) {
             try {
                 register(loadFromClasspath(resource));
             } catch (RuntimeException loadFailure) {
