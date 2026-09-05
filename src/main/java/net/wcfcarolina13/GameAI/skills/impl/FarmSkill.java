@@ -15,6 +15,8 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.WaterSpotMemory;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -373,8 +375,13 @@ public class FarmSkill implements Skill {
                 refillSource = refillSources.isEmpty() ? null : refillSources.get(0);
                 if (refillSource != null) {
                     LOGGER.info("Found still water at {} for irrigation/refills", refillSource);
+                    rememberIrrigationSource(bot, world, refillSource);
                 } else {
                     LOGGER.warn("No viable still water found within {} blocks of {}", WATER_SEARCH_RADIUS, farmCenter);
+                    refillSource = recallRememberedWaterSource(bot, world, farmCenter);
+                    if (refillSource != null) {
+                        LOGGER.info("Falling back to remembered water source at {} for irrigation/refills", refillSource);
+                    }
                 }
             }
 
@@ -2819,6 +2826,70 @@ public class FarmSkill implements Skill {
         }
         // Avoid deep water where we can't easily get back to land.
         return findSolidGroundNearby(world, waterPos, 12) != null;
+    }
+
+    /** Distance within which a remembered water source is worth using for refills. */
+    private static final int REMEMBERED_WATER_RADIUS = 48;
+
+    private static long currentFarmTick(ServerWorld world) {
+        return world.getServer() != null ? world.getServer().getOverworld().getTime() : world.getTime();
+    }
+
+    /**
+     * Remembers a viable bucket-refill source. Score convention is
+     * {@link WaterSpotMemory}'s: higher = better, and a confirmed still-water source
+     * scores a flat 1.0.
+     */
+    private static void rememberIrrigationSource(ServerPlayerEntity bot, ServerWorld world, BlockPos source) {
+        if (bot == null || world == null || source == null) {
+            return;
+        }
+        try {
+            BotHomeService.recordWaterSpot(bot, new WaterSpotMemory.WaterSpot(
+                    source.getX(), source.getY(), source.getZ(),
+                    1.0D,
+                    currentFarmTick(world),
+                    WaterSpotMemory.KIND_IRRIGATION));
+        } catch (Exception e) {
+            LOGGER.debug("Failed to remember irrigation source: {}", e.toString());
+        }
+    }
+
+    /**
+     * Consults remembered water spots (either kind — a fishing spot is still water we can
+     * dip a bucket in) before giving up on a refill source. Stale entries are forgotten.
+     */
+    private static BlockPos recallRememberedWaterSource(ServerPlayerEntity bot, ServerWorld world, BlockPos origin) {
+        if (bot == null || world == null || origin == null) {
+            return null;
+        }
+        List<WaterSpotMemory.WaterSpot> known;
+        try {
+            known = BotHomeService.knownWaterSpots(bot);
+        } catch (Exception e) {
+            LOGGER.debug("Failed to read remembered water spots: {}", e.toString());
+            return null;
+        }
+        if (known.isEmpty()) {
+            return null;
+        }
+        List<WaterSpotMemory.WaterSpot> ranked = WaterSpotMemory.rank(
+                known, origin.getX(), origin.getY(), origin.getZ(), currentFarmTick(world));
+        double maxDistSq = (double) REMEMBERED_WATER_RADIUS * REMEMBERED_WATER_RADIUS;
+        for (WaterSpotMemory.WaterSpot spot : ranked) {
+            BlockPos pos = new BlockPos(spot.x(), spot.y(), spot.z());
+            if (origin.getSquaredDistance(pos) > maxDistSq) {
+                continue;
+            }
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (isStillWater(world, pos) && isViableBucketRefillSource(world, pos)) {
+                return pos.toImmutable();
+            }
+            BotHomeService.forgetWaterSpot(bot, spot.x(), spot.y(), spot.z());
+        }
+        return null;
     }
 
     private static List<BlockPos> findStillWaterSources(ServerWorld world, BlockPos origin, int radius) {

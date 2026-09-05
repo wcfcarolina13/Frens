@@ -919,6 +919,118 @@ public final class BotHomeService {
         flush();
     }
 
+    // ------------------------------------------------------------------
+    // Remembered water spots (fishing / irrigation), per world, per bot.
+    // Score convention matches WaterSpotMemory: higher = better.
+    // ------------------------------------------------------------------
+
+    /** Max remembered water spots per bot per world. */
+    private static final int WATER_SPOT_CAP = 16;
+    /** Forget spots unused for ~14 in-game days. */
+    private static final long WATER_SPOT_MAX_AGE_TICKS = 24_000L * 14L;
+
+    /** Remembers a water spot the bot actually used. Persists immediately (caller's thread). */
+    public static void recordWaterSpot(ServerPlayerEntity bot, WaterSpotMemory.WaterSpot spot) {
+        if (bot == null || spot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return;
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.waterSpotsByBot == null) {
+                wd.waterSpotsByBot = new HashMap<>();
+            }
+            List<WaterSpotMemory.WaterSpot> current = fromSaved(wd.waterSpotsByBot.get(botId));
+            current = WaterSpotMemory.prune(current, spot.lastUsedTick(), WATER_SPOT_MAX_AGE_TICKS);
+            current = WaterSpotMemory.add(current, spot, WATER_SPOT_CAP);
+            wd.waterSpotsByBot.put(botId, toSaved(current));
+        }
+        flush();
+    }
+
+    /** Unmodifiable snapshot of the bot's remembered water spots for its current world. */
+    public static List<WaterSpotMemory.WaterSpot> knownWaterSpots(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return List.of();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return List.of();
+        String botId = botKey(bot);
+        if (botId.isBlank()) return List.of();
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.waterSpotsByBot == null) {
+                return List.of();
+            }
+            return List.copyOf(fromSaved(wd.waterSpotsByBot.get(botId)));
+        }
+    }
+
+    /** Forgets a remembered water spot (e.g. revalidation found it dried up / built over). */
+    public static void forgetWaterSpot(ServerPlayerEntity bot, int x, int y, int z) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return;
+
+        WorldData wd = worldData(server, world);
+        boolean changed;
+        synchronized (LOCK) {
+            if (wd.waterSpotsByBot == null) {
+                return;
+            }
+            List<WaterSpotMemory.WaterSpot> current = fromSaved(wd.waterSpotsByBot.get(botId));
+            List<WaterSpotMemory.WaterSpot> after = WaterSpotMemory.remove(current, x, y, z);
+            changed = after.size() != current.size();
+            if (changed) {
+                wd.waterSpotsByBot.put(botId, toSaved(after));
+            }
+        }
+        if (changed) {
+            flush();
+        }
+    }
+
+    private static List<WaterSpotMemory.WaterSpot> fromSaved(List<SavedWaterSpot> saved) {
+        if (saved == null || saved.isEmpty()) {
+            return List.of();
+        }
+        List<WaterSpotMemory.WaterSpot> out = new ArrayList<>();
+        for (SavedWaterSpot s : saved) {
+            if (s == null) continue;
+            out.add(new WaterSpotMemory.WaterSpot(s.x, s.y, s.z, s.score, s.lastUsedTick,
+                    s.kind == null ? WaterSpotMemory.KIND_FISHING : s.kind));
+        }
+        return out;
+    }
+
+    private static List<SavedWaterSpot> toSaved(List<WaterSpotMemory.WaterSpot> spots) {
+        List<SavedWaterSpot> out = new ArrayList<>();
+        if (spots == null) {
+            return out;
+        }
+        for (WaterSpotMemory.WaterSpot s : spots) {
+            if (s == null) continue;
+            SavedWaterSpot saved = new SavedWaterSpot();
+            saved.x = s.x();
+            saved.y = s.y();
+            saved.z = s.z();
+            saved.score = s.score();
+            saved.lastUsedTick = s.lastUsedTick();
+            saved.kind = s.kind();
+            out.add(saved);
+        }
+        return out;
+    }
+
     /**
      * Legacy four-arg overload. Creates a base with no owner — i.e. treated as server-owned
      * for permission gating (admin-only edits). Prefer the six-arg overload that stamps the
@@ -1658,6 +1770,8 @@ public final class BotHomeService {
         Map<String, SavedBase> basesByLabel = new HashMap<>();
         Map<String, String> preferredHomeBaseByBot = new HashMap<>();
         Map<String, String> navModeByBot = new HashMap<>();
+        // Remembered water spots (fishing / irrigation) per bot. Null on legacy JSON.
+        Map<String, List<SavedWaterSpot>> waterSpotsByBot = new HashMap<>();
         int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
         boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
     }
@@ -1735,6 +1849,15 @@ public final class BotHomeService {
         public int hashCode() {
             return Objects.hash(x, y, z);
         }
+    }
+
+    private static final class SavedWaterSpot {
+        int x;
+        int y;
+        int z;
+        double score; // higher = better (see WaterSpotMemory)
+        long lastUsedTick;
+        String kind;
     }
 
     private static final class SavedSleep {

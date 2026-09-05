@@ -31,6 +31,7 @@ import net.wcfcarolina13.GameAI.services.SmeltingService;
 import net.wcfcarolina13.GameAI.services.FollowPathService;
 import net.wcfcarolina13.GameAI.services.FishingSessionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.WaterSpotMemory;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -64,7 +65,14 @@ public final class FishingSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fishing");
     private static final int MAX_ATTEMPTS_PER_FISH = 6;
     private static final double APPROACH_REACH_SQ = 1.44D;
-    private static final int WATER_SEARCH_RADIUS = 12;
+    // Widened 12 -> 28 (2026-09-05). The scan is column-pre-filtered (see
+    // findFishingSpot), so cost stays ~O(r^2) probes rather than O(r^2 * ySpan)
+    // full block evaluations, and MAX_WATER_EVALUATIONS still caps the expensive work.
+    private static final int WATER_SEARCH_RADIUS = 28;
+    /** Vertical span (+/-) around the bot searched for a water surface. */
+    private static final int WATER_SEARCH_Y_SPAN = 3;
+    /** Stop probing columns once this many water surfaces are queued (nearest-first). */
+    private static final int WATER_COLUMN_PROBE_CAP = 320;
     private static final int MIN_CAST_DISTANCE_SQ = 16;   // >= 4 blocks away
     private static final int MAX_CAST_DISTANCE_SQ = 100; // <= 10 blocks away
     private static final int IDEAL_CAST_DISTANCE_SQ = 36; // ~6 blocks away
@@ -84,7 +92,13 @@ public final class FishingSkill implements Skill {
             Items.TROPICAL_FISH,
             Items.PUFFERFISH
     );
-    private static final record FishingSpot(BlockPos water, BlockPos stand, BlockPos castTarget, List<BlockPos> standOptions) {}
+    private static final record FishingSpot(BlockPos water, BlockPos stand, BlockPos castTarget,
+                                           List<BlockPos> standOptions, double score) {
+        /** Convenience constructor for spots whose score wasn't computed (resumed sessions). */
+        private FishingSpot(BlockPos water, BlockPos stand, BlockPos castTarget, List<BlockPos> standOptions) {
+            this(water, stand, castTarget, standOptions, 0.0D);
+        }
+    }
     private static final int CHEST_SCAN_RADIUS = 16;
     private static final record StandCandidate(BlockPos pos, boolean adjacent) {}
     private static final record StandOption(BlockPos stand, BlockPos castTarget, double score) {}
@@ -186,6 +200,13 @@ public final class FishingSkill implements Skill {
         }
 
         if (spot == null) {
+            spot = recallRememberedFishingSpot(bot);
+            if (spot != null) {
+                rememberFishingSpot(bot, spot); // refresh lastUsedTick so reused spots don't age out
+            }
+        }
+
+        if (spot == null) {
             long spotStart = System.nanoTime();
             spot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
             long spotElapsedMs = (System.nanoTime() - spotStart) / 1_000_000L;
@@ -198,6 +219,7 @@ public final class FishingSkill implements Skill {
             if (spotElapsedMs > 250L) {
                 LOGGER.info("Fishing spot search took {}ms", spotElapsedMs);
             }
+            rememberFishingSpot(bot, spot);
         }
 
         BlockPos stand = spot.stand();
@@ -1237,6 +1259,104 @@ public final class FishingSkill implements Skill {
         return null;
     }
 
+    /** Distance within which a remembered fishing spot is worth walking to. */
+    private static final int REMEMBERED_SPOT_RADIUS = 64;
+    /** How many remembered spots we're willing to revalidate before falling back to a local scan. */
+    private static final int REMEMBERED_SPOT_ATTEMPTS = 3;
+
+    private static long currentTick(ServerWorld world) {
+        return world.getServer() != null ? world.getServer().getOverworld().getTime() : world.getTime();
+    }
+
+    /**
+     * Persists the spot we're about to fish at so future sessions can go straight back.
+     *
+     * <p>Sign convention: {@code FishingSpot.score()} is "lower is better" (it's a cost),
+     * while {@link WaterSpotMemory} is "higher is better", so the score is negated here.
+     */
+    private static void rememberFishingSpot(ServerPlayerEntity bot, FishingSpot spot) {
+        if (bot == null || spot == null || spot.water() == null) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        try {
+            BlockPos water = spot.water();
+            BotHomeService.recordWaterSpot(bot, new WaterSpotMemory.WaterSpot(
+                    water.getX(), water.getY(), water.getZ(),
+                    -spot.score(),
+                    currentTick(world),
+                    WaterSpotMemory.KIND_FISHING));
+        } catch (Exception e) {
+            LOGGER.debug("Failed to remember fishing spot: {}", e.toString());
+        }
+    }
+
+    /**
+     * Tries the bot's remembered fishing spots (nearest/best/most-recent first) before
+     * paying for a fresh radius scan. Spots that no longer hold open water are forgotten.
+     */
+    private static FishingSpot recallRememberedFishingSpot(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        List<WaterSpotMemory.WaterSpot> known;
+        try {
+            known = BotHomeService.knownWaterSpots(bot);
+        } catch (Exception e) {
+            LOGGER.debug("Failed to read remembered water spots: {}", e.toString());
+            return null;
+        }
+        if (known.isEmpty()) {
+            return null;
+        }
+
+        BlockPos origin = bot.getBlockPos();
+        long now = currentTick(world);
+        List<WaterSpotMemory.WaterSpot> ranked =
+                WaterSpotMemory.rank(known, origin.getX(), origin.getY(), origin.getZ(), now);
+
+        double maxDistSq = (double) REMEMBERED_SPOT_RADIUS * REMEMBERED_SPOT_RADIUS;
+        List<BlockPos> chestAnchors = null;
+        int tried = 0;
+        for (WaterSpotMemory.WaterSpot remembered : ranked) {
+            if (tried >= REMEMBERED_SPOT_ATTEMPTS) {
+                break;
+            }
+            if (!WaterSpotMemory.KIND_FISHING.equals(remembered.kind())) {
+                continue;
+            }
+            BlockPos pos = new BlockPos(remembered.x(), remembered.y(), remembered.z());
+            if (origin.getSquaredDistance(pos) > maxDistSq) {
+                continue;
+            }
+            tried++;
+            if (!world.isChunkLoaded(pos)) {
+                continue; // don't forget it just because the chunk isn't resident
+            }
+            BlockPos water = findOpenWaterSurfaceAt(world, pos.getX(), pos.getZ(), pos.getY(), 2);
+            if (water == null) {
+                BotHomeService.forgetWaterSpot(bot, remembered.x(), remembered.y(), remembered.z());
+                LOGGER.info("Forgot remembered fishing spot {} (no open water there any more)", pos.toShortString());
+                continue;
+            }
+            if (chestAnchors == null) {
+                chestAnchors = collectChestAnchors(bot, world);
+            }
+            List<StandOption> options = findStandOptions(world, water, origin, chestAnchors);
+            if (options.isEmpty()) {
+                continue;
+            }
+            StandOption primary = options.get(0);
+            LOGGER.info("Reusing remembered fishing spot: water={} stand={}",
+                    water.toShortString(), primary.stand().toShortString());
+            return new FishingSpot(water.toImmutable(), primary.stand(), primary.castTarget(),
+                    options.stream().map(StandOption::stand).toList(), primary.score());
+        }
+        return null;
+    }
+
     private static FishingSpot findFishingSpot(ServerPlayerEntity bot, int radius) {
         if (bot == null) {
             return null;
@@ -1269,21 +1389,15 @@ public final class FishingSkill implements Skill {
         int MAX_WATER_EVALUATIONS = 80;
         int EARLY_EXIT_AFTER = 25;
         double EARLY_EXIT_SCORE = 8.0;
-        for (BlockPos water : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+        // Column pre-filter: probe one open-water surface per (x,z) column, nearest
+        // columns first, instead of evaluating every block in the radius volume.
+        // Keeps the widened radius at ~O(r^2) cheap probes.
+        for (BlockPos water : nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN)) {
             if (best != null && evaluated >= MAX_WATER_EVALUATIONS) {
                 break;
             }
             if (best != null && evaluated >= EARLY_EXIT_AFTER && bestScore <= EARLY_EXIT_SCORE) {
                 break; // good-enough spot found early
-            }
-            if (!world.isChunkLoaded(water)) {
-                continue;
-            }
-            if (!world.getFluidState(water).isIn(FluidTags.WATER)) {
-                continue;
-            }
-            if (!isOpenWaterSurface(world, water)) {
-                continue;
             }
             evaluated++;
 
@@ -1322,7 +1436,8 @@ public final class FishingSkill implements Skill {
                         water.toImmutable(),
                         primary.stand(),
                         primary.castTarget(),
-                        reachableOptions.stream().map(StandOption::stand).toList()
+                        reachableOptions.stream().map(StandOption::stand).toList(),
+                        primary.score()
                 );
             }
         }
@@ -1681,15 +1796,54 @@ public final class FishingSkill implements Skill {
             return false;
         }
         BlockPos origin = bot.getBlockPos();
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            if (world.getFluidState(pos).isIn(FluidTags.WATER)) {
-                return true;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -WATER_SEARCH_Y_SPAN; dy <= WATER_SEARCH_Y_SPAN; dy++) {
+                    BlockPos pos = origin.add(dx, dy, dz);
+                    if (!world.isChunkLoaded(pos)) {
+                        continue;
+                    }
+                    if (world.getFluidState(pos).isIn(FluidTags.WATER)) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * Nearest-first list of open-water surface blocks, at most one per (x,z) column.
+     * Columns are ordered by horizontal distance so the caller's evaluation budget is
+     * spent on the closest water first; each column costs at most {@code 2*ySpan+1}
+     * cheap surface probes.
+     */
+    private static List<BlockPos> nearestWaterColumns(ServerWorld world, BlockPos origin, int radius, int ySpan) {
+        if (world == null || origin == null || radius < 0) {
+            return List.of();
+        }
+        List<int[]> offsets = new ArrayList<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                offsets.add(new int[]{dx, dz});
+            }
+        }
+        offsets.sort(Comparator.comparingInt(o -> o[0] * o[0] + o[1] * o[1]));
+
+        List<BlockPos> columns = new ArrayList<>();
+        for (int[] off : offsets) {
+            BlockPos surface = findOpenWaterSurfaceAt(world, origin.getX() + off[0], origin.getZ() + off[1],
+                    origin.getY(), ySpan);
+            if (surface != null) {
+                columns.add(surface);
+                // Stop probing once we have comfortably more candidates than the
+                // caller's evaluation budget; the list is already nearest-first.
+                if (columns.size() >= WATER_COLUMN_PROBE_CAP) {
+                    break;
+                }
+            }
+        }
+        return columns;
     }
 
     private static List<BlockPos> findStandCandidates(ServerWorld world, BlockPos water, BlockPos botPos) {
