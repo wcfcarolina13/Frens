@@ -3911,15 +3911,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return evaluateNonLayoutBreakForNavigation(world, pos);
     }
 
-    /**
-     * Last-resort navigation: mine one blocking block between the bot and its target,
-     * walk through the gap, then replace the mined block.
-     * Returns true if the bot moved to a new position.
-     *
-     * <p>Two-tier safety: prefers non-layout blocks first, then allows breaking
-     * fortification layout blocks (with mandatory replacement).
-     * Max one break-through per call to prevent tunnel-mining.
-     */
+    /** Delegates to {@link FortifyCarveHelper#tryBreakThroughObstacle}; the break-through rules live there. */
     private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
         return tryBreakThroughObstacle(bot, world, target, null);
     }
