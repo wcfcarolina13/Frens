@@ -35,7 +35,6 @@ public class ToolSelector {
         List<ItemStack> hotbarItems = hotBarUtils.getHotbarItems(bot);
         ItemStack bestTool = ItemStack.EMPTY;
         float highestSpeed = 0.0f;
-        int bestHotbarSlot = -1;
         ItemStack priorHeld = bot.getMainHandStack();
         boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
@@ -52,6 +51,7 @@ public class ToolSelector {
             return hotBarUtils.getSelectedHotbarItemStack(bot);
         }
 
+        // ── SCAN (read-only; safe off the server thread) ──────────────────
         // First, search hotbar (slots 0-8)
         for (int i = 0; i < hotbarItems.size(); i++) {
             ItemStack item = hotbarItems.get(i);
@@ -62,7 +62,6 @@ public class ToolSelector {
             if (speed > highestSpeed) {
                 highestSpeed = speed;
                 bestTool = item;
-                bestHotbarSlot = i;
             }
         }
 
@@ -81,29 +80,42 @@ public class ToolSelector {
             }
         }
 
-        // If best tool is in main inventory, swap it to an empty hotbar slot or current slot
+        // ── MUTATION (one atomic server-thread unit) ─────────────────────
+        // If best tool is in main inventory, swap it to an empty hotbar slot or current slot.
         if (bestMainSlot != -1) {
-            int targetHotbarSlot = bot.getInventory().getSelectedSlot();
-            
-            // Try to find an empty hotbar slot first
-            for (int i = 0; i < 9; i++) {
-                if (bot.getInventory().getStack(i).isEmpty()) {
-                    targetHotbarSlot = i;
-                    break;
+            final int sourceSlot = bestMainSlot;
+            final ItemStack expected = bestTool;
+            final boolean announce = priorWasFiltered;
+            ItemStack swapped = callOnServer(bot, () -> {
+                ItemStack live = bot.getInventory().getStack(sourceSlot);
+                if (!slotStillMatches(expected, live)) {
+                    LOGGER.debug("Tool select: slot {} no longer holds {} — aborting swap for {}",
+                            sourceSlot, expected.getItem(), bot.getName().getString());
+                    return ItemStack.EMPTY;
                 }
-            }
-            
-            LOGGER.info("Swapping best tool from main inventory slot {} to hotbar slot {}", bestMainSlot, targetHotbarSlot);
-            
-            // Swap the items (main inventory slot -> hotbar slot)
-            bot.currentScreenHandler.onSlotClick(bestMainSlot, targetHotbarSlot, SlotActionType.SWAP, bot);
-            if (priorWasFiltered) {
-                CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
-            }
+                int targetHotbarSlot = bot.getInventory().getSelectedSlot();
+                for (int i = 0; i < 9; i++) {
+                    if (bot.getInventory().getStack(i).isEmpty()) {
+                        targetHotbarSlot = i;
+                        break;
+                    }
+                }
+                LOGGER.info("Swapping best tool from main inventory slot {} to hotbar slot {}",
+                        sourceSlot, targetHotbarSlot);
+                bot.currentScreenHandler.onSlotClick(sourceSlot, targetHotbarSlot, SlotActionType.SWAP, bot);
+                if (announce) {
+                    CompanionOverheadDialogueService.tryShowGearPreserveSwap(bot);
+                }
+                return bot.getInventory().getStack(targetHotbarSlot);
+            }, ItemStack.EMPTY);
 
-            // Get the swapped item which is now in hotbar
-            bestTool = bot.getInventory().getStack(targetHotbarSlot);
-            bestHotbarSlot = targetHotbarSlot;
+            if (!swapped.isEmpty()) {
+                return swapped;
+            }
+            // The chosen stack moved between scan and swap — fall through to the
+            // "nothing better than hands" tail below rather than returning a stale stack.
+            highestSpeed = 0.0f;
+            bestTool = ItemStack.EMPTY;
         }
 
         // If no tool with speed > 1.0 was found, use current selection
@@ -111,9 +123,17 @@ public class ToolSelector {
             // Bundle-aware last resort: a usable tool may be sitting inside a bundle, invisible to the
             // direct-slot scans above. Extract it only when it is strictly better than what we found.
             if (allowBundleReach) {
-                ItemStack reached = reachBetterBundledTool(bot, blockState, highestSpeed);
-                if (!reached.isEmpty()) {
+                final float directSpeed = highestSpeed;
+                // The extraction and the rescan (which may itself swap into the hotbar) have to be
+                // one atomic server-thread unit, or another actor can move the reached stack between them.
+                ItemStack reached = callOnServer(bot, () -> {
+                    if (reachBetterBundledTool(bot, blockState, directSpeed).isEmpty()) {
+                        return ItemStack.EMPTY;
+                    }
                     return selectBestToolForBlock(bot, blockState, false);
+                }, ItemStack.EMPTY);
+                if (!reached.isEmpty()) {
+                    return reached;
                 }
             }
             // If the reason nothing was found is that a preserved tool is below threshold,
@@ -134,6 +154,54 @@ public class ToolSelector {
         }
 
         return bestTool;
+    }
+
+    /**
+     * Pure re-validation predicate: does the slot we picked during the off-thread scan still hold
+     * the same item (and components) we scored? Empty {@code expected} never matches.
+     */
+    static boolean slotStillMatches(ItemStack expected, ItemStack actual) {
+        if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()) {
+            return false;
+        }
+        return ItemStack.areItemsAndComponentsEqual(expected, actual);
+    }
+
+    /**
+     * Runs {@code task} on the server thread (fast path when already there) and blocks for the result.
+     * Same shape as {@code ToolProvisionService.callOnServer} / {@code FurnaceOffloadService}.
+     */
+    private static <T> T callOnServer(ServerPlayerEntity bot, java.util.function.Supplier<T> task, T fallback) {
+        var server = bot == null ? null : bot.getEntityWorld().getServer();
+        if (server == null || task == null) {
+            return fallback;
+        }
+        if (server.isOnThread()) {
+            try {
+                return task.get();
+            } catch (Throwable t) {
+                LOGGER.debug("Tool select: on-thread step failed: {}", t.toString());
+                return fallback;
+            }
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.complete(fallback);
+            }
+        });
+        try {
+            T result = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
+            return result == null ? fallback : result;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            LOGGER.debug("Tool select: server-thread hop failed: {}", e.toString());
+            return fallback;
+        }
     }
 
     /**

@@ -386,27 +386,42 @@ public class MiningTool {
             return false;
         }
 
+        // ── SCAN (read-only; safe on MINING_EXECUTOR worker threads) ──────
         PlayerInventory inventory = bot.getInventory();
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (ItemStack.areItemsAndComponentsEqual(stack, tool)) {
-                BotActions.selectHotbarSlot(bot, i);
-                return true;
+        int foundSlot = -1;
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            if (ItemStack.areItemsAndComponentsEqual(inventory.getStack(i), tool)) {
+                foundSlot = i;
+                break;
             }
         }
 
-        for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (!ItemStack.areItemsAndComponentsEqual(stack, tool)) {
-                continue;
+        // ── MUTATION (one atomic server-thread unit, re-validated) ────────
+        if (foundSlot != -1) {
+            final int slot = foundSlot;
+            final ItemStack expected = tool;
+            Boolean ok = callOnServer(bot, () -> {
+                PlayerInventory inv = bot.getInventory();
+                if (!ToolSelector.slotStillMatches(expected, inv.getStack(slot))) {
+                    LOGGER.debug("Tool switch: slot {} no longer holds {} — aborting swap for {}",
+                            slot, expected.getItem(), bot.getName().getString());
+                    return Boolean.FALSE;
+                }
+                if (slot < 9) {
+                    BotActions.selectHotbarSlot(bot, slot);
+                    return Boolean.TRUE;
+                }
+                int target = findEmptyHotbarSlot(inv);
+                if (target == -1) {
+                    target = inv.getSelectedSlot();
+                }
+                swapStacks(inv, slot, target);
+                BotActions.selectHotbarSlot(bot, target);
+                return Boolean.TRUE;
+            }, Boolean.FALSE);
+            if (Boolean.TRUE.equals(ok)) {
+                return true;
             }
-            int target = findEmptyHotbarSlot(inventory);
-            if (target == -1) {
-                target = inventory.getSelectedSlot();
-            }
-            swapStacks(inventory, i, target);
-            BotActions.selectHotbarSlot(bot, target);
-            return true;
         }
 
         if (allowBundleReach) {
@@ -414,21 +429,71 @@ public class MiningTool {
             java.util.function.Predicate<ItemStack> match =
                     stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted);
             // Only worth a bundle hop when nothing matching sits in a direct slot but a bundle holds one.
-            if (InventoryIterator.countDirect(bot, match) == 0
-                    && InventoryIterator.count(bot, match) > 0
-                    && net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, match)) {
+            // Extraction and the follow-up equip must be the same server-thread unit.
+            Boolean reached = callOnServer(bot, () -> {
+                if (InventoryIterator.countDirect(bot, match) != 0
+                        || InventoryIterator.count(bot, match) == 0
+                        || !net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, match)) {
+                    return Boolean.FALSE;
+                }
                 LOGGER.info("Tool switch: reached {} out of a bundle for {}",
                         wanted.getItem(), bot.getName().getString());
                 return switchToTool(bot, wanted, false);
-            }
+            }, Boolean.FALSE);
+            return Boolean.TRUE.equals(reached);
         }
         return false;
+    }
+
+    /**
+     * Runs {@code task} on the server thread (fast path when already there) and blocks for the result.
+     * Mirrors {@code ToolProvisionService.callOnServer}; inventory mutations are server-thread only.
+     */
+    private static <T> T callOnServer(ServerPlayerEntity bot, java.util.function.Supplier<T> task, T fallback) {
+        var server = bot == null ? null : bot.getEntityWorld().getServer();
+        if (server == null || task == null) {
+            return fallback;
+        }
+        if (server.isOnThread()) {
+            try {
+                return task.get();
+            } catch (Throwable t) {
+                LOGGER.debug("Tool switch: on-thread step failed: {}", t.toString());
+                return fallback;
+            }
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.complete(fallback);
+            }
+        });
+        try {
+            T result = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
+            return result == null ? fallback : result;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            LOGGER.debug("Tool switch: server-thread hop failed: {}", e.toString());
+            return fallback;
+        }
     }
 
     private static void switchToHarmlessFallback(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
         }
+        // Scans and mutates inventory in one pass — must be a single server-thread unit.
+        callOnServer(bot, () -> {
+            switchToHarmlessFallbackOnThread(bot);
+            return Boolean.TRUE;
+        }, Boolean.FALSE);
+    }
+
+    private static void switchToHarmlessFallbackOnThread(ServerPlayerEntity bot) {
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inventory.getStack(i);
