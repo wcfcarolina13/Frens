@@ -33,6 +33,12 @@ import java.util.Set;
 final class FortifySkillOps {
     private FortifySkillOps() {} // non-instantiable container
 
+    // ── Constants shared by the skill and its extracted helpers ──
+    static final double REACH_DISTANCE_SQ = 20.25D;
+    static final int BLOCK_PLACE_DELAY_MS = 50;
+    static final int MIN_APPROACH_OPEN_EXITS = 2;
+    static final int FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST = 10;
+
     // ── Tier 1: Block-level primitives ─────────────────────────
 
     interface FortifyBlockOps {
@@ -152,6 +158,10 @@ final class FortifySkillOps {
 
         /** Count planned blocks that are active. */
         int countActivePlannedBlocks(List<ProceduralWallBlock> blocks);
+
+        /** Count unsatisfied active planned blocks within reach and line-of-sight of an eye at standPos. */
+        int countReachableWithLOS(ServerWorld world, ServerPlayerEntity bot,
+                                  BlockPos standPos, List<ProceduralWallBlock> vertexBlocks);
 
         /** Count building-material blocks in the bot's inventory. */
         int countBuildingBlocks(ServerPlayerEntity bot);

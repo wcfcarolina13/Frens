@@ -27,6 +27,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
+import static net.wcfcarolina13.GameAI.skills.impl.FortifySkillOps.*;
+
 /**
  * Tower construction, scaffold, approach/escape and hard-reset logic extracted
  * verbatim from {@link FortifyVillageSkill}.  Calls back into skill primitives
@@ -35,11 +37,6 @@ import java.util.*;
  */
 final class FortifyTowerHelper {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-tower");
-
-    // ── Constants (duplicated from FortifyVillageSkill; skill still uses its own copies) ──
-    private static final double REACH_DISTANCE_SQ = 20.25D;
-    private static final int BLOCK_PLACE_DELAY_MS = 50;
-    private static final int MIN_APPROACH_OPEN_EXITS = 2;
 
     // ── Constants (moved from FortifyVillageSkill) ──────────────
     private static final long TOWER_VERTEX_TIME_BUDGET_MS = 45_000L;
@@ -1863,7 +1860,7 @@ final class FortifyTowerHelper {
                 double distSq = bot.squaredDistanceTo(x + 0.5, y, z + 0.5);
                 int losReachable = 0;
                 if (vertexBlocks != null && !vertexBlocks.isEmpty()) {
-                    losReachable = countReachableWithLOS(world, bot, pos, vertexBlocks);
+                    losReachable = ctx.countReachableWithLOS(world, bot, pos, vertexBlocks);
                     if (losReachable == 0) {
                         losZero++;
                         continue;
@@ -2193,17 +2190,4 @@ final class FortifyTowerHelper {
         return progress.meaningful();
     }
 
-    int countReachableWithLOS(ServerWorld world, ServerPlayerEntity bot,
-                                       BlockPos standPos, List<ProceduralWallBlock> vertexBlocks) {
-        Vec3d eye = Vec3d.ofCenter(standPos).add(0, 1.12, 0); // 0.5 + 1.12 = 1.62 eye height
-        int count = 0;
-        for (ProceduralWallBlock block : vertexBlocks) {
-            if (!ctx.isActiveFortifyBlock(block)) continue;
-            if (ctx.isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
-            Vec3d blockCenter = Vec3d.ofCenter(block.worldPos());
-            if (eye.squaredDistanceTo(blockCenter) > REACH_DISTANCE_SQ) continue;
-            if (ops.hasLineOfSight(world, bot, eye, block.worldPos())) count++;
-        }
-        return count;
-    }
 }

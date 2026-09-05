@@ -57,6 +57,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.CRC32;
 
+import static net.wcfcarolina13.GameAI.skills.impl.FortifySkillOps.*;
+
 /**
  * Skill for autonomously building a defensive wall perimeter around a village.
  * Uses a convex hull of village structures for natural wall placement.
@@ -76,8 +78,6 @@ import java.util.zip.CRC32;
 public final class FortifyVillageSkill implements Skill, FortifySkillOps.FortifyNavOps, FortifySkillOps.FortifyTowerContext {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
-    private static final double REACH_DISTANCE_SQ = 20.25D;
-    private static final int BLOCK_PLACE_DELAY_MS = 50;
     private static final int MAX_SCAFFOLD_HEIGHT = 8;
     private static final long MAX_BUILD_TIME_MS = 30 * 60_000L; // 30 minute cap
     private static final long PHASE_B_TIME_BUDGET_MS = 30 * 60_000L;
@@ -99,7 +99,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int PERIMETER_WALK_SEARCH_RADIUS = 2;
     /** Walk offset for moat digging: outside moat trench (offset 3) + exterior clear (offset 4). */
     private static final int MOAT_WALK_OFFSET = 5;
-    private static final int MIN_APPROACH_OPEN_EXITS = 2;
     private static final long DIG_RESULT_POLL_MS = 50L;
     private static final long DIG_RESULT_TIMEOUT_MS = 1_200L;
     private static final long STARTUP_RECOVERY_BUDGET_MS = 8_000L;
@@ -111,7 +110,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int FORTIFY_CARVE_MAX_BOT_TO_BLOCK_DIST = 6;
     private static final int FORTIFY_CARVE_MAX_TARGET_TO_BLOCK_DIST = 8;
     private static final int FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST = 20;
-    private static final int FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST = 10;
     private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_XZ = 2;
     private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_Y = 8;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
@@ -167,6 +165,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     public long getFortifyMovementEpoch() {
         return fortifyMovementEpoch;
     }
+    // Field order matters: cleanupProcessor and towerHelper below receive the helpers declared above them.
     /** Deferred cleanup queue, throttle state, and task-state helpers. */
     private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper();
     /** Deferred-cleanup queue processing + mined-block replacement (extracted from this skill). */
@@ -3426,7 +3425,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
                 // Score by LOS coverage from simulated elevated eye position
                 BlockPos elevatedStand = cand.up(candPillar);
-                int losCount = towerHelper.countReachableWithLOS(world, bot, elevatedStand, remainingBlocks);
+                int losCount = countReachableWithLOS(world, bot, elevatedStand, remainingBlocks);
                 // Tie-break by proximity to bot (closer = fewer walk ticks)
                 int distPenalty = (int) (cand.getSquaredDistance(botPos) / 10.0);
                 int score = losCount * 100 - distPenalty;
@@ -6998,6 +6997,20 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return hit.getBlockPos().equals(target);
     }
 
+    @Override
+    public int countReachableWithLOS(ServerWorld world, ServerPlayerEntity bot,
+                                       BlockPos standPos, List<ProceduralWallBlock> vertexBlocks) {
+        Vec3d eye = Vec3d.ofCenter(standPos).add(0, 1.12, 0); // 0.5 + 1.12 = 1.62 eye height
+        int count = 0;
+        for (ProceduralWallBlock block : vertexBlocks) {
+            if (!isActiveFortifyBlock(block)) continue;
+            if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
+            Vec3d blockCenter = Vec3d.ofCenter(block.worldPos());
+            if (eye.squaredDistanceTo(blockCenter) > REACH_DISTANCE_SQ) continue;
+            if (hasLineOfSight(world, bot, eye, block.worldPos())) count++;
+        }
+        return count;
+    }
 
     // ── Helpers ─────────────────────────────────────────────────
 

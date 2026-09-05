@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static net.wcfcarolina13.GameAI.skills.impl.FortifySkillOps.*;
+
 /**
  * Deferred-cleanup processing extracted verbatim from {@link FortifyVillageSkill}:
  * drains the {@link FortifyCleanupHelper} queue (carve repairs, scaffold removal)
@@ -33,7 +35,6 @@ import java.util.Set;
 final class FortifyCleanupProcessor {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-cleanup");
 
-    private static final int FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST = 10;
     private static final int FORTIFY_MANDATORY_REPLACE_RETRIES = 2;
     private static final long FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS = 60L;
     private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS = 2;
