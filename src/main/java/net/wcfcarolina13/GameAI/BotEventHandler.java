@@ -3387,7 +3387,7 @@ public class BotEventHandler {
                                 String reason = BotFleeService
                                         .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
                                 LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
-                                        bot.getName().getString(), reason == null ? "" : reason);
+                                        bot.getName().getString(), reason);
                             }
                             GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
                         } else {
@@ -3468,7 +3468,7 @@ public class BotEventHandler {
                                 String reason = BotFleeService
                                         .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
                                 LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
-                                        bot.getName().getString(), reason == null ? "" : reason);
+                                        bot.getName().getString(), reason);
                             }
                             GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
                         } else {

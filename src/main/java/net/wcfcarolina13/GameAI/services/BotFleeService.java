@@ -319,10 +319,13 @@ public final class BotFleeService {
      * Reason for the most recent surface-recovery failure, but only while it is still fresh
      * (within {@link #SURFACE_RECOVERY_REASON_FRESH_TICKS} of now) — otherwise the
      * {@code [guard-escape]} log would name a failure from minutes ago.
+     *
+     * <p>Never returns {@code null}: a null, missing, or stale {@code botId}/reason yields
+     * {@code ""}.
      */
     public static String getRecentSurfaceRecoveryFailureReason(UUID botId) {
         if (botId == null) {
-            return null;
+            return "";
         }
         Long failedAt = SURFACE_RECOVERY_FAILURE_TICK.get(botId);
         if (failedAt == null) {
@@ -333,7 +336,8 @@ public final class BotFleeService {
         if (!net.wcfcarolina13.PlayerUtils.TickFreshness.isFresh(failedAt, nowTick, SURFACE_RECOVERY_REASON_FRESH_TICKS)) {
             return "";
         }
-        return SURFACE_RECOVERY_FAILURE_REASON.get(botId);
+        String reason = SURFACE_RECOVERY_FAILURE_REASON.get(botId);
+        return reason != null ? reason : "";
     }
 
     public static boolean hasPendingInterruptedSurvival(UUID botId) {
