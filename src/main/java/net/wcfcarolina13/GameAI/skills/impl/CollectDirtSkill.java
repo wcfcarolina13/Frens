@@ -1026,12 +1026,12 @@ public class CollectDirtSkill implements Skill {
 
         boolean ladderAttempted = ensureLadders(source, player, 6);
         if (ladderAttempted) {
-            Direction supportDir = pickLadderSupportDirection(world, start, 8);
+            Direction supportDir = ScaffoldService.pickLadderSupportDirection(world, start, 8);
             if (supportDir != null) {
-                BlockPos exit = findLadderExit(world, start, supportDir, 8);
+                BlockPos exit = ScaffoldService.findLadderExit(world, start, supportDir, 8);
                 if (exit != null) {
                     int neededHeight = Math.max(1, exit.getY() - start.getY());
-                    boolean placed = placeLadderColumn(world, player, start, supportDir, neededHeight);
+                    boolean placed = ScaffoldService.placeLadderColumn(world, player, start, supportDir, neededHeight);
                     if (placed) {
                         String moveResult = GoTo.goTo(source, exit.getX(), exit.getY(), exit.getZ(), false);
                         if (isGoToSuccess(moveResult) || player.getBlockPos().getSquaredDistance(exit) <= 9.0D) {
@@ -1084,76 +1084,6 @@ public class CollectDirtSkill implements Skill {
             }
         }
         return true;
-    }
-
-    private Direction pickLadderSupportDirection(ServerWorld world, BlockPos start, int scanHeight) {
-        if (world == null || start == null) {
-            return null;
-        }
-        Direction best = null;
-        int bestScore = -1;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            int score = 0;
-            for (int dy = 0; dy <= scanHeight; dy++) {
-                BlockPos foot = start.up(dy);
-                BlockPos support = foot.offset(dir);
-                if (world.getBlockState(support).isSolidBlock(world, support)) {
-                    score++;
-                }
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                best = dir;
-            }
-        }
-        return bestScore >= 2 ? best : null;
-    }
-
-    private BlockPos findLadderExit(ServerWorld world, BlockPos start, Direction supportDir, int scanHeight) {
-        if (world == null || start == null || supportDir == null) {
-            return null;
-        }
-        for (int dy = 1; dy <= scanHeight; dy++) {
-            BlockPos climbPos = start.up(dy);
-            if (!isPassable(world, climbPos) || !world.getBlockState(climbPos.offset(supportDir)).isSolidBlock(world, climbPos.offset(supportDir))) {
-                continue;
-            }
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos exitFoot = climbPos.offset(dir);
-                BlockPos exitHead = exitFoot.up();
-                BlockPos exitBelow = exitFoot.down();
-                if (isPassable(world, exitFoot)
-                        && isPassable(world, exitHead)
-                        && world.getBlockState(exitBelow).isSolidBlock(world, exitBelow)) {
-                    return exitFoot.toImmutable();
-                }
-            }
-        }
-        return null;
-    }
-
-    private boolean placeLadderColumn(ServerWorld world, ServerPlayerEntity player, BlockPos start, Direction supportDir, int height) {
-        if (world == null || player == null || start == null || supportDir == null) {
-            return false;
-        }
-        boolean any = false;
-        Direction face = supportDir.getOpposite();
-        for (int dy = 0; dy < height; dy++) {
-            if (SkillManager.shouldAbortSkill(player)) {
-                break;
-            }
-            BlockPos pos = start.up(dy);
-            if (!isPassable(world, pos)) {
-                break;
-            }
-            BlockPos support = pos.offset(supportDir);
-            if (!world.getBlockState(support).isSolidBlock(world, support)) {
-                break;
-            }
-            boolean placed = BotActions.placeBlockAt(player, pos, face, List.of(Items.LADDER));
-            any = any || placed;
-        }
-        return any;
     }
 
     private boolean isGoToSuccess(String result) {

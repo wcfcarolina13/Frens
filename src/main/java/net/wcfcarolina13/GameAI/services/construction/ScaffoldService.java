@@ -813,4 +813,94 @@ public final class ScaffoldService {
             Thread.currentThread().interrupt();
         }
     }
+
+    // ---------------------------------------------------------------
+    // Ladder column helpers (moved verbatim from CollectDirtSkill)
+    // ---------------------------------------------------------------
+
+    /**
+     * Picks the horizontal direction with the most solid support blocks along a vertical scan,
+     * suitable for anchoring a ladder column. Returns null if no direction has at least 2 supports.
+     */
+    public static Direction pickLadderSupportDirection(ServerWorld world, BlockPos start, int scanHeight) {
+        if (world == null || start == null) {
+            return null;
+        }
+        Direction best = null;
+        int bestScore = -1;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            int score = 0;
+            for (int dy = 0; dy <= scanHeight; dy++) {
+                BlockPos foot = start.up(dy);
+                BlockPos support = foot.offset(dir);
+                if (world.getBlockState(support).isSolidBlock(world, support)) {
+                    score++;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = dir;
+            }
+        }
+        return bestScore >= 2 ? best : null;
+    }
+
+    /**
+     * Finds a walkable exit position reachable from a ladder column anchored against {@code supportDir}.
+     */
+    public static BlockPos findLadderExit(ServerWorld world, BlockPos start, Direction supportDir, int scanHeight) {
+        if (world == null || start == null || supportDir == null) {
+            return null;
+        }
+        for (int dy = 1; dy <= scanHeight; dy++) {
+            BlockPos climbPos = start.up(dy);
+            if (!isLadderPassable(world, climbPos) || !world.getBlockState(climbPos.offset(supportDir)).isSolidBlock(world, climbPos.offset(supportDir))) {
+                continue;
+            }
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos exitFoot = climbPos.offset(dir);
+                BlockPos exitHead = exitFoot.up();
+                BlockPos exitBelow = exitFoot.down();
+                if (isLadderPassable(world, exitFoot)
+                        && isLadderPassable(world, exitHead)
+                        && world.getBlockState(exitBelow).isSolidBlock(world, exitBelow)) {
+                    return exitFoot.toImmutable();
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Places a ladder column from {@code start} upward, facing away from {@code supportDir}.
+     *
+     * @return true if at least one ladder was placed
+     */
+    public static boolean placeLadderColumn(ServerWorld world, ServerPlayerEntity player, BlockPos start, Direction supportDir, int height) {
+        if (world == null || player == null || start == null || supportDir == null) {
+            return false;
+        }
+        boolean any = false;
+        Direction face = supportDir.getOpposite();
+        for (int dy = 0; dy < height; dy++) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                break;
+            }
+            BlockPos pos = start.up(dy);
+            if (!isLadderPassable(world, pos)) {
+                break;
+            }
+            BlockPos support = pos.offset(supportDir);
+            if (!world.getBlockState(support).isSolidBlock(world, support)) {
+                break;
+            }
+            boolean placed = BotActions.placeBlockAt(player, pos, face, List.of(Items.LADDER));
+            any = any || placed;
+        }
+        return any;
+    }
+
+    private static boolean isLadderPassable(ServerWorld world, BlockPos pos) {
+        return world.getBlockState(pos).getCollisionShape(world, pos).isEmpty() && world.getFluidState(pos).isEmpty();
+    }
 }
