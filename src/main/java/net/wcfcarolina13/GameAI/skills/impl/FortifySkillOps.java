@@ -28,7 +28,9 @@ import java.util.Set;
  *
  * <p>{@link FortifySharedContext} exposes skill-level queries and cleanup entry
  * points shared by several extracted processors; {@link FortifyTowerContext}
- * extends it with the nav-scope / placement / replan state the tower code needs.
+ * extends it with the nav-scope / placement / replan state the tower code needs,
+ * and {@link FortifyCarveContext} with the hull / carve-eligibility queries the
+ * break-through code needs.
  */
 final class FortifySkillOps {
     private FortifySkillOps() {} // non-instantiable container
@@ -177,6 +179,20 @@ final class FortifySkillOps {
         boolean tryUnwedgeFromTightSpace(ServerCommandSource source, ServerPlayerEntity bot,
                                          ServerWorld world, SurfaceProfile surfaceProfile,
                                          BlockPos anchorPos, String context);
+    }
+
+    // ── Carve context (extends shared context) ─────────────────
+
+    interface FortifyCarveContext extends FortifySharedContext {
+
+        /** Is this position inside the convex hull of the current fortification layout? */
+        boolean isInsideCurrentFortificationHull(BlockPos pos);
+
+        /** Is a layout-protected position still reachable from outside the hull? */
+        boolean isLayoutExteriorReachable(ServerWorld world, BlockPos pos);
+
+        /** Whether a fortification layout is currently loaded (used for context inference). */
+        boolean hasCurrentFortificationLayout();
     }
 
     // ── Tower context (extends shared context) ─────────────────
