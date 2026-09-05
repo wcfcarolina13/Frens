@@ -2334,7 +2334,7 @@ public final class BotActions {
     private static int ensureHotbarAccess(ServerPlayerEntity bot, PlayerInventory inventory, int slot) {
         boolean locked = HotbarLockService.isLocked(bot);
         int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
-                slot, findEmptyHotbarSlot(inventory), locked);
+                slot, findEmptyHotbarSlot(inventory), locked, inventory.getSelectedSlot());
         if (locked) {
             if (target != slot) {
                 HotbarLockService.maybeLogBlocked(bot, "ensure-hotbar");

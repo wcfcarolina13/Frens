@@ -21,7 +21,7 @@ public class ToolSelector {
     private static final Logger LOGGER = LoggerFactory.getLogger("tool-selector");
 
     public static ItemStack selectBestToolForBlock(ServerPlayerEntity bot, BlockState blockState) {
-        return selectBestToolForBlock(bot, blockState, true);
+        return selectBestToolForBlock(bot, blockState, true, true);
     }
 
     /**
@@ -30,8 +30,13 @@ public class ToolSelector {
      *                         ({@code BundleService.reachFirst}, which hops to the server thread as
      *                         needed) and the scan is retried exactly once. Mining callers run on
      *                         {@code MiningTool}'s worker executor.
+     * @param allowRevalidationRetry when true and the on-thread re-validation of the scanned slot
+     *                         fails (another actor moved the stack between scan and swap), the scan
+     *                         is re-run exactly once inside the same server-thread unit rather than
+     *                         discarding an otherwise usable tool.
      */
-    private static ItemStack selectBestToolForBlock(ServerPlayerEntity bot, BlockState blockState, boolean allowBundleReach) {
+    private static ItemStack selectBestToolForBlock(ServerPlayerEntity bot, BlockState blockState,
+                                                    boolean allowBundleReach, boolean allowRevalidationRetry) {
         List<ItemStack> hotbarItems = hotBarUtils.getHotbarItems(bot);
         ItemStack bestTool = ItemStack.EMPTY;
         float highestSpeed = 0.0f;
@@ -89,6 +94,13 @@ public class ToolSelector {
             ItemStack swapped = callOnServer(bot, () -> {
                 ItemStack live = bot.getInventory().getStack(sourceSlot);
                 if (!slotStillMatches(expected, live)) {
+                    if (allowRevalidationRetry) {
+                        LOGGER.debug("Tool select: slot {} no longer holds {} for {} — re-running scan once",
+                                sourceSlot, expected.getItem(), bot.getName().getString());
+                        // Already on the server thread: the rescan (and any swap it performs) stays
+                        // inside this same atomic unit.
+                        return selectBestToolForBlock(bot, blockState, false, false);
+                    }
                     LOGGER.debug("Tool select: slot {} no longer holds {} — aborting swap for {}",
                             sourceSlot, expected.getItem(), bot.getName().getString());
                     return ItemStack.EMPTY;
@@ -130,7 +142,7 @@ public class ToolSelector {
                     if (reachBetterBundledTool(bot, blockState, directSpeed).isEmpty()) {
                         return ItemStack.EMPTY;
                     }
-                    return selectBestToolForBlock(bot, blockState, false);
+                    return selectBestToolForBlock(bot, blockState, false, false);
                 }, ItemStack.EMPTY);
                 if (!reached.isEmpty()) {
                     return reached;

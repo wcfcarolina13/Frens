@@ -67,7 +67,8 @@ public final class TravelWaitService {
          * (e.g. {@code /bot stop}) is not counted — see the completion handler below. Dispatch
          * stops once this reaches {@link TravelWaitPolicy#MAX_OFFLOAD_FAILURES}.
          */
-        volatile int offloadFailures;
+        final java.util.concurrent.atomic.AtomicInteger offloadFailures =
+                new java.util.concurrent.atomic.AtomicInteger();
         TravelWaitPolicy.Action lastAction;
 
         PendingTravel(String label, BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel, long startedTick) {
@@ -202,10 +203,10 @@ public final class TravelWaitService {
                 case OFFLOAD_EXISTING -> {
                     // Only dispatched while no task is active (the policy gates on !taskActive), and
                     // runAmbient itself refuses if the slot is taken, so this cannot stack. The
-                    // policy backoff+latch stops a chest that accepts nothing from being walked to
+                    // policy backoff+counter stops a chest that accepts nothing from being walked to
                     // over and over for the whole cooldown.
                     if (TravelWaitPolicy.shouldDispatchOffload(now, pending.lastOffloadTick,
-                            pending.offloadFailures, TravelWaitPolicy.MAX_OFFLOAD_FAILURES)) {
+                            pending.offloadFailures.get(), TravelWaitPolicy.MAX_OFFLOAD_FAILURES)) {
                         PendingTravel target = pending;
                         boolean started = TaskService.runAmbient(
                                 bot.getCommandSource(), bot, "travel-wait-offload",
@@ -220,10 +221,10 @@ public final class TravelWaitService {
                                                     + "not counted as a failure",
                                                     bot.getName().getString());
                                         } else {
-                                            target.offloadFailures++;
+                                            int failures = target.offloadFailures.incrementAndGet();
                                             LOGGER.info("travel-wait offload accepted nothing for {} "
                                                     + "({}/{} failures)",
-                                                    bot.getName().getString(), target.offloadFailures,
+                                                    bot.getName().getString(), failures,
                                                     TravelWaitPolicy.MAX_OFFLOAD_FAILURES);
                                         }
                                     }
