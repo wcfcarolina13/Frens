@@ -3,7 +3,40 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-05 (night) — next session starts here
+## Session Handoff 2026-09-05 (late night) — next session starts here
+
+**State:** main = origin/main @ 1.1.210 (pushed; deploy status in the changelog entry). Suite 812 green.
+
+**Shipped in 1.1.210 (FortifyVillageSkill Phase 3, zero behaviour change):** `FortifyCarveContext extends
+FortifySharedContext` (3 methods) on `FortifySkillOps`; `FortifyCarveHelper` (983 lines: 4-arg
+`tryBreakThroughObstacle`, `attemptFinalizeCarveTransaction`, `canOverrideVillageAdjacentForCarve`, nine
+carve-only helpers, four carve constants) moved verbatim, reviewer-regenerated diff clean; three cleanup
+delegates deleted (processor injected directly). Skill 7,106 → 6,185 lines. Only observable change: log
+category `skill-fortify-carve`. Details + rulings + field checks in `changelog.md`.
+
+**Fortify extraction is DONE — stop.** The residual skill is navigation glue that reads every field.
+Tidy-ups only, for a later pass: inline four single-caller delegates
+(`tryBreakThroughObstacle` ×2, `attemptFinalizeCarveTransaction`, `isCarveEligibleForBreakAttempt`);
+`isInsideCurrentFortificationHull(BlockPos)`/`isLayoutExteriorReachable` are public now (interface
+constraint, same as the tower precedent). Minor: `LeafClearAction`/`LeafClearResult` still on MovementService.
+
+**Needs Bradley next:** review the Phase 3 ontology spec (unchanged — 5 open questions with recommended
+answers). Then the guided field session: Phases 6b–6i in `docs/testing/FIELD_SESSION_1.1.202.md`
+(now 137 items; 6i = carve regression).
+
+**Remaining autonomous candidates:** ontology Phase 3 (d) novelty rejection ONLY once the spec is approved.
+Nothing else in the backlog is both autonomous and scoped; the next session should start with Bradley's
+spec verdict or pick a Lane 2 gameplay bug that has a log.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`; doorway rework.
+
+**Needs Bradley:** Phase 3 spec review; guided field session; woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-05 (night) — superseded
 
 **State:** main = origin/main @ 1.1.209 (pushed, deployed to all three Prism instances). Suite 812 green.
 
@@ -755,7 +788,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] **Shared construction reach/scaffold**: Standardize feet-based reach, LOS-aware recovery, scaffold stance rules in the generic service layer
 - [ ] **Generic schematic bottlenecks**: Remove remaining bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService`
 - [ ] **Shelter onto shared semantics**: Move shelter/hovel/burrow onto shared reach/scaffold without regressing geometry-specific behavior
-- [ ] **FortifyVillageSkill Phase 2 refactoring**: Design `FortifySharedContext` callback interface (~15 methods), then extract cleanup/tower sections. Phase 1 complete (extracted EntombmentHelper, SkillTypes, CleanupHelper, LayoutHelper, EscapeHelper — reduced by ~740 lines)
+- [x] **FortifyVillageSkill Phase 2 refactoring** ✅ 1.1.209 (cleanup/tower) + 1.1.210 (carve, Phase 3 — extraction complete): `FortifySharedContext`/`FortifyTowerContext`/`FortifyCarveContext`, `FortifyCleanupProcessor`, `FortifyTowerHelper`, `FortifyCarveHelper`; skill 9,560 → 6,185. Phase 1 complete (extracted EntombmentHelper, SkillTypes, CleanupHelper, LayoutHelper, EscapeHelper — reduced by ~740 lines)
 
 ### Commands / UX
 

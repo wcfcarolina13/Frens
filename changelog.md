@@ -2,6 +2,70 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## FortifyVillageSkill Phase 3 — carve/break-through section extracted to `FortifyCarveHelper` behind `FortifyCarveContext` (zero behaviour change); 1.1.210 (2026-09-05)
+
+The last planned Fortify extraction. Same loop as 1.1.209: read-only scoping → one implementer →
+batch review (reviewer regenerated every moved-body diff independently) → one fix wave → mechanical
+re-review. FortifyVillageSkill 7,106 → **6,185** lines; `FortifyCarveHelper` 983 lines. Scoping
+confirmed the backlog premise: the 4-arg `tryBreakThroughObstacle` overload is exactly 559 lines, every
+skill field it touches is read-only, and the whole section runs on the worker thread (no
+`callOnServer` anywhere in the skill).
+
+- **Carve helper (commit `64e4a70`).** `FortifySkillOps` gains `FortifyCarveContext extends
+  FortifySharedContext` (3 methods: `isInsideCurrentFortificationHull(BlockPos)`,
+  `isLayoutExteriorReachable`, `hasCurrentFortificationLayout` — the last replaces the bare
+  `currentLayout != null` read). New package-private `FortifyCarveHelper(ops, ctx, entombmentHelper,
+  cleanupHelper, cleanupProcessor, Supplier<Set<BlockPos>> protectedPositions)`, logger
+  `skill-fortify-carve`. Moved verbatim: `tryBreakThroughObstacle` (4-arg), `attemptFinalizeCarveTransaction`,
+  `canOverrideVillageAdjacentForCarve`, `isCarveEligibleForBreakAttempt`, `incrementNavBreakReject`,
+  `formatNavBreakRejectSummary`, `buildBreakThroughWalkTarget`, `isMeaningfulTrapEscapeProgress`,
+  `deferCarveRepair`, `isCarveEligibleScope`, `isEmergencyTrapEscapeEligible`,
+  `buildBreakThroughCandidateOffsets`, `shouldDeferCarveFinalize`, and the four carve constants
+  (`FORTIFY_CARVE_MAX_BOT_TO_BLOCK_DIST` 6, `FORTIFY_CARVE_MAX_TARGET_TO_BLOCK_DIST` 8,
+  `FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST` 20, `FORTIFY_TRAP_CARVE_DEPTH_LIMIT` 6). The skill keeps thin
+  delegates for both `tryBreakThroughObstacle` overloads, `attemptFinalizeCarveTransaction` and
+  `isCarveEligibleForBreakAttempt` (its `walkToTarget` caller). The three cleanup one-liners the 1.1.209
+  entry kept for this section (`tryReplaceMinedBlock`, `queueMandatoryCarveRepairIfNeeded`,
+  `verifyCarveRepairColumn`) are deleted — `FortifyCleanupProcessor` is injected directly, zero callers
+  remain (tree-wide grep). `carveHelper` is declared after `entombmentHelper`/`cleanupHelper`/
+  `cleanupProcessor`; the init-order comment names it. Reviewer's independent normalised diff of the 13
+  old ranges (914 lines) against the helper: one added `*/` (a javadoc split at the extraction boundary),
+  nothing else. Only observable change: log category `skill-fortify-carve`; message text unchanged.
+- **Fix wave (commit `e5af47e`).** Skill-side `tryBreakThroughObstacle` javadoc replaced with a one-line
+  pointer to the helper (Minor 2); comment-only diff, verified by grep.
+
+**Rulings made on Bradley's behalf (cost if wrong):**
+- Picked Fortify Phase 3 over ontology (d): the Phase 3 spec was not marked reviewed this session.
+  Cost: none — the spec is unchanged and still first in line once approved.
+- `FortifyCleanupProcessor` injected directly into the helper instead of adding three context methods
+  (scoper offered both). Cost: one more constructor arg; a future helper wanting the same calls injects
+  the same way, as the tower helper already does.
+- `isCarveEligibleForBreakAttempt` moved into the helper rather than onto the context, because both of
+  its callees moved; putting it on the context would have been a self-recursive loop. The skill keeps a
+  one-line delegate. Cost: one extra delegate to inline later.
+- Minor 1 (two hull/exterior queries went private → public to satisfy the package-private interface) and
+  Minor 3 (four single-caller delegates) deferred to the handoff — same shape as the tower precedent,
+  and inlining them is a behaviour-neutral tidy-up for a later pass, not this release.
+- Fix diff was comment-only, so the scoped re-review was a grep proving no non-comment lines changed
+  instead of an agent. Cost: none — no code moved.
+- No new unit tests: the scoper found no carve decision that is pure without `net.minecraft.*` types
+  (everything is typed on `BlockPos`/`ServerWorld`); making one pure would be a signature rewrite, not
+  a verbatim move. Verification is the field check, as for 1.1.209.
+
+**Stop here for Fortify.** The residual 6,185-line skill is navigation glue that reads every field
+(`walkToTarget`, edge patching, nav scopes, replan); extracting more repeats the `repositionNearAnchor`
+judgement from 1.1.209 and would not be a verbatim move. Deferred, unchanged: `FarmSkill.pillarEscape`,
+`WoodcutSkill`/`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`, doorway rework.
+
+**Tests:** 812 → 812 (no new tests by ruling; count must not drop and did not).
+
+- **Field checks (Phase 6i):** force a carve corridor during `/bot skill fortify` (stand so the bot must
+  route through a hillside): break-through lines now appear under `skill-fortify-carve` with unchanged
+  text; the corridor is repaired after the bot leaves (`skill-fortify-cleanup`); trap-escape carve
+  (bury the bot in a 1×1 pocket beside the wall) still frees it within the depth limit; nav-break
+  reject summary line still prints on a refused carve; no `NullPointerException` naming
+  `FortifyCarveHelper`.
+
 ## FortifyVillageSkill Phase 2 — cleanup processor + tower helper extracted behind `FortifySharedContext` (zero behaviour change); 1.1.209 (2026-09-05)
 
 The refactor that 1.1.208 deliberately left for its own release. Same loop: read-only scoping →

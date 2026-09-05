@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.209-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.210-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.209** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.210** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -541,6 +541,38 @@ for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the
 - [ ] **No new log noise (1.1.209)**
   - Claude watches for: any `NullPointerException` mentioning `FortifyTowerHelper`,
     `FortifyCleanupProcessor` or `FortifySkillOps`.
+  - Pass when: none in the whole session.
+
+---
+
+## Phase 6i — Fortify Phase 3 carve extraction (1.1.210)
+
+Regression checks only: carving must behave exactly as on 1.1.209. Watch the log for the new category
+`skill-fortify-carve` — the message text is unchanged. Grep: `grep -n "skill-fortify-carve" latest.log`.
+
+- [ ] **Corridor carve unchanged (1.1.210)**
+  - Bradley does: during `/bot skill fortify`, stand so the bot has to route through a hillside (or
+    reuse the corridor from Phase 6h).
+  - Claude watches for: break-through candidate/eligibility lines under `skill-fortify-carve`; the
+    carve session opens and the corridor is dug the same depth as on 1.1.209.
+  - Pass when: the bot reaches the far side and `attemptFinalizeCarveTransaction` queues the repair
+    (`skill-fortify-cleanup` lines follow).
+- [ ] **Carve repair still drains (1.1.210)**
+  - Claude watches for: the mandatory repair of the corridor after the bot leaves it; the "would seal
+    current exit" skip still fires when the bot is still inside.
+  - Pass when: the corridor is closed and the cleanup queue reports empty.
+- [ ] **Trap-escape carve unchanged (1.1.210)**
+  - Bradley does: box the bot into a 1×1 pocket beside the wall during the build.
+  - Claude watches for: emergency trap-escape eligibility and meaningful-progress lines; carving stops
+    at the depth limit (6) if it cannot break out.
+  - Pass when: the bot is freed or gives the same give-up message as on 1.1.209.
+- [ ] **Refused carve still summarised (1.1.210)**
+  - Bradley does: put a protected block (lodestone, chest) in the only carve line.
+  - Claude watches for: the nav-break reject summary line (reason counts) once per attempt.
+  - Pass when: the summary prints and the bot replans instead of mining the protected block.
+- [ ] **No new log noise (1.1.210)**
+  - Claude watches for: any `NullPointerException` mentioning `FortifyCarveHelper` or
+    `FortifyCarveContext`.
   - Pass when: none in the whole session.
 
 ---
