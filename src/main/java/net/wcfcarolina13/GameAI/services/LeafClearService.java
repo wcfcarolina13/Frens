@@ -1,24 +1,35 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 /**
  * Leaf-obstruction handling for bot movement.
@@ -323,5 +334,214 @@ public final class LeafClearService {
         }
         // Only treat leaves as an obstruction when they're in the immediate forward collision space.
         return hasLeafInImmediatePath(world, player.getBlockPos(), toward);
+    }
+
+    // ---------------------------------------------------------------
+    // Shared line-of-sight leaf clearing
+    //
+    // Migrated from WoodcutCleanupSkill.clearBlockingLeaves (LERP_SAMPLE_3X3X3)
+    // and BridgeScaffoldService.clearLeafObstructions (RAYCAST_HIT_PLUS_NEIGHBOURS).
+    // Both candidate orders and caps are preserved exactly; the callers supply their
+    // own block-breaker so their differing mining timeouts/overloads are unchanged.
+    // ---------------------------------------------------------------
+
+    /** How candidate obstruction blocks are chosen. */
+    public enum CandidateMode {
+        /** Iteratively raycast to the target and break whatever soft block the ray hits. */
+        RAYCAST_HIT_PLUS_NEIGHBOURS,
+        /** Sample the eye→target segment, plus the 3x3x3 box around the target. */
+        LERP_SAMPLE_3X3X3
+    }
+
+    /**
+     * @param maxPerAttempt          max blocks broken in one LERP pass
+     * @param maxTotal               max raycast iterations in RAYCAST mode
+     * @param skipDecayingLeaves     skip distance&gt;=7 non-persistent leaves (they decay on their own)
+     * @param mutationAllowed        optional veto per position (null = always allowed)
+     * @param includeSnowAndReplaceables also clear snow layers / replaceable blocks, not just leaves
+     */
+    public record Options(int maxPerAttempt,
+                          int maxTotal,
+                          boolean skipDecayingLeaves,
+                          Predicate<BlockPos> mutationAllowed,
+                          boolean includeSnowAndReplaceables,
+                          CandidateMode mode) {
+    }
+
+    /** Clears soft obstructions between the bot's eyes and {@code target}. Returns blocks broken. */
+    public static int clearLineOfSight(ServerPlayerEntity bot, BlockPos target, Options opts) {
+        return clearLineOfSight(bot, target, opts, (b, pos) -> {
+            LookController.faceBlock(b, pos);
+            try {
+                MiningTool.mineBlock(b, pos, true).get(3_000L, TimeUnit.MILLISECONDS);
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    /**
+     * Clears soft obstructions between the bot's eyes and {@code target}, using {@code breaker}
+     * to actually mine each block. Returns the number of blocks that went from non-air to air.
+     */
+    public static int clearLineOfSight(ServerPlayerEntity bot,
+                                       BlockPos target,
+                                       Options opts,
+                                       BiConsumer<ServerPlayerEntity, BlockPos> breaker) {
+        if (bot == null || target == null || opts == null || breaker == null) {
+            return 0;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return 0;
+        }
+        return opts.mode() == CandidateMode.RAYCAST_HIT_PLUS_NEIGHBOURS
+                ? clearByRaycast(bot, world, target, opts, breaker)
+                : clearByLerpSample(bot, world, target, opts, breaker);
+    }
+
+    private static int clearByLerpSample(ServerPlayerEntity bot,
+                                         ServerWorld world,
+                                         BlockPos target,
+                                         Options opts,
+                                         BiConsumer<ServerPlayerEntity, BlockPos> breaker) {
+        Vec3d eye = bot.getEyePos();
+        Vec3d center = Vec3d.ofCenter(target);
+        Set<BlockPos> candidates = new LinkedHashSet<>();
+        for (BlockPos sample : lerpSampleCandidates(eye, center)) {
+            if (world.getBlockState(sample).isIn(BlockTags.LEAVES)) {
+                candidates.add(sample.toImmutable());
+            }
+        }
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos neighbor = target.add(dx, dy, dz);
+                    if (world.getBlockState(neighbor).isIn(BlockTags.LEAVES)) {
+                        candidates.add(neighbor.toImmutable());
+                    }
+                }
+            }
+        }
+        int broken = 0;
+        for (BlockPos leafPos : candidates) {
+            if (broken >= opts.maxPerAttempt()) {
+                break;
+            }
+            BlockState leafState = world.getBlockState(leafPos);
+            if (!leafState.isIn(BlockTags.LEAVES)) {
+                continue;
+            }
+            // Skip leaves that are already decaying (distance=7, not player-placed).
+            // They will disappear on their own via random tick within seconds.
+            if (opts.skipDecayingLeaves() && isDecayingLeaf(leafState)) {
+                continue;
+            }
+            if (opts.mutationAllowed() != null && !opts.mutationAllowed().test(leafPos)) {
+                continue;
+            }
+            boolean before = leafState.isAir();
+            breaker.accept(bot, leafPos);
+            if (!before && world.getBlockState(leafPos).isAir()) {
+                broken++;
+            }
+        }
+        return broken;
+    }
+
+    private static int clearByRaycast(ServerPlayerEntity bot,
+                                      ServerWorld world,
+                                      BlockPos target,
+                                      Options opts,
+                                      BiConsumer<ServerPlayerEntity, BlockPos> breaker) {
+        int broken = 0;
+        for (int i = 0; i < opts.maxTotal(); i++) {
+            if (hasLineOfSightTo(bot, world, Vec3d.ofCenter(target))) {
+                return broken;
+            }
+            BlockHitResult hit = world.raycast(new RaycastContext(
+                    bot.getEyePos(), Vec3d.ofCenter(target),
+                    RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
+            if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
+                return broken;
+            }
+            BlockPos hitPos = hit.getBlockPos();
+            if (hitPos.equals(target)) {
+                return broken;
+            }
+            BlockState hitState = world.getBlockState(hitPos);
+            boolean soft = hitState.isIn(BlockTags.LEAVES)
+                    || (opts.includeSnowAndReplaceables()
+                        && (hitState.isOf(Blocks.SNOW) || hitState.isReplaceable()));
+            if (!soft) {
+                return broken;
+            }
+            if (opts.skipDecayingLeaves() && isDecayingLeaf(hitState)) {
+                return broken;
+            }
+            if (opts.mutationAllowed() != null && !opts.mutationAllowed().test(hitPos)) {
+                return broken;
+            }
+            breaker.accept(bot, hitPos);
+            if (world.getBlockState(hitPos).isAir()) {
+                broken++;
+            }
+        }
+        return broken;
+    }
+
+    private static boolean hasLineOfSightTo(ServerPlayerEntity bot, ServerWorld world, Vec3d target) {
+        BlockHitResult hit = world.raycast(new RaycastContext(
+                bot.getEyePos(), target,
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
+        return hit == null || hit.getType() != HitResult.Type.BLOCK
+                || hit.getBlockPos().getSquaredDistance(target) < 1.5;
+    }
+
+    // ── Pure, unit-testable pieces ───────────────────────────────────
+
+    /** Positions sampled along the eye→target segment (unfiltered, in ray order). */
+    public static List<BlockPos> lerpSampleCandidates(Vec3d eye, Vec3d center) {
+        if (eye == null || center == null) {
+            return List.of();
+        }
+        int steps = Math.max(4, (int) Math.ceil(eye.distanceTo(center) * 4.0D));
+        List<BlockPos> out = new ArrayList<>();
+        for (int i = 1; i < steps; i++) {
+            double t = i / (double) steps;
+            out.add(BlockPos.ofFloored(eye.lerp(center, t)));
+        }
+        return out;
+    }
+
+    /** Block-centre convenience overload of {@link #lerpSampleCandidates(Vec3d, Vec3d)}. */
+    public static List<BlockPos> lerpSampleCandidates(BlockPos eye, BlockPos target) {
+        if (eye == null || target == null) {
+            return List.of();
+        }
+        return lerpSampleCandidates(Vec3d.ofCenter(eye), Vec3d.ofCenter(target));
+    }
+
+    /**
+     * Returns true if a leaf with these properties will decay naturally.
+     * distance=7 means no log within 6 blocks through the leaf chain; player-placed
+     * leaves have persistent=true and never decay.
+     */
+    public static boolean isDecayingLeaf(int distance, boolean persistent) {
+        return !persistent && distance >= 7;
+    }
+
+    /** {@link BlockState} form of {@link #isDecayingLeaf(int, boolean)}. */
+    public static boolean isDecayingLeaf(BlockState state) {
+        if (state == null || !state.isIn(BlockTags.LEAVES)) {
+            return false;
+        }
+        boolean persistent = state.contains(LeavesBlock.PERSISTENT)
+                && Boolean.TRUE.equals(state.get(LeavesBlock.PERSISTENT));
+        if (persistent) {
+            return false;
+        }
+        if (state.contains(LeavesBlock.DISTANCE)) {
+            return isDecayingLeaf(state.get(LeavesBlock.DISTANCE), false);
+        }
+        return false;
     }
 }

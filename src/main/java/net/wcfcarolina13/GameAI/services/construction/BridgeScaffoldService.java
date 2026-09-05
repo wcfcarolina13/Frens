@@ -18,6 +18,7 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.GameAI.services.LeafClearService;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -384,24 +385,17 @@ public final class BridgeScaffoldService {
     }
 
     private static void clearLeafObstructions(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
-        for (int i = 0; i < 3; i++) {
-            if (hasLineOfSight(bot, Vec3d.ofCenter(target))) return;
-            BlockHitResult hit = world.raycast(new RaycastContext(
-                    bot.getEyePos(), Vec3d.ofCenter(target),
-                    RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot));
-            if (hit == null || hit.getType() != HitResult.Type.BLOCK) return;
-            BlockPos hitPos = hit.getBlockPos();
-            if (hitPos.equals(target)) return;
-            BlockState hitState = world.getBlockState(hitPos);
-            if (hitState.isIn(BlockTags.LEAVES) || hitState.isOf(Blocks.SNOW) || hitState.isReplaceable()) {
-                LookController.faceBlock(bot, hitPos);
-                try {
-                    MiningTool.mineBlock(bot, hitPos, true, false).get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-                } catch (Exception ignored) {}
-            } else {
-                return;
-            }
-        }
+        LeafClearService.clearLineOfSight(
+                bot,
+                target,
+                new LeafClearService.Options(3, 3, false, null, true,
+                        LeafClearService.CandidateMode.RAYCAST_HIT_PLUS_NEIGHBOURS),
+                (b, pos) -> {
+                    LookController.faceBlock(b, pos);
+                    try {
+                        MiningTool.mineBlock(b, pos, true, false).get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                    } catch (Exception ignored) {}
+                });
     }
 
     // ── Utility methods ───────────────────────────────────────────────────

@@ -3901,6 +3901,9 @@ public final class WoodcutSkill implements Skill {
                 snapshot.allLocalLogsProtectedOrHuman());
     }
 
+    // NOTE: deliberately NOT migrated to LeafClearService.clearLineOfSight — this variant
+    // mutates per-target reachSession counters (leafBlocksBroken) as it goes, which the
+    // shared service does not model. See GameAI/services/LeafClearService.
     private void clearBlockingLeaves(ServerPlayerEntity bot,
                                      BlockPos target,
                                      BlockPos associatedTargetBase,

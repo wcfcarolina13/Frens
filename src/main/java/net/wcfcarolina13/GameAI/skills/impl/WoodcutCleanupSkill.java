@@ -25,6 +25,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
+import net.wcfcarolina13.GameAI.services.LeafClearService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
@@ -1904,51 +1905,17 @@ public final class WoodcutCleanupSkill implements Skill {
             return 0;
         }
         selectLeafTool(bot);
-        Vec3d eye = bot.getEyePos();
-        Vec3d center = Vec3d.ofCenter(target);
-        int steps = Math.max(4, (int) Math.ceil(eye.distanceTo(center) * 4.0D));
-        Set<BlockPos> candidates = new LinkedHashSet<>();
-        for (int i = 1; i < steps; i++) {
-            double t = i / (double) steps;
-            BlockPos sample = BlockPos.ofFloored(eye.lerp(center, t));
-            if (world.getBlockState(sample).isIn(BlockTags.LEAVES)) {
-                candidates.add(sample.toImmutable());
-            }
-        }
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    BlockPos neighbor = target.add(dx, dy, dz);
-                    if (world.getBlockState(neighbor).isIn(BlockTags.LEAVES)) {
-                        candidates.add(neighbor.toImmutable());
-                    }
-                }
-            }
-        }
-        int broken = 0;
-        for (BlockPos leafPos : candidates) {
-            if (broken >= MAX_LEAF_CLEAR_BLOCKS_PER_ATTEMPT) {
-                break;
-            }
-            BlockState leafState = world.getBlockState(leafPos);
-            if (!leafState.isIn(BlockTags.LEAVES)) {
-                continue;
-            }
-            // Skip leaves that are already decaying (distance=7, not player-placed).
-            // They will disappear on their own via random tick within seconds.
-            if (isDecayingLeaf(leafState)) {
-                continue;
-            }
-            if (!canMutateRecoveryBlock(world, leafPos)) {
-                continue;
-            }
-            boolean before = leafState.isAir();
-            breakLeaf(bot, leafPos);
-            if (!before && world.getBlockState(leafPos).isAir()) {
-                broken++;
-            }
-        }
-        return broken;
+        return LeafClearService.clearLineOfSight(
+                bot,
+                target,
+                new LeafClearService.Options(
+                        MAX_LEAF_CLEAR_BLOCKS_PER_ATTEMPT,
+                        MAX_LEAF_CLEAR_BLOCKS_PER_ATTEMPT,
+                        true,
+                        pos -> canMutateRecoveryBlock(world, pos),
+                        false,
+                        LeafClearService.CandidateMode.LERP_SAMPLE_3X3X3),
+                this::breakLeaf);
     }
 
     /**
@@ -1956,18 +1923,7 @@ public final class WoodcutCleanupSkill implements Skill {
      * Such leaves have lost connection to any log and will disappear on a random tick.
      */
     private static boolean isDecayingLeaf(BlockState state) {
-        if (state == null || !state.isIn(BlockTags.LEAVES)) {
-            return false;
-        }
-        // Player-placed leaves have persistent=true and never decay.
-        if (state.contains(LeavesBlock.PERSISTENT) && Boolean.TRUE.equals(state.get(LeavesBlock.PERSISTENT))) {
-            return false;
-        }
-        // distance=7 means no log within 6 blocks through leaf chain → will decay.
-        if (state.contains(LeavesBlock.DISTANCE)) {
-            return state.get(LeavesBlock.DISTANCE) >= 7;
-        }
-        return false;
+        return LeafClearService.isDecayingLeaf(state);
     }
 
     private boolean selectLeafTool(ServerPlayerEntity bot) {
