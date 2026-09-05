@@ -2,6 +2,33 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Follow-ups from the 1.1.205 review: on-thread tool swaps, hotbar target parity, offload latch, reason contract; 1.1.206 (2026-09-04)
+
+Bradley said "move on the followup" — the four code follow-ups the 1.1.205 handoff named, plus
+Phase 6d (the 1.1.205 field checks) in `docs/testing/FIELD_SESSION_1.1.202.md` (108 items).
+
+- **ToolSelector / MiningTool swap on the server thread (commit `276de09`).** Pre-existing: the
+  mining worker mutated the inventory off-thread (`onSlotClick`, `swapStacks`, `setSelectedSlot`).
+  Now the scan stays off-thread and the swap+select runs as one `callOnServer` unit that
+  re-validates the scanned slot (`slotStillMatches`) and falls through to the held/harmless
+  fallback if the stack moved (DEBUG). Bundle reach + rescan is one on-thread unit;
+  `switchToHarmlessFallback` is wholly wrapped. Cost: up to two ~1-tick round-trips per tool
+  selection on the worker path; the in-loop 20-tick re-poll already runs on-thread (fast path).
+- **FarmSkill hotbar target parity (commit `9e7c312`).** `ScaffoldSlotPolicy.resolveHotbarTarget`
+  gained a `preferredSlot` overload; FarmSkill passes the selected slot again when the hotbar is
+  full and unlocked (1.1.205 had moved it to slot 0). Lock rule unchanged. 3 tests.
+- **Travel-wait offload latch counts real failures (commit `7a96894`).** Was a permanent latch on
+  any false, including a `/bot stop` abort. Now a counter (`MAX_OFFLOAD_FAILURES = 2`), abort does
+  not count, and the 60 s throttle is stamped only when the ambient task actually started.
+- **`getRecentSurfaceRecoveryFailureReason` never null (commit `f2418f8`).** `""` for unknown /
+  stale / null id; two BotEventHandler callers simplified.
+- **Review follow-up (commit `34f33ed`).** ToolSelector re-runs the scan once when swap re-validation
+  fails instead of discarding a good hotbar tool; `BotActions.ensureHotbarAccess` uses the same
+  preferred-slot overload as FarmSkill; offload failure counter is an `AtomicInteger`.
+- Tests 767 → 773.
+- **Field checks:** Phase 6d covers 1.1.205; for 1.1.206 specifically, watch mining for a
+  one-tick hitch before the first swing (expected) and any `slot moved` DEBUG lines (should be rare).
+
 ## Loose ends from the backlog run: hotbar-lock copies, bundled scaffold escape, bundle-aware tools, travel-wait offload, furnace fuel fallback; 1.1.205 (2026-09-04)
 
 Bradley picked items 1–5 from the "what else can you work through" list. Same loop: scope → implement

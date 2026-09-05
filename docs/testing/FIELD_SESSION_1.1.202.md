@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.204-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.205-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.204** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.205** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -13,7 +13,7 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 - Every item has three sub-lines: **Bradley does** / **Claude watches for** / **Pass when**.
 - Record-keeping rule inherited from `SOUL_COMMUNICATION_PILOT.md`: log **correlation ids and outcomes, never message bodies**.
 - Related runbooks — link, don't duplicate: [`SOUL_COMMUNICATION_PILOT.md`](SOUL_COMMUNICATION_PILOT.md) (its "Manual — to be executed in-game" section is still the authority for DM edge cases: disconnect/death/dimension, restart persistence, remote perception leakage, reserved deterministic routing) and [`IN_GAME_AUDIT_MASTER.md`](IN_GAME_AUDIT_MASTER.md) (Fast Daily Smoke + Full Reliability Sweep for the non-soul stack).
-- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `travel-wait`, `[guard-escape]`, `placed no blocks reason=`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
+- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `travel-wait`, `[guard-escape]`, `placed no blocks reason=`, `[furnace-offload]`, `pulled`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
 - Veto vocabulary in the log: `vetoed:cooldown`, `vetoed:salience`, `vetoed:danger`, `vetoed:roster-lost`, `vetoed:hard-reject`, `vetoed:changed-before-capture`, `vetoed:muted`.
 
 ---
@@ -360,6 +360,51 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Bradley does: put Jake in a boat with his sword outside the hotbar, spawn a zombie nearby.
   - Pass when: he does not swing a random item; either he dismounts and fights or stays passive —
     no wrong-item swings. Record what he did.
+
+---
+
+## Phase 6d — Loose ends (1.1.205): bundle reach, ambient offload, furnace fuel
+
+- [ ] **Bundled cobblestone still gets a pillar (1.1.205)**
+  - Bradley does: put ALL of Jake's cobblestone in a bundle (none loose), wedge him in a 1×1×2 hole
+    with an open top while guarding.
+  - Claude watches for: `ensureAtSurface: Jake pulled N scaffold stack(s) out of bundles for pillar
+    recovery` then a successful pillar (no `placed no blocks`).
+  - Pass when: he pillars out; the bundle is lighter by the stacks used.
+- [ ] **Hand-bundled better pickaxe gets pulled (1.1.205)**
+  - Bradley does: give Jake a stone pickaxe loose and a diamond pickaxe INSIDE a bundle; `/bot skill
+    mining` on stone.
+  - Pass when: the diamond pickaxe appears loose and is the one in hand within the first few blocks;
+    no repeated extraction attempts (one stack moves once).
+- [ ] **Bundled armor equips only if better (1.1.205)**
+  - Bradley does: Jake wearing iron chestplate; put a leather chestplate in a bundle → nothing should
+    happen; then put a diamond chestplate in a bundle.
+  - Pass when: leather stays bundled; diamond is extracted and equipped on the next armor audit.
+- [ ] **Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205)**
+  - Bradley does: in a boat with the sword outside the hotbar, ask him to place a boat/minecart
+    (RideSync) or scoop water (farm) — both should refuse cleanly rather than use slot 0.
+  - Pass when: no wrong-item use; chat/log shows the action declined.
+- [ ] **Travel-wait offload to an existing chest (1.1.205)**
+  - Bradley does: hobbies OFF, inventory ≥85 % full, a registered chest within ~12 blocks; trigger the
+    cooldown wait (`/bot come` twice from far).
+  - Claude watches for: `travel-wait offloading to existing chest` ONCE, an AMBIENT task
+    `travel-wait-offload` starting, items landing in the chest, then `cooldown expired … retrying travel`.
+  - Pass when: exactly one offload walk; no head-swivel during the walk (auto-face suppressed); if he was
+    following you, follow resumes afterwards.
+- [ ] **Offload backoff on a full chest (1.1.205)**
+  - Bradley does: same, but the chest is completely full.
+  - Pass when: at most 2 attempts ≥60 s apart, then no more offload walks for that wait.
+- [ ] **`/bot stop` during the offload does not poison later offloads (1.1.205)**
+  - Bradley does: `/bot stop` mid-walk, then trigger a fresh wait later.
+  - Pass when: the later wait can still offload (the abort did not count as a failure).
+- [ ] **Furnace fuel fallback (1.1.205)**
+  - Bradley does: no chest anywhere near, no chest materials (take his planks below 32 and remove
+    logs), leaves + sticks in inventory, a furnace within 12 blocks (not in a protected zone); force an
+    offload (`/bot store` or a full-inventory drop sweep).
+  - Claude watches for: `[furnace-offload] Jake gave N item(s) to furnace at …`; chat "No chest nearby -
+    dropped fuel into a furnace instead."
+  - Pass when: leaves/sticks are in the furnace fuel slot, planks stayed at ≥32, nothing damageable or
+    bundled was given. Repeat with a furnace that already holds coal → he skips it.
 
 ---
 

@@ -3,7 +3,30 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-04 (late) — next session starts here
+## Session Handoff 2026-09-04 (latest) — next session starts here
+
+**State:** main = origin/main @ 1.1.206 (pushed, deployed to all three Prism instances). Suite 773 green.
+
+**Shipped in 1.1.206:** the four code follow-ups from the 1.1.205 review — ToolSelector/MiningTool swaps
+now happen on the server thread (scan off-thread, atomic re-validated swap, one retry); FarmSkill and
+BotActions hotbar targeting prefers the selected slot again; travel-wait offload latch is a 2-failure
+counter that ignores aborts; `getRecentSurfaceRecoveryFailureReason` never null. Phase 6d (1.1.205
+checks) added to the field checklist (108 items).
+
+**Field checks pending:** `docs/testing/FIELD_SESSION_1.1.202.md` Phases 6b/6c/6d; for 1.1.206 watch
+mining for a one-tick hitch before the first swing and any `slot moved` DEBUG lines.
+
+**Remaining autonomous candidates:** command pruning review (`look_player`, `direction reset`,
+Actions-tab Regroup duplicate); water location memory + fishing reach; crafting helper "report missing
+inputs"; ScaffoldService/LeafClearService extraction; FortifyVillageSkill Phase 2; ontology Phase 3 /
+second scripted-text personality (spec first).
+
+**Needs Bradley:** guided field session; woodcut fallback restart loop repro; doorway rework decision;
+ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-04 (late) — superseded
 
 **State:** main = origin/main @ 1.1.205 (pushed, deployed to all three Prism instances). Suite 767 green.
 
