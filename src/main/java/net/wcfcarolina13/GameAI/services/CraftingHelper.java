@@ -102,6 +102,7 @@ public final class CraftingHelper {
     // when multiple tool provisions all fail in quick succession.
     private static final Map<UUID, Long> CRAFT_TABLE_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_MSG_COOLDOWN_MS = 30_000L;
+    private static final Map<UUID, Long> UNKNOWN_CRAFT_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -220,6 +221,43 @@ public final class CraftingHelper {
         ChatUtils.sendSystemMessage(source, msg);
     }
 
+    /** Send an "I don't know how to craft X" message at most once per cooldown period per bot. */
+    private static void sendUnknownCraftNameOnce(ServerPlayerEntity bot, ServerCommandSource source, String item) {
+        if (source == null) return;
+        String label = (item == null || item.isBlank()) ? "that" : item.replace('_', ' ').trim();
+        String msg = "I don't know how to craft " + label + ".";
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(source, msg);
+            return;
+        }
+        Long last = UNKNOWN_CRAFT_MSG_COOLDOWN.get(bot.getUuid());
+        long now = System.currentTimeMillis();
+        if (last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS) return;
+        UNKNOWN_CRAFT_MSG_COOLDOWN.put(bot.getUuid(), now);
+        ChatUtils.sendSystemMessage(source, msg);
+    }
+
+    /** Registry path of an item, e.g. "oak_planks", for use in missing-material messages. */
+    private static String itemLabel(Item item) {
+        if (item == null) return "item";
+        Identifier id = Registries.ITEM.getId(item);
+        return id == null ? "item" : id.getPath();
+    }
+
+    /**
+     * Emit a "Can't craft X: need N more Y" line built from needed/have maps. Falls back to
+     * {@code fallback} when nothing actually reads as missing.
+     */
+    private static void reportMissing(ServerCommandSource source,
+                                      String thing,
+                                      Map<String, Integer> needed,
+                                      Map<String, Integer> have,
+                                      String fallback) {
+        if (source == null) return;
+        String msg = CraftingRequirementsPolicy.format(thing, CraftingRequirementsPolicy.missing(needed, have));
+        ChatUtils.sendSystemMessage(source, msg.isEmpty() ? fallback : msg);
+    }
+
     public static boolean craftCraftingTable(ServerCommandSource source, ServerPlayerEntity bot, ServerPlayerEntity commander, int amountRequested) {
         if (bot == null || source == null) {
             return false;
@@ -278,7 +316,10 @@ public final class CraftingHelper {
             case "planks", "plank" -> craftPlanks(bot, source, commander, amount, null);
             case "ladder", "ladders" -> craftLadders(bot, source, commander, amount);
             case "bed", "beds" -> craftBed(bot, source, commander, amount);
-            default -> 0;
+            default -> {
+                sendUnknownCraftNameOnce(bot, source, normalized);
+                yield 0;
+            }
         };
     }
 
@@ -424,7 +465,14 @@ public final class CraftingHelper {
             }
         }
         if (chosen == null) {
-            ChatUtils.sendSystemMessage(source, "Beds need 3 matching wool or enough string to make it, plus 3 planks per bed.");
+            int bestWool = 0;
+            for (BedRecipe recipe : recipes) {
+                bestWool = Math.max(bestWool, totals.getOrDefault(recipe.wool(), 0));
+            }
+            reportMissing(source, "bed",
+                    Map.of("matching wool", 3 * Math.max(1, amount)),
+                    Map.of("matching wool", bestWool),
+                    "Beds need 3 matching wool or enough string to make it, plus 3 planks per bed.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
@@ -433,7 +481,10 @@ public final class CraftingHelper {
         }
 
         if (!ensurePlanksAvailable(bot, source, 3 * amount)) {
-            ChatUtils.sendSystemMessage(source, "Beds need 3 planks per bed.");
+            reportMissing(source, "bed",
+                    Map.of("planks", 3 * Math.max(1, amount)),
+                    Map.of("planks", countPlanks(bot)),
+                    "Beds need 3 planks per bed.");
             return 0;
         }
 
@@ -450,7 +501,13 @@ public final class CraftingHelper {
         int maxByWool = woolCount / 3;
         int crafts = Math.min(amount, Math.min(maxByPlanks, maxByWool));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Beds need 3 wool + 3 planks per bed.");
+            Map<String, Integer> bedNeeded = new LinkedHashMap<>();
+            bedNeeded.put(itemLabel(woolItem), 3 * Math.max(1, amount));
+            bedNeeded.put("planks", 3 * Math.max(1, amount));
+            Map<String, Integer> bedHave = new LinkedHashMap<>();
+            bedHave.put(itemLabel(woolItem), woolCount);
+            bedHave.put("planks", plankCount);
+            reportMissing(source, "bed", bedNeeded, bedHave, "Beds need 3 wool + 3 planks per bed.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -624,7 +681,10 @@ public final class CraftingHelper {
         int targetTorches = Math.max(1, amountRequested);
         int craftsNeeded = (int) Math.ceil(targetTorches / 4.0);
         if (!ensureSticks(bot, source, craftsNeeded)) {
-            ChatUtils.sendSystemMessage(source, "Torches need sticks; I don't have enough.");
+            reportMissing(source, "torch",
+                    Map.of("stick", craftsNeeded),
+                    Map.of("stick", countItem(bot, Items.STICK)),
+                    "Torches need sticks; I don't have enough.");
             return 0;
         }
         ensureItemAvailable(bot, source, Items.COAL, craftsNeeded);
@@ -638,7 +698,14 @@ public final class CraftingHelper {
         int fuel = coal + charcoal;
         int crafts = Math.min(craftsNeeded, Math.min(sticks, fuel));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Torches need 1 stick and 1 coal/charcoal per craft.");
+            Map<String, Integer> torchNeeded = new LinkedHashMap<>();
+            torchNeeded.put("stick", craftsNeeded);
+            torchNeeded.put("coal or charcoal", craftsNeeded);
+            Map<String, Integer> torchHave = new LinkedHashMap<>();
+            torchHave.put("stick", sticks);
+            torchHave.put("coal or charcoal", fuel);
+            reportMissing(source, "torch", torchNeeded, torchHave,
+                    "Torches need 1 stick and 1 coal/charcoal per craft.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -713,7 +780,10 @@ public final class CraftingHelper {
             }
         }
         if (best == null || bestCount < 6) {
-            ChatUtils.sendSystemMessage(source, "I need 6 matching planks to craft a door.");
+            reportMissing(source, "door",
+                    Map.of("matching planks", 6),
+                    Map.of("matching planks", bestCount),
+                    "I need 6 matching planks to craft a door.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
@@ -726,7 +796,10 @@ public final class CraftingHelper {
         int availablePlanks = countItem(bot, best.plank());
         int crafts = Math.min(craftsNeeded, availablePlanks / 6);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "I need 6 matching planks per door craft.");
+            reportMissing(source, "door",
+                    Map.of(itemLabel(best.plank()), craftsNeeded * 6),
+                    Map.of(itemLabel(best.plank()), availablePlanks),
+                    "I need 6 matching planks per door craft.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -786,7 +859,10 @@ public final class CraftingHelper {
             }
         }
         if (best == null || bestCount < 4) {
-            ChatUtils.sendSystemMessage(source, "I need 4 matching planks to craft a fence.");
+            reportMissing(source, "fence",
+                    Map.of("matching planks", 4),
+                    Map.of("matching planks", bestCount),
+                    "I need 4 matching planks to craft a fence.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
@@ -804,7 +880,14 @@ public final class CraftingHelper {
         int plankCount = countItem(bot, best.plank());
         int crafts = Math.min(craftsNeeded, Math.min(plankCount / 4, sticks / 2));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Fences need 4 matching planks and 2 sticks per craft.");
+            Map<String, Integer> fenceNeeded = new LinkedHashMap<>();
+            fenceNeeded.put(itemLabel(best.plank()), craftsNeeded * 4);
+            fenceNeeded.put("stick", craftsNeeded * 2);
+            Map<String, Integer> fenceHave = new LinkedHashMap<>();
+            fenceHave.put(itemLabel(best.plank()), plankCount);
+            fenceHave.put("stick", sticks);
+            reportMissing(source, "fence", fenceNeeded, fenceHave,
+                    "Fences need 4 matching planks and 2 sticks per craft.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
