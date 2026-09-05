@@ -62,8 +62,12 @@ public final class TravelWaitService {
         long lastHobbyNudgeTick = Long.MIN_VALUE;
         /** Tick of the last OFFLOAD_EXISTING dispatch; MIN_VALUE until the first one. */
         long lastOffloadTick = Long.MIN_VALUE;
-        /** Latched once an offload attempt reports failure; no further offloads for this request. */
-        volatile boolean offloadFailed;
+        /**
+         * Count of offload attempts that ran to completion and moved nothing. An abort
+         * (e.g. {@code /bot stop}) is not counted — see the completion handler below. Dispatch
+         * stops once this reaches {@link TravelWaitPolicy#MAX_OFFLOAD_FAILURES}.
+         */
+        volatile int offloadFailures;
         TravelWaitPolicy.Action lastAction;
 
         PendingTravel(String label, BiConsumer<MinecraftServer, ServerPlayerEntity> retryTravel, long startedTick) {
@@ -201,8 +205,7 @@ public final class TravelWaitService {
                     // policy backoff+latch stops a chest that accepts nothing from being walked to
                     // over and over for the whole cooldown.
                     if (TravelWaitPolicy.shouldDispatchOffload(now, pending.lastOffloadTick,
-                            pending.offloadFailed)) {
-                        pending.lastOffloadTick = now;
+                            pending.offloadFailures, TravelWaitPolicy.MAX_OFFLOAD_FAILURES)) {
                         PendingTravel target = pending;
                         boolean started = TaskService.runAmbient(
                                 bot.getCommandSource(), bot, "travel-wait-offload",
@@ -210,14 +213,26 @@ public final class TravelWaitService {
                                     boolean moved = DropSweeper.attemptChestStoreExistingOnly(
                                             bot.getCommandSource(), bot);
                                     if (!moved) {
-                                        // Latch: nothing was accepted, so retrying is pure walking.
-                                        target.offloadFailed = true;
-                                        LOGGER.info("travel-wait offload accepted nothing for {}; "
-                                                + "no further offload attempts for this request",
-                                                bot.getName().getString());
+                                        if (TaskService.isAbortRequested(uuid)) {
+                                            // A stop/abort, not a real failure — don't count it
+                                            // toward the failure cap.
+                                            LOGGER.debug("travel-wait offload aborted for {}; "
+                                                    + "not counted as a failure",
+                                                    bot.getName().getString());
+                                        } else {
+                                            target.offloadFailures++;
+                                            LOGGER.info("travel-wait offload accepted nothing for {} "
+                                                    + "({}/{} failures)",
+                                                    bot.getName().getString(), target.offloadFailures,
+                                                    TravelWaitPolicy.MAX_OFFLOAD_FAILURES);
+                                        }
                                     }
                                 });
-                        if (!started) {
+                        if (started) {
+                            // Only stamp the throttle when the ambient slot actually took the task;
+                            // a busy slot must not cost this request its 60s retry window for nothing.
+                            pending.lastOffloadTick = now;
+                        } else {
                             LOGGER.debug("travel-wait offload not started for {} (slot busy)",
                                     bot.getName().getString());
                         }

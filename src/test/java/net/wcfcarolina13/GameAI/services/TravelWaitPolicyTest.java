@@ -158,4 +158,28 @@ class TravelWaitPolicyTest {
         // A world-time rewind must not lock the request out until the clock catches up.
         assertTrue(TravelWaitPolicy.shouldDispatchOffload(50L, 5000L, false));
     }
+
+    @Test
+    void offloadCounterUnderMaxAllowsDispatch() {
+        assertTrue(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE, 0,
+                TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
+        assertTrue(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE, 1,
+                TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
+    }
+
+    @Test
+    void offloadCounterAtMaxBlocksDispatch() {
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE,
+                TravelWaitPolicy.MAX_OFFLOAD_FAILURES, TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
+        // Even after the interval elapses, the failure count still blocks dispatch.
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(
+                1000L + TravelWaitPolicy.OFFLOAD_INTERVAL_TICKS * 10, 1000L,
+                TravelWaitPolicy.MAX_OFFLOAD_FAILURES, TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
+    }
+
+    @Test
+    void offloadCounterAboveMaxBlocksDispatch() {
+        assertFalse(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE,
+                TravelWaitPolicy.MAX_OFFLOAD_FAILURES + 1, TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
+    }
 }

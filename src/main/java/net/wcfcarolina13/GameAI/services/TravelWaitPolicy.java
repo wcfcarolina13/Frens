@@ -34,6 +34,14 @@ public final class TravelWaitPolicy {
     /** Maximum times a queued travel may be retried before the request is dropped. */
     public static final int MAX_TRAVEL_RETRIES = 3;
 
+    /**
+     * Maximum recorded offload failures before a request stops dispatching further offload
+     * attempts. A single false result from the offload attempt (chest full, or a transient walk
+     * failure such as an abort) is not distinguishable from "this chest never accepts anything",
+     * so a permanent latch on one failure is too aggressive; this caps the retries instead.
+     */
+    public static final int MAX_OFFLOAD_FAILURES = 2;
+
     private TravelWaitPolicy() {
     }
 
@@ -88,16 +96,21 @@ public final class TravelWaitPolicy {
      *
      * <p>The action holds for as long as the inventory stays full and a chest is remembered nearby,
      * so without a backoff the service would walk the bot to the same chest every tick. Two gates:
-     * a {@link #OFFLOAD_INTERVAL_TICKS} interval, and a hard latch — once an offload attempt has
-     * reported failure (a chest that accepts nothing) the request never dispatches again and falls
-     * back to HOBBY/WAIT.
+     * a {@link #OFFLOAD_INTERVAL_TICKS} interval, and a failure counter — once
+     * {@code offloadFailures} reaches {@code maxFailures} the request stops dispatching and falls
+     * back to HOBBY/WAIT. A false result from a single offload attempt (chest full, or a transient
+     * walk failure) is counted rather than latching permanently on the first one; an abort
+     * (e.g. {@code /bot stop}) is not counted at all — the caller only increments the counter when
+     * the offload ran to completion and moved nothing.
      *
      * @param nowTick         current world tick
      * @param lastOffloadTick tick of the last dispatch, or {@link Long#MIN_VALUE} when never
-     * @param offloadFailed   true once an offload attempt returned false
+     * @param offloadFailures number of prior offload attempts that reported failure
+     * @param maxFailures     failures at/above which no further dispatch is allowed
      */
-    public static boolean shouldDispatchOffload(long nowTick, long lastOffloadTick, boolean offloadFailed) {
-        if (offloadFailed) {
+    public static boolean shouldDispatchOffload(long nowTick, long lastOffloadTick, int offloadFailures,
+                                                 int maxFailures) {
+        if (offloadFailures >= maxFailures) {
             return false;
         }
         if (lastOffloadTick == Long.MIN_VALUE) {
@@ -106,6 +119,20 @@ public final class TravelWaitPolicy {
         long elapsed = nowTick - lastOffloadTick;
         // A world-time rewind (negative elapsed) re-arms rather than locking the request out.
         return elapsed < 0 || elapsed >= OFFLOAD_INTERVAL_TICKS;
+    }
+
+    /**
+     * Legacy 3-arg form kept for callers/tests still using the boolean latch. Delegates to the
+     * counter-based rule: a latched failure reads as {@link #MAX_OFFLOAD_FAILURES} failures (blocks
+     * immediately), no failure reads as zero.
+     *
+     * @deprecated prefer {@link #shouldDispatchOffload(long, long, int, int)}, which distinguishes
+     *             a transient failure from a permanent one instead of latching on the first false.
+     */
+    @Deprecated
+    public static boolean shouldDispatchOffload(long nowTick, long lastOffloadTick, boolean offloadFailed) {
+        return shouldDispatchOffload(nowTick, lastOffloadTick,
+                offloadFailed ? MAX_OFFLOAD_FAILURES : 0, MAX_OFFLOAD_FAILURES);
     }
 
     public static boolean shouldNudgeHobby(Inputs in) {
