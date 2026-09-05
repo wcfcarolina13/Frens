@@ -99,6 +99,33 @@ public final class WaterSpotMemory {
         return List.copyOf(out);
     }
 
+    /**
+     * Like {@link #add}, but the cap is applied <b>per kind</b>: only spots sharing
+     * {@code spot.kind()} compete for {@code capPerKind} slots, and entries of other
+     * kinds are carried through untouched.
+     *
+     * <p>Scores are not comparable across kinds ({@code FishingSkill} stores negated
+     * costs, roughly -5..-20, while irrigation stores +1.0), so a shared cap with a
+     * score-descending trim would evict every fishing spot first.
+     */
+    public static List<WaterSpot> addPerKind(List<WaterSpot> spots, WaterSpot spot, int capPerKind) {
+        if (spot == null) {
+            return List.copyOf(copy(spots));
+        }
+        List<WaterSpot> sameKind = new ArrayList<>();
+        List<WaterSpot> otherKinds = new ArrayList<>();
+        for (WaterSpot s : copy(spots)) {
+            if (java.util.Objects.equals(s.kind(), spot.kind())) {
+                sameKind.add(s);
+            } else {
+                otherKinds.add(s);
+            }
+        }
+        List<WaterSpot> out = new ArrayList<>(otherKinds);
+        out.addAll(add(sameKind, spot, capPerKind));
+        return List.copyOf(out);
+    }
+
     /** Drops spots older than {@code maxAgeTicks}. Non-positive ages keep everything. */
     public static List<WaterSpot> prune(List<WaterSpot> spots, long nowTick, long maxAgeTicks) {
         List<WaterSpot> out = copy(spots);

@@ -924,7 +924,7 @@ public final class BotHomeService {
     // Score convention matches WaterSpotMemory: higher = better.
     // ------------------------------------------------------------------
 
-    /** Max remembered water spots per bot per world. */
+    /** Max remembered water spots per bot per world, applied per kind (fishing / irrigation). */
     private static final int WATER_SPOT_CAP = 16;
     /** Forget spots unused for ~14 in-game days. */
     private static final long WATER_SPOT_MAX_AGE_TICKS = 24_000L * 14L;
@@ -945,8 +945,10 @@ public final class BotHomeService {
                 wd.waterSpotsByBot = new HashMap<>();
             }
             List<WaterSpotMemory.WaterSpot> current = fromSaved(wd.waterSpotsByBot.get(botId));
+            // spot.lastUsedTick() is "now" for pruning: both callers (FishingSkill,
+            // FarmSkill) stamp the spot with the current world time when recording it.
             current = WaterSpotMemory.prune(current, spot.lastUsedTick(), WATER_SPOT_MAX_AGE_TICKS);
-            current = WaterSpotMemory.add(current, spot, WATER_SPOT_CAP);
+            current = WaterSpotMemory.addPerKind(current, spot, WATER_SPOT_CAP);
             wd.waterSpotsByBot.put(botId, toSaved(current));
         }
         flush();

@@ -105,4 +105,36 @@ class WaterSpotMemoryTest {
         withNullElement.add(null);
         assertTrue(WaterSpotMemory.rank(withNullElement, 0, 0, 0, 0L).isEmpty());
     }
+
+    @Test
+    void addPerKindCapsEachKindIndependently() {
+        List<WaterSpot> acc = List.of();
+        // Two irrigation spots (score +1.0) plus three fishing spots (negated costs).
+        for (int i = 0; i < 2; i++) {
+            acc = WaterSpotMemory.addPerKind(acc,
+                    new WaterSpot(i * 20, 64, 500, 1.0, 100L, WaterSpotMemory.KIND_IRRIGATION), 2);
+        }
+        for (int i = 0; i < 3; i++) {
+            acc = WaterSpotMemory.addPerKind(acc, spot(i * 20, 0, -5.0 - i, 100L + i), 2);
+        }
+        long fishing = acc.stream().filter(s -> WaterSpotMemory.KIND_FISHING.equals(s.kind())).count();
+        long irrigation = acc.stream().filter(s -> WaterSpotMemory.KIND_IRRIGATION.equals(s.kind())).count();
+        assertEquals(2, fishing, "fishing kind trimmed to its own cap, not evicted wholesale");
+        assertEquals(2, irrigation, "irrigation entries untouched by a fishing insert");
+    }
+
+    @Test
+    void addPerKindDedupesWithinKindAndIsNullSafe() {
+        List<WaterSpot> acc = WaterSpotMemory.addPerKind(List.of(), spot(0, 0, -8.0, 10L), 16);
+        acc = WaterSpotMemory.addPerKind(acc, spot(1, 0, -3.0, 50L), 16);
+        assertEquals(1, acc.size(), "nearby same-kind spots merge");
+        assertEquals(-3.0, acc.get(0).score(), 1e-9, "better (higher) score wins");
+        assertEquals(50L, acc.get(0).lastUsedTick(), "newer tick wins");
+
+        acc = WaterSpotMemory.addPerKind(acc,
+                new WaterSpot(1, 64, 0, 1.0, 60L, WaterSpotMemory.KIND_IRRIGATION), 16);
+        assertEquals(2, acc.size(), "different kind at the same spot is kept separately");
+        assertEquals(1, WaterSpotMemory.addPerKind(null, spot(0, 0, 1.0, 1L), 16).size());
+        assertTrue(WaterSpotMemory.addPerKind(null, null, 16).isEmpty());
+    }
 }

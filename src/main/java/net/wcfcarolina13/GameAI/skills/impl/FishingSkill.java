@@ -1787,6 +1787,13 @@ public final class FishingSkill implements Skill {
         return hit.getType() == HitResult.Type.MISS;
     }
 
+    /**
+     * Cheap "is there any water worth scanning nearby?" check used only on the
+     * give-up path to pick the failure message.  Shares the column pre-filter
+     * used by {@link #findFishingSpot} (one surface probe per (x,z) column,
+     * nearest-first) and returns on the first hit instead of sweeping the whole
+     * radius volume.
+     */
     private static boolean hasNearbyWater(ServerPlayerEntity bot, int radius) {
         if (bot == null) {
             return false;
@@ -1796,20 +1803,28 @@ public final class FishingSkill implements Skill {
             return false;
         }
         BlockPos origin = bot.getBlockPos();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                for (int dy = -WATER_SEARCH_Y_SPAN; dy <= WATER_SEARCH_Y_SPAN; dy++) {
-                    BlockPos pos = origin.add(dx, dy, dz);
-                    if (!world.isChunkLoaded(pos)) {
-                        continue;
-                    }
-                    if (world.getFluidState(pos).isIn(FluidTags.WATER)) {
-                        return true;
-                    }
-                }
+        for (int[] off : nearestColumnOffsets(radius)) {
+            if (findOpenWaterSurfaceAt(world, origin.getX() + off[0], origin.getZ() + off[1],
+                    origin.getY(), WATER_SEARCH_Y_SPAN) != null) {
+                return true;
             }
         }
         return false;
+    }
+
+    /** (dx, dz) offsets within {@code radius}, ordered by horizontal distance from the origin. */
+    private static List<int[]> nearestColumnOffsets(int radius) {
+        if (radius < 0) {
+            return List.of();
+        }
+        List<int[]> offsets = new ArrayList<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                offsets.add(new int[]{dx, dz});
+            }
+        }
+        offsets.sort(Comparator.comparingInt(o -> o[0] * o[0] + o[1] * o[1]));
+        return offsets;
     }
 
     /**
@@ -1822,16 +1837,8 @@ public final class FishingSkill implements Skill {
         if (world == null || origin == null || radius < 0) {
             return List.of();
         }
-        List<int[]> offsets = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                offsets.add(new int[]{dx, dz});
-            }
-        }
-        offsets.sort(Comparator.comparingInt(o -> o[0] * o[0] + o[1] * o[1]));
-
         List<BlockPos> columns = new ArrayList<>();
-        for (int[] off : offsets) {
+        for (int[] off : nearestColumnOffsets(radius)) {
             BlockPos surface = findOpenWaterSurfaceAt(world, origin.getX() + off[0], origin.getZ() + off[1],
                     origin.getY(), ySpan);
             if (surface != null) {

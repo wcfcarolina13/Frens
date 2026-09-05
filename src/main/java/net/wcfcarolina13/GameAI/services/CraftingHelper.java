@@ -102,7 +102,10 @@ public final class CraftingHelper {
     // when multiple tool provisions all fail in quick succession.
     private static final Map<UUID, Long> CRAFT_TABLE_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_MSG_COOLDOWN_MS = 30_000L;
+    // Separate cooldown for the "I don't know how to craft X" message. Evicted for a bot
+    // as soon as any craftGeneric call succeeds, so the map does not grow unbounded.
     private static final Map<UUID, Long> UNKNOWN_CRAFT_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long UNKNOWN_CRAFT_MSG_COOLDOWN_MS = 30_000L;
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -232,7 +235,7 @@ public final class CraftingHelper {
         }
         Long last = UNKNOWN_CRAFT_MSG_COOLDOWN.get(bot.getUuid());
         long now = System.currentTimeMillis();
-        if (last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS) return;
+        if (last != null && (now - last) < UNKNOWN_CRAFT_MSG_COOLDOWN_MS) return;
         UNKNOWN_CRAFT_MSG_COOLDOWN.put(bot.getUuid(), now);
         ChatUtils.sendSystemMessage(source, msg);
     }
@@ -281,6 +284,21 @@ public final class CraftingHelper {
                                    String item,
                                    int amount,
                                    String materialPreference) {
+        int crafted = craftGenericInternal(source, bot, commander, item, amount, materialPreference);
+        if (crafted > 0 && bot != null) {
+            // Any successful craft clears the unknown-name message cooldown for this bot,
+            // which is also the only eviction path for that map.
+            UNKNOWN_CRAFT_MSG_COOLDOWN.remove(bot.getUuid());
+        }
+        return crafted;
+    }
+
+    private static int craftGenericInternal(ServerCommandSource source,
+                                            ServerPlayerEntity bot,
+                                            ServerPlayerEntity commander,
+                                            String item,
+                                            int amount,
+                                            String materialPreference) {
         String normalized = item == null ? "" : item.toLowerCase(Locale.ROOT).trim().replace(' ', '_');
         if (normalized.endsWith("_planks")) {
             Item target = Registries.ITEM.get(Identifier.of("minecraft", normalized));
