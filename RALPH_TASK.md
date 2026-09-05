@@ -3,7 +3,29 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-04 (latest) — next session starts here
+## Session Handoff 2026-09-05 — next session starts here
+
+**State:** main = origin/main @ 1.1.207 (pushed, deployed to all three Prism instances). Suite 795 green.
+
+**Shipped in 1.1.207:** command pruning review (both commands kept with evidence; README name fixed;
+Actions-tab Regroup duplicate removed); crafting refusals report exactly what is missing
+(`CraftingRequirementsPolicy`) and unknown names are no longer silent; `WaterSpotMemory` per world
+(shared by fishing + farming, per-kind cap 16) and fishing water search 12→28 with a column pre-filter.
+Details + field checks in `changelog.md`.
+
+**Field checks pending:** `docs/testing/FIELD_SESSION_1.1.202.md` Phases 6b/6c/6d plus the 1.1.205–1.1.207
+lists in the changelog (add Phases 6e/6f when convenient).
+
+**Remaining autonomous candidates:** ScaffoldService/LeafClearService extraction; FortifyVillageSkill
+Phase 2 (`FortifySharedContext`); ontology Phase 3 / second scripted-text personality (spec first);
+`BotHomeService.flush()` debounce (sync whole-file write on every mutator).
+
+**Needs Bradley:** guided field session; woodcut fallback restart loop repro; doorway rework decision;
+ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-04 (latest) — superseded
 
 **State:** main = origin/main @ 1.1.206 (pushed, deployed to all three Prism instances). Suite 773 green.
 
@@ -190,7 +212,7 @@ track is validation-bound before anything new starts. Suite 621 green.
       whole. Design interview + spec first (`docs/superpowers/specs/`), then plan, then implement.
       ✅ 2026-09-04 (1.1.201) — phase 1 shipped as the memory digest; field-test pending.
 - [ ] **Action requests** — follows consolidation.
-- [ ] Smaller candidates named in specs but not built: second soul personality (engagement spec calls
+- [x] Smaller candidates named in specs but not built: second soul personality (engagement spec calls
       it the highest-leverage follow-up), ontology Phase 3 (bot↔bot stance, typed relation facts,
       structured output, novelty rejection), Pocket voice cloning (HF-gated), per-player voice mute
       masks (gated on the stubbed config sync — see Multiplayer Voice Muting below).
@@ -675,7 +697,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Commands / UX
 
-- [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed
+- [x] **Command pruning review** ✅ 1.1.207 — both KEPT (only yaw-setter; only WorkDirection reset); README name fixed
 - [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments
 - [ ] **Base Manager UX polish (carry-forward from 2026-04-20)**: the menu mixes registered bases (yellow `[Base]`) with lodestone compasses (white rows) in one flat list, and `[Home]` means two different things depending on row color. Even the dev got confused. A minimal inline legend landed in 1.1.39 and a "Home & Bases Explained" guide topic was added, but the full fix is: (a) sort rows so registered bases come first, lodestones second; (b) insert section headers (`Registered Bases`, `Lodestone Compasses`); (c) on row hover, show a one-line tooltip describing what clicking `Set Home` will do for that row type; (d) when the user clicks `Set Home` on a row, echo the stored label back in chat (`Jake will treat 'home' as home.`) — so they can immediately verify it took.
 - [x] **Named-hostile-mob pacifism (from 2026-04-20 backlog)** — implemented in `aeef62a` (1.1.55). `BotCombatPolicyService.shouldBotAttack` gates engagement; named hostiles still appear in scans so flee fires on damage; per-bot `attackNamedMobs` opt-in toggle reachable via `/bot attack_named_mobs <on|off|toggle> [target]` and the Admin tab "Attack Named Mobs" row. **Manual in-game verification still pending** — see the 6-item test plan in the 2026-05-06 session notes at the top of this file.
@@ -699,8 +721,8 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Verify leaf-block clearing when navigating far from shoreline
 - [ ] Verify fishing from higher vertical positions (cliffs/piers)
 - [ ] In-game check: trigger `/bot fish` while bot is swimming/submerged and verify it relocates to dry shore before first cast
-- [ ] **Fishing reach**: Extend "near water" search/acceptance radius
-- [ ] **Water location memory**: Store/recall known water locations
+- [x] **Fishing reach** ✅ 1.1.207 — 12→28, ±3, column pre-filter
+- [x] **Water location memory** ✅ 1.1.207 — `WaterSpotMemory` in BotHomeService.WorldData, shared with farming
 
 ### Combat & Safety
 
@@ -715,7 +737,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 ### Crafting & Building
 
 - [ ] Craft common items (armor, torches, etc.)
-- [ ] Crafting helper: detect required inputs in bot inventory and report missing items
+- [x] Crafting helper: report missing items ✅ 1.1.207 (`CraftingRequirementsPolicy`; torches/bed/door/fence + unknown names)
 - [ ] Crafting table craft: craft when inputs exist; announce success or missing items in chat
 - [ ] Placement: place crafted table/furnace/chest near commander safely
 - [ ] Build walls (specified materials, dimensions)

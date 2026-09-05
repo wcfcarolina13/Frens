@@ -2,6 +2,44 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Command pruning review, crafting "what's missing" messages, water spot memory + fishing reach; 1.1.207 (2026-09-05)
+
+Items 1–3 from the remaining-candidates list. Same loop: scope → implement → batch review → fix.
+
+- **Command pruning review (commit `9fb8fa1`).** Both candidates KEPT with evidence: `look_player`
+  is the only command that sets bot yaw, and `StripMineSkill` falls back to the bot's facing when no
+  work direction is stored; `direction reset` is the sole caller of `WorkDirectionService.
+  resetDirection`, consumed by StripMine/CollectDirt/Burrow. README named it `/bot reset_direction`,
+  which does not exist — fixed to `/bot direction reset`. The Actions-tab ("Orders & Travel") Regroup
+  entry is gone (it dispatched the identical `COMPANION_COME` as the Spells-tab one); the dead
+  skill-side tooltip case went with it.
+- **Crafting refusals say what is missing (commit `8baf140`; P2).** Pure
+  `CraftingRequirementsPolicy.missing(needed, have)` + `format(...)` → `Can't craft bed: need 2 more
+  white wool, 3 more planks`. Wired at torches, bed, door, fence (return values and arithmetic
+  unchanged; falls back to the old string if nothing computes as missing); the silent `default -> 0`
+  for unknown names now says `I don't know how to craft <item>.` once per 30 s per bot. Mass nouns
+  (wool, coal, charcoal, leather, string, wood, glass, iron, gold) are not pluralised. 11 tests.
+  Note: bed "have" counts include nearby chests at the first refusal (that is what `totals` means)
+  but inventory-only at the later two.
+- **Water spot memory + fishing reach (commit `c67420a`; P2).** Pure `WaterSpotMemory` (dedupe
+  within 4 blocks keeping the better score, cap 16, prune by age, rank by distance − 2·score + age;
+  9 tests) persisted per world in `BotHomeService.WorldData.waterSpotsByBot` (14-day retention).
+  FishingSkill tries up to three ranked remembered "fishing" spots within 64 blocks before scanning
+  (revalidates; forgets on failure) and records the spot it fishes; FarmSkill records its irrigation
+  source and consults memory (both kinds, 48 blocks) before giving up. Fishing scan radius 12 → 28
+  and ±2 → ±3, now a nearest-first column probe (`findOpenWaterSurfaceAt`, cap 320 columns) instead
+  of a volume walk. Score convention: memory is higher = better; fishing's stand cost is negated on
+  the way in. Renaming a bot loses its memory, same as every other per-bot WorldData map.
+- **Review fixes (commit `a03ca78`).** The fishing give-up path reuses the column scan instead of a
+  second 57×57×7 sweep (`nearestColumnOffsets` shared helper, early exit); the unknown-craft cooldown
+  has its own constant and is evicted on a successful craft; the water-spot cap is per kind
+  (`WaterSpotMemory.addPerKind`) so irrigation's flat +1.0 no longer evicts fishing's negated costs.
+- Tests 773 → 795.
+- **Field checks:** `/bot craft bed` with 1 wool → the exact "need 2 more" line; `/bot craft
+  spaceship` → one "don't know how" line, not repeated within 30 s; fish once, walk 40 blocks away
+  out of sight of water, `/bot fish` → he walks back to the remembered spot; farm setup records the
+  bucket source and reuses it next time; the Actions tab has no Regroup, the Spells tab still does.
+
 ## Follow-ups from the 1.1.205 review: on-thread tool swaps, hotbar target parity, offload latch, reason contract; 1.1.206 (2026-09-04)
 
 Bradley said "move on the followup" — the four code follow-ups the 1.1.205 handoff named, plus
