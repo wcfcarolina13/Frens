@@ -73,7 +73,7 @@ import java.util.zip.CRC32;
  *   /bot fortify name <old> <new>    — rename a saved wall
  *   /bot fortify merge <name>        — merge current village into existing wall
  */
-public final class FortifyVillageSkill implements Skill, FortifySkillOps.FortifyNavOps {
+public final class FortifyVillageSkill implements Skill, FortifySkillOps.FortifyNavOps, FortifySkillOps.FortifyTowerContext {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
     private static final double REACH_DISTANCE_SQ = 20.25D;
@@ -122,10 +122,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST = 10;
     private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_XZ = 2;
     private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_Y = 8;
-    private static final int FORTIFY_MANDATORY_REPLACE_RETRIES = 2;
-    private static final long FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS = 60L;
-    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS = 2;
-    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 12;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
 
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
@@ -159,10 +155,32 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private FortifyNavRuntimeScope activeFortifyNavScope = null;
     private long fortifyMovementEpoch = 0L;
     private boolean fortifyReplanActive = false;
+
+    @Override
+    public boolean isFortifyReplanActive() {
+        return fortifyReplanActive;
+    }
+
+    @Override
+    public void setFortifyReplanActive(boolean active) {
+        fortifyReplanActive = active;
+    }
+
+    @Override
+    public long bumpFortifyMovementEpoch() {
+        return ++fortifyMovementEpoch;
+    }
+
+    @Override
+    public long getFortifyMovementEpoch() {
+        return fortifyMovementEpoch;
+    }
     /** Tower vertices that yielded zero progress in the current auto-patch session — skip on next pass. */
     private final Set<Long> zeroProgressTowerVertices = new HashSet<>();
     /** Deferred cleanup queue, throttle state, and task-state helpers. */
     private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper();
+    /** Deferred-cleanup queue processing + mined-block replacement (extracted from this skill). */
+    private final FortifyCleanupProcessor cleanupProcessor = new FortifyCleanupProcessor(this, cleanupHelper, this);
     /** Layout query helper: block satisfaction, material fallbacks, edge ordering. */
     private final FortifyLayoutHelper layoutHelper = new FortifyLayoutHelper(ignoredCavityPositions);
     /** Escape/precipice-defense helper: hole escape, footing patches, shaft clearing. */
@@ -173,7 +191,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return activeFortifyNavScope;
     }
 
-    private FortifyNavRuntimeScope beginFortifyNavScope(String context,
+    @Override
+    public FortifyNavRuntimeScope beginFortifyNavScope(String context,
                                                         TowerNavAttemptState towerState,
                                                         WallPoint towerVertex,
                                                         BlockPos target,
@@ -189,7 +208,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return prior;
     }
 
-    private void endFortifyNavScope(ServerPlayerEntity bot, ServerWorld world, FortifyNavRuntimeScope prior) {
+    @Override
+    public void endFortifyNavScope(ServerPlayerEntity bot, ServerWorld world, FortifyNavRuntimeScope prior) {
         FortifyNavRuntimeScope scope = activeFortifyNavScope;
         try {
             if (scope != null && scope.carveSession != null) {
@@ -238,7 +258,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
     }
 
-    private void runWithFortifyTowerNavScope(ServerPlayerEntity bot, ServerWorld world,
+    @Override
+    public void runWithFortifyTowerNavScope(ServerPlayerEntity bot, ServerWorld world,
                                              String context,
                                              TowerNavAttemptState towerState,
                                              WallPoint towerVertex,
@@ -3739,7 +3760,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     // ── Block placement ─────────────────────────────────────────
 
-    private BotActions.PlaceResult tryPlaceBlock(ServerPlayerEntity bot, ServerWorld world,
+    @Override
+    public BotActions.PlaceResult tryPlaceBlock(ServerPlayerEntity bot, ServerWorld world,
                                                   BlockPos pos, BlockState targetState) {
         BlockState current = world.getBlockState(pos);
         if (current.equals(targetState)) {
@@ -4804,26 +4826,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return new ArrayList<>(offsets);
     }
 
-    private boolean tryRecoverTowardDeferredCleanup(ServerPlayerEntity bot, ServerWorld world, DeferredCleanupTask task) {
-        if (bot == null || world == null || task == null || task.pos == null) return false;
-        if (task.kind != FortifyCleanupKind.SCAFFOLD_REMOVE && task.kind != FortifyCleanupKind.CARVE_REPAIR) return false;
-        if (task.attempts < FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS) return false;
-        double distSq = bot.getBlockPos().getSquaredDistance(task.pos);
-        if (distSq > (double) (FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST * FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST)) {
-            return false;
-        }
-        BlockPos before = bot.getBlockPos();
-        walkTowardBlock(bot, task.pos, 700L);
-        if (!before.equals(bot.getBlockPos())) {
-            LOGGER.info("[FortifyCleanup] active-recovery moved toward {} pos={} from={} to={}",
-                    task.kind, task.pos.toShortString(), before.toShortString(), bot.getBlockPos().toShortString());
-            return true;
-        }
-        return false;
-    }
 
-
-    private boolean isTrapLikeCell(ServerWorld world, BlockPos pos) {
+    @Override
+    public boolean isTrapLikeCell(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) return false;
         VoxelJunctionService.VoxelStandCell cell = VoxelJunctionService.analyzeStandCell(world, pos);
         return cell.topology() == VoxelJunctionService.CellTopology.POCKET
@@ -4886,7 +4891,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return new CavityCheckResult(safe, airCount, spawnable);
     }
 
-    private boolean wouldRepairSealCurrentExit(ServerPlayerEntity bot, ServerWorld world, BlockPos repairPos) {
+    @Override
+    public boolean wouldRepairSealCurrentExit(ServerPlayerEntity bot, ServerWorld world, BlockPos repairPos) {
         if (bot == null || world == null || repairPos == null) return false;
         BlockPos botPos = bot.getBlockPos();
         if (botPos.equals(repairPos) || botPos.up().equals(repairPos)) {
@@ -5079,155 +5085,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 session.blocksMined, repaired, queued, session.cleanupState, session.completed);
     }
 
-    private void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
-        if (bot == null || world == null || cleanupHelper.queue.isEmpty()) {
-            return;
-        }
-        if ((SkillManager.shouldAbortSkill(bot) || bot.isRemoved()) && !cleanupHelper.isForcedContext(context)) {
-            return;
-        }
-        boolean forcePass = cleanupHelper.isForcedContext(context);
-        if (cleanupHelper.checkAndUpdateThrottle(forcePass)) return;
-        long now = System.currentTimeMillis();
-        boolean allowActiveRecoveryMovement = cleanupHelper.allowActiveRecovery(context);
-        int started = cleanupHelper.queue.size();
-        int repaired = 0;
-        int removedScaffold = 0;
-        int alreadyResolved = 0;
-        int skipped = 0;
-        int sealRiskSkips = 0;
-        Map<String, Integer> skipReasons = new LinkedHashMap<>();
-        for (Iterator<DeferredCleanupTask> it = cleanupHelper.queue.iterator(); it.hasNext(); ) {
-            DeferredCleanupTask task = it.next();
-            if (task == null || task.pos == null) {
-                it.remove();
-                continue;
-            }
-            if (task.nextEligibleMs > now) {
-                skipped++;
-                FortifyCleanupHelper.incrementReason(skipReasons, "backoffDeferred");
-                continue;
-            }
-            BlockPos pos = task.pos;
-            // Proximity skip: don't attempt items that are very far away — just defer them.
-            // The bot will pick them up when it's closer on a future pass.
-            double distSqToItem = bot.getBlockPos().getSquaredDistance(pos);
-            if (distSqToItem > 256.0D) { // > 16 blocks away
-                skipped++;
-                FortifyCleanupHelper.incrementReason(skipReasons, "tooFar");
-                continue;
-            }
-            if (task.kind == FortifyCleanupKind.CARVE_REPAIR) {
-                if (task.originalState == null) {
-                    it.remove();
-                    continue;
-                }
-                if (!world.getBlockState(pos).isAir()) {
-                    cleanupHelper.noteResolved(task);
-                    alreadyResolved++;
-                    it.remove();
-                    continue;
-                }
-                if (wouldRepairSealCurrentExit(bot, world, pos)) {
-                    cleanupHelper.noteSkip(task, "sealRisk");
-                    skipped++;
-                    sealRiskSkips++;
-                    FortifyCleanupHelper.incrementReason(skipReasons, "sealRisk");
-                    continue;
-                }
-                if (!isWithinReach(bot, pos)) {
-                    boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
-                    if (recovered && isWithinReach(bot, pos)) {
-                        now = System.currentTimeMillis();
-                    } else {
-                        cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
-                        skipped++;
-                        FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
-                        continue;
-                    }
-                }
-                if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                    boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
-                    if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                        cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
-                        skipped++;
-                        FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
-                        continue;
-                    }
-                }
-                ReplaceBlockResult replace = tryReplaceMinedBlock(bot, world, pos, task.originalState, task.mandatory,
-                        task.context != null ? task.context : context);
-                if (!world.getBlockState(pos).isAir()) {
-                    cleanupHelper.noteImmediateRetry(task, null);
-                    cleanupHelper.noteResolved(task);
-                    repaired++;
-                    it.remove();
-                } else {
-                    cleanupHelper.noteSkip(task, "replaceFail");
-                    skipped++;
-                    FortifyCleanupHelper.incrementReason(skipReasons, "replaceFail");
-                }
-                continue;
-            }
-
-            // Scaffold removal cleanup
-            BlockState current = world.getBlockState(pos);
-            if (current.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(current.getBlock().asItem())) {
-                ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                cleanupHelper.noteResolved(task);
-                alreadyResolved++;
-                it.remove();
-                continue;
-            }
-            if (!isWithinMiningReach(bot, pos)) {
-                boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
-                if (recovered && isWithinMiningReach(bot, pos)) {
-                    now = System.currentTimeMillis();
-                } else {
-                    cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
-                    skipped++;
-                    FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
-                    continue;
-                }
-            }
-            if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
-                if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                    cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
-                    skipped++;
-                    FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
-                    continue;
-                }
-            }
-            LookController.faceBlock(bot, pos);
-            sleepQuiet(30L);
-            boolean mined = digBlock(bot, world, pos);
-            BlockState after = world.getBlockState(pos);
-            if (mined && (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem()))) {
-                cleanupHelper.noteImmediateRetry(task, null);
-                ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                cleanupHelper.noteResolved(task);
-                removedScaffold++;
-                it.remove();
-            } else if (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem())) {
-                cleanupHelper.noteImmediateRetry(task, null);
-                ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                cleanupHelper.noteResolved(task);
-                alreadyResolved++;
-                it.remove();
-            } else {
-                cleanupHelper.noteSkip(task, "digFailed");
-                skipped++;
-                FortifyCleanupHelper.incrementReason(skipReasons, "digFailed");
-                continue;
-            }
-        }
-
-        if (started > 0) {
-            LOGGER.info("[FortifyCleanup] queue-process ctx={} started={} repaired={} scaffoldRemoved={} alreadyResolved={} skipped={} sealRiskSkips={} remaining={} reasons={}",
-                    context, started, repaired, removedScaffold, alreadyResolved, skipped, sealRiskSkips,
-                    cleanupHelper.queue.size(), FortifyCleanupHelper.formatReasonSummary(skipReasons));
-        }
+    @Override
+    public void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
+        cleanupProcessor.processDeferredFortifyCleanupQueue(bot, world, context);
     }
 
     /**
@@ -5255,114 +5115,24 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
     }
 
-    private ReplaceFailureKind classifyReplaceFailureKind(String reason) {
-        if (reason == null || reason.isBlank()) return ReplaceFailureKind.OTHER;
-        if (reason.startsWith("bot-intersects-target")) return ReplaceFailureKind.BOT_OCCUPIES;
-        if (reason.startsWith("out-of-reach")) return ReplaceFailureKind.OUT_OF_REACH;
-        if (reason.startsWith("no-line-of-sight")) return ReplaceFailureKind.LOS_BLOCKED;
-        if (reason.startsWith("no-block-item-available")) return ReplaceFailureKind.NO_MATERIAL;
-        return ReplaceFailureKind.OTHER;
+    ReplaceBlockResult tryReplaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                            BlockState originalState, boolean mandatory, String context) {
+        return cleanupProcessor.tryReplaceMinedBlock(bot, world, pos, originalState, mandatory, context);
     }
 
-    private ReplaceBlockResult tryReplaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
-                                                    BlockState originalState, boolean mandatory, String context) {
-        if (bot == null || world == null || pos == null || originalState == null) {
-            return new ReplaceBlockResult(false, ReplaceFailureKind.OTHER, "invalid-args");
-        }
-        if (!world.getBlockState(pos).isAir()) {
-            return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
-        }
-
-        Item originalItem = originalState.getBlock().asItem();
-        List<Item> replacements;
-        if (mandatory) {
-            Set<Item> seen = new LinkedHashSet<>();
-            if (originalItem != Items.AIR) seen.add(originalItem);
-            seen.addAll(FortifyLayoutHelper.STONE_BRICK_FALLBACKS);
-            seen.addAll(FortifyLayoutHelper.COBBLE_FALLBACKS);
-            replacements = new ArrayList<>(seen);
-        } else if (originalItem != Items.AIR) {
-            replacements = List.of(originalItem, Items.COBBLESTONE, Items.STONE, Items.DIRT);
-        } else {
-            replacements = List.of(Items.COBBLESTONE, Items.STONE, Items.DIRT);
-        }
-
-        int attempts = mandatory ? (1 + FORTIFY_MANDATORY_REPLACE_RETRIES) : 1;
-        ReplaceBlockResult last = new ReplaceBlockResult(false, ReplaceFailureKind.OTHER, "not-attempted");
-        for (int attempt = 1; attempt <= attempts; attempt++) {
-            if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(pos))) {
-                BlockPos safe = SafePositionService.findSafeNear(world, bot.getBlockPos(), 2);
-                if (safe != null && !safe.equals(bot.getBlockPos())) {
-                    walkToTarget(bot.getCommandSource(), bot, safe, 1000L);
-                }
-            }
-
-            BotActions.PlaceResult place = BotActions.tryPlaceBlockAt(bot, pos, Direction.UP, replacements, false);
-            if (place.success()) {
-                LOGGER.info("[FortifyNav] Replaced mined block at {}", pos.toShortString());
-                return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
-            }
-            ReplaceFailureKind kind = classifyReplaceFailureKind(place.reason());
-            last = new ReplaceBlockResult(false, kind, place.reason());
-
-            boolean finalAttempt = attempt >= attempts;
-            if (!finalAttempt && mandatory && last.retryable()) {
-                LookController.faceBlock(bot, pos);
-                if (kind == ReplaceFailureKind.OUT_OF_REACH
-                        && bot.getBlockPos().getSquaredDistance(pos)
-                        <= (double) (FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST * FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST)) {
-                    walkTowardBlock(bot, pos, 500L);
-                } else {
-                    BotActions.stop(bot);
-                }
-                sleepQuiet(FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS);
-                if (!world.getBlockState(pos).isAir()) {
-                    return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
-                }
-            }
-        }
-
-        // Fallback: bypass vanilla placement with direct setBlockState for mandatory repairs.
-        // This handles cases where blockItem.place() rejects placement due to entity collision,
-        // line-of-sight issues, or worker-thread read races on block state.
-        // Note: forceReplaceBlock has its own server-thread isAir() guard, so no outer check needed.
-        if (mandatory) {
-            BotActions.PlaceResult forced = BotActions.forceReplaceBlock(bot, pos, replacements);
-            if (forced.success() || !world.getBlockState(pos).isAir()) {
-                LOGGER.info("[FortifyNav] Force-replaced mined block at {} (bypassed vanilla placement)", pos.toShortString());
-                return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
-            }
-            LOGGER.warn("[FortifyNav] Force-replace also failed pos={} reason={}", pos.toShortString(), forced.reason());
-        }
-
-        String ctx = context == null ? "fortify-nav" : context;
-        if (mandatory) {
-            LOGGER.warn("[FortifyNav] replace-fail ctx={} pos={} mandatory=true reason={}",
-                    ctx, pos.toShortString(), last.reason());
-        } else {
-            LOGGER.debug("[FortifyNav] replace-fail ctx={} pos={} mandatory=false reason={}",
-                    ctx, pos.toShortString(), last.reason());
-        }
-        return last;
+    void queueMandatoryCarveRepairIfNeeded(ServerPlayerEntity bot, ServerWorld world,
+                                           BlockPos pos, BlockState originalState,
+                                           boolean mandatory, String context) {
+        cleanupProcessor.queueMandatoryCarveRepairIfNeeded(bot, world, pos, originalState, mandatory, context);
     }
 
-    private void queueMandatoryCarveRepairIfNeeded(ServerPlayerEntity bot, ServerWorld world,
-                                                   BlockPos pos, BlockState originalState,
-                                                   boolean mandatory, String context) {
-        if (!mandatory || pos == null || originalState == null) return;
-        if (world != null && !world.getBlockState(pos).isAir()) return;
-        String ctx = context == null ? "fortify-nav" : context;
-        cleanupHelper.queue(FortifyCleanupKind.CARVE_REPAIR, pos, originalState, true, ctx);
-    }
-
-    private void verifyCarveRepairColumn(ServerPlayerEntity bot, ServerWorld world,
-                                         BlockPos feetPos, BlockState feetOriginal, boolean feetMandatory,
-                                         BlockPos headPos, BlockState headOriginal, boolean headMandatory,
-                                         BlockPos overheadPos, BlockState overheadOriginal, boolean overheadMandatory,
-                                         String context) {
-        queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, context);
-        queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, context);
-        queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, context);
+    void verifyCarveRepairColumn(ServerPlayerEntity bot, ServerWorld world,
+                                 BlockPos feetPos, BlockState feetOriginal, boolean feetMandatory,
+                                 BlockPos headPos, BlockState headOriginal, boolean headMandatory,
+                                 BlockPos overheadPos, BlockState overheadOriginal, boolean overheadMandatory,
+                                 String context) {
+        cleanupProcessor.verifyCarveRepairColumn(bot, world, feetPos, feetOriginal, feetMandatory,
+                headPos, headOriginal, headMandatory, overheadPos, overheadOriginal, overheadMandatory, context);
     }
 
     /**
@@ -5370,9 +5140,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * wall material fallback lists and logs a warning on failure so auto-patch can
      * repair it. For non-layout blocks, best-effort with common materials.
      */
-    private boolean replaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
-                                      BlockState originalState, boolean mandatory) {
-        return tryReplaceMinedBlock(bot, world, pos, originalState, mandatory, "fortify-nav").success();
+    boolean replaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                              BlockState originalState, boolean mandatory) {
+        return cleanupProcessor.replaceMinedBlock(bot, world, pos, originalState, mandatory);
     }
 
     // ── Navigation ──────────────────────────────────────────────
@@ -5493,7 +5263,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      *
      * @return true if gate routing was performed (bot should now be outside the hull)
      */
-    private boolean navigateThroughGateIfNeeded(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public boolean navigateThroughGateIfNeeded(ServerCommandSource source, ServerPlayerEntity bot,
                                                  ServerWorld world, BlockPos target,
                                                  SurfaceProfile surfaceProfile) {
         FortificationLayout layout = this.currentLayout;
@@ -5888,7 +5659,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return new SurfaceProfile(referenceSurfaceY, plannedYByXZ);
     }
 
-    private int safeSurfaceY(SurfaceProfile profile, ServerWorld world, int x, int z) {
+    @Override
+    public int safeSurfaceY(SurfaceProfile profile, ServerWorld world, int x, int z) {
         int terrainY = VillageFortificationLayoutService.terrainY(world, x, z);
         return safeSurfaceY(profile.referenceSurfaceY(), profile.plannedYByXZ(), terrainY, x, z);
     }
@@ -5911,7 +5683,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return (int) Math.floor((px * dX + pz * dZ) / segSize);
     }
 
-    private int executeLocalPlacementBatch(ServerCommandSource source,
+    @Override
+    public int executeLocalPlacementBatch(ServerCommandSource source,
                                            ServerPlayerEntity bot,
                                            ServerWorld world,
                                            List<ProceduralWallBlock> blocks,
@@ -6127,7 +5900,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return placedCount + report.placedCount();
     }
 
-    private int countActivePlannedBlocks(List<ProceduralWallBlock> blocks) {
+    @Override
+    public int countActivePlannedBlocks(List<ProceduralWallBlock> blocks) {
         if (blocks == null || blocks.isEmpty()) {
             return 0;
         }
@@ -7737,7 +7511,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return false;
     }
 
-    private void repositionNearAnchor(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public void repositionNearAnchor(ServerCommandSource source, ServerPlayerEntity bot,
                                       ServerWorld world, BlockPos anchorPos, SurfaceProfile surfaceProfile,
                                       int attempt) {
         if (anchorPos == null) {
@@ -7963,7 +7738,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return fallback;
     }
 
-    private boolean canStandAt(ServerWorld world, BlockPos pos) {
+    @Override
+    public boolean canStandAt(ServerWorld world, BlockPos pos) {
         return VoxelJunctionService.isStandable(world, pos);
     }
 
@@ -8269,7 +8045,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return !before.equals(bot.getBlockPos());
     }
 
-    private boolean tryPostCarvePocketEscapeToward(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+    @Override
+    public boolean tryPostCarvePocketEscapeToward(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
         if (bot == null || world == null) return false;
         BlockPos start = bot.getBlockPos();
         VoxelJunctionService.VoxelStandCell startCell = VoxelJunctionService.analyzeStandCell(world, start);
@@ -8489,7 +8266,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
     }
 
-    private boolean tryUnwedgeFromTightSpace(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public boolean tryUnwedgeFromTightSpace(ServerCommandSource source, ServerPlayerEntity bot,
                                              ServerWorld world, SurfaceProfile surfaceProfile,
                                              BlockPos anchorPos, String context) {
         BlockPos botPos = bot.getBlockPos();
@@ -8659,7 +8437,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return FortifyEscapeHelper.dominantHorizontalDirection(from, to);
     }
 
-    private int countOpenExits(ServerWorld world, BlockPos center, BlockPos forcedSolidPos) {
+    @Override
+    public int countOpenExits(ServerWorld world, BlockPos center, BlockPos forcedSolidPos) {
         int exits = 0;
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos neighbor = center.offset(dir);
@@ -9472,11 +9251,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     // ── Helpers ─────────────────────────────────────────────────
 
-    private boolean isActiveFortifyBlock(ProceduralWallBlock block) {
+    @Override
+    public boolean isActiveFortifyBlock(ProceduralWallBlock block) {
         return layoutHelper.isActiveFortifyBlock(block);
     }
 
-    private boolean isPlannedBlockSatisfied(ProceduralWallBlock planned, BlockState current) {
+    @Override
+    public boolean isPlannedBlockSatisfied(ProceduralWallBlock planned, BlockState current) {
         return layoutHelper.isPlannedBlockSatisfied(planned, current);
     }
 
@@ -9486,11 +9267,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     /** Count how many planned blocks are satisfied by desired/fallback material state. */
-    private int countPresentBlocks(ServerWorld world, List<ProceduralWallBlock> allBlocks) {
+    @Override
+    public int countPresentBlocks(ServerWorld world, List<ProceduralWallBlock> allBlocks) {
         return layoutHelper.countPresentBlocks(world, allBlocks);
     }
 
-    private int countBuildingBlocks(ServerPlayerEntity bot) {
+    @Override
+    public int countBuildingBlocks(ServerPlayerEntity bot) {
         int count = 0;
         Set<Item> buildItems = Set.of(
                 Items.STONE_BRICKS, Items.COBBLESTONE, Items.STONE, Items.COBBLED_DEEPSLATE,
