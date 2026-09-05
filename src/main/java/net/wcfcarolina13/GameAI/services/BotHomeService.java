@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.wcfcarolina13.PlayerUtils.DebouncedWriter;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -26,6 +27,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Persisted "home" data used for returning to base.
@@ -212,17 +215,70 @@ public final class BotHomeService {
         }
     }
 
-    private static void flush() {
+    // ── Debounced persistence ────────────────────────────────────────────────
+    // Every mutator used to write the whole JSON file synchronously on the caller's thread —
+    // sometimes the server thread. Mutators now only mark the state dirty; the actual write
+    // lands on a daemon scheduler thread after 500 ms of quiet, and never later than 5 s after
+    // the first unflushed change. flushNow() forces a synchronous write (server stop).
+
+    private static final long WRITE_QUIET_MS = 500L;
+    private static final long WRITE_MAX_LATENCY_MS = 5_000L;
+
+    private static ScheduledExecutorService writeExecutor = newWriteExecutor();
+    private static DebouncedWriter writer = new DebouncedWriter(
+            BotHomeService::writeToDisk, WRITE_QUIET_MS, WRITE_MAX_LATENCY_MS, writeExecutor);
+
+    private static ScheduledExecutorService newWriteExecutor() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "frens-bot-home-writer");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** The actual whole-file write. Only ever called by {@link #writer}. */
+    private static void writeToDisk() {
         synchronized (LOCK) {
             try {
                 Path file = stateFile();
                 Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
-                    GSON.toJson(DATA, writer);
+                try (Writer out = Files.newBufferedWriter(file)) {
+                    GSON.toJson(DATA, out);
                 }
             } catch (IOException e) {
                 LOGGER.warn("Failed to save bot home data: {}", e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Marks the home data dirty. Cheap and safe from the server thread — the write is debounced.
+     * Keeps the historical name so every mutator call site is unchanged.
+     */
+    private static void flush() {
+        writer.markDirty();
+    }
+
+    /** Forces any pending write to disk synchronously on the calling thread. */
+    public static void flushNow() {
+        writer.flushNow();
+    }
+
+    /** Server-stop hook: flush pending state, then stop the writer thread. */
+    public static void shutdownExecutors() {
+        writer.shutdown();
+        writeExecutor.shutdownNow();
+    }
+
+    /**
+     * Server-start hook: re-arm the writer after a previous SERVER_STOPPING shut it down
+     * (integrated server exit-to-title + rejoin keeps static state alive). No-op if alive.
+     */
+    public static void restartExecutors() {
+        if (writeExecutor == null || writeExecutor.isShutdown()) {
+            writeExecutor = newWriteExecutor();
+            writer = new DebouncedWriter(
+                    BotHomeService::writeToDisk, WRITE_QUIET_MS, WRITE_MAX_LATENCY_MS, writeExecutor);
         }
     }
 
