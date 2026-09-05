@@ -272,10 +272,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
     }
 
-    private String fortifyContextPrefix(String navContext, FortifyNavRuntimeScope scope) {
-        return FortifyEntombmentHelper.fortifyContextPrefix(navContext, scope != null ? scope.context : null);
-    }
-
     private static long packXZ(int x, int z) {
         return FortifyExecutionPolicyUtil.packXZ(x, z);
     }
@@ -1180,11 +1176,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             ChatUtils.sendSystemMessage(source, "§7  Red particles show ignored cavities on the layout.");
         }
         return SkillExecutionResult.success("Reported ignored cavities.");
-    }
-
-    private SkillExecutionResult handleMerge(ServerCommandSource source, ServerPlayerEntity bot,
-                                              ServerWorld world, MinecraftServer server, String wallName) {
-        return handleExpand(source, bot, world, server, wallName, "merge");
     }
 
     private SkillExecutionResult handleDrift(ServerCommandSource source, ServerPlayerEntity bot,
@@ -3781,45 +3772,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
     }
 
-    private boolean digTemporarySurfaceEscapeRampBlock(ServerPlayerEntity bot, ServerWorld world,
-                                                       BlockPos pos, Set<Item> allowedRampItems) {
-        if (bot == null || world == null || pos == null) {
-            return false;
-        }
-        BlockState state = world.getBlockState(pos);
-        if (state.isAir()) return true;
-
-        if (allowedRampItems != null && !allowedRampItems.isEmpty()) {
-            Item item = state.getBlock().asItem();
-            if (!allowedRampItems.contains(item)) {
-                return false;
-            }
-        }
-
-        if (DIG_BLACKLIST.contains(state.getBlock())) return false;
-        if (state.getBlock() instanceof net.minecraft.block.DoorBlock) return false;
-        if (state.getBlock() instanceof net.minecraft.block.BedBlock) return false;
-        if (state.getBlock() instanceof FenceBlock) return false;
-        if (state.getBlock() instanceof FenceGateBlock) return false;
-        if (state.getBlock() instanceof WallBlock) return false;
-        if (state.getBlock() instanceof PaneBlock) return false;
-        if (state.getBlock() instanceof TrapdoorBlock) return false;
-        if (state.getHardness(world, pos) < 0) return false;
-
-        try {
-            CompletableFuture<String> result = MiningTool.mineBlock(bot, pos);
-            String outcome = awaitMiningOutcome(result, () -> SkillManager.shouldAbortSkill(bot),
-                    DIG_RESULT_TIMEOUT_MS, DIG_RESULT_POLL_MS);
-            if (outcome == null) {
-                return false;
-            }
-            return !outcome.startsWith("⚠️");
-        } catch (Exception e) {
-            LOGGER.debug("digTemporarySurfaceEscapeRampBlock failed at {}: {}", pos.toShortString(), e.getMessage());
-            return false;
-        }
-    }
-
     /**
      * Scans near the fortification perimeter for leftover scaffold pillars and mines them.
      * Detection: for each XZ column near hull vertices and edge midpoints, look for columns
@@ -3918,14 +3870,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      */
     // ── Break-through stuck recovery ─────────────────────────────
 
-    /**
-     * Check whether a non-layout block is safe to mine for navigation purposes.
-     * Rejects village structures, containers, and hazards.
-     */
-    private boolean isSafeToBreakForNavigation(ServerWorld world, BlockPos pos) {
-        return evaluateNonLayoutBreakForNavigation(world, pos).allowed();
-    }
-
     private NavBreakCandidateEval evaluateNonLayoutBreakForNavigation(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable()) return new NavBreakCandidateEval(false, NavBreakRejectReason.AIR_OR_REPLACEABLE);
@@ -3945,16 +3889,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
         if (state.getCollisionShape(world, pos).isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.NO_COLLISION);
         return new NavBreakCandidateEval(true, null);
-    }
-
-    /**
-     * Check whether a fortification layout block can be temporarily mined for navigation.
-     * More permissive than {@link #isSafeToBreakForNavigation} — allows layout blocks
-     * but still rejects unbreakable, fluid, and block-entity blocks.
-     * Callers MUST replace these blocks after walking through.
-     */
-    private boolean isLayoutBlockBreakableForNavigation(ServerWorld world, BlockPos pos) {
-        return evaluateLayoutBreakForNavigation(world, pos).allowed();
     }
 
     private NavBreakCandidateEval evaluateLayoutBreakForNavigation(ServerWorld world, BlockPos pos) {
@@ -5005,15 +4939,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     @Override
     public void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
         cleanupProcessor.processDeferredFortifyCleanupQueue(bot, world, context);
-    }
-
-    /**
-     * Unified check: can this block be mined for navigation?
-     * When {@code allowLayout} is false, only non-layout blocks pass.
-     * When {@code allowLayout} is true, layout blocks also pass (for wall traversal).
-     */
-    private boolean canBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
-        return evaluateBreakForNavigation(world, pos, allowLayout).allowed();
     }
 
     /** Mine a single block for navigation break-through. Thin wrapper around MiningTool. */
@@ -6362,27 +6287,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return escapeHelper.tryPatchFortifyFootingNearWorksite(bot, world, target, navContext, reason);
     }
 
-    private boolean isFortifyEscapeContext(String contextTag) {
-        return escapeHelper.isFortifyEscapeContext(contextTag);
-    }
-
-    private int countEscapeShaftBlockers(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb) {
-        return escapeHelper.countEscapeShaftBlockers(bot, world, stepsToClimb);
-    }
-
-    private int clearEscapeShaftHeadroom(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb, String contextTag) {
-        return escapeHelper.clearEscapeShaftHeadroom(bot, world, stepsToClimb, contextTag);
-    }
-
-    private int clearImmediateOverheadForEscape(ServerPlayerEntity bot, ServerWorld world) {
-        return escapeHelper.clearImmediateOverheadForEscape(bot, world);
-    }
-
-    private boolean tryPillarEscapeFirst(ServerPlayerEntity bot, ServerWorld world,
-                                         int referenceSurfaceY, String contextTag) {
-        return escapeHelper.tryPillarEscapeFirst(this, bot, world, referenceSurfaceY, contextTag);
-    }
-
     // ── Hole escape ──────────────────────────────────────────────
 
     /**
@@ -7066,14 +6970,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             LOGGER.debug("Walk to {} timed out at dist={}", target.toShortString(),
                     Math.sqrt(bot.squaredDistanceTo(targetVec)));
         }
-    }
-
-    private boolean moveToReachBlock(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
-        Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
-                bot, target, MovementService.MovementOptions.skillLoot());
-        if (plan.isEmpty()) return false;
-        MovementService.MovementResult result = MovementService.execute(source, bot, plan.get(), false, true, true, false);
-        return result.success();
     }
 
     @Override
