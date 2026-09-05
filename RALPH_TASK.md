@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-05 (late night) — next session starts here
 
-**State:** main = origin/main @ 1.1.210 (pushed; deploy status in the changelog entry). Suite 812 green.
+**State:** main = origin/main @ 1.1.210 (pushed, deployed to all three Prism instances). Suite 812 green.
 
 **Shipped in 1.1.210 (FortifyVillageSkill Phase 3, zero behaviour change):** `FortifyCarveContext extends
 FortifySharedContext` (3 methods) on `FortifySkillOps`; `FortifyCarveHelper` (983 lines: 4-arg
