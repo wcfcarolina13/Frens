@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.207-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.208-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.207** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.208** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -471,6 +471,40 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Bradley does: after the two items above, open `config/frens/bot_home_data.json` (or the
     equivalent BotHomeService file) → `waterSpotsByBot`.
   - Pass when: both a `fishing` and an `irrigation` entry are present for Jake with sane coordinates.
+
+---
+
+## Phase 6g — Zero-change refactors + debounced saves (1.1.208)
+
+These are regression checks: every item must behave exactly as it did on 1.1.207. Any difference is a
+fail, even an improvement — note it and move on.
+
+- [ ] **Leaf-blocked navigation unchanged (1.1.208)**
+  - Bradley does: `/bot come` through a dense leaf canopy (oak/jungle), twice.
+  - Claude watches for: the same bypass-then-mine sequence as before; the 1200 ms per-bot cooldown
+    still visible as the gap between leaf-mine attempts; no new exceptions mentioning `LeafClearService`.
+  - Pass when: he gets through with the same feel and roughly the same number of leaves broken.
+- [ ] **Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208)**
+  - Bradley does: fell a leafy tree so the cleanup pass runs.
+  - Claude watches for: per-attempt leaf cap unchanged (same count of "cleared leaf" lines per target);
+    decaying leaves still skipped.
+  - Pass when: cleanup completes; no leaf outside the old 3×3×3 sample box is touched.
+- [ ] **Bridge scaffold still clears snow (1.1.208)**
+  - Bradley does: woodcut across a snowy gap that needs a bridge.
+  - Pass when: snow layers and leaves on the line are cleared exactly as before (raycast hit only).
+- [ ] **CollectDirt ladder exit unchanged (1.1.208)**
+  - Bradley does: `/bot skill collect_dirt` where he digs a shaft deep enough to need ladders.
+  - Pass when: the ladder column goes in on the same support side as before and he climbs out.
+- [ ] **Home data survives a normal quit (1.1.208, debounce)**
+  - Bradley does: change something BotHomeService owns (set nav mode or sleep in a new bed), then quit
+    to title within 2 s.
+  - Claude watches for: no `frens-bot-home-writer` exception; file mtime updated at shutdown.
+  - Pass when: on reload the change is present (`bot_home_data.json` was flushed on SERVER_STOPPING).
+- [ ] **Home data write is batched (1.1.208, debounce)**
+  - Bradley does: run a hobby-heavy 2 minutes (several base/sleep/nav mutations).
+  - Claude watches for: `bot_home_data.json` mtime changing at most every ~0.5–5 s, not per mutation.
+  - Pass when: writes are visibly coalesced and nothing is lost on reload. (Known cost: a hard kill loses
+    ≤5 s of these changes — not a fail, just record it if it happens.)
 
 ---
 
