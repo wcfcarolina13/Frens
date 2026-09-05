@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.205-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.207-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.205** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.207** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -13,7 +13,7 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 - Every item has three sub-lines: **Bradley does** / **Claude watches for** / **Pass when**.
 - Record-keeping rule inherited from `SOUL_COMMUNICATION_PILOT.md`: log **correlation ids and outcomes, never message bodies**.
 - Related runbooks — link, don't duplicate: [`SOUL_COMMUNICATION_PILOT.md`](SOUL_COMMUNICATION_PILOT.md) (its "Manual — to be executed in-game" section is still the authority for DM edge cases: disconnect/death/dimension, restart persistence, remote perception leakage, reserved deterministic routing) and [`IN_GAME_AUDIT_MASTER.md`](IN_GAME_AUDIT_MASTER.md) (Fast Daily Smoke + Full Reliability Sweep for the non-soul stack).
-- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `travel-wait`, `[guard-escape]`, `placed no blocks reason=`, `[furnace-offload]`, `pulled`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
+- Useful greps: `[souls]`, `[VoicedDialogue]`, `[config]`, `Rejected config save`, `travel-wait`, `[guard-escape]`, `placed no blocks reason=`, `[furnace-offload]`, `pulled`, `Tool select:`, `Tool switch:`, `remembered`, `Can't craft`, `outcome=`, `vetoed:`, `verdict`, `memory digest`, `mind consolidated`, `Idle wooden fallback`, `torch-hold`, `scene-playback`, `tts`.
 - Veto vocabulary in the log: `vetoed:cooldown`, `vetoed:salience`, `vetoed:danger`, `vetoed:roster-lost`, `vetoed:hard-reject`, `vetoed:changed-before-capture`, `vetoed:muted`.
 
 ---
@@ -405,6 +405,72 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     dropped fuel into a furnace instead."
   - Pass when: leaves/sticks are in the furnace fuel slot, planks stayed at ≥32, nothing damageable or
     bundled was given. Repeat with a furnace that already holds coal → he skips it.
+
+---
+
+## Phase 6e — Follow-ups (1.1.206): on-thread tool swaps, hotbar target, offload latch
+
+- [ ] **Mining first-swing hitch is one tick, not more (1.1.206)**
+  - Bradley does: `/bot skill mining` with the best pickaxe OUTSIDE the hotbar.
+  - Claude watches for: `Swapping best tool from main inventory slot N to hotbar slot M` once; no
+    `Tool select: server-thread hop failed` / `on-thread step failed`; TPS steady.
+  - Pass when: the swap happens before the first swing, ≤1 tick pause, then mining proceeds normally.
+- [ ] **Swap re-validation is rare (1.1.206)**
+  - Bradley does: same as above, and while he mines pull an item out of his inventory via the bot
+    inventory screen once.
+  - Claude watches for: at most one `Tool select: slot N no longer holds … — re-running scan once`
+    (DEBUG) around that moment; never a repeating stream of them.
+  - Pass when: he continues with a valid tool (the hotbar pick, or hands if none), no wrong-item swing.
+- [ ] **Full unlocked hotbar keeps the selected slot (1.1.206)**
+  - Bradley does: fill all 9 hotbar slots, select slot 5, have him scoop water (farm) or place a boat.
+  - Pass when: the swapped-in item lands in slot 5 (the selected one), not slot 0.
+- [ ] **`/bot stop` during an offload does not disable later offloads (1.1.206)**
+  - Bradley does: trigger a travel-wait offload (Phase 6d setup), `/bot stop` mid-walk, then trigger a
+    fresh wait later.
+  - Claude watches for: no second failure counted; the later wait still logs
+    `travel-wait offloading to existing chest`.
+  - Pass when: the later offload runs. (Two genuine failures in one wait still stop further attempts.)
+
+---
+
+## Phase 6f — Crafting messages + water memory (1.1.207)
+
+- [ ] **Actions tab has no Regroup; Spells tab still does (1.1.207)**
+  - Bradley does: open the bot inventory → Actions tab ("Orders & Travel"), then the Spells tab.
+  - Pass when: Regroup appears only on Spells (Movement) and works from there.
+- [ ] **`/bot direction reset` is the real name (1.1.207)**
+  - Bradley does: set a strip-mine direction by standing behind him, then `/bot direction reset`.
+  - Pass when: the command exists and the next strip mine uses his facing again (README now matches).
+- [ ] **Crafting refusal says exactly what's missing (1.1.207)**
+  - Bradley does: give Jake 1 white wool + 10 planks, `/bot craft bed`; then 2 sticks and no coal,
+    `/bot craft torch 4`.
+  - Claude watches for: chat `Can't craft bed: need 2 more white wool`; `Can't craft torch: need 2 more
+    sticks, 4 more coal or charcoal` (numbers may differ by what's in nearby chests for the bed).
+  - Pass when: the numbers match the shortfall, the bot crafts nothing, and no old generic line
+    ("Beds need 3 wool…") appears.
+- [ ] **Unknown craft name speaks once per 30 s (1.1.207)**
+  - Bradley does: `/bot craft spaceship` three times in ten seconds, then once more after 40 s.
+  - Pass when: `I don't know how to craft spaceship.` appears at the 1st and 4th attempt only.
+- [ ] **Remembered fishing spot (1.1.207)**
+  - Bradley does: `/bot fish 1` at a pond, let him catch one; walk him 40–60 blocks away where no water
+    is visible; `/bot fish 1` again.
+  - Claude watches for: `Reusing remembered fishing spot: water=… stand=…`; then normal casting.
+  - Pass when: he walks back to the pond instead of saying "I need to be standing near open water".
+    Fill the pond in (or a 4-block-wide patch of it) and repeat → `Forgot remembered fishing spot …`
+    then a fresh scan.
+- [ ] **Wider fishing scan (1.1.207)**
+  - Bradley does: stand 20 blocks from a pond (was out of the old 12-block reach), `/bot fish 1`.
+  - Pass when: he finds it without a remembered spot (fresh world or after `bot_home_data.json` edit);
+    the failure path in a desert answers within a second, not a multi-second stall.
+- [ ] **Farm reuses its irrigation source (1.1.207)**
+  - Bradley does: set up a farm with a bucket refill from a nearby pool; next day move the farm 30
+    blocks (still within 48 of the pool) where no water is within 24 blocks.
+  - Claude watches for: `Falling back to remembered water source at … for irrigation/refills`.
+  - Pass when: he refills from the remembered pool instead of failing.
+- [ ] **Per-kind cap keeps fishing memory (1.1.207)**
+  - Bradley does: after the two items above, open `config/frens/bot_home_data.json` (or the
+    equivalent BotHomeService file) → `waterSpotsByBot`.
+  - Pass when: both a `fishing` and an `irrigation` entry are present for Jake with sane coordinates.
 
 ---
 
