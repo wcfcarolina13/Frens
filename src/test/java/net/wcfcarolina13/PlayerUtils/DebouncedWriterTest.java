@@ -192,9 +192,55 @@ class DebouncedWriterTest {
         assertEquals(1, writes.get(), "shutdown flushes the pending write");
 
         w.markDirty();
+        assertEquals(2, writes.get(), "a mark after shutdown writes through synchronously");
         exec.advance(10_000L);
-        assertEquals(1, writes.get(), "marks after shutdown are ignored");
+        assertEquals(2, writes.get(), "no timer is scheduled after shutdown");
         assertFalse(w.isDirty());
+    }
+
+    @Test
+    void marksAfterShutdownWriteThroughSynchronously() {
+        AtomicLong now = new AtomicLong(0L);
+        FakeScheduler exec = new FakeScheduler(now);
+        AtomicInteger writes = new AtomicInteger();
+        DebouncedWriter w = new DebouncedWriter(writes::incrementAndGet, 500L, 5_000L, exec, now::get);
+
+        w.shutdown();
+        assertEquals(0, writes.get(), "nothing dirty, nothing written");
+
+        w.markDirty();
+        assertEquals(1, writes.get(), "late mark writes on the caller's thread, immediately");
+        w.markDirty();
+        assertEquals(2, writes.get(), "every late mark writes through");
+        assertFalse(w.isDirty(), "write-through leaves nothing pending");
+        assertTrue(exec.tasks.isEmpty(), "no work is handed to the stopped scheduler");
+    }
+
+    @Test
+    void failedWriteReschedulesExactlyOneRetry() {
+        AtomicLong now = new AtomicLong(0L);
+        FakeScheduler exec = new FakeScheduler(now);
+        AtomicInteger attempts = new AtomicInteger();
+        Runnable alwaysFails = () -> {
+            attempts.incrementAndGet();
+            throw new IllegalStateException("disk on fire");
+        };
+        DebouncedWriter w = new DebouncedWriter(alwaysFails, 500L, 5_000L, exec, now::get);
+
+        w.markDirty();
+        exec.advance(500L);
+        assertEquals(1, attempts.get());
+        assertTrue(w.isDirty(), "a failed write stays dirty");
+
+        // The failure scheduled one retry, quietMs later.
+        exec.advance(500L);
+        assertEquals(2, attempts.get(), "exactly one automatic retry per failure");
+
+        // That retry also failed and scheduled one more, but never a tight loop:
+        // advancing far past quietMs yields one attempt per quiet window, not many.
+        exec.advance(10_000L);
+        assertEquals(3, attempts.get(), "retries do not loop within a single advance");
+        assertTrue(w.isDirty());
     }
 
     @Test

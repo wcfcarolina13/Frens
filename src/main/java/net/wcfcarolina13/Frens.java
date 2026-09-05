@@ -831,8 +831,6 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.shutdownExecutors();
-            // Flush any debounced bot-home state to disk, then stop its writer thread.
-            net.wcfcarolina13.GameAI.services.BotHomeService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.shutdownExecutor();
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);
@@ -875,6 +873,11 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotTorchHoldService.reset();
             net.wcfcarolina13.GameAI.services.BotRandomDanceService.reset();
             net.wcfcarolina13.GameAI.services.EmotecraftBridge.reset();
+            // LAST: flush any debounced bot-home state to disk, then stop its writer thread.
+            // Everything above (bot persistence, mount recording, task reset, per-service
+            // resets) can still mutate home data, so shutting the writer down earlier would
+            // force those late marks through the synchronous write-through fallback.
+            net.wcfcarolina13.GameAI.services.BotHomeService.shutdownExecutors();
         });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

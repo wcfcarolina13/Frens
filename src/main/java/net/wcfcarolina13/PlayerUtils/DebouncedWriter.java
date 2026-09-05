@@ -41,6 +41,8 @@ public final class DebouncedWriter {
     private long firstMarkMs;
     private ScheduledFuture<?> pending;
     private boolean stopped;
+    /** True while a post-failure retry is scheduled, so one failure schedules at most one retry. */
+    private boolean retrying;
 
     public DebouncedWriter(Runnable write, long quietMs, long maxLatencyMs, ScheduledExecutorService exec) {
         this(write, quietMs, maxLatencyMs, exec, System::currentTimeMillis);
@@ -62,33 +64,52 @@ public final class DebouncedWriter {
     /**
      * Records that the underlying state changed. Schedules a write after {@code quietMs} of
      * quiet, capped so the write happens no later than {@code maxLatencyMs} after the first
-     * mark of the current dirty window. No-op after {@link #shutdown()}.
+     * mark of the current dirty window.
+     *
+     * <p>After {@link #shutdown()} the scheduler is gone, so a late mark would otherwise be
+     * dropped. Instead it degrades to the old pre-debounce behaviour: a synchronous
+     * write-through on the caller's thread, under the write lock, so it can never overlap
+     * another write.
      */
     public void markDirty() {
+        boolean writeThrough;
         synchronized (stateLock) {
-            if (stopped) {
-                return;
-            }
-            long now = clock.getAsLong();
-            if (!dirty) {
-                dirty = true;
-                firstMarkMs = now;
-            }
-            long remainingToCap = Math.max(0L, (firstMarkMs + maxLatencyMs) - now);
-            long delay = Math.min(quietMs, remainingToCap);
-            if (pending != null) {
-                pending.cancel(false);
-                pending = null;
-            }
-            try {
-                pending = exec.schedule(this::onTimer, delay, TimeUnit.MILLISECONDS);
-            } catch (Throwable t) {
-                // Executor rejected (shutting down). Stay dirty — the shutdown path's
-                // flushNow() still writes, and any later mark reschedules.
-                pending = null;
-                LOGGER.warn("Debounced write could not be scheduled: {}", t.toString());
+            writeThrough = stopped;
+            if (!writeThrough) {
+                long now = clock.getAsLong();
+                if (!dirty) {
+                    dirty = true;
+                    firstMarkMs = now;
+                }
+                long remainingToCap = Math.max(0L, (firstMarkMs + maxLatencyMs) - now);
+                long delay = Math.min(quietMs, remainingToCap);
+                if (pending != null) {
+                    pending.cancel(false);
+                    pending = null;
+                }
+                retrying = false;
+                try {
+                    pending = exec.schedule(this::onTimer, delay, TimeUnit.MILLISECONDS);
+                } catch (Throwable t) {
+                    // Executor rejected (shutting down). Stay dirty — the shutdown path's
+                    // flushNow() still writes, and any later mark reschedules.
+                    pending = null;
+                    LOGGER.warn("Debounced write could not be scheduled: {}", t.toString());
+                }
             }
         }
+        if (writeThrough) {
+            // Deliberately outside stateLock: runWrite() takes writeLock and its failure path
+            // re-acquires stateLock, so holding stateLock here would invert the lock order.
+            runWrite();
+        }
+    }
+
+    private void onRetryTimer() {
+        synchronized (stateLock) {
+            retrying = false;
+        }
+        onTimer();
     }
 
     private void onTimer() {
@@ -148,6 +169,19 @@ public final class DebouncedWriter {
                     if (!dirty) {
                         dirty = true;
                         firstMarkMs = clock.getAsLong();
+                    }
+                    // Bounded: exactly one rescheduled retry per failure, never a retry loop —
+                    // the retry itself runs via onTimer(), whose own failure schedules at most
+                    // one more, and only while the writer is still running.
+                    if (!stopped && !retrying && pending == null) {
+                        retrying = true;
+                        try {
+                            pending = exec.schedule(this::onRetryTimer, quietMs, TimeUnit.MILLISECONDS);
+                        } catch (Throwable rejected) {
+                            retrying = false;
+                            pending = null;
+                            LOGGER.warn("Debounced write retry could not be scheduled: {}", rejected.toString());
+                        }
                     }
                 }
             }

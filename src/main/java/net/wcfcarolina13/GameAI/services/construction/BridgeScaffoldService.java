@@ -389,7 +389,7 @@ public final class BridgeScaffoldService {
                 bot,
                 target,
                 new LeafClearService.Options(3, 3, false, null, true,
-                        LeafClearService.CandidateMode.RAYCAST_HIT_PLUS_NEIGHBOURS),
+                        LeafClearService.CandidateMode.RAYCAST_HIT),
                 (b, pos) -> {
                     LookController.faceBlock(b, pos);
                     try {

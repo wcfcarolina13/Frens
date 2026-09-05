@@ -224,8 +224,9 @@ public final class BotHomeService {
     private static final long WRITE_QUIET_MS = 500L;
     private static final long WRITE_MAX_LATENCY_MS = 5_000L;
 
-    private static ScheduledExecutorService writeExecutor = newWriteExecutor();
-    private static DebouncedWriter writer = new DebouncedWriter(
+    // volatile: published from restartExecutors() on the server thread, read by mutators on worker threads.
+    private static volatile ScheduledExecutorService writeExecutor = newWriteExecutor();
+    private static volatile DebouncedWriter writer = new DebouncedWriter(
             BotHomeService::writeToDisk, WRITE_QUIET_MS, WRITE_MAX_LATENCY_MS, writeExecutor);
 
     private static ScheduledExecutorService newWriteExecutor() {

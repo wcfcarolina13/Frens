@@ -340,7 +340,7 @@ public final class LeafClearService {
     // Shared line-of-sight leaf clearing
     //
     // Migrated from WoodcutCleanupSkill.clearBlockingLeaves (LERP_SAMPLE_3X3X3)
-    // and BridgeScaffoldService.clearLeafObstructions (RAYCAST_HIT_PLUS_NEIGHBOURS).
+    // and BridgeScaffoldService.clearLeafObstructions (RAYCAST_HIT).
     // Both candidate orders and caps are preserved exactly; the callers supply their
     // own block-breaker so their differing mining timeouts/overloads are unchanged.
     // ---------------------------------------------------------------
@@ -348,7 +348,7 @@ public final class LeafClearService {
     /** How candidate obstruction blocks are chosen. */
     public enum CandidateMode {
         /** Iteratively raycast to the target and break whatever soft block the ray hits. */
-        RAYCAST_HIT_PLUS_NEIGHBOURS,
+        RAYCAST_HIT,
         /** Sample the eye→target segment, plus the 3x3x3 box around the target. */
         LERP_SAMPLE_3X3X3
     }
@@ -393,7 +393,7 @@ public final class LeafClearService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return 0;
         }
-        return opts.mode() == CandidateMode.RAYCAST_HIT_PLUS_NEIGHBOURS
+        return opts.mode() == CandidateMode.RAYCAST_HIT
                 ? clearByRaycast(bot, world, target, opts, breaker)
                 : clearByLerpSample(bot, world, target, opts, breaker);
     }
@@ -438,9 +438,9 @@ public final class LeafClearService {
             if (opts.mutationAllowed() != null && !opts.mutationAllowed().test(leafPos)) {
                 continue;
             }
-            boolean before = leafState.isAir();
+            // leafState is gated on isIn(LEAVES) above, so it can never be air here.
             breaker.accept(bot, leafPos);
-            if (!before && world.getBlockState(leafPos).isAir()) {
+            if (world.getBlockState(leafPos).isAir()) {
                 broken++;
             }
         }
