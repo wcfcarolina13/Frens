@@ -620,7 +620,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Quick Fetch", TopicAction.QUICK_FETCH, false, 0),
 
             TopicEntry.skillHeader("Orders & Travel"),
-            TopicEntry.skill("Regroup", TopicAction.COMPANION_COME, false, 0),
             TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
             TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
             TopicEntry.skill("Patrol", TopicAction.PATROL, true, 0),
@@ -4432,10 +4431,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Descent",
                 "Digs a safe downward staircase in the direction you choose.",
                 "Set the depth first, then look where you want it to begin and confirm from the world."
-            );
-            case COMPANION_COME -> java.util.List.of(
-                "Regroup",
-                "Teleports all your bots to your current position."
             );
             case FOLLOW -> java.util.List.of(
                 "Follow",

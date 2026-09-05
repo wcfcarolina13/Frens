@@ -266,7 +266,7 @@ Settings persist in `settings.json5`.
 - Place a **button on a wall** and right-click it to set facing direction
 - Bots automatically wade through shallow water
 - After death, bots ask "I died. Should I continue?" - reply yes/no
-- Use `/bot reset_direction Jake` to clear stored work direction
+- Use `/bot direction reset Jake` to clear stored work direction
 - When skills pause for hazards, use `/bot resume Jake` to continue
 
 ---
