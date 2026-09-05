@@ -3,7 +3,33 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-05 — next session starts here
+## Session Handoff 2026-09-05 (later) — next session starts here
+
+**State:** main = origin/main @ 1.1.208 (pushed, deployed to all three Prism instances). Suite 809 green.
+
+**Shipped in 1.1.208:** `DebouncedWriter` + debounced `BotHomeService` writes (500 ms / 5 s, write-through
+after shutdown); ladder helpers → ScaffoldService; new `LeafClearService` (moved navigation leaf clearing +
+shared `clearLineOfSight` for WoodcutCleanup/BridgeScaffold) — all verified zero-behaviour-change;
+**soul ontology Phase 3 spec** written, NOT built (`docs/superpowers/specs/2026-09-05-…phase3-design.md`).
+
+**Needs Bradley next:** review the Phase 3 spec (5 open questions with recommended answers; proposed order
+novelty → peer stance → relations → structured output, one build each). Then the guided field session
+(Phases 6b–6f + the 1.1.208 checks in the changelog).
+
+**Deferred with reasons:** `FarmSkill.pillarEscape` (timing/placement differ from ScaffoldService — a
+behaviour change, judge in the field first); `WoodcutSkill.pillarUp`, `HovelPerimeterBuilder.pillarUp`,
+`WoodcutSkill.clearBlockingLeaves` (need 2–3 options each, fragile skills); FortifyVillageSkill Phase 2
+(own build). Minor: `LeafClearAction`/`LeafClearResult` still declared on MovementService.
+
+**Remaining autonomous candidates:** FortifyVillageSkill Phase 2 (`FortifySharedContext`, own build);
+ontology Phase 3 (d) novelty rejection once the spec is approved.
+
+**Needs Bradley:** Phase 3 spec review; guided field session; woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-05 — superseded
 
 **State:** main = origin/main @ 1.1.207 (pushed, deployed to all three Prism instances). Suite 795 green.
 
@@ -672,8 +698,8 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 ### Shelter (Redo Needed)
 
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes
-- [ ] **ScaffoldService extraction**: Centralize pillaring/scaffolding + ladder placement into a reusable service
-- [ ] **LeafClearService extraction**: Centralize leaf-block clearing so other skills can reuse it
+- [x] **ScaffoldService extraction** ✅ 1.1.208 (ladders moved; Woodcut/Hovel pillar variants + FarmSkill.pillarEscape deferred — see handoff)
+- [x] **LeafClearService extraction** ✅ 1.1.208 (navigation clearing moved + shared clearLineOfSight; WoodcutSkill's LOS variant deferred)
 - [ ] **Shelter resource acquisition flow**: Auto-collect/craft materials by default; allow `ask|wait|manual` to pause
 - [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow
 - [ ] **Shelter chest workflow**: Withdraw/deposit resources and place chests inside planned interior

@@ -2,6 +2,54 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Debounced home-data writes, Scaffold/LeafClear extraction (zero behaviour change), ontology Phase 3 spec; 1.1.208 (2026-09-05)
+
+The next batch from the remaining-candidates list. FortifyVillageSkill Phase 2 is deliberately NOT in
+this build — an 8,600-line refactor should not share a release with movement changes.
+
+- **`BotHomeService` writes are debounced (commit `7714a92`).** Every mutator used to do a synchronous
+  whole-file Gson write on the caller's thread (sometimes the server thread). New pure
+  `PlayerUtils/DebouncedWriter` (quiet 500 ms, max latency 5 s, writes never overlap, a failed write
+  stays dirty and retries; 7 tests with a fake executor + clock). `flush()` keeps its name and all 27
+  call sites; `flushNow()` runs on SERVER_STOPPING via `shutdownExecutors()`, with `restartExecutors()`
+  beside MovementService's. Cost: a hard kill can lose up to 5 s of home-data changes (was zero).
+- **Ladder helpers → ScaffoldService (commit `5d8bba2`).** `placeLadderColumn`,
+  `pickLadderSupportDirection`, `findLadderExit` (+ `isLadderPassable`) moved verbatim out of
+  CollectDirtSkill; the skill keeps a thin call.
+- **`LeafClearService` (commits `07aedfb`, `e49285d`).** Seeded by moving MovementService's navigation
+  leaf clearing (`clearLeafObstructionDetailed`, bypass-then-async-mine, 1200 ms per-bot cooldown, all
+  six `LEAF_*` state fields) with delegating wrappers left in place so no call site changed. Then a
+  shared `clearLineOfSight(bot, target, Options, breaker)` replaced the two line-of-sight duplicates:
+  WoodcutCleanupSkill (lerp-sampled 3×3×3, skips decaying leaves, honours `canMutateRecoveryBlock`, its
+  own mining overload + 12 s) and BridgeScaffoldService (raycast hit, snow/replaceables, 3 s); each
+  keeps its exact candidate order and caps via options. Pure `isDecayingLeaf` / `lerpSampleCandidates`
+  tested (5 tests). Left alone on purpose: `WoodcutSkill.clearBlockingLeaves` (mutates reach-session
+  counters), `WoodcutSkill.pillarUp`, `HovelPerimeterBuilder.pillarUp` (each needs 2–3 new options),
+  and FortifyVillageSkill (already on ScaffoldService; the rest is tower ledger logic).
+- **FarmSkill.pillarEscape NOT migrated.** The pass stopped on it by design: its fixed 120 ms
+  jump/place timing, post-jump `down()` target, silent-skip failure semantics, sneak-held climb and
+  lack of a 12-step cap all differ from `ScaffoldService.pillarUp`. Migrating it is a behaviour change,
+  so it stays until a field session can judge it.
+- **Soul ontology Phase 3 design spec (commit `aca2e95`, spec only — nothing built).**
+  `docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md`: bot↔bot stance
+  (reuse `Stance` as `peerStances`), typed relation facts as an additive sidecar to `PlayerMemory`,
+  structured output as an optional `##FRENS {json}` tail after prose (validator ends the scene at the
+  sentinel so a malformed tail costs no lines), novelty rejection (trigram overlap ≥0.6 for ≥8-word
+  lines, exact match below; ring of 12 per bot). Proposed order: novelty → peer stance → relations →
+  structured output, one build each, all off by default until field-confirmed. Five open questions
+  with recommended answers are in the spec — **Bradley reviews before anything is implemented.**
+- **Review fixes (commit `27fdb04`).** The reviewer diffed every moved body against its original and
+  confirmed the three refactors are byte-equivalent. On the debounce: writer fields are `volatile`
+  (published from the server thread, read by workers); marks after `shutdown()` write through
+  synchronously instead of vanishing, and the shutdown call is now the last statement of
+  SERVER_STOPPING; a failed write schedules exactly one retry. `RAYCAST_HIT_PLUS_NEIGHBOURS` renamed
+  to what it does (`RAYCAST_HIT`); a dead `isAir` check removed.
+- Tests 795 → 809.
+- **Field checks:** leaf-blocked navigation and woodcut cleanup behave exactly as on 1.1.207 (same
+  cooldown feel, same number of leaves broken); ladder shaft exit in CollectDirt unchanged; bridge
+  scaffold still clears snow; after a normal quit, `bot_home_data.json` holds the last change made
+  within 5 s of stopping.
+
 ## Command pruning review, crafting "what's missing" messages, water spot memory + fishing reach; 1.1.207 (2026-09-05)
 
 Items 1–3 from the remaining-candidates list. Same loop: scope → implement → batch review → fix.
