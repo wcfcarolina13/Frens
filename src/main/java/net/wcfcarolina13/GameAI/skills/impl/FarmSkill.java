@@ -4157,7 +4157,7 @@ public class FarmSkill implements Skill {
         PlayerInventory inventory = bot.getInventory();
         boolean locked = net.wcfcarolina13.GameAI.services.HotbarLockService.isLocked(bot);
         int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
-                slot, findEmptyHotbarSlot(inventory), locked);
+                slot, findEmptyHotbarSlot(inventory), locked, inventory.getSelectedSlot());
         if (locked) {
             return target;
         }

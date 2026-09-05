@@ -33,6 +33,22 @@ class ScaffoldSlotPolicyTest {
     }
 
     @Test
+    void unlockedFullHotbarWithPreferredSlotOverloadPrefersThatSlot() {
+        assertEquals(3, ScaffoldSlotPolicy.resolveHotbarTarget(20, -1, false, 3));
+    }
+
+    @Test
+    void preferredSlotOverloadClampsOutOfRangeValues() {
+        assertEquals(8, ScaffoldSlotPolicy.resolveHotbarTarget(20, -1, false, 12));
+        assertEquals(0, ScaffoldSlotPolicy.resolveHotbarTarget(20, -1, false, -4));
+    }
+
+    @Test
+    void preferredSlotOverloadIgnoresPreferenceWhenEmptySlotExists() {
+        assertEquals(4, ScaffoldSlotPolicy.resolveHotbarTarget(20, 4, false, 7));
+    }
+
+    @Test
     void cooldownAppliesWhenRecoveryFailed() {
         assertTrue(ScaffoldSlotPolicy.shouldApplyEscapeCooldown(false, false));
         assertTrue(ScaffoldSlotPolicy.shouldApplyEscapeCooldown(false, true));
