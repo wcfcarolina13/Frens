@@ -3,7 +3,42 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-05 (later) — next session starts here
+## Session Handoff 2026-09-05 (night) — next session starts here
+
+**State:** main = origin/main @ 1.1.209 (pushed, deployed to all three Prism instances). Suite 812 green.
+
+**Shipped in 1.1.209 (FortifyVillageSkill Phase 2, zero behaviour change):** `FortifySharedContext` +
+`FortifyTowerContext` callback interfaces on `FortifySkillOps`; `FortifyCleanupProcessor` (deferred-cleanup
+processing + carve-repair replace path) and `FortifyTowerHelper` (all 44 tower methods, 2,209 lines) moved
+verbatim; 12 pre-existing dead privates deleted; shared constants hoisted. Skill 9,560 → 7,093 lines.
+Reviewer regenerated every moved-body diff independently. Only observable change: log categories
+`skill-fortify-cleanup` / `skill-fortify-tower`. Details + field checks in `changelog.md`.
+
+**Rulings made autonomously this session:** picked Fortify Phase 2 over ontology (d) because the Phase 3
+spec is still unreviewed; interface is a sibling of `FortifyNavOps` (not a sub-interface) so existing
+helpers keep their narrow contract; the "~15 methods" target became 14 + 11 because the tower section's
+true dependency count is 24 — split rather than leave dependencies behind; dead-code deletion and
+constant hoisting shipped in the same release as separate commits (reviewer-verified zero callers).
+
+**Needs Bradley next:** review the Phase 3 spec (unchanged — 5 open questions with recommended answers).
+Then the guided field session: Phases 6b–6h in `docs/testing/FIELD_SESSION_1.1.202.md` (now 132 items;
+6h = fortify regression).
+
+**Remaining autonomous candidates:** ontology Phase 3 (d) novelty rejection ONLY once the spec is approved;
+Fortify Phase 3 could extract the carve/break-through section (`tryBreakThroughObstacle`, ~560 lines,
+`attemptFinalizeCarveTransaction`) behind the same `FortifySharedContext` — but stop there: the remaining
+skill is navigation glue that reads every field. Minor: `LeafClearAction`/`LeafClearResult` still declared
+on MovementService.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`.
+
+**Needs Bradley:** Phase 3 spec review; guided field session; woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-05 (later) — superseded
 
 **State:** main = origin/main @ 1.1.208 (pushed, deployed to all three Prism instances). Suite 809 green.
 
@@ -708,6 +743,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 ### Construction (Blocked — formerly active task)
 
 #### Carried over from the retired `TODO.md` (written 2026-02-25, never revisited)
+- [x] **FortifyVillageSkill Phase 2** — 1.1.209: `FortifySharedContext`/`FortifyTowerContext`, `FortifyCleanupProcessor`, `FortifyTowerHelper`; skill 9,560 → 7,093 lines, zero behaviour change (field check Phase 6h).
 - [ ] Playtest fortify tower reliability pass (top-block repair verification, scaffold summit step/return, deferred cleanup backoff) on live server and tune retry/backoff values from `latest.log`.
 - [ ] Playtest Learning Mode v1 on a live fortify/scaffold scenario (`pillaring_to_roof`) and confirm trace quality + overhead at `detail=balanced`; tune snapshot radius/tick rates if needed.
 - [ ] Capture at least one intentional failed pillar/summit demo (`/bot learn stop fail`) to tune generalized scaffold retry/recenter thresholds from trace timing.

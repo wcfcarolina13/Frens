@@ -2,6 +2,53 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## FortifyVillageSkill Phase 2 — cleanup processor + tower helper extracted behind `FortifySharedContext` (zero behaviour change); 1.1.209 (2026-09-05)
+
+The refactor that 1.1.208 deliberately left for its own release. Same loop: read-only scoping →
+two sequential implementers (both touch the skill, so never in parallel) → batch review → fix wave →
+scoped re-review. Reviewer regenerated the moved-body diffs independently instead of trusting the
+implementers' proofs. FortifyVillageSkill 9,560 → **7,093** lines.
+
+- **Callback interfaces (commit `7e0fc6d`).** `FortifySkillOps` gains `FortifySharedContext` (14 methods:
+  `wouldRepairSealCurrentExit`, `countOpenExits`, `isTrapLikeCell`, `canStandAt`, `safeSurfaceY`,
+  `isActiveFortifyBlock`, `isPlannedBlockSatisfied`, `countPresentBlocks`, `countActivePlannedBlocks`,
+  `countBuildingBlocks`, `tryPlaceBlock`, `processDeferredFortifyCleanupQueue`, `tryUnwedgeFromTightSpace`,
+  `countReachableWithLOS`) and `FortifyTowerContext extends FortifySharedContext` (nav-scope begin/end/run,
+  `navigateThroughGateIfNeeded`, `executeLocalPlacementBatch`, `repositionNearAnchor`,
+  `tryPostCarvePocketEscapeToward`, plus `isFortifyReplanActive`/`setFortifyReplanActive` and
+  `bumpFortifyMovementEpoch`/`getFortifyMovementEpoch`). Sibling of `FortifyNavOps`, not a sub-interface,
+  so the three existing helpers keep their narrow contract. The skill implements it: 19 private methods
+  widened to `public @Override`, bodies untouched; the epoch bump is one `return ++fortifyMovementEpoch;`
+  so the tower replan's read-modify-write is still a single step.
+- **`FortifyCleanupProcessor` (same commit).** `processDeferredFortifyCleanupQueue`,
+  `tryRecoverTowardDeferredCleanup`, `classifyReplaceFailureKind` (now static, 3 tests),
+  `tryReplaceMinedBlock`, `queueMandatoryCarveRepairIfNeeded`, `verifyCarveRepairColumn`,
+  `replaceMinedBlock` moved verbatim (42 changed lines, all `ops.`/`ctx.` prefixes). Five keep one-line
+  delegates in the skill because `tryBreakThroughObstacle` and `attemptFinalizeCarveTransaction` call them.
+- **`FortifyTowerHelper` (commit `d443d2b`, 2,209 lines).** Everything tower: `patchTowerBlocks`, the
+  vertex ordering/grouping, `executeTowerVertexWithRetries`, the scaffold phase, summit step/roam/return,
+  ledger + teardown, footprint escape, hard reset, approach selection, medium-range replan — 44 methods
+  plus 17 `TOWER_*` constants and the `zeroProgressTowerVertices` set. 135 changed lines over 2,137: 79
+  `ctx.`, 45 `ops.`, 6 visibility, 5 accessor rewrites. `handlePatch` and the `buildWall` tower stage call
+  `towerHelper.*` directly. `repositionNearAnchor` and `canStandAt` stayed in the skill (21 callers).
+- **Dead code (commit `eeadf65`).** 12 private methods with zero callers at 8273d64 and now — mostly
+  leftover delegates from the earlier EscapeHelper/EntombmentHelper extractions, plus `handleMerge` (the
+  `merge` verb dispatches to `handleExpand`) — deleted, −104 lines.
+- **Review fixes (commit `71898d5`).** The four constants both sides still use (`REACH_DISTANCE_SQ`,
+  `BLOCK_PLACE_DELAY_MS`, `MIN_APPROACH_OPEN_EXITS`, `FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST`) hoisted to
+  package-private statics on `FortifySkillOps` with `import static`, so they cannot drift;
+  `countReachableWithLOS` (a generic reach+LOS scorer the tower helper had absorbed) went back to the skill
+  on `FortifySharedContext`; the load-bearing field-initialiser order is commented.
+- **Only observable change:** log categories. Moved code logs under `skill-fortify-cleanup` /
+  `skill-fortify-tower` instead of `skill-fortify-village` (message text and `[FortifyCleanup]` /
+  `[FortifyTower]` prefixes unchanged). Nothing in resources, tests, docs or scripts keys on the old category.
+- Tests 809 → 812. No Fortify test existed before; the section has no unit coverage beyond the pure
+  failure-kind mapping, so the field check is the verification.
+- **Field checks (Phase 6h):** `/bot skill fortify` on a village with towers: tower vertices built in the
+  same order, scaffold columns torn down, `[FortifyCleanup]` deferred-queue lines still appear after
+  carve corridors; `fortify patch` repairs tower tops; no `NullPointerException` from `FortifyTowerHelper`
+  or `FortifyCleanupProcessor`; the `merge` verb still expands.
+
 ## Debounced home-data writes, Scaffold/LeafClear extraction (zero behaviour change), ontology Phase 3 spec; 1.1.208 (2026-09-05)
 
 The next batch from the remaining-candidates list. FortifyVillageSkill Phase 2 is deliberately NOT in

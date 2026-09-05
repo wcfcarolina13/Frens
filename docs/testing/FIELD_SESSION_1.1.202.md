@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.208-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.209-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.208** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.209** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -505,6 +505,43 @@ fail, even an improvement — note it and move on.
   - Claude watches for: `bot_home_data.json` mtime changing at most every ~0.5–5 s, not per mutation.
   - Pass when: writes are visibly coalesced and nothing is lost on reload. (Known cost: a hard kill loses
     ≤5 s of these changes — not a fail, just record it if it happens.)
+
+---
+
+## Phase 6h — Fortify Phase 2 extraction (1.1.209)
+
+Regression checks only: fortify must behave exactly as on 1.1.208. Needs a village with at least two
+hull vertices that get towers (use the same test village as before if it still exists). Watch the log
+for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the message text is unchanged.
+
+- [ ] **Tower build unchanged (1.1.209)**
+  - Bradley does: `/bot skill fortify` on the village and let the wall stage reach the towers.
+  - Claude watches for: `[FortifyTower]` vertex lines in the same order as a 1.1.208 run; scaffold
+    column placed on the same side; summit step/return lines; the ledger teardown at the end.
+  - Pass when: every tower reaches the completion ratio and no `FortifyTowerHelper` exception appears.
+- [ ] **Deferred cleanup still drains (1.1.209)**
+  - Bradley does: during the build, watch for a carve corridor (bot mines through terrain) or force one
+    by standing so the bot has to route through a hillside.
+  - Claude watches for: `[FortifyCleanup]` queue lines under `skill-fortify-cleanup`; the replace-path
+    retries (`mandatory` repairs) and the "would seal current exit" skip still fire.
+  - Pass when: the corridor is repaired after the bot leaves it; the queue reports empty.
+- [ ] **Tower patch unchanged (1.1.209)**
+  - Bradley does: remove two blocks from a tower top, then `/bot skill fortify patch`.
+  - Pass when: both blocks are replaced via the tower staging position (same approach as before);
+    a vertex that makes no progress twice is skipped, as before.
+- [ ] **Merge verb still expands (1.1.209)**
+  - Bradley does: `/bot skill fortify merge` (the dead `handleMerge` was deleted; the verb routes to
+    expand).
+  - Pass when: the response is the expand behaviour, not "unknown verb".
+- [ ] **Tower replan guard unchanged (1.1.209)**
+  - Bradley does: block the tower approach so the bot triggers a medium-range replan.
+  - Claude watches for: exactly one replan at a time (`replan already active` never appears twice in a
+    row); the movement-epoch cancel still aborts the stale walk.
+  - Pass when: the bot reaches the approach or gives the same give-up message as on 1.1.208.
+- [ ] **No new log noise (1.1.209)**
+  - Claude watches for: any `NullPointerException` mentioning `FortifyTowerHelper`,
+    `FortifyCleanupProcessor` or `FortifySkillOps`.
+  - Pass when: none in the whole session.
 
 ---
 
