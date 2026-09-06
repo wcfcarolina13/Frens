@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.213-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.214-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.213** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.214** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -691,6 +691,60 @@ Toggle-gated: `/bot soul relations on` first — until then no BELIEFS block, no
   - Claude watches for: `relations` log lines, `BELIEFS` in the prompt, `relation:` seed topics.
   - Pass when: none of the three appear; `mind.json` still holds the earlier fact (decayed by 1 per
     night) — the toggle stops production and rendering, not storage.
+
+---
+
+## Phase 6m — Soul structured LLM output, `##FRENS` side channel (1.1.214)
+
+Toggle-gated: `/bot soul structured on` first — until then the prompt carries no side-channel contract,
+the output cap stays 320 tokens, and a stray `##FRENS` line is stripped from the scene but never applied.
+Grep: `grep -n "\[souls\] side-channel" latest.log` (lines print as
+`[souls] side-channel correlationId=<id> stance=<applied>/<seen> facts=<applied>/<seen> dropped=<n>` or
+`[souls] side-channel unparsed correlationId=<id> chars=<n>`). Absent tail = no line at all (expected).
+Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs <Bot>`.
+
+- [ ] **Toggle default and round trip (1.1.214)**
+  - Bradley does: `/bot soul structured status`, then `/bot soul structured on`, `status` again.
+  - Claude watches for: nothing in the log; chat replies.
+  - Pass when: first status reads off on a fresh config, second reads on, and `config/frens/*.json5`
+    holds `soulStructuredOutputEnabled: true` after the save.
+- [ ] **Contract reaches the prompt only when enabled (1.1.214)**
+  - Bradley does: with the toggle off fire one scene (`/bot soul banter now`), turn it on, fire another.
+  - Claude watches for: the request's system contract (diagnostic logging) carrying
+    `You may end your reply with one extra line starting with ##FRENS`.
+  - Pass when: the paragraph is absent from the first request and present in the second.
+- [ ] **Side channel is emitted at all (1.1.214)**
+  - Bradley does: with the toggle on, tell Jake something opinionated ("I hate the Nether") and let
+    five scenes fire (Jake + Bob together).
+  - Claude watches for: `[souls] side-channel` INFO lines — applied or `unparsed` — per correlationId.
+  - Pass when: over 5 scenes at least one usable tail appears (a line with nonzero `stance=` or `facts=`
+    applied), **or** the outcome is recorded as "3B cannot do it" and fallback (3), the clerk call, is
+    scheduled in `RALPH_TASK.md`.
+- [ ] **A malformed tail never costs a scene (1.1.214)**
+  - Bradley does: nothing; watch the same 5 scenes.
+  - Claude watches for: every `side-channel unparsed` line and the delivery outcome on the same
+    `correlationId`.
+  - Pass when: each scene with an unparsed tail still delivered its lines; zero `outcome=failed:MALFORMED`
+    attributable to a sentinel.
+- [ ] **`##FRENS` is never spoken (1.1.214)**
+  - Bradley does: read chat and listen during those scenes.
+  - Claude watches for: the literal `##FRENS` in a delivered line or in TTS text.
+  - Pass when: it never appears in chat or audio.
+- [ ] **A model fact lands as INFERRED at ≤0.6 (1.1.214)**
+  - Bradley does: after an applied line with `facts=1/…`, run `/bot soul beliefs Jake` and `/bot soul beliefs Bob`.
+  - Claude watches for: the fact in both bots' output.
+  - Pass when: it prints with `INFERRED`, confidence ≤0.6, subject is Roti/Jake/Bob/the world — never an
+    unknown name — and appears for every bot that was in the scene.
+- [ ] **Model stance delta is peers-only and once per day (1.1.214)**
+  - Bradley does: force three scenes in one Minecraft day; then read `mind.json` for both bots.
+  - Claude watches for: `stance=` applied counts, and `peerStances` values before/after.
+  - Pass when: `playerStance` never moves on a side-channel line; each peer axis moved at most one step
+    that day; values stay within 0..6.
+- [ ] **Toggle off is inert (1.1.214)**
+  - Bradley does: `/bot soul structured off`, fire two scenes.
+  - Claude watches for: `side-channel` lines and the contract paragraph in the prompt.
+  - Pass when: neither appears; earlier INFERRED facts remain in `mind.json` (the toggle stops
+    production, not storage).
 
 ---
 

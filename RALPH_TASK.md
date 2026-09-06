@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-06 (late) — next session starts here
 
-**State:** main = origin/main @ 1.1.214 (pushed; DEPLOYSTATE). Suite 900 green. **Phase 3 of the soul
+**State:** main = origin/main @ 1.1.214 (pushed; deployed to all three Prism instances). Suite 900 green. **Phase 3 of the soul
 conversation ontology is COMPLETE** — (d) 1.1.211, (a) 1.1.212, (b) 1.1.213, (c) 1.1.214.
 
 **Shipped in 1.1.214 (Phase 3 item c — structured LLM output, `##FRENS` side channel):** pure
