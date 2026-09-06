@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.210-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.211-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.210** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.211** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -574,6 +574,37 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
   - Claude watches for: any `NullPointerException` mentioning `FortifyCarveHelper` or
     `FortifyCarveContext`.
   - Pass when: none in the whole session.
+
+---
+
+## Phase 6j — Soul novelty rejection (1.1.211)
+
+Off by default — nothing in this phase happens until the toggle is on. Grep:
+`grep -n "novelty" latest.log` (drops print as `[souls] novelty dropped bot=<name> reason=trigram|exact`).
+
+- [ ] **Toggle defaults off and round-trips (1.1.211)**
+  - Bradley does: `/bot soul novelty status` on the fresh config, then `/bot soul novelty on`, then
+    `status` again; on a dedicated-server/LAN client also confirm the value arrives after config sync.
+  - Claude watches for: the status line reading off, then on; no `UnrecognizedProperty` in the log.
+  - Pass when: the second status reads on and `config/frens/settings.json5` contains
+    `soulNoveltyRejectionEnabled: true`.
+- [ ] **Novelty fires and does not gag the bots (1.1.211)**
+  - Bradley does: with the toggle on and two bots in the roster, sit through ~6 scenes in one sitting.
+  - Claude watches for: `novelty dropped` lines and the delivered-line count per scene.
+  - Pass when: ≥1 drop occurs across the session **and** no scene delivers zero lines because of
+    novelty alone.
+- [ ] **Silas stays laconic (1.1.211)**
+  - Bradley does: run at least two scenes with Silas in the roster.
+  - Claude watches for: any `novelty dropped bot=Silas` line and its reason.
+  - Pass when: Silas's short idioms ("Aye.") only ever drop with `reason=exact`, never `trigram`.
+- [ ] **Quoted short idiom is not a repeat (1.1.211)**
+  - Claude watches for: a `reason=trigram` drop whose dropped line is long and merely quotes a short
+    earlier line (the `MIN_TRIGRAMS` floor should prevent this).
+  - Pass when: none in the session; if one appears, note the two lines for the floor 3→4 follow-up.
+- [ ] **Toggle off is silent (1.1.211)**
+  - Bradley does: `/bot soul novelty off`, then two more scenes.
+  - Claude watches for: any `novelty` line after the toggle.
+  - Pass when: none, and scene delivery counts match the pre-toggle pattern.
 
 ---
 

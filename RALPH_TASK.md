@@ -3,7 +3,45 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-05 (late night) — next session starts here
+## Session Handoff 2026-09-06 — next session starts here
+
+**State:** main = origin/main @ 1.1.211 (pushed; deploy status recorded below). Suite 831 green.
+
+**Phase 3 ontology spec APPROVED by Bradley (2026-09-06)** — all five open questions took the recommended
+answer: (1) model stance deltas → peers only; (2) relations coexist with `PlayerMemory`, decide after the
+field session; (3) structured output (c) off by default; (4) `/bot soul beliefs <Bot>` yes, read-only;
+(5) novelty state not persisted. Ruling on top: (d) ships behind `soulNoveltyRejectionEnabled`, default
+false (spec said no toggle; Bradley's brief asked for one).
+
+**Shipped in 1.1.211 (Phase 3 item d):** `SoulNoveltyPolicy` (pure: ordered content words via the
+widened digest normaliser, trigram overlap |a∩b|/min ≥0.6 when ≥8 content words AND ≥3 trigrams both
+sides, exact-normalised match otherwise; ring of 12 per bot, only kept lines remembered; per-scene rule =
+exact across speakers, full rule for the same speaker) applied in `SoulGroupConversationService` between
+parse and enqueue (worker thread; `ConcurrentHashMap<UUID, Ring>`, synchronized ring). Scoping corrected
+the spec: delivery is NOT in `SoulRuntime` (that is only the `sceneDelivered` callback). Toggle mirrors
+`soulMemoryDigestEnabled` at all six config sites + `/bot soul novelty on|off|status`. Log line:
+`[souls] novelty dropped bot=… reason=trigram|exact`. Details + rulings in `changelog.md`.
+
+**Field checks pending:** Phase 6j in `docs/testing/FIELD_SESSION_1.1.202.md` (now 142 items) — turn the
+toggle on first; the feature is inert until then.
+
+**Remaining autonomous candidates (spec approved, in this order, one build each):** Phase 3 (a) bot↔bot
+stance (`peerStances` in `mind.json`, deterministic rules in `SoulMindOps`, one prompt clause);
+(b) typed relations with only the deterministic `SEEN` producer + `BELIEFS` block + read-only
+`/bot soul beliefs <Bot>`; (c) structured `##FRENS` tail, off by default, peers-only stance deltas — last,
+only after (b)'s consumer exists. Not combined. Tidy-ups: `MIN_TRIGRAMS` floor 3→4 if the field session
+shows quoted-idiom drops; ring idle eviction only if a leak shows; inline the four single-caller Fortify
+delegates.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`; doorway rework.
+
+**Needs Bradley:** guided field session (Phases 6b–6j); woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-05 (late night) — superseded
 
 **State:** main = origin/main @ 1.1.210 (pushed, deployed to all three Prism instances). Suite 812 green.
 
@@ -22,7 +60,7 @@ constraint, same as the tower precedent). Minor: `LeafClearAction`/`LeafClearRes
 
 **Needs Bradley next:** review the Phase 3 ontology spec (unchanged — 5 open questions with recommended
 answers). Then the guided field session: Phases 6b–6i in `docs/testing/FIELD_SESSION_1.1.202.md`
-(now 137 items; 6i = carve regression).
+(now 142 items; 6j = novelty rejection).
 
 **Remaining autonomous candidates:** ontology Phase 3 (d) novelty rejection ONLY once the spec is approved.
 Nothing else in the backlog is both autonomous and scoped; the next session should start with Bradley's

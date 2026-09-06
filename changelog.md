@@ -2,6 +2,73 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul ontology Phase 3 (d) — novelty rejection behind `soulNoveltyRejectionEnabled` (off by default); 1.1.211 (2026-09-06)
+
+Phase 3 spec (`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md`)
+**approved by Bradley this session** — all five open questions answered with the recommended option:
+(1) model-asserted stance deltas touch peers only, never the owner; (2) typed relations coexist with
+`PlayerMemory`, decide after the field session; (3) structured output (c) ships off by default;
+(4) `/bot soul beliefs <Bot>` wanted, read-only; (5) novelty state is NOT persisted. Item (d) shipped
+first, alone, per the spec's sequencing. Same loop as 1.1.209/1.1.210: read-only scoping → one
+implementer → batch review → one fix wave → scoped re-review.
+
+**Scoping correction:** the spec placed the rejection pass "in the runtime's committer path" in
+`SoulRuntime`; scoping found parsed lines are handed straight to playback at
+`SoulGroupConversationService` (`player.enqueue(new PlayableScene(turn, token, parse.lines()))`), and
+`SoulRuntime:259-272` is only the post-hoc `sceneDelivered` callback. The filter therefore sits between
+`SoulGroupResponseValidator.parse` and `enqueue` in the conversation service. That continuation runs on
+the provider-future worker thread, so rings live in a `ConcurrentHashMap<UUID, Ring>` with every `Ring`
+method synchronized; no server-thread work added.
+
+- `3017061` **feat** — `SoulNoveltyPolicy` (package `GameAI.souls`, pure, `java.util` only):
+  `normalise`/`contentWords` (ordered; reuses the digest normaliser — `SoulMemoryDigestOps.normalize`,
+  `tokens`, `STOP_WORDS` widened private → package-private, bodies untouched), `trigrams`,
+  `trigramOverlap` = |a∩b| / min(|a|,|b|), `rejectReason(candidate, remembered)` → `exact` | `trigram`
+  | keep, `filter(...)` over plain strings with the per-scene rule (same normalised text twice in one
+  scene → second dropped), nested `Ring` (12, oldest-first eviction). Rule: ≥8 content words → exact OR
+  trigram ≥0.6 rejects; <8 → exact only ("Aye." vs "Aye, right." kept). Rejected lines are dropped, the
+  scene is still enqueued (possibly empty) so the existing zero-delivery contract finishes it. Only
+  KEPT lines enter the ring. Log: `[souls] novelty dropped bot=<name> reason=trigram|exact`. Toggle
+  `soulNoveltyRejectionEnabled` (default **false**) mirrors `soulMemoryDigestEnabled` at all six sites
+  (ManualConfig field/getter/setter, SharedConfig field + snapshot-out + apply-in) plus
+  `/bot soul novelty on|off|status` (op-gated, saves) and both directions of
+  `ConfigJsonUtilRoundTripTest`. `SoulRuntime` passes a live null-safe `BooleanSupplier` into a new
+  9-arg `SoulGroupConversationService` constructor; the legacy 8-arg one hard-codes `false`, so
+  `SoulGroupConversationServiceTest` is unchanged. Toggle off = same list instance returned before any
+  state is touched.
+- `5fb89cf` **fix** (review findings) — (Important) a remembered 3-content-word line has one trigram,
+  so any long candidate quoting it scored 1.0 and was gagged; the trigram path now requires
+  `MIN_TRIGRAMS = 3` on BOTH sides (≥5 content words), else exact-only. (Minor, rode along) same-speaker
+  paraphrases inside one scene were only exact-checked because ring snapshots pre-date the scene;
+  `filter` gained a speaker-keyed overload that also checks already-kept lines of the same speaker with
+  the full rule; cross-speaker stays exact-only per spec.
+
+**Rulings made autonomously (cost if wrong):**
+- Toggle, off by default, overriding the spec's "no toggle" (Bradley's brief asked for it and confirmed
+  in the approval question). Cost: one more config site to keep in parity; zero behaviour change until
+  `/bot soul novelty on`.
+- Containment denominator min(|a|,|b|) kept, gated by `MIN_TRIGRAMS = 3` rather than switching to
+  Jaccard. Cost if wrong: a 5-content-word remembered idiom quoted verbatim inside a long new line is
+  still dropped as `trigram` — visible as a `reason=trigram` drop whose two lines differ; flip the
+  floor to 4 if the field session shows it.
+- Fixed the Important finding in-release instead of deferring (cheap, and it is the Silas-laconic case
+  the spec flags). Cost: five extra tests, one more overload.
+- Per-scene same-speaker paraphrase check added beyond the spec's exact-only per-scene rule. Cost if
+  wrong: a bot intentionally repeating itself for emphasis within one scene loses the second line.
+
+**Deferred with reasons:** persistence of the ring (ruled out, Q5); embedding/paraphrase similarity (no
+embedder in-tree); GUI toggle (no precedent — the digest toggle is commands-only too); ring map never
+shrinks (12 strings × bot count — add idle eviction only if a leak shows); whitespace-only lines
+normalise to `""` and are always kept/never remembered (validator already rejects blanks).
+
+**Tests:** 812 → **831** (`SoulNoveltyPolicyTest` 19 cases, no `net.minecraft.*`), 0 failures.
+
+**Field checks (Phase 6j in `docs/testing/FIELD_SESSION_1.1.202.md`):** `/bot soul novelty status`
+reads off on a fresh config and survives a round trip through `/bot soul novelty on`; with it on,
+≥1 `[souls] novelty dropped` across ~6 scenes and no scene delivering zero lines because of novelty
+alone; Silas's short idioms only ever drop with `reason=exact`; a long line quoting a short earlier
+idiom is kept; toggle off → no `novelty` lines at all.
+
 ## FortifyVillageSkill Phase 3 — carve/break-through section extracted to `FortifyCarveHelper` behind `FortifyCarveContext` (zero behaviour change); 1.1.210 (2026-09-05)
 
 The last planned Fortify extraction. Same loop as 1.1.209: read-only scoping → one implementer →
