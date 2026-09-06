@@ -229,8 +229,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      * already said inside this same scene). The scene is always enqueued, even when every line is
      * dropped — the zero-delivery path is an explicit part of the {@code sceneDelivered} contract
      * and skipping the enqueue would strand the turn. Kept lines are remembered in their speaker's
-     * ring only after they survive the filter. With the toggle off this returns the parsed lines
-     * unchanged and touches no state.
+     * ring only after they survive the filter. Ring snapshots are taken before filtering, so the
+     * speaker's bot id is passed alongside each line and the policy also checks a candidate
+     * against what that same bot already kept in this scene. With the toggle off this returns the
+     * parsed lines unchanged and touches no state.
      */
     private List<SoulGroupTypes.SceneLine> applyNovelty(SoulGroupTypes.GroupSceneTurn turn,
                                                         List<SoulGroupTypes.SceneLine> parsed) {
@@ -240,15 +242,17 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         List<String> texts = new ArrayList<>(parsed.size());
         List<List<String>> histories = new ArrayList<>(parsed.size());
         List<SoulNoveltyPolicy.Ring> rings = new ArrayList<>(parsed.size());
+        List<Object> speakerKeys = new ArrayList<>(parsed.size());
         for (SoulGroupTypes.SceneLine line : parsed) {
             texts.add(line.text());
             SoulGroupTypes.SceneParticipant speaker = participantFor(turn, line.participantIndex());
             SoulNoveltyPolicy.Ring ring = speaker == null ? null
                     : noveltyRings.computeIfAbsent(speaker.botId(), id -> new SoulNoveltyPolicy.Ring());
             rings.add(ring);
+            speakerKeys.add(speaker == null ? null : speaker.botId());
             histories.add(ring == null ? List.of() : ring.snapshot());
         }
-        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(texts, histories);
+        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(texts, histories, speakerKeys);
         List<SoulGroupTypes.SceneLine> kept = new ArrayList<>(parsed.size());
         for (SoulNoveltyPolicy.Verdict verdict : verdicts) {
             SoulGroupTypes.SceneLine line = parsed.get(verdict.index());

@@ -3,9 +3,11 @@ package net.wcfcarolina13.GameAI.souls;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -29,6 +31,14 @@ final class SoulNoveltyPolicy {
     static final int MIN_CONTENT_WORDS = 8;
     /** Trigram overlap at or above which two long lines are "the same line again". */
     static final double TRIGRAM_THRESHOLD = 0.6d;
+    /**
+     * Minimum trigram count required on <em>both</em> sides before the fuzzy path may reject.
+     * Containment uses a {@code min} denominator, so a remembered line with a single trigram
+     * (three content words) that happens to appear anywhere inside a long, genuinely novel
+     * candidate would score a perfect 1.0 and silence it. Three trigrams — five content words —
+     * is enough shared structure for containment to mean "this is that line again".
+     */
+    static final int MIN_TRIGRAMS = 3;
     /** Per-bot ring capacity: the last N normalised lines that bot actually delivered. */
     static final int RING_SIZE = 12;
 
@@ -102,7 +112,9 @@ final class SoulNoveltyPolicy {
      *
      * <p>Exact normalised match always rejects. A candidate with at least
      * {@link #MIN_CONTENT_WORDS} content words additionally rejects when its trigram overlap with
-     * any remembered line reaches {@link #TRIGRAM_THRESHOLD}.
+     * any remembered line reaches {@link #TRIGRAM_THRESHOLD} — but only when both sides carry at
+     * least {@link #MIN_TRIGRAMS} trigrams, so a short remembered fragment quoted inside a long
+     * novel line falls back to the exact path instead of swallowing it.
      */
     static Optional<String> rejectReason(String candidate, Collection<String> rememberedNormalised) {
         if (rememberedNormalised == null || rememberedNormalised.isEmpty()) {
@@ -120,7 +132,7 @@ final class SoulNoveltyPolicy {
             return Optional.empty();
         }
         Set<String> candidateGrams = trigrams(words);
-        if (candidateGrams.isEmpty()) {
+        if (candidateGrams.size() < MIN_TRIGRAMS) {
             return Optional.empty();
         }
         for (String remembered : rememberedNormalised) {
@@ -128,6 +140,9 @@ final class SoulNoveltyPolicy {
                 continue;
             }
             Set<String> rememberedGrams = trigrams(contentWords(remembered));
+            if (rememberedGrams.size() < MIN_TRIGRAMS) {
+                continue;
+            }
             if (trigramOverlap(candidateGrams, rememberedGrams) >= TRIGRAM_THRESHOLD) {
                 return Optional.of(REASON_TRIGRAM);
             }
@@ -147,27 +162,57 @@ final class SoulNoveltyPolicy {
      * <p>Kept lines are also checked against each other within the scene: the same normalised text
      * twice in one scene drops the second occurrence with reason {@link #REASON_EXACT}, no matter
      * which bot said it, so two bots cannot echo each other inside a single exchange.
+     *
+     * <p>This overload has no speaker identity, so only that cross-speaker exact rule applies
+     * inside the scene.
      */
     static List<Verdict> filter(List<String> candidates, List<? extends Collection<String>> historyByLine) {
+        return filter(candidates, historyByLine, null);
+    }
+
+    /**
+     * As {@link #filter(List, List)}, plus an intra-scene <em>same-speaker</em> pass.
+     *
+     * <p>Ring snapshots are taken before the scene is filtered, so a bot that produces two
+     * paraphrases of one thought inside a single scene would sail past the ring check — nothing
+     * kept this scene is in its history yet. Each candidate is therefore additionally checked
+     * against the normalised texts already kept in this scene by the <em>same</em> speaker, using
+     * the same {@link #rejectReason} rule, so within-scene paraphrases are caught and not just
+     * verbatim echoes. {@code speakerKeys} supplies one key per candidate (any equals/hashCode
+     * identity — bot id, roster index); a null list or null entry means "unknown speaker" and
+     * takes part in the exact cross-speaker rule only.
+     */
+    static List<Verdict> filter(List<String> candidates,
+                                List<? extends Collection<String>> historyByLine,
+                                List<?> speakerKeys) {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
         Set<String> saidThisScene = new HashSet<>();
+        Map<Object, List<String>> keptBySpeaker = new HashMap<>();
         List<Verdict> verdicts = new ArrayList<>(candidates.size());
         for (int i = 0; i < candidates.size(); i++) {
             String text = candidates.get(i);
             String normalised = normalise(text);
             Collection<String> history = historyByLine != null && i < historyByLine.size()
                     ? historyByLine.get(i) : null;
-            String reason = null;
+            Object speaker = speakerKeys != null && i < speakerKeys.size() ? speakerKeys.get(i) : null;
+            List<String> sameSpeakerThisScene = speaker == null ? null : keptBySpeaker.get(speaker);
+            String reason;
             if (!normalised.isEmpty() && saidThisScene.contains(normalised)) {
                 reason = REASON_EXACT;
             } else {
                 reason = rejectReason(text, history).orElse(null);
+                if (reason == null && sameSpeakerThisScene != null && !sameSpeakerThisScene.isEmpty()) {
+                    reason = rejectReason(text, sameSpeakerThisScene).orElse(null);
+                }
             }
             if (reason == null) {
                 if (!normalised.isEmpty()) {
                     saidThisScene.add(normalised);
+                    if (speaker != null) {
+                        keptBySpeaker.computeIfAbsent(speaker, k -> new ArrayList<>()).add(normalised);
+                    }
                 }
                 verdicts.add(new Verdict(i, true, null, normalised));
             } else {

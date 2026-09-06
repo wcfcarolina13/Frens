@@ -134,6 +134,61 @@ class SoulNoveltyPolicyTest {
     }
 
     @Test
+    void shortRememberedFragmentInsideLongCandidateIsKept() {
+        // "bank the fire lads" is 3 content words -> 1 trigram, below MIN_TRIGRAMS. Containment
+        // would score it 1.0 against any long line quoting it, so the fuzzy path must stand down.
+        String remembered = "bank the fire lads";
+        String candidate = "I'll bank the fire lads before we head down the ravine tonight";
+        assertTrue(SoulNoveltyPolicy.trigrams(SoulNoveltyPolicy.contentWords(remembered)).size()
+                < SoulNoveltyPolicy.MIN_TRIGRAMS);
+        assertTrue(SoulNoveltyPolicy.contentWords(candidate).size() >= SoulNoveltyPolicy.MIN_CONTENT_WORDS);
+        assertEquals(Optional.empty(), SoulNoveltyPolicy.rejectReason(candidate, List.of(norm(remembered))));
+    }
+
+    @Test
+    void sixContentWordRememberedLineContainedInLongCandidateStillDropped() {
+        String remembered = "bank the fire before the wolves reach the camp";
+        String candidate = "Lads bank the fire before the wolves reach the camp tonight and sleep light";
+        assertTrue(SoulNoveltyPolicy.trigrams(SoulNoveltyPolicy.contentWords(remembered)).size()
+                >= SoulNoveltyPolicy.MIN_TRIGRAMS);
+        assertEquals(Optional.of(SoulNoveltyPolicy.REASON_TRIGRAM),
+                SoulNoveltyPolicy.rejectReason(candidate, List.of(norm(remembered))));
+    }
+
+    @Test
+    void sameSpeakerParaphraseInOneSceneDropsTheSecond() {
+        List<String> lines = List.of(
+                "We should haul the copper ore back to the base camp tonight",
+                "We should haul the copper ore back to the base camp again");
+        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(
+                lines, List.of(List.of(), List.of()), List.of("bob", "bob"));
+        assertTrue(verdicts.get(0).kept());
+        assertFalse(verdicts.get(1).kept());
+        assertEquals(SoulNoveltyPolicy.REASON_TRIGRAM, verdicts.get(1).reason());
+    }
+
+    @Test
+    void crossSpeakerParaphraseInOneSceneIsKept() {
+        List<String> lines = List.of(
+                "We should haul the copper ore back to the base camp tonight",
+                "We should haul the copper ore back to the base camp again");
+        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(
+                lines, List.of(List.of(), List.of()), List.of("bob", "silas"));
+        assertTrue(verdicts.get(0).kept());
+        assertTrue(verdicts.get(1).kept());
+    }
+
+    @Test
+    void crossSpeakerExactEchoInOneSceneStillDropped() {
+        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(
+                List.of("Storm's coming.", "Storm's coming."),
+                List.of(List.of(), List.of()), List.of("bob", "silas"));
+        assertTrue(verdicts.get(0).kept());
+        assertFalse(verdicts.get(1).kept());
+        assertEquals(SoulNoveltyPolicy.REASON_EXACT, verdicts.get(1).reason());
+    }
+
+    @Test
     void emptyHistoryNeverRejects() {
         assertEquals(Optional.empty(), SoulNoveltyPolicy.rejectReason("anything at all", List.of()));
     }
