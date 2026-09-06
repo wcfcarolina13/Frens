@@ -988,6 +988,10 @@ final class BotSoulCommands {
         ChatUtils.sendSystemMessage(source, "Structured output is " + (enabled ? "ON" : "OFF")
                 + ". Lets a scene end with an optional ##FRENS JSON line carrying peer stance"
                 + " nudges and inferred relation facts; the line is never spoken.");
+        if (config != null && !config.isSoulRelationsEnabled()) {
+            ChatUtils.sendSystemMessage(source,
+                    "Note: facts are parsed but not stored until /bot soul relations on.");
+        }
         return 1;
     }
 

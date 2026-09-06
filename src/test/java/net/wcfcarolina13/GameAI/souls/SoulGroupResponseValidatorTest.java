@@ -299,4 +299,53 @@ class SoulGroupResponseValidatorTest {
         assertTrue(parse.accepted());
         assertTrue(parse.sideChannelRaw().isEmpty());
     }
+
+    // --- lenient sentinel match (1.1.214 review): models decorate the token, and an
+    // exact-case miss let the JSON body be SPOKEN in a solo roster.
+
+    @Test
+    void lowercaseSentinelIsRecognised() {
+        var parse = validator.parse("Jake: Morning.\n##frens {\"facts\":[]}\nSara: after", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("Morning.", parse.lines().get(0).text());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get());
+    }
+
+    @Test
+    void boldWrappedSentinelIsRecognised() {
+        var parse = validator.parse("Jake: Morning.\n**##FRENS {\"facts\":[]}**\nSara: after", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get());
+    }
+
+    @Test
+    void spacedSentinelIsRecognised() {
+        var parse = validator.parse("Jake: Morning.\n## FRENS {\"facts\":[]}\nSara: after", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get());
+    }
+
+    @Test
+    void decoratedSentinelIsNeverSpokenInASoloRoster() {
+        String json = "{\"stance\":{\"Jake\":{\"warmth\":1}}}";
+        for (String tail : List.of("##frens " + json, "**##FRENS " + json + "**", "## FRENS " + json)) {
+            var parse = validator.parse("Quiet night.\n" + tail, List.of("Jake"), 4);
+            assertTrue(parse.accepted(), tail);
+            assertEquals(1, parse.lines().size(), tail);
+            assertEquals("Quiet night.", parse.lines().get(0).text(), tail);
+            assertFalse(parse.lines().get(0).text().contains("warmth"), tail);
+            assertEquals(json, parse.sideChannelRaw().get(), tail);
+        }
+    }
+
+    @Test
+    void ordinaryProseBeginningWithFrensIsNotASentinel() {
+        var parse = validator.parse("Jake: Frens are what keep us alive out here.", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertTrue(parse.sideChannelRaw().isEmpty());
+    }
 }

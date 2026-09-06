@@ -994,18 +994,33 @@ public final class SoulRuntime {
         if (turn.ownerDisplayName() != null && !turn.ownerDisplayName().isBlank()) {
             allowedSubjects.add(turn.ownerDisplayName());
         }
+        // Facts are RELATION storage — the same gate the deterministic producers respect. Stance
+        // deltas are plain peer-stance state and stay ungated (1.1.214 review #2).
+        net.wcfcarolina13.FilingSystem.ManualConfig relCfg = net.wcfcarolina13.Frens.CONFIG;
+        boolean relationsEnabled = relCfg != null && relCfg.isSoulRelationsEnabled();
+        int factsSkipped = 0;
         for (int i = 0; i < ids.size(); i++) {
             UUID botId = ids.get(i);
             if (botId == null) {
                 continue;
             }
             final int day = currentDay(botId);
+            if (day < 0) {
+                // Bot despawned between the worker parse and this hop: a fact merged at day=-1
+                // would poison recency scoring, and the stance per-day guard is meaningless.
+                LOGGER.debug("[souls] side-channel skipped bot={} reason=day-unresolved", botId);
+                continue;
+            }
             List<SoulTypes.RelationFact> facts = new ArrayList<>();
-            for (SoulSideChannelOps.FactCandidate candidate : effects.facts()) {
-                SoulRelationOps.normalise(candidate.subject(), candidate.relation(), candidate.object(),
-                                candidate.confidence(), SoulTypes.RelationSource.INFERRED, day,
-                                SoulSideChannelOps.FACT_SALIENCE, allowedSubjects)
-                        .ifPresent(facts::add);
+            if (relationsEnabled) {
+                for (SoulSideChannelOps.FactCandidate candidate : effects.facts()) {
+                    SoulRelationOps.normalise(candidate.subject(), candidate.relation(), candidate.object(),
+                                    candidate.confidence(), SoulTypes.RelationSource.INFERRED, day,
+                                    SoulSideChannelOps.FACT_SALIENCE, allowedSubjects)
+                            .ifPresent(facts::add);
+                }
+            } else {
+                factsSkipped += effects.facts().size();
             }
             List<SoulSideChannelOps.StanceDelta> deltas = new ArrayList<>();
             List<UUID> targets = new ArrayList<>();
@@ -1031,6 +1046,12 @@ public final class SoulRuntime {
                 }
                 return next;
             });
+        }
+        if (factsSkipped > 0) {
+            // Counted, not silent: an install with structured output on but relations off would
+            // otherwise see "facts=n/n" in the service log and no trace of them being discarded.
+            LOGGER.info("[souls] side-channel factsSkipped={} reason=soulRelationsEnabled=false",
+                    factsSkipped);
         }
     }
 

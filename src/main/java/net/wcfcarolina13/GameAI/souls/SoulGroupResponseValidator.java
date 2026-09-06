@@ -145,9 +145,9 @@ public final class SoulGroupResponseValidator {
             String line = cleanLine(rawLine);
             // Checked BEFORE the line cap so a tail that follows a full-length scene is still
             // captured (and, more importantly, still stripped) rather than left unread.
-            if (line.startsWith(SIDE_CHANNEL_SENTINEL)) {
-                sideChannelRaw = java.util.Optional.of(
-                        line.substring(SIDE_CHANNEL_SENTINEL.length()).strip());
+            java.util.Optional<String> sentinelTail = sideChannelTail(line);
+            if (sentinelTail.isPresent()) {
+                sideChannelRaw = sentinelTail;
                 break; // end of scene: this line and everything after it are dropped
             }
             if (lines.size() >= maxSceneLines) {
@@ -239,6 +239,57 @@ public final class SoulGroupResponseValidator {
     }
 
     /** Strips Minecraft formatting codes and control characters from one candidate line. */
+    /**
+     * Lenient side-channel sentinel detection (1.1.214 review). Small models decorate the token:
+     * {@code ##frens}, {@code **##FRENS {…}**}, {@code ## FRENS {…}}, {@code `##FRENS …`}. An
+     * exact-case {@code startsWith("##FRENS")} missed all of those, and in a SOLO roster the line
+     * then fell through the untagged-prose repair path and the raw JSON body was SPOKEN (and sent
+     * to TTS). So: strip leading {@code * # _ `} and whitespace, match {@code FRENS}
+     * case-insensitively, and require the next char to be whitespace, <code>{</code>, or the end
+     * of the line — {@code Frenship: …} is dialogue, not a sentinel.
+     *
+     * @return the trimmed tail after the token (trailing {@code *} / backticks stripped) when the
+     *     line is a sentinel, else empty.
+     */
+    private static java.util.Optional<String> sideChannelTail(String line) {
+        int i = 0;
+        boolean sawHash = false;
+        while (i < line.length()) {
+            char c = line.charAt(i);
+            if (c == '*' || c == '#' || c == '_' || c == '`' || Character.isWhitespace(c)) {
+                sawHash |= c == '#';
+                i++;
+            } else {
+                break;
+            }
+        }
+        if (!sawHash) {
+            return java.util.Optional.empty(); // "Frens are great" is dialogue, not a sentinel
+        }
+        String token = SIDE_CHANNEL_SENTINEL.substring(2); // "FRENS"
+        if (!line.regionMatches(true, i, token, 0, token.length())) {
+            return java.util.Optional.empty();
+        }
+        int after = i + token.length();
+        if (after < line.length()) {
+            char c = line.charAt(after);
+            if (!Character.isWhitespace(c) && c != '{') {
+                return java.util.Optional.empty();
+            }
+        }
+        String tail = line.substring(after).strip();
+        int end = tail.length();
+        while (end > 0) {
+            char c = tail.charAt(end - 1);
+            if (c == '*' || c == '`' || c == '_' || Character.isWhitespace(c)) {
+                end--;
+            } else {
+                break;
+            }
+        }
+        return java.util.Optional.of(tail.substring(0, end).strip());
+    }
+
     private static String cleanLine(String line) {
         String cleaned = SECTION_SIGN_CODE.matcher(line).replaceAll("");
         StringBuilder out = new StringBuilder(cleaned.length());
