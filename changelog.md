@@ -2,6 +2,78 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul ontology Phase 3 (a) — bot↔bot peer stance (`peerStances` in `mind.json`); 1.1.212 (2026-09-06)
+
+Second Phase 3 build, alone, per the spec's sequencing (`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md` §(a)). Same loop as 1.1.209–1.1.211: read-only scoping → one implementer → batch review → one fix wave → scoped re-review.
+
+**Scoping corrections to the spec (every §(a) file:line was verified, not trusted):** the mind seam
+really is `SoulRuntime.noteSceneDeliveredForMind` (`:839`, invoked from the committer at `:263`) — the
+1.1.211 "delivery lives in the conversation service" lesson applies to *delivery*, not to this
+callback. `GroupSceneTurn` does NOT carry `SoulSpeechAct`, so the TEASE rule is not observable at the
+seam; `OWNER_DAMAGE` journal events carry only `ownerId` (`SoulEventObserver:461`) and consolidation
+reads one bot's journal, so "peer present at an owner-damage day" is not derivable either. Both rules
+deferred. `lastTaskTrustDay` is an `int` (spec said long) and cannot express per-pair, so the day
+guard moved into the map value. There is no `@JsonCreator` on `SoulMind` — Jackson binds the record's
+canonical constructor by component name; adding a component needs no annotation.
+
+- `a169568` **feat** — `SoulTypes.PeerStance(Stance stance, int lastTrustDay)` + `baseline()`;
+  `SoulMind` gains a 12th component `Map<UUID, PeerStance> peerStances` (compact ctor null → `Map.of()`,
+  else `Map.copyOf`; new 11-arg compat ctor, 8-arg kept). `SoulMindOps.notePeerScene(mind, selfIndex,
+  rosterNames, rosterIds, delivered, day)` — pure over `SceneLine` indices + roster UUIDs: (i) a peer's
+  line names this bot and ends with `?` → curiosity +1; (ii) this bot's last `?` line naming the peer
+  with no later peer line in the scene → exasperation +1; (iii) both spoke → trust +1 once per
+  Minecraft day per pair. Cap `MAX_PEER_STANCES = 6`, evicting the peer with the smallest Manhattan
+  distance to `Stance.BASELINE` (ties → lowest UUID string; the peer being updated is never evicted).
+  Decay in `consolidate`: one `stepToward` per axis per day, entries that reach exact baseline are
+  dropped. `peerStanceClause`: trust ≤1 "wary of X", ≥5 "thick as thieves with X"; exasperation ≥4
+  "short with X", ≥2 "a little tired of X"; curiosity ≥5 "curious about X"; `""` at baseline.
+  `SoulGroupPromptAssembler.stateBlock` appends one clause per roster-present, non-baseline peer after
+  the owner clause, inside the existing per-bot `MAX_STATE_CHARS_PER_BOT = 400` truncate.
+  `SoulRuntime.notePeerStances` runs above the narrator-seeded guard (that guard previously skipped
+  all mind updates for non-narrator scenes), builds the roster lists on the server thread and hands
+  the pure rule to `store.updateMind` (store executor, serialized with consolidation). Log:
+  `[souls] peer stance bot=<name> peer=<name> trust=<t> exasperation=<e> curiosity=<c>` once per
+  changed pair.
+- `07b7ccc` **fix** (review findings) — (Important) curiosity/exasperation fired once per *scene*
+  against a decay of one step per *day*, so eight scenes in a day pinned "curious about Bob" forever;
+  `PeerStance` gained `int lastAskDay` (3-arg canonical, 2-arg compat) and both ask rules are gated
+  `lastAskDay != day`, evaluated against the old value so both can still fire in one scene. (Minor)
+  the change log moved out of the `updateMind` lambda into a `thenAccept` completion on the store
+  thread — the rule is pure again and nothing blocks the server thread. (Minor) the implementer's
+  report note about `currentDay == -1` was inverted: with baseline day `-1` the bump is *suppressed*,
+  not doubled.
+
+**Rulings made autonomously (cost if wrong):**
+- Map value is a nested `PeerStance(stance, lastTrustDay, lastAskDay)` rather than the spec's bare
+  `Stance`. Cost: one more nested record in `mind.json`; no migration since no file in the wild has
+  the key yet.
+- TEASE and OWNER_DAMAGE rules deferred (not observable at the seam). Cost: peer stance moves only on
+  questions and shared scenes — slower to form; (c) structured output will add model-asserted deltas.
+- Per-day guard on the ask axes (beyond the spec, which guarded only trust). Cost if wrong: a
+  genuinely inquisitive pair takes ~2 days instead of one scene to read "curious about" — visible in
+  `mind.json` values.
+- Baseline entries are dropped at consolidation instead of kept. Cost: `lastTrustDay` is forgotten
+  with the entry, so a pair that decays to baseline can bump trust again the same day it re-forms.
+- No config toggle (spec: the clause is empty at baseline, so the feature is inert until a peer
+  stance moves). Cost: nothing to switch off in the field except a `mind.json` reset.
+- Substring, case-insensitive name match for "names this bot" (same limitation as the owner-side
+  question path). Cost: "Al" matches "Alfa".
+
+**Deferred with reasons:** TEASE rule (needs `SoulSpeechAct` on `GroupSceneTurn` — a director→turn
+change, separate seam); OWNER_DAMAGE-peer-present rule (event carries no peer ids); `currentDay == -1`
+for a bot missing from the player manager suppresses the day-guarded rules for that bot until its
+first consolidation (harmless, self-heals).
+
+**Tests:** 831 → **846** (SoulMindOps +11, assembler +3, store +2 incl. legacy `mind.json` without
+`peerStances` → empty map and a two-peer disk round-trip, foundation compat ctor), 0 failures, no
+`net.minecraft.*`.
+
+**Field checks (Phase 6k in `docs/testing/FIELD_SESSION_1.1.202.md`):** old `mind.json` files load
+with no Jackson warning and gain `"peerStances": {}` at the first consolidation; after two shared
+scenes both bots' files hold one peer entry with values in 0..6; `[souls] peer stance` lines appear;
+a peer clause reaches `CURRENT STATE`; trust and the ask axes move at most once per day per pair
+across three forced scenes; a day rollover steps every peer axis one toward baseline.
+
 ## Soul ontology Phase 3 (d) — novelty rejection behind `soulNoveltyRejectionEnabled` (off by default); 1.1.211 (2026-09-06)
 
 Phase 3 spec (`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md`)

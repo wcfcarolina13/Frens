@@ -3,7 +3,45 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-06 — next session starts here
+## Session Handoff 2026-09-06 (evening) — next session starts here
+
+**State:** main = origin/main @ 1.1.212 (pushed, deployed to all three Prism instances). Suite 846 green.
+
+**Shipped in 1.1.212 (Phase 3 item a — bot↔bot peer stance):** `SoulTypes.PeerStance(stance,
+lastTrustDay, lastAskDay)`; `SoulMind.peerStances: Map<UUID, PeerStance>` (12th component, old
+`mind.json` → empty map, no `@JsonCreator` needed — Jackson binds the canonical record ctor).
+`SoulMindOps.notePeerScene` (pure: asked-by-peer → curiosity; unanswered ask → exasperation; both spoke
+→ trust; every axis once per Minecraft day per pair; cap 6, closest-to-baseline eviction; decay in
+`consolidate` drops entries at exact baseline) + `peerStanceClause` ladder (wary of / thick as thieves
+with / short with / a little tired of / curious about). Seam: `SoulRuntime.notePeerStances` above the
+narrator guard in `noteSceneDeliveredForMind` (server thread builds lists → `store.updateMind` on the
+store executor, log in a `thenAccept`). Render: one clause per roster-present non-baseline peer in
+`SoulGroupPromptAssembler.stateBlock`, inside the 400-char cap. No toggle (inert at baseline). Log:
+`[souls] peer stance bot=… peer=… trust=… exasperation=… curiosity=…`. Details + rulings in `changelog.md`.
+
+**Scoping corrections:** the mind seam IS `SoulRuntime:839` (spec right; the 1.1.211 lesson was about
+delivery only). TEASE rule deferred (`GroupSceneTurn` has no `SoulSpeechAct`); OWNER_DAMAGE-peer rule
+deferred (event carries only `ownerId`). Per-day guard extended to the ask axes (review finding).
+
+**Field checks pending:** Phase 6k in `docs/testing/FIELD_SESSION_1.1.202.md` (now 147 items) —
+run "Old minds load clean" first; the rest need two bots that both speak.
+
+**Remaining autonomous candidates (spec approved, in this order, one build each):** (b) typed
+relations with only the deterministic `SEEN` producer + `BELIEFS` block + read-only
+`/bot soul beliefs <Bot>` behind `soulRelationsEnabled` (default false) — next; (c) structured `##FRENS`
+tail, off by default, peers-only stance deltas — last, only after (b)'s consumer exists. Not combined.
+Tidy-ups: TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`; `MIN_TRIGRAMS` 3→4 if the
+field session shows quoted-idiom drops; inline the four single-caller Fortify delegates.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`; doorway rework.
+
+**Needs Bradley:** guided field session (Phases 6b–6k); woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-06 — superseded
 
 **State:** main = origin/main @ 1.1.211 (pushed, deployed to all three Prism instances). Suite 831 green.
 
@@ -346,7 +384,7 @@ track is validation-bound before anything new starts. Suite 621 green.
 - [ ] **Action requests** — follows consolidation.
 - [x] Smaller candidates named in specs but not built: second soul personality (engagement spec calls
       it the highest-leverage follow-up), ontology Phase 3 (bot↔bot stance, typed relation facts,
-      structured output, novelty rejection), Pocket voice cloning (HF-gated), per-player voice mute
+      structured output, novelty rejection — (d) ✅ 1.1.211, (a) ✅ 1.1.212), Pocket voice cloning (HF-gated), per-player voice mute
       masks (gated on the stubbed config sync — see Multiplayer Voice Muting below).
 
 ### Housekeeping (one commit)

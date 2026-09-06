@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.211-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.212-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.211** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.212** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -605,6 +605,47 @@ Off by default — nothing in this phase happens until the toggle is on. Grep:
   - Bradley does: `/bot soul novelty off`, then two more scenes.
   - Claude watches for: any `novelty` line after the toggle.
   - Pass when: none, and scene delivery counts match the pre-toggle pattern.
+
+---
+
+## Phase 6k — Soul peer stance (1.1.212)
+
+No toggle — the feature is inert until a peer stance leaves baseline, and the prompt clause is empty
+until then. Grep: `grep -n "peer stance" latest.log` (lines print as
+`[souls] peer stance bot=<name> peer=<name> trust=<t> exasperation=<e> curiosity=<c>`).
+Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind consolidated` names).
+
+- [ ] **Old minds load clean (1.1.212)**
+  - Bradley does: launch with the pre-1.1.212 `mind.json` files in place (no reset); sleep through one
+    night.
+  - Claude watches for: `[souls] mind consolidated` at the rollover and any Jackson
+    `UnrecognizedProperty` / `InvalidDefinition` warning.
+  - Pass when: consolidation succeeds and each rewritten file contains `"peerStances": {}` (or a
+    populated map) — never a missing key or a null.
+- [ ] **Peer entry appears after shared scenes (1.1.212)**
+  - Bradley does: with Jake and Bob together and quiet, let two banter scenes fire in which both speak.
+  - Claude watches for: `[souls] peer stance bot=Jake peer=Bob …` and the mirror line for Bob.
+  - Pass when: both files hold one `peerStances` entry keyed by the other bot's UUID, all three values
+    in 0..6, and at least one value differs from baseline (3/0/3).
+- [ ] **Peer clause reaches the prompt (1.1.212)**
+  - Bradley does: force a question between the bots (`/bot soul banter now` until one bot ends a line
+    naming the other with `?`), then one more scene next day so curiosity/exasperation ≥ the ladder
+    threshold — or read the clause from `mind.json` values directly.
+  - Claude watches for: the request's `CURRENT STATE` block (diagnostic logging) carrying
+    "curious about Bob" / "a little tired of Bob" / "short with Bob" / "wary of Bob" /
+    "thick as thieves with Bob".
+  - Pass when: the clause names the other bot, is ≤50 chars, and only appears for bots present in
+    that roster.
+- [ ] **Bumps are once per day per pair (1.1.212)**
+  - Bradley does: `/bot soul banter now` ×3 within one Minecraft day with both bots speaking.
+  - Claude watches for: `peer stance` lines after scene 1 vs 2 vs 3.
+  - Pass when: trust changed at most once and curiosity/exasperation each at most once that day
+    (no `peer stance` line at all for scenes 2–3 is the expected outcome).
+- [ ] **Day rollover decays toward baseline (1.1.212)**
+  - Bradley does: sleep through a night after the entries exist; read both `mind.json` files.
+  - Claude watches for: `[souls] mind consolidated` and the peer values.
+  - Pass when: every peer axis moved exactly one step toward 3/0/3, and an entry that reached exact
+    baseline is gone from the map.
 
 ---
 
