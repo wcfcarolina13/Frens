@@ -368,11 +368,9 @@ public final class SoulGroupPromptAssembler {
         if (!relationsEnabled.getAsBoolean()) {
             return Optional.empty();
         }
-        StringBuilder sb = new StringBuilder(
-                "BELIEFS (what the bots have come to think; claims, not world truth)\n");
+        StringBuilder sb = new StringBuilder("BELIEFS (claims the bots hold, not world truth)\n");
         boolean any = false;
         int lineBudget = SoulRelationOps.MAX_BELIEF_LINES;
-        int charBudget = SoulRelationOps.MAX_BELIEFS_CHARS;
         for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
             if (lineBudget <= 0) {
                 break;
@@ -383,21 +381,28 @@ public final class SoulGroupPromptAssembler {
             }
             List<String> lines = SoulRelationOps.beliefLines(mind.get(),
                     SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId()));
+            if (lines.isEmpty()) {
+                continue;
+            }
+            // The budget covers the WHOLE block — header and per-bot sub-headers included — so
+            // the prompt cost of BELIEFS is what the spec says it is. A bot whose sub-header
+            // alone would not fit is skipped, and a line is never emitted half.
+            String subHeader = participant.displayName() + " believes:\n";
+            int projected = sb.length() + subHeader.length();
             List<String> kept = new ArrayList<>();
             for (String line : lines) {
-                if (kept.size() >= lineBudget || charBudget - line.length() - 1 < 0) {
+                if (kept.size() >= lineBudget || projected + line.length() + 1 > SoulRelationOps.MAX_BELIEFS_CHARS) {
                     break;
                 }
                 kept.add(line);
-                charBudget -= line.length() + 1;
+                projected += line.length() + 1;
             }
             if (kept.isEmpty()) {
                 continue;
             }
             lineBudget -= kept.size();
             any = true;
-            sb.append(participant.displayName()).append(" believes:\n")
-                    .append(String.join("\n", kept)).append('\n');
+            sb.append(subHeader).append(String.join("\n", kept)).append('\n');
         }
         return any
                 ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))

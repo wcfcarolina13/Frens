@@ -331,6 +331,12 @@ public final class SoulBanterDirector {
             // Only the holder of that memory actually changes; the others are no-ops.
             String recalled = topic.substring(SoulMindOps.MEMORY_TOPIC_PREFIX.length());
             runtime.updateMinds(presentIds, m -> SoulMindOps.noteRecalled(m, recalled, currentDay));
+        } else if (topic.startsWith(SoulRelationOps.RELATION_TOPIC_PREFIX)) {
+            // The relation topic carries its own triple, so the holder of that belief cools it for
+            // RECALL_COOLDOWN_DAYS and the others are no-ops — same round trip as memory anchors.
+            SoulRelationOps.parseAnchorTopic(topic).ifPresent(fact ->
+                    runtime.updateMinds(presentIds, m -> SoulMindOps.withRelations(
+                            m, SoulRelationOps.noteRecalled(m.relations(), fact, currentDay))));
         } else if (topic.equals(SoulMindOps.TOPIC_UNANSWERED)) {
             runtime.updateMinds(presentIds, SoulMindOps::dropExpired);
         }

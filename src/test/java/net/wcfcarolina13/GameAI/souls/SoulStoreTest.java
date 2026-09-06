@@ -685,6 +685,28 @@ class SoulStoreTest {
     }
 
     @Test
+    void malformedRelationFactsAreDroppedOnLoad() throws Exception {
+        UUID bot = UUID.randomUUID();
+        Path dir = worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+        Files.createDirectories(dir);
+        // Three bad rows next to one good one: a missing relation, a missing source, and a blank
+        // object. Jackson passes null for the absent enum keys; the compact ctor must drop the row
+        // rather than invent a LIKES/INFERRED belief the bot never held.
+        Files.writeString(dir.resolve("mind.json"), "{\"schemaVersion\":1,\"playerStance\":{\"trust\":3,\"exasperation\":0,\"curiosity\":3},"
+                + "\"threads\":[],\"memories\":[],\"seen\":[],\"lastConsolidatedAtMs\":0,\"lastDay\":-1,\"lastTaskTrustDay\":-1,"
+                + "\"relations\":["
+                + "{\"subject\":\"Bob\",\"relation\":\"GOOD_AT\",\"object\":\"mining\",\"confidence\":0.4,\"source\":\"SEEN\",\"day\":4,\"salience\":6},"
+                + "{\"subject\":\"Bob\",\"object\":\"cake\",\"confidence\":0.4,\"source\":\"SAID\",\"day\":4,\"salience\":6},"
+                + "{\"subject\":\"Bob\",\"relation\":\"LIKES\",\"object\":\"cake\",\"confidence\":0.4,\"day\":4,\"salience\":6},"
+                + "{\"subject\":\"Bob\",\"relation\":\"LIKES\",\"object\":\"  \",\"confidence\":0.4,\"source\":\"SAID\",\"day\":4,\"salience\":6}"
+                + "]}");
+        SoulTypes.SoulMind mind = store.mind(bot).get();
+        assertEquals(1, mind.relations().size(), mind.relations().toString());
+        assertEquals(SoulTypes.Relation.GOOD_AT, mind.relations().get(0).relation());
+        assertEquals("mining", mind.relations().get(0).object());
+    }
+
+    @Test
     void peerStancesRoundTripThroughMindJson() throws Exception {
         UUID bot = UUID.randomUUID();
         UUID alfa = UUID.randomUUID(), bravo = UUID.randomUUID();

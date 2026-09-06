@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.souls;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -379,8 +380,9 @@ public final class SoulTypes {
         public RelationFact {
             subject = subject == null ? "" : subject.trim();
             object = object == null ? "" : object.trim();
-            relation = relation == null ? Relation.LIKES : relation;
-            source = source == null ? RelationSource.INFERRED : source;
+            // Enums are NOT defaulted: a malformed fact must stay malformed so the SoulMind
+            // compact ctor can drop it on load rather than silently fabricate a LIKES/INFERRED
+            // belief out of a bad JSON row.
         }
     }
 
@@ -412,7 +414,21 @@ public final class SoulTypes {
             archivedPlayerMemories = archivedPlayerMemories == null ? List.of() : List.copyOf(archivedPlayerMemories);
             digestCursors = digestCursors == null ? Map.of() : Map.copyOf(digestCursors);
             peerStances = peerStances == null ? Map.of() : Map.copyOf(peerStances);
-            relations = relations == null ? List.of() : List.copyOf(relations);
+            // Drop malformed relation rows (legacy or hand-edited JSON): an unknown/missing
+            // relation or source deserialises to null, and a fact with no subject or object says
+            // nothing. Better to lose the row than to invent a belief the bot never held.
+            if (relations == null) {
+                relations = List.of();
+            } else {
+                List<RelationFact> keptRelations = new ArrayList<>(relations.size());
+                for (RelationFact fact : relations) {
+                    if (fact != null && fact.relation() != null && fact.source() != null
+                            && !fact.subject().isBlank() && !fact.object().isBlank()) {
+                        keptRelations.add(fact);
+                    }
+                }
+                relations = List.copyOf(keptRelations);
+            }
         }
 
         /** Pre-player-memory shape; defaults the four new fields to empty. */

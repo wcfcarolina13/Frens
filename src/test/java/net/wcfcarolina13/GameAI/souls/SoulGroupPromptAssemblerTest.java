@@ -471,8 +471,7 @@ class SoulGroupPromptAssemblerTest {
         }
         assertTrue(idx > 0, "no BELIEFS block");
         String beliefs = req.messages().get(idx).content();
-        assertTrue(beliefs.startsWith("BELIEFS (what the bots have come to think; claims, not world truth)\n"),
-                beliefs);
+        assertTrue(beliefs.startsWith("BELIEFS (claims the bots hold, not world truth)\n"), beliefs);
         assertTrue(beliefs.contains("Jake believes:"), beliefs);
         assertTrue(beliefs.contains("- Jake is good at mining"), beliefs);
         assertFalse(beliefs.contains("Sara believes:"), beliefs);
@@ -517,8 +516,9 @@ class SoulGroupPromptAssemblerTest {
         long lines = beliefs.lines().filter(l -> l.startsWith("- ")).count();
         assertTrue(lines <= SoulRelationOps.MAX_BELIEF_LINES, "lines=" + lines);
         assertTrue(lines >= 1, beliefs);
-        int chars = beliefs.lines().filter(l -> l.startsWith("- ")).mapToInt(l -> l.length() + 1).sum();
-        assertTrue(chars <= SoulRelationOps.MAX_BELIEFS_CHARS + 1, "chars=" + chars);
+        // The budget is the WHOLE block: header and "<name> believes:" sub-headers included.
+        assertTrue(beliefs.length() <= SoulRelationOps.MAX_BELIEFS_CHARS,
+                "block was " + beliefs.length() + " chars:\n" + beliefs);
         assertFalse(beliefs.contains("Sara believes:"), "roster budget already spent");
     }
 

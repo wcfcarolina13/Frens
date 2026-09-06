@@ -27,7 +27,11 @@ final class SoulRelationOps {
     static final int MAX_RELATION_ANCHORS = 2;
     /** Same tier as {@link SoulMindOps#MEMORY_ANCHOR_WEIGHT}: grounding 1-3 < memory 4 < change 5. */
     static final int RELATION_ANCHOR_WEIGHT = 4;
-    /** Seed topics of relation anchors are {@code relation:<RELATION>}. */
+    /**
+     * Seed topics of relation anchors are {@code relation:<RELATION>|<subject>|<object>} — the
+     * topic carries the whole triple so the director can put exactly the spoken fact on its recall
+     * cooldown, the way a {@code memory:} topic round-trips a fact key.
+     */
     static final String RELATION_TOPIC_PREFIX = "relation:";
     static final int MAX_BELIEF_LINES = 4;
     static final int MAX_BELIEFS_CHARS = 240;
@@ -232,10 +236,13 @@ final class SoulRelationOps {
     /**
      * The only producer shipped in Phase 3b: the bot watching itself work. Every
      * {@code TASK_COMPLETED} event in {@code events} (already this bot's own journal) is counted by
-     * its {@code category} fact, and a category completed at least {@link #SEEN_MIN_COMPLETIONS}
-     * times becomes {@code <bot> GOOD_AT <category>} at {@link #SEEN_CONFIDENCE}. BAD_AT is
-     * deliberately not produced — failure counting needs a failure event this journal does not
-     * carry.
+     * its task bucket (see {@link #bucketOf}), and the single most-completed bucket at or above
+     * {@link #SEEN_MIN_COMPLETIONS} becomes {@code <bot> GOOD_AT <bucket>} at
+     * {@link #SEEN_CONFIDENCE}. Exactly one fact per fold: GOOD_AT is single-valued and every SEEN
+     * fact shares one confidence, so two qualifying buckets in one day would just overwrite each
+     * other and make the belief flap. Ties go to the alphabetically first bucket for determinism.
+     * BAD_AT is deliberately not produced — failure counting needs a failure event this journal
+     * does not carry.
      */
     static List<SoulTypes.RelationFact> fromJournal(List<SoulTypes.SoulEvent> events, String botName, int day) {
         if (events == null || events.isEmpty() || botName == null || botName.isBlank()) {
@@ -246,20 +253,52 @@ final class SoulRelationOps {
             if (event == null || event.type() != SoulTypes.EventType.TASK_COMPLETED) {
                 continue;
             }
-            String category = event.facts().get("category");
-            if (category == null || category.isBlank()) {
+            String bucket = bucketOf(event);
+            if (bucket == null) {
                 continue;
             }
-            counts.merge(category.trim().toLowerCase(Locale.ROOT), 1, Integer::sum);
+            counts.merge(bucket, 1, Integer::sum);
         }
-        List<SoulTypes.RelationFact> out = new ArrayList<>();
+        String best = null;
+        int bestCount = 0;
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() >= SEEN_MIN_COMPLETIONS) {
-                out.add(new SoulTypes.RelationFact(botName.trim(), SoulTypes.Relation.GOOD_AT,
-                        entry.getKey(), SEEN_CONFIDENCE, SoulTypes.RelationSource.SEEN, day, SEEN_SALIENCE));
+            int count = entry.getValue();
+            if (count < SEEN_MIN_COMPLETIONS) {
+                continue;
+            }
+            if (count > bestCount || (count == bestCount && best != null && entry.getKey().compareTo(best) < 0)) {
+                best = entry.getKey();
+                bestCount = count;
             }
         }
-        return List.copyOf(out);
+        if (best == null) {
+            return List.of();
+        }
+        return List.of(new SoulTypes.RelationFact(botName.trim(), SoulTypes.Relation.GOOD_AT,
+                best, SEEN_CONFIDENCE, SoulTypes.RelationSource.SEEN, day, SEEN_SALIENCE));
+    }
+
+    /**
+     * The bucket one completed task counts toward: the task identifier's suffix after the first
+     * {@code ':'} ({@code "skill:woodcut"} → {@code "woodcut"}), the whole task name when it has
+     * no prefix, and the {@code category} fact only as a last resort — the category alone is the
+     * prefix, which is {@code "skill"} for every skill task and would make one useless belief.
+     */
+    private static String bucketOf(SoulTypes.SoulEvent event) {
+        String task = event.facts().get("task");
+        if (task != null && !task.isBlank()) {
+            String trimmed = task.trim();
+            int colon = trimmed.indexOf(':');
+            String candidate = colon >= 0 ? trimmed.substring(colon + 1).trim() : trimmed;
+            if (!candidate.isEmpty()) {
+                return candidate.toLowerCase(Locale.ROOT);
+            }
+        }
+        String category = event.facts().get("category");
+        if (category != null && !category.isBlank()) {
+            return category.trim().toLowerCase(Locale.ROOT);
+        }
+        return null;
     }
 
     // === rendering ===
@@ -353,17 +392,68 @@ final class SoulRelationOps {
             return List.of();
         }
         eligible.sort(Comparator.comparingInt(SoulTypes.RelationFact::salience).reversed());
+        List<SoulTypes.RelationFact> pool = new ArrayList<>(eligible);
         List<SoulTypes.RelationFact> picked = new ArrayList<>(MAX_RELATION_ANCHORS);
-        picked.add(eligible.get(0));
-        if (eligible.size() > 1 && MAX_RELATION_ANCHORS > 1 && random != null) {
-            picked.add(eligible.get(1 + random.nextInt(eligible.size() - 1)));
+        while (picked.size() < MAX_RELATION_ANCHORS && !pool.isEmpty()) {
+            picked.add(pool.remove(pickWeighted(pool, random)));
         }
         List<SoulBanterSeed.Anchor> out = new ArrayList<>(picked.size());
         for (SoulTypes.RelationFact fact : picked) {
-            out.add(new SoulBanterSeed.Anchor(RELATION_TOPIC_PREFIX + fact.relation().name(),
-                    phrase(fact, botName), RELATION_ANCHOR_WEIGHT));
+            out.add(new SoulBanterSeed.Anchor(anchorTopic(fact), phrase(fact, botName),
+                    RELATION_ANCHOR_WEIGHT));
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * Salience-weighted index into {@code pool} (already strongest-first). A null {@code random}
+     * — or an all-zero-salience pool, which decay makes impossible — falls back to the strongest,
+     * keeping the choice deterministic in tests that pass no rng.
+     */
+    private static int pickWeighted(List<SoulTypes.RelationFact> pool, RandomGenerator random) {
+        int total = 0;
+        for (SoulTypes.RelationFact fact : pool) {
+            total += Math.max(1, fact.salience());
+        }
+        if (random == null || total <= 0) {
+            return 0;
+        }
+        int roll = random.nextInt(total);
+        for (int i = 0; i < pool.size(); i++) {
+            roll -= Math.max(1, pool.get(i).salience());
+            if (roll < 0) {
+                return i;
+            }
+        }
+        return pool.size() - 1;
+    }
+
+    /** The self-identifying seed topic of one relation anchor. */
+    static String anchorTopic(SoulTypes.RelationFact fact) {
+        return RELATION_TOPIC_PREFIX + fact.relation().name() + "|" + fact.subject() + "|" + fact.object();
+    }
+
+    /**
+     * The inverse of {@link #anchorTopic}: a fired seed topic back into the triple it names, so
+     * the director can hand it to {@link #noteRecalled}. Empty for any topic that is not one of
+     * ours or is malformed.
+     */
+    static Optional<SoulTypes.RelationFact> parseAnchorTopic(String topic) {
+        if (topic == null || !topic.startsWith(RELATION_TOPIC_PREFIX)) {
+            return Optional.empty();
+        }
+        String[] parts = topic.substring(RELATION_TOPIC_PREFIX.length()).split("\\|", -1);
+        if (parts.length != 3 || parts[1].isBlank() || parts[2].isBlank()) {
+            return Optional.empty();
+        }
+        SoulTypes.Relation relation;
+        try {
+            relation = SoulTypes.Relation.valueOf(parts[0].trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            return Optional.empty();
+        }
+        return Optional.of(new SoulTypes.RelationFact(parts[1], relation, parts[2],
+                0d, SoulTypes.RelationSource.SEEN, -1, 0));
     }
 
     /** First person when the bot is talking about itself, {@link #render}'s wording otherwise. */

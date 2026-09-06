@@ -20,6 +20,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -749,6 +750,12 @@ public final class SoulRuntime {
         return SoulRelationOps.render(fact);
     }
 
+    /** Case-insensitive (subject, relation, object) identity — the same triple {@code merge} uses. */
+    private static String relationKey(SoulTypes.RelationFact fact) {
+        return fact.subject().toLowerCase(java.util.Locale.ROOT) + "\u0000" + fact.relation().name()
+                + "\u0000" + fact.object().toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Cached minds for a roster, in roster order; a bot with no cached mind yields an empty one. */
     List<SoulTypes.SoulMind> mindsFor(List<UUID> botIds) {
         List<SoulTypes.SoulMind> out = new ArrayList<>(botIds.size());
@@ -812,7 +819,12 @@ public final class SoulRuntime {
         // lands at the next day rollover with no pipeline reload.
         net.wcfcarolina13.FilingSystem.ManualConfig relationCfg = net.wcfcarolina13.Frens.CONFIG;
         boolean relationsEnabled = relationCfg != null && relationCfg.isSoulRelationsEnabled();
-        int relationsBefore = store.cachedMind(botId).map(m -> m.relations().size()).orElse(0);
+        // Triples held before the fold, so "added" counts facts that are actually new rather than
+        // the net size change — a day that adds one belief while another decays away is still 1.
+        java.util.Set<String> relationsBefore = store.cachedMind(botId)
+                .map(m -> m.relations().stream().map(SoulRuntime::relationKey)
+                        .collect(java.util.stream.Collectors.toCollection(HashSet::new)))
+                .orElseGet(HashSet::new);
         long lastMs = store.cachedMind(botId).map(SoulTypes.SoulMind::lastConsolidatedAtMs).orElse(0L);
         Instant since = lastMs <= 0L ? Instant.EPOCH : Instant.ofEpochMilli(lastMs);
         store.eventsSince(botId, since)
@@ -828,7 +840,10 @@ public final class SoulRuntime {
                 .thenAccept(mind -> {
                     LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
                             botId, day, mind.memories().size());
-                    int added = mind.relations().size() - relationsBefore;
+                    int added = (int) mind.relations().stream()
+                            .map(SoulRuntime::relationKey)
+                            .filter(key -> !relationsBefore.contains(key))
+                            .count();
                     if (added > 0) {
                         LOGGER.info("[souls] relations bot={} added={} total={}",
                                 digestBotName, added, mind.relations().size());

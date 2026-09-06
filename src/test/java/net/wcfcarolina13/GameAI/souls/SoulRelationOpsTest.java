@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,10 +33,13 @@ class SoulRelationOpsTest {
         return SoulMindOps.withRelations(SoulTypes.SoulMind.empty(), relations);
     }
 
-    private static SoulTypes.SoulEvent completed(String category) {
+    /** One completed task, carrying the same facts SoulEventObserver emits: task + its prefix. */
+    private static SoulTypes.SoulEvent completed(String task) {
+        int colon = task.indexOf(':');
+        String category = colon >= 0 ? task.substring(0, colon) : task;
         return new SoulTypes.SoulEvent(UUID.randomUUID(), SoulTypes.EventType.TASK_COMPLETED,
                 UUID.randomUUID(), List.of(), "overworld", "forest",
-                Map.of("task", category + ":thing", "category", category),
+                Map.of("task", task, "category", category),
                 SoulTypes.Witness.SELF, 0L, Instant.EPOCH, SoulTypes.Salience.LOW);
     }
 
@@ -152,27 +156,49 @@ class SoulRelationOpsTest {
     // === SEEN producer ===
 
     @Test
-    void fromJournalNeedsThreeCompletionsPerCategory() {
-        assertTrue(SoulRelationOps.fromJournal(List.of(completed("skill"), completed("skill")), "Bob", 4).isEmpty());
-        List<SoulTypes.RelationFact> one = SoulRelationOps.fromJournal(
-                List.of(completed("skill"), completed("skill"), completed("skill")), "Bob", 4);
+    void fromJournalNeedsThreeCompletionsOfTheSameTask() {
+        assertTrue(SoulRelationOps.fromJournal(
+                List.of(completed("skill:woodcut"), completed("skill:woodcut")), "Bob", 4).isEmpty());
+        List<SoulTypes.RelationFact> one = SoulRelationOps.fromJournal(List.of(
+                completed("skill:woodcut"), completed("skill:woodcut"), completed("skill:woodcut")), "Bob", 4);
         assertEquals(1, one.size());
         assertEquals("Bob", one.get(0).subject());
         assertEquals(SoulTypes.Relation.GOOD_AT, one.get(0).relation());
-        assertEquals("skill", one.get(0).object());
+        assertEquals("woodcut", one.get(0).object(), "the task suffix, not the 'skill' category prefix");
         assertEquals(0.4d, one.get(0).confidence(), 1e-9);
         assertEquals(SoulTypes.RelationSource.SEEN, one.get(0).source());
         assertEquals(4, one.get(0).day());
         assertEquals(6, one.get(0).salience());
+        assertEquals("Bob is good at woodcut", SoulRelationOps.render(one.get(0)));
+    }
 
-        List<SoulTypes.SoulEvent> two = new ArrayList<>();
+    @Test
+    void fromJournalKeepsOnlyTheMostCompletedTask() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            two.add(completed("skill"));
-            two.add(completed("Hobby"));
+            events.add(completed("skill:woodcut"));
         }
-        two.add(completed("chore"));
-        List<SoulTypes.RelationFact> both = SoulRelationOps.fromJournal(two, "Bob", 4);
-        assertEquals(List.of("skill", "hobby"), both.stream().map(SoulTypes.RelationFact::object).toList());
+        for (int i = 0; i < 5; i++) {
+            events.add(completed("skill:mining"));
+        }
+        List<SoulTypes.RelationFact> facts = SoulRelationOps.fromJournal(events, "Bob", 4);
+        assertEquals(List.of("mining"), facts.stream().map(SoulTypes.RelationFact::object).toList(),
+                "GOOD_AT is single-valued, so only the best-evidenced task becomes the belief");
+    }
+
+    @Test
+    void fromJournalTiesGoAlphabeticallyAndFallBackToTheWholeName() {
+        List<SoulTypes.SoulEvent> tied = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            tied.add(completed("skill:woodcut"));
+            tied.add(completed("skill:Mining"));
+        }
+        assertEquals(List.of("mining"), SoulRelationOps.fromJournal(tied, "Bob", 4)
+                .stream().map(SoulTypes.RelationFact::object).toList());
+
+        List<SoulTypes.SoulEvent> noColon = List.of(completed("fishing"), completed("fishing"), completed("fishing"));
+        assertEquals(List.of("fishing"), SoulRelationOps.fromJournal(noColon, "Bob", 4)
+                .stream().map(SoulTypes.RelationFact::object).toList());
     }
 
     // === rendering ===
@@ -244,17 +270,62 @@ class SoulRelationOpsTest {
                 fact("Roti", SoulTypes.Relation.WANTS, "iron", 0.6d, 1, 3)));
         List<SoulBanterSeed.Anchor> anchors = SoulRelationOps.anchors(mind, "Bob", 9, new Random(1));
         assertEquals(SoulRelationOps.MAX_RELATION_ANCHORS, anchors.size());
-        assertEquals(SoulRelationOps.RELATION_TOPIC_PREFIX + "GOOD_AT", anchors.get(0).topic());
-        assertEquals(SoulRelationOps.RELATION_ANCHOR_WEIGHT, anchors.get(0).weight());
-        assertEquals("I am good at mining", anchors.get(0).phrase(), "the bot speaks of itself first person");
-        assertTrue(anchors.get(1).phrase().startsWith("Roti "), anchors.get(1).phrase());
+        assertNotEquals(anchors.get(0).topic(), anchors.get(1).topic(), "two distinct facts");
+        Set<String> topics = Set.of(SoulRelationOps.RELATION_TOPIC_PREFIX + "GOOD_AT|Bob|mining",
+                SoulRelationOps.RELATION_TOPIC_PREFIX + "FEARS|Roti|the dark",
+                SoulRelationOps.RELATION_TOPIC_PREFIX + "WANTS|Roti|iron");
+        for (SoulBanterSeed.Anchor anchor : anchors) {
+            assertTrue(topics.contains(anchor.topic()), anchor.topic());
+            assertEquals(SoulRelationOps.RELATION_ANCHOR_WEIGHT, anchor.weight());
+            assertTrue(anchor.phrase().startsWith("I ") || anchor.phrase().startsWith("Roti "),
+                    anchor.phrase());
+        }
+    }
+
+    @Test
+    void anchorsPickBySalienceOverManyRolls() {
+        SoulTypes.SoulMind mind = mindWith(List.of(
+                fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 10),
+                fact("Roti", SoulTypes.Relation.WANTS, "iron", 0.6d, 1, 1)));
+        int strongFirst = 0;
+        for (int seed = 0; seed < 200; seed++) {
+            if (SoulRelationOps.anchors(mind, "Bob", 9, new Random(seed)).get(0)
+                    .phrase().equals("I am good at mining")) {
+                strongFirst++;
+            }
+        }
+        assertTrue(strongFirst > 140, "salience-weighted, so 10 should beat 1 most rolls: " + strongFirst);
+        assertEquals("I am good at mining",
+                SoulRelationOps.anchors(mind, "Bob", 9, null).get(0).phrase(),
+                "no rng falls back to the strongest deterministically");
+    }
+
+    @Test
+    void anchorTopicRoundTripsThroughParse() {
+        SoulTypes.RelationFact source = fact("Roti", SoulTypes.Relation.DISLIKES, "the nether", 0.9d, 3, 7);
+        String topic = SoulRelationOps.anchorTopic(source);
+        Optional<SoulTypes.RelationFact> parsed = SoulRelationOps.parseAnchorTopic(topic);
+        assertTrue(parsed.isPresent());
+        assertEquals("Roti", parsed.get().subject());
+        assertEquals(SoulTypes.Relation.DISLIKES, parsed.get().relation());
+        assertEquals("the nether", parsed.get().object());
+        assertTrue(SoulRelationOps.parseAnchorTopic("memory:said:abcd1234").isEmpty());
+        assertTrue(SoulRelationOps.parseAnchorTopic("relation:NOPE|Roti|x").isEmpty());
+        assertTrue(SoulRelationOps.parseAnchorTopic("relation:LIKES|Roti").isEmpty());
+
+        // The parsed triple is what noteRecalled matches on — the spoken fact goes on cooldown.
+        List<SoulTypes.RelationFact> cooled =
+                SoulRelationOps.noteRecalled(List.of(source), parsed.get(), 11);
+        assertEquals(11, cooled.get(0).day());
+        assertEquals(10, cooled.get(0).salience());
     }
 
     // === consolidate integration ===
 
     @Test
     void consolidateFoldsSeenFactsOnlyWhenEnabledAndAlwaysDecays() {
-        List<SoulTypes.SoulEvent> events = List.of(completed("skill"), completed("skill"), completed("skill"));
+        List<SoulTypes.SoulEvent> events = List.of(
+                completed("skill:mining"), completed("skill:mining"), completed("skill:mining"));
         SoulTypes.SoulMind off = SoulMindOps.consolidate(SoulTypes.SoulMind.empty(), events, 4, "forest",
                 id -> "?", 1L, "Bob", false);
         assertTrue(off.relations().isEmpty());
@@ -262,7 +333,7 @@ class SoulRelationOpsTest {
         SoulTypes.SoulMind on = SoulMindOps.consolidate(SoulTypes.SoulMind.empty(), events, 4, "forest",
                 id -> "?", 1L, "Bob", true);
         assertEquals(1, on.relations().size());
-        assertEquals("skill", on.relations().get(0).object());
+        assertEquals("mining", on.relations().get(0).object());
         assertEquals(SoulRelationOps.SEEN_SALIENCE - 1, on.relations().get(0).salience(),
                 "the same consolidation that writes the fact also runs the day's decay");
 
