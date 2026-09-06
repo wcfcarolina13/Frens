@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-06 (final) — next session starts here
 
-**State:** main = origin/main @ 1.1.215 (pushed; DEPLOYSTATE). Suite 903 green. 1.1.215 = one-line follow-up: leading list bullets (`-`, `•`, `>`) stripped before the `##FRENS` sentinel (the 1.1.214 re-review residual), no new field items. **Phase 3 of the soul
+**State:** main = origin/main @ 1.1.215 (pushed; deployed to all three Prism instances). Suite 903 green. 1.1.215 = one-line follow-up: leading list bullets (`-`, `•`, `>`) stripped before the `##FRENS` sentinel (the 1.1.214 re-review residual), no new field items. **Phase 3 of the soul
 conversation ontology is COMPLETE** — (d) 1.1.211, (a) 1.1.212, (b) 1.1.213, (c) 1.1.214.
 
 **Shipped in 1.1.214 (Phase 3 item c — structured LLM output, `##FRENS` side channel):** pure
