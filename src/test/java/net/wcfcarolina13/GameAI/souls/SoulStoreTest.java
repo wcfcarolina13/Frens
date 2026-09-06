@@ -665,8 +665,23 @@ class SoulStoreTest {
         assertTrue(mind.playerMemories().isEmpty());
         assertTrue(mind.digestCursors().isEmpty());
         assertTrue(mind.peerStances().isEmpty());
+        assertTrue(mind.relations().isEmpty());
         SoulTypes.SoulMind saved = store.updateMind(bot, m -> SoulMemoryDigestOps.withCursor(m, "DIRECT:x", new SoulTypes.ConversationCursor(2L, 5L))).get();
         assertEquals(new SoulTypes.ConversationCursor(2L, 5L), saved.digestCursors().get("DIRECT:x"));
+    }
+
+    @Test
+    void relationsRoundTripThroughMindJson() throws Exception {
+        UUID bot = UUID.randomUUID();
+        List<SoulTypes.RelationFact> facts = List.of(
+                new SoulTypes.RelationFact("Bob", SoulTypes.Relation.GOOD_AT, "skill", 0.4d,
+                        SoulTypes.RelationSource.SEEN, 4, 6),
+                new SoulTypes.RelationFact("Roti", SoulTypes.Relation.DISLIKES, "the nether", 0.8d,
+                        SoulTypes.RelationSource.SAID, 5, 9));
+        store.updateMind(bot, m -> SoulMindOps.withRelations(m, facts)).get();
+        SoulStore reopened = new SoulStore(worldRoot, Executors.newSingleThreadExecutor());
+        SoulTypes.SoulMind reloaded = reopened.mind(bot).get();
+        assertEquals(facts, reloaded.relations());
     }
 
     @Test

@@ -86,7 +86,7 @@ class SoulMindOpsTest {
                 List.of(), List.of(new SoulTypes.DayMemory(2, "the work", "finished fishing", "river", List.of(), 1, -1)),
                 Set.of(), 0L, 2, -1);
         SoulTypes.SoulMind after = SoulMindOps.consolidate(before, events, 3, "forest",
-                id -> id.equals(roti) ? "Roti" : "?", 999L);
+                id -> id.equals(roti) ? "Roti" : "?", 999L, "Bob", false);
         List<String> topics = after.memories().stream().map(SoulTypes.DayMemory::topic).toList();
         assertEquals(List.of("getting stuck", "getting hurt", "fighting"), topics,
                 "top 3 by score; sleep excluded; old memory decayed to 0 and evicted");
@@ -134,7 +134,7 @@ class SoulMindOpsTest {
         UUID p = UUID.randomUUID();
         SoulTypes.SoulMind m = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
                 new SoulTypes.PlayerMemory(p, 1, "Roti wants a farm", 2, -1, List.of())));
-        SoulTypes.SoulMind c = SoulMindOps.consolidate(m, List.of(), 5, "plains", id -> "Roti", 1_000L);
+        SoulTypes.SoulMind c = SoulMindOps.consolidate(m, List.of(), 5, "plains", id -> "Roti", 1_000L, "Bob", false);
         assertEquals(1, c.playerMemories().get(0).salience());
         String key = SoulMemoryDigestOps.factKey("Roti wants a farm");
         SoulTypes.SoulMind r = SoulMindOps.noteRecalled(c, key, 5);
@@ -298,7 +298,7 @@ class SoulMindOpsTest {
         peers.put(ALFA, new SoulTypes.PeerStance(new SoulTypes.Stance(4, 1, 3), 2));
         peers.put(BRAVO, new SoulTypes.PeerStance(new SoulTypes.Stance(6, 0, 3), 2, 3));
         SoulTypes.SoulMind after = SoulMindOps.consolidate(mindWithPeers(peers), List.of(), 3, "forest",
-                id -> "?", 500L);
+                id -> "?", 500L, "Bob", false);
         assertFalse(after.peerStances().containsKey(ALFA), "reached baseline -> forgotten");
         assertEquals(new SoulTypes.Stance(5, 0, 3), after.peerStances().get(BRAVO).stance());
         assertEquals(2, after.peerStances().get(BRAVO).lastTrustDay());

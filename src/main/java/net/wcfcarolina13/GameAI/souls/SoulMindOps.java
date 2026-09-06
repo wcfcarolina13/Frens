@@ -362,7 +362,8 @@ final class SoulMindOps {
      * outranks two ordinary scrapes; the score is what the memory carries as salience.
      */
     static SoulTypes.SoulMind consolidate(SoulTypes.SoulMind mind, List<SoulTypes.SoulEvent> events, int day,
-                                          String place, Function<UUID, String> nameOf, long nowMs) {
+                                          String place, Function<UUID, String> nameOf, long nowMs,
+                                          String botName, boolean relationsEnabled) {
         Map<String, List<SoulTypes.SoulEvent>> groups = new LinkedHashMap<>();
         for (SoulTypes.SoulEvent event : events) {
             if (event.type() == SoulTypes.EventType.DIRECT_CONVERSATION) {
@@ -453,9 +454,17 @@ final class SoulMindOps {
                         entry.getValue().lastAskDay()));
             }
         }
-        return SoulMemoryDigestOps.decay(withPeerStances(
+        // Phase 3b relation facts: the deterministic SEEN producer folds in only when the toggle
+        // is on, but decay always runs so a disabled toggle still lets old beliefs fade out.
+        List<SoulTypes.RelationFact> relations = mind.relations();
+        if (relationsEnabled) {
+            for (SoulTypes.RelationFact fact : SoulRelationOps.fromJournal(events, botName, day)) {
+                relations = SoulRelationOps.merge(relations, fact);
+            }
+        }
+        return SoulMemoryDigestOps.decay(withRelations(withPeerStances(
                 rebuild(mind, decayed, mind.threads(), memories, mind.seen(), nowMs, day, mind.lastTaskTrustDay()),
-                peers));
+                peers), SoulRelationOps.decay(relations)));
     }
 
     // === prompt + seed views ===
@@ -581,28 +590,40 @@ final class SoulMindOps {
     static SoulTypes.SoulMind withPlayerMemories(SoulTypes.SoulMind mind, List<SoulTypes.PlayerMemory> playerMemories) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances());
+                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances(),
+                mind.relations());
     }
 
     static SoulTypes.SoulMind withArchivedPlayerMemories(SoulTypes.SoulMind mind,
                                                           List<SoulTypes.PlayerMemory> archivedPlayerMemories) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors(), mind.peerStances());
+                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors(), mind.peerStances(),
+                mind.relations());
     }
 
     static SoulTypes.SoulMind withDigestCursors(SoulTypes.SoulMind mind,
                                                 Map<String, SoulTypes.ConversationCursor> digestCursors) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors, mind.peerStances());
+                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors, mind.peerStances(),
+                mind.relations());
+    }
+
+    static SoulTypes.SoulMind withRelations(SoulTypes.SoulMind mind,
+                                            List<SoulTypes.RelationFact> relations) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances(),
+                relations);
     }
 
     static SoulTypes.SoulMind withPeerStances(SoulTypes.SoulMind mind,
                                               Map<UUID, SoulTypes.PeerStance> peerStances) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                mind.playerMemories(), mind.archivedPlayerMemories(), mind.digestCursors(), peerStances);
+                mind.playerMemories(), mind.archivedPlayerMemories(), mind.digestCursors(), peerStances,
+                mind.relations());
     }
 
     private static SoulTypes.SoulMind rebuild(SoulTypes.SoulMind mind, SoulTypes.Stance stance,
@@ -611,6 +632,6 @@ final class SoulMindOps {
                                               int lastTaskTrustDay) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), stance, threads, memories, seen,
                 lastConsolidatedAtMs, lastDay, lastTaskTrustDay, mind.playerMemories(),
-                mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances());
+                mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances(), mind.relations());
     }
 }

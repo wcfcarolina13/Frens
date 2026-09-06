@@ -352,7 +352,8 @@ final class SoulMemoryDigestOps {
         return tokens;
     }
 
-    private static double jaccard(Set<String> a, Set<String> b) {
+    /** Package-private (1.1.213) so {@link SoulRelationOps} can reuse the same overlap test. */
+    static double jaccard(Set<String> a, Set<String> b) {
         if (a.isEmpty() || b.isEmpty()) {
             return 0d;
         }

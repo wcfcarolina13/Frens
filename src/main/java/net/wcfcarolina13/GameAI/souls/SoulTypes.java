@@ -359,6 +359,32 @@ public final class SoulTypes {
     }
 
     /**
+     * The closed vocabulary of typed relation facts (conversation ontology Phase 3b). A bot may
+     * only ever hold one of these about a subject; anything the model proposes outside the set is
+     * rejected rather than stored.
+     */
+    public enum Relation { LIKES, DISLIKES, FEARS, GOOD_AT, BAD_AT, PROMISED, WANTS, CALLS }
+
+    /** Where a {@link RelationFact} came from: heard it, watched it happen, or reasoned to it. */
+    public enum RelationSource { SAID, SEEN, INFERRED }
+
+    /**
+     * One typed belief a bot holds (conversation ontology Phase 3b). A CLAIM, never world truth:
+     * {@code subject} is a scene participant's name or the literal {@code "the world"},
+     * {@code confidence} is 0..1 quantised to one decimal, {@code day} the Minecraft day it was
+     * last written or recalled, and {@code salience} the 0..10 forgetting budget.
+     */
+    public record RelationFact(String subject, Relation relation, String object, double confidence,
+                               RelationSource source, int day, int salience) {
+        public RelationFact {
+            subject = subject == null ? "" : subject.trim();
+            object = object == null ? "" : object.trim();
+            relation = relation == null ? Relation.LIKES : relation;
+            source = source == null ? RelationSource.INFERRED : source;
+        }
+    }
+
+    /**
      * Per-bot persistent mind: stance toward the player, open threads, day memories, and the
      * first-sighting registry ({@code seen}, kept in insertion order so the oldest key is the
      * one evicted at the cap). {@code lastConsolidatedAtMs} is epoch millis, {@code lastDay}
@@ -368,13 +394,15 @@ public final class SoulTypes {
      * the ones a {@code /bot soul reset} moved aside for audit (only reset archives; decay and
      * cap eviction drop memories outright), and {@code digestCursors}
      * the per-conversation-key cursor of how far the digest has consumed each transcript.
+     * {@code relations} holds the typed {@link RelationFact} beliefs (ontology Phase 3b).
      */
     public record SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
                            List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
                            int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
                            List<PlayerMemory> archivedPlayerMemories,
                            Map<String, ConversationCursor> digestCursors,
-                           Map<UUID, PeerStance> peerStances) {
+                           Map<UUID, PeerStance> peerStances,
+                           List<RelationFact> relations) {
         public SoulMind {
             playerStance = playerStance == null ? Stance.BASELINE : playerStance;
             threads = threads == null ? List.of() : List.copyOf(threads);
@@ -384,6 +412,7 @@ public final class SoulTypes {
             archivedPlayerMemories = archivedPlayerMemories == null ? List.of() : List.copyOf(archivedPlayerMemories);
             digestCursors = digestCursors == null ? Map.of() : Map.copyOf(digestCursors);
             peerStances = peerStances == null ? Map.of() : Map.copyOf(peerStances);
+            relations = relations == null ? List.of() : List.copyOf(relations);
         }
 
         /** Pre-player-memory shape; defaults the four new fields to empty. */
@@ -391,10 +420,10 @@ public final class SoulTypes {
                         List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
                         int lastDay, int lastTaskTrustDay) {
             this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
-                    lastDay, lastTaskTrustDay, List.of(), List.of(), Map.of(), Map.of());
+                    lastDay, lastTaskTrustDay, List.of(), List.of(), Map.of(), Map.of(), List.of());
         }
 
-        /** Pre-peer-stance shape; defaults {@code peerStances} to empty. */
+        /** Pre-peer-stance shape; defaults {@code peerStances} and {@code relations} to empty. */
         public SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
                         List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
                         int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
@@ -402,7 +431,19 @@ public final class SoulTypes {
                         Map<String, ConversationCursor> digestCursors) {
             this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
                     lastDay, lastTaskTrustDay, playerMemories, archivedPlayerMemories, digestCursors,
-                    Map.of());
+                    Map.of(), List.of());
+        }
+
+        /** Pre-relations shape; defaults {@code relations} to empty. */
+        public SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
+                        List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
+                        int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
+                        List<PlayerMemory> archivedPlayerMemories,
+                        Map<String, ConversationCursor> digestCursors,
+                        Map<UUID, PeerStance> peerStances) {
+            this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
+                    lastDay, lastTaskTrustDay, playerMemories, archivedPlayerMemories, digestCursors,
+                    peerStances, List.of());
         }
 
         public static SoulMind empty() {
