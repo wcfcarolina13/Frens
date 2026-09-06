@@ -932,7 +932,12 @@ public final class SoulRuntime {
                         return playback != null && playback.hasActiveScene(ownerId);
                     }
                 },
-                delivery::deliverStatus);
+                delivery::deliverStatus,
+                // Phase 3d novelty rejection: live read, OFF unless explicitly enabled.
+                () -> {
+                    ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                    return cfg != null && cfg.isSoulNoveltyRejectionEnabled();
+                });
         // Live supplier like the banter switch above: /bot soul digest on|off takes effect on the
         // next day rollover with no pipeline reload. Absent config = on (the field default).
         SoulMemoryDigestService digest = new SoulMemoryDigestService(

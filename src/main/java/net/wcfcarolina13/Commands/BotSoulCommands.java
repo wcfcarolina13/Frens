@@ -111,6 +111,10 @@ final class BotSoulCommands {
                         .then(CommandManager.literal("on").executes(ctx -> executeDigestToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeDigestToggle(ctx, false)))
                         .then(CommandManager.literal("status").executes(BotSoulCommands::executeDigestStatus)))
+                .then(CommandManager.literal("novelty")
+                        .then(CommandManager.literal("on").executes(ctx -> executeNoveltyToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeNoveltyToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeNoveltyStatus)))
                 .then(CommandManager.literal("voice")
                         .then(CommandManager.literal("on").executes(BotSoulCommands::executeVoiceOn))
                         .then(CommandManager.literal("off").executes(BotSoulCommands::executeVoiceOff))
@@ -903,6 +907,38 @@ final class BotSoulCommands {
         boolean enabled = config == null || config.isSoulMemoryDigestEnabled();
         ChatUtils.sendSystemMessage(source, "Memory digest is " + (enabled ? "ON" : "OFF")
                 + ". Runs at each Minecraft day rollover for soul-bound bots.");
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul novelty on|off} — operator-only switch for group-scene novelty rejection
+     * (Phase 3d). Off by default; the group conversation service reads it through a live supplier,
+     * so the change lands on the next scene with no pipeline reload.
+     */
+    private static int executeNoveltyToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the novelty rejection switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        if (config == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        config.setSoulNoveltyRejectionEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Novelty rejection set to " + (enabled ? "on" : "off") + ".");
+        return 1;
+    }
+
+    /** {@code /bot soul novelty status} — enablement plus what the filter actually drops. */
+    private static int executeNoveltyStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulNoveltyRejectionEnabled();
+        ChatUtils.sendSystemMessage(source, "Novelty rejection is " + (enabled ? "ON" : "OFF")
+                + ". Drops a group-scene line that repeats one of the speaker's last 12 lines.");
         return 1;
     }
 

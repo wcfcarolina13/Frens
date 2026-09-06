@@ -49,6 +49,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setSoulLocalChatEnabled(true);
         cfg.setSoulBanterActiveEnabled(true);
         cfg.setSoulMemoryDigestEnabled(false);
+        cfg.setSoulNoveltyRejectionEnabled(true);
         cfg.setDialogueScriptedRate(11);
         cfg.setSoulBanterIdleRate(22);
         cfg.setSoulBanterActiveRate(33);
@@ -77,6 +78,7 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals(expected.isSoulLocalChatEnabled(), actual.isSoulLocalChatEnabled());
         assertEquals(expected.isSoulBanterActiveEnabled(), actual.isSoulBanterActiveEnabled());
         assertEquals(expected.isSoulMemoryDigestEnabled(), actual.isSoulMemoryDigestEnabled());
+        assertEquals(expected.isSoulNoveltyRejectionEnabled(), actual.isSoulNoveltyRejectionEnabled());
         assertEquals(expected.getDialogueScriptedRate(), actual.getDialogueScriptedRate());
         assertEquals(expected.getSoulBanterIdleRate(), actual.getSoulBanterIdleRate());
         assertEquals(expected.getSoulBanterActiveRate(), actual.getSoulBanterActiveRate());

@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 
 /**
  * Orchestrates one group-scene (PARTY channel) turn: heard → one capped orchestration call →
@@ -56,11 +57,29 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private final StatusSink status;
     /** Scene provider metadata by correlationId, for per-line SPOKEN appends during playback. */
     private final Map<UUID, SoulTypes.ProviderResult> sceneResults = new ConcurrentHashMap<>();
+    /**
+     * Per-bot ring of recently delivered normalised lines (Phase 3d novelty rejection). Scenes for
+     * different owners complete on different provider-future worker threads, so the map is
+     * concurrent and each ring synchronizes internally. In-memory only — never persisted.
+     */
+    private final Map<UUID, SoulNoveltyPolicy.Ring> noveltyRings = new ConcurrentHashMap<>();
+    /** Live read of {@code soulNoveltyRejectionEnabled}; default off keeps behaviour unchanged. */
+    private final BooleanSupplier noveltyEnabled;
 
+    /** Legacy 8-arg form: novelty rejection disabled (behaviour identical to pre-1.1.211). */
     public SoulGroupConversationService(SoulStore partyStore, SoulGroupPromptAssembler prompts,
                                          SoulGenerationScheduler scheduler, SoulModelProvider provider,
                                          SoulGroupResponseValidator validator, SoulSettings settings,
                                          ScenePlayer player, StatusSink status) {
+        this(partyStore, prompts, scheduler, provider, validator, settings, player, status, () -> false);
+    }
+
+    public SoulGroupConversationService(SoulStore partyStore, SoulGroupPromptAssembler prompts,
+                                         SoulGenerationScheduler scheduler, SoulModelProvider provider,
+                                         SoulGroupResponseValidator validator, SoulSettings settings,
+                                         ScenePlayer player, StatusSink status,
+                                         BooleanSupplier noveltyEnabled) {
+        this.noveltyEnabled = Objects.requireNonNull(noveltyEnabled, "noveltyEnabled");
         this.partyStore = Objects.requireNonNull(partyStore, "partyStore");
         this.prompts = Objects.requireNonNull(prompts, "prompts");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -193,14 +212,65 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return;
         }
 
+        List<SoulGroupTypes.SceneLine> lines = applyNovelty(turn, parse.lines());
+
         sceneResults.put(correlationId, result);
-        player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, parse.lines()));
+        player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines));
         LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
                         + "provider={} model={} providerMs={} totalMs={} outcome=scene-started",
-                correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), parse.lines().size(),
+                correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), lines.size(),
                 queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
                 elapsedMs(submitStartNanos));
         outcome.complete(Submission.SCENE_STARTED);
+    }
+
+    /**
+     * Phase 3d: drop scene lines that repeat what the speaker recently said (or that another bot
+     * already said inside this same scene). The scene is always enqueued, even when every line is
+     * dropped — the zero-delivery path is an explicit part of the {@code sceneDelivered} contract
+     * and skipping the enqueue would strand the turn. Kept lines are remembered in their speaker's
+     * ring only after they survive the filter. With the toggle off this returns the parsed lines
+     * unchanged and touches no state.
+     */
+    private List<SoulGroupTypes.SceneLine> applyNovelty(SoulGroupTypes.GroupSceneTurn turn,
+                                                        List<SoulGroupTypes.SceneLine> parsed) {
+        if (parsed.isEmpty() || !noveltyEnabled.getAsBoolean()) {
+            return parsed;
+        }
+        List<String> texts = new ArrayList<>(parsed.size());
+        List<List<String>> histories = new ArrayList<>(parsed.size());
+        List<SoulNoveltyPolicy.Ring> rings = new ArrayList<>(parsed.size());
+        for (SoulGroupTypes.SceneLine line : parsed) {
+            texts.add(line.text());
+            SoulGroupTypes.SceneParticipant speaker = participantFor(turn, line.participantIndex());
+            SoulNoveltyPolicy.Ring ring = speaker == null ? null
+                    : noveltyRings.computeIfAbsent(speaker.botId(), id -> new SoulNoveltyPolicy.Ring());
+            rings.add(ring);
+            histories.add(ring == null ? List.of() : ring.snapshot());
+        }
+        List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(texts, histories);
+        List<SoulGroupTypes.SceneLine> kept = new ArrayList<>(parsed.size());
+        for (SoulNoveltyPolicy.Verdict verdict : verdicts) {
+            SoulGroupTypes.SceneLine line = parsed.get(verdict.index());
+            if (!verdict.kept()) {
+                SoulGroupTypes.SceneParticipant speaker = participantFor(turn, line.participantIndex());
+                LOGGER.info("[souls] novelty dropped bot={} reason={}",
+                        speaker == null ? "?" : speaker.displayName(), verdict.reason());
+                continue;
+            }
+            SoulNoveltyPolicy.Ring ring = rings.get(verdict.index());
+            if (ring != null) {
+                ring.remember(verdict.normalised());
+            }
+            kept.add(line);
+        }
+        return kept;
+    }
+
+    /** Roster participant for a validated line index, or null if the index is somehow out of range. */
+    private static SoulGroupTypes.SceneParticipant participantFor(SoulGroupTypes.GroupSceneTurn turn, int index) {
+        List<SoulGroupTypes.SceneParticipant> roster = turn.roster();
+        return index >= 0 && index < roster.size() ? roster.get(index) : null;
     }
 
     private void failTurn(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,

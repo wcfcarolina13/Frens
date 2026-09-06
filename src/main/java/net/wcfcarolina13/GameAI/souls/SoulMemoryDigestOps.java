@@ -59,7 +59,8 @@ final class SoulMemoryDigestOps {
     private static final Pattern THEY = Pattern.compile("\\bthey\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern NON_TOKEN = Pattern.compile("[^a-z0-9 ]");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
-    private static final Set<String> STOP_WORDS = Set.of(
+    /** Package-private: SoulNoveltyPolicy reuses the same vocabulary rather than duplicating it. */
+    static final Set<String> STOP_WORDS = Set.of(
             "a", "an", "the", "and", "or", "to", "of", "in", "on", "is", "are", "was", "were",
             "be", "it", "that", "this", "they", "their", "them");
 
@@ -340,7 +341,7 @@ final class SoulMemoryDigestOps {
         return List.copyOf(new LinkedHashSet<>(ids));
     }
 
-    private static Set<String> tokens(String fact) {
+    static Set<String> tokens(String fact) {
         String normalized = normalize(fact);
         Set<String> tokens = new HashSet<>();
         for (String token : WHITESPACE.split(normalized)) {
@@ -364,7 +365,7 @@ final class SoulMemoryDigestOps {
         return (double) shared / (a.size() + b.size() - shared);
     }
 
-    private static String normalize(String fact) {
+    static String normalize(String fact) {
         String lower = (fact == null ? "" : fact).toLowerCase(Locale.ROOT);
         return WHITESPACE.matcher(NON_TOKEN.matcher(lower).replaceAll("")).replaceAll(" ").trim();
     }
