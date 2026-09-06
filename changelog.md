@@ -2,6 +2,93 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul ontology Phase 3 (c) — structured LLM output, `##FRENS` side channel, behind `soulStructuredOutputEnabled` (off by default); 1.1.214 (2026-09-06)
+
+Fourth and last Phase 3 build, alone, per the spec's sequencing
+(`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md` §(c)). Phase 3 is
+now complete. Same loop as 1.1.211–1.1.213: read-only scoping → one implementer → batch review → one fix
+wave → scoped re-review.
+
+**Scoping corrections to the spec and to the 1.1.213 handoff:** `SoulRuntime.noteSceneDeliveredForMind`
+DOES exist (`SoulRuntime:939`, called from the `sceneDelivered` override at `:271`; the 1.1.213 scoper was
+wrong, the 1.1.212 session's `:839` had merely drifted by 100 lines) — but it runs on the server thread at
+playback finish and carries no `SceneParse`/correlationId, so (c) does NOT use it: side-effects are applied
+in `SoulGroupConversationService` between `applyNovelty` and `player.enqueue` (worker thread), where the
+roster, owner name and correlationId are all in scope and the spec's "apply even when ambient-muted" holds
+by construction. Other stale spec claims: the SYSTEM contract is added at `SoulGroupPromptAssembler:83`
+(not `:70`); `endAtOwnerAddress` end-of-scene is `SoulGroupResponseValidator:179-186` (not `:92-97`);
+`SoulMemoryDigestService` parses bullets, not JSON — no model-JSON pattern existed to copy, so the parser
+uses `SoulProfileRegistry`'s static `ObjectMapper`/`readTree` idiom. Unstated but load-bearing: the
+conversation service held no `SoulStore`, and there was no signed-delta peer-stance helper — both new.
+
+- `8208bbb1` **feat** — `SoulSideChannelOps` (pure, Jackson + `java.util`):
+  `parse(Optional<String> raw, Set<String> rosterNames, String ownerName)` →
+  `SideEffects(stanceDeltas, facts, droppedStance, droppedFacts, unparsed)`. Absent raw → empty, no log;
+  unparseable / non-object → `unparsed`; unknown keys ignored; `stance` = `{"<peer>":{"warmth"|"friction"|
+  "curiosity": -1|0|1}}` mapped warmth→trust, friction→exasperation, curiosity→curiosity, owner-named or
+  off-roster peers dropped, magnitude >1 or non-integral dropped, `0` no-op, once per scene per
+  `lowercase(peer)|axis` (first writer wins); `facts` = `[subject, relation, object, confidence]` 4-tuples,
+  ≤3 (extras counted dropped), confidence clamped ≤0.6 BEFORE `SoulRelationOps.normalise`, subject must be
+  owner / roster / "the world" (canonical roster spelling returned); `threads` read and discarded.
+  `SoulMindOps.bumpPeerStance(mind, peerId, axis, delta, day)` — ±1, per-day guard (WARMTH consumes
+  `lastTrustDay`; FRICTION and CURIOSITY share `lastAskDay`, as `notePeerScene` does), 0..6 clamp inherited
+  from `Stance`'s compact ctor, `evictPeers` at `MAX_PEER_STANCES`, never self, `playerStance` untouched.
+  `SoulGroupResponseValidator`: a `##FRENS` line ends the scene (checked BEFORE the `maxSceneLines` cap so a
+  tail after a full scene is still stripped), never becomes a `SceneLine`; `SceneParse` gains
+  `Optional<String> sideChannelRaw` (4-arg compat ctor); `reject()` carries an empty side channel so a
+  sentinel-first reply (zero roster lines) takes the existing reject/cooldown-refund path with no effects.
+  `SoulGroupConversationService`: `SideChannelSink` boundary + 11-arg ctor (`structuredEnabled`, sink;
+  8/9-arg ctors default to a no-op sink), `applySideChannel` after novelty, before enqueue.
+  `SoulRuntime.applySideChannelOnServer`: worker → `server.execute` (resolve the Minecraft day) →
+  `store.updateMind` on the store executor for every roster bot — the `notePeerStances` idiom; stance
+  deltas applied to every OTHER roster bot toward the named peer; facts merged at `source=INFERRED`,
+  salience 6, via `SoulRelationOps.normalise` + `merge`. `SoulGroupPromptAssembler`: third ctor arg
+  `BooleanSupplier structuredEnabled`; the spec's optional-contract paragraph appended inside
+  `sceneContract()` and `maxOutputTokens()` 320 → 380, both ONLY when enabled (off = byte-identical
+  requests to 1.1.213). Logs: `[souls] side-channel correlationId=… stance=<applied>/<seen>
+  facts=<applied>/<seen> dropped=<n>` and `[souls] side-channel unparsed correlationId=… chars=<n>`;
+  absent tail logs nothing; `##FRENS {}` logs nothing. Toggle `soulStructuredOutputEnabled` default
+  **false** at all six sites (ManualConfig field/getter/setter, SharedConfig field + snapshot-out +
+  apply-in) + both directions of `ConfigJsonUtilRoundTripTest`; `/bot soul structured on|off|status`
+  (op-gated, saves, same shape as `relations`).
+- `04f3d382` **fix** (review findings) — (Important) sentinel match was exact-case `startsWith("##FRENS")`;
+  `##frens {…}`, `**##FRENS {…}**` or `## FRENS {…}` fell through the solo-roster wrong-tag repair and the
+  JSON body became a spoken line — now lenient (leading `*`/`#`/`_`/backticks/space stripped, at least one `#` required so "Frens are…" prose is never a sentinel, `FRENS`
+  case-insensitive) with validator tests incl. a solo-roster "never spoken" case; (Important, ruling) fact
+  writes are gated on `soulRelationsEnabled` so the relations switch still means "no relation writes" —
+  stance deltas still apply, skipped facts are counted in the log line, and `/bot soul structured status`
+  says so when relations is off; (Minor) when the bot despawned between hops and the day resolves to -1,
+  the whole apply for that bot is skipped instead of merging a fact at `day=-1`.
+
+**Rulings made autonomously (cost if wrong):**
+- Seam = conversation service after parse, not the delivery seam. Cost: effects apply even for a scene
+  that later fails playback; bounded to ±1 stance / ≤3 facts per scene.
+- `threads.closed` DEFERRED: the only `markAnswered` closes every thread and moves `playerStance`; a
+  per-question overload is its own item. Cost: the model cannot close threads yet; nothing lost.
+- Facts merged into EVERY roster bot present (all heard it), always `INFERRED` (schema has no attribution,
+  so no `SAID`). Cost: a bot may hold a belief it only overheard; `merge` caps and decay bound it.
+- Stance deltas apply to every OTHER roster bot toward the named peer (the schema names a peer, not a
+  perspective). Cost: a two-bot scene is unambiguous; a three-bot scene moves two minds one step.
+- A model delta consumes that day's deterministic guard (`lastTrustDay`/`lastAskDay`) rather than
+  stacking. Cost: at most one lost deterministic step per axis per day — no saturation.
+- Facts gated on `soulRelationsEnabled` (review). Cost: facts asserted while relations is off are lost;
+  they were invisible anyway.
+- `applied` in the log = accepted at the seam, pre-write (the store write is async). Cost: a per-day guard
+  can no-op one delta after the log says applied; `mind.json` is the truth.
+- The validator strips a `##FRENS` line even with the toggle off. Cost: none — the only reachable
+  behaviour delta when off, and it is strictly safer (a solo roster could previously speak the tail).
+
+**Deferred with reasons:** a leading `-` bullet before `##FRENS` is not stripped (re-review residual; the exact match missed it too — one char in `sideChannelTail` + a test); `threads.closed` (above); fallback (3), a separate clerk generation, only if the
+field session shows the 3B model cannot produce a usable tail; `BAD_AT` from `TASK_FAILED`; TEASE peer rule.
+
+Tests 874 → 900 (new `SoulSideChannelOpsTest`; `SoulGroupResponseValidatorTest` + sentinel cases;
+`ConfigJsonUtilRoundTripTest` both directions).
+
+**Field checks:** Phase 6m in `docs/testing/FIELD_SESSION_1.1.202.md` — toggle round trip; contract only
+when enabled; side channel emitted at all (or "3B cannot do it" → schedule fallback (3)); malformed tail
+never costs a scene; `##FRENS` never spoken; INFERRED fact ≤0.6 in every present bot; stance peers-only,
+once per day; toggle off inert.
+
 ## Soul ontology Phase 3 (b) — typed relation facts, `SEEN` producer only, behind `soulRelationsEnabled` (off by default); 1.1.213 (2026-09-06)
 
 Third Phase 3 build, alone, per the spec's sequencing
