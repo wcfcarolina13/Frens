@@ -80,6 +80,11 @@ final class SoulRelationOps {
         if (!WORLD_SUBJECT.equalsIgnoreCase(s) && !containsIgnoreCase(allowedSubjects, s)) {
             return Optional.empty();
         }
+        // '|' is the anchorTopic delimiter; a subject/object containing it would make the topic
+        // unparseable, so that fact could never be put on recall cooldown.
+        if (s.contains("|") || o.contains("|")) {
+            return Optional.empty();
+        }
         s = truncate(s);
         o = truncate(o);
         double c = Math.max(0d, Math.min(1d, confidence));
@@ -254,7 +259,7 @@ final class SoulRelationOps {
                 continue;
             }
             String bucket = bucketOf(event);
-            if (bucket == null) {
+            if (bucket == null || bucket.contains("|")) {
                 continue;
             }
             counts.merge(bucket, 1, Integer::sum);

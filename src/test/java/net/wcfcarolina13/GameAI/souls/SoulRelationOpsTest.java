@@ -82,6 +82,14 @@ class SoulRelationOpsTest {
                 .orElseThrow().object().length());
     }
 
+    @Test
+    void normaliseRejectsPipeInSubjectOrObject() {
+        assertTrue(SoulRelationOps.normalise("Bob|evil", "likes", "cake", 0.5d,
+                SoulTypes.RelationSource.SAID, 3, 5, SCENE).isEmpty(), "pipe in subject");
+        assertTrue(SoulRelationOps.normalise("Bob", "likes", "cake|lie", 0.5d,
+                SoulTypes.RelationSource.SAID, 3, 5, SCENE).isEmpty(), "pipe in object");
+    }
+
     // === merge ===
 
     @Test
