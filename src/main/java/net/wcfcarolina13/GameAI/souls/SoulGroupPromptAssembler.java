@@ -244,11 +244,29 @@ public final class SoulGroupPromptAssembler {
             }
             // Stance toward the owner (conversation ontology Phase 2): a word ladder from the
             // persisted mind, "" at baseline so an unremarkable bot reads exactly as before.
-            String stance = mindLookup.apply(participant.botId())
-                    .map(mind -> SoulMindOps.stanceClause(mind.playerStance(), turn.ownerDisplayName()))
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            String stance = mind
+                    .map(m -> SoulMindOps.stanceClause(m.playerStance(), turn.ownerDisplayName()))
                     .orElse("");
             if (!stance.isEmpty()) {
                 state.append(", ").append(stance);
+            }
+            // Stance toward the other bots in this scene (Phase 3a): only peers actually present,
+            // only non-baseline feelings. The per-bot truncate below bounds the whole line.
+            if (mind.isPresent() && !mind.get().peerStances().isEmpty()) {
+                for (SoulGroupTypes.SceneParticipant peer : turn.roster()) {
+                    if (peer.botId() == null || peer.botId().equals(participant.botId())) {
+                        continue;
+                    }
+                    SoulTypes.PeerStance peerStance = mind.get().peerStances().get(peer.botId());
+                    if (peerStance == null) {
+                        continue;
+                    }
+                    String clause = SoulMindOps.peerStanceClause(peerStance.stance(), peer.displayName());
+                    if (!clause.isEmpty()) {
+                        state.append(", ").append(clause);
+                    }
+                }
             }
             sb.append(truncate(state.toString(), MAX_STATE_CHARS_PER_BOT)).append('\n');
         }

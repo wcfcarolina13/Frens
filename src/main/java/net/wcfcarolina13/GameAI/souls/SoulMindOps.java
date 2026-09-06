@@ -141,6 +141,153 @@ final class SoulMindOps {
         return withStance(mind, new SoulTypes.Stance(s.trust(), s.exasperation(), s.curiosity() + 1));
     }
 
+    // === peer stance rules (conversation ontology Phase 3a) ===
+
+    /** At most this many peers are remembered; the flattest stance is evicted first. */
+    static final int MAX_PEER_STANCES = 6;
+
+    /**
+     * Folds one delivered group scene into this bot's peer stances. Pure and game-free: the
+     * caller flattens the roster into index-aligned names/ids. Three rules, each at most once
+     * per peer per scene:
+     *
+     * <ol>
+     *   <li>a peer asked this bot something (their line names this bot and ends with {@code ?})
+     *       → curiosity +1 toward that peer;</li>
+     *   <li>this bot asked the peer something and the peer never spoke again in the scene
+     *       → exasperation +1;</li>
+     *   <li>both of them spoke → trust +1, at most once per Minecraft day per pair.</li>
+     * </ol>
+     *
+     * @param selfIndex this bot's index into {@code rosterIds}
+     * @return the same instance when nothing changed
+     */
+    static SoulTypes.SoulMind notePeerScene(SoulTypes.SoulMind mind, int selfIndex, List<String> rosterNames,
+                                            List<UUID> rosterIds, List<SoulGroupTypes.SceneLine> delivered,
+                                            int day) {
+        if (rosterNames == null || rosterIds == null || delivered == null || delivered.isEmpty()
+                || rosterNames.size() != rosterIds.size()
+                || selfIndex < 0 || selfIndex >= rosterIds.size()) {
+            return mind;
+        }
+        String selfName = rosterNames.get(selfIndex);
+        Map<Integer, Integer> lastLine = new LinkedHashMap<>();
+        for (int i = 0; i < delivered.size(); i++) {
+            int speaker = delivered.get(i).participantIndex();
+            if (speaker >= 0 && speaker < rosterIds.size()) {
+                lastLine.put(speaker, i);
+            }
+        }
+        boolean selfSpoke = lastLine.containsKey(selfIndex);
+
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>(mind.peerStances());
+        Set<UUID> touchedIds = new LinkedHashSet<>();
+        boolean changed = false;
+        for (int p = 0; p < rosterIds.size(); p++) {
+            if (p == selfIndex) {
+                continue;
+            }
+            UUID peerId = rosterIds.get(p);
+            String peerName = rosterNames.get(p);
+            if (peerId == null || peerName == null || peerName.isBlank()) {
+                continue;
+            }
+            SoulTypes.PeerStance current = peers.getOrDefault(peerId, SoulTypes.PeerStance.baseline());
+            SoulTypes.Stance s = current.stance();
+            int trust = s.trust();
+            int exasperation = s.exasperation();
+            int curiosity = s.curiosity();
+            int lastTrustDay = current.lastTrustDay();
+            boolean touched = false;
+
+            if (selfName != null && !selfName.isBlank() && lastAskIndex(delivered, p, selfName) >= 0) {
+                curiosity++;
+                touched = true;
+            }
+            int myAsk = lastAskIndex(delivered, selfIndex, peerName);
+            if (myAsk >= 0 && lastLine.getOrDefault(p, -1) < myAsk) {
+                exasperation++;
+                touched = true;
+            }
+            if (selfSpoke && lastLine.containsKey(p) && lastTrustDay != day) {
+                trust++;
+                lastTrustDay = day;
+                touched = true;
+            }
+            if (!touched) {
+                continue;
+            }
+            SoulTypes.PeerStance updated =
+                    new SoulTypes.PeerStance(new SoulTypes.Stance(trust, exasperation, curiosity), lastTrustDay);
+            touchedIds.add(peerId);
+            if (!updated.equals(peers.put(peerId, updated))) {
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return mind;
+        }
+        evictPeers(peers, touchedIds);
+        return withPeerStances(mind, peers);
+    }
+
+    /**
+     * Index of the last line by {@code speakerIndex} that names {@code targetName}
+     * (case-insensitive) and ends with a question mark, or -1 when there is none.
+     */
+    private static int lastAskIndex(List<SoulGroupTypes.SceneLine> delivered, int speakerIndex, String targetName) {
+        if (targetName == null || targetName.isBlank()) {
+            return -1;
+        }
+        String needle = targetName.toLowerCase(java.util.Locale.ROOT);
+        int found = -1;
+        for (int i = 0; i < delivered.size(); i++) {
+            SoulGroupTypes.SceneLine line = delivered.get(i);
+            if (line.participantIndex() != speakerIndex) {
+                continue;
+            }
+            String text = line.text() == null ? "" : line.text().trim();
+            if (text.endsWith("?") && text.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                found = i;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Trims {@code peers} to {@link #MAX_PEER_STANCES}, dropping the flattest stance first
+     * (smallest Manhattan distance to {@link SoulTypes.Stance#BASELINE}, ties broken by lowest
+     * UUID string so eviction is deterministic). Peers in {@code protectedIds} are never evicted.
+     */
+    private static void evictPeers(Map<UUID, SoulTypes.PeerStance> peers, Set<UUID> protectedIds) {
+        while (peers.size() > MAX_PEER_STANCES) {
+            UUID victim = null;
+            int best = Integer.MAX_VALUE;
+            for (Map.Entry<UUID, SoulTypes.PeerStance> entry : peers.entrySet()) {
+                if (protectedIds.contains(entry.getKey())) {
+                    continue;
+                }
+                int distance = baselineDistance(entry.getValue().stance());
+                if (distance < best
+                        || (distance == best && victim != null
+                            && entry.getKey().toString().compareTo(victim.toString()) < 0)) {
+                    best = distance;
+                    victim = entry.getKey();
+                }
+            }
+            if (victim == null) {
+                return;
+            }
+            peers.remove(victim);
+        }
+    }
+
+    private static int baselineDistance(SoulTypes.Stance s) {
+        SoulTypes.Stance b = SoulTypes.Stance.BASELINE;
+        return Math.abs(s.trust() - b.trust()) + Math.abs(s.exasperation() - b.exasperation())
+                + Math.abs(s.curiosity() - b.curiosity());
+    }
+
     /**
      * Marks every memory of {@code topic} as recalled on {@code day} (cools it for
      * {@link #RECALL_COOLDOWN_DAYS}). A {@code said:} key is a player-memory fact key, not a day
@@ -281,8 +428,20 @@ final class SoulMindOps {
         SoulTypes.Stance b = SoulTypes.Stance.BASELINE;
         SoulTypes.Stance decayed = new SoulTypes.Stance(stepToward(s.trust(), b.trust()),
                 stepToward(s.exasperation(), b.exasperation()), stepToward(s.curiosity(), b.curiosity()));
-        return SoulMemoryDigestOps.decay(
-                rebuild(mind, decayed, mind.threads(), memories, mind.seen(), nowMs, day, mind.lastTaskTrustDay()));
+        // Peer stances decay one step a day too; a pair that reaches baseline is forgotten
+        // outright so mind.json never grows a tail of bots this one feels nothing about.
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
+        for (Map.Entry<UUID, SoulTypes.PeerStance> entry : mind.peerStances().entrySet()) {
+            SoulTypes.Stance ps = entry.getValue().stance();
+            SoulTypes.Stance stepped = new SoulTypes.Stance(stepToward(ps.trust(), b.trust()),
+                    stepToward(ps.exasperation(), b.exasperation()), stepToward(ps.curiosity(), b.curiosity()));
+            if (!stepped.equals(b)) {
+                peers.put(entry.getKey(), new SoulTypes.PeerStance(stepped, entry.getValue().lastTrustDay()));
+            }
+        }
+        return SoulMemoryDigestOps.decay(withPeerStances(
+                rebuild(mind, decayed, mind.threads(), memories, mind.seen(), nowMs, day, mind.lastTaskTrustDay()),
+                peers));
     }
 
     // === prompt + seed views ===
@@ -302,6 +461,25 @@ final class SoulMindOps {
         }
         if (s.curiosity() >= 5) {
             parts.add("full of questions for " + playerName);
+        }
+        return String.join(", ", parts);
+    }
+
+    /** Word ladder for how this bot feels about ANOTHER bot; {@code ""} at baseline. */
+    static String peerStanceClause(SoulTypes.Stance s, String peerName) {
+        List<String> parts = new ArrayList<>(3);
+        if (s.trust() <= 1) {
+            parts.add("wary of " + peerName);
+        } else if (s.trust() >= 5) {
+            parts.add("thick as thieves with " + peerName);
+        }
+        if (s.exasperation() >= 4) {
+            parts.add("short with " + peerName);
+        } else if (s.exasperation() >= 2) {
+            parts.add("a little tired of " + peerName);
+        }
+        if (s.curiosity() >= 5) {
+            parts.add("curious about " + peerName);
         }
         return String.join(", ", parts);
     }
@@ -389,21 +567,28 @@ final class SoulMindOps {
     static SoulTypes.SoulMind withPlayerMemories(SoulTypes.SoulMind mind, List<SoulTypes.PlayerMemory> playerMemories) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors());
+                playerMemories, mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances());
     }
 
     static SoulTypes.SoulMind withArchivedPlayerMemories(SoulTypes.SoulMind mind,
                                                           List<SoulTypes.PlayerMemory> archivedPlayerMemories) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors());
+                mind.playerMemories(), archivedPlayerMemories, mind.digestCursors(), mind.peerStances());
     }
 
     static SoulTypes.SoulMind withDigestCursors(SoulTypes.SoulMind mind,
                                                 Map<String, SoulTypes.ConversationCursor> digestCursors) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
                 mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
-                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors);
+                mind.playerMemories(), mind.archivedPlayerMemories(), digestCursors, mind.peerStances());
+    }
+
+    static SoulTypes.SoulMind withPeerStances(SoulTypes.SoulMind mind,
+                                              Map<UUID, SoulTypes.PeerStance> peerStances) {
+        return new SoulTypes.SoulMind(mind.schemaVersion(), mind.playerStance(), mind.threads(), mind.memories(),
+                mind.seen(), mind.lastConsolidatedAtMs(), mind.lastDay(), mind.lastTaskTrustDay(),
+                mind.playerMemories(), mind.archivedPlayerMemories(), mind.digestCursors(), peerStances);
     }
 
     private static SoulTypes.SoulMind rebuild(SoulTypes.SoulMind mind, SoulTypes.Stance stance,
@@ -412,6 +597,6 @@ final class SoulMindOps {
                                               int lastTaskTrustDay) {
         return new SoulTypes.SoulMind(mind.schemaVersion(), stance, threads, memories, seen,
                 lastConsolidatedAtMs, lastDay, lastTaskTrustDay, mind.playerMemories(),
-                mind.archivedPlayerMemories(), mind.digestCursors());
+                mind.archivedPlayerMemories(), mind.digestCursors(), mind.peerStances());
     }
 }

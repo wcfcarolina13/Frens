@@ -278,7 +278,14 @@ class SoulFoundationTest {
         assertTrue(legacy.playerMemories().isEmpty());
         assertTrue(legacy.archivedPlayerMemories().isEmpty());
         assertTrue(legacy.digestCursors().isEmpty());
+        assertTrue(legacy.peerStances().isEmpty());
         assertEquals(legacy, SoulTypes.SoulMind.empty());
+
+        SoulTypes.SoulMind prePeer = new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE, List.of(), List.of(),
+                Set.of(), 0L, -1, -1, List.of(), List.of(), java.util.Map.of());
+        assertTrue(prePeer.peerStances().isEmpty());
+        assertEquals(legacy, prePeer);
+        assertEquals(SoulTypes.Stance.BASELINE, new SoulTypes.PeerStance(null, -1).stance());
 
         SoulTypes.ConversationRecord rec = new SoulTypes.ConversationRecord(UUID.randomUUID(), 0L, 0L,
                 SoulTypes.TurnKind.HEARD, "hi", Instant.EPOCH, "", "", null, null);

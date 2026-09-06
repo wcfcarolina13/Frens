@@ -502,4 +502,83 @@ class SoulGroupPromptAssemblerTest {
                 playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
         assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
     }
+
+    // === Conversation ontology Phase 3a: peer stance reaches the prompt ===
+
+    private static SoulGroupTypes.GroupSceneTurn rosterTurn(List<UUID> ids, List<String> names) {
+        List<SoulGroupTypes.SceneParticipant> roster = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            roster.add(new SoulGroupTypes.SceneParticipant(ids.get(i), "frens:jake", names.get(i),
+                    grounding(ids.get(i), names.get(i))));
+        }
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER, UUID.randomUUID(), "Bradley",
+                roster, "seed-text", Instant.EPOCH, UUID.randomUUID(), false);
+    }
+
+    private static SoulTypes.SoulMind mindWithPeer(UUID peer, SoulTypes.Stance stance) {
+        return SoulMindOps.withPeerStances(SoulTypes.SoulMind.empty(),
+                java.util.Map.of(peer, new SoulTypes.PeerStance(stance, -1)));
+    }
+
+    private static String lineFor(SoulTypes.ProviderRequest req, String name) {
+        return req.messages().get(2).content().lines()
+                .filter(l -> l.startsWith(name + ":")).findFirst().orElse("");
+    }
+
+    @Test
+    void peerStanceClauseReachesTheStateBlockForPresentPeersOnly() {
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        UUID absent = UUID.randomUUID();
+        SoulTypes.SoulMind mind = SoulMindOps.withPeerStances(SoulTypes.SoulMind.empty(), java.util.Map.of(
+                sara, new SoulTypes.PeerStance(new SoulTypes.Stance(5, 0, 3), -1),
+                absent, new SoulTypes.PeerStance(new SoulTypes.Stance(0, 6, 6), -1)));
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(jake) ? Optional.of(mind) : Optional.empty());
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                rosterTurn(List.of(jake, sara), List.of("Jake", "Sara")), twoProfiles(), List.of(),
+                Duration.ofSeconds(5));
+        String jakeLine = lineFor(req, "Jake");
+        assertTrue(jakeLine.contains("thick as thieves with Sara"), jakeLine);
+        assertFalse(jakeLine.contains("wary of"), "the absent peer never reaches the prompt: " + jakeLine);
+        assertFalse(lineFor(req, "Sara").contains("thick as thieves"), "Sara has no mind");
+    }
+
+    @Test
+    void baselinePeerStanceAddsNothing() {
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(jake) ? Optional.of(mindWithPeer(sara, SoulTypes.Stance.BASELINE))
+                        : Optional.empty());
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                rosterTurn(List.of(jake, sara), List.of("Jake", "Sara")), twoProfiles(), List.of(),
+                Duration.ofSeconds(5));
+        String jakeLine = lineFor(req, "Jake");
+        assertFalse(jakeLine.contains("Sara"), jakeLine);
+    }
+
+    @Test
+    void stateLineStaysBoundedWithFivePeerStances() {
+        List<UUID> ids = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        List<SoulTypes.SoulProfile> profiles = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            ids.add(UUID.randomUUID());
+            names.add("Companion" + i);
+            profiles.add(profile("frens:jake", "Companion" + i));
+        }
+        java.util.Map<UUID, SoulTypes.PeerStance> peers = new java.util.LinkedHashMap<>();
+        for (int i = 1; i < 6; i++) {
+            peers.put(ids.get(i), new SoulTypes.PeerStance(new SoulTypes.Stance(0, 6, 6), -1));
+        }
+        SoulTypes.SoulMind mind = SoulMindOps.withPeerStances(SoulTypes.SoulMind.empty(), peers);
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(ids.get(0)) ? Optional.of(mind) : Optional.empty());
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                rosterTurn(ids, names), profiles, List.of(), Duration.ofSeconds(5));
+        String line = lineFor(req, "Companion0");
+        assertFalse(line.isEmpty());
+        assertTrue(line.length() <= SoulGroupPromptAssembler.MAX_STATE_CHARS_PER_BOT, "" + line.length());
+    }
 }

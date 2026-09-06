@@ -664,7 +664,23 @@ class SoulStoreTest {
         SoulTypes.SoulMind mind = store.mind(bot).get();
         assertTrue(mind.playerMemories().isEmpty());
         assertTrue(mind.digestCursors().isEmpty());
+        assertTrue(mind.peerStances().isEmpty());
         SoulTypes.SoulMind saved = store.updateMind(bot, m -> SoulMemoryDigestOps.withCursor(m, "DIRECT:x", new SoulTypes.ConversationCursor(2L, 5L))).get();
         assertEquals(new SoulTypes.ConversationCursor(2L, 5L), saved.digestCursors().get("DIRECT:x"));
+    }
+
+    @Test
+    void peerStancesRoundTripThroughMindJson() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID alfa = UUID.randomUUID(), bravo = UUID.randomUUID();
+        java.util.Map<UUID, SoulTypes.PeerStance> peers = new java.util.LinkedHashMap<>();
+        peers.put(alfa, new SoulTypes.PeerStance(new SoulTypes.Stance(5, 0, 4), 7));
+        peers.put(bravo, new SoulTypes.PeerStance(new SoulTypes.Stance(1, 6, 3), -1));
+        store.updateMind(bot, m -> SoulMindOps.withPeerStances(m, peers)).get();
+        SoulStore reopened = new SoulStore(worldRoot, Executors.newSingleThreadExecutor());
+        SoulTypes.SoulMind reloaded = reopened.mind(bot).get();
+        assertEquals(2, reloaded.peerStances().size());
+        assertEquals(new SoulTypes.PeerStance(new SoulTypes.Stance(5, 0, 4), 7), reloaded.peerStances().get(alfa));
+        assertEquals(new SoulTypes.PeerStance(new SoulTypes.Stance(1, 6, 3), -1), reloaded.peerStances().get(bravo));
     }
 }

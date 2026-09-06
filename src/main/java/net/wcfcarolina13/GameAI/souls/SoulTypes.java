@@ -298,6 +298,21 @@ public final class SoulTypes {
     }
 
     /**
+     * How this bot currently feels about ANOTHER bot (conversation ontology Phase 3a). Same
+     * 0..6 axes as {@link Stance}; {@code lastTrustDay} is the Minecraft day the "we both spoke
+     * in a scene" trust bump was last granted for this pair (-1 never).
+     */
+    public record PeerStance(Stance stance, int lastTrustDay) {
+        public PeerStance {
+            stance = stance == null ? Stance.BASELINE : stance;
+        }
+
+        public static PeerStance baseline() {
+            return new PeerStance(Stance.BASELINE, -1);
+        }
+    }
+
+    /**
      * A question this bot put to the player that has not been answered yet. {@code askedAtMs}
      * is wall-clock epoch millis (server ticks reset every launch); {@code expired} flips once
      * the answer window has passed so the seed can recall it exactly once before it is dropped.
@@ -349,7 +364,8 @@ public final class SoulTypes {
                            List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
                            int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
                            List<PlayerMemory> archivedPlayerMemories,
-                           Map<String, ConversationCursor> digestCursors) {
+                           Map<String, ConversationCursor> digestCursors,
+                           Map<UUID, PeerStance> peerStances) {
         public SoulMind {
             playerStance = playerStance == null ? Stance.BASELINE : playerStance;
             threads = threads == null ? List.of() : List.copyOf(threads);
@@ -358,14 +374,26 @@ public final class SoulTypes {
             playerMemories = playerMemories == null ? List.of() : List.copyOf(playerMemories);
             archivedPlayerMemories = archivedPlayerMemories == null ? List.of() : List.copyOf(archivedPlayerMemories);
             digestCursors = digestCursors == null ? Map.of() : Map.copyOf(digestCursors);
+            peerStances = peerStances == null ? Map.of() : Map.copyOf(peerStances);
         }
 
-        /** Pre-player-memory shape; defaults the three new fields to empty. */
+        /** Pre-player-memory shape; defaults the four new fields to empty. */
         public SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
                         List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
                         int lastDay, int lastTaskTrustDay) {
             this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
-                    lastDay, lastTaskTrustDay, List.of(), List.of(), Map.of());
+                    lastDay, lastTaskTrustDay, List.of(), List.of(), Map.of(), Map.of());
+        }
+
+        /** Pre-peer-stance shape; defaults {@code peerStances} to empty. */
+        public SoulMind(int schemaVersion, Stance playerStance, List<OpenThread> threads,
+                        List<DayMemory> memories, Set<String> seen, long lastConsolidatedAtMs,
+                        int lastDay, int lastTaskTrustDay, List<PlayerMemory> playerMemories,
+                        List<PlayerMemory> archivedPlayerMemories,
+                        Map<String, ConversationCursor> digestCursors) {
+            this(schemaVersion, playerStance, threads, memories, seen, lastConsolidatedAtMs,
+                    lastDay, lastTaskTrustDay, playerMemories, archivedPlayerMemories, digestCursors,
+                    Map.of());
         }
 
         public static SoulMind empty() {

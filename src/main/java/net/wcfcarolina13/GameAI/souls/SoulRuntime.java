@@ -833,11 +833,59 @@ public final class SoulRuntime {
     }
 
     /**
+     * Every bot in the roster folds this scene into its peer stances (conversation ontology
+     * Phase 3a). Called on the server thread; the rule itself is pure and runs on the store
+     * thread inside {@code updateMind}.
+     */
+    private void notePeerStances(SoulGroupTypes.GroupSceneTurn turn, List<SoulGroupTypes.SceneLine> delivered) {
+        if (delivered == null || delivered.isEmpty() || turn.roster().size() < 2) {
+            return;
+        }
+        List<String> names = new ArrayList<>(turn.roster().size());
+        List<UUID> ids = new ArrayList<>(turn.roster().size());
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            names.add(participant.displayName());
+            ids.add(participant.botId());
+        }
+        for (int i = 0; i < ids.size(); i++) {
+            UUID botId = ids.get(i);
+            if (botId == null) {
+                continue;
+            }
+            final int selfIndex = i;
+            final int day = currentDay(botId);
+            final String selfName = names.get(i);
+            updateMind(botId, m -> {
+                SoulTypes.SoulMind next = SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day);
+                if (next != m) {
+                    logPeerStanceChanges(selfName, names, ids, m, next);
+                }
+                return next;
+            });
+        }
+    }
+
+    private void logPeerStanceChanges(String selfName, List<String> names, List<UUID> ids,
+                                      SoulTypes.SoulMind before, SoulTypes.SoulMind after) {
+        for (int p = 0; p < ids.size(); p++) {
+            UUID peerId = ids.get(p);
+            SoulTypes.PeerStance now = peerId == null ? null : after.peerStances().get(peerId);
+            if (now == null || now.equals(before.peerStances().get(peerId))) {
+                continue;
+            }
+            SoulTypes.Stance s = now.stance();
+            LOGGER.info("[souls] peer stance bot={} peer={} trust={} exasperation={} curiosity={}",
+                    selfName, names.get(p), s.trust(), s.exasperation(), s.curiosity());
+        }
+    }
+
+    /**
      * Narrator-seeded scenes only: a closing line that asks the player something becomes an
      * open thread on its speaker (see {@link SoulMindOps#extractQuestion}).
      */
     private void noteSceneDeliveredForMind(SoulGroupTypes.GroupSceneTurn turn, int lastSpeakerIndex,
                                            List<SoulGroupTypes.SceneLine> delivered) {
+        notePeerStances(turn, delivered);
         if (!turn.kind().isNarratorSeeded() || lastSpeakerIndex < 0 || delivered == null
                 || delivered.isEmpty() || lastSpeakerIndex >= turn.roster().size()) {
             return;

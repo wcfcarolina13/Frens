@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.souls;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,6 +14,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure rules of the per-bot mind: stance ladder, open threads, day consolidation, seen-registry. */
@@ -138,5 +140,123 @@ class SoulMindOpsTest {
         SoulTypes.SoulMind r = SoulMindOps.noteRecalled(c, key, 5);
         assertEquals(4, r.playerMemories().get(0).salience());
         assertEquals(5, r.playerMemories().get(0).lastRecalledDay());
+    }
+
+    // === peer stance (conversation ontology Phase 3a) ===
+
+    private static final UUID ALFA = UUID.fromString("00000000-0000-0000-0000-00000000000a");
+    private static final UUID BRAVO = UUID.fromString("00000000-0000-0000-0000-00000000000b");
+
+    private static SoulGroupTypes.SceneLine line(int index, String text) {
+        return new SoulGroupTypes.SceneLine(index, text);
+    }
+
+    private static SoulTypes.SoulMind mindWithPeers(Map<UUID, SoulTypes.PeerStance> peers) {
+        return SoulMindOps.withPeerStances(SoulTypes.SoulMind.empty(), peers);
+    }
+
+    @Test
+    void peerSceneAppliesCuriosityExasperationAndTrust() {
+        // Bravo asks Alfa a question and Alfa never answers: Alfa is curious, Bravo exasperated.
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> delivered = List.of(
+                line(0, "Nice weather."),
+                line(1, "Alfa, did you bring the pickaxe?"));
+
+        SoulTypes.SoulMind alfa = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, delivered, 4);
+        SoulTypes.PeerStance alfaOnBravo = alfa.peerStances().get(BRAVO);
+        assertEquals(new SoulTypes.Stance(4, 0, 4), alfaOnBravo.stance(), "curiosity +1 (asked), trust +1 (both spoke)");
+        assertEquals(4, alfaOnBravo.lastTrustDay());
+
+        SoulTypes.SoulMind bravo = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 1, names, ids, delivered, 4);
+        assertEquals(new SoulTypes.Stance(4, 1, 3), bravo.peerStances().get(ALFA).stance(),
+                "exasperation +1 (unanswered), trust +1 (both spoke)");
+    }
+
+    @Test
+    void peerTrustBumpsOnlyOncePerDayPerPair() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> delivered = List.of(line(0, "Hi."), line(1, "Hello."));
+        SoulTypes.SoulMind once = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, delivered, 4);
+        assertEquals(4, once.peerStances().get(BRAVO).stance().trust());
+        SoulTypes.SoulMind twice = SoulMindOps.notePeerScene(once, 0, names, ids, delivered, 4);
+        assertSame(once, twice, "same day, nothing left to change");
+        SoulTypes.SoulMind nextDay = SoulMindOps.notePeerScene(once, 0, names, ids, delivered, 5);
+        assertEquals(5, nextDay.peerStances().get(BRAVO).stance().trust());
+        assertEquals(5, nextDay.peerStances().get(BRAVO).lastTrustDay());
+    }
+
+    @Test
+    void peerRulesApplyAtMostOncePerScene() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> delivered = List.of(
+                line(1, "alfa, where were you?"),
+                line(0, "Busy."),
+                line(1, "Alfa, really?"));
+        SoulTypes.SoulMind alfa = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, delivered, 1);
+        assertEquals(new SoulTypes.Stance(4, 0, 4), alfa.peerStances().get(BRAVO).stance(),
+                "two questions in one scene still only +1 curiosity");
+    }
+
+    @Test
+    void peerExasperationNeedsNoLaterPeerLine() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> answered = List.of(
+                line(0, "Bravo, did you eat?"),
+                line(1, "I did."));
+        SoulTypes.SoulMind alfa = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, answered, 1);
+        assertEquals(0, alfa.peerStances().get(BRAVO).stance().exasperation(), "peer answered afterwards");
+    }
+
+    @Test
+    void peerCapEvictsFlattestAndNeverTheUpdatedPeer() {
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
+        // Six existing peers; the first two are exactly baseline (flattest, tie on distance 0).
+        UUID flatLow = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID flatHigh = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        peers.put(flatHigh, new SoulTypes.PeerStance(SoulTypes.Stance.BASELINE, -1));
+        peers.put(flatLow, new SoulTypes.PeerStance(SoulTypes.Stance.BASELINE, -1));
+        for (int i = 3; i <= 6; i++) {
+            peers.put(UUID.fromString("00000000-0000-0000-0000-00000000000" + i),
+                    new SoulTypes.PeerStance(new SoulTypes.Stance(6, 4, 6), -1));
+        }
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> delivered = List.of(line(0, "Hi."), line(1, "Hello."));
+        SoulTypes.SoulMind after =
+                SoulMindOps.notePeerScene(mindWithPeers(peers), 0, names, ids, delivered, 1);
+        assertEquals(SoulMindOps.MAX_PEER_STANCES, after.peerStances().size());
+        assertTrue(after.peerStances().containsKey(BRAVO), "the peer just updated is never evicted");
+        assertFalse(after.peerStances().containsKey(flatLow), "lowest UUID wins the distance tie");
+        assertTrue(after.peerStances().containsKey(flatHigh));
+    }
+
+    @Test
+    void peerStancesDecayAndDropAtBaseline() {
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
+        peers.put(ALFA, new SoulTypes.PeerStance(new SoulTypes.Stance(4, 1, 3), 2));
+        peers.put(BRAVO, new SoulTypes.PeerStance(new SoulTypes.Stance(6, 0, 3), 2));
+        SoulTypes.SoulMind after = SoulMindOps.consolidate(mindWithPeers(peers), List.of(), 3, "forest",
+                id -> "?", 500L);
+        assertFalse(after.peerStances().containsKey(ALFA), "reached baseline -> forgotten");
+        assertEquals(new SoulTypes.Stance(5, 0, 3), after.peerStances().get(BRAVO).stance());
+        assertEquals(2, after.peerStances().get(BRAVO).lastTrustDay());
+    }
+
+    @Test
+    void peerStanceClauseLadder() {
+        assertEquals("", SoulMindOps.peerStanceClause(SoulTypes.Stance.BASELINE, "Bravo"));
+        assertEquals("wary of Bravo", SoulMindOps.peerStanceClause(new SoulTypes.Stance(1, 0, 3), "Bravo"));
+        assertEquals("thick as thieves with Bravo",
+                SoulMindOps.peerStanceClause(new SoulTypes.Stance(5, 0, 3), "Bravo"));
+        assertEquals("a little tired of Bravo", SoulMindOps.peerStanceClause(new SoulTypes.Stance(3, 2, 3), "Bravo"));
+        assertEquals("short with Bravo", SoulMindOps.peerStanceClause(new SoulTypes.Stance(3, 4, 3), "Bravo"));
+        assertEquals("curious about Bravo", SoulMindOps.peerStanceClause(new SoulTypes.Stance(3, 0, 5), "Bravo"));
+        assertEquals("wary of Bravo, short with Bravo, curious about Bravo",
+                SoulMindOps.peerStanceClause(new SoulTypes.Stance(0, 6, 6), "Bravo"));
     }
 }
