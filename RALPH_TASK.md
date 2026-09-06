@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-06 (night) — next session starts here
 
-**State:** main = origin/main @ 1.1.213 (pushed; deploy status in the final session message). Suite 874 green.
+**State:** main = origin/main @ 1.1.213 (pushed; deployed to all three Prism instances). Suite 874 green.
 
 **Shipped in 1.1.213 (Phase 3 item b — typed relation facts, `SEEN` producer only):** `SoulTypes.Relation`
 (closed enum of 8), `RelationSource`, `RelationFact`; `SoulMind.relations` (13th component, old

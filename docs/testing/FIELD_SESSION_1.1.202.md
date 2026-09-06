@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.212-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.213-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.212** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.213** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -646,6 +646,51 @@ Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind co
   - Claude watches for: `[souls] mind consolidated` and the peer values.
   - Pass when: every peer axis moved exactly one step toward 3/0/3, and an entry that reached exact
     baseline is gone from the map.
+
+---
+
+## Phase 6l — Soul typed relation facts (1.1.213)
+
+Toggle-gated: `/bot soul relations on` first — until then no BELIEFS block, no relation anchors, no
+`relations` log lines, only an empty `"relations": []` in `mind.json`. Grep:
+`grep -n "\[souls\] relations" latest.log` (lines print as
+`[souls] relations bot=<name> added=<n> total=<n>` at day rollover). Audit view: `/bot soul beliefs <Bot>`.
+
+- [ ] **Toggle default and round trip (1.1.213)**
+  - Bradley does: `/bot soul relations status`, then `/bot soul relations on`, `status` again.
+  - Claude watches for: nothing in the log; chat replies.
+  - Pass when: first status reads off on a fresh config, second reads on, and `config/frens/*.json5`
+    holds `soulRelationsEnabled: true` after the save.
+- [ ] **Old minds load clean (1.1.213)**
+  - Bradley does: launch with the pre-1.1.213 `mind.json` files in place (no reset); sleep one night.
+  - Claude watches for: `[souls] mind consolidated` and any Jackson `UnrecognizedProperty` /
+    `InvalidDefinition` warning.
+  - Pass when: consolidation succeeds and each rewritten file contains `"relations": []` (or a populated
+    list) — never a missing key or a null.
+- [ ] **SEEN fact forms from repeated completions (1.1.213)**
+  - Bradley does: with the toggle on, have Jake complete `/bot skill woodcut` at least three times in one
+    Minecraft day (let each run finish, not `/bot stop`), then sleep through the night.
+  - Claude watches for: `[souls] relations bot=Jake added=1 total=1`.
+  - Pass when: the line appears exactly once and `/bot soul beliefs Jake` prints
+    `Jake is good at woodcut (conf 0.4, SEEN, day <d>, salience 5)` — the object is `woodcut`, never `skill`.
+- [ ] **BELIEFS block reaches the prompt (1.1.213)**
+  - Bradley does: nothing; let the next group banter scene fire (or `/bot soul banter now`).
+  - Claude watches for: the request's prompt (diagnostic logging) carrying
+    `BELIEFS (claims the bots hold, not world truth)` followed by `Jake believes:` / `- Jake is good at woodcut`.
+  - Pass when: the block sits right after the ABOUT block, is ≤240 chars, and never appears for a bot
+    whose `relations` is empty.
+- [ ] **Relation anchor fires and goes on cooldown (1.1.213)**
+  - Bradley does: three days after the fact formed, `/bot soul banter now` up to 4 times.
+  - Claude watches for: a seed with `topic="relation:GOOD_AT|Jake|woodcut"` on a fired line; then the
+    fact's `day` in `mind.json`.
+  - Pass when: the seeded line references being good at woodcut without stating it as world fact, and
+    after it fires the fact's `day` equals the current day and `salience` rose by 3 (cap 10) — the same
+    anchor does not fire again for three days.
+- [ ] **Toggle off is inert (1.1.213)**
+  - Bradley does: `/bot soul relations off`, sleep a night, fire two scenes.
+  - Claude watches for: `relations` log lines, `BELIEFS` in the prompt, `relation:` seed topics.
+  - Pass when: none of the three appear; `mind.json` still holds the earlier fact (decayed by 1 per
+    night) — the toggle stops production and rendering, not storage.
 
 ---
 
