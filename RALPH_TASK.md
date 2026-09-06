@@ -3,7 +3,50 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-06 (evening) — next session starts here
+## Session Handoff 2026-09-06 (night) — next session starts here
+
+**State:** main = origin/main @ 1.1.213 (pushed; deploy status in the final session message). Suite 874 green.
+
+**Shipped in 1.1.213 (Phase 3 item b — typed relation facts, `SEEN` producer only):** `SoulTypes.Relation`
+(closed enum of 8), `RelationSource`, `RelationFact`; `SoulMind.relations` (13th component, old
+`mind.json` → empty list; malformed rows dropped in the compact ctor). Pure `SoulRelationOps`
+(`normalise`/`merge`/`decay`/`noteRecalled`/`fromJournal`/`render`/`beliefLines`/`anchors`/
+`anchorTopic`+`parseAnchorTopic`). Producer: `consolidate(…, botName, relationsEnabled)` folds
+≥3 `TASK_COMPLETED` of one task (suffix after `:`, e.g. `woodcut`) → `(bot, GOOD_AT, task)` at 0.4, one
+fact per fold (most completions), then ALWAYS decays. Render: `BELIEFS (claims the bots hold, not world
+truth)` block after ABOUT, whole block ≤240 chars/≤4 lines, ABOUT wins Jaccard ≥0.6. Seeds: relation
+anchors weight 4, cap 2, topic `relation:<REL>|<subject>|<object>`, recall cooldown wired in the director.
+Commands: `/bot soul beliefs <Bot>` (read-only), `/bot soul relations on|off|status`. Toggle
+`soulRelationsEnabled` default **false** at the six config sites. Log: `[souls] relations bot=… added=…
+total=…`. Details + rulings in `changelog.md`.
+
+**Scoping corrections:** spec's `(Bob, GOOD_AT, mining)` was unreachable — the `category` fact is
+`skill` for every skill task; producer buckets on the task suffix. `SoulRuntime.noteSceneDeliveredForMind`
+(the spec's (c) producer hook) does not exist — (c)'s scoper must find the real mind seam
+(`noteSceneDeliveredForMind` was the 1.1.212 name at `SoulRuntime:839`? verify). (d) and the digest do
+NOT share a comparator (trigram vs Jaccard).
+
+**Field checks pending:** Phase 6l in `docs/testing/FIELD_SESSION_1.1.202.md` (now 153 items) — run
+"Old minds load clean" first, then turn the toggle on; the feature is inert until then.
+
+**Remaining autonomous candidates:** (c) structured `##FRENS` tail behind `soulStructuredOutputEnabled`
+(default false), peers-only stance deltas, `SAID`/`INFERRED` relation writes through
+`SoulRelationOps.normalise` with the scene roster as allowed subjects — LAST in spec order, now unblocked
+because (b)'s consumer exists. Start it in a FRESH session (this one ran the full loop once; (c) touches
+the generation contract and deserves a clean context). Tidy-ups: `BAD_AT` from repeated `TASK_FAILED`;
+`SoulBanterDirector.relationsEnabled()` static `Frens.CONFIG` read → supplier if a seed-loop test is ever
+written; TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`; `MIN_TRIGRAMS` 3→4 if the field
+session shows quoted-idiom drops; inline the four single-caller Fortify delegates.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`; doorway rework.
+
+**Needs Bradley:** guided field session (Phases 6b–6l); woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+---
+
+## Session Handoff 2026-09-06 (evening) — superseded
 
 **State:** main = origin/main @ 1.1.212 (pushed, deployed to all three Prism instances). Suite 846 green.
 

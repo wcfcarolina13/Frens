@@ -2,6 +2,106 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul ontology Phase 3 (b) — typed relation facts, `SEEN` producer only, behind `soulRelationsEnabled` (off by default); 1.1.213 (2026-09-06)
+
+Third Phase 3 build, alone, per the spec's sequencing
+(`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md` §(b)). Only the
+deterministic journal-derived `SEEN` producer is wired; no model-asserted relations (that is (c)). Same
+loop as 1.1.211/1.1.212: read-only scoping → one implementer → batch review → one fix wave → scoped
+re-review → one-line follow-up fix.
+
+**Scoping corrections to the spec:** `SoulMindOps.consolidate` is at `:364` (not `:204`) and already
+receives the per-bot event journal; `aboutBlock` is `SoulGroupPromptAssembler:319-339` (not `:301-322`);
+`SoulRuntime.noteSceneDeliveredForMind` does not exist (the (c) producer hook is wrong as written, out of
+scope here). The spec's "same comparator (d) and the digest use" is false — (d) is trigram overlap, the
+digest is token Jaccard; the BELIEFS de-dup uses the digest's `SoulMemoryDigestOps.jaccard` (widened
+private → package-private, body untouched). No journal event carries a human subject name, so the SEEN
+producer is bot-subject only and "subject in scene" reduces to the bot's own display name. Review then
+found the spec's example `(Bob, GOOD_AT, mining)` is unreachable as written: the `category` fact is the
+task-name prefix before `:` — `skill` for every skill — so the producer buckets on the task suffix
+(`skill:woodcut` → `woodcut`) instead.
+
+- `17cdb518` **feat** — `SoulTypes.Relation` (closed enum `LIKES, DISLIKES, FEARS, GOOD_AT, BAD_AT,
+  PROMISED, WANTS, CALLS`), `RelationSource` (`SAID, SEEN, INFERRED`),
+  `RelationFact(subject, relation, object, confidence, source, day, salience)`; `SoulMind.relations` as
+  13th component (12-arg compat ctor; old `mind.json` → empty list; all five positional `new SoulMind(`
+  sites in `SoulMindOps` carry it). `SoulRelationOps` (package-private, pure, `java.util` only):
+  `normalise` (enum parse case-insensitive else drop; subject must be an allowed name or `"the world"`;
+  ≤60 chars; confidence clamped 0..1 and quantised to one decimal; salience clamped 0..10), `merge`
+  (identical triple → max confidence/salience, newer day; single-valued `GOOD_AT/BAD_AT/CALLS` replace
+  when confidence ≥ old else drop; `LIKES`/`DISLIKES` of one object remove each other; cap 20, evict
+  lowest salience then oldest day), `decay` (−1, drop at 0), `noteRecalled` (+3 cap 10, `day` = recall
+  day), `fromJournal` (SEEN: ≥3 `TASK_COMPLETED` of one task → `(bot, GOOD_AT, task)` at 0.4, salience 6),
+  `render`, `beliefLines` (salience desc, Jaccard ≥0.6 vs the rendered ABOUT lines drops the relation —
+  ABOUT wins), `anchors`. `SoulMindOps.withRelations`; `consolidate(…, String botName, boolean
+  relationsEnabled)` folds SEEN facts when enabled and ALWAYS decays relations (harmless on empty).
+  `SoulRuntime.onNewDay` passes the name it already computes and logs
+  `[souls] relations bot=<name> added=<n> total=<n>` in a `thenAccept`.
+- `87f0b682` **feat** — `BELIEFS (claims the bots hold, not world truth)` block in
+  `SoulGroupPromptAssembler.assemble` right after ABOUT, per roster bot `<name> believes:` + `- ` lines,
+  whole block ≤240 chars / ≤4 lines, empty (no header) when nothing survives or the toggle is off;
+  assembler gained a `BooleanSupplier relationsEnabled` ctor arg (0/1-arg ctors default `false`, tests
+  unchanged). `SoulBanterDirector` appends `SoulRelationOps.anchors` (weight 4 = memory tier, cap
+  `MAX_RELATION_ANCHORS = 2`, cooldown 3 days like memory anchors) in the `mindAnchors` loop; first person
+  when the subject is the bot itself. `/bot soul beliefs <Bot>` (read-only audit view, same auth as
+  `/bot soul memory`: registered bot + `isPrivateSoulAuthorized`, cached mind, prints `relations: on|off`
+  then `<render> (conf, source, day, salience)` in stored order) and `/bot soul relations on|off|status`
+  (op-gated, saves). Toggle `soulRelationsEnabled` default **false** at all six sites (ManualConfig
+  field/getter/setter, SharedConfig field + snapshot-out + apply-in) + both directions of
+  `ConfigJsonUtilRoundTripTest`.
+- `211169f5` **fix** (review findings) — (Critical) SEEN buckets on the task suffix after `:` (fallbacks:
+  whole task name, then category), ONE fact per fold = most completions, ties alphabetical, so the
+  single-valued belief cannot flap between skills; (Important) `RelationFact` compact ctor no longer
+  defaults a null relation to `LIKES` / null source to `INFERRED` — `SoulMind`'s compact ctor drops
+  malformed facts on load (test writes legacy JSON with relation-less / source-less / blank rows);
+  (Important) the 240-char BELIEFS budget now covers header + sub-headers (header shortened), test asserts
+  the actual block length; (Important) recall cooldown wired: anchor topic is self-identifying
+  `relation:<RELATION>|<subject>|<object>`, `parseAnchorTopic` round-trips, director calls
+  `runtime.updateMinds(presentIds, withRelations(noteRecalled(…)))` in the same branch chain, thread and
+  all-present-minds semantics as the memory recall path; (Minor) `added=` counts genuinely new triples
+  (pre-fold key set), not net size after decay; (Minor) both anchor picks salience-weighted without
+  replacement, null rng → strongest.
+- `fbbc9c4b` **fix** — `normalise` and the SEEN bucket reject `|` in subject/object (anchor-topic
+  delimiter); unreachable today, live once a `SAID`/`INFERRED` producer exists.
+
+**Rulings made autonomously (cost if wrong):**
+- One implementer instead of two (the prompt/command half cannot compile until the types exist). Cost:
+  none at runtime; a larger single review.
+- `consolidate` takes two plain params (`botName`, `relationsEnabled`) rather than an options record.
+  Cost: one more param to thread if (c) adds inputs.
+- Decay runs in the same consolidation as the fold, so a fresh SEEN fact lands at salience 5, not 6.
+  Cost: one day shorter life before eviction; flip the order if beliefs vanish too fast in the field.
+- Recall day reuses `RelationFact.day` (no `lastRecalledDay` component). Cost: `/bot soul beliefs` shows
+  the last recall day, not the day the fact was formed.
+- BELIEFS budget is roster-wide in roster order; a later bot can be squeezed out. Cost: in a 3-bot roster
+  the third bot's beliefs may never render — raise `MAX_BELIEFS_CHARS` if the field session shows it.
+- Only `GOOD_AT` from `TASK_COMPLETED`; no `BAD_AT` from failures. Cost: a bot never "believes" it is bad
+  at anything until a later producer; recorded as a deferred item.
+- `fromJournal` does not filter by `actorId` (journal is already per-bot). Cost: none unless
+  `eventsSince` ever returns another bot's events.
+- `SoulRuntime.renderRelation` public passthrough so `BotSoulCommands` (other package) can render without
+  making `SoulRelationOps` public. Cost: one extra static.
+- `"relations": []` is written into every `mind.json` on the first consolidation (toggle on or off).
+  Cost: none; matches how `peerStances` landed.
+- `SoulBanterDirector.relationsEnabled()` is a static `Frens.CONFIG` read (null-safe → off) — the
+  director's first `Frens` reference. Cost: a future pure-logic test of the seed loop would trip `Frens`
+  clinit; convert to a supplier then.
+
+**Deferred with reasons:** `BAD_AT`/`SAID`/`INFERRED` producers (spec (c) / later); `lastRecalledDay`
+component (not in spec); GUI toggle (commands-only like the digest and novelty toggles); Phase 4 migration
+of the digest to emit relations (decide after the field session, per Bradley's Q2 answer).
+
+**Tests:** 846 → **874** (`SoulRelationOpsTest` 20 cases, 3 assembler BELIEFS cases, 2 store JSON cases,
+consolidate fold/decay, config round trip; no `net.minecraft.*`), 0 failures.
+
+**Field checks (Phase 6l in `docs/testing/FIELD_SESSION_1.1.202.md`):** `/bot soul relations status`
+reads off on a fresh config and survives a round trip; old `mind.json` loads and gains `"relations": []`
+at the first rollover; with the toggle on, ≥3 completed woodcut tasks then a night → `[souls] relations
+bot=Jake added=1 total=1` and `/bot soul beliefs Jake` prints `Jake is good at woodcut (conf 0.4, SEEN,
+…)`; the next group scene's prompt carries a `BELIEFS` block ≤240 chars (diagnostic logging); a scene
+seeded with `topic="relation:GOOD_AT|Jake|woodcut"` fires and the fact's `day` advances; toggle off → no
+BELIEFS block, no relation anchors, no `relations` log lines.
+
 ## Soul ontology Phase 3 (a) — bot↔bot peer stance (`peerStances` in `mind.json`); 1.1.212 (2026-09-06)
 
 Second Phase 3 build, alone, per the spec's sequencing (`docs/superpowers/specs/2026-09-05-frens-soul-conversation-ontology-phase3-design.md` §(a)). Same loop as 1.1.209–1.1.211: read-only scoping → one implementer → batch review → one fix wave → scoped re-review.
