@@ -244,9 +244,11 @@ public final class SoulGroupResponseValidator {
      * {@code ##frens}, {@code **##FRENS {…}**}, {@code ## FRENS {…}}, {@code `##FRENS …`}. An
      * exact-case {@code startsWith("##FRENS")} missed all of those, and in a SOLO roster the line
      * then fell through the untagged-prose repair path and the raw JSON body was SPOKEN (and sent
-     * to TTS). So: strip leading {@code * # _ `} and whitespace, match {@code FRENS}
-     * case-insensitively, and require the next char to be whitespace, <code>{</code>, or the end
-     * of the line — {@code Frenship: …} is dialogue, not a sentinel.
+     * to TTS). Same failure for a leading list bullet ({@code - ##FRENS …}, {@code • ##FRENS …},
+     * {@code > ##FRENS …}). So: strip leading {@code * # _ ` - • >} and whitespace, match
+     * {@code FRENS} case-insensitively, and require the next char to be whitespace,
+     * <code>{</code>, or the end of the line — {@code Frenship: …} is dialogue, not a sentinel,
+     * and {@code - Frens are great} stays dialogue too (no {@code #} was ever seen).
      *
      * @return the trimmed tail after the token (trailing {@code *} / backticks stripped) when the
      *     line is a sentinel, else empty.
@@ -256,7 +258,8 @@ public final class SoulGroupResponseValidator {
         boolean sawHash = false;
         while (i < line.length()) {
             char c = line.charAt(i);
-            if (c == '*' || c == '#' || c == '_' || c == '`' || Character.isWhitespace(c)) {
+            if (c == '*' || c == '#' || c == '_' || c == '`' || c == '-' || c == '•' || c == '>'
+                    || Character.isWhitespace(c)) {
                 sawHash |= c == '#';
                 i++;
             } else {

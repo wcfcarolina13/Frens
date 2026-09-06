@@ -329,9 +329,28 @@ class SoulGroupResponseValidatorTest {
     }
 
     @Test
+    void dashBulletSentinelIsRecognised() {
+        var parse = validator.parse("Jake: Morning.\n- ##FRENS {\"facts\":[]}\nSara: after", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("Morning.", parse.lines().get(0).text());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get());
+    }
+
+    @Test
+    void blockquoteBulletSentinelIsRecognised() {
+        var parse = validator.parse("Jake: Morning.\n> ##FRENS {\"facts\":[]}\nSara: after", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("Morning.", parse.lines().get(0).text());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get());
+    }
+
+    @Test
     void decoratedSentinelIsNeverSpokenInASoloRoster() {
         String json = "{\"stance\":{\"Jake\":{\"warmth\":1}}}";
-        for (String tail : List.of("##frens " + json, "**##FRENS " + json + "**", "## FRENS " + json)) {
+        for (String tail : List.of("##frens " + json, "**##FRENS " + json + "**", "## FRENS " + json,
+                "- ##FRENS " + json)) {
             var parse = validator.parse("Quiet night.\n" + tail, List.of("Jake"), 4);
             assertTrue(parse.accepted(), tail);
             assertEquals(1, parse.lines().size(), tail);
@@ -346,6 +365,15 @@ class SoulGroupResponseValidatorTest {
         var parse = validator.parse("Jake: Frens are what keep us alive out here.", ROSTER);
         assertTrue(parse.accepted());
         assertEquals(1, parse.lines().size());
+        assertTrue(parse.sideChannelRaw().isEmpty());
+    }
+
+    @Test
+    void dashBulletProseWithoutHashIsStillDialogue() {
+        var parse = validator.parse("- Frens are what keep us alive.", List.of("Jake"), 4);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("- Frens are what keep us alive.", parse.lines().get(0).text());
         assertTrue(parse.sideChannelRaw().isEmpty());
     }
 }
