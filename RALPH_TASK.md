@@ -3,7 +3,52 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-06 (late) — next session starts here
+## Session Handoff 2026-09-06 (final) — next session starts here
+
+**State:** main = origin/main @ 1.1.215 (pushed; DEPLOYSTATE). Suite 903 green. 1.1.215 = one-line follow-up: leading list bullets (`-`, `•`, `>`) stripped before the `##FRENS` sentinel (the 1.1.214 re-review residual), no new field items. **Phase 3 of the soul
+conversation ontology is COMPLETE** — (d) 1.1.211, (a) 1.1.212, (b) 1.1.213, (c) 1.1.214.
+
+**Shipped in 1.1.214 (Phase 3 item c — structured LLM output, `##FRENS` side channel):** pure
+`SoulSideChannelOps.parse(raw, rosterNames, ownerName)` → `SideEffects` (peers-only stance deltas ±1 per
+axis per scene, ≤3 facts at confidence ≤0.6, unknown keys ignored, `threads` discarded); validator ends the
+scene at a lenient `##FRENS` line (case-insensitive, `*`/`#`/`_`/backtick decoration tolerated, ≥1 `#`
+required) and carries `SceneParse.sideChannelRaw`; sentinel-first → existing reject path, no effects.
+Applied in `SoulGroupConversationService` after novelty, before enqueue, through a `SideChannelSink`
+that `SoulRuntime` implements as worker → `server.execute` (day) → `store.updateMind`: stance deltas via
+`SoulMindOps.bumpPeerStance` (per-day guard consumes `lastTrustDay`/`lastAskDay`) to every other roster
+bot toward the named peer; facts via `SoulRelationOps.normalise`+`merge` at `INFERRED`, salience 6, into
+every present bot — ONLY when `soulRelationsEnabled` is on. Prompt contract paragraph + 380-token cap
+only when `soulStructuredOutputEnabled` (default **false**, six config sites,
+`/bot soul structured on|off|status`). Logs: `[souls] side-channel correlationId=… stance=a/s facts=a/s
+dropped=n`, `… unparsed correlationId=… chars=n`, `… factsSkipped=n reason=soulRelationsEnabled=false`.
+Details + rulings in `changelog.md`.
+
+**Scoping corrections:** `SoulRuntime.noteSceneDeliveredForMind` DOES exist (`SoulRuntime:939`; the
+1.1.213 handoff was wrong) but is the wrong seam for (c) (server-thread playback finish, no
+`SceneParse`/correlationId). `SoulMemoryDigestService` parses bullets, not JSON.
+
+**Field checks pending:** Phase 6m in `docs/testing/FIELD_SESSION_1.1.202.md` (now 161 items) — needs
+BOTH `/bot soul structured on` and `/bot soul relations on`; the decisive item is "Side channel is emitted
+at all": if the 3B model never produces a usable tail over 5 scenes, schedule spec fallback (3) — a
+separate clerk generation — as its own build.
+
+**Remaining autonomous candidates:** `threads.closed` matching (needs a per-question
+`SoulMindOps.markAnswered(mind, question)` overload — the existing one closes all threads and moves
+`playerStance`); `BAD_AT` from repeated `TASK_FAILED`; TEASE peer rule once `SoulSpeechAct` rides on
+`GroupSceneTurn`; `SoulBanterDirector.relationsEnabled()` static read → supplier; `MIN_TRIGRAMS` 3→4 if
+the field session shows quoted-idiom drops; inline the four single-caller Fortify delegates. None of these
+should start before the guided field session — Phase 3 is now all field-blocked.
+
+**Deferred with reasons (unchanged):** `FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`,
+`HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`; doorway rework.
+
+**Needs Bradley:** guided field session (Phases 6b–6m); woodcut fallback restart loop repro; doorway
+rework decision; ACTION REQUESTS interview; Bob's TTS reference sample.
+
+
+---
+
+## Session Handoff 2026-09-06 (late) — superseded
 
 **State:** main = origin/main @ 1.1.214 (pushed; deployed to all three Prism instances). Suite 900 green. **Phase 3 of the soul
 conversation ontology is COMPLETE** — (d) 1.1.211, (a) 1.1.212, (b) 1.1.213, (c) 1.1.214.

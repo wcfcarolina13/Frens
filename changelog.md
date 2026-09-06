@@ -2,6 +2,25 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Soul side channel — leading list bullet before `##FRENS` stripped; 1.1.215 (2026-09-06)
+
+Follow-up to 1.1.214, requested by Bradley: the scoped re-review's one residual. `sideChannelTail`
+stripped `*`/`#`/`_`/backtick/whitespace before the sentinel but not a list bullet, so a reply line
+`- ##FRENS {…}` (a shape small models produce readily) was not recognised; in a solo roster it fell through
+the wrong-tag repair and the JSON body became a spoken line. Same as the 1.1.214 fix wave, only the
+leading-strip set changes; the `sawHash` requirement still keeps `- Frens are great` as dialogue.
+
+- `2dd32cc2` **fix** — leading `-`, `•`, `>` added to the strip set in `SoulGroupResponseValidator.sideChannelTail`;
+  validator tests for `- ##FRENS {…}` and `> ##FRENS {…}` (scene ends, never a `SceneLine`,
+  `sideChannelRaw` = the JSON), a solo-roster "never spoken" case, and `- Frens are what keep us alive.`
+  staying dialogue.
+
+**Rulings made autonomously (cost if wrong):** `>` (blockquote) and `•` included alongside `-` since they
+are equally cheap and equally likely from a chat-tuned model. Cost: none reachable — every stripped char
+must still be followed by a `#` and the case-insensitive token before anything is treated as a sentinel.
+
+Tests 900 → 903. **Field checks:** none new — covered by Phase 6m "`##FRENS` is never spoken".
+
 ## Soul ontology Phase 3 (c) — structured LLM output, `##FRENS` side channel, behind `soulStructuredOutputEnabled` (off by default); 1.1.214 (2026-09-06)
 
 Fourth and last Phase 3 build, alone, per the spec's sequencing
