@@ -213,6 +213,63 @@ class SoulMindOpsTest {
     }
 
     @Test
+    void peerAskRulesFireAtMostOncePerDay() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        List<SoulGroupTypes.SceneLine> scene = List.of(
+                line(0, "Nice weather."),
+                line(1, "Alfa, did you bring the pickaxe?"));
+
+        SoulTypes.SoulMind day4 = SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, scene, 4);
+        assertEquals(4, day4.peerStances().get(BRAVO).stance().curiosity());
+        assertEquals(4, day4.peerStances().get(BRAVO).lastAskDay());
+
+        // A second scene the same day, with another question, must not bump the ask axes again.
+        List<SoulGroupTypes.SceneLine> scene2 = List.of(
+                line(0, "Still here."),
+                line(1, "Alfa, seriously?"));
+        SoulTypes.SoulMind sameDay = SoulMindOps.notePeerScene(day4, 0, names, ids, scene2, 4);
+        assertSame(day4, sameDay, "ask and trust guards both spent for day 4");
+
+        SoulTypes.SoulMind day5 = SoulMindOps.notePeerScene(day4, 0, names, ids, scene2, 5);
+        assertEquals(5, day5.peerStances().get(BRAVO).stance().curiosity(), "new day re-arms curiosity");
+        assertEquals(5, day5.peerStances().get(BRAVO).lastAskDay());
+    }
+
+    @Test
+    void peerAskGuardIsIndependentOfTrustGuard() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        // Trust already granted today; the ask guard is still unspent.
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
+        peers.put(BRAVO, new SoulTypes.PeerStance(SoulTypes.Stance.BASELINE, 4, -1));
+        List<SoulGroupTypes.SceneLine> scene = List.of(
+                line(0, "Nice weather."),
+                line(1, "Alfa, did you bring the pickaxe?"));
+        SoulTypes.SoulMind after = SoulMindOps.notePeerScene(mindWithPeers(peers), 0, names, ids, scene, 4);
+        SoulTypes.PeerStance bravo = after.peerStances().get(BRAVO);
+        assertEquals(4, bravo.stance().curiosity(), "curiosity still fires");
+        assertEquals(3, bravo.stance().trust(), "trust already spent today");
+        assertEquals(4, bravo.lastAskDay());
+        assertEquals(4, bravo.lastTrustDay());
+    }
+
+    @Test
+    void bothAskRulesCanFireInTheSameScene() {
+        List<String> names = List.of("Alfa", "Bravo");
+        List<UUID> ids = List.of(ALFA, BRAVO);
+        // Bravo asks Alfa first; Alfa then asks Bravo and Bravo never speaks again.
+        List<SoulGroupTypes.SceneLine> scene = List.of(
+                line(1, "Alfa, where were you?"),
+                line(0, "Bravo, why do you care?"));
+        SoulTypes.PeerStance bravo =
+                SoulMindOps.notePeerScene(SoulTypes.SoulMind.empty(), 0, names, ids, scene, 4)
+                        .peerStances().get(BRAVO);
+        assertEquals(new SoulTypes.Stance(4, 1, 4), bravo.stance(), "curiosity and exasperation both fire");
+        assertEquals(4, bravo.lastAskDay());
+    }
+
+    @Test
     void peerCapEvictsFlattestAndNeverTheUpdatedPeer() {
         Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
         // Six existing peers; the first two are exactly baseline (flattest, tie on distance 0).
@@ -239,12 +296,13 @@ class SoulMindOpsTest {
     void peerStancesDecayAndDropAtBaseline() {
         Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>();
         peers.put(ALFA, new SoulTypes.PeerStance(new SoulTypes.Stance(4, 1, 3), 2));
-        peers.put(BRAVO, new SoulTypes.PeerStance(new SoulTypes.Stance(6, 0, 3), 2));
+        peers.put(BRAVO, new SoulTypes.PeerStance(new SoulTypes.Stance(6, 0, 3), 2, 3));
         SoulTypes.SoulMind after = SoulMindOps.consolidate(mindWithPeers(peers), List.of(), 3, "forest",
                 id -> "?", 500L);
         assertFalse(after.peerStances().containsKey(ALFA), "reached baseline -> forgotten");
         assertEquals(new SoulTypes.Stance(5, 0, 3), after.peerStances().get(BRAVO).stance());
         assertEquals(2, after.peerStances().get(BRAVO).lastTrustDay());
+        assertEquals(3, after.peerStances().get(BRAVO).lastAskDay(), "decay preserves both day guards");
     }
 
     @Test

@@ -683,4 +683,22 @@ class SoulStoreTest {
         assertEquals(new SoulTypes.PeerStance(new SoulTypes.Stance(5, 0, 4), 7), reloaded.peerStances().get(alfa));
         assertEquals(new SoulTypes.PeerStance(new SoulTypes.Stance(1, 6, 3), -1), reloaded.peerStances().get(bravo));
     }
+
+    @Test
+    void legacyPeerStanceWithoutLastAskDayLoads() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID alfa = UUID.randomUUID();
+        Path dir = worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("mind.json"), "{\"schemaVersion\":1,\"playerStance\":{\"trust\":3,\"exasperation\":0,\"curiosity\":3},"
+                + "\"threads\":[],\"memories\":[],\"seen\":[],\"lastConsolidatedAtMs\":0,\"lastDay\":-1,\"lastTaskTrustDay\":-1,"
+                + "\"peerStances\":{\"" + alfa + "\":{\"stance\":{\"trust\":5,\"exasperation\":0,\"curiosity\":4},\"lastTrustDay\":7}}}");
+        SoulTypes.SoulMind mind = store.mind(bot).get();
+        SoulTypes.PeerStance loaded = mind.peerStances().get(alfa);
+        assertEquals(new SoulTypes.Stance(5, 0, 4), loaded.stance());
+        assertEquals(7, loaded.lastTrustDay());
+        // Jackson fills a missing primitive with 0; the ask guard is "!= day" so day 0 is the only
+        // day that would be (harmlessly) skipped for such a legacy pair.
+        assertEquals(0, loaded.lastAskDay());
+    }
 }

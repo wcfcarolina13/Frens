@@ -153,9 +153,9 @@ final class SoulMindOps {
      *
      * <ol>
      *   <li>a peer asked this bot something (their line names this bot and ends with {@code ?})
-     *       → curiosity +1 toward that peer;</li>
+     *       → curiosity +1 toward that peer, at most once per Minecraft day per pair;</li>
      *   <li>this bot asked the peer something and the peer never spoke again in the scene
-     *       → exasperation +1;</li>
+     *       → exasperation +1, sharing the same once-per-day guard;</li>
      *   <li>both of them spoke → trust +1, at most once per Minecraft day per pair.</li>
      * </ol>
      *
@@ -198,16 +198,29 @@ final class SoulMindOps {
             int exasperation = s.exasperation();
             int curiosity = s.curiosity();
             int lastTrustDay = current.lastTrustDay();
+            int lastAskDay = current.lastAskDay();
             boolean touched = false;
 
-            if (selfName != null && !selfName.isBlank() && lastAskIndex(delivered, p, selfName) >= 0) {
+            // Both ask rules are evaluated against the OLD lastAskDay so they can still both
+            // fire in the same scene, but neither may fire twice in one Minecraft day: without
+            // this guard a busy day of scenes would saturate curiosity/exasperation permanently
+            // (decay only steps once per day).
+            boolean askAllowed = lastAskDay != day;
+            boolean askFired = false;
+            if (askAllowed && selfName != null && !selfName.isBlank()
+                    && lastAskIndex(delivered, p, selfName) >= 0) {
                 curiosity++;
                 touched = true;
+                askFired = true;
             }
             int myAsk = lastAskIndex(delivered, selfIndex, peerName);
-            if (myAsk >= 0 && lastLine.getOrDefault(p, -1) < myAsk) {
+            if (askAllowed && myAsk >= 0 && lastLine.getOrDefault(p, -1) < myAsk) {
                 exasperation++;
                 touched = true;
+                askFired = true;
+            }
+            if (askFired) {
+                lastAskDay = day;
             }
             if (selfSpoke && lastLine.containsKey(p) && lastTrustDay != day) {
                 trust++;
@@ -217,8 +230,8 @@ final class SoulMindOps {
             if (!touched) {
                 continue;
             }
-            SoulTypes.PeerStance updated =
-                    new SoulTypes.PeerStance(new SoulTypes.Stance(trust, exasperation, curiosity), lastTrustDay);
+            SoulTypes.PeerStance updated = new SoulTypes.PeerStance(
+                    new SoulTypes.Stance(trust, exasperation, curiosity), lastTrustDay, lastAskDay);
             touchedIds.add(peerId);
             if (!updated.equals(peers.put(peerId, updated))) {
                 changed = true;
@@ -436,7 +449,8 @@ final class SoulMindOps {
             SoulTypes.Stance stepped = new SoulTypes.Stance(stepToward(ps.trust(), b.trust()),
                     stepToward(ps.exasperation(), b.exasperation()), stepToward(ps.curiosity(), b.curiosity()));
             if (!stepped.equals(b)) {
-                peers.put(entry.getKey(), new SoulTypes.PeerStance(stepped, entry.getValue().lastTrustDay()));
+                peers.put(entry.getKey(), new SoulTypes.PeerStance(stepped, entry.getValue().lastTrustDay(),
+                        entry.getValue().lastAskDay()));
             }
         }
         return SoulMemoryDigestOps.decay(withPeerStances(

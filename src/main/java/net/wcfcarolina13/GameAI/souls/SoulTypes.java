@@ -300,15 +300,24 @@ public final class SoulTypes {
     /**
      * How this bot currently feels about ANOTHER bot (conversation ontology Phase 3a). Same
      * 0..6 axes as {@link Stance}; {@code lastTrustDay} is the Minecraft day the "we both spoke
-     * in a scene" trust bump was last granted for this pair (-1 never).
+     * in a scene" trust bump was last granted for this pair (-1 never), and {@code lastAskDay}
+     * the day the curiosity/exasperation ask rules last fired for this pair (-1 never).
      */
-    public record PeerStance(Stance stance, int lastTrustDay) {
+    public record PeerStance(Stance stance, int lastTrustDay, int lastAskDay) {
         public PeerStance {
             stance = stance == null ? Stance.BASELINE : stance;
         }
 
+        /**
+         * Legacy two-arg shape (pre-{@code lastAskDay}); defaults the ask-day guard to "never".
+         * Kept so older call sites and tests compile unchanged.
+         */
+        public PeerStance(Stance stance, int lastTrustDay) {
+            this(stance, lastTrustDay, -1);
+        }
+
         public static PeerStance baseline() {
-            return new PeerStance(Stance.BASELINE, -1);
+            return new PeerStance(Stance.BASELINE, -1, -1);
         }
     }
 

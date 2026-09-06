@@ -835,7 +835,7 @@ public final class SoulRuntime {
     /**
      * Every bot in the roster folds this scene into its peer stances (conversation ontology
      * Phase 3a). Called on the server thread; the rule itself is pure and runs on the store
-     * thread inside {@code updateMind}.
+     * thread inside {@code updateMind}, with the change log emitted in the completion callback.
      */
     private void notePeerStances(SoulGroupTypes.GroupSceneTurn turn, List<SoulGroupTypes.SceneLine> delivered) {
         if (delivered == null || delivered.isEmpty() || turn.roster().size() < 2) {
@@ -855,12 +855,22 @@ public final class SoulRuntime {
             final int selfIndex = i;
             final int day = currentDay(botId);
             final String selfName = names.get(i);
-            updateMind(botId, m -> {
-                SoulTypes.SoulMind next = SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day);
-                if (next != m) {
-                    logPeerStanceChanges(selfName, names, ids, m, next);
+            // The update lambda stays pure: it only captures the mind it was handed. The R8 log
+            // is hoisted into the completion callback, which runs on the store thread (never the
+            // server thread) and never blocks.
+            java.util.concurrent.atomic.AtomicReference<SoulTypes.SoulMind> before =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            store.updateMind(botId, m -> {
+                before.set(m);
+                return SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day);
+            }).thenAccept(next -> {
+                SoulTypes.SoulMind prev = before.get();
+                if (prev != null && prev != next) {
+                    logPeerStanceChanges(selfName, names, ids, prev, next);
                 }
-                return next;
+            }).exceptionally(ex -> {
+                LOGGER.warn("[souls] peer stance update failed for {}", botId, ex);
+                return null;
             });
         }
     }
