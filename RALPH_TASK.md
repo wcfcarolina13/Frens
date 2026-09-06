@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-06 — next session starts here
 
-**State:** main = origin/main @ 1.1.211 (pushed; deploy status recorded below). Suite 831 green.
+**State:** main = origin/main @ 1.1.211 (pushed, deployed to all three Prism instances). Suite 831 green.
 
 **Phase 3 ontology spec APPROVED by Bradley (2026-09-06)** — all five open questions took the recommended
 answer: (1) model stance deltas → peers only; (2) relations coexist with `PlayerMemory`, decide after the
