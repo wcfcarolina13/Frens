@@ -290,6 +290,12 @@ public final class SoulBanterDirector {
             // Player-memory anchors: something the player once said, off cooldown.
             mindAnchors.addAll(SoulMemoryDigestOps.anchors(minds.get(i), player.getUuid(),
                     player.getName().getString(), currentDay, random));
+            // Phase 3b relation anchors: a typed belief this bot holds, off cooldown. Gated on
+            // soulRelationsEnabled (live read) so the default-off build seeds exactly as before.
+            if (relationsEnabled()) {
+                mindAnchors.addAll(SoulRelationOps.anchors(minds.get(i), roster.get(i).displayName(),
+                        currentDay, random));
+            }
         }
         SoulBanterSeed.Seed seeded;
         synchronized (memory) {
@@ -545,6 +551,12 @@ public final class SoulBanterDirector {
      * group scenes get a closing player-addressed line about one time in three. Deterministic
      * Frens logic — the model never decides WHETHER the player is addressed.
      */
+    /** Live read of {@code soulRelationsEnabled}; absent config means off. */
+    private static boolean relationsEnabled() {
+        net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+        return cfg != null && cfg.isSoulRelationsEnabled();
+    }
+
     static boolean decideAddressPlayer(int rosterSize, RandomGenerator random) {
         return rosterSize == 1 || random.nextInt(3) == 0;
     }

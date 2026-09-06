@@ -134,6 +134,9 @@ public class ManualConfig {
     // degrades to the pre-digest behaviour when it is off.
     private boolean soulMemoryDigestEnabled = true;
     private boolean soulNoveltyRejectionEnabled = false;
+    // Typed relation facts (ontology Phase 3b): the BELIEFS prompt block, relation banter
+    // anchors, and the deterministic SEEN producer. Default-OFF pending field verification.
+    private boolean soulRelationsEnabled = false;
     // Dialogue pacing sliders (0–100, 50 = shipped cadence). Never "off": the toggles above
     // and the lane masters (Scripted Text/Voice, Soul Chat/Voice) are the kill switches.
     private int dialogueScriptedRate = 50;
@@ -979,6 +982,8 @@ public class ManualConfig {
     public void setSoulMemoryDigestEnabled(boolean v) { this.soulMemoryDigestEnabled = v; }
     public boolean isSoulNoveltyRejectionEnabled() { return soulNoveltyRejectionEnabled; }
     public void setSoulNoveltyRejectionEnabled(boolean v) { this.soulNoveltyRejectionEnabled = v; }
+    public boolean isSoulRelationsEnabled() { return soulRelationsEnabled; }
+    public void setSoulRelationsEnabled(boolean v) { this.soulRelationsEnabled = v; }
 
     private static int clampRate(int rate) { return Math.max(0, Math.min(100, rate)); }
     public int getDialogueScriptedRate() { return clampRate(dialogueScriptedRate); }

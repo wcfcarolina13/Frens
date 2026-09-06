@@ -38,6 +38,7 @@ public class SharedConfig {
     public Boolean soulBanterActiveEnabled;
     public Boolean soulMemoryDigestEnabled;
     public Boolean soulNoveltyRejectionEnabled;
+    public Boolean soulRelationsEnabled;
     public Integer dialogueScriptedRate;
     public Integer soulBanterIdleRate;
     public Integer soulBanterActiveRate;
@@ -74,6 +75,7 @@ public class SharedConfig {
         snapshot.soulBanterActiveEnabled = config.isSoulBanterActiveEnabled();
         snapshot.soulMemoryDigestEnabled = config.isSoulMemoryDigestEnabled();
         snapshot.soulNoveltyRejectionEnabled = config.isSoulNoveltyRejectionEnabled();
+        snapshot.soulRelationsEnabled = config.isSoulRelationsEnabled();
         snapshot.dialogueScriptedRate = config.getDialogueScriptedRate();
         snapshot.soulBanterIdleRate = config.getSoulBanterIdleRate();
         snapshot.soulBanterActiveRate = config.getSoulBanterActiveRate();
@@ -121,6 +123,7 @@ public class SharedConfig {
         if (soulBanterActiveEnabled != null) config.setSoulBanterActiveEnabled(soulBanterActiveEnabled);
         if (soulMemoryDigestEnabled != null) config.setSoulMemoryDigestEnabled(soulMemoryDigestEnabled);
         if (soulNoveltyRejectionEnabled != null) config.setSoulNoveltyRejectionEnabled(soulNoveltyRejectionEnabled);
+        if (soulRelationsEnabled != null) config.setSoulRelationsEnabled(soulRelationsEnabled);
         if (dialogueScriptedRate != null) config.setDialogueScriptedRate(dialogueScriptedRate);
         if (soulBanterIdleRate != null) config.setSoulBanterIdleRate(soulBanterIdleRate);
         if (soulBanterActiveRate != null) config.setSoulBanterActiveRate(soulBanterActiveRate);

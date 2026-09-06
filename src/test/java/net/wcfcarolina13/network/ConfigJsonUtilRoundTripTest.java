@@ -50,6 +50,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setSoulBanterActiveEnabled(true);
         cfg.setSoulMemoryDigestEnabled(false);
         cfg.setSoulNoveltyRejectionEnabled(true);
+        cfg.setSoulRelationsEnabled(true);
         cfg.setDialogueScriptedRate(11);
         cfg.setSoulBanterIdleRate(22);
         cfg.setSoulBanterActiveRate(33);
@@ -79,6 +80,7 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals(expected.isSoulBanterActiveEnabled(), actual.isSoulBanterActiveEnabled());
         assertEquals(expected.isSoulMemoryDigestEnabled(), actual.isSoulMemoryDigestEnabled());
         assertEquals(expected.isSoulNoveltyRejectionEnabled(), actual.isSoulNoveltyRejectionEnabled());
+        assertEquals(expected.isSoulRelationsEnabled(), actual.isSoulRelationsEnabled());
         assertEquals(expected.getDialogueScriptedRate(), actual.getDialogueScriptedRate());
         assertEquals(expected.getSoulBanterIdleRate(), actual.getSoulBanterIdleRate());
         assertEquals(expected.getSoulBanterActiveRate(), actual.getSoulBanterActiveRate());
@@ -129,6 +131,18 @@ class ConfigJsonUtilRoundTripTest {
         assertTrue(ConfigJsonUtil.applyConfigJson("{}", target));
 
         assertSharedFieldsEqual(pristine, target);
+    }
+
+    @Test
+    void soulRelationsToggleTravelsInBothDirections() throws Exception {
+        ManualConfig defaults = newRealConfig();
+        assertFalse(defaults.isSoulRelationsEnabled(), "default off");
+
+        ManualConfig target = newRealConfig();
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulRelationsEnabled\":true}", target));
+        assertTrue(target.isSoulRelationsEnabled());
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulRelationsEnabled\":false}", target));
+        assertFalse(target.isSoulRelationsEnabled());
     }
 
     @Test

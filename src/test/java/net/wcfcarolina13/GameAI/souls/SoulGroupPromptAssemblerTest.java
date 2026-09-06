@@ -444,6 +444,84 @@ class SoulGroupPromptAssemblerTest {
                 0L, 1, -1, memories, List.of(), java.util.Map.of());
     }
 
+    private static SoulTypes.SoulMind mindBelieving(SoulTypes.RelationFact... facts) {
+        return SoulMindOps.withRelations(SoulTypes.SoulMind.empty(), List.of(facts));
+    }
+
+    private static SoulTypes.RelationFact belief(String subject, SoulTypes.Relation relation, String object) {
+        return new SoulTypes.RelationFact(subject, relation, object, 0.4d,
+                SoulTypes.RelationSource.SEEN, 3, 6);
+    }
+
+    @Test
+    void beliefsBlockFollowsAboutAndNamesEachBelievingBot() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind jakeMind = mindBelieving(belief("Jake", SoulTypes.Relation.GOOD_AT, "mining"));
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> id.equals(jake) ? Optional.of(jakeMind) : Optional.empty(), () -> true);
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        int idx = -1;
+        for (int i = 0; i < req.messages().size(); i++) {
+            if (req.messages().get(i).content().startsWith("BELIEFS ")) {
+                idx = i;
+            }
+        }
+        assertTrue(idx > 0, "no BELIEFS block");
+        String beliefs = req.messages().get(idx).content();
+        assertTrue(beliefs.startsWith("BELIEFS (what the bots have come to think; claims, not world truth)\n"),
+                beliefs);
+        assertTrue(beliefs.contains("Jake believes:"), beliefs);
+        assertTrue(beliefs.contains("- Jake is good at mining"), beliefs);
+        assertFalse(beliefs.contains("Sara believes:"), beliefs);
+        assertEquals(SoulTypes.Role.SYSTEM, req.messages().get(idx).role());
+        assertTrue(req.messages().get(idx - 1).content().startsWith("CURRENT STATE"),
+                req.messages().get(idx - 1).content());
+    }
+
+    @Test
+    void beliefsBlockIsAbsentWithoutRelationsOrWithTheToggleOff() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind jakeMind = mindBelieving(belief("Jake", SoulTypes.Relation.GOOD_AT, "mining"));
+        SoulTypes.ProviderRequest toggledOff = new SoulGroupPromptAssembler(id -> Optional.of(jakeMind))
+                .assemble(UUID.randomUUID(), "m", playerTurnWithOwner(owner, jake, sara), twoProfiles(),
+                        List.of(), Duration.ofSeconds(5));
+        assertFalse(toggledOff.messages().stream().anyMatch(m -> m.content().startsWith("BELIEFS ")));
+
+        SoulTypes.ProviderRequest noRelations = new SoulGroupPromptAssembler(
+                id -> Optional.of(SoulTypes.SoulMind.empty()), () -> true)
+                .assemble(UUID.randomUUID(), "m", playerTurnWithOwner(owner, jake, sara), twoProfiles(),
+                        List.of(), Duration.ofSeconds(5));
+        assertFalse(noRelations.messages().stream().anyMatch(m -> m.content().startsWith("BELIEFS ")));
+    }
+
+    @Test
+    void beliefsBlockIsBoundedAcrossTheWholeRoster() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.RelationFact[] many = new SoulTypes.RelationFact[6];
+        for (int i = 0; i < many.length; i++) {
+            many[i] = belief("Jake", SoulTypes.Relation.WANTS, ("word" + i + " ").repeat(12).trim());
+        }
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(
+                id -> Optional.of(mindBelieving(many)), () -> true);
+        SoulTypes.ProviderRequest req = withMind.assemble(UUID.randomUUID(), "m",
+                playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(), Duration.ofSeconds(5));
+        String beliefs = req.messages().stream().map(SoulTypes.Message::content)
+                .filter(c -> c.startsWith("BELIEFS ")).findFirst().orElse("");
+        long lines = beliefs.lines().filter(l -> l.startsWith("- ")).count();
+        assertTrue(lines <= SoulRelationOps.MAX_BELIEF_LINES, "lines=" + lines);
+        assertTrue(lines >= 1, beliefs);
+        int chars = beliefs.lines().filter(l -> l.startsWith("- ")).mapToInt(l -> l.length() + 1).sum();
+        assertTrue(chars <= SoulRelationOps.MAX_BELIEFS_CHARS + 1, "chars=" + chars);
+        assertFalse(beliefs.contains("Sara believes:"), "roster budget already spent");
+    }
+
     @Test
     void aboutOwnerBlockNamesEachBotThatRemembersSomething() {
         UUID owner = UUID.randomUUID();

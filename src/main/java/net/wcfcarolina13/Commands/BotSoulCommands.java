@@ -111,6 +111,14 @@ final class BotSoulCommands {
                         .then(CommandManager.literal("on").executes(ctx -> executeDigestToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeDigestToggle(ctx, false)))
                         .then(CommandManager.literal("status").executes(BotSoulCommands::executeDigestStatus)))
+                .then(CommandManager.literal("beliefs")
+                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                .executes(context -> executeBeliefs(context,
+                                        EntityArgumentType.getPlayer(context, "bot")))))
+                .then(CommandManager.literal("relations")
+                        .then(CommandManager.literal("on").executes(ctx -> executeRelationsToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeRelationsToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeRelationsStatus)))
                 .then(CommandManager.literal("novelty")
                         .then(CommandManager.literal("on").executes(ctx -> executeNoveltyToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeNoveltyToggle(ctx, false)))
@@ -875,6 +883,84 @@ final class BotSoulCommands {
             ChatUtils.sendSystemMessage(source, "day " + m.day() + " · salience " + m.salience()
                     + " · " + m.fact());
         }
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul beliefs <bot>} — the typed relation facts this bot holds (ontology Phase
+     * 3b). Read-only, same guard sequence as {@code memory}: registered bot, private-soul
+     * authorization. Beliefs are claims the bot has formed, never world truth.
+     */
+    private static int executeBeliefs(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayer();
+        if (actor == null) {
+            source.sendError(Text.literal("This command must be run by a player."));
+            return 0;
+        }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            source.sendError(Text.literal(bot.getName().getString() + " is not a Frens bot."));
+            return 0;
+        }
+        if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {
+            source.sendError(Text.literal(
+                    "You are not authorized to read soul beliefs for " + bot.getName().getString() + "."));
+            return 0;
+        }
+        Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
+        if (maybeRuntime.isEmpty()) {
+            source.sendError(Text.literal("Soul runtime is not currently running."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulRelationsEnabled();
+        ChatUtils.sendSystemMessage(source, "relations: " + (enabled ? "on" : "off"));
+        String botName = bot.getName().getString();
+        List<SoulTypes.RelationFact> facts = maybeRuntime.get().cachedMind(bot.getUuid())
+                .map(SoulTypes.SoulMind::relations)
+                .orElse(List.of());
+        if (facts.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, botName + " has no beliefs yet.");
+            return 1;
+        }
+        for (SoulTypes.RelationFact fact : facts) {
+            ChatUtils.sendSystemMessage(source, SoulRuntime.renderRelation(fact)
+                    + " (conf " + fact.confidence() + ", " + fact.source()
+                    + ", day " + fact.day() + ", salience " + fact.salience() + ")");
+        }
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul relations on|off} — operator-only switch for typed relation facts (Phase
+     * 3b): the SEEN producer at day rollover, the BELIEFS prompt block, and relation banter
+     * anchors. Off by default; every consumer reads it live, so no pipeline reload is needed.
+     */
+    private static int executeRelationsToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the relation facts switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        if (config == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        config.setSoulRelationsEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Relation facts set to " + (enabled ? "on" : "off") + ".");
+        return 1;
+    }
+
+    /** {@code /bot soul relations status} — enablement plus what the switch actually turns on. */
+    private static int executeRelationsStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulRelationsEnabled();
+        ChatUtils.sendSystemMessage(source, "Relation facts are " + (enabled ? "ON" : "OFF")
+                + ". Adds the BELIEFS prompt block, relation banter anchors, and the"
+                + " day-rollover \"good at\" producer.");
         return 1;
     }
 

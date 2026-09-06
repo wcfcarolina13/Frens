@@ -42,6 +42,9 @@ public final class SoulGroupPromptAssembler {
     /** Per-bot mind (stance, open threads) by bot id; empty when none is loaded. */
     private final Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup;
 
+    /** Live read of {@code soulRelationsEnabled}; default off keeps the prompt unchanged. */
+    private final java.util.function.BooleanSupplier relationsEnabled;
+
     public SoulGroupPromptAssembler() {
         // No mind: assembly is a pure function of its arguments.
         this(id -> Optional.empty());
@@ -52,7 +55,17 @@ public final class SoulGroupPromptAssembler {
      *     assembling thread for every roster member)
      */
     public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup) {
+        this(mindLookup, () -> false);
+    }
+
+    /**
+     * @param relationsEnabled live read of the Phase 3b toggle; when false the {@code BELIEFS}
+     *     block is never assembled, whatever the minds hold
+     */
+    public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup,
+                                    java.util.function.BooleanSupplier relationsEnabled) {
         this.mindLookup = mindLookup == null ? id -> Optional.empty() : mindLookup;
+        this.relationsEnabled = relationsEnabled == null ? () -> false : relationsEnabled;
     }
 
     /**
@@ -72,6 +85,7 @@ public final class SoulGroupPromptAssembler {
         messages.add(stateBlock(turn));
         threadsBlock(turn).ifPresent(messages::add);
         aboutBlock(turn).ifPresent(messages::add);
+        beliefsBlock(turn).ifPresent(messages::add);
         messages.addAll(boundedHistory(partyHistory));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
@@ -333,6 +347,57 @@ public final class SoulGroupPromptAssembler {
             any = true;
             sb.append(participant.displayName()).append(" remembers:\n")
                     .append(String.join("\n", lines)).append('\n');
+        }
+        return any
+                ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))
+                : Optional.empty();
+    }
+
+    // === BELIEFS (typed relation facts the bots hold) ===
+
+    /**
+     * {@code BELIEFS} block (ontology Phase 3b): per roster member, the typed relations that bot
+     * has come to hold. Claims, not world truth — the header says so, and the block sits after
+     * ABOUT so remembered speech and present truth both still win a conflict. Lines that merely
+     * restate an ABOUT line are dropped by {@link SoulRelationOps#beliefLines}; the whole block is
+     * bounded to {@link SoulRelationOps#MAX_BELIEF_LINES} lines and
+     * {@link SoulRelationOps#MAX_BELIEFS_CHARS} characters across every bot. Absent entirely when
+     * the toggle is off or no bot has a surviving line.
+     */
+    private Optional<SoulTypes.Message> beliefsBlock(SoulGroupTypes.GroupSceneTurn turn) {
+        if (!relationsEnabled.getAsBoolean()) {
+            return Optional.empty();
+        }
+        StringBuilder sb = new StringBuilder(
+                "BELIEFS (what the bots have come to think; claims, not world truth)\n");
+        boolean any = false;
+        int lineBudget = SoulRelationOps.MAX_BELIEF_LINES;
+        int charBudget = SoulRelationOps.MAX_BELIEFS_CHARS;
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            if (lineBudget <= 0) {
+                break;
+            }
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            if (mind.isEmpty()) {
+                continue;
+            }
+            List<String> lines = SoulRelationOps.beliefLines(mind.get(),
+                    SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId()));
+            List<String> kept = new ArrayList<>();
+            for (String line : lines) {
+                if (kept.size() >= lineBudget || charBudget - line.length() - 1 < 0) {
+                    break;
+                }
+                kept.add(line);
+                charBudget -= line.length() + 1;
+            }
+            if (kept.isEmpty()) {
+                continue;
+            }
+            lineBudget -= kept.size();
+            any = true;
+            sb.append(participant.displayName()).append(" believes:\n")
+                    .append(String.join("\n", kept)).append('\n');
         }
         return any
                 ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))

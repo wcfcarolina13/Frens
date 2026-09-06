@@ -103,7 +103,14 @@ public final class SoulRuntime {
     private final SoulVoiceService.VoiceDelivery voiceDelivery;
     private final SoulPromptAssembler promptAssembler = new SoulPromptAssembler();
     private final SoulResponseValidator validator = new SoulResponseValidator();
-    private final SoulGroupPromptAssembler groupPromptAssembler = new SoulGroupPromptAssembler(this::cachedMind);
+    // Phase 3b: the BELIEFS block is gated on a live config read, so /bot soul relations on|off
+    // lands at the next scene with no pipeline reload.
+    private final SoulGroupPromptAssembler groupPromptAssembler = new SoulGroupPromptAssembler(
+            this::cachedMind,
+            () -> {
+                net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                return cfg != null && cfg.isSoulRelationsEnabled();
+            });
     private final SoulGroupResponseValidator groupValidator = new SoulGroupResponseValidator();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AtomicReference<Pipeline> pipelineRef;
@@ -733,6 +740,15 @@ public final class SoulRuntime {
         return store.cachedMind(botId);
     }
 
+    /**
+     * One relation fact as an English clause, for {@code /bot soul beliefs}. Public passthrough
+     * because {@link SoulRelationOps} is package-private by design (pure rules, no callers
+     * outside this package).
+     */
+    public static String renderRelation(SoulTypes.RelationFact fact) {
+        return SoulRelationOps.render(fact);
+    }
+
     /** Cached minds for a roster, in roster order; a bot with no cached mind yields an empty one. */
     List<SoulTypes.SoulMind> mindsFor(List<UUID> botIds) {
         List<SoulTypes.SoulMind> out = new ArrayList<>(botIds.size());
@@ -792,20 +808,32 @@ public final class SoulRuntime {
             }
         }
         String digestBotName = botName;
+        // Phase 3b: relation facts are OFF unless explicitly enabled; read live so the switch
+        // lands at the next day rollover with no pipeline reload.
+        net.wcfcarolina13.FilingSystem.ManualConfig relationCfg = net.wcfcarolina13.Frens.CONFIG;
+        boolean relationsEnabled = relationCfg != null && relationCfg.isSoulRelationsEnabled();
+        int relationsBefore = store.cachedMind(botId).map(m -> m.relations().size()).orElse(0);
         long lastMs = store.cachedMind(botId).map(SoulTypes.SoulMind::lastConsolidatedAtMs).orElse(0L);
         Instant since = lastMs <= 0L ? Instant.EPOCH : Instant.ofEpochMilli(lastMs);
         store.eventsSince(botId, since)
                 .thenCompose(events -> store.updateMind(botId, m -> SoulMindOps.consolidate(
                         m, events, day, biome, id -> names.getOrDefault(id, "someone"),
-                        System.currentTimeMillis())))
+                        System.currentTimeMillis(), digestBotName, relationsEnabled)))
                 .thenCompose(mind -> store.trimEvents(botId, 200).thenApply(trimmed -> mind))
                 .thenCompose(mind -> {
                     SoulMemoryDigestService d = pipelineRef.get().digest();
                     return d == null ? CompletableFuture.completedFuture(mind)
                             : d.digest(botId, digestBotName, day, digestNames).thenApply(v -> mind);
                 })
-                .thenAccept(mind -> LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
-                        botId, day, mind.memories().size()))
+                .thenAccept(mind -> {
+                    LOGGER.info("[souls] mind consolidated bot={} day={} memories={}",
+                            botId, day, mind.memories().size());
+                    int added = mind.relations().size() - relationsBefore;
+                    if (added > 0) {
+                        LOGGER.info("[souls] relations bot={} added={} total={}",
+                                digestBotName, added, mind.relations().size());
+                    }
+                })
                 .exceptionally(ex -> {
                     LOGGER.warn("[souls] day consolidation failed for bot {} day {}: {}",
                             botId, day, ex.toString());
