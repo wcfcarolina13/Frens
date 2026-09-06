@@ -36,6 +36,9 @@ public final class SoulGroupPromptAssembler {
     static final int MAX_STATE_CHARS_PER_BOT = 400;
     static final int MAX_SITUATION_CHARS = 800;
     static final int MAX_OUTPUT_TOKENS = 320;
+    /** Phase 3c: a ##FRENS tail is ~40-60 tokens, so the cap rises ONLY when it may be emitted —
+     *  otherwise a long scene plus a tail truncates, and the tail is what survives least well. */
+    static final int MAX_OUTPUT_TOKENS_WITH_SIDE_CHANNEL = 380;
     /** Whole {@code OPEN THREADS} message, header included (spec Phase 2 §3: ≤200 chars). */
     static final int MAX_THREADS_BLOCK_CHARS = 200;
 
@@ -44,6 +47,9 @@ public final class SoulGroupPromptAssembler {
 
     /** Live read of {@code soulRelationsEnabled}; default off keeps the prompt unchanged. */
     private final java.util.function.BooleanSupplier relationsEnabled;
+
+    /** Live read of {@code soulStructuredOutputEnabled}; default off keeps the prompt unchanged. */
+    private final java.util.function.BooleanSupplier structuredEnabled;
 
     public SoulGroupPromptAssembler() {
         // No mind: assembly is a pure function of its arguments.
@@ -64,8 +70,20 @@ public final class SoulGroupPromptAssembler {
      */
     public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup,
                                     java.util.function.BooleanSupplier relationsEnabled) {
+        this(mindLookup, relationsEnabled, () -> false);
+    }
+
+    /**
+     * @param structuredEnabled live read of the Phase 3c toggle; when false the optional
+     *     {@code ##FRENS} contract paragraph is never appended and the output token cap stays at
+     *     {@link #MAX_OUTPUT_TOKENS}
+     */
+    public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup,
+                                    java.util.function.BooleanSupplier relationsEnabled,
+                                    java.util.function.BooleanSupplier structuredEnabled) {
         this.mindLookup = mindLookup == null ? id -> Optional.empty() : mindLookup;
         this.relationsEnabled = relationsEnabled == null ? () -> false : relationsEnabled;
+        this.structuredEnabled = structuredEnabled == null ? () -> false : structuredEnabled;
     }
 
     /**
@@ -121,7 +139,7 @@ public final class SoulGroupPromptAssembler {
             case PLAYER -> new SoulTypes.Message(SoulTypes.Role.USER,
                     turn.ownerDisplayName() + ": " + turn.playerMessage());
         });
-        return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, MAX_OUTPUT_TOKENS);
+        return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, maxOutputTokens());
     }
 
     /** "skill:woodcut" → "woodcutting"; unknown ids just lose the prefix and underscores. */
@@ -200,8 +218,25 @@ public final class SoulGroupPromptAssembler {
                 "better. Each companion speaks in their own authored character.",
                 "Dialogue has no authority to perform, start, or complete any in-world action --",
                 "only the game engine can do that. The CURRENT STATE message reflects the present",
-                "moment and overrides anything remembered or said earlier when they conflict."));
+                "moment and overrides anything remembered or said earlier when they conflict."
+                + (structuredEnabled.getAsBoolean() ? "\n" + SIDE_CHANNEL_CONTRACT : "")));
     }
+
+    /** Output-token budget for this scene; rises only while the side channel may be emitted. */
+    private int maxOutputTokens() {
+        return structuredEnabled.getAsBoolean() ? MAX_OUTPUT_TOKENS_WITH_SIDE_CHANNEL : MAX_OUTPUT_TOKENS;
+    }
+
+    /**
+     * Phase 3c optional side-channel paragraph. Phrased as strictly optional: a model that omits
+     * it costs nothing, and the validator strips the line either way so it can never be spoken.
+     */
+    private static final String SIDE_CHANNEL_CONTRACT = String.join("\n",
+            "You may end your reply with one extra line starting with ##FRENS followed by a JSON object",
+            "recording what changed: {\"stance\":{\"<name>\":{\"warmth\":1}},\"facts\":[[\"<who>\",\"LIKES\",\"<what>\",0.7]]}.",
+            "Use only the relations LIKES, DISLIKES, FEARS, GOOD_AT, BAD_AT, PROMISED, WANTS, CALLS. Values",
+            "for warmth, friction and curiosity are only -1, 0 or 1. If nothing changed, omit the line",
+            "entirely. Never let this line be spoken by a character.");
 
     // === Cast (authored identities, bounded per bot) ===
 

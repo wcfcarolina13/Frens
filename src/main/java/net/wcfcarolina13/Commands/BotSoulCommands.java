@@ -119,6 +119,10 @@ final class BotSoulCommands {
                         .then(CommandManager.literal("on").executes(ctx -> executeRelationsToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeRelationsToggle(ctx, false)))
                         .then(CommandManager.literal("status").executes(BotSoulCommands::executeRelationsStatus)))
+                .then(CommandManager.literal("structured")
+                        .then(CommandManager.literal("on").executes(ctx -> executeStructuredToggle(ctx, true)))
+                        .then(CommandManager.literal("off").executes(ctx -> executeStructuredToggle(ctx, false)))
+                        .then(CommandManager.literal("status").executes(BotSoulCommands::executeStructuredStatus)))
                 .then(CommandManager.literal("novelty")
                         .then(CommandManager.literal("on").executes(ctx -> executeNoveltyToggle(ctx, true)))
                         .then(CommandManager.literal("off").executes(ctx -> executeNoveltyToggle(ctx, false)))
@@ -950,6 +954,40 @@ final class BotSoulCommands {
         config.setSoulRelationsEnabled(enabled);
         config.save();
         ChatUtils.sendSystemMessage(source, "Relation facts set to " + (enabled ? "on" : "off") + ".");
+        return 1;
+    }
+
+    /**
+     * {@code /bot soul structured on|off} — operator-only switch for the {@code ##FRENS} structured
+     * side channel (Phase 3c): the optional prompt contract, the raised output token cap, and the
+     * peer-stance / relation-fact side-effects a scene's tail carries. Off by default; every
+     * consumer reads it live, so no pipeline reload is needed.
+     */
+    private static int executeStructuredToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
+        ServerCommandSource source = context.getSource();
+        if (!Frens.isOperator(source)) {
+            source.sendError(Text.literal("Only an operator may change the structured output switch."));
+            return 0;
+        }
+        ManualConfig config = Frens.CONFIG;
+        if (config == null) {
+            source.sendError(Text.literal("Config not loaded."));
+            return 0;
+        }
+        config.setSoulStructuredOutputEnabled(enabled);
+        config.save();
+        ChatUtils.sendSystemMessage(source, "Structured output set to " + (enabled ? "on" : "off") + ".");
+        return 1;
+    }
+
+    /** {@code /bot soul structured status} — enablement plus what the switch actually turns on. */
+    private static int executeStructuredStatus(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ManualConfig config = Frens.CONFIG;
+        boolean enabled = config != null && config.isSoulStructuredOutputEnabled();
+        ChatUtils.sendSystemMessage(source, "Structured output is " + (enabled ? "ON" : "OFF")
+                + ". Lets a scene end with an optional ##FRENS JSON line carrying peer stance"
+                + " nudges and inferred relation facts; the line is never spoken.");
         return 1;
     }
 

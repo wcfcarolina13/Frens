@@ -32,12 +32,33 @@ public final class SoulGroupResponseValidator {
 
     private static final Pattern SECTION_SIGN_CODE = Pattern.compile("§.");
 
-    /** Outcome of {@link #parse}. {@code lines()} is roster-verified, capped dialogue. */
+    /**
+     * Sentinel opening the optional structured side channel (ontology Phase 3c). A line whose
+     * first non-space characters are this token ENDS the scene — everything after it is dropped
+     * and the line itself never becomes a {@link SoulGroupTypes.SceneLine}, so a model that emits
+     * it can never have it spoken. Parsing the tail is not this class's job; see
+     * {@code SoulSideChannelOps}.
+     */
+    static final String SIDE_CHANNEL_SENTINEL = "##FRENS";
+
+    /**
+     * Outcome of {@link #parse}. {@code lines()} is roster-verified, capped dialogue;
+     * {@code sideChannelRaw()} is the trimmed text following a {@code ##FRENS} sentinel, empty
+     * when the model emitted none (the expected common case).
+     */
     public record SceneParse(boolean accepted, List<SoulGroupTypes.SceneLine> lines,
-                              SoulTypes.FailureCode failureCode, String reason) {
+                              SoulTypes.FailureCode failureCode, String reason,
+                              java.util.Optional<String> sideChannelRaw) {
         public SceneParse {
             lines = lines == null ? List.of() : List.copyOf(lines);
             reason = reason == null ? "" : reason;
+            sideChannelRaw = sideChannelRaw == null ? java.util.Optional.empty() : sideChannelRaw;
+        }
+
+        /** Pre-3c four-arg shape; keeps existing callers and tests source-stable. */
+        public SceneParse(boolean accepted, List<SoulGroupTypes.SceneLine> lines,
+                          SoulTypes.FailureCode failureCode, String reason) {
+            this(accepted, lines, failureCode, reason, java.util.Optional.empty());
         }
     }
 
@@ -119,11 +140,19 @@ public final class SoulGroupResponseValidator {
 
         int[] perBot = new int[rosterDisplayNames.size()];
         List<SoulGroupTypes.SceneLine> lines = new ArrayList<>();
+        java.util.Optional<String> sideChannelRaw = java.util.Optional.empty();
         for (String rawLine : text.split("\n")) {
+            String line = cleanLine(rawLine);
+            // Checked BEFORE the line cap so a tail that follows a full-length scene is still
+            // captured (and, more importantly, still stripped) rather than left unread.
+            if (line.startsWith(SIDE_CHANNEL_SENTINEL)) {
+                sideChannelRaw = java.util.Optional.of(
+                        line.substring(SIDE_CHANNEL_SENTINEL.length()).strip());
+                break; // end of scene: this line and everything after it are dropped
+            }
             if (lines.size() >= maxSceneLines) {
                 break;
             }
-            String line = cleanLine(rawLine);
             if (line.isEmpty()) {
                 continue;
             }
@@ -185,9 +214,11 @@ public final class SoulGroupResponseValidator {
             }
         }
         if (lines.isEmpty()) {
+            // Sentinel-first (or an otherwise empty scene): rejected exactly as before, and the
+            // side channel is deliberately NOT carried out — no scene, no side-effects.
             return reject("no roster-tagged dialogue lines");
         }
-        return new SceneParse(true, lines, null, "");
+        return new SceneParse(true, lines, null, "", sideChannelRaw);
     }
 
     /** True when a word of the line is the owner's name or a ≥4-char abbreviation of it. */

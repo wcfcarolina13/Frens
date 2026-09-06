@@ -245,6 +245,67 @@ final class SoulMindOps {
     }
 
     /**
+     * Applies one model-asserted peer stance move (conversation ontology Phase 3c). Pure, and
+     * deliberately narrower than {@link #notePeerScene}: the delta is capped at ±1, the axis moves
+     * at most once per Minecraft day per pair (reusing the same {@code lastTrustDay} /
+     * {@code lastAskDay} guards the deterministic rules use, so a model claim CONSUMES that day's
+     * budget rather than stacking on top of it), the 0..6 range clamp comes from
+     * {@link SoulTypes.Stance}'s compact constructor, and {@code playerStance} is never touched.
+     *
+     * @param peerId the OTHER bot this stance is toward; a null id, a zero delta, or a spent
+     *     day-guard returns {@code mind} unchanged
+     * @return the same instance when nothing changed
+     */
+    static SoulTypes.SoulMind bumpPeerStance(SoulTypes.SoulMind mind, UUID peerId,
+                                             SoulSideChannelOps.Axis axis, int delta, int day) {
+        if (mind == null || peerId == null || axis == null || delta == 0 || delta < -1 || delta > 1) {
+            return mind;
+        }
+        SoulTypes.PeerStance current = mind.peerStances().getOrDefault(peerId, SoulTypes.PeerStance.baseline());
+        SoulTypes.Stance s = current.stance();
+        int trust = s.trust();
+        int exasperation = s.exasperation();
+        int curiosity = s.curiosity();
+        int lastTrustDay = current.lastTrustDay();
+        int lastAskDay = current.lastAskDay();
+        switch (axis) {
+            case WARMTH -> {
+                if (lastTrustDay == day) {
+                    return mind;
+                }
+                trust += delta;
+                lastTrustDay = day;
+            }
+            case FRICTION -> {
+                if (lastAskDay == day) {
+                    return mind;
+                }
+                exasperation += delta;
+                lastAskDay = day;
+            }
+            case CURIOSITY -> {
+                if (lastAskDay == day) {
+                    return mind;
+                }
+                curiosity += delta;
+                lastAskDay = day;
+            }
+            default -> {
+                return mind;
+            }
+        }
+        SoulTypes.PeerStance updated = new SoulTypes.PeerStance(
+                new SoulTypes.Stance(trust, exasperation, curiosity), lastTrustDay, lastAskDay);
+        if (updated.equals(current) && mind.peerStances().containsKey(peerId)) {
+            return mind;
+        }
+        Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>(mind.peerStances());
+        peers.put(peerId, updated);
+        evictPeers(peers, Set.of(peerId));
+        return withPeerStances(mind, peers);
+    }
+
+    /**
      * Index of the last line by {@code speakerIndex} that names {@code targetName}
      * (case-insensitive) and ends with a question mark, or -1 when there is none.
      */

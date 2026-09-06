@@ -42,6 +42,16 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         boolean hasActiveScene(UUID ownerId);
     }
 
+    /**
+     * Mind side-effect boundary (ontology Phase 3c). Called on the provider-future WORKER thread
+     * with already-validated effects; the production implementation ({@code SoulRuntime}) hops to
+     * the server thread to resolve the Minecraft day and then applies the change on the store
+     * executor. Side-effects are STATE, not speech, so they apply even for an ambient-muted scene.
+     */
+    public interface SideChannelSink {
+        void apply(SoulGroupTypes.GroupSceneTurn turn, SoulSideChannelOps.SideEffects effects);
+    }
+
     /** Deterministic owner-notice boundary — production forwards to the DM delivery's status path. */
     public interface StatusSink {
         void deliverStatus(UUID playerId, String text);
@@ -65,6 +75,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private final Map<UUID, SoulNoveltyPolicy.Ring> noveltyRings = new ConcurrentHashMap<>();
     /** Live read of {@code soulNoveltyRejectionEnabled}; default off keeps behaviour unchanged. */
     private final BooleanSupplier noveltyEnabled;
+    /** Live read of {@code soulStructuredOutputEnabled}; default off keeps behaviour unchanged. */
+    private final BooleanSupplier structuredEnabled;
+    /** Where accepted side-channel effects go; the default drops them. */
+    private final SideChannelSink sideChannel;
 
     /** Legacy 8-arg form: novelty rejection disabled (behaviour identical to pre-1.1.211). */
     public SoulGroupConversationService(SoulStore partyStore, SoulGroupPromptAssembler prompts,
@@ -79,6 +93,22 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                                          SoulGroupResponseValidator validator, SoulSettings settings,
                                          ScenePlayer player, StatusSink status,
                                          BooleanSupplier noveltyEnabled) {
+        this(partyStore, prompts, scheduler, provider, validator, settings, player, status,
+                noveltyEnabled, () -> false, (turn, effects) -> { });
+    }
+
+    /**
+     * @param structuredEnabled live read of the Phase 3c {@code ##FRENS} toggle
+     * @param sideChannel where accepted side-effects are applied (never on this thread)
+     */
+    public SoulGroupConversationService(SoulStore partyStore, SoulGroupPromptAssembler prompts,
+                                         SoulGenerationScheduler scheduler, SoulModelProvider provider,
+                                         SoulGroupResponseValidator validator, SoulSettings settings,
+                                         ScenePlayer player, StatusSink status,
+                                         BooleanSupplier noveltyEnabled, BooleanSupplier structuredEnabled,
+                                         SideChannelSink sideChannel) {
+        this.structuredEnabled = Objects.requireNonNull(structuredEnabled, "structuredEnabled");
+        this.sideChannel = Objects.requireNonNull(sideChannel, "sideChannel");
         this.noveltyEnabled = Objects.requireNonNull(noveltyEnabled, "noveltyEnabled");
         this.partyStore = Objects.requireNonNull(partyStore, "partyStore");
         this.prompts = Objects.requireNonNull(prompts, "prompts");
@@ -213,6 +243,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
 
         List<SoulGroupTypes.SceneLine> lines = applyNovelty(turn, parse.lines());
+        applySideChannel(turn, correlationId, rosterNames, parse.sideChannelRaw());
 
         sceneResults.put(correlationId, result);
         player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines));
@@ -222,6 +253,44 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                 queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
                 elapsedMs(submitStartNanos));
         outcome.complete(Submission.SCENE_STARTED);
+    }
+
+    /**
+     * Phase 3c: hand the validated {@code ##FRENS} tail to the pure parser and route whatever
+     * survives to the {@link SideChannelSink}. Runs on the provider-future worker thread; the sink
+     * owns its own thread hop. The absent-sentinel case is the expected common one and is silent.
+     *
+     * <p>The logged {@code applied} counts are elements ACCEPTED FOR APPLICATION at this seam —
+     * the store write is asynchronous, so a per-mind day-guard may still no-op one of them.
+     */
+    private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn, UUID correlationId,
+                                  List<String> rosterNames, java.util.Optional<String> raw) {
+        if (raw.isEmpty()) {
+            return; // no sentinel — never an error, never logged
+        }
+        if (!structuredEnabled.getAsBoolean()) {
+            // The validator stripped the line regardless, so nothing was spoken either way.
+            LOGGER.debug("[souls] side-channel ignored (disabled) correlationId={} chars={}",
+                    correlationId, raw.get().length());
+            return;
+        }
+        SoulSideChannelOps.SideEffects effects = SoulSideChannelOps.parse(
+                raw, new java.util.LinkedHashSet<>(rosterNames), turn.ownerDisplayName());
+        if (effects.unparsed()) {
+            LOGGER.info("[souls] side-channel unparsed correlationId={} chars={}",
+                    correlationId, raw.get().length());
+            return;
+        }
+        if (effects.isEmpty()) {
+            return; // a well-formed but empty tail says nothing worth a log line
+        }
+        int stanceSeen = effects.stanceDeltas().size() + effects.droppedStance();
+        int factsSeen = effects.facts().size() + effects.droppedFacts();
+        sideChannel.apply(turn, effects);
+        LOGGER.info("[souls] side-channel correlationId={} stance={}/{} facts={}/{} dropped={}",
+                correlationId, effects.stanceDeltas().size(), stanceSeen,
+                effects.facts().size(), factsSeen,
+                effects.droppedStance() + effects.droppedFacts());
     }
 
     /**

@@ -51,6 +51,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setSoulMemoryDigestEnabled(false);
         cfg.setSoulNoveltyRejectionEnabled(true);
         cfg.setSoulRelationsEnabled(true);
+        cfg.setSoulStructuredOutputEnabled(true);
         cfg.setDialogueScriptedRate(11);
         cfg.setSoulBanterIdleRate(22);
         cfg.setSoulBanterActiveRate(33);
@@ -81,6 +82,7 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals(expected.isSoulMemoryDigestEnabled(), actual.isSoulMemoryDigestEnabled());
         assertEquals(expected.isSoulNoveltyRejectionEnabled(), actual.isSoulNoveltyRejectionEnabled());
         assertEquals(expected.isSoulRelationsEnabled(), actual.isSoulRelationsEnabled());
+        assertEquals(expected.isSoulStructuredOutputEnabled(), actual.isSoulStructuredOutputEnabled());
         assertEquals(expected.getDialogueScriptedRate(), actual.getDialogueScriptedRate());
         assertEquals(expected.getSoulBanterIdleRate(), actual.getSoulBanterIdleRate());
         assertEquals(expected.getSoulBanterActiveRate(), actual.getSoulBanterActiveRate());
@@ -137,12 +139,17 @@ class ConfigJsonUtilRoundTripTest {
     void soulRelationsToggleTravelsInBothDirections() throws Exception {
         ManualConfig defaults = newRealConfig();
         assertFalse(defaults.isSoulRelationsEnabled(), "default off");
+        assertFalse(defaults.isSoulStructuredOutputEnabled(), "default off");
 
         ManualConfig target = newRealConfig();
         assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulRelationsEnabled\":true}", target));
         assertTrue(target.isSoulRelationsEnabled());
         assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulRelationsEnabled\":false}", target));
         assertFalse(target.isSoulRelationsEnabled());
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulStructuredOutputEnabled\":true}", target));
+        assertTrue(target.isSoulStructuredOutputEnabled());
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulStructuredOutputEnabled\":false}", target));
+        assertFalse(target.isSoulStructuredOutputEnabled());
     }
 
     @Test

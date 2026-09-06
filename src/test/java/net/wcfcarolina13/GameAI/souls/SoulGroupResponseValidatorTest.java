@@ -263,4 +263,40 @@ class SoulGroupResponseValidatorTest {
         assertEquals(4, parse.lines().size());
         assertEquals("Four.", parse.lines().get(2).text());
     }
+
+    // === ##FRENS side channel (ontology Phase 3c) ===
+
+    @Test
+    void sentinelEndsTheSceneAndIsNeverASceneLine() {
+        var parse = validator.parse("Jake: Morning.\n##FRENS {\"stance\":{\"Sara\":{\"warmth\":1}}}\n"
+                + "Sara: Ignored after the tail.", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("Morning.", parse.lines().get(0).text());
+        assertTrue(parse.sideChannelRaw().isPresent());
+        assertEquals("{\"stance\":{\"Sara\":{\"warmth\":1}}}", parse.sideChannelRaw().get());
+    }
+
+    @Test
+    void sentinelIsRecognisedWithLeadingWhitespace() {
+        var parse = validator.parse("Jake: Morning.\n   ##FRENS   {\"facts\":[]}  ", ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals("{\"facts\":[]}", parse.sideChannelRaw().get(), "tail is trimmed");
+    }
+
+    @Test
+    void sentinelFirstLeavesZeroLinesAndIsRejected() {
+        var parse = validator.parse("##FRENS {\"stance\":{\"Jake\":{\"warmth\":1}}}\nJake: too late", ROSTER);
+        assertFalse(parse.accepted());
+        assertEquals(SoulTypes.FailureCode.MALFORMED, parse.failureCode());
+        assertTrue(parse.sideChannelRaw().isEmpty(), "no scene, no side-effects");
+    }
+
+    @Test
+    void anOrdinaryParseCarriesNoSideChannel() {
+        var parse = validator.parse("Jake: I say we mine tonight.\nSara: Too dangerous.", ROSTER);
+        assertTrue(parse.accepted());
+        assertTrue(parse.sideChannelRaw().isEmpty());
+    }
 }

@@ -111,6 +111,11 @@ public final class SoulRuntime {
             () -> {
                 net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                 return cfg != null && cfg.isSoulRelationsEnabled();
+            },
+            // Phase 3c: the optional ##FRENS contract paragraph and the raised token cap.
+            () -> {
+                net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                return cfg != null && cfg.isSoulStructuredOutputEnabled();
             });
     private final SoulGroupResponseValidator groupValidator = new SoulGroupResponseValidator();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -955,6 +960,93 @@ public final class SoulRuntime {
                 new SoulTypes.OpenThread(asker, question.get(), now, false)));
     }
 
+    /**
+     * Phase 3c: fold one scene's structured side channel into the roster's minds.
+     *
+     * <p>Called on a provider-future WORKER thread, so it hops to the server thread first — that
+     * is where {@link #currentDay} may read the player manager — and the mind write itself then
+     * runs on the store executor inside {@code updateMind}, exactly like {@code notePeerStances}.
+     *
+     * <p>Every accepted fact goes to EVERY roster bot (all of them heard the scene) as
+     * {@code INFERRED}; a stance delta goes to every roster bot OTHER than its target, so no bot
+     * ever forms a stance toward itself and {@code playerStance} is never touched.
+     */
+    private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn,
+                                  SoulSideChannelOps.SideEffects effects) {
+        MinecraftServer srv = server;
+        if (srv == null || effects == null || turn == null) {
+            return;
+        }
+        srv.execute(() -> applySideChannelOnServer(turn, effects));
+    }
+
+    private void applySideChannelOnServer(SoulGroupTypes.GroupSceneTurn turn,
+                                          SoulSideChannelOps.SideEffects effects) {
+        List<String> names = new ArrayList<>(turn.roster().size());
+        List<UUID> ids = new ArrayList<>(turn.roster().size());
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            names.add(participant.displayName());
+            ids.add(participant.botId());
+        }
+        // normalise() re-checks the subject against the same allow-list the parser used; the
+        // owner is a legal fact subject even though they are never a stance target.
+        java.util.Set<String> allowedSubjects = new java.util.LinkedHashSet<>(names);
+        if (turn.ownerDisplayName() != null && !turn.ownerDisplayName().isBlank()) {
+            allowedSubjects.add(turn.ownerDisplayName());
+        }
+        for (int i = 0; i < ids.size(); i++) {
+            UUID botId = ids.get(i);
+            if (botId == null) {
+                continue;
+            }
+            final int day = currentDay(botId);
+            List<SoulTypes.RelationFact> facts = new ArrayList<>();
+            for (SoulSideChannelOps.FactCandidate candidate : effects.facts()) {
+                SoulRelationOps.normalise(candidate.subject(), candidate.relation(), candidate.object(),
+                                candidate.confidence(), SoulTypes.RelationSource.INFERRED, day,
+                                SoulSideChannelOps.FACT_SALIENCE, allowedSubjects)
+                        .ifPresent(facts::add);
+            }
+            List<SoulSideChannelOps.StanceDelta> deltas = new ArrayList<>();
+            List<UUID> targets = new ArrayList<>();
+            for (SoulSideChannelOps.StanceDelta delta : effects.stanceDeltas()) {
+                int peerIndex = indexOfName(names, delta.peerName());
+                if (peerIndex < 0 || peerIndex == i || ids.get(peerIndex) == null) {
+                    continue; // never a stance toward yourself, never toward a non-participant
+                }
+                deltas.add(delta);
+                targets.add(ids.get(peerIndex));
+            }
+            if (facts.isEmpty() && deltas.isEmpty()) {
+                continue;
+            }
+            updateMind(botId, m -> {
+                SoulTypes.SoulMind next = m;
+                for (SoulTypes.RelationFact fact : facts) {
+                    next = SoulMindOps.withRelations(next, SoulRelationOps.merge(next.relations(), fact));
+                }
+                for (int d = 0; d < deltas.size(); d++) {
+                    next = SoulMindOps.bumpPeerStance(next, targets.get(d), deltas.get(d).axis(),
+                            deltas.get(d).delta(), day);
+                }
+                return next;
+            });
+        }
+    }
+
+    /** Case-insensitive display-name lookup, the same match {@code notePeerStances} relies on. */
+    private static int indexOfName(List<String> names, String candidate) {
+        if (candidate == null) {
+            return -1;
+        }
+        for (int i = 0; i < names.size(); i++) {
+            if (names.get(i) != null && names.get(i).equalsIgnoreCase(candidate)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /** The bot's Minecraft day from its world (server thread), else the mind's last known day. */
     private int currentDay(UUID botId) {
         MinecraftServer srv = server;
@@ -1038,7 +1130,13 @@ public final class SoulRuntime {
                 () -> {
                     ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                     return cfg != null && cfg.isSoulNoveltyRejectionEnabled();
-                });
+                },
+                // Phase 3c structured side channel: live read, OFF unless explicitly enabled.
+                () -> {
+                    ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                    return cfg != null && cfg.isSoulStructuredOutputEnabled();
+                },
+                this::applySideChannel);
         // Live supplier like the banter switch above: /bot soul digest on|off takes effect on the
         // next day rollover with no pipeline reload. Absent config = on (the field default).
         SoulMemoryDigestService digest = new SoulMemoryDigestService(
