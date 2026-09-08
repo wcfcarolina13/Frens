@@ -1,5 +1,10 @@
 # Gotchas
 
+## Diagnose the speech lane the user is testing
+
+- When the user reports silent Souls or LLM voices, trace Soul scheduling, generation, delivery, and TTS. Scripted voice mute settings belong to a separate lane and do not explain Soul silence.
+- A scene cancelled on exit explains that scene only; investigate why no earlier scene delivered before attributing the whole session to disconnection.
+
 ## Keep command scope separate from execution safety
 
 - Do not assume different proximity rules between two entry paths are themselves a bug.
