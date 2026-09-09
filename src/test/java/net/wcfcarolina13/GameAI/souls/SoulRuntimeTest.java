@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.souls;
 
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.GameAI.souls.voice.PiperVoiceEngine;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -278,6 +280,103 @@ class SoulRuntimeTest {
         assertFalse(runtime.isMasterEnabled());
         verify(oldProvider).close();
         verify(scheduler).close();
+    }
+
+    @Test
+    void modelOnlyReloadKeepsVoiceEngineUntilShutdown() {
+        try (var engines = mockConstruction(PiperVoiceEngine.class)) {
+            SoulRuntime runtime = new SoulRuntime(settings(true, true, "old-model"), store,
+                    mock(SoulModelProvider.class), scheduler, conversationService);
+            SoulRuntime.installForTest(runtime);
+            ManualConfig config = voiceReloadConfig();
+            runtime.reloadSettings(config).join();
+            PiperVoiceEngine engine = engines.constructed().getFirst();
+            when(engine.alive()).thenReturn(true);
+
+            when(config.getSoulModel()).thenReturn("llama3.1:8b");
+            runtime.reloadSettings(config).join();
+            runtime.reloadSettings(config).join();
+
+            assertEquals(1, engines.constructed().size(), "model reload must retain the warm voice engine");
+            verify(engine, never()).close();
+            SoulRuntime.stop();
+            verify(engine).close();
+        }
+    }
+
+    @Test
+    void changedVoiceSettingsReplaceAndCloseTheOldEngine() {
+        try (var engines = mockConstruction(PiperVoiceEngine.class)) {
+            SoulRuntime runtime = new SoulRuntime(settings(true, true, "old-model"), store,
+                    mock(SoulModelProvider.class), scheduler, conversationService);
+            SoulRuntime.installForTest(runtime);
+            ManualConfig config = voiceReloadConfig();
+            runtime.reloadSettings(config).join();
+            PiperVoiceEngine first = engines.constructed().getFirst();
+            when(first.alive()).thenReturn(true);
+
+            when(config.getSoulVoiceModel()).thenReturn("another-voice.onnx");
+            runtime.reloadSettings(config).join();
+
+            assertEquals(2, engines.constructed().size());
+            verify(first).close();
+            PiperVoiceEngine replacement = engines.constructed().getLast();
+            verify(replacement, never()).close();
+            SoulRuntime.stop();
+            verify(first).close();
+            verify(replacement).close();
+        }
+    }
+
+    @Test
+    void unchangedSettingsReplaceAnUnavailableVoiceEngine() {
+        try (var engines = mockConstruction(PiperVoiceEngine.class)) {
+            SoulRuntime runtime = new SoulRuntime(settings(true, true, "old-model"), store,
+                    mock(SoulModelProvider.class), scheduler, conversationService);
+            SoulRuntime.installForTest(runtime);
+            ManualConfig config = voiceReloadConfig();
+            runtime.reloadSettings(config).join();
+            PiperVoiceEngine first = engines.constructed().getFirst();
+            when(first.alive()).thenReturn(false);
+
+            runtime.reloadSettings(config).join();
+
+            assertEquals(2, engines.constructed().size());
+            verify(first).close();
+            SoulRuntime.stop();
+            verify(engines.constructed().getLast()).close();
+        }
+    }
+
+    @Test
+    void stoppedRuntimeDoesNotConstructVoiceOnReload() {
+        try (var engines = mockConstruction(PiperVoiceEngine.class)) {
+            SoulRuntime runtime = new SoulRuntime(settings(true, true, "old-model"), store,
+                    mock(SoulModelProvider.class), scheduler, conversationService);
+            SoulRuntime.installForTest(runtime);
+            SoulRuntime.stop();
+
+            runtime.reloadSettings(voiceReloadConfig()).join();
+
+            assertTrue(engines.constructed().isEmpty());
+        }
+    }
+
+    private static ManualConfig voiceReloadConfig() {
+        ManualConfig config = mock(ManualConfig.class);
+        when(config.isSoulsEnabled()).thenReturn(true);
+        when(config.getSoulProvider()).thenReturn("ollama");
+        when(config.getSoulModel()).thenReturn("llama3.2:3b");
+        when(config.getOllamaBaseUrl()).thenReturn("http://127.0.0.1:11434");
+        when(config.getSoulRequestTimeoutSeconds()).thenReturn(60);
+        when(config.getSoulQueueCapacity()).thenReturn(8);
+        when(config.isSoulVoiceEnabled()).thenReturn(true);
+        when(config.getSoulVoiceEngine()).thenReturn("piper");
+        when(config.getSoulVoicePiperBinary()).thenReturn("piper");
+        when(config.getSoulVoiceModel()).thenReturn("voice.onnx");
+        when(config.getSoulVoiceMaxChars()).thenReturn(400);
+        when(config.getSoulVoiceSynthTimeoutMs()).thenReturn(30_000L);
+        return config;
     }
 
     /**

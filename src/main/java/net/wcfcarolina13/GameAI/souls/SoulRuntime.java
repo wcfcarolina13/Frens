@@ -1097,36 +1097,37 @@ public final class SoulRuntime {
      * settings are enabled/valid -- only {@link #isConversationEnabled()} gates whether the new
      * pipeline is ever actually used to generate a reply.
      *
-     * <p>Building the new pipeline happens outside {@link #lifecycleLock} (no shared state
-     * touched, no reason to hold the lock across it); installing it and closing whatever it
-     * displaces happens under the lock together with a {@link #stopped} check, so a
-     * {@link #stop()} racing this call can never be left with a freshly built pipeline that
-     * nothing ever closes -- either this call sees {@code stopped} already true and closes the
-     * pipeline it just built without installing it, or it wins the lock first and installs it,
-     * in which case {@code stop()} (blocked on the same lock) closes exactly that one once it
-     * proceeds.
+     * <p>Reload and shutdown share {@link #lifecycleLock}, including construction, so unchanged
+     * voice services can be transferred without shutdown closing them in between. Model-only
+     * changes keep the voice worker and engine warm. Construction does not run inference.
      */
     public CompletableFuture<Void> reloadSettings(ManualConfig config) {
         SoulSettings newSettings = SoulSettings.from(config);
         SoulVoiceSettings newVoiceSettings = SoulVoiceSettings.from(config);
-        Pipeline built = buildPipeline(newSettings, newVoiceSettings);
         synchronized (lifecycleLock) {
             if (stopped) {
-                closePipeline(built);
                 return CompletableFuture.completedFuture(null);
             }
+            Pipeline previous = pipelineRef.get();
+            SoulVoiceService voice = voiceSettings.equals(newVoiceSettings)
+                    && previous.voice().engineAlive()
+                    ? previous.voice() : buildVoiceService(newVoiceSettings);
+            Pipeline built = buildPipeline(newSettings, voice);
             voiceSettings = newVoiceSettings;
-            closePipeline(pipelineRef.getAndSet(built));
+            closePipeline(pipelineRef.getAndSet(built), voice);
         }
         return CompletableFuture.completedFuture(null);
     }
 
     private Pipeline buildPipeline(SoulSettings settings, SoulVoiceSettings voiceSettings) {
+        return buildPipeline(settings, buildVoiceService(voiceSettings));
+    }
+
+    private Pipeline buildPipeline(SoulSettings settings, SoulVoiceService voice) {
         warnIfNonLocalOllamaHost(settings);
         SoulModelProvider provider =
                 new OllamaSoulProvider(settings.ollamaBaseUri(), settings.model(), objectMapper);
         SoulGenerationScheduler scheduler = new SoulGenerationScheduler(1, settings.queueCapacity());
-        SoulVoiceService voice = buildVoiceService(voiceSettings);
         SoulConversationService conversationService = new SoulConversationService(
                 store, promptAssembler, scheduler, provider, validator, delivery, settings, voice);
         SoulGroupConversationService groupService = new SoulGroupConversationService(
@@ -1267,6 +1268,10 @@ public final class SoulRuntime {
     }
 
     private void closePipeline(Pipeline pipeline) {
+        closePipeline(pipeline, null);
+    }
+
+    private void closePipeline(Pipeline pipeline, SoulVoiceService retainedVoice) {
         if (pipeline == null) {
             return;
         }
@@ -1281,7 +1286,9 @@ public final class SoulRuntime {
             LOGGER.warn("[souls] provider close failed: {}", ex.toString());
         }
         try {
-            pipeline.voice().close();
+            if (pipeline.voice() != retainedVoice) {
+                pipeline.voice().close();
+            }
         } catch (RuntimeException ex) {
             LOGGER.warn("[souls] voice close failed: {}", ex.toString());
         }

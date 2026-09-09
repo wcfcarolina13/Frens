@@ -90,7 +90,7 @@ public class SoulModelManagerScreen extends Screen {
             return Text.literal("…");
         }
         if (model.tag().equals(s.currentModel())) {
-            return Text.literal("§aIn use ✔");
+            return Text.literal("§aSelected ✔");
         }
         if (s.isInstalled(model.tag())) {
             return Text.literal("Use");
@@ -108,6 +108,7 @@ public class SoulModelManagerScreen extends Screen {
         }
         if (s.isInstalled(model.tag())) {
             OllamaModelInstaller.select(model.tag());
+            lastResult = "§aSelected " + model.tag() + ".";
             startDetect();
             return;
         }
@@ -167,6 +168,9 @@ public class SoulModelManagerScreen extends Screen {
                             + "  ·  models download from registry.ollama.ai",
                     cx + PAD, y, COL_DIM);
             y += 14;
+            context.drawTextWithShadow(this.textRenderer,
+                    "New requests use your selection; the first reply may take longer.",
+                    cx + PAD, y, COL_DIM);
 
             int rowY = cy + 72;
             for (OllamaModelInstaller.KnownModel m : OllamaModelInstaller.KNOWN_MODELS) {

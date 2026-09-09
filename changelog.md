@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Model switching preserves unchanged Soul voices (2026-09-08, not deployed)
+
+The September 8 playthrough did switch from llama3.2:3b to llama3.1:8b; the next generation
+took about 16 seconds. Reloading model settings also rebuilt the unrelated voice engine.
+SoulRuntime now retains a healthy voice service when voice settings match, while replacing the
+LLM provider and scheduler. Voice-setting changes still replace the engine, and shutdown
+closes the retained engine once. Unavailable voices are rebuilt so reload can recover from
+synthesis failures. Reload after shutdown constructs no new voice engine.
+The model menu says “Selected” and explains that new requests use the selection and the
+first reply may take longer; selection does not claim that the model is already loaded.
+
+Validation: lifecycle regressions failed before the fix and pass after it; `./gradlew build`
+passed all 949 tests. In-game menu layout and audible playback remain unverified. No JAR
+was deployed. The approved chest-permission and helper design is recorded in
+`docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md` for later phases.
+
 ## Speech floor + idle-hobby backoff — first field evidence since 1.1.184; 1.1.216 (2026-09-07)
 
 Bradley played a four-minute session on 2026-09-06 (22:29–22:33, instance 1.21.11, Jake + Bob, Roti mounted)
