@@ -726,6 +726,24 @@ public final class BotGuideScreen extends Screen {
         String guideKey = FrensClient.getGuideHotkeyDisplayName();
         return List.of(
                 new GuideTopic(
+                        "basics_group_chat",
+                        "Basics",
+                        "Talk to Nearby Bots (Group Chat)",
+                        "Start chat with Bots or All bots instead of naming each companion.",
+                        List.of(
+                                "Type in normal chat, without a slash: Bots, what should we do next?",
+                                "All bots, how is everyone doing? works too.",
+                                "With Souls and Soul Party enabled, up to four nearby companions with active Soul profiles join the conversation, nearest first.",
+                                "They must be within 32 blocks in the same world. Normally only your owned bots qualify; operators can also address other owners' bots.",
+                                "If only one companion qualifies, they receive the message directly. A group conversation does not require every bot to reply.",
+                                "Voice input works the same way if your dictation sends the words into normal Minecraft chat. Frens does not provide microphone transcription itself.",
+                                "Use Bots or All bots explicitly: Everyone and Guys are not group-address shortcuts."
+                        ),
+                        "Normal chat: Bots, what should we do next? (no slash)",
+                        "Open Guide: " + guideKey + " | Search: group chat, earshot, or voice",
+                        "talk speaking address all nearby owned companions souls soul party earshot voice microphone dictation everyone guys"
+                ),
+                new GuideTopic(
                         "basics_stop",
                         "Basics",
                         "Stop",

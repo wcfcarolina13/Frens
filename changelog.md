@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Discoverable group-chat guide (2026-09-08, not deployed)
+
+Added “Talk to Nearby Bots (Group Chat)” as the first Basics topic in the in-game guide.
+Includes copyable wording examples, Soul Party prerequisites, the four-bot/32-block limit,
+ownership/operator behavior, and the dictation caveat. Search terms include group chat,
+earshot, voice, and nearby. This documents existing routing; it does not change chat behavior.
+
 ## Model switching preserves unchanged Soul voices (2026-09-08, not deployed)
 
 The September 8 playthrough did switch from llama3.2:3b to llama3.1:8b; the next generation
