@@ -538,6 +538,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.StoreTargetPayload.ID, net.wcfcarolina13.network.StoreTargetPayload.CODEC);
 
         // Survival recruitment (find village -> recruit bot) payloads.
+        net.wcfcarolina13.network.GroupChatHint.register();
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenRecruitmentDialoguePayload.ID, OpenRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(RecruitmentStatePayload.ID, RecruitmentStatePayload.CODEC);

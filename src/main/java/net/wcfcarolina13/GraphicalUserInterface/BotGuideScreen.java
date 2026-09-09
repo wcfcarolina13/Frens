@@ -78,9 +78,14 @@ public final class BotGuideScreen extends Screen {
     private String selectedTopicId = "";
 
     public BotGuideScreen(Screen parent, String botAlias) {
+        this(parent, botAlias, "");
+    }
+
+    public BotGuideScreen(Screen parent, String botAlias, String topicId) {
         super(Text.literal("Guide"));
         this.parent = parent;
         this.botAlias = botAlias != null ? botAlias : "bot";
+        this.selectedTopicId = topicId != null ? topicId : "";
     }
 
     @Override

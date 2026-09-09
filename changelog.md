@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## One-time group-chat discovery hint (2026-09-09, not deployed)
+
+The first encounter with two owned, Soul-enabled companions within earshot offers a small
+15-second hint. It waits for normal gameplay and quiet after attacks/damage; combat or lost
+proximity hides it. Press the configured chat key to click Open guide or Dismiss. Open guide
+selects the group-chat topic directly. The server records actual display per player UUID in
+the world's `frens/group-chat-hint-seen.txt`, using serialized background saves, so reopening
+menus or reconnecting does not repeat it. Operator status does not bypass ownership here.
+No game launch or deployment was performed; in-game appearance and interaction need a field check.
+Validation: `./gradlew build` passed the existing 949 tests; `git diff --check` passed.
+Source review covered eligibility loss, invalid configuration, and reconnect behavior.
+
 ## Discoverable group-chat guide (2026-09-08, not deployed)
 
 Added “Talk to Nearby Bots (Group Chat)” as the first Basics topic in the in-game guide.
