@@ -7,7 +7,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
+import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Server-side network handlers for the chest registry screen. */
 public final class ChestRegistryNetworkManager {
@@ -43,12 +48,38 @@ public final class ChestRegistryNetworkManager {
                 context.server().execute(() -> handleStoreTarget(context.player(), context.server(), payload.json())));
     }
 
+    /**
+     * Server thread. True if {@code player} may drive the chest-registry screen for {@code bot}
+     * (see {@link ChestRegistryAccessPolicy#authorize}); otherwise logs a WARN, tells the
+     * requester why in red, and returns false.
+     */
+    private static boolean authorize(String handler, ServerPlayerEntity player, MinecraftServer server,
+                                     ServerPlayerEntity bot, String botName) {
+        ChestRegistryAccessPolicy.Access access = ChestRegistryAccessPolicy.authorize(
+                player.getUuid(),
+                CompanionCommunicationPolicy.resolveOwnerUuid(bot),
+                bot instanceof createFakePlayer,
+                Frens.isOperator(player),
+                server.isHost(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile())));
+        if (access.allowed()) return true;
+
+        LOGGER.warn("[chest-registry] denied {} from {} for {}: {}",
+                handler, player.getName().getString(), botName, access);
+        String reason = access == ChestRegistryAccessPolicy.Access.DENY_NOT_A_BOT
+                ? botName + " is not a companion."
+                : "Only " + botName + "'s owner can do that.";
+        net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                player.getCommandSource(), "\u00A7c" + reason + "\u00A7r");
+        return false;
+    }
+
     private static void handleRequest(ServerPlayerEntity player, MinecraftServer server, String botName) {
         if (player == null || player.isRemoved() || server == null) return;
         if (botName == null || botName.isBlank()) return;
 
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
         if (bot == null) return;
+        if (!authorize("request", player, server, bot, botName)) return;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
 
         // Verify chest states and capture fresh contents snapshots.
@@ -103,9 +134,39 @@ public final class ChestRegistryNetworkManager {
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
+            if (!authorize("collect", player, server, bot, botName)) return;
 
-            String mode = parsed.get("mode") instanceof String s2 ? s2 : "collect";
-            String returnTo = parsed.get("returnTo") instanceof String s3 ? s3 : "stay";
+            String rawMode = parsed.get("mode") instanceof String s2 ? s2 : null;
+            String rawReturnTo = parsed.get("returnTo") instanceof String s3 ? s3 : null;
+            Optional<ChestRegistryAccessPolicy.Mode> modeOpt = ChestRegistryAccessPolicy.parseMode(rawMode);
+            Optional<String> returnToOpt = ChestRegistryAccessPolicy.parseReturnTo(rawReturnTo);
+            if (modeOpt.isEmpty() || returnToOpt.isEmpty()) {
+                LOGGER.warn("[chest-registry] rejected collect from {} for {}: bogus mode={} returnTo={}",
+                        player.getName().getString(), botName, rawMode, rawReturnTo);
+                return;
+            }
+            ChestRegistryAccessPolicy.Mode mode = modeOpt.get();
+            String returnTo = returnToOpt.get();
+
+            // Go and Collect may only target a live chest in this bot's own registry (the list the
+            // screen shows) — never arbitrary client-supplied coordinates.
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
+            BotChestRegistryService.verifyChests(bot, world);
+            List<ChestRegistryAccessPolicy.ChestKey> keys = new ArrayList<>();
+            for (BotChestRegistryService.ChestRecord r : BotChestRegistryService.listChests(bot, world)) {
+                keys.add(new ChestRegistryAccessPolicy.ChestKey(r.x, r.y, r.z, r.destroyed));
+            }
+            ChestRegistryAccessPolicy.Target target = ChestRegistryAccessPolicy.checkTarget(keys, x, y, z);
+            if (target != ChestRegistryAccessPolicy.Target.OK) {
+                LOGGER.info("[chest-registry] refused collect from {} for {} at {},{},{}: {}",
+                        player.getName().getString(), botName, x, y, z, target);
+                String why = target == ChestRegistryAccessPolicy.Target.DESTROYED
+                        ? "That chest is gone."
+                        : "That chest isn't in " + botName + "'s registry.";
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                        player.getCommandSource(), "\u00A7c" + why + "\u00A7r");
+                return;
+            }
 
             BlockPos chestPos = new BlockPos(x, y, z);
             double distance = bot.getBlockPos().getManhattanDistance(chestPos);
@@ -113,13 +174,13 @@ public final class ChestRegistryNetworkManager {
             double mult = NavigationArtifactService.artifactDelayMultiplier(bot, player);
             int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim, mult);
 
-            if ("go".equals(mode)) {
+            if (mode == ChestRegistryAccessPolicy.Mode.GO) {
                 // Go mode: fast travel to chest, no withdrawal.
                 LOGGER.info("Chest go: {} sending {} to chest at {},{},{} (dist={})",
                         player.getName().getString(), botName, x, y, z, (int) distance);
                 NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
-                        ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
+                        world.getRegistryKey(), delayTicks, player.getUuid());
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                         player.getCommandSource(),
                         botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).");
@@ -134,7 +195,7 @@ public final class ChestRegistryNetworkManager {
                                 net.minecraft.util.math.Vec3d.of(bot.getBlockPos())));
                 NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
-                        ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
+                        world.getRegistryKey(), delayTicks, player.getUuid());
                 String etaMsg = botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).";
                 if (!"stay".equals(returnTo)) {
                     etaMsg += " Will return to " + returnTo + " after collecting.";
@@ -169,6 +230,7 @@ public final class ChestRegistryNetworkManager {
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
+            if (!authorize("dismiss", player, server, bot, botName)) return;
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
 
             BotChestRegistryService.removeRecord(bot, world, new BlockPos(x, y, z));
@@ -215,6 +277,8 @@ public final class ChestRegistryNetworkManager {
                         player.getCommandSource(), "\u00A7c" + botName + " is not available.\u00A7r");
                 return;
             }
+            // Authorization only \u2014 the target is player-chosen by design (walking, not a registry chest).
+            if (!authorize("store", player, server, bot, botName)) return;
 
             BlockPos chestPos = new BlockPos(x, y, z);
 

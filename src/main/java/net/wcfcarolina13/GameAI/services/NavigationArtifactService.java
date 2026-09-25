@@ -1521,7 +1521,20 @@ public final class NavigationArtifactService {
                 BlockPos chestPos = action.target();
                 ServerWorld w = (ServerWorld) arrBot.getEntityWorld();
                 var be = w.getBlockEntity(chestPos);
-                if (be instanceof net.minecraft.inventory.Inventory storage) {
+                // Take only from a chest (trapped chests extend ChestBlockEntity) that the bot actually
+                // landed next to and that is in its own registry here — a lingering or forged withdraw
+                // action must not empty an arbitrary container. Registry membership ignores `destroyed`;
+                // the block-entity check already covers presence.
+                boolean inReach = ChestRegistryAccessPolicy.withinArrivalReach(
+                        arrBot.squaredDistanceTo(Vec3d.ofCenter(chestPos)));
+                List<ChestRegistryAccessPolicy.ChestKey> keys = new ArrayList<>();
+                for (BotChestRegistryService.ChestRecord r : BotChestRegistryService.listChests(arrBot, w)) {
+                    keys.add(new ChestRegistryAccessPolicy.ChestKey(r.x, r.y, r.z, r.destroyed));
+                }
+                boolean registered = ChestRegistryAccessPolicy.checkTarget(
+                        keys, chestPos.getX(), chestPos.getY(), chestPos.getZ())
+                        != ChestRegistryAccessPolicy.Target.NOT_REGISTERED;
+                if (be instanceof net.minecraft.block.entity.ChestBlockEntity storage && inReach && registered) {
                     int moved = 0;
                     for (int i = 0; i < storage.size() && moved < 256; i++) {
                         net.minecraft.item.ItemStack stack = storage.getStack(i);
@@ -1544,8 +1557,23 @@ public final class NavigationArtifactService {
                     // Handle return trip.
                     handlePostCollectReturn(server, arrBot, ps.botAlias(), finalReturnMode, action);
                 } else {
-                    notifyOwner(server, action.ownerUuid(),
-                            "\u00A7e" + ps.botAlias() + " arrived but no chest found at " + chestPos.toShortString() + ".\u00A7r");
+                    // Refused: no return trip.
+                    String reason;
+                    String ownerMsg;
+                    if (!(be instanceof net.minecraft.block.entity.ChestBlockEntity)) {
+                        reason = "no chest found";
+                        ownerMsg = ps.botAlias() + " arrived but no chest found at " + chestPos.toShortString() + ".";
+                    } else if (!inReach) {
+                        reason = "arrived too far from the chest";
+                        ownerMsg = ps.botAlias() + " arrived too far from the chest at "
+                                + chestPos.toShortString() + "; nothing collected.";
+                    } else {
+                        reason = "that chest isn't in its registry";
+                        ownerMsg = ps.botAlias() + " arrived, but that chest isn't in its registry; nothing collected.";
+                    }
+                    LOGGER.info("Post-arrival: {} withdraw refused at {}: {}",
+                            ps.botAlias(), chestPos.toShortString(), reason);
+                    notifyOwner(server, action.ownerUuid(), "\u00A7e" + ownerMsg + "\u00A7r");
                 }
             });
         }
