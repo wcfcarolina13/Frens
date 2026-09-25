@@ -37,6 +37,9 @@ is now 199 items.
 - An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap.
 - `verifyChests` revives a record for any chest placed back at its position.
 - A dimension-fallback collect is dropped.
+- Two Collects on different chests while the bot is on cooldown fail safe but silently. The second overwrites the
+  first pending action, which is keyed by alias. Retry A arrives and is dropped as WRONG_TRIP; retry B finds no action
+  left. The owner sees two "arrived" lines and gets no items.
 
 **Next autonomous candidates:** unchanged from 1.1.219 below.
 1. Supplies Phase 3. Its withdrawal list includes the NavigationArtifactService withdraw branch, which is now

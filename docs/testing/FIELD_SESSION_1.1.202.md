@@ -972,8 +972,9 @@ Before starting, have a bot that has placed at least one supply chest (it shows 
   - Claude watches for: `Quick deposit: <bot> deposited N items at …` and `Quick fetch: <bot> fetched N items at …`.
   - Pass when: both move items, and no `[chest-registry] denied store` line appears.
 - [ ] **Another player can't use your bot's storage (1.1.220, needs a second player)**
-  - Bradley does: with a non-op friend on LAN, the friend opens their inventory view of Bradley's bot (if they can)
-    and tries Storage → Refresh, Collect, and Store Here.
+  - Bradley does: with a non-op friend on LAN who has their own bot, the friend right-clicks their own bot → Storage,
+    then picks Bradley's bot in the screen's bot dropdown (it lists every online bot) and tries Refresh and Collect.
+    Right-clicking Bradley's bot directly is already refused by the inventory permission check.
   - Claude watches for: `[chest-registry] denied request from <friend> for <bot>: DENY_NOT_OWNER`, and the
     same line with `collect` / `store` for the others.
   - Pass when: the friend sees "Only <bot>'s owner can do that." and gets no chest list; the bot doesn't move; nothing
