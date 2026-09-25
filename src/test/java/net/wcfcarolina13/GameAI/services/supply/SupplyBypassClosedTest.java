@@ -41,7 +41,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   calls {@code SupplyWithdrawals.withdraw(} (or {@code grantableEstimate(} for an availability
  *   estimate) and, like the listings that feed them, holds no raw item move.</li>
  *   <li><b>Deleted pulls stay deleted.</b> The raw container pulls removed from HuntSkill,
- *   ToolProvisionService and CraftingHelper are not back.</li>
+ *   ToolProvisionService and CraftingHelper are not back, and ToolProvisionService's chest listing
+ *   keeps no chest handle to move items through.</li>
+ *   <li><b>One hop.</b> The supply hops in ToolProvisionService and ChestStoreService's walking
+ *   withdrawal go through {@code SupplyServerHop.call(}, which never runs a task its worker gave
+ *   up on.</li>
  * </ul>
  *
  * The scan fails loudly when the source tree cannot be found or its patterns stop matching the
@@ -80,9 +84,10 @@ class SupplyBypassClosedTest {
                 "facade: re-reads the merged chest after a move to refresh the registry snapshot (read-only)");
         allow(TPS, 1,
                 "scanContainers: read-only ChestBlock listing for pullFromReachableChests / grantableChestCount (facade)");
-        allow(CSS, 6,
+        allow(CSS, 5,
                 "owner-initiated /bot withdraw + Quick Fetch (performStoreTransferWithBotDetailed) + deposits; read-only "
-                        + "item-type snapshot; askBeforeWalking's read before the facade; dead performStoreTransfer's chest probe");
+                        + "item-type snapshot; askBeforeWalking's read before the facade (1.1.220 fix wave: dead "
+                        + "performStoreTransfer and its chest probe deleted, 6 -> 5)");
         allow(CRAFTING, 3,
                 "deposits (depositIntoChests, placeChestNearBot) + findPullCandidates' read-only listing for the facade");
         allow(MUTUAL_AID, 1,
@@ -141,8 +146,16 @@ class SupplyBypassClosedTest {
     private static final Pattern RAW_MOVE = Pattern.compile(
             "\\.\\s*(?:removeStack|split|setStack|decrement|increment|insertStack|offerOrDrop|giveItemStack)\\s*\\("
                     + "|\\bInventories\\s*\\.|(?<![\\w.])moveItems\\s*\\(");
-    /** Reading the chest handle TPS's listing keeps in each ContainerSlot. */
+    /** Reading a chest handle out of TPS's listing record (it keeps none since the 1.1.220 fix wave). */
     private static final Pattern CONTAINER_SLOT_INV_READ = Pattern.compile("\\.\\s*inv\\s*\\(\\s*\\)");
+    /** TPS's listing record and its component list. */
+    private static final Pattern CONTAINER_SLOT_RECORD = Pattern.compile("\\brecord\\s+ContainerSlot\\s*\\(([^)]*)\\)");
+    /** A container type named as a word, e.g. a record component's type. */
+    private static final Pattern CONTAINER_TYPE_WORD = Pattern.compile("\\b" + CONTAINER_TYPE + "\\b");
+    /** The shared, abandon-safe hop. */
+    private static final Pattern SHARED_HOP_CALL = Pattern.compile("\\bSupplyServerHop\\s*\\.\\s*call\\s*\\(");
+    /** A site's own hop copy. */
+    private static final Pattern PRIVATE_HOP_CALL = Pattern.compile("(?<![\\w.])(?:callOnServer|onServerThread)\\s*\\(");
 
     private static Map<String, String> sources;
 
@@ -276,11 +289,31 @@ class SupplyBypassClosedTest {
         assertFalse(RATCHET.containsKey(HUNT), "HuntSkill stays out of the ratchet");
         assertAbsent(TPS, "\\bwithdrawFromNearbyContainers\\w*", "\\bwithdrawBestAccessibleSlot\\w*",
                 "\\bwithdrawAccessibleItems\\w*", "\\bwithdrawFromContainerSlot\\w*");
-        // The listing keeps a chest handle in each ContainerSlot; reading it would reopen a raw move
-        // without a new container-access site.
+        // A chest handle kept in each ContainerSlot would reopen a raw move without a new
+        // container-access site, so the listing record holds none (and nothing reads one).
+        Matcher slotRecord = CONTAINER_SLOT_RECORD.matcher(sources.get(TPS));
+        assertTrue(slotRecord.find(), "ToolProvisionService's ContainerSlot listing record not found");
+        assertFalse(CONTAINER_TYPE_WORD.matcher(slotRecord.group(1)).find(),
+                ROUTED + "; ContainerSlot keeps no chest handle: " + slotRecord.group());
         assertFalse(CONTAINER_SLOT_INV_READ.matcher(sources.get(TPS)).find(),
                 ROUTED + "; ToolProvisionService never reads ContainerSlot.inv()");
         assertAbsent(CRAFTING, "\\bwithdrawFromInventory\\w*");
+    }
+
+    @Test
+    void supplyHopsGoThroughTheSharedHop() {
+        // ToolProvisionService's only hops are supply hops (the off-thread pull, the tool search's
+        // registry refresh): it keeps no private copy at all.
+        assertFalse(PRIVATE_HOP_CALL.matcher(sources.get(TPS)).find(),
+                "ToolProvisionService hops through SupplyServerHop.call only; it keeps no private copy");
+        assertFalse(sources.get(TPS).contains("CompletableFuture"),
+                "ToolProvisionService hops through SupplyServerHop.call only; no hand-rolled future");
+        assertCalls(TPS, "pullFromReachableChests", SHARED_HOP_CALL);
+        // ChestStoreService keeps its private copy for the owner's own transfers, deposits and the
+        // walk; the ask before walking uses the shared hop.
+        assertCalls(CSS, "withdrawMatchingWalkOnly", SHARED_HOP_CALL);
+        assertFalse(PRIVATE_HOP_CALL.matcher(methodBody(CSS, "withdrawMatchingWalkOnly")).find(),
+                "ChestStoreService#withdrawMatchingWalkOnly hops through SupplyServerHop.call only");
     }
 
     @Test
@@ -333,6 +366,19 @@ class SupplyBypassClosedTest {
 
         assertTrue(CONTAINER_SLOT_INV_READ.matcher("slot.inv().removeStack(slot.slot(), 1)").find());
         assertFalse(CONTAINER_SLOT_INV_READ.matcher("new ContainerSlot(inv, pos, i, stack); slot.invalid();").find());
+        Matcher kept = CONTAINER_SLOT_RECORD.matcher("private record ContainerSlot(Inventory inv, BlockPos pos) {}");
+        assertTrue(kept.find());
+        assertTrue(CONTAINER_TYPE_WORD.matcher(kept.group(1)).find(), "a kept chest handle is seen");
+        Matcher clean = CONTAINER_SLOT_RECORD.matcher("private record ContainerSlot(BlockPos pos, int slot, ItemStack stack) {}");
+        assertTrue(clean.find());
+        assertFalse(CONTAINER_TYPE_WORD.matcher(clean.group(1)).find(), "no handle, no match");
+        assertFalse(CONTAINER_TYPE_WORD.matcher("PlayerInventory own, SimpleInventory copy").find());
+
+        assertTrue(SHARED_HOP_CALL.matcher("ask = SupplyServerHop.call(server, () -> x(), 2500L, null);").find());
+        assertFalse(SHARED_HOP_CALL.matcher("SupplyServerHop.hop(server, task, 1); callOnServer(s, t, 1, f);").find());
+        assertTrue(PRIVATE_HOP_CALL.matcher("SupplyAsk ask = callOnServer(server, () -> a(), 2500, null);").find());
+        assertTrue(PRIVATE_HOP_CALL.matcher("return onServerThread(server, task);").find());
+        assertFalse(PRIVATE_HOP_CALL.matcher("SupplyServerHop.call(s, t, 1, f); this.callOnServerLater(x);").find());
     }
 
     @Test

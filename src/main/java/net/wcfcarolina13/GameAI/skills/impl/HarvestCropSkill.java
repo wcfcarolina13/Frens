@@ -431,7 +431,8 @@ public class HarvestCropSkill implements Skill {
             return 0;
         }
         int planted = 0;
-        for (BlockPos plot : emptyPlots) {
+        for (int i = 0; i < emptyPlots.size(); i++) {
+            BlockPos plot = emptyPlots.get(i);
             abortIfRequested(bot);
             if (!world.getBlockState(plot).isOf(Blocks.FARMLAND) || !world.isAir(plot.up())) {
                 continue;
@@ -439,7 +440,9 @@ public class HarvestCropSkill implements Skill {
             if (!isMutationAuthorized(bot, world, plot.up())) {
                 continue;
             }
-            int seedSlot = ensureAnySeedHotbarOrRestock(bot, source, restock);
+            // Ask for every plot still ahead at once: one "Allow once" plants them all, where a
+            // seed at a time would hit the prompt cooldown on the very next plot.
+            int seedSlot = ensureAnySeedHotbarOrRestock(bot, source, restock, emptyPlots.size() - i);
             if (seedSlot < 0) {
                 LOGGER.info("Harvest fallback planting stopped: no seeds available for remaining empty farmland");
                 break;
@@ -488,7 +491,7 @@ public class HarvestCropSkill implements Skill {
         if (countItem(bot.getInventory(), seedItem) >= Math.max(1, neededCount)) {
             return 0;
         }
-        if (restock.stopAsking) {
+        if (!restock.mayAsk()) {
             return 0;
         }
         if (countEmptySlots(bot) == 0 && !attemptInventoryOffload(bot, source, Map.of(seedItem, Math.max(1, neededCount)), "seed-restock")) {
@@ -503,7 +506,7 @@ public class HarvestCropSkill implements Skill {
             if (moved > 0) {
                 return moved;
             }
-            if (restock.stopAsking) {
+            if (!restock.mayAsk()) {
                 return 0;
             }
         }
@@ -512,11 +515,14 @@ public class HarvestCropSkill implements Skill {
 
     /**
      * One chest's answer for one seed, through the supply facade (it walks only once asking says
-     * it may, and waits there once for the owner's answer); returns the count taken. Remembers a
-     * chest that gave nothing for this seed, so later replant targets don't ask it again, and sets
-     * {@link SeedRestock#stopAsking} after an answer that holds for every chest
-     * ({@link SupplyPullPolicy#afterChest}): the owner refused or ignored the prompt, a cooldown,
-     * another prompt open, an abort.
+     * it may, and waits there once for the owner's answer); returns the count taken. By the
+     * answer's scope ({@link SupplyPullPolicy#next}): a chest that will not serve this seed, or
+     * holds only stacks of it the policy never grants, is remembered (both halves of a double
+     * chest), so later replant targets don't ask it again; a transient refusal (a busy server, a
+     * full inventory) leaves the chest for the next target; the owner away pauses every ask for
+     * {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_MS}; an answer that holds for every chest (the owner
+     * refused or ignored the prompt, a cooldown, another prompt open) sets
+     * {@link SeedRestock#stopAsking}.
      */
     private static int restockFromChest(ServerPlayerEntity bot,
                                         ServerCommandSource source,
@@ -524,8 +530,11 @@ public class HarvestCropSkill implements Skill {
                                         Item seedItem,
                                         int missing,
                                         SeedRestock restock) {
+        // A transient refusal (ABORTED among them) no longer ends the chest loop, so a stop request
+        // ends the run here, before the next chest is asked or walked to.
+        abortIfRequested(bot);
         ChestSeed key = new ChestSeed(chestPos.asLong(), seedItem);
-        if (restock.stopAsking || restock.fruitless.contains(key)) {
+        if (!restock.mayAsk() || restock.fruitless.contains(key)) {
             return 0;
         }
         SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
@@ -536,20 +545,35 @@ public class HarvestCropSkill implements Skill {
                 stack -> stack != null && !stack.isEmpty() && stack.isOf(seedItem),
                 "harvest-seeds",
                 SupplyWithdrawals.WaitMode.UNTIL_ANSWERED);
-        switch (SupplyPullPolicy.afterChest(result.kind(), result.moved(), result.reason())) {
-            case DONE:
-                LOGGER.info("Harvest restocked {}x {} from chest {}", result.moved(), seedItem, chestPos.toShortString());
-                return result.moved();
-            case STOP:
-                restock.stopAsking = true;
-                LOGGER.info("Harvest seed restock: not asking chests again this run ({} {} at {})",
-                        result.kind(), result.reason(), chestPos.toShortString());
-                return 0;
-            case NEXT_CHEST:
-            default:
-                restock.fruitless.add(key);
-                return 0;
+        if (result.kind() == SupplyWithdrawals.Kind.MOVED && result.moved() > 0) {
+            LOGGER.info("Harvest restocked {}x {} from chest {}", result.moved(), seedItem, chestPos.toShortString());
+            return result.moved();
         }
+        switch (SupplyPullPolicy.next(result.kind(), result.scope())) {
+            case SKIP_CHEST, SKIP_ITEM -> {
+                // The chest's merged view was read: its other half holds the same stacks.
+                restock.fruitless.add(key);
+                BlockPos otherHalf = ChestStoreService.otherChestHalf(bot.getEntityWorld(), chestPos);
+                if (otherHalf != null) {
+                    restock.fruitless.add(new ChestSeed(otherHalf.asLong(), seedItem));
+                }
+            }
+            case NEXT, RETRY_LATER -> {
+                // Nothing about this chest or the owner: a later target may ask it again.
+            }
+            case OWNER_AWAY -> {
+                restock.askAgainAtMs = System.currentTimeMillis() + SupplyPullPolicy.OWNER_AWAY_PAUSE_MS;
+                LOGGER.info("Harvest seed restock: owner away; not asking chests for {} s ({} {} at {})",
+                        SupplyPullPolicy.OWNER_AWAY_PAUSE_MS / 1000L, result.reason(), result.scope(),
+                        chestPos.toShortString());
+            }
+            case STOP -> {
+                restock.stopAsking = true;
+                LOGGER.info("Harvest seed restock: not asking chests again this run ({} {} {} at {})",
+                        result.kind(), result.reason(), result.scope(), chestPos.toShortString());
+            }
+        }
+        return 0;
     }
 
     private static boolean attemptInventoryOffload(ServerPlayerEntity bot,
@@ -634,12 +658,13 @@ public class HarvestCropSkill implements Skill {
 
     private static int ensureAnySeedHotbarOrRestock(ServerPlayerEntity bot,
                                                     ServerCommandSource source,
-                                                    SeedRestock restock) {
+                                                    SeedRestock restock,
+                                                    int wanted) {
         int slot = findAnySeedHotbarSlot(bot);
         if (slot >= 0) {
             return slot;
         }
-        int moved = restockAnyPlantableSeed(bot, source, restock);
+        int moved = restockAnyPlantableSeed(bot, source, restock, wanted);
         if (moved > 0) {
             restock.pulls++;
         }
@@ -671,8 +696,10 @@ public class HarvestCropSkill implements Skill {
         return -1;
     }
 
-    private static int restockAnyPlantableSeed(ServerPlayerEntity bot, ServerCommandSource source, SeedRestock restock) {
-        if (bot == null || source == null || restock.stopAsking) {
+    /** Asks the nearby chests for {@code wanted} seeds of the first plantable kind one grants. */
+    private static int restockAnyPlantableSeed(ServerPlayerEntity bot, ServerCommandSource source, SeedRestock restock,
+                                               int wanted) {
+        if (bot == null || source == null || !restock.mayAsk()) {
             return 0;
         }
         if (countEmptySlots(bot) == 0 && !attemptInventoryOffload(bot, source, Map.of(), "generic-seed-restock")) {
@@ -683,11 +710,11 @@ public class HarvestCropSkill implements Skill {
         // chest; the first answer that holds for every chest ends it.
         for (Item seed : PLANTABLE_SEEDS) {
             for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
-                int moved = restockFromChest(bot, source, candidate.pos(), seed, 1, restock);
+                int moved = restockFromChest(bot, source, candidate.pos(), seed, Math.max(1, wanted), restock);
                 if (moved > 0) {
                     return moved;
                 }
-                if (restock.stopAsking) {
+                if (!restock.mayAsk()) {
                     return 0;
                 }
             }
@@ -701,8 +728,15 @@ public class HarvestCropSkill implements Skill {
         int pulls;
         /** An answer that holds for every chest came back: no more chest asks this run. */
         boolean stopAsking;
-        /** Chest and seed pairs that gave nothing this run: not asked again. */
+        /** The owner was found away: no chest is asked before this time (epoch ms). */
+        long askAgainAtMs;
+        /** Chest and seed pairs that will not serve this run: not asked again. */
         final Set<ChestSeed> fruitless = new HashSet<>();
+
+        /** Whether any chest may be asked now. */
+        boolean mayAsk() {
+            return !stopAsking && System.currentTimeMillis() >= askAgainAtMs;
+        }
     }
 
     private record ChestSeed(long chestPos, Item seed) {

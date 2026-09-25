@@ -97,8 +97,10 @@ public final class BotIdleHobbiesService {
      * failure on the {@link HobbyBackoffPolicy} ladder, and no pull asks again until it runs out:
      * the probe below runs every 5 s during a woodcut backoff and would otherwise re-prompt an
      * owner who ignores it as soon as the ledger allowed. A pull still waiting for an answer is not
-     * a failure (the next pull must be free to redeem the grant); a pull that moved something and
-     * missed nothing clears it.
+     * a failure (the next pull must be free to redeem the grant); a pull that found the owner away
+     * waits a flat {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_TICKS} and is not a failure either (a
+     * bot left alone must not climb the ladder and keep a returning owner waiting); a pull that
+     * moved something and missed nothing clears it.
      */
     private static final String IDLE_SUPPLY_BACKOFF_KEY = "idle-supply";
     /**
@@ -164,6 +166,9 @@ public final class BotIdleHobbiesService {
         LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
         PREFER_COOKING_UNTIL.clear();
+        // The chest tool search pauses this service's fallback shares; ToolProvisionService has no
+        // lifecycle hook of its own, and this runs at SERVER_STOPPED.
+        ToolProvisionService.resetSession();
     }
 
     /** Returns the last idle-hobby skill name (e.g. "fish"/"hangout"), or null if unknown. */
@@ -1890,10 +1895,32 @@ public final class BotIdleHobbiesService {
         switch (SupplyPullPolicy.idleBackoff(pull)) {
             case SUCCESS -> recordHobbyAttempt(bot.getUuid(), IDLE_SUPPLY_BACKOFF_KEY, true, false, nowTick);
             case FAILURE -> recordHobbyAttempt(bot.getUuid(), IDLE_SUPPLY_BACKOFF_KEY, false, false, nowTick);
+            case OWNER_AWAY -> deferHobby(bot.getUuid(), IDLE_SUPPLY_BACKOFF_KEY,
+                    nowTick + SupplyPullPolicy.OWNER_AWAY_PAUSE_TICKS);
             case NONE -> {
             }
         }
         return pull;
+    }
+
+    /**
+     * Holds a (bot, hobby) pair off until {@code untilTick} without touching its failure count:
+     * the owner-away recheck ({@link SupplyPullPolicy.Backoff#OWNER_AWAY}). Not
+     * {@link #recordHobbyAttempt}, which always moves the count (up on a failure, to zero on a
+     * success). A longer backoff already running is kept. The window counts as logged: the supply
+     * facade's owner-away line already says why, once per window. Server tick thread only.
+     */
+    private static void deferHobby(UUID botUuid, String hobby, long untilTick) {
+        if (botUuid == null) {
+            return;
+        }
+        String key = normalizeHobbyKey(hobby);
+        if (key.isEmpty()) {
+            return;
+        }
+        long nextAllowed = Math.max(untilTick, hobbyNextAllowedTick(botUuid, key));
+        HOBBY_NEXT_ALLOWED_TICK.computeIfAbsent(botUuid, u -> new ConcurrentHashMap<>()).put(key, nextAllowed);
+        HOBBY_BACKOFF_LOGGED_FOR.computeIfAbsent(botUuid, u -> new ConcurrentHashMap<>()).put(key, nextAllowed);
     }
 
     /**

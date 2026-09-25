@@ -122,17 +122,6 @@ public final class SupplyWithdrawals {
             scope = SupplyWithdrawalPolicy.resultScope(kind, scope);
         }
 
-        /**
-         * A result without a scope: a refusal reads {@link Scope#BOT} (fail closed).
-         *
-         * @deprecated kept only so callers written before refusal scopes compile; pass a scope
-         *             ({@link #refused(String, Scope)}) instead
-         */
-        @Deprecated
-        public Result(Kind kind, int moved, String reason) {
-            this(kind, moved, reason, null);
-        }
-
         /** A refusal with the given reason and scope. */
         public static Result refused(String reason, Scope scope) {
             return new Result(Kind.REFUSED, 0, reason, scope);

@@ -2,6 +2,8 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ChestBlock;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -21,6 +23,9 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -51,6 +56,8 @@ public final class ChestStoreService {
     private static final int DEFAULT_CHEST_SEARCH_RADIUS = 12;
     private static final int DEFAULT_CHEST_SEARCH_YSPAN = 6;
     private static final double MAX_REMEMBERED_CHEST_DIST_SQ = 140.0D * 140.0D;
+    /** How long a withdrawal's worker waits for its ask before walking to start on the server thread. */
+    private static final long ASK_HOP_TIMEOUT_MS = 2_500L;
     private static final Map<UUID, WorldPos> LAST_PLACED_CHEST = new ConcurrentHashMap<>();
 
     private static final Set<Item> DEFAULT_STORE_ITEMS = Set.of(
@@ -287,11 +294,11 @@ public final class ChestStoreService {
     }
 
     /**
-     * User-facing detailed variant of {@link #performStoreTransfer}. Returns the full
+     * The owner's {@code /bot deposit|withdraw} transfer. Returns the full
      * {@link TransferAttemptResult} so {@link #handleTransfer} can build a specific
      * failure message instead of the unhelpful generic "unreachable, blocked, or no
-     * matching items" string. Mirrors {@link #performStoreTransfer}'s precondition
-     * checks but threads a {@code failureReason} through every abort path.
+     * matching items" string: the bot and chest precondition checks thread a
+     * {@code failureReason} through every abort path.
      */
     private static TransferAttemptResult performStoreTransferDetailed(ServerCommandSource source,
                                                                        UUID botId,
@@ -739,9 +746,11 @@ public final class ChestStoreService {
      * <ol>
      *   <li>On the server thread: chest blocks only ({@link SupplyPullPolicy#NOT_CHEST} for a
      *       barrel or anything else, never asked); each distinct stack {@code matcher} accepts, in
-     *       slot order, is asked about with {@link SupplyWithdrawals.WaitMode#NONE} until one is not
-     *       refused for its own sake ({@link SupplyPullPolicy#tryNextStack}). Nothing matching:
-     *       {@link SupplyPullPolicy#NO_MATCH}. Already within reach and covered: taken now.</li>
+     *       slot order, is asked about with {@link SupplyWithdrawals.WaitMode#NONE} while the item
+     *       asked about is one the policy never grants ({@link SupplyPullPolicy#tryNextStack}).
+     *       Nothing matching: {@link SupplyPullPolicy#NO_MATCH}. Already within reach and covered:
+     *       taken now. The hop is {@link SupplyServerHop}'s: an ask the worker gave up on before it
+     *       started never runs, so it cannot open a prompt nobody will walk for.</li>
      *   <li>Walk (the deposit approach, on this worker) only when
      *       {@link SupplyPullPolicy#walkAfterAsk} says so: permitted, or a prompt is open and
      *       {@code mode} waits for it. A refusal never walks.</li>
@@ -749,7 +758,11 @@ public final class ChestStoreService {
      *       waits there for the owner's answer, abandoned on the bot's abort latch.</li>
      * </ol>
      *
-     * Worker thread (it walks, and may wait). Deposits are unchanged.
+     * Worker thread (it walks, and may wait). Deposits are unchanged. This method's own refusals
+     * carry a scope like the facade's: a missing argument, no server or a hop that did not run
+     * are {@link Scope#TRANSIENT}; {@link SupplyPullPolicy#NOT_CHEST},
+     * {@link SupplyPullPolicy#NO_MATCH} and {@link SupplyPullPolicy#UNREACHABLE} are
+     * {@link Scope#CHEST}.
      *
      * @param amount  how many to ask for (at least 1)
      * @param purpose a short label for the supply log, e.g. {@code "harvest-seeds"}
@@ -763,11 +776,11 @@ public final class ChestStoreService {
                                                                    String purpose,
                                                                    SupplyWithdrawals.WaitMode mode) {
         if (bot == null || chestPos == null || source == null || matcher == null) {
-            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "INVALID");
+            return SupplyWithdrawals.Result.refused(Refusal.INVALID);
         }
         MinecraftServer server = source.getServer();
         if (server == null) {
-            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "NOT_RUNNING");
+            return SupplyWithdrawals.Result.refused(Refusal.NOT_RUNNING);
         }
 
         int want = Math.max(1, amount);
@@ -779,12 +792,12 @@ public final class ChestStoreService {
                 + " botWorld=" + worldKeyName(bot.getEntityWorld())
                 + " amount=" + want
                 + " mode=" + mode);
-        // Only ever on the server thread: a stopped server runs execute() inline on the caller.
-        SupplyAsk ask = callOnServer(server,
-                () -> server.isOnThread() ? askBeforeWalking(bot, chestPos, want, matcher, purpose, mode) : null,
-                2500, null);
+        // Server thread only, abandon-safe: SupplyServerHop never runs the ask off it (a stopped
+        // server) or after this worker stopped waiting for it.
+        SupplyAsk ask = SupplyServerHop.call(server,
+                () -> askBeforeWalking(bot, chestPos, want, matcher, purpose, mode), ASK_HOP_TIMEOUT_MS, null);
         if (ask == null) {
-            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "SERVER_BUSY");
+            return SupplyWithdrawals.Result.refused(Refusal.SERVER_BUSY);
         }
         if (ask.walkFor() == null) {
             return ask.result();
@@ -793,7 +806,7 @@ public final class ChestStoreService {
         TransferAttemptResult reach = approachChestForTransfer(source, bot, chestPos, WALK_ONLY);
         if (!reach.interacted()) {
             // Any ticket the ask left stays with the facade; a later call can still redeem it.
-            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, SupplyPullPolicy.UNREACHABLE);
+            return SupplyWithdrawals.Result.refused(SupplyPullPolicy.UNREACHABLE, Scope.CHEST);
         }
         return SupplyWithdrawals.withdraw(bot, chestPos, ask.walkFor(), want, want, purpose,
                 mode == null ? SupplyWithdrawals.WaitMode.NONE : mode,
@@ -820,8 +833,7 @@ public final class ChestStoreService {
                 ? net.minecraft.block.ChestBlock.getInventory(chestBlock, state, world, chestPos, true)
                 : null;
         if (storage == null) {
-            return new SupplyAsk(new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0,
-                    SupplyPullPolicy.NOT_CHEST), null);
+            return new SupplyAsk(SupplyWithdrawals.Result.refused(SupplyPullPolicy.NOT_CHEST, Scope.CHEST), null);
         }
         List<ItemStack> samples = new ArrayList<>();
         for (int i = 0; i < storage.size(); i++) {
@@ -840,20 +852,39 @@ public final class ChestStoreService {
                 samples.add(stack.copy());
             }
         }
-        SupplyWithdrawals.Result last = new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0,
-                SupplyPullPolicy.NO_MATCH);
+        SupplyWithdrawals.Result last = SupplyWithdrawals.Result.refused(SupplyPullPolicy.NO_MATCH, Scope.CHEST);
         for (ItemStack sample : samples) {
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, chestPos, sample, want, want, purpose,
                     SupplyWithdrawals.WaitMode.NONE, null);
             if (SupplyPullPolicy.walkAfterAsk(result.kind(), mode)) {
                 return new SupplyAsk(result, sample);
             }
-            if (!SupplyPullPolicy.tryNextStack(result.kind(), result.reason())) {
+            if (!SupplyPullPolicy.tryNextStack(result.kind(), result.scope())) {
                 return new SupplyAsk(result, null);
             }
             last = result;
         }
         return new SupplyAsk(last, null);
+    }
+
+    /**
+     * The other half of the double chest at {@code pos}, or {@code null} for a single chest, a
+     * block that is not a chest, or an unloaded position. Reads block states only (never a
+     * container, never loads a chunk), so a chest loop can skip both halves after a
+     * {@link Scope#CHEST} refusal. Called off the server thread by the chest loops, like their
+     * other block-state reads.
+     */
+    public static BlockPos otherChestHalf(World world, BlockPos pos) {
+        if (world == null || pos == null || !world.isChunkLoaded(pos)) {
+            return null;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock) || !state.contains(ChestBlock.CHEST_TYPE)
+                || !state.contains(ChestBlock.FACING) || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
+            return null;
+        }
+        BlockPos partner = pos.offset(ChestBlock.getFacing(state));
+        return world.isChunkLoaded(partner) ? partner.toImmutable() : null;
     }
 
     public static DepositProbeResult probeDepositMatchingWalkOnly(ServerCommandSource source,
@@ -1444,40 +1475,6 @@ public final class ChestStoreService {
             return pos.toImmutable();
         }
         return null;
-    }
-
-    private static int performStoreTransfer(ServerCommandSource source,
-                                           UUID botId,
-                                           BlockPos chestPos,
-                                           int amount,
-                                           Predicate<ItemStack> filter,
-                                           boolean deposit,
-                                           MovementFlags movement) {
-        if (source == null || botId == null || chestPos == null) {
-            return 0;
-        }
-        MinecraftServer server = source.getServer();
-        if (server == null) {
-            return 0;
-        }
-
-        ServerPlayerEntity bot = callOnServer(server, () -> server.getPlayerManager().getPlayer(botId), 800, null);
-        if (bot == null || bot.isRemoved()) {
-            return 0;
-        }
-        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof Inventory, 800, Boolean.FALSE);
-        if (!Boolean.TRUE.equals(chestOk)) {
-            return 0;
-        }
-
-        if (deposit) {
-            int have = callOnServer(server, () -> countMatching(bot.getInventory(), filter), 800, 0);
-            if (have <= 0) {
-                return 0;
-            }
-        }
-
-        return performStoreTransferWithBot(source, bot, chestPos, amount, filter, deposit, movement);
     }
 
     private static java.util.List<BlockPos> findStandCandidatesNearChest(net.minecraft.world.World rawWorld, ServerPlayerEntity bot, BlockPos chestPos) {

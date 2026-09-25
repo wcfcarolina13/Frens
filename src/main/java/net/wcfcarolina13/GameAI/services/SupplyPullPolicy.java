@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
 
@@ -7,29 +8,31 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  * Pure decisions for the automatic chest pulls that {@code ToolProvisionService},
  * {@code ChestStoreService}, {@code HarvestCropSkill} and {@code BotIdleHobbiesService} make
  * through {@code SupplyWithdrawals}: how far one answer from the facade reaches, when a walking
- * caller walks, what an idle pull adds up to, and how long a caller leaves the owner alone before
+ * caller walks, what a pull adds up to, and how long a caller leaves the owner alone before
  * asking again.
  *
- * <p>No Minecraft types: {@link Kind} and {@link WaitMode} are plain enums nested in
- * {@code SupplyWithdrawals}, and loading one does not load the outer class.
+ * <p>An answer is read by its {@link Kind} and, for a refusal, its {@link Scope} only; the reason
+ * text is for the logs. {@code ChestStoreService} makes three refusals of its own for a chest it
+ * did not take from, all {@link Scope#CHEST}: {@link #NOT_CHEST}, {@link #NO_MATCH} and
+ * {@link #UNREACHABLE}.
  *
- * <p>A reason is the facade's machine-readable text: a code, sometimes with a bracketed detail
- * ({@code DENIED(DENY_LOCKED)}, {@code INELIGIBLE(RESERVE_EXHAUSTED)}) or a trailing
- * {@code " id=…"}. Only the code and the bracketed detail are read. {@code ChestStoreService}
- * adds three codes of its own for a chest it did not take from: {@link #NOT_CHEST},
- * {@link #NO_MATCH} and {@link #UNREACHABLE}.
+ * <p>The per-scope rule, shared with {@code CraftChestPullPolicy} and
+ * {@code MutualAidChestFoodPolicy}: {@link Scope#ITEM} skips the item everywhere this pass;
+ * {@link Scope#CHEST} skips the chest (both halves of a double chest); {@link Scope#BOT} stops
+ * the pass and the caller pauses; {@link Scope#OWNER_ABSENT} stops the pass for a flat
+ * {@link #OWNER_AWAY_PAUSE_MS} that is never a miss; {@link Scope#TRANSIENT} leaves that chest for
+ * the next cycle without stopping the rest or counting a miss.
  *
- * <p>{@code CraftChestPullPolicy} reads the same reasons for {@code CraftingHelper}. The one
- * deliberate difference is {@code NOT_PERMITTED}: the owner has just said No to, or ignored, a
- * prompt, so asking any other chest straight away would prompt them again; here it stops the pass.
+ * <p>No Minecraft types: {@link Kind}, {@link WaitMode} and {@link Scope} are plain nested enums,
+ * and loading one does not load its outer class.
  */
 public final class SupplyPullPolicy {
 
-    /** The block at the position is not a chest (a barrel, a furnace, air): never asked. */
+    /** The block at the position is not a chest (a barrel, a furnace, air): never asked. {@link Scope#CHEST}. */
     public static final String NOT_CHEST = "NOT_CHEST";
-    /** The chest holds nothing the caller wants: never asked, never walked to. */
+    /** The chest holds nothing the caller wants: never asked, never walked to. {@link Scope#CHEST}. */
     public static final String NO_MATCH = "NO_MATCH";
-    /** The bot walked but could not get within reach of the chest. */
+    /** The bot walked but could not get within reach of the chest. {@link Scope#CHEST}. */
     public static final String UNREACHABLE = "UNREACHABLE";
 
     /**
@@ -43,118 +46,95 @@ public final class SupplyPullPolicy {
     public static final long MAX_MISS_PAUSE_MS = 600_000L;
     /** Largest doubling applied to {@link #MISS_PAUSE_MS} ({@code 60 s << 4} already exceeds the ceiling). */
     public static final int MISS_PAUSE_CAP_SHIFT = 4;
+    /**
+     * The flat wait after the owner was found away from a chest nothing standing covers: long
+     * enough not to re-ask (and re-log) every few seconds, short enough that a returning owner
+     * is asked within a minute. Never climbs, never counts as a miss.
+     */
+    public static final long OWNER_AWAY_PAUSE_MS = 60_000L;
+    /** {@link #OWNER_AWAY_PAUSE_MS} in server ticks, for tick-keyed backoffs. */
+    public static final long OWNER_AWAY_PAUSE_TICKS = OWNER_AWAY_PAUSE_MS / 50L;
 
     private SupplyPullPolicy() {
     }
 
     // ── One answer ───────────────────────────────────────────────────────────────────────────
 
-    /** What a pass over chest stacks does after one answer from the facade. */
+    /** What a pass over chest stacks, or over chests, does after one answer from the facade. */
     public enum Next {
-        /** Go on to the next stack: items moved, or this chest's stock of this item will not serve. */
+        /** Items moved: go on (to the next stack, or the caller is done). */
         NEXT,
-        /** The pre-filter never grants this exact item (no ask was made): skip it in every chest. */
+        /** {@link Scope#ITEM}: this exact item is never granted: skip it in every chest this pass. */
         SKIP_ITEM,
-        /** This chest will not serve the bot: skip its other stacks. */
+        /** {@link Scope#CHEST}: this chest will not serve this pass: skip it, both halves of a double chest. */
         SKIP_CHEST,
-        /** A prompt is open, or nothing more will be granted right now: stop this pass. */
-        STOP
+        /** {@link Scope#TRANSIENT}: leave this chest for the next cycle; go on with the others. */
+        RETRY_LATER,
+        /** {@link Scope#BOT}, or a prompt is open or a grant waits for the bot: stop the pass. */
+        STOP,
+        /** {@link Scope#OWNER_ABSENT}: stop the pass; recheck after {@link #OWNER_AWAY_PAUSE_MS}. */
+        OWNER_AWAY;
+
+        /** Whether this answer ends the pass: nothing after it is asked. */
+        public boolean stopsPass() {
+            return this == STOP || this == OWNER_AWAY;
+        }
     }
 
     /**
-     * How far one answer reaches.
-     * <ul>
-     *   <li>{@link Next#NEXT}: {@code MOVED}; {@code INELIGIBLE(RESERVE_EXHAUSTED|NO_NEED)},
-     *       {@code NO_STOCK}, a move that moved nothing, {@link #NO_MATCH}.</li>
-     *   <li>{@link Next#SKIP_ITEM}: the pre-filter's verdicts, {@code NOT_ALLOWLISTED},
-     *       {@code PROTECTED_COMPONENTS} and {@code TIER_NOT_ALLOWED}.</li>
-     *   <li>{@link Next#SKIP_CHEST}: {@code DENIED(…)}, {@code CHEST_MISMATCH},
-     *       {@code OWNER_NOT_NEARBY} (a chest under a standing permission needs no owner nearby,
-     *       so another chest may still serve), {@link #NOT_CHEST}, {@link #UNREACHABLE}.</li>
-     *   <li>{@link Next#STOP}: {@code WAITING} and {@code READY} (one prompt per bot; asking
-     *       elsewhere would only drop the ticket), and every other refusal, unknown ones included:
-     *       another prompt pending, {@code NOT_PERMITTED}, either cooldown, a full inventory, no
-     *       owner, a timeout or abort, the service or bot gone, a busy hop, an error.</li>
-     * </ul>
+     * How far one answer reaches. {@code MOVED}: go on. {@code WAITING} and {@code READY}: stop
+     * (one prompt per bot, and a caller that does not walk cannot take a grant out of reach). A
+     * refusal by its scope; a refusal without one reads {@link Scope#BOT} (fail closed).
      */
-    public static Next next(Kind kind, String reason) {
+    public static Next next(Kind kind, Scope scope) {
         if (kind == null) {
             return Next.STOP;
         }
         return switch (kind) {
             case MOVED -> Next.NEXT;
             case READY, WAITING -> Next.STOP;
-            case REFUSED -> onRefusal(reason);
+            case REFUSED -> switch (refusalScope(scope)) {
+                case ITEM -> Next.SKIP_ITEM;
+                case CHEST -> Next.SKIP_CHEST;
+                case TRANSIENT -> Next.RETRY_LATER;
+                case OWNER_ABSENT -> Next.OWNER_AWAY;
+                case BOT, NONE -> Next.STOP;
+            };
         };
-    }
-
-    private static Next onRefusal(String reason) {
-        String code = reasonCode(reason);
-        switch (code) {
-            case "INELIGIBLE": {
-                String verdict = reasonDetail(reason);
-                if (isNeverGrantedVerdict(verdict)) {
-                    return Next.SKIP_ITEM;
-                }
-                if ("RESERVE_EXHAUSTED".equals(verdict) || "NO_NEED".equals(verdict)) {
-                    return Next.NEXT;
-                }
-                return Next.STOP; // NO_OWNER: nobody may approve anything for this bot
-            }
-            case "NO_STOCK":
-            case "MOVED":
-            case "MOVED_SHORT":
-            case NO_MATCH:
-                return Next.NEXT;
-            case "DENIED":
-            case "CHEST_MISMATCH":
-            case "OWNER_NOT_NEARBY":
-            case NOT_CHEST:
-            case UNREACHABLE:
-                return Next.SKIP_CHEST;
-            default:
-                return Next.STOP;
-        }
     }
 
     /**
      * Whether an answer means the owner has a prompt open or a grant is waiting for the bot to
-     * reach the chest: {@code WAITING}, {@code READY}, or a refusal because another prompt of this
-     * bot's is still open. A caller must keep coming back (quietly) rather than count it a miss.
+     * reach the chest ({@code WAITING}, {@code READY}): a caller keeps coming back, quietly and
+     * soon, rather than count it a miss.
      */
-    public static boolean isWaiting(Kind kind, String reason) {
-        if (kind == Kind.WAITING || kind == Kind.READY) {
-            return true;
-        }
-        if (kind != Kind.REFUSED) {
-            return false;
-        }
-        String code = reasonCode(reason);
-        return "OTHER_REQUEST_PENDING".equals(code) || "DUPLICATE_PENDING".equals(code);
+    public static boolean isWaiting(Kind kind) {
+        return kind == Kind.WAITING || kind == Kind.READY;
     }
 
     /**
-     * Whether an answer is a miss: the owner's ledger was consulted and gave nothing (a refusal,
-     * a cooldown, an expired or refused prompt, the reserve, no room, access denied) or the bot
-     * walked for it and could not reach the chest. Not a miss: anything that moved or is waiting;
-     * the pre-filter's never-granted verdicts and a chest that was not a chest or held nothing
-     * wanted (nothing was asked); and the transport failures that say nothing about the owner
-     * ({@code NOT_RUNNING}, {@code BOT_GONE}, {@code INVALID}, {@code SERVER_BUSY}, {@code ERROR},
-     * {@code ABORTED}, {@code WRONG_THREAD}).
+     * Whether an answer is a miss, one step on the caller's backoff: a refusal for this chest
+     * ({@link Scope#CHEST}) or for everything the bot asks for now ({@link Scope#BOT}). Not a
+     * miss: anything that moved or is waiting; {@link Scope#ITEM} (the pre-filter, nothing
+     * asked); {@link Scope#OWNER_ABSENT} (a flat recheck, not the owner's answer); and
+     * {@link Scope#TRANSIENT} (nothing about the owner, the item or the chest).
      */
-    public static boolean isMiss(Kind kind, String reason) {
-        if (kind != Kind.REFUSED || isWaiting(kind, reason)) {
+    public static boolean isMiss(Kind kind, Scope scope) {
+        if (kind != Kind.REFUSED) {
             return false;
         }
-        String code = reasonCode(reason);
-        if ("INELIGIBLE".equals(code) && isNeverGrantedVerdict(reasonDetail(reason))) {
-            return false;
-        }
-        return switch (code) {
-            case NOT_CHEST, NO_MATCH, "NOT_RUNNING", "BOT_GONE", "INVALID", "SERVER_BUSY", "ERROR", "ABORTED",
-                 "WRONG_THREAD" -> false;
-            default -> true;
-        };
+        Scope s = refusalScope(scope);
+        return s == Scope.CHEST || s == Scope.BOT;
+    }
+
+    /** Whether an answer found the owner away from a chest nothing standing covers. */
+    public static boolean isOwnerAway(Kind kind, Scope scope) {
+        return kind == Kind.REFUSED && refusalScope(scope) == Scope.OWNER_ABSENT;
+    }
+
+    /** A refusal's scope, {@link Scope#BOT} when it has none (as the facade itself reads it). */
+    private static Scope refusalScope(Scope scope) {
+        return scope == null || scope == Scope.NONE ? Scope.BOT : scope;
     }
 
     // ── Walking callers (ChestStoreService, and the chest loops above it) ────────────────────
@@ -175,53 +155,34 @@ public final class SupplyPullPolicy {
 
     /**
      * Within one chest, whether the next distinct matching stack is worth asking about after this
-     * answer: only when this exact stack was refused for its own sake (never granted, the reserve,
-     * no stock). A chest-wide or bot-wide refusal answers for every stack.
+     * answer: only when this exact item is never granted ({@link Scope#ITEM}). Any other refusal
+     * answers for the whole chest, or more.
      */
-    public static boolean tryNextStack(Kind kind, String reason) {
-        if (kind != Kind.REFUSED) {
-            return false;
-        }
-        Next next = next(kind, reason);
-        return next == Next.NEXT || next == Next.SKIP_ITEM;
+    public static boolean tryNextStack(Kind kind, Scope scope) {
+        return kind == Kind.REFUSED && refusalScope(scope) == Scope.ITEM;
     }
 
-    /** What a caller walking a list of chests does after one chest's result. */
-    public enum ChestLoop {
-        /** Items moved: done. */
-        DONE,
-        /** This chest did not serve: try the next one. */
-        NEXT_CHEST,
-        /** A prompt is open or nothing more will be granted now: stop asking. */
-        STOP
-    }
-
-    public static ChestLoop afterChest(Kind kind, int moved, String reason) {
-        if (kind == Kind.MOVED && moved > 0) {
-            return ChestLoop.DONE;
-        }
-        return next(kind, reason) == Next.STOP ? ChestLoop.STOP : ChestLoop.NEXT_CHEST;
-    }
-
-    // ── Idle pulls (ToolProvisionService's reachable-chest choke point, BotIdleHobbiesService) ─
+    // ── What a pull adds up to ───────────────────────────────────────────────────────────────
 
     /**
-     * What one idle pull achieved across every chest and item it tried.
+     * What one pull achieved across every chest and item it tried: an idle pull
+     * ({@code ToolProvisionService}'s reachable-chest choke point) or a chest tool search.
      *
-     * @param moved   items moved into the bot
-     * @param waiting a prompt is open, or a grant waits for the bot ({@link #isWaiting})
-     * @param missed  at least one answer was a miss ({@link #isMiss})
-     * @param halted  an answer stopped the pull ({@link Next#STOP}); later items were not asked
+     * @param moved     items moved into the bot
+     * @param waiting   a prompt is open, or a grant waits for the bot ({@link #isWaiting})
+     * @param missed    at least one answer was a miss ({@link #isMiss})
+     * @param ownerAway an answer found the owner away ({@link #isOwnerAway})
+     * @param halted    an answer stopped the pull ({@link Next#stopsPass()}); later items were not asked
      */
-    public record Pull(int moved, boolean waiting, boolean missed, boolean halted) {
-        public static final Pull NOTHING = new Pull(0, false, false, false);
+    public record Pull(int moved, boolean waiting, boolean missed, boolean ownerAway, boolean halted) {
+        public static final Pull NOTHING = new Pull(0, false, false, false, false);
 
         public Pull plus(Pull other) {
             if (other == null) {
                 return this;
             }
             return new Pull(moved + other.moved, waiting || other.waiting, missed || other.missed,
-                    halted || other.halted);
+                    ownerAway || other.ownerAway, halted || other.halted);
         }
 
         public boolean movedAny() {
@@ -230,13 +191,14 @@ public final class SupplyPullPolicy {
     }
 
     /** Folds one answer into a pull's tally. */
-    public static Pull fold(Pull tally, Kind kind, int moved, String reason) {
+    public static Pull fold(Pull tally, Kind kind, int moved, Scope scope) {
         Pull t = tally == null ? Pull.NOTHING : tally;
         int took = kind == Kind.MOVED ? Math.max(0, moved) : 0;
         return new Pull(t.moved() + took,
-                t.waiting() || isWaiting(kind, reason),
-                t.missed() || isMiss(kind, reason),
-                t.halted() || next(kind, reason) == Next.STOP);
+                t.waiting() || isWaiting(kind),
+                t.missed() || isMiss(kind, scope),
+                t.ownerAway() || isOwnerAway(kind, scope),
+                t.halted() || next(kind, scope).stopsPass());
     }
 
     /** What an idle pull does to its caller's ask backoff. */
@@ -245,13 +207,23 @@ public final class SupplyPullPolicy {
         SUCCESS,
         /** Asked and got nothing, with no prompt open: one more failure on the ladder. */
         FAILURE,
+        /** The owner is away: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched. */
+        OWNER_AWAY,
         /** Leave it: nothing was asked, or a prompt is still open (the next pull must be free to redeem it). */
         NONE
     }
 
+    /**
+     * An open prompt outranks everything (its grant must stay redeemable); then the owner being
+     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting);
+     * then a miss; then a move.
+     */
     public static Backoff idleBackoff(Pull pull) {
         if (pull == null || pull.waiting()) {
             return Backoff.NONE;
+        }
+        if (pull.ownerAway()) {
+            return Backoff.OWNER_AWAY;
         }
         if (pull.missed()) {
             return Backoff.FAILURE;
@@ -277,23 +249,33 @@ public final class SupplyPullPolicy {
     }
 
     /**
-     * How long a chest tool retrieval waits before it asks again: {@link #WAITING_RECHECK_MS}
-     * when it ended on an open prompt (come back soon to redeem it), {@link #missPauseMs} after a
-     * miss, and 0 when it asked nothing.
+     * How long a chest tool search waits before it asks again, in the same order as
+     * {@link #idleBackoff}: {@link #WAITING_RECHECK_MS} when it ended on an open prompt (come back
+     * soon to redeem it), {@link #OWNER_AWAY_PAUSE_MS} when the owner was away,
+     * {@link #missPauseMs} after a miss, and 0 when it took something or asked nothing.
      */
-    public static long retrievalPauseMs(boolean endedWaiting, boolean missed, int priorMisses) {
-        if (endedWaiting) {
+    public static long retrievalPauseMs(Pull search, int priorMisses) {
+        if (search == null || search.movedAny()) {
+            return 0L;
+        }
+        if (search.waiting()) {
             return WAITING_RECHECK_MS;
         }
-        return missed ? missPauseMs(priorMisses) : 0L;
+        if (search.ownerAway()) {
+            return OWNER_AWAY_PAUSE_MS;
+        }
+        return search.missed() ? missPauseMs(priorMisses) : 0L;
     }
 
-    /** The miss counter after a retrieval: reset by a move, unchanged while waiting, +1 on a miss. */
-    public static int nextMissCount(int prior, boolean moved, boolean endedWaiting, boolean missed) {
-        if (moved) {
+    /**
+     * The miss counter after a chest tool search: reset by a move, unchanged while waiting or
+     * while the owner is away, +1 on a miss.
+     */
+    public static int nextMissCount(int prior, Pull search) {
+        if (search != null && search.movedAny()) {
             return 0;
         }
-        if (endedWaiting || !missed) {
+        if (search == null || search.waiting() || search.ownerAway() || !search.missed()) {
             return Math.max(prior, 0);
         }
         return HobbyBackoffPolicy.nextFailureCount(prior, false);
@@ -317,42 +299,5 @@ public final class SupplyPullPolicy {
         long ladder = HobbyBackoffPolicy.nextAllowedTick(
                 new HobbyBackoffPolicy.Attempt("craft", false, false, priorFailures - 1, 0L));
         return Math.max(flat, ladder);
-    }
-
-    // ── Reason text ──────────────────────────────────────────────────────────────────────────
-
-    /** The reason's code: the text before any bracket or space; empty for {@code null}. */
-    static String reasonCode(String reason) {
-        if (reason == null) {
-            return "";
-        }
-        int end = reason.length();
-        int bracket = reason.indexOf('(');
-        if (bracket >= 0) {
-            end = bracket;
-        }
-        int space = reason.indexOf(' ');
-        if (space >= 0 && space < end) {
-            end = space;
-        }
-        return reason.substring(0, end).trim();
-    }
-
-    /** The bracketed detail, e.g. {@code DENY_LOCKED} in {@code DENIED(DENY_LOCKED)}; {@code null} if none. */
-    static String reasonDetail(String reason) {
-        if (reason == null) {
-            return null;
-        }
-        int open = reason.indexOf('(');
-        int close = reason.lastIndexOf(')');
-        if (open < 0 || close <= open) {
-            return null;
-        }
-        return reason.substring(open + 1, close).trim();
-    }
-
-    private static boolean isNeverGrantedVerdict(String verdict) {
-        return "NOT_ALLOWLISTED".equals(verdict) || "PROTECTED_COMPONENTS".equals(verdict)
-                || "TIER_NOT_ALLOWED".equals(verdict);
     }
 }

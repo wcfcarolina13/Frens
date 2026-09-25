@@ -19,6 +19,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService.ItemSnapshot;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import org.slf4j.Logger;
@@ -32,15 +33,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 public final class ToolProvisionService {
     private static final Logger LOGGER = LoggerFactory.getLogger("tool-provision");
     private static final int CONTAINER_RADIUS = 12;
     private static final int CONTAINER_YSPAN = 6;
+    /** How long a worker waits for an off-thread reachable-chest pull to start on the server thread. */
+    private static final long PULL_HOP_TIMEOUT_MS = 2_500L;
+    /** How long a chest tool search waits for its registry snapshot refresh to start on the server thread. */
+    private static final long SNAPSHOT_HOP_TIMEOUT_MS = 3_000L;
 
     private ToolProvisionService() {}
 
@@ -816,9 +819,9 @@ public final class ToolProvisionService {
      *
      * <p>One prompt per bot: the first item the owner is asked about ends the pull
      * ({@link SupplyPullPolicy.Pull#halted()}), and so does any refusal that answers for every
-     * other item too (a cooldown, the owner refusing or ignoring a prompt). The caller reads the
-     * result: {@code waiting} means don't craft or cut a tree over the owner's pending answer,
-     * {@code missed} feeds its ask backoff.
+     * other item too (a cooldown, the owner refusing or ignoring a prompt, the owner being away).
+     * The caller reads the result: {@code waiting} means don't craft or cut a tree over the
+     * owner's pending answer, {@code missed} and {@code ownerAway} feed its ask backoff.
      */
     public static SupplyPullPolicy.Pull pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
                                                                                 ServerWorld world,
@@ -1275,13 +1278,14 @@ public final class ToolProvisionService {
      * {@link SupplyWithdrawals#withdraw} with {@link SupplyWithdrawals.WaitMode#NONE}, in
      * {@code order} (scan order when {@code null}). Never walks, never waits. Stops once
      * {@code desired} items moved, or on an answer that stops the pass ({@link SupplyPullPolicy#next}):
-     * a prompt now open, or a refusal that answers for everything else too. An item the policy
-     * never grants is refused without a prompt and skipped everywhere; a chest that refuses is
-     * skipped.
+     * a prompt now open, the owner away, or a refusal that answers for everything else too. An
+     * item the policy never grants is refused without a prompt and skipped everywhere; a chest
+     * that refuses is skipped, both halves of a double chest; a chest with a transient refusal is
+     * skipped for this pull only.
      *
      * <p>Server thread. Called off it (a skill such as {@code LeashToFenceSkill} reaching
-     * {@link #ensureLead}), the whole pull runs in one bounded hop and reports nothing if the hop
-     * times out.
+     * {@link #ensureLead}), the whole pull runs in one bounded, abandon-safe
+     * {@link SupplyServerHop} hop and reports nothing if the hop did not run.
      */
     private static SupplyPullPolicy.Pull pullFromReachableChests(ServerPlayerEntity bot,
                                                                  ServerWorld world,
@@ -1297,12 +1301,11 @@ public final class ToolProvisionService {
             return SupplyPullPolicy.Pull.NOTHING;
         }
         if (!server.isOnThread()) {
-            // A stopped server runs execute() inline on the caller: take nothing then, rather than
-            // recurse back into this branch.
-            return callOnServer(server, () -> server.isOnThread()
-                            ? pullFromReachableChests(bot, world, wanted, order, desired, purpose)
-                            : SupplyPullPolicy.Pull.NOTHING,
-                    2500L, SupplyPullPolicy.Pull.NOTHING);
+            // The hop runs the pull on the server thread only (never inline on this worker once the
+            // server stopped) and not at all if this worker gave up on it before it started.
+            return SupplyServerHop.call(server,
+                    () -> pullFromReachableChests(bot, world, wanted, order, desired, purpose),
+                    PULL_HOP_TIMEOUT_MS, SupplyPullPolicy.Pull.NOTHING);
         }
         List<ChestItemGroup> groups = groupByChestAndItem(scanAccessibleContainers(bot, world, bot.getBlockPos()), wanted);
         if (order != null) {
@@ -1321,11 +1324,18 @@ public final class ToolProvisionService {
             }
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, group.pos, group.sample, left, left,
                     purpose, SupplyWithdrawals.WaitMode.NONE, null);
-            pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.reason());
-            switch (SupplyPullPolicy.next(result.kind(), result.reason())) {
+            pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.scope());
+            switch (SupplyPullPolicy.next(result.kind(), result.scope())) {
                 case SKIP_ITEM -> skippedItems.add(group.sample);
-                case SKIP_CHEST -> skippedChests.add(group.pos);
-                case STOP -> {
+                case SKIP_CHEST -> {
+                    skippedChests.add(group.pos);
+                    BlockPos otherHalf = ChestStoreService.otherChestHalf(world, group.pos);
+                    if (otherHalf != null) {
+                        skippedChests.add(otherHalf);
+                    }
+                }
+                case RETRY_LATER -> skippedChests.add(group.pos);
+                case STOP, OWNER_AWAY -> {
                     return pull;
                 }
                 case NEXT -> {
@@ -1569,13 +1579,14 @@ public final class ToolProvisionService {
                 if (stack == null || stack.isEmpty()) {
                     continue;
                 }
-                out.add(new ContainerSlot(inv, pos.toImmutable(), i, stack));
+                out.add(new ContainerSlot(pos.toImmutable(), i, stack));
             }
         }
         return out;
     }
 
-    private record ContainerSlot(Inventory inv, BlockPos pos, int slot, ItemStack stack) {}
+    /** One non-empty chest slot, read-only: no chest handle is kept, so nothing can move items through it. */
+    private record ContainerSlot(BlockPos pos, int slot, ItemStack stack) {}
 
     // ── Leather armor crafting ──────────────────────────────────────────
 
@@ -1631,35 +1642,6 @@ public final class ToolProvisionService {
             LOGGER.info("Crafted {} for {}", craftName, bot.getName().getString());
         }
         return crafted;
-    }
-
-    // ── Server-thread dispatch ─────────────────────────────────────────
-
-    private static <T> T callOnServer(MinecraftServer server,
-                                       java.util.function.Supplier<T> task,
-                                       long timeoutMs,
-                                       T fallback) {
-        if (server == null || task == null) return fallback;
-        if (server.isOnThread()) {
-            try {
-                return task.get();
-            } catch (Throwable t) {
-                return fallback;
-            }
-        }
-        CompletableFuture<T> future = new CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                future.complete(task.get());
-            } catch (Throwable t) {
-                future.complete(fallback);
-            }
-        });
-        try {
-            return future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            return fallback;
-        }
     }
 
     // ── Chest tool retrieval: axe helpers ────────────���─────────────────
@@ -1719,14 +1701,18 @@ public final class ToolProvisionService {
      * Walk to a registered chest and retrieve one tool matching the given criteria, through the
      * supply facade ({@link ChestStoreService#withdrawMatchingWalkOnly}): the owner is asked before
      * the bot walks, and nothing is taken without their permission or a standing one.
-     * Runs on a worker thread. Uses callOnServer for snapshot refresh.
+     * Runs on a worker thread; the registry snapshot refresh hops through {@link SupplyServerHop}.
      *
      * <p>Chests are tried best tool first, then nearest, until one gives a tool or an answer stops
-     * the search ({@link SupplyPullPolicy#afterChest}). After a search that asked and got nothing,
-     * this bot's searches pause ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s while a prompt is
-     * open, then 60 s doubling to 10 min per miss), because Woodcut calls this before every log
-     * while it has no axe and would otherwise re-prompt the owner, and rewrite the chest registry,
-     * as fast as it mines.
+     * the search ({@link SupplyPullPolicy#next}); a chest that refuses is skipped with its other
+     * half. After a search that took nothing, this bot's {@link SupplyWithdrawals.WaitMode#NONE}
+     * searches pause ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s while a prompt is open, a
+     * flat 60 s while the owner is away, 60 s doubling to 10 min per miss), because Woodcut calls
+     * this before every log while it has no axe and would otherwise re-prompt the owner as fast as
+     * it mines. An {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search (Woodcut's start: the
+     * owner is there to answer) is never paused. A search looking again at a prompt still open
+     * leaves the registry file alone (nothing moved, so its snapshots are unchanged) and logs at
+     * DEBUG; the facade logged the ask once.
      *
      * @param mode {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} to wait at the chest for the
      *             owner's answer (Woodcut's start only)
@@ -1746,28 +1732,35 @@ public final class ToolProvisionService {
 
         UUID botUuid = bot.getUuid();
         long startedAtMs = System.currentTimeMillis();
-        Long pausedUntilMs = TOOL_RETRIEVAL_PAUSED_UNTIL_MS.get(botUuid);
-        if (pausedUntilMs != null && startedAtMs < pausedUntilMs) {
+        RetrievalPause paused = TOOL_RETRIEVAL_PAUSES.get(botUuid);
+        boolean waitsForAnswer = mode == SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;
+        if (!waitsForAnswer && paused != null && startedAtMs < paused.untilMs()) {
             LOGGER.debug("Chest tool retrieval: {} paused for {} ms after its last supply answer",
-                    bot.getName().getString(), pausedUntilMs - startedAtMs);
+                    bot.getName().getString(), paused.untilMs() - startedAtMs);
             return false;
         }
+        boolean relook = !waitsForAnswer && paused != null && paused.awaitingAnswer();
 
-        // Refresh snapshots on server thread (block entities must be read there)
-        Boolean refreshed = callOnServer(server, () -> {
-            BotChestRegistryService.refreshAllSnapshots(bot, world);
-            return Boolean.TRUE;
-        }, 3000L, Boolean.FALSE);
-        if (!Boolean.TRUE.equals(refreshed)) {
-            LOGGER.debug("Chest tool retrieval: snapshot refresh failed/timed out for {}",
-                    bot.getName().getString());
-            return false;
+        if (!relook) {
+            // Refresh snapshots on the server thread (block entities must be read there).
+            Boolean refreshed = SupplyServerHop.call(server, () -> {
+                BotChestRegistryService.refreshAllSnapshots(bot, world);
+                return Boolean.TRUE;
+            }, SNAPSHOT_HOP_TIMEOUT_MS, Boolean.FALSE);
+            if (!Boolean.TRUE.equals(refreshed)) {
+                LOGGER.debug("Chest tool retrieval: snapshot refresh failed/timed out for {}",
+                        bot.getName().getString());
+                return false;
+            }
         }
 
         // Get all registered chests for this bot/owner
         List<BotChestRegistryService.ChestRecord> allChests =
                 BotChestRegistryService.listChestsForOwner(bot, world);
-        if (allChests.isEmpty()) return false;
+        if (allChests.isEmpty()) {
+            recordToolSearch(botUuid, paused, SupplyPullPolicy.Pull.NOTHING);
+            return false;
+        }
 
         double maxDistSq = (double) maxRange * maxRange;
         BlockPos botPos = bot.getBlockPos();
@@ -1801,6 +1794,7 @@ public final class ToolProvisionService {
         if (candidates.isEmpty()) {
             LOGGER.debug("Chest tool retrieval: no matching chests within {} blocks for {}",
                     maxRange, bot.getName().getString());
+            recordToolSearch(botUuid, paused, SupplyPullPolicy.Pull.NOTHING);
             return false;
         }
 
@@ -1809,55 +1803,109 @@ public final class ToolProvisionService {
                 .<ChestCandidate, ItemSnapshot>comparing(c -> c.bestMatch, snapshotComparator)
                 .thenComparingDouble(c -> c.distSq));
 
-        LOGGER.info("Chest tool retrieval: {} candidate chest(s) for {} within {} blocks",
-                candidates.size(), bot.getName().getString(), maxRange);
+        if (relook) {
+            LOGGER.debug("Chest tool retrieval: looking again at {} candidate chest(s) for {} within {} blocks",
+                    candidates.size(), bot.getName().getString(), maxRange);
+        } else {
+            LOGGER.info("Chest tool retrieval: {} candidate chest(s) for {} within {} blocks",
+                    candidates.size(), bot.getName().getString(), maxRange);
+        }
 
         // Try each candidate
-        boolean missed = false;
-        boolean endedWaiting = false;
+        SupplyPullPolicy.Pull search = SupplyPullPolicy.Pull.NOTHING;
+        Set<BlockPos> skippedHalves = new HashSet<>();
         SupplyWithdrawals.Result last = null;
         for (ChestCandidate candidate : candidates) {
+            // A transient refusal (ABORTED among them) no longer ends the search, so a stop
+            // request ends it here, before the next chest is asked or walked to.
+            if (TaskService.isAbortRequested(botUuid)) {
+                break;
+            }
+            if (skippedHalves.contains(candidate.pos)) {
+                continue;
+            }
             SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
                     source, bot, candidate.pos, 1, stackPredicate, "chest-tool", mode);
             last = result;
-            SupplyPullPolicy.ChestLoop next = SupplyPullPolicy.afterChest(result.kind(), result.moved(), result.reason());
-            if (next == SupplyPullPolicy.ChestLoop.DONE) {
-                TOOL_RETRIEVAL_PAUSED_UNTIL_MS.remove(botUuid);
-                TOOL_RETRIEVAL_MISSES.remove(botUuid);
+            search = SupplyPullPolicy.fold(search, result.kind(), result.moved(), result.scope());
+            if (search.movedAny()) {
+                TOOL_RETRIEVAL_PAUSES.remove(botUuid);
                 LOGGER.info("Chest tool retrieval: withdrew tool from chest at {} for {}",
                         candidate.pos.toShortString(), bot.getName().getString());
                 return true;
             }
-            missed |= SupplyPullPolicy.isMiss(result.kind(), result.reason());
-            if (next == SupplyPullPolicy.ChestLoop.STOP) {
-                endedWaiting = SupplyPullPolicy.isWaiting(result.kind(), result.reason());
+            SupplyPullPolicy.Next next = SupplyPullPolicy.next(result.kind(), result.scope());
+            if (next.stopsPass()) {
                 break;
             }
-            LOGGER.debug("Chest tool retrieval: chest at {} gave nothing for {} ({} {})",
-                    candidate.pos.toShortString(), bot.getName().getString(), result.kind(), result.reason());
+            if (next == SupplyPullPolicy.Next.SKIP_CHEST || next == SupplyPullPolicy.Next.SKIP_ITEM) {
+                // The ask read the chest's merged view, so its other half would answer the same.
+                BlockPos otherHalf = ChestStoreService.otherChestHalf(world, candidate.pos);
+                if (otherHalf != null) {
+                    skippedHalves.add(otherHalf);
+                }
+            }
+            LOGGER.debug("Chest tool retrieval: chest at {} gave nothing for {} ({} {} {})",
+                    candidate.pos.toShortString(), bot.getName().getString(), result.kind(), result.reason(),
+                    result.scope());
         }
 
-        int priorMisses = TOOL_RETRIEVAL_MISSES.getOrDefault(botUuid, 0);
-        long pauseMs = SupplyPullPolicy.retrievalPauseMs(endedWaiting, missed, priorMisses);
-        int misses = SupplyPullPolicy.nextMissCount(priorMisses, false, endedWaiting, missed);
-        if (misses > 0) {
-            TOOL_RETRIEVAL_MISSES.put(botUuid, misses);
-        }
-        if (pauseMs > 0L) {
-            TOOL_RETRIEVAL_PAUSED_UNTIL_MS.put(botUuid, System.currentTimeMillis() + pauseMs);
-            LOGGER.info("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {}); next search in {} s",
+        long pauseMs = recordToolSearch(botUuid, paused, search);
+        if (pauseMs > 0L && !(relook && search.waiting())) {
+            LOGGER.info("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {} {}); next search in {} s",
                     bot.getName().getString(), candidates.size(),
-                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason(), pauseMs / 1000L);
+                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason(),
+                    last == null ? "-" : last.scope(), pauseMs / 1000L);
         } else {
-            LOGGER.debug("Chest tool retrieval: all {} candidates exhausted for {} without asking (last: {} {})",
-                    candidates.size(), bot.getName().getString(),
-                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason());
+            LOGGER.debug("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {} {}); next search in {} s",
+                    bot.getName().getString(), candidates.size(),
+                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason(),
+                    last == null ? "-" : last.scope(), pauseMs / 1000L);
         }
         return false;
     }
 
-    /** Per bot: when its next chest tool search may ask again (see {@link #retrieveToolFromChests}). Any thread. */
-    private static final Map<UUID, Long> TOOL_RETRIEVAL_PAUSED_UNTIL_MS = new ConcurrentHashMap<>();
-    /** Per bot: consecutive tool searches that asked and got nothing; a withdrawal resets it. */
-    private static final Map<UUID, Integer> TOOL_RETRIEVAL_MISSES = new ConcurrentHashMap<>();
+    /**
+     * Records how a chest tool search that took nothing ended and returns its pause
+     * ({@link SupplyPullPolicy#retrievalPauseMs}); the miss count moves per
+     * {@link SupplyPullPolicy#nextMissCount}. A search that sets no pause (it asked nothing, or
+     * met only transient trouble) leaves a pause still running as it was, for the unpaused
+     * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search, and clears the open-prompt mark,
+     * so the next search refreshes the registry snapshots again.
+     */
+    private static long recordToolSearch(UUID botUuid, RetrievalPause prior, SupplyPullPolicy.Pull search) {
+        int priorMisses = prior == null ? 0 : prior.misses();
+        long pauseMs = SupplyPullPolicy.retrievalPauseMs(search, priorMisses);
+        int misses = SupplyPullPolicy.nextMissCount(priorMisses, search);
+        long nowMs = System.currentTimeMillis();
+        long untilMs = pauseMs > 0L ? nowMs + pauseMs : (prior == null ? 0L : prior.untilMs());
+        if (untilMs <= nowMs && misses <= 0) {
+            TOOL_RETRIEVAL_PAUSES.remove(botUuid);
+        } else {
+            TOOL_RETRIEVAL_PAUSES.put(botUuid, new RetrievalPause(untilMs, misses, search.waiting()));
+        }
+        return pauseMs;
+    }
+
+    /**
+     * Forgets every bot's chest tool search pause. Called at SERVER_STOPPED through
+     * {@link BotIdleHobbiesService#resetSession()} (Frens' SERVER_STOPPED handler), so a pause
+     * never carries into the next world.
+     */
+    public static void resetSession() {
+        TOOL_RETRIEVAL_PAUSES.clear();
+    }
+
+    /**
+     * One bot's chest tool search pause.
+     *
+     * @param untilMs        when its next {@link SupplyWithdrawals.WaitMode#NONE} search may ask again
+     * @param misses         consecutive searches that asked and got nothing; a withdrawal resets it
+     * @param awaitingAnswer the last search ended on an open prompt: the next one only looks again
+     */
+    private record RetrievalPause(long untilMs, int misses, boolean awaitingAnswer) {
+    }
+
+    /** Per bot: its chest tool search pause (see {@link #retrieveToolFromChests}). Any thread. */
+    private static final Map<UUID, RetrievalPause> TOOL_RETRIEVAL_PAUSES = new ConcurrentHashMap<>();
 }
