@@ -21,6 +21,9 @@ import java.util.UUID;
  *       accepted, so no arbitrary string reaches the post-arrival action type.</li>
  *   <li>{@link #withinArrivalReach} — the arrival withdraw only takes from a chest the bot
  *       actually landed next to.</li>
+ *   <li>{@link #checkArrival} — the whole arrival withdraw decision: only on the collect trip
+ *       itself, only from a chest, within reach, in the bot's own registry.</li>
+ *   <li>{@link #logSafe} — client strings are defanged before they reach a log line.</li>
  * </ul>
  *
  * <p>The screen is owner-initiated (a person explicitly sends their own bot to their own chest),
@@ -135,5 +138,51 @@ public final class ChestRegistryAccessPolicy {
     public static boolean withinArrivalReach(double distanceSq) {
         if (Double.isNaN(distanceSq) || distanceSq < 0) return false;
         return distanceSq <= ARRIVAL_MAX_DISTANCE * ARRIVAL_MAX_DISTANCE;
+    }
+
+    /** Outcome of {@link #checkArrival}. */
+    public enum Arrival { TAKE, WRONG_TRIP, NOT_A_CHEST, TOO_FAR, NOT_REGISTERED }
+
+    /**
+     * Whether an arrived bot may withdraw from the chest its pending withdraw action names.
+     *
+     * <p>Evaluation order: the trip's destination is not that chest → {@link Arrival#WRONG_TRIP}
+     * (the action was left over from a collect whose travel never started, and this arrival is an
+     * unrelated trip); no chest there → {@link Arrival#NOT_A_CHEST}; not
+     * {@link #withinArrivalReach} → {@link Arrival#TOO_FAR}; not in the bot's registry →
+     * {@link Arrival#NOT_REGISTERED}; otherwise {@link Arrival#TAKE}.
+     *
+     * @param destinationMatches whether the trip's requested destination equals the action's chest
+     * @param isChest            whether the block entity at the chest position is a chest
+     * @param distanceSq         squared distance from the arrived bot to the chest centre
+     * @param registered         whether the chest position is in the bot's registry
+     */
+    public static Arrival checkArrival(boolean destinationMatches, boolean isChest,
+                                       double distanceSq, boolean registered) {
+        if (!destinationMatches) return Arrival.WRONG_TRIP;
+        if (!isChest) return Arrival.NOT_A_CHEST;
+        if (!withinArrivalReach(distanceSq)) return Arrival.TOO_FAR;
+        if (!registered) return Arrival.NOT_REGISTERED;
+        return Arrival.TAKE;
+    }
+
+    /** Longest client string {@link #logSafe} keeps before cutting. */
+    static final int LOG_SAFE_MAX_CHARS = 40;
+
+    /**
+     * A client-supplied string made safe for one log line: {@code null} → {@code "null"}; every
+     * control character ({@code < 0x20} or {@code 0x7F}) → {@code '?'}, so no forged line breaks;
+     * cut to {@value #LOG_SAFE_MAX_CHARS} chars with a trailing {@code "\u2026"} when longer.
+     */
+    public static String logSafe(String raw) {
+        if (raw == null) return "null";
+        int n = Math.min(raw.length(), LOG_SAFE_MAX_CHARS);
+        StringBuilder sb = new StringBuilder(n + 1);
+        for (int i = 0; i < n; i++) {
+            char c = raw.charAt(i);
+            sb.append(c < 0x20 || c == 0x7F ? '?' : c);
+        }
+        if (raw.length() > LOG_SAFE_MAX_CHARS) sb.append('\u2026');
+        return sb.toString();
     }
 }

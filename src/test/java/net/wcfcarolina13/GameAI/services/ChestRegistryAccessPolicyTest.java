@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy.Access;
+import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy.Arrival;
 import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy.Mode;
 import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy.Target;
@@ -194,5 +195,111 @@ class ChestRegistryAccessPolicyTest {
         assertFalse(ChestRegistryAccessPolicy.withinArrivalReach(-1.0));
         assertFalse(ChestRegistryAccessPolicy.withinArrivalReach(-0.0001));
         assertFalse(ChestRegistryAccessPolicy.withinArrivalReach(Double.POSITIVE_INFINITY));
+    }
+
+    // ── checkArrival ───────────────────────────────────────────────────────
+
+    @Test
+    void arrivalTakesWhenEverythingHolds() {
+        assertEquals(Arrival.TAKE, ChestRegistryAccessPolicy.checkArrival(true, true, 0.0, true));
+        assertEquals(Arrival.TAKE, ChestRegistryAccessPolicy.checkArrival(true, true, 5.5 * 5.5, true));
+    }
+
+    @Test
+    void arrivalOnAnotherTripIsWrongTrip() {
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, true, 0.0, true));
+    }
+
+    @Test
+    void arrivalWithNoChestIsNotAChest() {
+        assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, 0.0, true));
+    }
+
+    @Test
+    void arrivalBeyondReachIsTooFar() {
+        assertEquals(Arrival.TOO_FAR, ChestRegistryAccessPolicy.checkArrival(true, true, 64.01, true));
+        assertEquals(Arrival.TOO_FAR, ChestRegistryAccessPolicy.checkArrival(true, true, -1.0, true));
+        assertEquals(Arrival.TOO_FAR,
+                ChestRegistryAccessPolicy.checkArrival(true, true, Double.POSITIVE_INFINITY, true));
+    }
+
+    @Test
+    void arrivalWithNaNDistanceIsTooFar() {
+        assertEquals(Arrival.TOO_FAR, ChestRegistryAccessPolicy.checkArrival(true, true, Double.NaN, true));
+    }
+
+    @Test
+    void arrivalAtUnregisteredChestIsNotRegistered() {
+        assertEquals(Arrival.NOT_REGISTERED, ChestRegistryAccessPolicy.checkArrival(true, true, 0.0, false));
+    }
+
+    @Test
+    void arrivalReachBoundaryIsInclusive() {
+        assertEquals(Arrival.TAKE, ChestRegistryAccessPolicy.checkArrival(true, true, 64.0, true));
+        assertEquals(Arrival.NOT_REGISTERED, ChestRegistryAccessPolicy.checkArrival(true, true, 64.0, false));
+    }
+
+    @Test
+    void wrongTripIsCheckedBeforeEverythingElse() {
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, false, 0.0, true));
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, true, 1e9, true));
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, true, 0.0, false));
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, false, Double.NaN, false));
+    }
+
+    @Test
+    void notAChestIsCheckedBeforeReachAndRegistry() {
+        assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, 1e9, true));
+        assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, 0.0, false));
+        assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, Double.NaN, false));
+    }
+
+    @Test
+    void tooFarIsCheckedBeforeRegistry() {
+        assertEquals(Arrival.TOO_FAR, ChestRegistryAccessPolicy.checkArrival(true, true, 1e9, false));
+        assertEquals(Arrival.TOO_FAR, ChestRegistryAccessPolicy.checkArrival(true, true, Double.NaN, false));
+    }
+
+    // ── logSafe ────────────────────────────────────────────────────────────
+
+    @Test
+    void logSafeRendersNullAsTheWordNull() {
+        assertEquals("null", ChestRegistryAccessPolicy.logSafe(null));
+    }
+
+    @Test
+    void logSafeKeepsOrdinaryText() {
+        assertEquals("", ChestRegistryAccessPolicy.logSafe(""));
+        assertEquals("stay player ~!", ChestRegistryAccessPolicy.logSafe("stay player ~!"));
+    }
+
+    @Test
+    void logSafeReplacesEveryControlChar() {
+        assertEquals("a?b?c?d", ChestRegistryAccessPolicy.logSafe("a\nb\tc\u007Fd"));
+        assertEquals("???? x", ChestRegistryAccessPolicy.logSafe("\u0000\r\n\u001F x"));
+        assertEquals("forged ?[main/INFO] ok",
+                ChestRegistryAccessPolicy.logSafe("forged \n[main/INFO] ok"));
+    }
+
+    @Test
+    void logSafeKeepsExactlyFortyCharsWhole() {
+        String forty = "a".repeat(40);
+        String out = ChestRegistryAccessPolicy.logSafe(forty);
+        assertEquals(forty, out);
+        assertEquals(40, out.length());
+    }
+
+    @Test
+    void logSafeCutsFortyOneCharsWithEllipsis() {
+        String fortyOne = "b".repeat(40) + "c";
+        String out = ChestRegistryAccessPolicy.logSafe(fortyOne);
+        assertEquals("b".repeat(40) + "\u2026", out);
+        assertEquals(41, out.length());
+    }
+
+    @Test
+    void logSafeCutsLongInputAndDropsWhatFollows() {
+        String longWithTail = "x".repeat(39) + "\n" + "y".repeat(32_000) + "\n";
+        assertEquals("x".repeat(39) + "?\u2026", ChestRegistryAccessPolicy.logSafe(longWithTail));
     }
 }

@@ -1520,13 +1520,16 @@ public final class NavigationArtifactService {
                 if (arrBot == null || arrBot.isRemoved()) return;
                 BlockPos chestPos = action.target();
                 ServerWorld w = (ServerWorld) arrBot.getEntityWorld();
-                var be = w.getBlockEntity(chestPos);
+                // Bind the withdraw to its own trip: an action left behind by a collect whose travel
+                // was refused must not fire on a later, unrelated arrival. ps.dest() is this trip's
+                // requested destination (Overworld spawn on dimension fallback). On any other trip the
+                // chest's chunk need not be loaded, so don't read the world there.
+                boolean destinationMatches = chestPos.equals(ps.dest());
+                var be = destinationMatches ? w.getBlockEntity(chestPos) : null;
                 // Take only from a chest (trapped chests extend ChestBlockEntity) that the bot actually
-                // landed next to and that is in its own registry here — a lingering or forged withdraw
-                // action must not empty an arbitrary container. Registry membership ignores `destroyed`;
-                // the block-entity check already covers presence.
-                boolean inReach = ChestRegistryAccessPolicy.withinArrivalReach(
-                        arrBot.squaredDistanceTo(Vec3d.ofCenter(chestPos)));
+                // landed next to and that is in its own registry here — a forged withdraw action must
+                // not empty an arbitrary container. Registry membership ignores `destroyed`; the
+                // block-entity check already covers presence.
                 List<ChestRegistryAccessPolicy.ChestKey> keys = new ArrayList<>();
                 for (BotChestRegistryService.ChestRecord r : BotChestRegistryService.listChests(arrBot, w)) {
                     keys.add(new ChestRegistryAccessPolicy.ChestKey(r.x, r.y, r.z, r.destroyed));
@@ -1534,7 +1537,13 @@ public final class NavigationArtifactService {
                 boolean registered = ChestRegistryAccessPolicy.checkTarget(
                         keys, chestPos.getX(), chestPos.getY(), chestPos.getZ())
                         != ChestRegistryAccessPolicy.Target.NOT_REGISTERED;
-                if (be instanceof net.minecraft.block.entity.ChestBlockEntity storage && inReach && registered) {
+                ChestRegistryAccessPolicy.Arrival arrival = ChestRegistryAccessPolicy.checkArrival(
+                        destinationMatches,
+                        be instanceof net.minecraft.block.entity.ChestBlockEntity,
+                        arrBot.squaredDistanceTo(Vec3d.ofCenter(chestPos)),
+                        registered);
+                if (arrival == ChestRegistryAccessPolicy.Arrival.TAKE
+                        && be instanceof net.minecraft.block.entity.ChestBlockEntity storage) {
                     int moved = 0;
                     for (int i = 0; i < storage.size() && moved < 256; i++) {
                         net.minecraft.item.ItemStack stack = storage.getStack(i);
@@ -1556,14 +1565,18 @@ public final class NavigationArtifactService {
 
                     // Handle return trip.
                     handlePostCollectReturn(server, arrBot, ps.botAlias(), finalReturnMode, action);
+                } else if (arrival == ChestRegistryAccessPolicy.Arrival.WRONG_TRIP) {
+                    // Not the collect trip: drop the action. No owner message, no return trip.
+                    LOGGER.info("Post-arrival: {} withdraw dropped: trip to {} is not the collect trip to {}",
+                            ps.botAlias(), ps.dest().toShortString(), chestPos.toShortString());
                 } else {
                     // Refused: no return trip.
                     String reason;
                     String ownerMsg;
-                    if (!(be instanceof net.minecraft.block.entity.ChestBlockEntity)) {
+                    if (arrival == ChestRegistryAccessPolicy.Arrival.NOT_A_CHEST) {
                         reason = "no chest found";
                         ownerMsg = ps.botAlias() + " arrived but no chest found at " + chestPos.toShortString() + ".";
-                    } else if (!inReach) {
+                    } else if (arrival == ChestRegistryAccessPolicy.Arrival.TOO_FAR) {
                         reason = "arrived too far from the chest";
                         ownerMsg = ps.botAlias() + " arrived too far from the chest at "
                                 + chestPos.toShortString() + "; nothing collected.";

@@ -142,7 +142,10 @@ public final class ChestRegistryNetworkManager {
             Optional<String> returnToOpt = ChestRegistryAccessPolicy.parseReturnTo(rawReturnTo);
             if (modeOpt.isEmpty() || returnToOpt.isEmpty()) {
                 LOGGER.warn("[chest-registry] rejected collect from {} for {}: bogus mode={} returnTo={}",
-                        player.getName().getString(), botName, rawMode, rawReturnTo);
+                        player.getName().getString(), botName,
+                        ChestRegistryAccessPolicy.logSafe(rawMode), ChestRegistryAccessPolicy.logSafe(rawReturnTo));
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                        player.getCommandSource(), "\u00A7cUnknown collect request.\u00A7r");
                 return;
             }
             ChestRegistryAccessPolicy.Mode mode = modeOpt.get();
