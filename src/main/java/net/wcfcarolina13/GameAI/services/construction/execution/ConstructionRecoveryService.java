@@ -12,6 +12,8 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionPlacementRules;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
+import net.wcfcarolina13.GameAI.services.construction.InteriorEgressPolicy;
+import net.wcfcarolina13.GameAI.services.construction.InteriorEgressService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -152,9 +154,16 @@ public final class ConstructionRecoveryService {
                         stance.toShortString(),
                         bot.getBlockPos().toShortString());
             }
-            // Try pathfinder first; fall back to direct nudge if path goes through protected blocks
+            // Try pathfinder first; fall back to direct nudge if path goes through protected blocks.
+            // No straight nudge from the interior across the wall line while a doorway route
+            // exists: moveTo already tried egress, and the nudge would only walk into the wall.
             if (!moveTo(source, bot, stance)) {
-                nudgeToward(bot, stance, 2000L, true);
+                if (InteriorEgressService.blocksStraightLineTo(bot, stance)) {
+                    LOGGER.info("task-recovery: scaffold {} skip straight nudge across footprint edge stance={} botPos={}",
+                            mode, stance.toShortString(), bot.getBlockPos().toShortString());
+                } else {
+                    nudgeToward(bot, stance, 2000L, true);
+                }
             }
             // Accept if we're close enough horizontally — pillar doesn't need exact position
                 if (squaredHorizontalDistance(bot.getBlockPos(), stance)
@@ -446,6 +455,9 @@ public final class ConstructionRecoveryService {
         if (plan.isEmpty()) {
             return false;
         }
+        // Interior -> stance past the wall line: out through the doorway first. Any outcome
+        // other than OK leaves the move below exactly as before.
+        InteriorEgressService.egressIfNeeded(source, bot, target, plan.get().finalDestination());
         MovementService.MovementResult result = MovementService.execute(source, bot, plan.get(), false, true, true, false);
         return result.success();
     }
@@ -514,6 +526,9 @@ public final class ConstructionRecoveryService {
         BlockPos start = bot.getBlockPos();
         BlockPos best = null;
         double bestScore = Double.NEGATIVE_INFINITY;
+        // From the footprint interior, only interior candidates (or adjacent steps): a far
+        // candidate past the wall line is a straight nudge into the wall.
+        InteriorEgressPolicy.Footprint crossingGuard = InteriorEgressService.crossingGuard(bot).orElse(null);
 
         for (int r = 1; r <= 4; r++) {
             for (int dx = -r; dx <= r; dx++) {
@@ -527,6 +542,10 @@ public final class ConstructionRecoveryService {
                     for (int dy = -1; dy <= 1; dy++) {
                         BlockPos candidate = start.add(dx, dy, dz);
                         if (!canStandAt(world, candidate)) {
+                            continue;
+                        }
+                        if (crossingGuard != null && InteriorEgressPolicy.isLongCrossing(crossingGuard,
+                                start.getX(), start.getZ(), candidate.getX(), candidate.getZ())) {
                             continue;
                         }
                         int exits = countOpenExits(world, candidate);

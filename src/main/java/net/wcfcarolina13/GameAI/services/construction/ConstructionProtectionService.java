@@ -64,13 +64,6 @@ public final class ConstructionProtectionService {
         }
     }
 
-    public static void activate(UUID botId,
-                                String taskId,
-                                Set<BlockPos> plannedPositions,
-                                Set<BlockPos> stationPositions) {
-        activate(botId, taskId, plannedPositions, stationPositions, Set.of());
-    }
-
     /**
      * @param doorPositions planned walk-through door cells (subset of {@code plannedPositions});
      *                      they stay open during the build, so egress treats their columns as

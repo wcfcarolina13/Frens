@@ -26,6 +26,7 @@ import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionServ
 import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
 import net.wcfcarolina13.GameAI.services.construction.DoorPlacementService;
 import net.wcfcarolina13.GameAI.services.construction.DoorwayAccessService;
+import net.wcfcarolina13.GameAI.services.construction.InteriorEgressService;
 import net.wcfcarolina13.GameAI.services.construction.PerimeterService;
 import net.wcfcarolina13.GameAI.services.construction.RoofAccessService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
@@ -413,7 +414,8 @@ public final class BuildSchematicSkill implements Skill {
                 bot.getUuid(),
                 taskId,
                 protectedPlannedPositions,
-            Set.copyOf(buildStations)
+            Set.copyOf(buildStations),
+            Set.copyOf(plan.doorPositions())
         );
         ConstructionRepairService.register(bot.getUuid(), repairSession);
         LOGGER.info("Activated schematic protection: bot={} schematic={} planned={} stations={}",
@@ -606,6 +608,7 @@ public final class BuildSchematicSkill implements Skill {
                     schematic.name());
             ConstructionRepairService.clear(bot.getUuid());
             ConstructionProtectionService.clear(bot.getUuid());
+            InteriorEgressService.clear(bot.getUuid());
             ScaffoldService.clearScaffoldMemory(bot);
             RoofAccessService.clearRoofPillars(bot);
         }
@@ -974,6 +977,10 @@ public final class BuildSchematicSkill implements Skill {
             LOGGER.debug("No movement plan found for {}", target.toShortString());
             return false;
         }
+
+        // From inside the footprint to a stance past the wall line: leave through the doorway
+        // first. Any outcome other than OK leaves the move below exactly as before.
+        InteriorEgressService.egressIfNeeded(source, bot, target, plan.get().finalDestination());
 
         // Use survival-style movement: no teleport override, no snap
         MovementService.MovementResult result = MovementService.execute(source, bot, plan.get(), false, true, true, false);
