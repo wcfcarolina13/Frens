@@ -79,17 +79,19 @@ import java.util.concurrent.TimeUnit;
  * decide on, and acts on the answer — the owner's prompt, the clickable reply, the item move and
  * the per-save file of standing "always" permissions.
  *
- * <p><b>Dormant (supplies Phase 2).</b> {@link #request} and {@link #transferNow} have no
- * production caller: no skill, service, tick hook or command reaches them, and
- * {@code SupplyDormancyTest} scans the source tree to keep it that way. They stay unwired until
- * Phase 3 has closed the existing automatic chest withdrawals. What is live now: loading and
- * saving the ALWAYS file, the once-a-second ledger sweep, and {@link #answer} / {@link #revoke} /
- * {@link #revokeAll} behind {@code /frens supply}, which are inert while no request can be opened.
+ * <p><b>One way in (supplies Phase 3).</b> {@link #request} and {@link #transferNow} have exactly
+ * one caller, {@link SupplyWithdrawals}: every automatic chest withdrawal a companion makes goes
+ * through that facade, which keeps the request's fingerprint between the ask and the take.
+ * {@code SupplyDormancyTest} scans the source tree so no other file reaches them. What the owner
+ * does themselves — {@code /bot withdraw} and Quick Fetch — is the owner's own act and stays
+ * outside this service. Also live: loading and saving the ALWAYS file, the once-a-second sweep of
+ * the ledger and the facade's tickets, and {@link #answer} / {@link #revoke} / {@link #revokeAll}
+ * behind {@code /frens supply}.
  *
  * <p><b>Threading.</b> Every public method except {@link #register()} and {@link #isRunning()}
  * must run on the server thread; called anywhere else it logs a WARN and returns its failure
  * value without touching the world. The ledger itself is synchronized, so the debounced writer
- * may snapshot it from its own thread.
+ * may snapshot it from its own thread, and {@link #isPending} may be polled from a worker.
  */
 public final class SupplyRequestService {
 
@@ -187,6 +189,38 @@ public final class SupplyRequestService {
         }
     }
 
+    /** Why {@link #transferNow} moved items or did not. Only {@link #MOVED} and {@link #MOVED_SHORT} moved any. */
+    public enum TransferStatus {
+        /** Moved exactly the permitted quantity: a once-grant spent, or a standing permission used. */
+        MOVED,
+        /** Moved fewer than permitted (the inventory took less than it had room for); a once-grant is spent anyway. */
+        MOVED_SHORT,
+        /** Called off the server thread; nothing was read or changed. */
+        WRONG_THREAD,
+        /** The service has not started (no server, or between worlds). */
+        NOT_RUNNING,
+        /** No bot, no position or no fingerprint. */
+        INVALID,
+        /** The bot's current owner, or the bot itself, is not the fingerprint's. */
+        OWNER_OR_BOT_MISMATCH,
+        /** The chest may not be touched now (unloaded, not a chest, locked, territory, ownership, blocked). */
+        DENIED,
+        /** The chest at the position is not the fingerprint's chest (a half was added or removed). */
+        CHEST_MISMATCH,
+        /** The bot cannot reach the chest from where it stands. */
+        OUT_OF_REACH,
+        /** The chest holds none of the exact item. */
+        NO_STOCK,
+        /** The bot's inventory has no room for the item; no grant was consumed. */
+        NO_ROOM,
+        /** No live grant or standing permission covers it, or the policy now refuses it (e.g. the reserve). */
+        NOT_PERMITTED
+    }
+
+    /** What {@link #transferNow} did: how many items it moved (0 unless MOVED or MOVED_SHORT) and why. */
+    public record TransferOutcome(int moved, TransferStatus status) {
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────────────────────────────────
 
     /** Hooks server start, the housekeeping tick and stop. Called once from mod init. */
@@ -199,6 +233,7 @@ public final class SupplyRequestService {
             writer = null;
             writeExecutor = null;
             server = null;
+            SupplyWithdrawals.clearTickets();
         });
     }
 
@@ -209,8 +244,9 @@ public final class SupplyRequestService {
 
     /**
      * Once a second: drops expired prompts, grants and cooldowns, so an ignored prompt closes on
-     * time even when nothing else touches the ledger. Housekeeping only — nobody is messaged; an
-     * owner who clicks a swept prompt reads "no longer open".
+     * time even when nothing else touches the ledger, and the facade's tickets that have outlived
+     * any grant they could redeem. Housekeeping only — nobody is messaged; an owner who clicks a
+     * swept prompt reads "no longer open".
      */
     private static void tick(MinecraftServer ticking) {
         if (ticking.getTicks() % SWEEP_INTERVAL_TICKS != 0) {
@@ -221,6 +257,7 @@ public final class SupplyRequestService {
             return;
         }
         book.sweep();
+        SupplyWithdrawals.sweepTickets(System.currentTimeMillis(), book.timings());
     }
 
     private static void start(MinecraftServer started) {
@@ -317,7 +354,7 @@ public final class SupplyRequestService {
 
     /**
      * Asks {@code bot}'s owner whether it may take {@code qty} of {@code sample}'s exact item from
-     * the chest at {@code chestPos}. DORMANT: no production caller (see the class comment).
+     * the chest at {@code chestPos}. Called only by {@link SupplyWithdrawals} (see the class comment).
      *
      * <p>Order: owner (none → the policy's {@code NO_OWNER}; never the recruiter or controller) →
      * chest access ({@link SupplyChestRules#access}) → unless a standing permission already covers
@@ -490,7 +527,7 @@ public final class SupplyRequestService {
 
     /**
      * Moves the granted items from the chest into {@code bot}'s inventory, now, in this tick.
-     * DORMANT: no production caller (see the class comment).
+     * Called only by {@link SupplyWithdrawals} (see the class comment).
      *
      * <p>Re-checks everything against the world as it is now: the bot's current owner must still
      * be {@code fp.owner()} and the chest at {@code chestPos} must be {@code fp.chest()}; access,
@@ -498,49 +535,58 @@ public final class SupplyRequestService {
      * Otherwise the grant is consumed for at most the room available and exactly the permitted
      * quantity of stacks matching {@code fp}'s item id and component fingerprint is moved.
      *
-     * @return how many items were moved (0 on any refusal)
+     * @return how many items were moved (0 on any refusal) and the status that says why
      */
-    public static int transferNow(ServerPlayerEntity bot, BlockPos chestPos, RequestFingerprint fp, int need) {
+    public static TransferOutcome transferNow(ServerPlayerEntity bot, BlockPos chestPos, RequestFingerprint fp, int need) {
         TransferResult result = evaluateTransfer(bot, chestPos, fp, need);
         LOGGER.info("[supply] transfer bot={} chest={} item={} qty={} need={} moved={} status={}",
                 nameOf(bot), posText(chestPos), fp == null ? "-" : fp.itemId(), fp == null ? 0 : fp.qty(),
-                need, result.moved(), result.status());
-        return result.moved();
+                need, result.moved(), result.detail());
+        return new TransferOutcome(result.moved(), result.status());
     }
 
-    private record TransferResult(int moved, String status) {
-        static TransferResult refused(String status) {
-            return new TransferResult(0, status);
+    /**
+     * {@link TransferOutcome} plus the log detail it has always carried: the consume status
+     * ({@code ONCE}, {@code ALWAYS}, {@code ONCE_SHORT}, …), the access or policy verdict in
+     * brackets on a refusal, or the status name.
+     */
+    private record TransferResult(int moved, TransferStatus status, String detail) {
+        static TransferResult refused(TransferStatus status) {
+            return new TransferResult(0, status, status.name());
+        }
+
+        static TransferResult refused(TransferStatus status, String detail) {
+            return new TransferResult(0, status, detail);
         }
     }
 
     private static TransferResult evaluateTransfer(ServerPlayerEntity bot, BlockPos chestPos,
                                                    RequestFingerprint fp, int need) {
         if (offServerThread("transferNow")) {
-            return TransferResult.refused("WRONG_THREAD");
+            return TransferResult.refused(TransferStatus.WRONG_THREAD);
         }
         SupplyRequestLedger book = ledger;
         MinecraftServer srv = server;
         if (book == null || srv == null) {
-            return TransferResult.refused("NOT_RUNNING");
+            return TransferResult.refused(TransferStatus.NOT_RUNNING);
         }
         if (bot == null || chestPos == null || fp == null) {
-            return TransferResult.refused("INVALID");
+            return TransferResult.refused(TransferStatus.INVALID);
         }
         UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
         if (owner == null || !owner.equals(fp.owner()) || !bot.getUuid().equals(fp.bot())) {
-            return TransferResult.refused("OWNER_OR_BOT_MISMATCH");
+            return TransferResult.refused(TransferStatus.OWNER_OR_BOT_MISMATCH);
         }
         ServerWorld world = bot.getEntityWorld();
         ChestRead chest = readChest(srv, world, chestPos, bot, owner);
         if (chest.access() != Access.OK) {
-            return TransferResult.refused("DENIED(" + chest.access() + ")");
+            return TransferResult.refused(TransferStatus.DENIED, "DENIED(" + chest.access() + ")");
         }
         if (!fp.chest().equals(chest.key())) {
-            return TransferResult.refused("CHEST_MISMATCH");
+            return TransferResult.refused(TransferStatus.CHEST_MISMATCH);
         }
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
-            return TransferResult.refused("OUT_OF_REACH");
+            return TransferResult.refused(TransferStatus.OUT_OF_REACH);
         }
         DynamicOps<JsonElement> ops = world.getRegistryManager().getOps(JsonOps.INSTANCE);
         Inventory storage = chest.inventory();
@@ -548,19 +594,20 @@ public final class SupplyRequestService {
         Stock stockNow = SupplyChestRules.stock(slots, fp.item(), book.config());
         List<SupplyChestRules.Take> first = SupplyChestRules.withdrawPlan(slots, fp.item(), 1);
         if (first.isEmpty()) {
-            return TransferResult.refused("NO_STOCK");
+            return TransferResult.refused(TransferStatus.NO_STOCK);
         }
         ItemStack template = storage.getStack(first.get(0).slot());
         int maxPerStack = bot.getInventory().getMaxCount(template);
         int capacity = SupplyChestRules.capacity(slotViews(bot.getInventory().getMainStacks(), fp.itemId(), ops),
                 fp.item(), maxPerStack);
         if (capacity <= 0) {
-            return TransferResult.refused("NO_ROOM");
+            return TransferResult.refused(TransferStatus.NO_ROOM);
         }
         RequestFingerprint capped = fp.withQty(Math.min(fp.qty(), capacity));
         Consume consume = book.consumeGrant(capped, stockNow, need);
         if (!consume.permitted()) {
-            return TransferResult.refused(consume.status() + "(" + consume.verdict() + ")");
+            return TransferResult.refused(TransferStatus.NOT_PERMITTED,
+                    consume.status() + "(" + consume.verdict() + ")");
         }
         int quantity = consume.quantity();
         int moved = 0;
@@ -588,9 +635,9 @@ public final class SupplyRequestService {
         if (moved < quantity) {
             LOGGER.warn("[supply] transfer moved {} of {} permitted for bot={}; the grant is spent",
                     moved, quantity, nameOf(bot));
-            return new TransferResult(moved, consume.status() + "_SHORT");
+            return new TransferResult(moved, TransferStatus.MOVED_SHORT, consume.status() + "_SHORT");
         }
-        return new TransferResult(moved, consume.status().name());
+        return new TransferResult(moved, TransferStatus.MOVED, consume.status().name());
     }
 
     // ── Revoke ───────────────────────────────────────────────────────────────────────────────
@@ -850,6 +897,64 @@ public final class SupplyRequestService {
         } catch (RuntimeException e) {
             return ENCODE_FAILED_MARKER;
         }
+    }
+
+    // ── Seams for SupplyWithdrawals (package-private) ────────────────────────────────────────
+
+    /**
+     * The running ledger's policy config — the one {@code open} and {@code consumeGrant} apply,
+     * so a pre-filter through it can never disagree with them — or {@code null} when not running.
+     */
+    static SupplyRequestPolicy.Config config() {
+        SupplyRequestLedger book = ledger;
+        return book == null ? null : book.config();
+    }
+
+    /** The running ledger's timings, or the defaults when not running, so a waiting caller never sees null. */
+    static SupplyRequestLedger.Timings timings() {
+        SupplyRequestLedger book = ledger;
+        return book == null ? SupplyRequestLedger.Timings.defaults() : book.timings();
+    }
+
+    /** Whether {@code bot} has an unexpired prompt waiting. Any thread: the ledger is synchronized. */
+    static boolean isPending(UUID bot) {
+        SupplyRequestLedger book = ledger;
+        return book != null && book.hasPending(bot);
+    }
+
+    /** The running server, or {@code null}. */
+    static MinecraftServer server() {
+        return server;
+    }
+
+    /** {@code stack} as the policy sees it, computed exactly as a request computes it. Server thread. */
+    static ItemKey itemKeyOf(ServerWorld world, ItemStack stack) {
+        return itemKey(stack, world.getRegistryManager().getOps(JsonOps.INSTANCE));
+    }
+
+    /**
+     * The canonical key of the chest at {@code pos} — the same key a request records, whichever
+     * half {@code pos} names — or {@code null} when the service is not running, the chunk is not
+     * loaded, the block is not a chest, or it is a double chest whose other half cannot be
+     * resolved without loading a chunk. Server thread; never loads a chunk.
+     */
+    static ChestKey chestKeyAt(ServerWorld world, BlockPos pos) {
+        MinecraftServer srv = server;
+        if (srv == null || world == null || pos == null || !world.isChunkLoaded(pos)) {
+            return null;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock) || !hasChestProperties(state)) {
+            return null;
+        }
+        BlockPos partner = null;
+        if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
+            partner = partnerOf(world, pos);
+            if (partner == null) {
+                return null;
+            }
+        }
+        return chestKey(srv, world, pos, partner);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────
