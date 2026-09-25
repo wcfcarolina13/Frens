@@ -2,6 +2,84 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Chest registry screen — owner-only Collect / Go / Dismiss / Quick Store-Fetch (security fix); 1.1.220 (2026-09-25)
+
+A read-only scoper found this on 2026-09-25 at 54e876ea. Before this build, any multiplayer player could send the storage
+screen's payloads and name ANY bot:
+- Collect / Go made that bot fast-travel to coordinates the client chose.
+- On arrival, Collect took up to 256 items from whatever container was at that position: any `Inventory` block entity,
+  with no type, distance or registry check.
+- The screen's other three payloads had the same gap. Refresh sent any bot's chest locations and contents to the
+  requester. Dismiss deleted any bot's records. Quick Store / Quick Fetch made any bot deposit into, or empty, any
+  container within 32 blocks of it.
+- `getPlayer(botName)` also resolves real humans, so a forged name could send another player through the fast-travel
+  path.
+
+- `386dd22e` fix — pure `ChestRegistryAccessPolicy` (java.util only):
+  - `authorize(requester, botOwner, botIsFakePlayer, isOp, isHost)`. A real human as the "bot" → DENY_NOT_A_BOT. Then
+    owner → op → integrated-server host. An un-owned bot is op/host only (DENY_UNOWNED); anyone else is DENY_NOT_OWNER.
+  - `checkTarget(records, x, y, z)` → OK / DESTROYED / NOT_REGISTERED.
+  - `parseMode` accepts go / collect (absent = collect). `parseReturnTo` accepts stay / player / home (absent = stay).
+  - `withinArrivalReach(distSq)` ≤ 8 blocks. A normal arrival lands at most ~5.5 blocks from the chest centre
+    (`findSafeNear` r=3, dy −3..+2).
+  - `ChestRegistryNetworkManager`: one `authorize(...)` gate in all four handlers, right after the bot lookup and before
+    any world read, travel or mutation. On deny: a WARN `[chest-registry] denied <handler> …` and a red line to the
+    requester.
+  - Collect and Go both run `verifyChests`, then need a live record in that bot's own registry for the bot's current
+    dimension. That is the list the screen shows; the screen already offers Go/Collect only for live entries.
+  - An unknown mode or returnTo is refused. It used to fall through to collect / return-to-origin.
+  - `NavigationArtifactService` post-arrival withdraw: takes only from a `ChestBlockEntity` (trapped chest extends it),
+    only within 8 blocks, and only at a position in the bot's registry for the arrival world. Otherwise it tells the
+    owner why, logs `Post-arrival: <bot> withdraw refused at <pos>: <reason>` and skips the return trip. The take loop,
+    256 cap, snapshot update and return trip are unchanged.
+- `cb747654` fix (review wave):
+  - A withdraw is bound to its own trip. It takes only when the arrival's requested destination is that chest. Before
+    this, a Collect whose travel was refused (combat, cooldown) left its withdraw queued, and a later Go to a chest
+    within 8 blocks of the first one emptied the first one. The cooldown retry still collects, because it travels to
+    the same destination. A leftover action on any other trip is dropped with
+    `Post-arrival: <bot> withdraw dropped: trip to … is not the collect trip to …`. The owner gets no message, and
+    the bot doesn't read that chest's chunk.
+  - The whole arrival decision is pure: `checkArrival` → TAKE / WRONG_TRIP / NOT_A_CHEST / TOO_FAR / NOT_REGISTERED.
+  - An unknown collect request now tells the requester.
+  - `logSafe` cuts client strings to 40 characters and replaces control characters before they reach a WARN line.
+  - The reviewer's suggestion, "schedule only if travel started", was not taken. The cooldown gate returns false but
+    queues a retry, and that retry would have lost its withdraw.
+
+**Rulings (cost if wrong):**
+- The integrated-server host is allowed alongside owner and op. This follows the `configNetworkManager.canEditConfig`
+  precedent from 1.1.203: single-player with cheats off has no ops.json entry, so an un-owned bot's Collect would
+  otherwise die. Cost: a LAN host can drive a guest's bot from this screen.
+- The gate covers all four handlers, not only Collect: same check, same file. Cost: a non-op friend can no longer see or
+  act on another player's bot chests from the screen.
+- Un-owned bots are op/host only, stricter than `InventoryAccessPolicy.canOpen`. That keeps the 1.1.219 "nobody approves
+  for an un-owned bot" rule, and `resolveController` / `isAllowedToControl` are ruled out. Cost: a non-op can't use the
+  screen on an un-owned bot. Bots spawned by a player get that player as owner, so this is rare.
+- Records are validated by position membership, not `ChestRecord.ownerUuid`. Every pre-1.1.219 record has a null owner,
+  and matching on it would lock out every existing chest. Cost: none known; the records are per-bot already.
+- Quick Store / Quick Fetch keep a player-chosen target (by design: a walking, targeted action). They get the owner gate
+  only. Cost: an owner can still point their own bot at any container within 32 blocks.
+- Arrival uses a distance check, not `BlockInteractionService.canInteract`. The arrival spot can be 3 blocks sideways,
+  and a line-of-sight raycast would fail a chest inside a hut. Cost: a bot can take through one wall on its own
+  registered chest.
+- The screen stays owner-initiated and exempt from the supplies policy.
+
+**Deferred:**
+- On dimension fallback, the bot lands at Overworld spawn and a collect is dropped as a wrong trip. The owner still gets
+  the "arrived at Overworld spawn" line.
+- Ownership is not re-checked on arrival. An owner change during the few seconds of travel isn't caught.
+- After the End exit, vanilla respawns a bot as a plain `ServerPlayerEntity` (`createFakePlayer.teleportTo` :320 →
+  PERFORM_RESPAWN). Until the bot is recreated by fast-travel or rejoin, the owner gets "X is not a companion." This
+  fails closed, and all 78 existing `instanceof createFakePlayer` checks share the gap.
+- `IntegratedServer.isHost` matches by name, ignoring case. On an offline-mode LAN, a guest using the host's name passes
+  as host. `configNetworkManager` has the same gap, and offline mode already allows UUID spoofing.
+- `verifyChests` revives a record when any chest is placed back at its position, so a chest someone else puts there is
+  collectable by the bot. This is the existing registry design. The fix would be the owner-stamped records from
+  1.1.219, which pre-1.1.219 chests don't have.
+
+Tests 1242 → 1280.
+
+**Field checks:** Phase 6r in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
 ## Companion supplies Phase 2 (dormant adapter) + chat addressee rule fixes; 1.1.219 (2026-09-25)
 
 Two items in one build. **Supplies Phase 2** is the chest adapter and authorization store for

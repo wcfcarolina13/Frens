@@ -3,7 +3,53 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.219) — next session starts here
+## Session Handoff 2026-09-25 (1.1.220) — next session starts here
+
+**State:** main = origin/main @ 1.1.220. Suite 1280 green (1242 → 1280). One build, one item: a security fix. The work
+was done in a worktree branch and fast-forwarded into main.
+
+**Shipped in 1.1.220 — the Bot Storage screen is owner-only.** A read-only scoper found the hole and it was verified with
+file:line. Any multiplayer player could send the screen's payloads for ANY bot. Collect / Go fast-traveled that bot to
+coordinates the client chose, and on arrival it took up to 256 items from any container there. Refresh, Dismiss and
+Quick Store/Fetch had no owner check either.
+- Pure `ChestRegistryAccessPolicy` (authorize / checkTarget / parseMode / parseReturnTo / checkArrival / logSafe).
+- All four `ChestRegistryNetworkManager` handlers run one gate first: the bot must be a companion, and the requester its
+  owner, an op or the integrated-server host.
+- Collect and Go need a live record in that bot's own registry.
+- The arrival take is chest-only, within 8 blocks, a registry member, and only on the collect trip itself.
+- Details, rulings and deferrals are in `changelog.md`.
+
+**Rulings on Bradley's behalf (recorded with cost-if-wrong in the changelog):**
+- The host is allowed, following the 1.1.203 `canEditConfig` precedent.
+- The gate covers all four handlers.
+- Un-owned bots are op/host only, which is stricter than `InventoryAccessPolicy`.
+- Records are validated by position, not by `ownerUuid`.
+- Quick Fetch keeps a player-chosen target.
+- The arrival check uses distance, not a line-of-sight raycast.
+
+**Field checks pending:** Phase 6r (new; owner flows still work, and a second player is denied), plus 6b–6q. The checklist
+is now 199 items.
+
+**Deferred from 1.1.220:**
+- Ownership is not re-checked on arrival.
+- A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets "not a companion" until it is recreated.
+  This fails closed, and the mod's 78 other `instanceof` checks share it.
+- An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap.
+- `verifyChests` revives a record for any chest placed back at its position.
+- A dimension-fallback collect is dropped.
+
+**Next autonomous candidates:** unchanged from 1.1.219 below.
+1. Supplies Phase 3. Its withdrawal list includes the NavigationArtifactService withdraw branch, which is now
+   owner-gated and chest-only; keep it exempt as owner-initiated.
+2. Egress follow-ups.
+3. Addressee deferrals.
+
+**Needs Bradley:** guided field session (6b–6r); doorway rework decision; ACTION REQUESTS interview; Bob's TTS reference
+sample; whether to lower `OLLAMA_NUM_PARALLEL`.
+
+---
+
+## Session Handoff 2026-09-25 (1.1.219) — superseded
 
 **State:** main = origin/main @ 1.1.219 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1242 green (1122 → 1242). One build, two
 items. The work was done in a worktree branch and fast-forwarded into main.

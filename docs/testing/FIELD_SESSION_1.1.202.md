@@ -1,6 +1,6 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.219-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.220-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
@@ -950,6 +950,34 @@ nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, s
   - Claude watches for: `[supply] answer … result=NOT_FOUND` (or NOT_RUNNING_OR_INVALID) and
     `[supply] revoke … removed=false`; `[supply] started: 0 standing permission(s) restored` at world load.
   - Pass when: both reply with a plain sentence, nothing errors, nothing moves.
+
+## Phase 6r — Bot Storage screen is owner-only (1.1.220)
+
+1.1.220 closes a multiplayer hole in the Bot Storage screen: any player could use it on any bot. The owner's own use must
+still work exactly as before. Solo is enough for the first three items; the last one needs a second player (LAN).
+Before starting, have a bot that has placed at least one supply chest (it shows in Bot Storage).
+
+- [ ] **Collect still works for the owner (1.1.220)**
+  - Bradley does: bot inventory screen → Storage → pick a live chest → Collect, once with "stay" and once with "return
+    to player".
+  - Claude watches for: `Chest collect: … sending <bot> to chest at …`, then `Post-arrival: <bot> withdrew N items from
+    chest at …`. No `[chest-registry] denied`, no `[chest-registry] refused collect`, no `withdraw refused`.
+  - Pass when: the bot comes back with the chest's items, and the return trip happens for "return to player".
+- [ ] **Go and Dismiss still work for the owner (1.1.220)**
+  - Bradley does: Go on a live chest; later, Dismiss on a chest entry he no longer wants.
+  - Claude watches for: `Chest go: … sending <bot> to chest at …`; `Dismissed chest record for <bot> at …`.
+  - Pass when: the bot travels to the chest and takes nothing; the dismissed entry leaves the list after the refresh.
+- [ ] **Quick Store / Quick Fetch still work for the owner (1.1.220)**
+  - Bradley does: Actions → Store Here on a chest near the bot, then a Fetch from it.
+  - Claude watches for: `Quick deposit: <bot> deposited N items at …` and `Quick fetch: <bot> fetched N items at …`.
+  - Pass when: both move items, and no `[chest-registry] denied store` line appears.
+- [ ] **Another player can't use your bot's storage (1.1.220, needs a second player)**
+  - Bradley does: with a non-op friend on LAN, the friend opens their inventory view of Bradley's bot (if they can)
+    and tries Storage → Refresh, Collect, and Store Here.
+  - Claude watches for: `[chest-registry] denied request from <friend> for <bot>: DENY_NOT_OWNER`, and the
+    same line with `collect` / `store` for the others.
+  - Pass when: the friend sees "Only <bot>'s owner can do that." and gets no chest list; the bot doesn't move; nothing
+    leaves any chest.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
