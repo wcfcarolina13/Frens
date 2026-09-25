@@ -317,11 +317,16 @@ public final class SoulLocalDirector {
         // this reaction's line. Only scripted lanes respect the reservation; the scene's first
         // delivered line supersedes it and its ceiling bounds a lost release.
         SpeechFloorService.noteSpeech(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_PENDING);
-        runtime.submitGroupTurn(turn).thenAccept(submission -> {
+        runtime.submitGroupTurn(turn).whenComplete((submission, error) -> {
             // Same failure-refund rule as the banter director (review round, minor #1): a
             // MALFORMED generation must not burn the full 6–12 min window. Conditional replace
             // of exactly the value this fire wrote, so a deliberate re-arm meanwhile stands.
-            if (submission == SoulGroupConversationService.Submission.FAILED) {
+            // whenComplete, not thenAccept: an exceptional completion is treated like FAILED.
+            if (error != null) {
+                LOGGER.warn("[souls] local player={} routingId={} submission failed exceptionally: {}",
+                        playerId, routingId, error.toString());
+            }
+            if (error != null || submission == SoulGroupConversationService.Submission.FAILED) {
                 // Unconditional: no line of this scene will supersede the reservation. Map op
                 // only, safe on the provider worker that completes the future.
                 SpeechFloorService.releasePending(playerId);

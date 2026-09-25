@@ -72,4 +72,31 @@ class TorchHoldPolicyTest {
         }
         assertEquals(List.of(true, true, true, true, false, false, true, true), states);
     }
+
+    @Test
+    void slotToPersistKeepsCurrentWhenNotHolding() {
+        assertEquals(4, TorchHoldPolicy.slotToPersist(-1, -1, 4));
+        assertEquals(0, TorchHoldPolicy.slotToPersist(-1, -1, 0));
+    }
+
+    @Test
+    void slotToPersistReturnsPreTorchSlotWhileTheHeldTorchIsSelected() {
+        // Bot had slot 2 (a sword) selected; the service put the torch up in slot 6.
+        assertEquals(2, TorchHoldPolicy.slotToPersist(2, 6, 6));
+        assertEquals(0, TorchHoldPolicy.slotToPersist(0, 8, 8));
+    }
+
+    @Test
+    void slotToPersistLetsAForeignSelectionWinBeforeTheTickDropsTheHold() {
+        // Another service selected slot 1 in the few ticks before the hold's foreign-swap check.
+        assertEquals(1, TorchHoldPolicy.slotToPersist(2, 6, 1));
+        // Even when the foreign selection happens to be the pre-torch slot itself.
+        assertEquals(2, TorchHoldPolicy.slotToPersist(2, 6, 2));
+    }
+
+    @Test
+    void slotToPersistIgnoresAHalfRecordedHold() {
+        assertEquals(6, TorchHoldPolicy.slotToPersist(2, -1, 6));
+        assertEquals(6, TorchHoldPolicy.slotToPersist(-1, 6, 6));
+    }
 }

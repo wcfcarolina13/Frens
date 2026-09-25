@@ -58,8 +58,15 @@ public final class BotTorchHoldService {
     private static final double AUDIBLE_HOSTILE_RADIUS = 8.0D;
     private static final long EVAL_INTERVAL_TICKS = 5L;
 
-    /** Slot the bot had selected before we put the torch in hand. -1 = no override. */
-    private static final ConcurrentHashMap<UUID, Integer> SAVED_SELECTED_SLOT = new ConcurrentHashMap<>();
+    /**
+     * An active hold: the slot the bot had selected before we put the torch in hand, and the
+     * hotbar slot we put it up in. Kept as one value so a reader on another thread
+     * ({@link #slotToPersist}) sees both halves of the same hold.
+     */
+    private record Hold(int savedSlot, int torchSlot) {}
+
+    /** Active holds by bot. No entry = no override. */
+    private static final ConcurrentHashMap<UUID, Hold> SAVED_SELECTED_SLOT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_EVAL_TICK = new ConcurrentHashMap<>();
     /**
      * Last verdict line logged for a bot (verdict + gate + measured values).
@@ -94,7 +101,8 @@ public final class BotTorchHoldService {
 
         // Foreign-swap detection: if we recorded a saved slot, the torch slot
         // we put up better still be selected. If something else swapped, yield.
-        Integer savedSlot = SAVED_SELECTED_SLOT.get(id);
+        Hold hold = SAVED_SELECTED_SLOT.get(id);
+        Integer savedSlot = hold == null ? null : hold.savedSlot();
         int currentSlot = bot.getInventory().getSelectedSlot();
         if (savedSlot != null) {
             int torchSlot = findTorchHotbarSlot(bot);
@@ -124,16 +132,17 @@ public final class BotTorchHoldService {
             }
             if (currentSlot != torchSlot) {
                 if (savedSlot == null) {
-                    SAVED_SELECTED_SLOT.put(id, currentSlot);
+                    SAVED_SELECTED_SLOT.put(id, new Hold(currentSlot, torchSlot));
                 }
                 BotActions.selectHotbarSlot(bot, torchSlot);
             }
             // Report the slot we will yield back to (read fresh: the put above may have just
             // recorded it), not the slot that happened to be selected this tick.
-            Integer yieldTo = SAVED_SELECTED_SLOT.get(id);
+            Hold yieldTo = SAVED_SELECTED_SLOT.get(id);
             logVerdictIfChanged(bot, id, verdict,
                     String.format(" action=%s slot=%d savedSlot=%d",
-                            promoted ? "promoted+held" : "held", torchSlot, yieldTo == null ? -1 : yieldTo));
+                            promoted ? "promoted+held" : "held", torchSlot,
+                            yieldTo == null ? -1 : yieldTo.savedSlot()));
         } else if (savedSlot != null) {
             BotActions.selectHotbarSlot(bot, savedSlot);
             SAVED_SELECTED_SLOT.remove(id);
@@ -308,24 +317,37 @@ public final class BotTorchHoldService {
     }
 
     /**
+     * The selected slot a bot save should persist: the bot's own pre-torch slot while this
+     * service is holding a torch for it, otherwise {@code currentSelected}.
+     *
+     * <p>The selected slot is persisted by the Frens inventory snapshot
+     * ({@code BotInventoryStorageService}, {@code SelectedSlot}, which the restore applies over the
+     * vanilla {@code .dat}), while {@link #SAVED_SELECTED_SLOT} is memory-only — so a snapshot of
+     * the torch slot reloads with the torch in hand and no record of what to yield back to. This
+     * keeps the snapshot right without touching the entity, so it is safe from any save path,
+     * including the integrated-server DISCONNECT save that runs on a Netty IO thread.
+     *
+     * <p>Threading: one ConcurrentHashMap read, no entity or inventory access.
+     */
+    public static int slotToPersist(UUID botId, int currentSelected) {
+        Hold hold = botId == null ? null : SAVED_SELECTED_SLOT.get(botId);
+        if (hold == null) return currentSelected;
+        return TorchHoldPolicy.slotToPersist(hold.savedSlot(), hold.torchSlot(), currentSelected);
+    }
+
+    /**
      * Teardown: puts every bot's pre-torch slot back in hand, then clears all state.
      *
-     * <p>Must run BEFORE any bot save that can be the last one. The selected slot is persisted by
-     * both the Frens inventory snapshot ({@code BotInventoryStorageService}, {@code SelectedSlot})
-     * and the vanilla player {@code .dat}, while {@link #SAVED_SELECTED_SLOT} is memory-only — so a
-     * bot saved mid-hold reloads with the torch in hand and no record of what to yield back to,
-     * and never yields. Callers: SERVER_STOPPING before {@code BotPersistenceService.saveAll}
-     * (dedicated), and the integrated-server real-player DISCONNECT before
-     * {@code saveBotsBeforeShutdown} (the save that actually lands on a singleplayer quit).
+     * <p>Runs in SERVER_STOPPING before {@code BotPersistenceService.saveAll}, so the in-memory
+     * selection (also written to the vanilla {@code .dat}) is the bot's own slot again. Saves that
+     * can run elsewhere, off the server thread, rely on {@link #slotToPersist} instead.
      *
      * <p>Mirrors the tick's foreign-swap rule: a bot whose selected slot is no longer our torch
      * slot already belongs to another service and is left alone. Idempotent — a second call finds
      * the map empty. Each bot is isolated in a try/catch so a failure here can never skip the save
      * that follows it.
      *
-     * <p>Threading: mutates the selected hotbar slot. SERVER_STOPPING runs on the server thread;
-     * the integrated-server DISCONNECT has been observed on a Netty IO thread, where the
-     * surrounding pre-shutdown save already mutates bots (dismount) — see that call site.
+     * <p>Threading: mutates the selected hotbar slot — server thread only.
      */
     public static void yieldAll(MinecraftServer server) {
         if (server != null) {
@@ -335,7 +357,7 @@ public final class BotTorchHoldService {
                     if (bot == null || bot.isRemoved()) continue;
                     int torchSlot = findTorchHotbarSlot(bot);
                     if (torchSlot < 0 || bot.getInventory().getSelectedSlot() != torchSlot) continue;
-                    int savedSlot = entry.getValue();
+                    int savedSlot = entry.getValue().savedSlot();
                     BotActions.selectHotbarSlot(bot, savedSlot);
                     LOGGER.info("[torch-hold] {} action=yield-on-teardown slot={}",
                             bot.getName().getString(), savedSlot);

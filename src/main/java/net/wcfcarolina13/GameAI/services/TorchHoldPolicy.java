@@ -43,4 +43,23 @@ public final class TorchHoldPolicy {
     public static int lightThreshold(boolean holding) {
         return holding ? RELEASE_MAX_LIGHT : ACQUIRE_MAX_LIGHT;
     }
+
+    /**
+     * The hotbar slot a bot save should record as selected.
+     *
+     * <p>The torch-hold bookkeeping is memory-only while the selected slot is persisted, so a
+     * save taken mid-hold must record the bot's own pre-torch slot, not the torch. That applies
+     * only while the torch slot this service put up is still the selection; once anything else
+     * has selected another slot (the few ticks before the service notices a foreign swap), that
+     * selection wins.
+     *
+     * @param savedSlot       the slot selected before the torch went up, or -1 when not holding
+     * @param heldTorchSlot   the hotbar slot the torch was put up in, or -1 when not holding
+     * @param currentSelected the bot's selected slot right now
+     * @return {@code savedSlot} while the held torch slot is still selected, else {@code currentSelected}
+     */
+    public static int slotToPersist(int savedSlot, int heldTorchSlot, int currentSelected) {
+        boolean holding = savedSlot >= 0 && heldTorchSlot >= 0 && currentSelected == heldTorchSlot;
+        return holding ? savedSlot : currentSelected;
+    }
 }

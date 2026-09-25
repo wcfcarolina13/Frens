@@ -114,7 +114,10 @@ public final class BotInventoryStorageService {
         NbtCompound root = new NbtCompound();
         root.putString(KEY_ALIAS, bot.getGameProfile().name());
         root.putString(KEY_UUID, bot.getUuidAsString());
-        root.putInt(KEY_SELECTED_SLOT, inventory.getSelectedSlot());
+        // A torch the torch-hold service put up is persisted as the bot's own pre-torch slot: the
+        // hold bookkeeping is memory-only, so a torch slot saved here would never be yielded back.
+        root.putInt(KEY_SELECTED_SLOT,
+                BotTorchHoldService.slotToPersist(bot.getUuid(), inventory.getSelectedSlot()));
         root.put(KEY_INVENTORY, items);
         
         // Save player stats (health, hunger, XP)

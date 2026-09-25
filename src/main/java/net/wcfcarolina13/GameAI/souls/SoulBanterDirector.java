@@ -398,14 +398,20 @@ public final class SoulBanterDirector {
         // playback), the first delivered line supersedes it, and it is capped at
         // SCENE_PENDING_FLOOR_MS in case no release ever arrives.
         SpeechFloorService.noteSpeech(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_PENDING);
-        runtime.submitGroupTurn(turn).thenAccept(submission -> {
+        runtime.submitGroupTurn(turn).whenComplete((submission, error) -> {
             // 2026-08-29 field fix (+ review round): a fired scene arms the full 8–15 min
             // cooldown up front, so a generation that then FAILS (observed: 3B output rejected
             // as MALFORMED) used to cost the player the whole window for zero delivered lines.
             // Refund with a CONDITIONAL replace of exactly the value this fire wrote — a plain
             // min-merge would also shorten a cooldown deliberately re-armed by notePlayerScene
             // when a real player conversation started while this generation was in flight.
-            if (submission == SoulGroupConversationService.Submission.FAILED) {
+            // whenComplete, not thenAccept: an exceptionally completed future delivered no line
+            // either, and must release the reservation and refund just like FAILED.
+            if (error != null) {
+                LOGGER.warn("[souls] banter lane={} player={} routingId={} submission failed exceptionally: {}",
+                        lane, playerId, routingId, error.toString());
+            }
+            if (error != null || submission == SoulGroupConversationService.Submission.FAILED) {
                 // Unconditional, unlike the refund below: the refund can lose to a
                 // notePlayerScene re-arm, but no line of this scene will ever supersede the
                 // reservation, so it must be dropped either way. May run on a provider worker

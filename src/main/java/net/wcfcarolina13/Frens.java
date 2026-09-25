@@ -978,10 +978,9 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.TravelWaitService.cancel(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 // On a singleplayer quit THIS is the bot save that lands (SERVER_STOPPING's saveAll
-                // has been observed to find no bots), so torches must be put away here too. This
-                // handler has been observed on a Netty IO thread; yieldAll only re-selects a hotbar
-                // slot, matching the dismount the pre-shutdown save below already does here.
-                net.wcfcarolina13.GameAI.services.BotTorchHoldService.yieldAll(server);
+                // has been observed to find no bots). This handler runs on a Netty IO thread, so do
+                // NOT call BotTorchHoldService.yieldAll here (it re-selects hotbar slots, racing the
+                // torch tick): the snapshot already persists the pre-torch slot via slotToPersist.
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }
         });
