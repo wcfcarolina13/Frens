@@ -108,18 +108,24 @@ public final class SkillResumeService {
         notifyDecision(pending, true);
     }
 
-    public static void handleChat(ServerPlayerEntity sender, String message) {
+    /**
+     * Chat hook for the post-death "continue? (yes/no)" prompt.
+     *
+     * @return whether this line answered a pending prompt (the skill was resumed or stood down);
+     *     the caller still lets the line through to other chat handlers
+     */
+    public static boolean handleChat(ServerPlayerEntity sender, String message) {
         if (sender == null || message == null) {
-            return;
+            return false;
         }
         String normalized = message.trim().toLowerCase(Locale.ROOT);
         if (!normalized.equals("yes") && !normalized.equals("no")) {
-            return;
+            return false;
         }
         Object key = responderKey(sender.getCommandSource());
         PendingSkill pending = PENDING_BY_RESPONDER.get(key);
         if (pending == null) {
-            return;
+            return false;
         }
         if (normalized.equals("yes")) {
             resume(pending, false, sender.getCommandSource());
@@ -128,6 +134,7 @@ public final class SkillResumeService {
             notifyDecision(pending, false);
         }
         clear(pending.botUuid());
+        return true;
     }
 
     public static void requestAutoResume(ServerPlayerEntity bot) {

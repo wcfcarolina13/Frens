@@ -317,6 +317,30 @@ class SoulChatRouterTest {
     }
 
     @Test
+    void submittingADmToAnotherBotClosesTheOpenWindowBeforeItsReply() {
+        SoulConversationService conversationService = mock(SoulConversationService.class);
+        SoulRuntime runtime = runtimeWith(conversationService);
+        SoulTypes.AcceptedTurn first = acceptedTurn();
+        when(conversationService.submit(first))
+                .thenReturn(CompletableFuture.completedFuture(SoulConversationService.Submission.DELIVERED));
+        runtime.submitTurn(first).join();
+        assertEquals(first.key().botId(), SoulRuntime.dmFollowUp(first.key().playerId()).orElseThrow().botId());
+
+        SoulTypes.AcceptedTurn toOtherBot = new SoulTypes.AcceptedTurn(
+                new SoulTypes.ConversationKey(UUID.randomUUID(), first.key().playerId(), SoulTypes.Channel.DIRECT),
+                "Wren", "Player", "hi wren", "frens:wren", first.grounding(), Instant.now());
+        CompletableFuture<SoulConversationService.Submission> otherReply = new CompletableFuture<>();
+        when(conversationService.submit(toOtherBot)).thenReturn(otherReply);
+        runtime.submitTurn(toOtherBot);
+
+        assertTrue(SoulRuntime.dmFollowUp(first.key().playerId()).isEmpty(),
+                "the first bot's window closes at submit time, not when the other bot answers");
+        otherReply.complete(SoulConversationService.Submission.DELIVERED);
+        assertEquals(toOtherBot.key().botId(),
+                SoulRuntime.dmFollowUp(first.key().playerId()).orElseThrow().botId());
+    }
+
+    @Test
     void forgetPlayerClosesTheFollowUpWindow() {
         SoulConversationService conversationService = mock(SoulConversationService.class);
         runtimeWith(conversationService);

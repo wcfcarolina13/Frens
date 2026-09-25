@@ -251,10 +251,39 @@ class ChatAddressingTest {
     }
 
     @Test
-    void earlierSoftWordBeatsALaterBotName() {
+    void aBotNamedAnywhereBeatsAnEarlierSoftWord() {
+        // Soft words only apply to a line that names no bot: the ordinary name rules decide.
         ChatAddressing.Resolution r = resolved("everyone, Jake found iron", JAKE_AND_WREN);
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertFalse(r.broadcast());
+        assertFalse(r.softBroadcast());
+        assertEquals("everyone, Jake found iron", r.prompt());
+    }
+
+    @Test
+    void softGreetingBeforeABotNameAddressesThatBot() {
+        ChatAddressing.Resolution r = resolved("hey guys, Wren come here", JAKE_AND_WREN);
+        assertEquals(List.of(1), r.matchedNameIndices());
+        assertFalse(r.broadcast());
+        assertFalse(r.softBroadcast());
+        assertEquals("hey guys, Wren come here", r.prompt());
+        assertEquals(List.of(0), resolved("you two, can Jake dig here", JAKE_AND_WREN).matchedNameIndices());
+    }
+
+    @Test
+    void softLineWithoutABotNameStaysASoftBroadcast() {
+        ChatAddressing.Resolution r = resolved("hey guys follow me", JAKE_AND_WREN);
+        assertTrue(r.broadcast());
         assertTrue(r.softBroadcast());
         assertTrue(r.matchedNameIndices().isEmpty());
+        assertEquals("hey guys follow me", r.prompt());
+    }
+
+    @Test
+    void broadcastKeywordAfterASoftWordIsAHardBroadcast() {
+        ChatAddressing.Resolution r = resolved("morning guys, bots stack the logs", JAKE_AND_WREN);
+        assertTrue(r.broadcast());
+        assertFalse(r.softBroadcast());
     }
 
     @Test
@@ -340,6 +369,30 @@ class ChatAddressingTest {
     }
 
     @Test
+    void humanNamedLikeABroadcastKeywordNeedsATrailingCommaOrColon() {
+        ChatAddressing.Resolution allBots = resolved("all bots gather the wheat", JAKE_AND_WREN, List.of("All"));
+        assertFalse(allBots.otherAddressee());
+        assertTrue(allBots.broadcast());
+        assertFalse(allBots.softBroadcast());
+        ChatAddressing.Resolution bots = resolved("bots gather the wheat", JAKE_AND_WREN, List.of("Bots"));
+        assertFalse(bots.otherAddressee());
+        assertTrue(bots.broadcast());
+        assertTrue(resolved("Bots, gather the wheat", JAKE_AND_WREN, List.of("Bots")).otherAddressee());
+        assertTrue(resolved("all: gather the wheat", JAKE_AND_WREN, List.of("All")).otherAddressee());
+    }
+
+    @Test
+    void humanNamedLikeASoftWordNeedsATrailingCommaOrColon() {
+        for (String name : List.of("Everyone", "Everybody", "Yall", "Two", "Both")) {
+            assertTrue(ChatAddressing.HUMAN_NAME_STOPWORDS.contains(ChatAddressing.normalizeToken(name)), name);
+        }
+        ChatAddressing.Resolution r = resolved("everyone gather the wheat", JAKE_AND_WREN, List.of("Everyone"));
+        assertFalse(r.otherAddressee());
+        assertTrue(r.softBroadcast());
+        assertTrue(resolved("Everyone, gather the wheat", JAKE_AND_WREN, List.of("Everyone")).otherAddressee());
+    }
+
+    @Test
     void botNameWinsOverAnIdenticalHumanName() {
         ChatAddressing.Resolution r = resolved("Jake come here", JAKE_AND_WREN, List.of("Jake"));
         assertFalse(r.otherAddressee());
@@ -413,10 +466,36 @@ class ChatAddressingTest {
     }
 
     @Test
-    void unpunctuatedSecondNameAfterACommaStaysInThePrompt() {
+    void commaJoinedSecondNameJoinsTheRun() {
         ChatAddressing.Resolution r = resolved("Jake, Wren come here", JAKE_AND_WREN);
+        assertEquals(List.of(0, 1), r.matchedNameIndices());
+        assertEquals("come here", r.prompt());
+        assertEquals(List.of(0, 1), resolved("Jake , Wren come here", JAKE_AND_WREN).matchedNameIndices());
+        ChatAddressing.Resolution three = resolved("Jake, Wren, Oswin grab a pickaxe", List.of("Jake", "Wren", "Oswin"));
+        assertEquals(List.of(0, 1, 2), three.matchedNameIndices());
+        assertEquals("grab a pickaxe", three.prompt());
+    }
+
+    @Test
+    void commaJoinedNameFollowedByAClauseCueStaysInThePrompt() {
+        ChatAddressing.Resolution r = resolved("Jake, Wren said the furnace ran out", JAKE_AND_WREN);
         assertEquals(List.of(0), r.matchedNameIndices());
-        assertEquals("Wren come here", r.prompt());
+        assertEquals("Wren said the furnace ran out", r.prompt());
+        // Contracted cues are matched in normalized form.
+        ChatAddressing.Resolution contracted = resolved("Jake, Wren isn't back yet", JAKE_AND_WREN);
+        assertEquals(List.of(0), contracted.matchedNameIndices());
+        assertEquals("Wren isn't back yet", contracted.prompt());
+        for (String cue : List.of("told", "wants", "was", "didn't", "doesn't", "will", "can", "went", "never")) {
+            assertEquals(List.of(0), resolved("Jake, Wren " + cue + " x", JAKE_AND_WREN).matchedNameIndices(), cue);
+        }
+    }
+
+    @Test
+    void clauseCueDoesNotSplitAPunctuatedOrAndJoinedName() {
+        // A comma after the second name marks it as a vocative, not the subject of the cue.
+        assertEquals(List.of(0, 1), resolved("Jake, Wren, is it night yet", JAKE_AND_WREN).matchedNameIndices());
+        // "and" joins exactly as before.
+        assertEquals(List.of(0, 1), resolved("Jake and Wren said nothing", JAKE_AND_WREN).matchedNameIndices());
     }
 
     // === No-match and degenerate inputs ===

@@ -508,7 +508,7 @@ public final class SoulRuntime {
         noteThreadAnswered(turn.key().botId());
         boolean direct = turn.key().channel() == SoulTypes.Channel.DIRECT;
         if (direct) {
-            dmFollowUp.noteSubmitted(turn.key().playerId(), turn.routingId());
+            dmFollowUp.noteSubmitted(turn.key().playerId(), turn.key().botId(), turn.routingId());
         }
         CompletableFuture<SoulConversationService.Submission> outcome =
                 pipelineRef.get().conversationService().submit(turn);

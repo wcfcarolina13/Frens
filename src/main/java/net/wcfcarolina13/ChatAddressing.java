@@ -19,7 +19,8 @@ import java.util.Set;
  *
  * <p>Matching: tokens are normalized by stripping non-alphanumerics and lowercasing; the first
  * token that matches a broadcast keyword ({@code bots}, {@code allbots}, or the pair
- * {@code all bots}), a soft group address, or a registered bot name wins.
+ * {@code all bots}) or a registered bot name wins. Only a line with neither is scanned for a
+ * soft group address.
  *
  * <p>Prompt extraction (the leading-name quirk fix): when the matched token is
  * <em>leading</em> — every earlier token normalizes to empty, e.g. {@code "Jake come here"} or
@@ -30,9 +31,10 @@ import java.util.Set;
  * <ul>
  *   <li><b>Soft broadcast</b> — {@code everyone}, {@code everybody}, {@code yall}/{@code y'all},
  *       {@code guys} (unless a determiner such as "those"/"the" precedes it), {@code you two},
- *       {@code you both}. Reported with {@code broadcast} and {@code softBroadcast} both set; the
- *       caller decides whether to honour it (see {@link #shouldDemoteSoftBroadcast}). The explicit
- *       keywords stay hard broadcasts.</li>
+ *       {@code you both}. Applies only when the line names no bot and no broadcast keyword
+ *       ("hey guys, Jake come here" is for Jake). Reported with {@code broadcast} and
+ *       {@code softBroadcast} both set; the caller decides whether to honour it (see
+ *       {@link #shouldDemoteSoftBroadcast}). The explicit keywords stay hard broadcasts.</li>
  *   <li><b>Other addressee</b> — the leading token is another online human's name: the line is
  *       for them, not the bots ({@code otherAddressee}, no bot indices). A bot name always wins
  *       over a human name. Names of two characters or fewer, or on a small common-word list,
@@ -41,10 +43,12 @@ import java.util.Set;
  *   <li><b>Trailing vocative</b> — a non-leading first match loses to a different bot named by
  *       the last token when the token before it ends in a comma ("did Jake eat, Wren" → Wren).
  *       Leading names still win.</li>
- *   <li><b>Comma runs</b> — in a leading multi-name run, a name reached without "and" only
- *       joins the run when its own token ends in punctuation or it is the last meaningful token
- *       ("Jake, Wren, come here" and "Jake, Wren" both address two; "Jake Wren come here"
- *       addresses Jake only).</li>
+ *   <li><b>Comma runs</b> — in a leading multi-name run, a name reached with "and" or a comma
+ *       joins the run ("Jake and Wren come here", "Jake, Wren come here" and "Jake, Wren" all
+ *       address two), unless a comma-joined name is followed directly by a {@link #CLAUSE_CUES
+ *       clause cue} ("Jake, Wren said you took it" addresses Jake). A name reached with neither
+ *       joins only when its own token ends in punctuation or it is the last meaningful token
+ *       ("Jake Wren come here" addresses Jake only).</li>
  * </ul>
  */
 public final class ChatAddressing {
@@ -85,12 +89,25 @@ public final class ChatAddressing {
     /**
      * Common chat words that are also plausible usernames: a human with one of these names is
      * only treated as the addressee when the token carries a trailing {@code ,} or {@code :}.
+     * Includes the broadcast keywords and every soft-broadcast word, so a human called "All" or
+     * "Everyone" does not swallow "all bots follow me" or "everyone come here". Normalized forms.
      */
     static final Set<String> HUMAN_NAME_STOPWORDS = Set.of(
             "hey", "hi", "hello", "yo", "yes", "yeah", "yep", "nope", "okay", "lol", "lmao", "oh",
             "so", "well", "wait", "what", "why", "how", "who", "where", "when", "the", "and", "but",
             "you", "this", "that", "come", "stop", "help", "nice", "cool", "thanks", "bro", "dude",
-            "man", "guys", "hmm", "sure", "sorry", "please", "afk");
+            "man", "guys", "hmm", "sure", "sorry", "please", "afk",
+            "bots", "allbots", "all", "everyone", "everybody", "yall", "two", "both");
+
+    /**
+     * Tokens that, right after a comma-joined second name, make that name the subject of a new
+     * clause ("Jake, Wren said you took it") instead of a second addressee. Normalized forms
+     * (apostrophes stripped: "isn't" is {@code isnt}).
+     */
+    static final Set<String> CLAUSE_CUES = Set.of(
+            "said", "says", "told", "tells", "asked", "asks", "thinks", "thought", "wants", "wanted",
+            "is", "was", "isnt", "wasnt", "has", "had", "did", "does", "didnt", "doesnt", "will",
+            "would", "can", "could", "should", "went", "got", "just", "also", "always", "never");
 
     private ChatAddressing() {
     }
@@ -147,13 +164,20 @@ public final class ChatAddressing {
                 consumed = i + 1;
                 break;
             }
-            int softLength = softBroadcastLength(tokens, i, current);
-            if (softLength > 0) {
-                broadcast = true;
-                soft = true;
-                matchTokenIndex = i;
-                consumed = i + softLength;
-                break;
+        }
+        // Soft group words only count when the line names no bot and no broadcast keyword at all:
+        // "hey guys, Jake come here" is for Jake, decided by the ordinary name rules above.
+        if (consumed < 0) {
+            for (int i = 0; i < tokens.length; i++) {
+                String current = normalizeToken(tokens[i]);
+                int softLength = current.isEmpty() ? 0 : softBroadcastLength(tokens, i, current);
+                if (softLength > 0) {
+                    broadcast = true;
+                    soft = true;
+                    matchTokenIndex = i;
+                    consumed = i + softLength;
+                    break;
+                }
             }
         }
         if (consumed < 0) {
@@ -183,21 +207,26 @@ public final class ChatAddressing {
             indices.add(matchedNameIndex);
         }
         // Leading multi-name run: after "Jake", keep consuming ("and" | punctuation-only)* Name
-        // pairs — "Jake and Sara, ..." or "Jake, Sara, ..." address both bots. A connector that
-        // is not followed by a further bot name reverts entirely, so "Jake and I went mining"
-        // still routes only to Jake with the tail untouched. A name reached without "and" joins
-        // only when its token ends in punctuation or closes the line, so "Jake Wren come here"
-        // stays with Jake. Non-leading matches never extend: the full-message prompt rule already
+        // pairs — "Jake and Wren, ..." or "Jake, Wren come here" address both bots. A connector
+        // that is not followed by a further bot name reverts entirely, so "Jake and I went mining"
+        // still routes only to Jake with the tail untouched. A comma-joined name is left out when
+        // the very next token opens a new clause with it as the subject ("Jake, Wren said you took
+        // it" is for Jake about Wren). A name reached with neither "and" nor a comma joins only
+        // when its token ends in punctuation or closes the line, so "Jake Wren come here" stays
+        // with Jake. Non-leading matches never extend: the full-message prompt rule already
         // preserves every name for the single addressee.
         if (matchedNameIndex >= 0 && leading) {
             int cursor = consumed;
             while (cursor < tokens.length) {
                 int probe = cursor;
                 boolean viaAnd = false;
+                boolean viaComma = tokens[cursor - 1].endsWith(",");
                 String norm = normalizeToken(tokens[probe]);
                 while (probe < tokens.length && (norm.equals("and") || norm.isEmpty())) {
                     if (norm.equals("and")) {
                         viaAnd = true;
+                    } else if (tokens[probe].contains(",")) {
+                        viaComma = true;
                     }
                     probe++;
                     norm = probe < tokens.length ? normalizeToken(tokens[probe]) : "";
@@ -209,7 +238,7 @@ public final class ChatAddressing {
                 if (nameIdx < 0) {
                     break;
                 }
-                if (!viaAnd && !endsInPunctuation(tokens[probe]) && probe != lastMeaningful) {
+                if (!joinsRun(tokens, probe, lastMeaningful, viaAnd, viaComma)) {
                     break;
                 }
                 if (!indices.contains(nameIdx)) {
@@ -310,6 +339,21 @@ public final class ChatAddressing {
             }
         }
         return -1;
+    }
+
+    /**
+     * Whether the bot name at {@code nameToken}, reached from the previous run name, joins a
+     * leading multi-name run. "and" always joins; so does a name whose own token ends in
+     * punctuation ("Wren,") or that closes the line. A comma-joined name joins unless the token
+     * right after it is a {@link #CLAUSE_CUES clause cue} making it the subject of a new clause.
+     */
+    private static boolean joinsRun(String[] tokens, int nameToken, int lastMeaningful,
+                                    boolean viaAnd, boolean viaComma) {
+        if (viaAnd || endsInPunctuation(tokens[nameToken]) || nameToken == lastMeaningful) {
+            return true;
+        }
+        return viaComma && (nameToken + 1 >= tokens.length
+                || !CLAUSE_CUES.contains(normalizeToken(tokens[nameToken + 1])));
     }
 
     private static boolean endsInPunctuation(String token) {

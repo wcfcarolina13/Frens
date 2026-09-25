@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Locks in the DM follow-up window (addressee rule R1): opens only on a delivered reply to the
  * player's newest DM, refreshes on each later delivery, closes at its exact deadline, on
- * {@code close}, and never lets a slow reply to an older DM steal the window.
+ * {@code close} and when a DM to a different bot is submitted, and never lets a slow reply to an
+ * older DM steal the window.
  */
 class SoulDmFollowUpWindowTest {
 
@@ -23,22 +24,22 @@ class SoulDmFollowUpWindowTest {
     private final UUID jake = UUID.randomUUID();
     private final UUID wren = UUID.randomUUID();
 
-    private UUID submit() {
+    private UUID submit(UUID bot) {
         UUID routingId = UUID.randomUUID();
-        window.noteSubmitted(player, routingId);
+        window.noteSubmitted(player, bot, routingId);
         return routingId;
     }
 
     @Test
     void noWindowBeforeAnyDelivery() {
         assertTrue(window.current(player).isEmpty());
-        submit();
+        submit(jake);
         assertTrue(window.current(player).isEmpty(), "a submitted DM alone opens nothing");
     }
 
     @Test
     void deliveredReplyToTheNewestDmOpensTheWindow() {
-        UUID dm = submit();
+        UUID dm = submit(jake);
         assertTrue(window.noteDelivered(player, jake, dm));
         Optional<SoulDmFollowUpWindow.Open> open = window.current(player);
         assertTrue(open.isPresent());
@@ -54,14 +55,14 @@ class SoulDmFollowUpWindowTest {
 
     @Test
     void windowReportsItsAge() {
-        window.noteDelivered(player, jake, submit());
+        window.noteDelivered(player, jake, submit(jake));
         now.addAndGet(12_345L);
         assertEquals(12_345L, window.current(player).orElseThrow().ageMs());
     }
 
     @Test
     void windowClosesAtTheExactDeadline() {
-        window.noteDelivered(player, jake, submit());
+        window.noteDelivered(player, jake, submit(jake));
         now.addAndGet(SoulDmFollowUpWindow.WINDOW_MS - 1);
         assertTrue(window.current(player).isPresent(), "still open one millisecond before the deadline");
         now.addAndGet(1);
@@ -72,9 +73,9 @@ class SoulDmFollowUpWindowTest {
 
     @Test
     void laterDeliveryRefreshesTheDeadline() {
-        window.noteDelivered(player, jake, submit());
+        window.noteDelivered(player, jake, submit(jake));
         now.addAndGet(20_000L);
-        UUID followUp = submit();
+        UUID followUp = submit(jake);
         assertTrue(window.current(player).isPresent(), "a new submission keeps the open window");
         now.addAndGet(5_000L);
         assertTrue(window.noteDelivered(player, jake, followUp));
@@ -84,9 +85,9 @@ class SoulDmFollowUpWindowTest {
 
     @Test
     void pendingReplyReopensAWindowThatExpiredMeanwhile() {
-        window.noteDelivered(player, jake, submit());
+        window.noteDelivered(player, jake, submit(jake));
         now.addAndGet(25_000L);
-        UUID followUp = submit();
+        UUID followUp = submit(jake);
         now.addAndGet(10_000L);
         assertTrue(window.current(player).isEmpty());
         assertTrue(window.noteDelivered(player, jake, followUp));
@@ -95,8 +96,8 @@ class SoulDmFollowUpWindowTest {
 
     @Test
     void slowReplyToAnOlderDmNeverStealsTheWindow() {
-        UUID toJake = submit();
-        UUID toWren = submit();
+        UUID toJake = submit(jake);
+        UUID toWren = submit(wren);
         assertFalse(window.noteDelivered(player, jake, toJake), "Jake answers late: stale routing id");
         assertTrue(window.current(player).isEmpty());
         assertTrue(window.noteDelivered(player, wren, toWren));
@@ -106,23 +107,34 @@ class SoulDmFollowUpWindowTest {
     }
 
     @Test
-    void newerDmToAnotherBotBlocksTheOldBotsRefresh() {
-        UUID toJake = submit();
+    void newerDmToAnotherBotClosesTheWindowAtSubmitTime() {
+        UUID toJake = submit(jake);
         window.noteDelivered(player, jake, toJake);
-        UUID toWren = submit();
-        assertFalse(window.noteDelivered(player, jake, toJake));
-        assertEquals(jake, window.current(player).orElseThrow().botId(), "open window untouched");
-        window.noteDelivered(player, wren, toWren);
+        UUID toWren = submit(wren);
+        assertTrue(window.current(player).isEmpty(), "Jake's window closes when the DM to Wren is submitted");
+        assertFalse(window.noteDelivered(player, jake, toJake), "Jake's late refresh cannot reopen it");
+        assertTrue(window.current(player).isEmpty());
+        assertTrue(window.noteDelivered(player, wren, toWren));
         assertEquals(wren, window.current(player).orElseThrow().botId());
     }
 
     @Test
+    void newerDmToTheSameBotKeepsTheWindowOpenUntilItsReply() {
+        window.noteDelivered(player, jake, submit(jake));
+        now.addAndGet(3_000L);
+        submit(jake);
+        SoulDmFollowUpWindow.Open open = window.current(player).orElseThrow();
+        assertEquals(jake, open.botId());
+        assertEquals(3_000L, open.ageMs(), "the pending follow-up does not reset the age");
+    }
+
+    @Test
     void closeDropsTheWindowAndThePendingDm() {
-        UUID dm = submit();
+        UUID dm = submit(jake);
         window.noteDelivered(player, jake, dm);
         window.close(player);
         assertTrue(window.current(player).isEmpty());
-        UUID inFlight = submit();
+        UUID inFlight = submit(jake);
         window.close(player);
         assertFalse(window.noteDelivered(player, jake, inFlight),
                 "a reply still in flight at close time cannot reopen the window");
@@ -132,7 +144,7 @@ class SoulDmFollowUpWindowTest {
     @Test
     void playersAreIndependent() {
         UUID other = UUID.randomUUID();
-        window.noteDelivered(player, jake, submit());
+        window.noteDelivered(player, jake, submit(jake));
         assertTrue(window.current(other).isEmpty());
         window.close(other);
         assertTrue(window.current(player).isPresent());

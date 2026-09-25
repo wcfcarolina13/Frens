@@ -18,8 +18,9 @@ import java.util.function.LongSupplier;
  *
  * <p>Slow-reply guard: a reply opens the window only when its routing id is still the player's
  * newest submitted DM. With 4-16 s generations, a late reply from one bot must not steal the
- * window from a newer DM to another bot. {@link #close} forgets the pending id too, so a reply
- * still in flight when the player addresses someone else cannot reopen the window afterwards.
+ * window from a newer DM to another bot, and submitting that newer DM already closes the old
+ * bot's window. {@link #close} forgets the pending id too, so a reply still in flight when the
+ * player addresses someone else cannot reopen the window afterwards.
  *
  * <p>Expiry is exclusive: the window is open while {@code now < openedAt + WINDOW_MS} and closed
  * from the deadline itself onward.
@@ -59,13 +60,16 @@ public final class SoulDmFollowUpWindow {
     }
 
     /**
-     * Records {@code routingId} as the player's newest DM (called at submit time). An already
-     * open window stays open; only which reply may refresh it changes.
+     * Records {@code routingId}, a DM to {@code botId}, as the player's newest DM (called at submit
+     * time). An open window for the same bot stays open; an open window for a different bot closes
+     * now, since the player has moved on to another conversation (a whisper to Bob must not leave
+     * Jake's window catching lines until Bob's reply lands).
      */
-    public void noteSubmitted(UUID playerId, UUID routingId) {
+    public void noteSubmitted(UUID playerId, UUID botId, UUID routingId) {
         Objects.requireNonNull(playerId, "playerId");
+        Objects.requireNonNull(botId, "botId");
         Objects.requireNonNull(routingId, "routingId");
-        states.compute(playerId, (id, state) -> state == null
+        states.compute(playerId, (id, state) -> state == null || !botId.equals(state.botId())
                 ? new State(routingId, null, 0L, 0L)
                 : new State(routingId, state.botId(), state.openedAtMs(), state.expiresAtMs()));
     }

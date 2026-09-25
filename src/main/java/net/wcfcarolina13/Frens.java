@@ -1277,15 +1277,16 @@ public class Frens implements ModInitializer {
             // delayed by other heavier chat handlers (LLM, quest matcher, etc.).
             // Per-bot debouncing inside the service prevents duplicate triggers from
             // multiple players spamming or repeated messages.
+            boolean zzzTriggered = false;
             try {
-                net.wcfcarolina13.GameAI.services.BotZzzSleepService.handleChatTrigger(sender, raw);
+                zzzTriggered = net.wcfcarolina13.GameAI.services.BotZzzSleepService.handleChatTrigger(sender, raw);
             } catch (Throwable t) {
                 LOGGER.warn("zzz handler threw: {}", t.toString());
             }
 
             // Quest usability: allow a bare "quest"/"mission" ask to target the nearest bot.
             // This keeps the feature discoverable without requiring "<botname> quest".
-            tryHandleNearbyQuestAsk(sender, raw);
+            boolean nearbyQuestHandled = tryHandleNearbyQuestAsk(sender, raw);
 
             boolean consumed = false;
             if (OLLAMA4J_AVAILABLE) {
@@ -1305,7 +1306,7 @@ public class Frens implements ModInitializer {
             if (net.wcfcarolina13.GameAI.services.BotRespawnPromptService.handleChat(sender, raw)) {
                 return;
             }
-            SkillResumeService.handleChat(sender, raw);
+            boolean resumeAnswered = SkillResumeService.handleChat(sender, raw);
 
             // Banter quiet-window: any typed line (plain chat, DM turn, scene trigger) counts
             // as the player actively conversing.
@@ -1418,9 +1419,12 @@ public class Frens implements ModInitializer {
             }
 
             // DM follow-up window: a bot's soul DM reply was delivered to this player within the
-            // last 30 s, so an unaddressed line continues that conversation -- but only when the
-            // DM path would accept it silently; otherwise the line falls through unchanged.
-            if (tryRouteDmFollowUp(sender, raw)) {
+            // last 30 s, so an unaddressed line continues that conversation -- but only when no
+            // earlier handler already acted on the line (zzz, nearby quest, the skill-resume
+            // yes/no) and the DM path would accept it silently; otherwise the line falls through
+            // unchanged.
+            boolean earlierHandlerActed = zzzTriggered || nearbyQuestHandled || resumeAnswered;
+            if (!earlierHandlerActed && tryRouteDmFollowUp(sender, raw)) {
                 return;
             }
 
@@ -1433,22 +1437,23 @@ public class Frens implements ModInitializer {
         });
     }
 
-    private static void tryHandleNearbyQuestAsk(ServerPlayerEntity sender, String raw) {
+    /** Returns whether the nearest bot's quest service acted on this bare quest ask. */
+    private static boolean tryHandleNearbyQuestAsk(ServerPlayerEntity sender, String raw) {
         if (serverInstance == null || sender == null || sender.isRemoved()) {
-            return;
+            return false;
         }
         if (BotEventHandler.isRegisteredBot(sender)) {
-            return;
+            return false;
         }
         if (!looksLikeQuestAsk(raw)) {
-            return;
+            return false;
         }
 
         // If message already explicitly targets bots ("Jake quest", "bots quest"), normal routing
         // will handle it; a line addressed to another human is not for the bots at all.
         ChatTarget explicit = resolveChatTargets(raw, sender);
         if (!explicit.bots().isEmpty() || explicit.otherAddressee()) {
-            return;
+            return false;
         }
 
         // Route to nearest registered bot within a small radius.
@@ -1469,11 +1474,11 @@ public class Frens implements ModInitializer {
             }
         }
         if (nearest == null) {
-            return;
+            return false;
         }
 
         // Let the quest service decide if it should respond.
-        BotQuestService.tryHandleQuestPrompt(nearest, sender, raw);
+        return BotQuestService.tryHandleQuestPrompt(nearest, sender, raw);
     }
 
     private static boolean looksLikeQuestAsk(String raw) {
@@ -1606,7 +1611,8 @@ public class Frens implements ModInitializer {
 
     /**
      * Routes an unaddressed line through the sender's open DM follow-up window, when there is one,
-     * its bot is online and registered, and the soul DM path accepts the line silently.
+     * no other human is online (the line may be for them -- the same check that demotes a soft
+     * broadcast), its bot is online and registered, and the soul DM path accepts the line silently.
      */
     private static boolean tryRouteDmFollowUp(ServerPlayerEntity sender, String raw) {
         if (serverInstance == null || sender == null || raw == null || raw.isBlank()) {
@@ -1615,7 +1621,7 @@ public class Frens implements ModInitializer {
         try {
             java.util.Optional<net.wcfcarolina13.GameAI.souls.SoulDmFollowUpWindow.Open> window =
                     net.wcfcarolina13.GameAI.souls.SoulRuntime.dmFollowUp(sender.getUuid());
-            if (window.isEmpty()) {
+            if (window.isEmpty() || !otherOnlineHumanNames(sender).isEmpty()) {
                 return false;
             }
             ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(window.get().botId());
