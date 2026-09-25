@@ -63,6 +63,7 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
     private final java.util.concurrent.atomic.AtomicInteger activeSyntheses =
             new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean selfDisabled;
+    private volatile boolean closed;
 
     public SoulVoiceService(SoulVoiceSettings settings, SoulVoiceEngine engine, VoiceDelivery delivery) {
         this(settings, engine, delivery, () -> true);
@@ -116,6 +117,37 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
                 activeSyntheses.decrementAndGet();
             }
         });
+    }
+
+    /**
+     * Asks the engine to pre-warm the backend for each key (Piper: spawn the process that will
+     * serve that voice). Same enable gate as {@link #onSpoken}, plus not-closed. Deliberately
+     * bypasses the voice worker (its 4-slot queue belongs to real lines), is not counted in
+     * {@link #activeSyntheses()} (so it never holds the LoadGoverner floor or the scene budget),
+     * and never feeds the failure backoff. Never blocks: engines only enqueue.
+     *
+     * @return the keys the engine actually scheduled a warm-up for; empty when gated
+     */
+    public List<SoulTypes.VoiceKey> warm(java.util.Collection<SoulTypes.VoiceKey> keys) {
+        if (keys == null || keys.isEmpty() || closed || engine == null
+                || !settings.enabled() || !masterVoiceEnabled.getAsBoolean()
+                || !settings.valid() || !engineAlive()) {
+            return List.of();
+        }
+        List<SoulTypes.VoiceKey> scheduled = new java.util.ArrayList<>(keys.size());
+        for (SoulTypes.VoiceKey key : keys) {
+            if (key == null) {
+                continue;
+            }
+            try {
+                if (engine.warm(key)) {
+                    scheduled.add(key);
+                }
+            } catch (RuntimeException ex) {
+                LOGGER.debug("[souls] tts prewarm rejected for {}: {}", key, ex.toString());
+            }
+        }
+        return scheduled;
     }
 
     /** Number of synthesis renders currently running (0 or 1; the worker is single-threaded). */
@@ -292,6 +324,7 @@ public final class SoulVoiceService implements SoulConversationService.SpokenLis
         if (this == DISABLED) {
             return;
         }
+        closed = true;
         worker.shutdownNow();
         if (engine != null) {
             engine.close();

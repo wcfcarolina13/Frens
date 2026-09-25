@@ -209,4 +209,128 @@ class SoulVoiceServiceTest {
         Thread.sleep(200);
         service.close();
     }
+
+    /** Fake engine that records warm calls (and the thread they ran on) and can block synthesis. */
+    private static final class WarmRecordingEngine implements SoulVoiceEngine {
+        final CopyOnWriteArrayList<SoulTypes.VoiceKey> warmed = new CopyOnWriteArrayList<>();
+        final CopyOnWriteArrayList<String> warmThreads = new CopyOnWriteArrayList<>();
+        final java.util.concurrent.atomic.AtomicInteger synthCalls = new java.util.concurrent.atomic.AtomicInteger();
+        final CompletableFuture<byte[]> synthGate = new CompletableFuture<>();
+        boolean accept = true;
+
+        @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+            synthCalls.incrementAndGet();
+            return synthGate;
+        }
+        @Override public boolean warm(SoulTypes.VoiceKey key) {
+            warmed.add(key);
+            warmThreads.add(Thread.currentThread().getName());
+            return accept;
+        }
+        @Override public boolean alive() { return true; }
+        @Override public void close() { }
+    }
+
+    @Test
+    void warmGoesStraightToTheEngineBypassingTheWorkerAndTheSynthesisCount() throws Exception {
+        WarmRecordingEngine engine = new WarmRecordingEngine();
+        SoulVoiceService service = new SoulVoiceService(enabledSettings(), engine,
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { });
+
+        // Occupy the single worker with a render blocked inside the engine, then fill its
+        // 4-slot queue: a warm routed through the worker could not run now.
+        service.synthesizeLine("frens:jake", "A scene line that blocks the worker.");
+        long deadline = System.currentTimeMillis() + 2_000L;
+        while (service.activeSyntheses() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, service.activeSyntheses());
+        for (int i = 0; i < 4; i++) {
+            service.synthesizeLine("frens:jake", "A queued scene line number " + i + ".");
+        }
+
+        List<SoulTypes.VoiceKey> keys = List.of(new SoulTypes.VoiceKey("Jake", "frens:jake"),
+                new SoulTypes.VoiceKey("Bob", "frens:bob"));
+        List<SoulTypes.VoiceKey> scheduled = service.warm(keys);
+
+        assertEquals(keys, scheduled);
+        assertEquals(keys, engine.warmed);
+        assertTrue(engine.warmThreads.stream().noneMatch("frens-soul-voice"::equals),
+                "warm must not run on the voice worker");
+        assertEquals(1, service.activeSyntheses(), "warm is not a synthesis");
+        assertEquals(1, engine.synthCalls.get(), "warm never synthesizes");
+        assertTrue(service.engineAlive(), "warm never feeds the failure backoff");
+
+        engine.synthGate.complete(tinyWav(new byte[2]));
+        service.close();
+    }
+
+    @Test
+    void warmIsANoOpWhenVoiceIsDisabledMutedOrClosed() {
+        List<SoulTypes.VoiceKey> keys = List.of(new SoulTypes.VoiceKey("Jake", "frens:jake"));
+        SoulVoiceService.VoiceDelivery noDelivery =
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { };
+
+        assertTrue(SoulVoiceService.disabled().warm(keys).isEmpty());
+
+        WarmRecordingEngine offEngine = new WarmRecordingEngine();
+        SoulVoiceSettings off = new SoulVoiceSettings(false, true, "", SoulVoiceSettings.ENGINE_PIPER,
+                "/bin/piper", "/voices/jake.onnx", "", "", "", "", "charles", 400, 8000L, 0.6f);
+        SoulVoiceService disabledBySettings = new SoulVoiceService(off, offEngine, noDelivery);
+        assertTrue(disabledBySettings.warm(keys).isEmpty());
+        disabledBySettings.close();
+
+        WarmRecordingEngine mutedEngine = new WarmRecordingEngine();
+        SoulVoiceService muted = new SoulVoiceService(enabledSettings(), mutedEngine, noDelivery, () -> false);
+        assertTrue(muted.warm(keys).isEmpty());
+        muted.close();
+
+        WarmRecordingEngine closedEngine = new WarmRecordingEngine();
+        SoulVoiceService closed = new SoulVoiceService(enabledSettings(), closedEngine, noDelivery);
+        closed.close();
+        assertTrue(closed.warm(keys).isEmpty());
+
+        assertTrue(offEngine.warmed.isEmpty());
+        assertTrue(mutedEngine.warmed.isEmpty());
+        assertTrue(closedEngine.warmed.isEmpty());
+    }
+
+    @Test
+    void warmReportsOnlyKeysTheEngineScheduledAndSwallowsEngineErrors() {
+        SoulVoiceService.VoiceDelivery noDelivery =
+                (playerId, correlationId, botId, mode, sampleRate, chunks, groupId, segmentIndex) -> { };
+        List<SoulTypes.VoiceKey> keys = List.of(new SoulTypes.VoiceKey("Jake", "frens:jake"));
+
+        // An engine without a warm path (Pocket/Dreamsleeve keep the default) schedules nothing.
+        SoulVoiceService noWarmPath = new SoulVoiceService(enabledSettings(), new SoulVoiceEngine() {
+            @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+                return CompletableFuture.completedFuture(tinyWav(new byte[2]));
+            }
+            @Override public boolean alive() { return true; }
+            @Override public void close() { }
+        }, noDelivery);
+        assertTrue(noWarmPath.warm(keys).isEmpty());
+        noWarmPath.close();
+
+        WarmRecordingEngine declining = new WarmRecordingEngine();
+        declining.accept = false;
+        SoulVoiceService declined = new SoulVoiceService(enabledSettings(), declining, noDelivery);
+        assertTrue(declined.warm(keys).isEmpty());
+        assertEquals(keys, declining.warmed);
+        declined.close();
+
+        SoulVoiceService throwing = new SoulVoiceService(enabledSettings(), new SoulVoiceEngine() {
+            @Override public CompletableFuture<byte[]> synthesize(String text, String voiceId) {
+                return CompletableFuture.completedFuture(tinyWav(new byte[2]));
+            }
+            @Override public boolean warm(SoulTypes.VoiceKey key) {
+                throw new IllegalStateException("warm exploded");
+            }
+            @Override public boolean alive() { return true; }
+            @Override public void close() { }
+        }, noDelivery);
+        assertTrue(throwing.warm(keys).isEmpty());
+        assertTrue(throwing.engineAlive());
+        throwing.close();
+    }
 }

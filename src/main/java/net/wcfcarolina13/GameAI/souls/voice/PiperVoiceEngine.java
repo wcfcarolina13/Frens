@@ -67,6 +67,8 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         final String model;
         final int speaker;
         final Path outDir;
+        /** Set once, just before the first spawn attempt; never cleared by {@link #killProcess}. */
+        boolean startAttempted;
         Process process;
         Writer stdin;
         BufferedReader stdout;
@@ -195,6 +197,41 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         return result;
     }
 
+    /**
+     * Pre-spawns the Piper process that will serve {@code key}, so the model is already loaded
+     * when the first scene line arrives (field 1.1.216: the lazy spawn cost ~1.3 s on line 1).
+     * Enqueues on the engine thread and returns at once; the caller's thread never touches a
+     * process. Warm only ever starts a process that has never been started: once a spawn has
+     * been attempted (by warm or by synthesis), restarts belong to the synthesis path and the
+     * service's backoff ladder, so a crashed or missing binary is never respawned from here.
+     */
+    @Override
+    public boolean warm(SoulTypes.VoiceKey key) {
+        if (closed) {
+            return false;
+        }
+        SoulTypes.VoiceKey voiceKey = key == null ? new SoulTypes.VoiceKey("", "") : key;
+        try {
+            engineThread.submit(() -> {
+                if (closed) {
+                    return;
+                }
+                try {
+                    PiperProcess proc = processFor(voiceKey);
+                    if (proc.startAttempted) {
+                        return;
+                    }
+                    ensureProcess(proc);
+                } catch (Exception ex) {
+                    LOGGER.debug("[souls] tts prewarm skipped for {}: {}", voiceKey, ex.toString());
+                }
+            });
+            return true;
+        } catch (RejectedExecutionException ex) {
+            return false;
+        }
+    }
+
     /** Engine thread: pick (or create the bookkeeping for) the process serving this voice. */
     private PiperProcess processFor(SoulTypes.VoiceKey key) throws IOException {
         SoulTypes.VoiceSpec spec;
@@ -254,6 +291,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         ProcessBuilder builder = new ProcessBuilder(command(binary, proc.model, proc.speaker, proc.outDir.toString()));
         builder.redirectErrorStream(false);
         applyLibraryPathEnv(builder, binary);
+        proc.startAttempted = true;
         proc.process = builder.start();
         proc.stdin = new java.io.OutputStreamWriter(proc.process.getOutputStream(), StandardCharsets.UTF_8);
         proc.stdout = new BufferedReader(new InputStreamReader(proc.process.getInputStream(), StandardCharsets.UTF_8));

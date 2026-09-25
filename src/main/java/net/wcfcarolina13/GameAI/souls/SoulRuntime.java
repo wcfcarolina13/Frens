@@ -607,6 +607,7 @@ public final class SoulRuntime {
             director.tick();
         }
         runtime.migrateLegacyBindings(server);
+        runtime.prewarmVoices(server);
         SoulLocalDirector local = runtime.localDirector;
         if (local != null) {
             local.tick();
@@ -1332,6 +1333,60 @@ public final class SoulRuntime {
                     LOGGER.info("[souls] rebound {} from frens:jake to its own profile {}", name, own.get());
                 }
             });
+        }
+    }
+
+    /** Server-thread only: voice keys already handed to {@link #prewarmedFor}'s engine. */
+    private final java.util.Set<SoulTypes.VoiceKey> prewarmedVoices = new HashSet<>();
+    /** The voice service {@link #prewarmedVoices} belongs to; a replaced service starts empty. */
+    private SoulVoiceService prewarmedFor;
+    private long prewarmTick;
+
+    /**
+     * TTS pre-warm sweep (1.1.217), every 100 ticks on the server thread: asks the current voice
+     * service to start the engine for every online bot with an active soul profile, so the first
+     * scene line does not pay the cold start (field 1.1.216: ~1.3 s on line 1). This thread only
+     * reads bot names and cached soul state, then enqueues; the engine spawns processes on its
+     * own thread. Keys are remembered per voice-service instance — a retained service (model-only
+     * reload) stays warm, a rebuilt one is warmed afresh. Runs on the half-interval so a legacy
+     * rebinding from {@link #migrateLegacyBindings} has landed before its key is computed.
+     */
+    void prewarmVoices(MinecraftServer server) {
+        if (++prewarmTick % 100 != 50 || server == null || stopped || !isReady()
+                || !isConversationEnabled()) {
+            return;
+        }
+        try {
+            SoulVoiceService voice = pipelineRef.get().voice();
+            if (voice != prewarmedFor) {
+                prewarmedVoices.clear();
+                prewarmedFor = voice;
+            }
+            if (!voice.engineAlive()) {
+                return;
+            }
+            List<VoicePrewarmPolicy.Candidate> candidates = new ArrayList<>();
+            for (net.minecraft.server.network.ServerPlayerEntity bot
+                    : net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(server)) {
+                if (bot == null) {
+                    continue;
+                }
+                UUID botId = bot.getUuid();
+                candidates.add(new VoicePrewarmPolicy.Candidate(bot.getName().getString(),
+                        cachedState(botId).map(SoulTypes.SoulState::profileId).orElse(""),
+                        !bot.isRemoved(), hasActiveProfile(botId)));
+            }
+            List<SoulTypes.VoiceKey> keys = VoicePrewarmPolicy.select(candidates, prewarmedVoices);
+            if (keys.isEmpty()) {
+                return;
+            }
+            List<SoulTypes.VoiceKey> scheduled = voice.warm(keys);
+            if (!scheduled.isEmpty()) {
+                prewarmedVoices.addAll(scheduled);
+                LOGGER.info("[souls] tts prewarm voices={} keys={}", scheduled.size(), scheduled);
+            }
+        } catch (RuntimeException ex) {
+            LOGGER.debug("[souls] tts prewarm sweep failed: {}", ex.toString());
         }
     }
 

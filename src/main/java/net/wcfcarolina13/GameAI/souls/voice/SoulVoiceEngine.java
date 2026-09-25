@@ -15,6 +15,16 @@ public interface SoulVoiceEngine extends AutoCloseable {
         return synthesize(text, key == null ? "" : key.profileId());
     }
 
+    /**
+     * Pre-warm hook: start whatever backend resource would serve {@code key} so the first real
+     * line does not pay a cold start. Must never block the caller and never throw; returns
+     * {@code true} only when a warm-up was actually scheduled. Engines without a warm path keep
+     * this default no-op.
+     */
+    default boolean warm(net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceKey key) {
+        return false;
+    }
+
     boolean alive();
 
     @Override
