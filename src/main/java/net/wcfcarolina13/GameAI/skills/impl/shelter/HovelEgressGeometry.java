@@ -36,6 +36,9 @@ final class HovelEgressGeometry {
     /** How far past the door the preferred exit sits. Equals PERIMETER_RING_OFFSET, so it lands on the ring. */
     static final int EXIT_DISTANCE = 2;
 
+    /** How far off the door axis a fallback exit cell may be. */
+    static final int EXIT_MAX_LATERAL = 2;
+
     private HovelEgressGeometry() {
     }
 
@@ -124,13 +127,17 @@ final class HovelEgressGeometry {
     }
 
     /**
-     * Fallback filter for the exit waypoint: strictly in front of the door wall (at least one cell past
-     * it along the normal). A cell around the corner would make the door-to-exit leg clip the wall.
+     * Fallback filter for the exit waypoint: in front of the door wall (at least one cell past it along the
+     * normal) and within {@link #EXIT_MAX_LATERAL} of the door axis. A cell around the corner, or far along
+     * the wall face, would make the door-to-exit leg run sideways into the wall beside the doorway.
      */
     static boolean isInFrontOfDoor(int x, int z, int centerX, int centerZ, int radius, int normalX, int normalZ) {
         requireCardinal(normalX, normalZ);
-        int alongNormal = (x - centerX) * normalX + (z - centerZ) * normalZ;
-        return alongNormal >= Math.max(1, radius) + 1;
+        int dx = x - centerX;
+        int dz = z - centerZ;
+        int alongNormal = dx * normalX + dz * normalZ;
+        int lateral = dx * -normalZ + dz * normalX;
+        return alongNormal >= Math.max(1, radius) + 1 && Math.abs(lateral) <= EXIT_MAX_LATERAL;
     }
 
     /** Vertical offsets to try at a fixed column, nearest first, downward before upward: 0, -1, +1, -2, +2... */

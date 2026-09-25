@@ -239,8 +239,12 @@ class HovelEgressGeometryTest {
     void inFrontOfDoorExcludesCellsAroundTheCorner() {
         int r = 3;
         // East door.
-        assertTrue(HovelEgressGeometry.isInFrontOfDoor(CX + 4, CZ + 3, CX, CZ, r, 1, 0));
-        assertTrue(HovelEgressGeometry.isInFrontOfDoor(CX + 6, CZ - 5, CX, CZ, r, 1, 0));
+        assertTrue(HovelEgressGeometry.isInFrontOfDoor(CX + 4, CZ, CX, CZ, r, 1, 0));
+        assertTrue(HovelEgressGeometry.isInFrontOfDoor(CX + 5, CZ + 2, CX, CZ, r, 1, 0));
+        assertTrue(HovelEgressGeometry.isInFrontOfDoor(CX + 7, CZ - 2, CX, CZ, r, 1, 0));
+        assertFalse(HovelEgressGeometry.isInFrontOfDoor(CX + 5, CZ + 4, CX, CZ, r, 1, 0),
+                "too far along the wall face: the door-to-exit leg would run sideways into the wall");
+        assertFalse(HovelEgressGeometry.isInFrontOfDoor(CX + 4, CZ - 6, CX, CZ, r, 1, 0));
         assertFalse(HovelEgressGeometry.isInFrontOfDoor(CX + 3, CZ + 4, CX, CZ, r, 1, 0),
                 "outside, but beside the door wall rather than in front of it");
         assertFalse(HovelEgressGeometry.isInFrontOfDoor(CX + 3, CZ, CX, CZ, r, 1, 0), "the doorway itself");
