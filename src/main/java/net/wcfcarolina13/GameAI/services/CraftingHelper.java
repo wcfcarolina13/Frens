@@ -2,7 +2,9 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ChestBlock;
 import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.inventory.Inventory;
@@ -27,6 +29,7 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
@@ -46,13 +49,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 /**
  * Minimal crafting helper focused on basic block crafts (starting with crafting tables).
@@ -117,11 +116,16 @@ public final class CraftingHelper {
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_CRAFT_COOLDOWN_MS = 60_000L;
 
-    // Chest pulls (withdrawFromNearbyChests). A pull that asked and got nothing pauses that
+    // Chest pulls (withdrawFromNearbyChests). A pull that met a refusal and got nothing pauses that
     // material for the bot (CraftChestPullPolicy.PAUSE_MS), keyed "<bot uuid>|<material>".
+    // Neither map is cleared at server stop (this class has no lifecycle hook): both are hints with
+    // wall-clock deadlines — a pause ends after PAUSE_MS, a held ticket is forgotten after the
+    // facade's ticket lifetime — and at most one entry per bot (per material for pauses).
     private static final Map<String, Long> CHEST_PULL_PAUSED_UNTIL = new ConcurrentHashMap<>();
-    // The chest and item a bot's unanswered supply prompt is about: the facade keeps one ticket per
-    // bot and only an ask for that same chest and item redeems it, so the next pull asks it first.
+    // The chest and item a bot's open supply ticket is about (a prompt not yet answered, or a yes
+    // the bot has not reached yet). While the prompt is open the facade answers an ask about
+    // anything else with OTHER_REQUEST_PENDING, and a yes lapses unspent after its grant lifetime,
+    // so the next pull asks this chest and item first.
     private static final Map<UUID, PendingPull> CHEST_PULL_PENDING = new ConcurrentHashMap<>();
     // How long a worker waits for the server thread to list chest stacks before pulling nothing.
     private static final long CHEST_PULL_SCAN_HOP_MS = 2_500L;
@@ -2944,13 +2948,18 @@ public final class CraftingHelper {
     }
 
     /**
-     * A chest stack worth asking for: the chest half it was seen in, a one-item copy of it, and
-     * how many of that exact item the half held when listed.
+     * A chest stack worth asking for: the chest half it was seen in, the other half of a double
+     * chest ({@code null} for a single chest), a one-item copy of the stack, and how many of that
+     * exact item the half held when listed.
      */
-    private record PullCandidate(BlockPos chestPos, ItemStack sample, int count) {
+    private record PullCandidate(BlockPos chestPos, BlockPos otherHalf, ItemStack sample, int count) {
+        /** Whether this stack sits in the chest at {@code pos}, either half of it. */
+        boolean isInChest(BlockPos pos) {
+            return pos != null && (pos.equals(chestPos) || pos.equals(otherHalf));
+        }
     }
 
-    /** The chest and item a bot's unanswered supply prompt is about, and when it was first seen waiting. */
+    /** The chest and item a bot's open supply ticket is about, and when it was first held. */
     private record PendingPull(BlockPos chestPos, ItemStack sample, long sinceMs) {
     }
 
@@ -2959,13 +2968,15 @@ public final class CraftingHelper {
      * through {@link SupplyWithdrawals}: the owner is asked unless a standing permission covers the
      * chest, and an item the supply policy never grants is refused without asking. Returns how many
      * moved. Every ask uses {@link SupplyWithdrawals.WaitMode#NONE}, so nothing here ever waits on
-     * the owner; an unanswered prompt leaves a ticket that the next pull redeems (it asks that chest
-     * and item first).
+     * the owner; an unanswered prompt, or a yes the bot could not reach, leaves a ticket that the
+     * next pull redeems (it asks that chest and item first).
      *
      * <p>Runs on the caller's thread. On the server thread it asks only chests already within
-     * reach and never walks. Off it, per chest stack: ask (a refusal skips it, no walk), walk, ask
-     * again. Chest stacks are listed on the server thread either way. What each answer does next,
-     * and when a pull pauses its material for the bot, is {@link CraftChestPullPolicy}.
+     * reach and never walks. Off it, per chest stack: ask, and only when the answer is permitted but
+     * out of reach walk there and ask again (a refusal or an open prompt never walks). Chest stacks
+     * are listed on the server thread either way (through {@link SupplyServerHop}). What each answer
+     * does next — by its refusal scope, never its reason text — and when a pull pauses its material
+     * for the bot, is {@link CraftChestPullPolicy}.
      *
      * @param material a short label for the pause key and the facade's log purpose, e.g. {@code "planks"}
      */
@@ -2993,7 +3004,8 @@ public final class CraftingHelper {
         boolean onServerThread = server.isOnThread();
         List<PullCandidate> candidates = onServerThread
                 ? findPullCandidates(world, bot, match, true)
-                : callOnServer(server, () -> findPullCandidates(world, bot, match, false), List.of());
+                : SupplyServerHop.call(server, () -> findPullCandidates(world, bot, match, false),
+                        CHEST_PULL_SCAN_HOP_MS, List.of());
 
         PendingPull pending = CHEST_PULL_PENDING.get(botId);
         if (pending != null && System.currentTimeMillis() - pending.sinceMs()
@@ -3001,7 +3013,7 @@ public final class CraftingHelper {
             CHEST_PULL_PENDING.remove(botId, pending);
             pending = null;
         }
-        // Asked first when listed; forgotten once asked unless it is still waiting (below).
+        // Asked first when listed; forgotten once that ask settles it, unless it holds again (below).
         boolean pendingListed = false;
         if (pending != null && match.test(pending.sample())) {
             List<PullCandidate> reordered = askedFirst(candidates, pending);
@@ -3013,7 +3025,8 @@ public final class CraftingHelper {
 
         String purpose = "craft-" + material;
         int moved = 0;
-        boolean askedLoudly = false;
+        boolean metRefusal = false;
+        boolean pendingSettled = false;
         PullCandidate waitingOn = null;
         List<ItemStack> neverGranted = new ArrayList<>();
         Set<BlockPos> skippedChests = new HashSet<>();
@@ -3027,25 +3040,33 @@ public final class CraftingHelper {
             int want = desired - moved;
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(),
                     candidate.sample(), want, want, purpose, SupplyWithdrawals.WaitMode.NONE, null);
-            askedLoudly |= CraftChestPullPolicy.isLoud(result.kind(), result.reason());
-            CraftChestPullPolicy.Next next = CraftChestPullPolicy.afterAsk(result.kind(), result.reason(),
+            metRefusal |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+            CraftChestPullPolicy.Next next = CraftChestPullPolicy.afterAsk(result.kind(), result.scope(),
                     onServerThread);
             if (next == CraftChestPullPolicy.Next.WALK) {
-                // Off the server thread only; the second ask checks reach itself.
+                // Off the server thread only, and only for a permitted ticket; the second ask checks reach itself.
                 moveNearBlock(bot, source, candidate.chestPos(), STATION_REACH_SQ);
                 result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(), candidate.sample(), want, want,
                         purpose, SupplyWithdrawals.WaitMode.NONE, null);
-                askedLoudly |= CraftChestPullPolicy.isLoud(result.kind(), result.reason());
-                next = CraftChestPullPolicy.afterWalk(result.kind(), result.reason());
+                metRefusal |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+                next = CraftChestPullPolicy.afterWalk(result.kind(), result.scope());
             }
             if (result.kind() == SupplyWithdrawals.Kind.MOVED) {
                 moved += result.moved();
             }
+            if (pendingListed && isSamePull(pending, candidate)
+                    && CraftChestPullPolicy.settlesHeldTicket(result.kind(), result.scope())) {
+                pendingSettled = true;
+            }
             if (next == CraftChestPullPolicy.Next.SKIP_ITEM) {
                 neverGranted.add(candidate.sample());
             } else if (next == CraftChestPullPolicy.Next.SKIP_CHEST) {
+                // A double chest is one chest to the facade: its other half would answer the same.
                 skippedChests.add(candidate.chestPos());
-            } else if (next == CraftChestPullPolicy.Next.STOP_WAITING) {
+                if (candidate.otherHalf() != null) {
+                    skippedChests.add(candidate.otherHalf());
+                }
+            } else if (next == CraftChestPullPolicy.Next.HOLD) {
                 waitingOn = candidate;
                 break;
             } else if (next == CraftChestPullPolicy.Next.STOP) {
@@ -3058,10 +3079,14 @@ public final class CraftingHelper {
                 CHEST_PULL_PENDING.put(botId,
                         new PendingPull(waitingOn.chestPos(), waitingOn.sample(), System.currentTimeMillis()));
             }
-        } else if (pendingListed) {
+        } else if (pendingSettled) {
             CHEST_PULL_PENDING.remove(botId, pending);
         }
-        if (CraftChestPullPolicy.shouldPause(moved, waitingOn != null, askedLoudly)) {
+        // A ticket of this material still open (held now, not listed this time, or only hit by a
+        // transient failure) must stay free for the next pull to redeem: no pause over it.
+        PendingPull held = CHEST_PULL_PENDING.get(botId);
+        boolean holdingTicket = held != null && match.test(held.sample());
+        if (CraftChestPullPolicy.shouldPause(moved, holdingTicket, metRefusal)) {
             CHEST_PULL_PAUSED_UNTIL.put(pauseKey, System.currentTimeMillis() + CraftChestPullPolicy.PAUSE_MS);
         } else {
             CHEST_PULL_PAUSED_UNTIL.remove(pauseKey);
@@ -3072,8 +3097,8 @@ public final class CraftingHelper {
     /**
      * Server thread only (a block entity reads as absent anywhere else). The stacks worth asking
      * for in each chest half near the bot: nearest chest first, then slot order, one entry per
-     * distinct item (id and components). {@code inReachOnly} keeps chests the bot can use from
-     * where it stands.
+     * distinct item (id and components), each with its double chest's other half. {@code inReachOnly}
+     * keeps chests the bot can use from where it stands.
      */
     private static List<PullCandidate> findPullCandidates(ServerWorld world, ServerPlayerEntity bot,
                                                           Predicate<ItemStack> match, boolean inReachOnly) {
@@ -3089,6 +3114,7 @@ public final class CraftingHelper {
             if (!(world.getBlockEntity(chestPos) instanceof ChestBlockEntity chest)) {
                 continue;
             }
+            BlockPos otherHalf = otherHalfOf(world.getBlockState(chestPos), chestPos);
             List<PullCandidate> inChest = new ArrayList<>();
             for (int i = 0; i < chest.size(); i++) {
                 ItemStack stack = chest.getStack(i);
@@ -3098,9 +3124,10 @@ public final class CraftingHelper {
                 int at = indexOfSameItem(inChest, stack);
                 if (at >= 0) {
                     PullCandidate first = inChest.get(at);
-                    inChest.set(at, new PullCandidate(chestPos, first.sample(), first.count() + stack.getCount()));
+                    inChest.set(at, new PullCandidate(chestPos, otherHalf, first.sample(),
+                            first.count() + stack.getCount()));
                 } else {
-                    inChest.add(new PullCandidate(chestPos, stack.copyWithCount(1), stack.getCount()));
+                    inChest.add(new PullCandidate(chestPos, otherHalf, stack.copyWithCount(1), stack.getCount()));
                 }
             }
             candidates.addAll(inChest);
@@ -3141,9 +3168,23 @@ public final class CraftingHelper {
         return null;
     }
 
+    /** Whether {@code candidate} is {@code pending}'s item in {@code pending}'s chest (either half: one ticket covers both). */
     private static boolean isSamePull(PendingPull pending, PullCandidate candidate) {
-        return pending != null && candidate != null && pending.chestPos().equals(candidate.chestPos())
+        return pending != null && candidate != null && candidate.isInChest(pending.chestPos())
                 && ItemStack.areItemsAndComponentsEqual(pending.sample(), candidate.sample());
+    }
+
+    /**
+     * The other half of the double chest whose one half is at {@code pos}, from the block state
+     * alone (no block entity, no merged inventory); {@code null} for a single chest or a block
+     * that is not a chest.
+     */
+    private static BlockPos otherHalfOf(BlockState state, BlockPos pos) {
+        if (state == null || pos == null || !state.contains(ChestBlock.CHEST_TYPE) || !state.contains(ChestBlock.FACING)
+                || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
+            return null;
+        }
+        return pos.offset(ChestBlock.getFacing(state)).toImmutable();
     }
 
     private static boolean containsSameItem(List<ItemStack> stacks, ItemStack stack) {
@@ -3153,38 +3194,6 @@ public final class CraftingHelper {
             }
         }
         return false;
-    }
-
-    /**
-     * Runs a read-only {@code task} on the server thread and waits up to
-     * {@link #CHEST_PULL_SCAN_HOP_MS} for it; {@code fallback} when it cannot. A task that runs
-     * after the wait gave up only reads, so it is harmless.
-     */
-    private static <T> T callOnServer(MinecraftServer server, Supplier<T> task, T fallback) {
-        if (server.isOnThread()) {
-            return task.get();
-        }
-        CompletableFuture<T> result = new CompletableFuture<>();
-        try {
-            server.execute(() -> {
-                try {
-                    result.complete(task.get());
-                } catch (RuntimeException e) {
-                    LOGGER.warn("Chest pull scan failed on the server thread", e);
-                    result.complete(fallback);
-                }
-            });
-        } catch (RuntimeException rejected) {
-            return fallback;
-        }
-        try {
-            return result.get(CHEST_PULL_SCAN_HOP_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return fallback;
-        } catch (ExecutionException | TimeoutException e) {
-            return fallback;
-        }
     }
 
     private static List<BlockPos> findNearbyChests(ServerWorld world, BlockPos origin, int radius) {

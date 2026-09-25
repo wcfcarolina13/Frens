@@ -5,6 +5,9 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import org.junit.jupiter.api.Test;
 
@@ -14,166 +17,214 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Pure tests for CraftingHelper's chest-pull decisions — no net.minecraft types, no world. */
+/** Pure tests for CraftingHelper's chest-pull decisions — no net.minecraft types, no world, no reason strings. */
 class CraftChestPullPolicyTest {
 
-    // ── first ask / after the walk ───────────────────────────────────────────────────────────
+    // ── refusals: the one per-scope rule ─────────────────────────────────────────────────────
 
     @Test
-    void offTheServerThreadReadyAndWaitingWalkAndRefusedNeverDoes() {
-        assertEquals(Next.NEXT, CraftChestPullPolicy.afterAsk(Kind.MOVED, "MOVED", false));
-        assertEquals(Next.WALK, CraftChestPullPolicy.afterAsk(Kind.READY, "OUT_OF_REACH", false));
-        assertEquals(Next.WALK, CraftChestPullPolicy.afterAsk(Kind.WAITING, "ASKED", false));
-        assertEquals(Next.WALK, CraftChestPullPolicy.afterAsk(Kind.WAITING, "PENDING", false));
-        for (String reason : new String[]{"DENIED(DENY_LOCKED)", "INELIGIBLE(NOT_ALLOWLISTED)", "PROMPT_COOLDOWN",
-                "NO_STOCK", "OTHER_REQUEST_PENDING", "OWNER_NOT_NEARBY"}) {
-            assertTrue(CraftChestPullPolicy.afterAsk(Kind.REFUSED, reason, false) != Next.WALK, reason);
-        }
+    void everyScopeHasADeliberateNext() {
+        Map<Scope, Next> expected = new EnumMap<>(Scope.class);
+        expected.put(Scope.ITEM, Next.SKIP_ITEM);
+        expected.put(Scope.CHEST, Next.SKIP_CHEST);
+        expected.put(Scope.BOT, Next.STOP);
+        expected.put(Scope.OWNER_ABSENT, Next.STOP);
+        expected.put(Scope.TRANSIENT, Next.NEXT);          // this stack only; the pass goes on
+        expected.put(Scope.NONE, Next.STOP);               // never a refusal's scope: fail closed
+        assertEquals(EnumSet.allOf(Scope.class), expected.keySet(), "a new Scope needs a decision here");
+        expected.forEach((scope, next) -> {
+            assertEquals(next, CraftChestPullPolicy.onRefusal(scope), scope.name());
+            assertEquals(next, CraftChestPullPolicy.afterAsk(Kind.REFUSED, scope, true), "on thread " + scope);
+            assertEquals(next, CraftChestPullPolicy.afterAsk(Kind.REFUSED, scope, false), "off thread " + scope);
+            assertEquals(next, CraftChestPullPolicy.afterWalk(Kind.REFUSED, scope), "after walk " + scope);
+        });
+        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(null));
     }
 
     @Test
-    void onTheServerThreadNothingWalks() {
-        for (Kind kind : Kind.values()) {
-            assertTrue(CraftChestPullPolicy.afterAsk(kind, "X", true) != Next.WALK, kind.name());
-        }
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.afterAsk(Kind.READY, "OUT_OF_REACH", true));
-        assertEquals(Next.STOP_WAITING, CraftChestPullPolicy.afterAsk(Kind.WAITING, "ASKED", true));
-        assertEquals(Next.NEXT, CraftChestPullPolicy.afterAsk(Kind.MOVED, "MOVED", true));
+    void theOwnersNoOrAnIgnoredPromptStopsThePassInsteadOfAskingTheNextChest() {
+        // R3 I1: NOT_PERMITTED used to skip to the next chest, which prompted again right after a No.
+        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(Refusal.NOT_PERMITTED.scope()));
+        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(
+                SupplyWithdrawalPolicy.transferScope(TransferStatus.NOT_PERMITTED)));
+        assertTrue(CraftChestPullPolicy.countsTowardPause(Kind.REFUSED, Refusal.NOT_PERMITTED.scope()));
+        assertTrue(CraftChestPullPolicy.shouldPause(0, false, true));
+        // Aligned with the other supply sites: a duplicate prompt is the bot's, not the chest's.
+        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(
+                SupplyWithdrawalPolicy.requestScope(RequestStatus.DUPLICATE_PENDING, null, null)));
     }
 
     @Test
-    void afterTheWalkWaitingStopsForALaterPullAndReadyMovesOn() {
-        assertEquals(Next.NEXT, CraftChestPullPolicy.afterWalk(Kind.MOVED, "MOVED_SHORT"));
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.afterWalk(Kind.READY, "OUT_OF_REACH"));
-        assertEquals(Next.STOP_WAITING, CraftChestPullPolicy.afterWalk(Kind.WAITING, "PENDING"));
-        assertEquals(Next.STOP, CraftChestPullPolicy.afterWalk(Kind.REFUSED, "OTHER_REQUEST_PENDING"));
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.afterWalk(Kind.REFUSED, "NOT_PERMITTED"));
+    void everyFacadeRefusalHasADeliberateNext() {
+        Map<Refusal, Next> expected = new EnumMap<>(Refusal.class);
+        expected.put(Refusal.NOT_RUNNING, Next.NEXT);
+        expected.put(Refusal.BOT_GONE, Next.NEXT);
+        expected.put(Refusal.INVALID, Next.NEXT);
+        expected.put(Refusal.NO_OWNER, Next.STOP);
+        expected.put(Refusal.CHEST_UNREADABLE, Next.NEXT);
+        expected.put(Refusal.OWNER_NOT_NEARBY, Next.STOP);
+        expected.put(Refusal.OTHER_REQUEST_PENDING, Next.STOP);
+        expected.put(Refusal.NOT_PERMITTED, Next.STOP);
+        expected.put(Refusal.TIMEOUT, Next.NEXT);
+        expected.put(Refusal.ABORTED, Next.NEXT);
+        expected.put(Refusal.SERVER_BUSY, Next.NEXT);
+        expected.put(Refusal.ERROR, Next.NEXT);
+        assertEquals(EnumSet.allOf(Refusal.class), expected.keySet(), "a new Refusal needs a decision here");
+        expected.forEach((refusal, next) ->
+                assertEquals(next, CraftChestPullPolicy.onRefusal(refusal.scope()), refusal.name()));
     }
 
     @Test
-    void aMissingKindStops() {
-        assertEquals(Next.STOP, CraftChestPullPolicy.afterAsk(null, "MOVED", false));
-        assertEquals(Next.STOP, CraftChestPullPolicy.afterWalk(null, "MOVED"));
-    }
-
-    // ── refusals ─────────────────────────────────────────────────────────────────────────────
-
-    @Test
-    void everyRequestStatusAsARefusalHasADeliberateScope() {
+    void everyRequestStatusAsARefusalHasADeliberateNext() {
         Map<RequestStatus, Next> expected = new EnumMap<>(RequestStatus.class);
         expected.put(RequestStatus.OPENED, Next.STOP);             // a prompt without a fingerprint: fail closed
         expected.put(RequestStatus.DUPLICATE_PENDING, Next.STOP);
         expected.put(RequestStatus.PROMPT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.REJECT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, Next.STOP);  // covered without a fingerprint: fail closed
-        expected.put(RequestStatus.INELIGIBLE, Next.STOP);         // no verdict attached
-        expected.put(RequestStatus.OWNER_NOT_NEARBY, Next.SKIP_CHEST);
+        expected.put(RequestStatus.INELIGIBLE, Next.STOP);         // no verdict attached: fail closed
+        expected.put(RequestStatus.OWNER_NOT_NEARBY, Next.STOP);
         expected.put(RequestStatus.DENIED, Next.SKIP_CHEST);
-        expected.put(RequestStatus.INVALID, Next.STOP);
-        expected.put(RequestStatus.NOT_RUNNING, Next.STOP);
-        expected.put(RequestStatus.WRONG_THREAD, Next.STOP);
+        expected.put(RequestStatus.INVALID, Next.NEXT);
+        expected.put(RequestStatus.NOT_RUNNING, Next.NEXT);
+        expected.put(RequestStatus.WRONG_THREAD, Next.NEXT);
         assertEquals(EnumSet.allOf(RequestStatus.class), expected.keySet(), "a new RequestStatus needs a decision here");
-        expected.forEach((status, next) ->
-                assertEquals(next, CraftChestPullPolicy.onRefusal(status.name()), status.name()));
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal("OPENED id=1234-abcd"));
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.onRefusal("DENIED(DENY_LOCKED)"));
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.onRefusal("DENIED(DENY_NOT_CHEST)"));
+        expected.forEach((status, next) -> assertEquals(next,
+                CraftChestPullPolicy.onRefusal(SupplyWithdrawalPolicy.requestScope(status, null, null)), status.name()));
     }
 
     @Test
-    void everyTransferStatusAsARefusalHasADeliberateScope() {
+    void everyTransferStatusAsARefusalHasADeliberateNext() {
         Map<TransferStatus, Next> expected = new EnumMap<>(TransferStatus.class);
-        expected.put(TransferStatus.MOVED, Next.NEXT);          // reported as a refusal only when 0 moved
+        expected.put(TransferStatus.MOVED, Next.NEXT);          // a refusal only when nothing moved
         expected.put(TransferStatus.MOVED_SHORT, Next.NEXT);
-        expected.put(TransferStatus.WRONG_THREAD, Next.STOP);
-        expected.put(TransferStatus.NOT_RUNNING, Next.STOP);
-        expected.put(TransferStatus.INVALID, Next.STOP);
+        expected.put(TransferStatus.WRONG_THREAD, Next.NEXT);
+        expected.put(TransferStatus.NOT_RUNNING, Next.NEXT);
+        expected.put(TransferStatus.INVALID, Next.NEXT);
         expected.put(TransferStatus.OWNER_OR_BOT_MISMATCH, Next.STOP);
         expected.put(TransferStatus.DENIED, Next.SKIP_CHEST);
         expected.put(TransferStatus.CHEST_MISMATCH, Next.SKIP_CHEST);
-        expected.put(TransferStatus.OUT_OF_REACH, Next.STOP);   // arrives as READY, never as a refusal
-        expected.put(TransferStatus.NO_STOCK, Next.NEXT);
-        expected.put(TransferStatus.NO_ROOM, Next.STOP);
-        expected.put(TransferStatus.NOT_PERMITTED, Next.SKIP_CHEST);
-        expected.put(TransferStatus.INELIGIBLE_NOW, Next.STOP);   // not parsed yet: unknown reasons fail closed
+        expected.put(TransferStatus.OUT_OF_REACH, Next.NEXT);   // arrives as READY, never as a refusal
+        expected.put(TransferStatus.NO_STOCK, Next.SKIP_CHEST);
+        expected.put(TransferStatus.NO_ROOM, Next.NEXT);
+        expected.put(TransferStatus.NOT_PERMITTED, Next.STOP);
+        expected.put(TransferStatus.INELIGIBLE_NOW, Next.SKIP_CHEST);
         assertEquals(EnumSet.allOf(TransferStatus.class), expected.keySet(), "a new TransferStatus needs a decision here");
-        expected.forEach((status, next) ->
-                assertEquals(next, CraftChestPullPolicy.onRefusal(status.name()), status.name()));
+        expected.forEach((status, next) -> assertEquals(next,
+                CraftChestPullPolicy.onRefusal(SupplyWithdrawalPolicy.transferScope(status)), status.name()));
     }
 
     @Test
-    void anIneligibleVerdictReachesTheItemTheChestsStockOrEverything() {
+    void anIneligibleVerdictReachesTheItemTheChestOrTheBot() {
         Map<Verdict, Next> expected = new EnumMap<>(Verdict.class);
         expected.put(Verdict.ELIGIBLE, Next.STOP);              // nonsense as a refusal: fail closed
         expected.put(Verdict.NOT_ALLOWLISTED, Next.SKIP_ITEM);
         expected.put(Verdict.PROTECTED_COMPONENTS, Next.SKIP_ITEM);
         expected.put(Verdict.TIER_NOT_ALLOWED, Next.SKIP_ITEM);
-        expected.put(Verdict.RESERVE_EXHAUSTED, Next.NEXT);
-        expected.put(Verdict.NO_NEED, Next.NEXT);
+        expected.put(Verdict.NO_NEED, Next.SKIP_ITEM);
+        expected.put(Verdict.RESERVE_EXHAUSTED, Next.SKIP_CHEST);
         expected.put(Verdict.NO_OWNER, Next.STOP);
         assertEquals(EnumSet.allOf(Verdict.class), expected.keySet(), "a new Verdict needs a decision here");
-        expected.forEach((verdict, next) ->
-                assertEquals(next, CraftChestPullPolicy.onRefusal("INELIGIBLE(" + verdict + ")"), verdict.name()));
+        expected.forEach((verdict, next) -> assertEquals(next,
+                CraftChestPullPolicy.onRefusal(SupplyWithdrawalPolicy.requestScope(RequestStatus.INELIGIBLE, null,
+                        verdict)), verdict.name()));
+        // The pre-filter's refusal, made before any ask, reaches the item.
+        assertEquals(Next.SKIP_ITEM, CraftChestPullPolicy.onRefusal(
+                SupplyWithdrawalPolicy.preFilterScope(Verdict.NOT_ALLOWLISTED)));
     }
 
+    // ── walking ──────────────────────────────────────────────────────────────────────────────
+
     @Test
-    void theFacadesOwnRefusalsStopExceptAClosedTicketWhichSkipsTheChest() {
-        for (String reason : new String[]{"NOT_RUNNING", "BOT_GONE", "INVALID", "OTHER_REQUEST_PENDING",
-                "TIMEOUT", "ABORTED", "SERVER_BUSY", "ERROR"}) {
-            assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(reason), reason);
+    void onTheServerThreadNothingWalks() {
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : Scope.values()) {
+                assertNotEquals(Next.WALK, CraftChestPullPolicy.afterAsk(kind, scope, true), kind + "/" + scope);
+            }
         }
-        assertEquals(Next.SKIP_CHEST, CraftChestPullPolicy.onRefusal("NOT_PERMITTED"));
+        // Permitted but out of reach from the tick: hold the grant for a pull that can walk.
+        assertEquals(Next.HOLD, CraftChestPullPolicy.afterAsk(Kind.READY, Scope.NONE, true));
+        assertEquals(Next.HOLD, CraftChestPullPolicy.afterAsk(Kind.WAITING, Scope.NONE, true));
+        assertEquals(Next.NEXT, CraftChestPullPolicy.afterAsk(Kind.MOVED, Scope.NONE, true));
     }
 
     @Test
-    void anUnknownEmptyOrMissingReasonStops() {
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal("SOMETHING_NEW"));
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(""));
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(null));
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal("(NOT_ALLOWLISTED)"));
+    void offTheServerThreadOnlyAPermittedTicketWalks() {
+        assertEquals(Next.WALK, CraftChestPullPolicy.afterAsk(Kind.READY, Scope.NONE, false));
+        // R3 M2: an open prompt may yet be refused, so the bot does not walk to it.
+        assertEquals(Next.HOLD, CraftChestPullPolicy.afterAsk(Kind.WAITING, Scope.NONE, false));
+        assertEquals(Next.NEXT, CraftChestPullPolicy.afterAsk(Kind.MOVED, Scope.NONE, false));
+        for (Scope scope : Scope.values()) {
+            assertNotEquals(Next.WALK, CraftChestPullPolicy.afterAsk(Kind.REFUSED, scope, false), scope.name());
+        }
     }
 
     @Test
-    void theReasonSplitsIntoCodeAndBracketedDetail() {
-        assertEquals("DENIED", CraftChestPullPolicy.reasonCode("DENIED(DENY_LOCKED)"));
-        assertEquals("DENY_LOCKED", CraftChestPullPolicy.reasonDetail("DENIED(DENY_LOCKED)"));
-        assertEquals("OPENED", CraftChestPullPolicy.reasonCode("OPENED id=1234"));
-        assertNull(CraftChestPullPolicy.reasonDetail("OPENED id=1234"));
-        assertEquals("NO_STOCK", CraftChestPullPolicy.reasonCode("NO_STOCK"));
-        assertNull(CraftChestPullPolicy.reasonDetail("NO_STOCK"));
-        assertEquals("", CraftChestPullPolicy.reasonCode(null));
-        assertNull(CraftChestPullPolicy.reasonDetail(null));
-        assertNull(CraftChestPullPolicy.reasonDetail("BROKEN)("));
-    }
-
-    // ── loudness and the pause ───────────────────────────────────────────────────────────────
-
-    @Test
-    void onlyAnswersTheFacadeLogsAtInfoAreLoud() {
-        assertFalse(CraftChestPullPolicy.isLoud(Kind.WAITING, "PENDING"), "a repeat wait is DEBUG");
-        assertFalse(CraftChestPullPolicy.isLoud(Kind.REFUSED, "OTHER_REQUEST_PENDING"));
-        assertFalse(CraftChestPullPolicy.isLoud(Kind.REFUSED, "INELIGIBLE(NOT_ALLOWLISTED)"), "the pre-filter is DEBUG");
-        assertFalse(CraftChestPullPolicy.isLoud(Kind.REFUSED, "INELIGIBLE(PROTECTED_COMPONENTS)"));
-        assertFalse(CraftChestPullPolicy.isLoud(Kind.REFUSED, "INELIGIBLE(TIER_NOT_ALLOWED)"));
-
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.WAITING, "ASKED"), "a new prompt");
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.REFUSED, "INELIGIBLE(RESERVE_EXHAUSTED)"), "a request was made");
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.REFUSED, "PROMPT_COOLDOWN"));
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.REFUSED, "OWNER_NOT_NEARBY"));
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.REFUSED, "NOT_PERMITTED"));
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.READY, "OUT_OF_REACH"));
-        assertTrue(CraftChestPullPolicy.isLoud(Kind.MOVED, "MOVED"));
+    void afterTheWalkAnOpenTicketHoldsAndNothingWalksAgain() {
+        assertEquals(Next.NEXT, CraftChestPullPolicy.afterWalk(Kind.MOVED, Scope.NONE));
+        // The walk did not reach the chest: the yes is still live, so neither the next chest nor a pause.
+        assertEquals(Next.HOLD, CraftChestPullPolicy.afterWalk(Kind.READY, Scope.NONE));
+        assertEquals(Next.HOLD, CraftChestPullPolicy.afterWalk(Kind.WAITING, Scope.NONE));
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : Scope.values()) {
+                assertNotEquals(Next.WALK, CraftChestPullPolicy.afterWalk(kind, scope), kind + "/" + scope);
+            }
+        }
+        assertFalse(CraftChestPullPolicy.shouldPause(0, true, true), "a held ticket never pauses");
     }
 
     @Test
-    void aPullPausesOnlyWhenItAskedAndGotNothingAndIsNotWaiting() {
+    void aMissingKindStops() {
+        for (Scope scope : Scope.values()) {
+            assertEquals(Next.STOP, CraftChestPullPolicy.afterAsk(null, scope, false), scope.name());
+            assertEquals(Next.STOP, CraftChestPullPolicy.afterAsk(null, scope, true), scope.name());
+            assertEquals(Next.STOP, CraftChestPullPolicy.afterWalk(null, scope), scope.name());
+        }
+    }
+
+    // ── the held ticket ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    void aHeldTicketIsSettledByAMoveOrARefusalThatIsNotTransient() {
+        for (Scope scope : Scope.values()) {
+            assertTrue(CraftChestPullPolicy.settlesHeldTicket(Kind.MOVED, scope), "moved " + scope);
+            assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.READY, scope), "ready " + scope);
+            assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.WAITING, scope), "waiting " + scope);
+            assertEquals(scope != Scope.TRANSIENT, CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, scope),
+                    "refused " + scope);
+            assertTrue(CraftChestPullPolicy.settlesHeldTicket(null, scope), "no kind " + scope);
+        }
+        // A busy hop or a full inventory says nothing about the owner's answer: keep asking it first.
+        assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, Refusal.SERVER_BUSY.scope()));
+        assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED,
+                SupplyWithdrawalPolicy.transferScope(TransferStatus.NO_ROOM)));
+        assertTrue(CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, Refusal.NOT_PERMITTED.scope()));
+    }
+
+    // ── the pause ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void onlyARefusalFromTheOwnersSideCountsTowardThePause() {
+        EnumSet<Scope> counting = EnumSet.of(Scope.CHEST, Scope.BOT, Scope.OWNER_ABSENT);
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : Scope.values()) {
+                boolean expected = kind == Kind.REFUSED && counting.contains(scope);
+                assertEquals(expected, CraftChestPullPolicy.countsTowardPause(kind, scope), kind + "/" + scope);
+            }
+        }
+        assertFalse(CraftChestPullPolicy.countsTowardPause(Kind.REFUSED, null));
+        assertFalse(CraftChestPullPolicy.countsTowardPause(null, Scope.BOT));
+    }
+
+    @Test
+    void aPullPausesOnlyWhenItMetARefusalMovedNothingAndHoldsNoTicket() {
         assertTrue(CraftChestPullPolicy.shouldPause(0, false, true));
         assertFalse(CraftChestPullPolicy.shouldPause(3, false, true), "something moved");
-        assertFalse(CraftChestPullPolicy.shouldPause(0, true, true), "the next pull must be free to redeem the prompt");
-        assertFalse(CraftChestPullPolicy.shouldPause(0, false, false), "nothing was asked");
+        assertFalse(CraftChestPullPolicy.shouldPause(0, true, true), "the next pull must be free to redeem the ticket");
+        assertFalse(CraftChestPullPolicy.shouldPause(0, false, false), "only the item, or transient failures");
         assertFalse(CraftChestPullPolicy.shouldPause(2, true, false));
     }
 
@@ -190,5 +241,12 @@ class CraftChestPullPolicyTest {
     void thePauseOutlastsAnUnansweredPromptAndThePromptCooldown() {
         Timings t = Timings.defaults();
         assertTrue(CraftChestPullPolicy.PAUSE_MS > t.requestLifetimeMs() + t.promptCooldownMs());
+    }
+
+    @Test
+    void theOwnerAwayDeferIsAFlatMinute() {
+        assertEquals(60_000L, CraftChestPullPolicy.PAUSE_MS);
+        assertTrue(CraftChestPullPolicy.PAUSE_MS >= SupplyWithdrawalPolicy.OWNER_AWAY_MEMO_MS,
+                "the pause outlasts the facade's quiet owner-away memo");
     }
 }
