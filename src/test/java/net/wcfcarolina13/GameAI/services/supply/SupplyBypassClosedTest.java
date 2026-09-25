@@ -92,9 +92,9 @@ class SupplyBypassClosedTest {
                 "deposits (depositIntoChests, placeChestNearBot) + findPullCandidates' read-only listing for the facade");
         allow(MUTUAL_AID, 1,
                 "merged chest read-only listing; every take goes through askForFood (facade)");
-        allow(SERVICES + "NavigationArtifactService.java", 1,
-                "storage-screen Collect after fast travel: owner-initiated, exempt per DESIGN (its missing "
-                        + "owner-to-bot check is a separate security task)");
+        allow(SERVICES + "NavigationArtifactService.java", 2,
+                "storage-screen Collect after fast travel: owner-initiated, exempt per DESIGN; since 1.1.220 "
+                        + "owner-gated, and the arrival take checks ChestBlockEntity then binds it (two sites, one take)");
         allow(SERVICES + "BotChestRegistryService.java", 1, "read-only contents snapshot (refreshAllSnapshots)");
         allow(SERVICES + "BotEmergencyRescueService.java", 1, "read-only availability probe: is there chest food nearby");
         allow(SERVICES + "SmeltingService.java", 10,
