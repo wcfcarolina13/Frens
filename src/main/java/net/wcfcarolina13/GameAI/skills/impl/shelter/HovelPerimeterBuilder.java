@@ -69,6 +69,8 @@ public final class HovelPerimeterBuilder {
     private BlockPos activeBuildCenter;
     private int activeRadius;
     private Direction activeDoorSide;
+    // True while ensureExteriorAccessForDestination is running a door egress (one builder per build, one worker thread).
+    private boolean doorEgressInProgress;
 
     // Tracks scaffold bases (X/Z) used in this build to avoid redundant pillars.
     private final Set<BlockPos> usedScaffoldBasesXZ = new HashSet<>();
@@ -2370,14 +2372,38 @@ public final class HovelPerimeterBuilder {
         if (world == null || source == null || bot == null || destination == null || center == null || radius <= 0) {
             return false;
         }
-        if (!isInsideFootprint(bot.getBlockPos(), center, radius)) {
+        if (doorEgressInProgress) {
+            // Recursion fence: the egress owns routing until it returns.
             return true;
         }
-        if (!isOutsideFootprint(destination, center, radius)) {
+        // Boundary-aware, as in Fortify gate routing: a bot on the wall line at floor level still needs the
+        // doorway, and a wall-line target counts as outside (HovelEgressGeometry.needsDoorEgress).
+        BlockPos botPos = bot.getBlockPos();
+        HovelEgressGeometry.FootprintZone botZone = HovelGeometryService.classifyFootprint(botPos, center, radius);
+        HovelEgressGeometry.FootprintZone targetZone = HovelGeometryService.classifyFootprint(destination, center, radius);
+        if (!HovelEgressGeometry.needsDoorEgress(botZone, targetZone,
+                botPos.getX(), botPos.getZ(), botPos.getY(),
+                destination.getX(), destination.getZ(),
+                center.getY() + 1)) {
             return true;
         }
         Direction doorSide = resolveDoorSideForExit(bot);
-        return exitInteriorViaDoor(world, source, bot, center, radius, doorSide);
+        HovelDoorAccessService.EgressOutcome outcome;
+        doorEgressInProgress = true;
+        try {
+            outcome = exitInteriorViaDoor(world, source, bot, center, radius, doorSide);
+        } finally {
+            doorEgressInProgress = false;
+        }
+        LOGGER.info("[hovel-egress] bot={} door={} from={} outcome={} botPos={} target={} route={}",
+                bot.getName().getString(),
+                doorSide.asString(),
+                botZone,
+                outcome.describe(),
+                botPos.toShortString(),
+                destination.toShortString(),
+                outcome.route());
+        return outcome.ok();
     }
 
     private boolean ensureInteriorAccessForDestination(ServerWorld world,
@@ -2422,12 +2448,12 @@ public final class HovelPerimeterBuilder {
         );
     }
 
-    private boolean exitInteriorViaDoor(ServerWorld world,
-                                        ServerCommandSource source,
-                                        ServerPlayerEntity bot,
-                                        BlockPos center,
-                                        int radius,
-                                        Direction doorSide) {
+    private HovelDoorAccessService.EgressOutcome exitInteriorViaDoor(ServerWorld world,
+                                                                     ServerCommandSource source,
+                                                                     ServerPlayerEntity bot,
+                                                                     BlockPos center,
+                                                                     int radius,
+                                                                     Direction doorSide) {
         return HovelDoorAccessService.exitInteriorViaDoor(
                 world,
                 source,
@@ -2436,13 +2462,53 @@ public final class HovelPerimeterBuilder {
                 radius,
                 doorSide,
                 REACH_DISTANCE_SQ,
-                this::findNearbyStandable,
-                this::moveToBuildSiteAllowPathing,
-                this::directMove,
-                this::pathMove,
-                this::ensureRingStandable,
-                this::mineSoft
+                new DoorEgressOps()
         );
+    }
+
+    /**
+     * Builder primitives for the door egress. Only direct/path moves, nudges and local block work: nothing
+     * here may call back into the access guards above (clearPendingRoofPillarAt documents the
+     * StackOverflowError that re-entering the routing stack caused).
+     */
+    private final class DoorEgressOps implements HovelDoorAccessService.EgressOps {
+        @Override
+        public boolean isStandable(ServerWorld world, BlockPos foot) {
+            return HovelPerimeterBuilder.this.isStandable(world, foot);
+        }
+
+        @Override
+        public BlockPos findStandableFiltered(ServerWorld world,
+                                              BlockPos seed,
+                                              int radius,
+                                              java.util.function.Predicate<BlockPos> accept) {
+            return findNearbyStandableFiltered(world, seed, radius, accept);
+        }
+
+        @Override
+        public boolean directMove(ServerCommandSource source, ServerPlayerEntity bot, BlockPos dest) {
+            return HovelPerimeterBuilder.this.directMove(source, bot, dest);
+        }
+
+        @Override
+        public boolean pathMove(ServerCommandSource source, ServerPlayerEntity bot, BlockPos dest) {
+            return HovelPerimeterBuilder.this.pathMove(source, bot, dest);
+        }
+
+        @Override
+        public boolean nudgeToStand(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, long timeoutMs) {
+            return nudgeToStandWithJump(world, bot, stand, timeoutMs);
+        }
+
+        @Override
+        public void ensureRingStandable(ServerWorld world, ServerPlayerEntity bot, BlockPos ringPos) {
+            HovelPerimeterBuilder.this.ensureRingStandable(world, bot, ringPos);
+        }
+
+        @Override
+        public void mineSoft(ServerPlayerEntity bot, BlockPos pos) {
+            HovelPerimeterBuilder.this.mineSoft(bot, pos);
+        }
     }
 
     @SuppressWarnings("unused")

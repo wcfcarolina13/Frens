@@ -30,4 +30,13 @@ final class HovelGeometryService {
         int dz = Math.abs(pos.getZ() - center.getZ());
         return dx > radius || dz > radius;
     }
+
+    /**
+     * Boundary-aware X/Z zone (INSIDE / ON_WALL / OUTSIDE). Unlike the two strict tests above, a wall-line
+     * cell gets its own answer instead of being "neither". Returns null when an argument is missing.
+     */
+    static HovelEgressGeometry.FootprintZone classifyFootprint(BlockPos pos, BlockPos center, int radius) {
+        if (pos == null || center == null) return null;
+        return HovelEgressGeometry.classify(pos.getX(), pos.getZ(), center.getX(), center.getZ(), radius);
+    }
 }
