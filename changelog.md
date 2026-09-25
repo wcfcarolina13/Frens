@@ -2,7 +2,79 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## One-time group-chat discovery hint (2026-09-09, not deployed)
+## Field-log follow-ups — Piper pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation; ships the Sept 8–9 Codex work; 1.1.217 (2026-09-25)
+
+Driven by the five 1.21.11 sessions on 1.1.216 (2026-09-07 21:39 → 2026-09-08 20:15, Jake + Bob) that no session had
+autopsied. What they showed: no Frens WARN/ERROR; the woodcut storm is gone (2 failures per session, `failures=1 remaining=48s`,
+`failures=2 remaining=108s`); scenes pass the floor (4 `vetoed:speech-floor`, each followed by a later `fired`) and the
+finish→next-fire gap was 20–45 s every time; Piper cold-started both voices at the first scene in 5/5 sessions; torch-hold
+does fire (Jake held 5 times at light 6–7) but yielded within ≤1 s at light 8. Scene generation on llama3.2:3b was
+4.2–6.4 s (one 11 s), 16 s on the first llama3.1:8b call.
+
+**A false alarm worth recording.** A first pass counted scripted bursts (four lines in one second at 05:33:30) as a failed
+speech floor. The scoper proved otherwise: `Sending chat message` is logged before the text gate (ChatUtils :85 vs :189)
+and the scripted text master was off, so none of those lines reached the client — there is not one scripted
+`[System] [CHAT]` line in the four logs. The floor was right not to arm. The log line was lying, which is now fixed, and the
+investigation turned up two latent gaps that are fixed below.
+
+Shipped (merged fast-forward from `codex/companion-supplies-model-switch`, reviewed in this batch):
+- `7a663785` fix — SoulRuntime keeps a healthy voice service across LLM-only reloads (the 20:15:16 double engine restart).
+- `feb21be9` docs — "Talk to Nearby Bots (Group Chat)" guide topic.
+- `43bd5474` feat — one-time nearby group-chat hint (`network/GroupChatHint`, `frens/group-chat-hint-seen.txt`).
+
+This loop:
+- `dc1bd894` feat — Piper pre-warm. `SoulVoiceEngine.warm` (default no-op), Piper override guarded by a per-process
+  `startAttempted` so warm never respawns (restarts stay with the synth path and its backoff); `SoulVoiceService.warm`
+  bypasses the worker queue and `activeSyntheses`; pure `VoicePrewarmPolicy`; `SoulRuntime.prewarmVoices` every 100 ticks
+  for online bots with an active profile. Log: `[souls] tts prewarm voices=N`.
+- `70a484bf` fix — torch hysteresis via pure `TorchHoldPolicy` (acquire at light ≤7, keep until ≥12; field readings 10:15,
+  11:11 made ≥10 too low), `savedSlot=` label now prints the saved slot, `yieldAll` before bot saves.
+- `c289b75a` fix — `SpeechFloorService.clearAll` on SERVER_STOPPING, `clear(player)` on real-player disconnect.
+- `e006e456` feat — `[souls] ollama usage model=… promptTokens=… evalTokens=… loadMs=… promptEvalMs=… numCtx=8192`
+  per soul call so `NUM_CTX` can be right-sized (OLLAMA_NUM_PARALLEL=4 on this Mac reserves 4× the KV cache).
+- `9abc81e6` fix — ChatUtils logs `Scripted chat suppressed (text off)` instead of `Sending chat message` when the text
+  gate will drop the line, and `Scripted chat delivered bot=… category=… part=N` at the real send (grep `part=0`).
+- `9c72bc28` fix — `showOverheadLine` already plays mapped voice clips; the pet/context services played them again, hit
+  the 2.5 s per-bot throttle and counted the line as undelivered, so with voice on and text off the floor never armed.
+  New pure `ScriptedDelivery`; the duplicate play is gone.
+- `8706b905` fix — `SOUL_SCENE_PENDING`: a reservation with its own deadline, taken when a banter or local scene fires,
+  vetoes scripted lines only, released on FAILED and at finish, 30 s ceiling. Scene-line floors are hold-aware:
+  max(6 s, min(hold + 1.5 s, 20 s)) — the field log had an 8 s line gap under a 6 s floor.
+- `2a48682f` fix (review wave) — Fabric's DISCONNECT runs on a Netty IO thread (the overlap log shows the Frens
+  handler's `Pre-shutdown bot save captured 2` on `[Netty Local IO #2]`). GroupChatHint's disconnect cleanup of its plain
+  HashMap/HashSet now hops to `server.execute` (a guest leaving mid-tick could have thrown a ConcurrentModificationException
+  in END_SERVER_TICK). The disconnect-site torch `yieldAll` is gone: `BotInventoryStorageService` persists
+  `BotTorchHoldService.slotToPersist(id, selected)` — the pre-torch slot while the service's torch is still selected, read
+  from one `Hold(savedSlot, torchSlot)` map value — so every save path, autosaves included, is right without touching the
+  entity off-thread. Both directors release the scene reservation in `whenComplete`, so an exceptional completion
+  releases and refunds like FAILED.
+
+**Rulings made on Bradley's behalf (cost if wrong):**
+- Fast-forwarded the three Codex commits into main and reviewed them in this batch (cost: revert three commits).
+- Torch release at light ≥12, not ≥10: field readings put 26 of Jake's samples at 10–11 (cost: a torch stays up a
+  little longer walking into lit areas).
+- Persist the pre-torch slot in the snapshot rather than yield on disconnect (review; cost: none found — a LAN guest
+  leaving no longer puts every bot's torch away).
+- Pre-warm Piper only, only for online bots with an active soul profile, and only while soul chat is on (cost: Pocket /
+  Dreamsleeve first lines stay cold; a bot that never speaks holds one idle Piper process).
+- After the scripted-burst false alarm, folded the two latent floor gaps into this build rather than a follow-up (cost:
+  scripted lines are held for every scene's generation window, typically 5–16 s, capped at 30 s).
+
+**Deferred with reasons:** torch minimum hold time (hysteresis alone may be enough — field
+check first); pre-warm retry after a failed spawn, re-warm on voice reassign, eviction of departed bots' processes,
+Pocket/Dreamsleeve warm; player-initiated scenes take no pending reservation (outside the files touched);
+`SoulLocalDirector` never checks the floor, so a local reaction can fire inside another scene's 20 s post-scene quiet
+(pre-existing, may be intended); the chat-fallback floor arm reads `isTextAllowed` only and can mis-arm when
+`sendChatMessages` drops or force-sends a line (pre-existing — have it return its decision); `sanitize` clamps on read but
+never writes back after a >60 s backward clock jump (pre-existing); other `showOverheadLine` callers that also play the
+line themselves still double-play into the throttle (inaudible). Legacy `-PaiEnabled` path found by the Jev investigation:
+`DecisionResolver`/`NLPProcessor.getIntentionFromLLM` block the server thread and set no `num_ctx` (Ollama 0.33 then
+loads at full model context × `OLLAMA_NUM_PARALLEL`), `WebSearchTool` Ollama case falls through (:200→:223) — none of it
+ships in the standard JAR (ollama4j is compileOnly).
+
+Tests 949 → 1020. **Field checks:** Phase 6o in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
+## One-time group-chat discovery hint (2026-09-09, shipped in 1.1.217)
 
 The first encounter with two owned, Soul-enabled companions within earshot offers a small
 15-second hint. It waits for normal gameplay and quiet after attacks/damage; combat or lost
@@ -14,14 +86,14 @@ No game launch or deployment was performed; in-game appearance and interaction n
 Validation: `./gradlew build` passed the existing 949 tests; `git diff --check` passed.
 Source review covered eligibility loss, invalid configuration, and reconnect behavior.
 
-## Discoverable group-chat guide (2026-09-08, not deployed)
+## Discoverable group-chat guide (2026-09-08, shipped in 1.1.217)
 
 Added “Talk to Nearby Bots (Group Chat)” as the first Basics topic in the in-game guide.
 Includes copyable wording examples, Soul Party prerequisites, the four-bot/32-block limit,
 ownership/operator behavior, and the dictation caveat. Search terms include group chat,
 earshot, voice, and nearby. This documents existing routing; it does not change chat behavior.
 
-## Model switching preserves unchanged Soul voices (2026-09-08, not deployed)
+## Model switching preserves unchanged Soul voices (2026-09-08, shipped in 1.1.217)
 
 The September 8 playthrough did switch from llama3.2:3b to llama3.1:8b; the next generation
 took about 16 seconds. Reloading model settings also rebuilt the unrelated voice engine.

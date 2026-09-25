@@ -3,7 +3,59 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-07 — next session starts here
+## Session Handoff 2026-09-25 — next session starts here
+
+**State:** main = origin/main @ 1.1.217 (pushed; deployed only if the natives pgrep showed the game closed — see the
+release commit / final message). Suite 1020 green (949 → 1020). The Codex branch `codex/companion-supplies-model-switch`
+(voice-preserving model switch, group-chat guide topic, one-time group-chat hint) was fast-forwarded into main and
+reviewed in this batch.
+
+**Where 1.1.217 came from:** five 1.21.11 sessions on 1.1.216 (2026-09-07 21:39 → 2026-09-08 20:15) that nobody had
+autopsied. Log-answered Phase 6n items (not ticked — Bradley's session still confirms): "A scene still gets through a
+scripted floor" PASS (4 `vetoed:speech-floor`, each followed by `fired`), "The two banter lanes respect one quiet period"
+PASS (finish→next fire 20–45 s), "The woodcut storm is gone" PASS (2 failures/session, `remaining=48s` then `108s`),
+"The backoff ladder widens" PARTIAL (sessions too short past 108 s). Torch-hold DOES fire (Jake held 5 times at light 6–7)
+but yielded within ≤1 s at light 8 — the P1 "not visibly firing" item is a threshold-flicker problem, now hysteresis.
+
+**A false alarm to not repeat:** `Sending chat message (withDelay=true)` was logged BEFORE the text gate, so with the
+scripted Text master off it recorded lines nobody saw. It now logs `Scripted chat suppressed (text off)` there and
+`Scripted chat delivered bot=… category=… part=N` at the real send — grep `part=0` for delivered scripted lines.
+
+**Shipped in 1.1.217:** Piper pre-warm (`[souls] tts prewarm voices=N`); torch hysteresis 7/11 + `savedSlot=` label +
+pre-torch slot persisted in the snapshot (`slotToPersist`) + SERVER_STOPPING `yieldAll`; SpeechFloorService teardown;
+`[souls] ollama usage … promptTokens=…` per soul call; truthful scripted-chat logs; `ScriptedDelivery` (voice-on/text-off
+lines now arm the floor); `SOUL_SCENE_PENDING` reservation + hold-aware scene-line floors; review wave: GroupChatHint
+disconnect hop to server thread, whenComplete release. Details, rulings and deferrals in `changelog.md`.
+
+**Field checks pending:** Phase 6o in `docs/testing/FIELD_SESSION_1.1.202.md` (new), plus 6b–6n. Phase 6n item 1 now
+greps `Scripted chat delivered … part=0`. The torch check must run at night or underground (daylight gives only
+`light-above-7` rejects).
+
+**Performance notes from the Jev / System-One investigation (2026-09-25):** hosted Jev: skip (waitlist, chat leaves the
+machine, worst calibration in independent tests). The local Ollama already does single-token typed decisions with
+logprobs at ~145 ms warm on the resident 8B, but a few-shot eval on REAL lines did not beat the current rules (chat
+routing 28 vs 33/41, addressee 18 vs 17/24) — no-go for a model router. It did surface rule fixes for addressee
+detection (below). `OLLAMA_NUM_PARALLEL=4` (Bradley's `com.bradley.ollama-env` LaunchAgent) makes Ollama reserve 4× the
+KV cache for Frens' `num_ctx 8192` — ~4 GiB on llama3.1:8b, one slot used; the new `ollama usage` log lets `NUM_CTX` be
+right-sized. Generation latency (4–16 s) is the real bottleneck, not decisions.
+
+**Next autonomous candidates (in queue order):** (1) **1.1.218 construction interior egress** — scoped: schematic/generic
+builds have no inside→outside doorway routing, straight-line moves run before A*, and the hovel's footprint tests are
+both strict so wall-line cells skip its door exit. Fix = lift Fortify's gate pattern into a shared helper; do NOT refactor
+Fortify. Scope notes: `.superpowers/sdd/SCOPE-1.1.218-egress.md`. (2) Companion supplies Phase 1 (pure policy only; plan
+`docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`). (3) **Addressee rule fixes** from the
+eval: a 30 s reply window after a delivered DM reply (today only group scenes open one, SoulRuntime:287/293),
+"guys/you two/everyone" → both, a line starting with another human's name → none, trailing ", Jake?" outranks an earlier
+"Bob", "Bob, Jake said…" ≠ both. Unchanged older candidates: `threads.closed` matching, `BAD_AT`, TEASE peer rule,
+`relationsEnabled()` supplier, `MIN_TRIGRAMS`, Fortify delegate inlining — all field-blocked.
+
+**Needs Bradley:** guided field session (6b–6o); doorway rework decision (the follow/pressure-plate one, separate from
+construction egress); ACTION REQUESTS interview; Bob's TTS reference sample; supplies plan iron-tier question;
+whether to lower `OLLAMA_NUM_PARALLEL` (machine-wide; other local jobs share it).
+
+---
+
+## Session Handoff 2026-09-07 — superseded
 
 **State:** main = origin/main @ 1.1.216 (pushed; deployed to all three Prism instances). Suite 945 green.
 First build in this project driven by a real field log rather than the backlog: Bradley played four minutes on
@@ -1009,7 +1061,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [x] **Stand-down hotkey + stop→drop-sweep cooldown (60s)** — ✅ shipped 1.1.95. New per-bot drop-sweep suppression layer in [DropSweepService](src/main/java/net/wcfcarolina13/GameAI/services/DropSweepService.java) (`suppressFor`/`isSuppressedFor`). `/bot stop` now sets a 60s suppression. New service [BotStandDownService](src/main/java/net/wcfcarolina13/GameAI/services/BotStandDownService.java) snapshots follow target, stops following, suppresses drop-sweep for 60s, then re-issues follow on tick expiry ("Back in formation."). Companion overlay slot 1 repurposed from duplicate "Stop" to `🪖 Stand Down (60s)`; new `bot standdown` brigadier command. Tap `\` still does plain stop. Final implementation differs from the original spec: timers live in `DropSweepService` (drop-sweep) and `BotStandDownService` (follow snapshot), not `BotHomeService` — closer to the existing per-service ownership pattern.
 - [ ] **Creeper self-protection / back-away** — 🔧 1.1.202: root cause found and fixed (`BotCreeperDefenseService` filtered on `isIgnited()`, never set by proximity swelling; now `isFusing()`), decision extracted to tested `CreeperEvasionPolicy`, armed bots back away inside 4.5 blocks; **verify in the field session Phase 8**, then check off. Original report: Existing creeper evasion (sprint away when unarmed, [BotEventHandler.java:3794](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3794)) reportedly insufficient — bot still doesn't reliably back off when creepers are near. Audit fuse-distance / armed-vs-unarmed branches and tighten. Likely also needs a dedicated `BotCreeperSafetyService` or expansion of `BotHazardService`.
 - [x] **Dangerous-pursuit gate** — ✅ shipped 1.1.97. New [DangerousPursuitGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) composes 4 rules: target >4 blocks below bot → reject; combined light ≤0 at target → reject; 2+ hostiles within 5 blocks of target → reject; non-aggroed mob → require ranged weapon. Wired into [DropSweepService.collectNearbyDrops](src/main/java/net/wcfcarolina13/GameAI/services/DropSweepService.java) per-drop filter + [BotEventHandler.engageHostiles](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) hostile-filter loop. Self-defense (mob already targeting bot) always passes. Out of scope: route-based fall/light analysis (currently checks target only, not the path); charged-creeper weighting in cluster threshold.
-- [ ] **BotTorchHoldService not visibly firing** — 🔧 1.1.202 ships the state-change `[torch-hold]` gate diagnostics; field session Phase 8 names the rejecting gate, then fix. Original: — added in 1.1.72-1.1.91 batch but user reports torch never appears in bot's hand in dim follow situations. Service IS deployed (in 1.1.93+ JAR) and registered ([Frens.java:1131](src/main/java/net/wcfcarolina13/Frens.java#L1131)). Likely caused by: (a) overly-strict 8-block audible-hostile suppression — in caves/at night there's almost always *some* hostile in 8 blocks → torch hold rejected; (b) foreign-swap detection cycling against other systems that mutate selected slot every tick (combat loadout, AutoFaceEntity), so torch gets re-overridden between 5-tick eval intervals; (c) only logs at `LOGGER.debug` so we can't tell which gate is firing. Diagnostic-first: bump key transitions to `LOGGER.info`, ship a build, see what the gate actually rejects. Possible fix after diagnosis: drop the 8-block audible gate, keep only the 16-block visible-LOS gate. Don't touch until diagnostic confirms the root cause.
+- [ ] **BotTorchHoldService not visibly firing** — 🔧 1.1.217: diagnostics from 1.1.216 logs named the cause — holds DID fire (Jake, light 6–7) but yielded within ≤1 s at light 8 (spatial flicker); Bob carries no torches. Fixed with hysteresis (hold ≤7, keep until ≥12, `TorchHoldPolicy`); verify at night/underground in Phase 6o. 🔧 1.1.202 ships the state-change `[torch-hold]` gate diagnostics; field session Phase 8 names the rejecting gate, then fix. Original: — added in 1.1.72-1.1.91 batch but user reports torch never appears in bot's hand in dim follow situations. Service IS deployed (in 1.1.93+ JAR) and registered ([Frens.java:1131](src/main/java/net/wcfcarolina13/Frens.java#L1131)). Likely caused by: (a) overly-strict 8-block audible-hostile suppression — in caves/at night there's almost always *some* hostile in 8 blocks → torch hold rejected; (b) foreign-swap detection cycling against other systems that mutate selected slot every tick (combat loadout, AutoFaceEntity), so torch gets re-overridden between 5-tick eval intervals; (c) only logs at `LOGGER.debug` so we can't tell which gate is firing. Diagnostic-first: bump key transitions to `LOGGER.info`, ship a build, see what the gate actually rejects. Possible fix after diagnosis: drop the 8-block audible gate, keep only the 16-block visible-LOS gate. Don't touch until diagnostic confirms the root cause.
 - [x] **Locked-gate enclosure respect (drop-sweep + pursuit)** — ✅ shipped 1.1.98. New ray-cast helper [DangerousPursuitGate.crossesLockedGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) samples ~1 cell per block along the bot→target line and returns true if any sample is a tracked locked door / fence gate / trapdoor. Wired into both `isLocationSafeForPursuit` (drop-sweep) and `engageHostiles` combat-target filter. Caveat: over-rejects when a wall has BOTH a locked gate AND an unlocked gap (line crosses the locked cell while a legitimate path goes around). Under-rejection was the actual user complaint, so the trade-off is acceptable. Reuses existing LockableBlockService — no new wall semantics.
 - [x] **Bed selection bugs (two related)** — ✅ shipped 1.1.100, user-verified in-game 2026-05-17 (bot now places and uses its own bed from inventory when no nearby bed is available). (a) [SleepService.findNearbyBedFeet](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) now filters beds with `BedBlock.OCCUPIED == true` and sorts the bot's previously-claimed bed (via `BotHomeService.getLastSleep`) first. Defensive late-occupancy guard added to `tryUseBed`. (b) When all nearby beds are filtered (only-occupied case), the existing placement branch fires with an explicit "Nearby bed is taken. Setting up my own." handoff message. Out of scope: bed reservation across mid-night user step-outs; multi-bot claim contention.
 - [~] **Pathfinding cache learning isn't measurably improving** — diagnostic surfacing shipped 1.1.101. [NavHazardCache](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) is the actual learning system (per-cell rejection scoring; pathfinders consult via `penaltyFor`). Wiring is correct — recording fires per `applyMovementInput-reject` (903 today's session), pathfinders read the penalty in both [PathFinder.java:152,187](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java#L152) and [BaritoneStylePathFinder.java:380](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java#L380). Penalty hits now log at INFO (throttled 1/s, ≥1.0 penalty); periodic summary every 5 min lists top scoring cells. Architectural caveat: cache helps when alternative routes exist; tight bottleneck doorways (the user's actual stuck cases) have no alternates, so cache doesn't help there even when working perfectly. Out of scope: chat command for on-demand cache dump (`/bot debug nav-hazard`); promotion-event INFO log; tuning `STREAK_PROMOTION_THRESHOLD` after we have real data.

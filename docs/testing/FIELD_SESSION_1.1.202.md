@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.216-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.217-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.216** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.217** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -756,7 +756,10 @@ toggles: the floor and the backoff are always on.
 
 - [ ] **No two bots talk over each other (1.1.216)**
   - Bradley does: stand near both bots with an animal in view for two minutes and let ambient lines fire.
-  - Claude watches for: `Sending chat message (withDelay=true)` timestamps in `latest.log`.
+  - Claude watches for: `Scripted chat delivered bot=… part=0` timestamps in `latest.log` (1.1.217+). NOT
+    `Sending chat message` — before 1.1.217 that line was logged ahead of the text gate and counted lines nobody saw.
+    With scripted Text off, delivery is voice/overhead only: listen, and use `Scripted chat suppressed (text off)` to
+    confirm the gate.
   - Pass when: no two scripted lines land within four seconds of each other, and the 22:30:08 shape of
     three lines from two bots inside one second never recurs.
 - [ ] **Scripted lines do not interleave with a soul scene (1.1.216)**
@@ -766,11 +769,13 @@ toggles: the floor and the backoff are always on.
   - Pass when: no scripted line lands mid-scene, and none lands in the twenty seconds after
     `outcome=finished`.
 - [ ] **A scene still gets through a scripted floor (1.1.216)**
+  - Log evidence 2026-09-08 20:10–20:15 (1.1.216): 4 `vetoed:speech-floor`, each followed by `fired` — PASS in logs; confirm live.
   - Bradley does: same as above, but keep the animal lines firing while asking for a scene.
   - Claude watches for: `outcome=vetoed:speech-floor` versus `outcome=fired`.
   - Pass when: scenes still fire — a run of only `vetoed:speech-floor` with no `fired` over several minutes
     means scripted ambient is starving the soul lane and the preemption is not working.
 - [ ] **The two banter lanes respect one quiet period (1.1.216)**
+  - Log evidence 2026-09-08 20:09–20:15 (1.1.216): finish→next fire 20–45 s, all ≥20 s — PASS in logs; confirm live.
   - Bradley does: let two scenes fire back to back without intervening.
   - Claude watches for: the gap between `scene-playback … outcome=finished` and the next
     `banter lane=… outcome=fired`.
@@ -793,12 +798,14 @@ toggles: the floor and the backoff are always on.
   - Pass when: the second event still draws a line — the per-pool dedup must not have inherited the
     five-minute animal window.
 - [ ] **The woodcut storm is gone (1.1.216)** — the repro Bradley captured
+  - Log evidence 2026-09-07/08 (1.1.216): 2 failures per session, `failures=1 remaining=48s` then `failures=2 remaining=108s` — PASS in logs.
   - Bradley does: take every axe, plank and stick off Jake, leave him idle near trees for three minutes.
   - Claude watches for: `Idle hobby 'woodcut' finished for Jake: success=false` and
     `skipping hobby 'woodcut' backing off: failures=N remaining=…s`.
   - Pass when: the failure line appears a handful of times at widening intervals, never more than once a
     minute, and never the 3–19 per second of the 1.1.215 log.
 - [ ] **The backoff ladder widens (1.1.216)**
+  - Log evidence 2026-09-07/08: 48 s → 108 s seen; sessions ended before 240 s — PARTIAL.
   - Bradley does: keep watching the same idle Jake for ten minutes.
   - Claude watches for: the `remaining=` values across successive skip lines.
   - Pass when: the gaps widen roughly 60s, 120s, 240s, 480s and then hold at ten minutes.
@@ -810,6 +817,56 @@ toggles: the floor and the backoff are always on.
   - Bradley does: with Jake in a woodcut backoff, issue `/bot woodcut Jake` directly.
   - Claude watches for: the skill starting.
   - Pass when: the command runs at once — the backoff gates the idle fallback only, never a direct order.
+
+## Phase 6o — Pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation (1.1.217)
+
+From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Includes the Codex work shipped in this build
+(voice-preserving model switch, group-chat guide topic, one-time group-chat hint).
+
+- [ ] **Voices are warm before the first scene (1.1.217)**
+  - Bradley does: load the world with Jake + Bob soul-enabled and voice on; wait ~10 s, then `/bot soul banter now`.
+  - Claude watches for: `[souls] tts prewarm voices=N` within ~5 s of the bots being online, and `[souls] tts engine
+    started pid=…` lines BEFORE the scene's `scene correlationId=… outcome=scene-started`.
+  - Pass when: no `tts engine started` line appears as the first scene plays, and line 1 starts about as fast as line 2.
+    If line 1 still lags with the process already up, Piper's first inference is the cost — the deferred "Ready." priming.
+- [ ] **Torch stays up in the dark (1.1.217)** — run at night or underground; daylight only yields `light-above-7`
+  - Bradley does: walk Jake (give him torches; Bob carries none unless given some) through a dim cave for a minute.
+  - Claude watches for: `[torch-hold] Jake verdict=hold … savedSlot=<his real slot>` and the gate on the yield line.
+  - Pass when: the torch stays in hand across light 8–11 and is put away only at `gate=light-above-11` (light ≥12) or a
+    hostile/task gate; `savedSlot=` shows the pre-torch slot, not the torch slot.
+- [ ] **Quit mid-hold does not reload with a torch in hand (1.1.217)**
+  - Bradley does: while Jake holds a torch underground, save and quit, reload.
+  - Claude watches for: Jake's held item after reload (and `[torch-hold]` lines).
+  - Pass when: Jake reloads holding his own pre-torch item.
+- [ ] **Scripted lines hold off while a scene is generating (1.1.217)**
+  - Bradley does: stand near an animal with scripted voice or text on, trigger `/bot soul banter now`.
+  - Claude watches for: `Scripted chat delivered … part=0` or audible scripted lines between `banter … outcome=fired` and the
+    scene's first line; scripted veto lines naming the reservation.
+  - Pass when: no scripted line lands between fire and line 1, and scripted lines resume after the scene (post-scene quiet
+    20 s).
+- [ ] **Voice on, text off still arms the floor (1.1.217)**
+  - Bradley does: scripted Voice on, scripted Text off; stand near animals for two minutes.
+  - Claude watches for: audible pet/context lines and their spacing.
+  - Pass when: no two voiced scripted lines within four seconds of each other.
+- [ ] **Scripted logs tell the truth (1.1.217)**
+  - Bradley does: toggle scripted Text off for a minute, then on.
+  - Claude watches for: `Scripted chat suppressed (text off)` while off, `Scripted chat delivered … part=0` while on.
+  - Pass when: no `Sending chat message` line appears while Text is off.
+- [ ] **Ollama usage is logged (1.1.217)**
+  - Bradley does: nothing extra — any soul reply or scene.
+  - Claude watches for: `[souls] ollama usage model=… promptTokens=… evalTokens=…`.
+  - Pass when: the line appears per call; note the largest `promptTokens` seen (sizing input for `NUM_CTX`), and flag any
+    `nearCtxLimit=true`.
+- [ ] **Model switch keeps voices alive (1.1.217, Codex 7a663785)**
+  - Bradley does: switch the soul model in the model manager mid-session, then trigger a scene.
+  - Claude watches for: `tts engine started` lines after the switch.
+  - Pass when: no voice engine restarts on a model-only switch; the menu says "Selected", and the first reply on the new
+    model may be slow (model load).
+- [ ] **Group-chat hint appears once (1.1.217, Codex 43bd5474)**
+  - Bradley does: first time with two owned soul-enabled bots in earshot, in calm gameplay.
+  - Claude watches for: the hint on screen; `frens/group-chat-hint-seen.txt` in the world dir afterwards.
+  - Pass when: it shows once for ~15 s, Open guide lands on the group-chat topic, and it does not come back after
+    reconnecting.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
