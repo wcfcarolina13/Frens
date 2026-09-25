@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
+import net.wcfcarolina13.GameAI.services.dialogue.ScriptedDelivery;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
@@ -166,20 +167,26 @@ public final class CompanionOverheadDialogueService {
     /**
      * Show an arbitrary overhead line (no built-in cooldown). Intended for callers that already
      * have their own throttling and want to avoid chat spam.
+     *
+     * @return what actually surfaced: whether the hologram went up, and the outcome of the voice
+     *         attempt this method makes for lines with a {@code DialogueTextMapper} entry
+     *         ({@link ScriptedDelivery.VoiceOutcome#NONE} when the line has no mapping). Callers
+     *         that also voice the line themselves must skip their own play unless the outcome is
+     *         NONE — see {@link ScriptedDelivery#needsExplicitVoice}.
      */
-    public static void showOverheadLine(ServerPlayerEntity bot, String line, int durationMs, double range, String tag, String reason) {
+    public static ScriptedDelivery.Surface showOverheadLine(ServerPlayerEntity bot, String line, int durationMs, double range, String tag, String reason) {
         if (bot == null || bot.isRemoved()) {
-            return;
+            return ScriptedDelivery.Surface.EMPTY;
         }
         if (line == null || line.isBlank()) {
-            return;
+            return ScriptedDelivery.Surface.EMPTY;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld)) {
-            return;
+            return ScriptedDelivery.Surface.EMPTY;
         }
         UUID id = bot.getUuid();
         if (id == null) {
-            return;
+            return ScriptedDelivery.Surface.EMPTY;
         }
 
         int dur = durationMs > 0 ? durationMs : DURATION_MS;
@@ -187,18 +194,21 @@ public final class CompanionOverheadDialogueService {
         // Text toggle gates the hologram only; voice is gated by its own toggles below
         // (previously this early-returned, silencing voice when Text Chat was off —
         // inconsistent with tryShowGeneric and with ChatUtils' voice-only mode).
+        boolean textShown = false;
         if (TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag(tag))) {
             CompanionOverheadHologramService.show(bot, line, dur);
             LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
+            textShown = true;
         }
 
         // If the line has a DialogueTextMapper entry, play the matching sound.
         // This was missing from the public overload (only tryShowGeneric had it),
         // which caused greeting/skill_sleep/topic_*/many other lines to show
-        // overhead text but never play audio. Callers that also manually
-        // BotDialoguePlayer.playSoundForBotDetailed(...) are protected from
-        // double-play by BotDialoguePlayer's MIN_GAP_ANY_VOICE_MS mutex.
-        tryPlayVoicedOverheadLine(bot, line, tag);
+        // overhead text but never play audio. A caller that plays the same line again
+        // gets THROTTLED from BotDialoguePlayer's MIN_GAP_ANY_VOICE_MS mutex — audibly
+        // harmless, but it reads as "not delivered", so callers that care about delivery
+        // use the returned outcome instead of playing twice (1.1.217).
+        ScriptedDelivery.VoiceOutcome voice = tryPlayVoicedOverheadLine(bot, line, tag);
 
         if (tag != null && !tag.isBlank()) {
             if (reason != null && !reason.isBlank()) {
@@ -207,6 +217,7 @@ public final class CompanionOverheadDialogueService {
                 LOGGER.debug("Overhead line ({}) bot={} line={}", tag, bot.getName().getString(), line);
             }
         }
+        return new ScriptedDelivery.Surface(textShown, voice);
     }
 
     private static void tryShowGeneric(
@@ -256,22 +267,25 @@ public final class CompanionOverheadDialogueService {
         }
     }
 
-    private static void tryPlayVoicedOverheadLine(ServerPlayerEntity bot, String line, String tag) {
+    /** @return the voice attempt's outcome; {@code NONE} when the line has no voice mapping. */
+    private static ScriptedDelivery.VoiceOutcome tryPlayVoicedOverheadLine(ServerPlayerEntity bot, String line, String tag) {
         if (bot == null || bot.isRemoved()) {
-            return;
+            return ScriptedDelivery.VoiceOutcome.NONE;
         }
         if (line == null || line.isBlank()) {
-            return;
+            return ScriptedDelivery.VoiceOutcome.NONE;
         }
         try {
             SoundEvent sound = DialogueTextMapper.lookup(line);
             if (sound == null) {
-                return;
+                return ScriptedDelivery.VoiceOutcome.NONE;
             }
             // Respect per-bot voiced dialogue config, category mutes + global anti-spam.
-            BotDialoguePlayer.playSoundForBotDetailed(bot, sound, VoiceLineCategory.fromTag(tag));
+            return ScriptedDelivery.from(
+                    BotDialoguePlayer.playSoundForBotDetailed(bot, sound, VoiceLineCategory.fromTag(tag)));
         } catch (Throwable ignored) {
             // Best-effort only.
+            return ScriptedDelivery.VoiceOutcome.NONE;
         }
     }
 

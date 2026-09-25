@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
+import net.wcfcarolina13.GameAI.services.dialogue.ScriptedDelivery;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
 import net.minecraft.entity.passive.AbstractHorseEntity;
@@ -538,13 +539,24 @@ public final class PetProximityReactionService {
         // attempt meant a fully muted scripted lane still silenced the soul lane for four seconds
         // per line. That is a lane gated on another lane's TOGGLE, which the project's dialogue
         // lane-separation rule forbids: a lane may only be gated on live speaking state.
-        boolean overheadShown = TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag("pet"));
-        CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "pet", line.id);
-        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.AMBIENT_CHATTER);
-        if (result == BotDialoguePlayer.PlayResult.PLAYED || result == BotDialoguePlayer.PlayResult.THROTTLED) {
-            // THROTTLED is not a delivery: the voice mutex swallowed it and no chat fallback runs.
+        //
+        // showOverheadLine already voices lines that have a DialogueTextMapper entry and reports
+        // what surfaced. Playing line.sound again for such a line hit the 2.5 s per-bot voice
+        // mutex, came back THROTTLED, and — with text off — left the floor unarmed although the
+        // player had just heard the line (1.1.217). So the explicit play runs only when the
+        // overhead made no voice attempt ("pet" and AMBIENT_CHATTER are the same mask category).
+        ScriptedDelivery.Surface overhead =
+                CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "pet", line.id);
+        ScriptedDelivery.VoiceOutcome explicitVoice = ScriptedDelivery.needsExplicitVoice(overhead.voice())
+                ? ScriptedDelivery.from(BotDialoguePlayer.playSoundForBotDetailed(
+                        bot, line.sound, VoiceLineCategory.AMBIENT_CHATTER))
+                : ScriptedDelivery.VoiceOutcome.NONE;
+        if (ScriptedDelivery.voiceHandled(overhead.voice(), explicitVoice)) {
+            // No chat fallback when the voice lane took the line. A THROTTLED here now means a
+            // DIFFERENT line held the voice mutex, so on its own it is not a delivery; a PLAYED
+            // from either attempt is.
             noteSpeechIfDelivered(audience,
-                    overheadShown || result == BotDialoguePlayer.PlayResult.PLAYED);
+                    ScriptedDelivery.delivered(overhead.textShown(), overhead.voice(), explicitVoice, false));
             return true;
         }
 
@@ -554,8 +566,8 @@ public final class PetProximityReactionService {
                 true,
                 VoiceLineCategory.AMBIENT_CHATTER
         );
-        noteSpeechIfDelivered(audience,
-                overheadShown || TextLineVisibilityService.isTextAllowed(VoiceLineCategory.AMBIENT_CHATTER));
+        noteSpeechIfDelivered(audience, ScriptedDelivery.delivered(overhead.textShown(), overhead.voice(), explicitVoice,
+                TextLineVisibilityService.isTextAllowed(VoiceLineCategory.AMBIENT_CHATTER)));
         return true;
     }
 

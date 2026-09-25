@@ -56,6 +56,7 @@ import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.ChatUtils.TextLineVisibilityService;
+import net.wcfcarolina13.GameAI.services.dialogue.ScriptedDelivery;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
 
@@ -1195,14 +1196,24 @@ public final class CompanionContextReactionService {
         // finding 2). Each surface carries its own mask, so arming before the attempt let a fully
         // muted scripted lane silence the soul lane — a lane gated on another lane's TOGGLE, which
         // the project's dialogue lane-separation rule forbids.
-        boolean overheadShown = TextLineVisibilityService.isTextAllowed(VoiceLineCategory.fromTag("context"));
-        CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "context", triggerKey);
-
-        BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound, VoiceLineCategory.REACTIONS);
-        if (result == BotDialoguePlayer.PlayResult.PLAYED || result == BotDialoguePlayer.PlayResult.THROTTLED) {
-            // THROTTLED is not a delivery: the voice mutex swallowed it and no chat fallback runs.
+        //
+        // showOverheadLine already voices lines that have a DialogueTextMapper entry and reports
+        // what surfaced. Playing line.sound again for such a line hit the 2.5 s per-bot voice
+        // mutex, came back THROTTLED, and — with text off — left the floor unarmed although the
+        // player had just heard the line (1.1.217). So the explicit play runs only when the
+        // overhead made no voice attempt ("context" and REACTIONS are the same mask category).
+        ScriptedDelivery.Surface overhead =
+                CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "context", triggerKey);
+        ScriptedDelivery.VoiceOutcome explicitVoice = ScriptedDelivery.needsExplicitVoice(overhead.voice())
+                ? ScriptedDelivery.from(BotDialoguePlayer.playSoundForBotDetailed(
+                        bot, line.sound, VoiceLineCategory.REACTIONS))
+                : ScriptedDelivery.VoiceOutcome.NONE;
+        if (ScriptedDelivery.voiceHandled(overhead.voice(), explicitVoice)) {
+            // No chat fallback when the voice lane took the line. A THROTTLED here now means a
+            // DIFFERENT line held the voice mutex, so on its own it is not a delivery; a PLAYED
+            // from either attempt is.
             noteSpeechIfDelivered(audience,
-                    overheadShown || result == BotDialoguePlayer.PlayResult.PLAYED);
+                    ScriptedDelivery.delivered(overhead.textShown(), overhead.voice(), explicitVoice, false));
             return true;
         }
 
@@ -1212,8 +1223,8 @@ public final class CompanionContextReactionService {
                 true,
                 VoiceLineCategory.REACTIONS
         );
-        noteSpeechIfDelivered(audience,
-                overheadShown || TextLineVisibilityService.isTextAllowed(VoiceLineCategory.REACTIONS));
+        noteSpeechIfDelivered(audience, ScriptedDelivery.delivered(overhead.textShown(), overhead.voice(), explicitVoice,
+                TextLineVisibilityService.isTextAllowed(VoiceLineCategory.REACTIONS)));
         return true;
     }
 
