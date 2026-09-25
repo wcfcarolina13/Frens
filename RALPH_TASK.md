@@ -5,8 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 (1.1.218) — next session starts here
 
-**State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances if the natives pgrep passed — see
-the release commit). Suite 1078 green (1020 → 1078). Two builds this session: 1.1.217 (below) and 1.1.218.
+**State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1078 green (1020 → 1078). Two builds this session: 1.1.217 (below) and 1.1.218.
 
 **Shipped in 1.1.218 — construction interior egress** (Bradley's "stuck inside the house instead of walking out the
 doorway"). Hovel: boundary-aware `HovelEgressGeometry` + aligned door waypoints; schematic/generic: `InteriorEgressPolicy`
