@@ -55,12 +55,15 @@ import java.util.function.Supplier;
  * the prompt's lifetime plus the grant's and is swept once a second. A ticket whose prompt was
  * refused or expired, or whose grant lapsed, is dropped with {@code NOT_PERMITTED} before any
  * reach check, so {@link Kind#READY} always means permitted. A take the policy refuses at the
- * chest ({@code INELIGIBLE_NOW}) drops its ticket too, so it is not walked for again.
+ * chest ({@code INELIGIBLE_NOW}) drops its ticket too, so it is not walked for again. A request
+ * the owner's unspent "Allow once" for that chest and item still covers (its ticket was dropped)
+ * is answered from the grant without a second prompt ({@code COVERED_BY_GRANT}), after the same
+ * access and policy checks as any request.
  *
  * <p><b>Refusals carry a scope</b> ({@link Result#scope()}, {@link Scope}): how far the answer
  * reaches — this item anywhere, this chest, this item in this chest, the owner being away, the
- * owner's decision for everything the bot asks now, or a busy moment. Callers decide from it; the
- * reason string is for the logs.
+ * owner's decision for everything the bot asks now, a busy moment, or no room in the bot. Callers
+ * decide from it; the reason string is for the logs.
  *
  * <p><b>Quiet refusals.</b> A bot with no owner is refused ({@code NO_OWNER}) without asking the
  * ledger. After a request finds the owner away from the bot, the bot asks about no chest a

@@ -18,7 +18,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
  * double chest); {@link Scope#TARGET} skips this item in this chest only; {@link Scope#OWNER_ABSENT}
  * skips the chest (both halves) and, if the pull then ends empty-handed with nothing held, pauses
  * the material a flat {@link #PAUSE_MS}; {@link Scope#BOT} stops the pull and pauses the material;
- * {@link Scope#BUSY} stops the pull without a pause.
+ * {@link Scope#BUSY} and {@link Scope#INVENTORY_FULL} stop the pull without a pause.
  */
 public final class CraftChestPullPolicy {
 
@@ -53,8 +53,10 @@ public final class CraftChestPullPolicy {
          * yes but the bot cannot reach the chest. Stop without pausing; the next pull asks it first.
          */
         HOLD,
-        /** Busy (another prompt open, no room, a busy hop, a stopped call): stop without pausing. */
+        /** Busy (another prompt open, a busy hop, a stopped call): stop without pausing. */
         BUSY,
+        /** The bot's inventory is full ({@link Scope#INVENTORY_FULL}): stop without pausing; nothing more fits. */
+        FULL,
         /** The owner decided (a No, an ignored prompt, a cooldown, no owner): stop, and pause the material. */
         STOP
     }
@@ -97,8 +99,8 @@ public final class CraftChestPullPolicy {
      * How far a refusal reaches: {@link Scope#ITEM} → {@link Next#SKIP_ITEM}; {@link Scope#CHEST}
      * → {@link Next#SKIP_CHEST}; {@link Scope#TARGET} → {@link Next#SKIP_TARGET};
      * {@link Scope#OWNER_ABSENT} → {@link Next#OWNER_AWAY}; {@link Scope#BUSY} → {@link Next#BUSY};
-     * {@link Scope#BOT} → {@link Next#STOP}. {@link Scope#NONE} or none at all is not a refusal's
-     * scope: fail closed, as {@link Scope#BOT}.
+     * {@link Scope#INVENTORY_FULL} → {@link Next#FULL}; {@link Scope#BOT} → {@link Next#STOP}.
+     * {@link Scope#NONE} or none at all is not a refusal's scope: fail closed, as {@link Scope#BOT}.
      */
     public static Next onRefusal(Scope scope) {
         if (scope == null) {
@@ -110,6 +112,7 @@ public final class CraftChestPullPolicy {
             case TARGET -> Next.SKIP_TARGET;
             case OWNER_ABSENT -> Next.OWNER_AWAY;
             case BUSY -> Next.BUSY;
+            case INVENTORY_FULL -> Next.FULL;
             case BOT, NONE -> Next.STOP;
         };
     }
@@ -118,8 +121,9 @@ public final class CraftChestPullPolicy {
      * Whether the answer for the chest and item a pull asked first — the ticket it held from an
      * earlier pull — settles that ticket, so later pulls stop asking it first: items moved, or a
      * refusal that says something about the owner, the chest or the item (the facade has dropped
-     * that ticket). A hold keeps it, and so does a busy answer (another prompt open, no room),
-     * which leaves the ticket as it was.
+     * that ticket). A hold keeps it, and so do a busy answer (another prompt open) and a full
+     * inventory (the facade keeps a permitted ticket it had no room for), which leave the ticket
+     * as it was.
      */
     public static boolean settlesHeldTicket(Kind kind, Scope scope) {
         if (kind == null) {
@@ -128,7 +132,7 @@ public final class CraftChestPullPolicy {
         return switch (kind) {
             case MOVED -> true;
             case READY, WAITING -> false;
-            case REFUSED -> scope != Scope.BUSY;
+            case REFUSED -> scope != Scope.BUSY && scope != Scope.INVENTORY_FULL;
         };
     }
 
@@ -136,7 +140,7 @@ public final class CraftChestPullPolicy {
      * Whether one answer is the owner's decision, which pauses the material: a refusal scoped
      * {@link Scope#BOT}, or one with no scope at all (fail closed). Never an item, chest or target
      * refusal ("nothing found here"), never the owner being away (see {@link #isOwnerAway}), never
-     * a busy moment, and never an answer that is not a refusal.
+     * a busy moment or a full inventory, and never an answer that is not a refusal.
      */
     public static boolean countsTowardPause(Kind kind, Scope scope) {
         return kind == Kind.REFUSED && (scope == null || scope == Scope.BOT || scope == Scope.NONE);
@@ -150,14 +154,17 @@ public final class CraftChestPullPolicy {
     /**
      * Whether a pull pauses its material for {@link #PAUSE_MS}. Never when it moved something,
      * leaves a ticket of this material open (a prompt waiting, or a yes not yet reached, must stay
-     * free for the next pull to redeem), or stopped busy (retried at the caller's own pace). Then
-     * when the owner's decision stopped it ({@link #countsTowardPause}), or it found the owner
-     * away ({@link #isOwnerAway}): the same flat minute either way. A pull that met only item,
-     * chest and target refusals found nothing, and does not pause.
+     * free for the next pull to redeem), or stopped busy or on a full inventory ({@link Next#BUSY},
+     * {@link Next#FULL}: retried at the caller's own pace). Then when the owner's decision stopped
+     * it ({@link #countsTowardPause}), or it found the owner away ({@link #isOwnerAway}): the same
+     * flat minute either way. A pull that met only item, chest and target refusals found nothing,
+     * and does not pause.
+     *
+     * @param stoppedBusyOrFull the pull ended on {@link Next#BUSY} or {@link Next#FULL}
      */
-    public static boolean shouldPause(int moved, boolean holdingTicket, boolean stoppedBusy, boolean metOwnerDecision,
-                                      boolean ownerAwaySeen) {
-        if (moved > 0 || holdingTicket || stoppedBusy) {
+    public static boolean shouldPause(int moved, boolean holdingTicket, boolean stoppedBusyOrFull,
+                                      boolean metOwnerDecision, boolean ownerAwaySeen) {
+        if (moved > 0 || holdingTicket || stoppedBusyOrFull) {
             return false;
         }
         return metOwnerDecision || ownerAwaySeen;

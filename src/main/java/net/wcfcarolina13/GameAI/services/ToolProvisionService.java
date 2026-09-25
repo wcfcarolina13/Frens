@@ -820,11 +820,12 @@ public final class ToolProvisionService {
      *
      * <p>One prompt per bot: the first item the owner is asked about ends the pull
      * ({@link SupplyPullPolicy.Pull#halted()}), and so does an answer that would hold for every
-     * other item too: the owner's decision (a cooldown, a No, an ignored prompt) or a busy one
-     * (another prompt open, no room). The owner being away skips only the chests it was found
-     * for, so a chest the owner granted "always" is still reached. The caller reads the result:
-     * {@link SupplyPullPolicy.Pull#held()} means don't craft or cut a tree yet, {@code missed}
-     * and {@code ownerAway} feed its ask backoff ({@link SupplyPullPolicy#idleBackoff}).
+     * other item too: the owner's decision (a cooldown, a No, an ignored prompt), a busy one
+     * (another prompt open), or a full inventory. The owner being away skips only the chests it
+     * was found for, so a chest the owner granted "always" is still reached. The caller reads the
+     * result: {@link SupplyPullPolicy.Pull#held()} means don't craft or cut a tree yet (a full
+     * inventory is not held), {@code missed} and {@code ownerAway} feed its ask backoff
+     * ({@link SupplyPullPolicy#idleBackoff}).
      */
     public static SupplyPullPolicy.Pull pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
                                                                                 ServerWorld world,
@@ -1347,7 +1348,7 @@ public final class ToolProvisionService {
                         skippedTargets.computeIfAbsent(otherHalf, p -> new ArrayList<>()).add(group.sample);
                     }
                 }
-                case HOLD, BUSY, STOP -> {
+                case HOLD, BUSY, FULL, STOP -> {
                     return pull;
                 }
                 case NEXT -> {
@@ -1715,9 +1716,10 @@ public final class ToolProvisionService {
      * the bot walks, and nothing is taken without their permission or a standing one.
      * Runs on a worker thread; the registry snapshot refresh hops through {@link SupplyServerHop}.
      *
-     * <p>Chests are tried best tool first, then nearest, until one gives a tool or an answer stops
+     * <p>Chests are tried best tool first, then nearest, until one gives a tool, an answer stops
      * the search ({@link SupplyPullPolicy#next}: a prompt open or a grant waiting, a busy answer,
-     * the owner's decision). Each ask reads the chest's merged view and tries its stacks in turn,
+     * a full inventory, the owner's decision), or the task the search began under is told to stop
+     * ({@link SupplyPullPolicy#stopsToolSearch}). Each ask reads the chest's merged view and tries its stacks in turn,
      * so any other answer is final for that chest, and its other half is skipped. After a search
      * that took nothing, this bot's {@link SupplyWithdrawals.WaitMode#NONE} searches pause
      * ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s after a search that held, 60 s doubling to
@@ -1755,6 +1757,9 @@ public final class ToolProvisionService {
             return false;
         }
         boolean relook = !waitsForAnswer && paused != null && paused.awaitingAnswer();
+        // Read once, before the first hop: /bot stop removes the task at once and leaves only the
+        // abort latch, so a per-chest read would find no task and go on (SupplyPullPolicy#stopsToolSearch).
+        boolean inTaskAtStart = TaskService.hasActiveTask(botUuid);
 
         if (!relook) {
             // Refresh snapshots on the server thread (block entities must be read there).
@@ -1832,10 +1837,11 @@ public final class ToolProvisionService {
         SupplyWithdrawals.Result last = null;
         for (ChestCandidate candidate : candidates) {
             // A stop request ends the search here, before the next chest is asked or walked to
-            // (an ABORTED answer already stops it as busy). Only a running task's stop:
-            // DurabilityFallbackService also searches outside any task, where a stale abort latch
-            // (a /bot come or follow) must not cancel a search nobody stopped.
-            if (TaskService.hasActiveTask(botUuid) && TaskService.isAbortRequested(botUuid)) {
+            // (an ABORTED answer already stops it as busy). Only the stop of the task the search
+            // began under (inTaskAtStart, read before the loop): DurabilityFallbackService also
+            // searches outside any task, where a stale abort latch (a /bot come or follow) must not
+            // cancel a search nobody stopped.
+            if (SupplyPullPolicy.stopsToolSearch(inTaskAtStart, TaskService.isAbortRequested(botUuid))) {
                 break;
             }
             if (skippedHalves.contains(candidate.pos)) {

@@ -34,6 +34,7 @@ class CraftChestPullPolicyTest {
             Scope.OWNER_ABSENT, Next.OWNER_AWAY,
             Scope.BOT, Next.STOP,
             Scope.BUSY, Next.BUSY,
+            Scope.INVENTORY_FULL, Next.FULL,
             Scope.NONE, Next.STOP));             // never a refusal's scope: fail closed
 
     // ── refusals: the one per-scope rule ─────────────────────────────────────────────────────
@@ -74,7 +75,8 @@ class CraftChestPullPolicyTest {
                 Scope read = scope == null || scope == Scope.NONE ? Scope.BOT : scope;
                 assertEquals(refused && read == Scope.BOT, CraftChestPullPolicy.countsTowardPause(kind, scope), at);
                 assertEquals(refused && scope == Scope.OWNER_ABSENT, CraftChestPullPolicy.isOwnerAway(kind, scope), at);
-                boolean settles = kind == Kind.MOVED || (refused && scope != Scope.BUSY);
+                boolean settles = kind == Kind.MOVED
+                        || (refused && scope != Scope.BUSY && scope != Scope.INVENTORY_FULL);
                 assertEquals(settles, CraftChestPullPolicy.settlesHeldTicket(kind, scope), at);
             }
         }
@@ -107,10 +109,16 @@ class CraftChestPullPolicyTest {
     void noRoomAndABusyServerStopThePassInsteadOfAskingTheNextChest() {
         // FC concern 2: no room used to go on (prompting for items the bot cannot hold), a lagging
         // server cost a hop per candidate.
-        for (Scope busy : List.of(SupplyWithdrawalPolicy.transferScope(TransferStatus.NO_ROOM),
-                Refusal.SERVER_BUSY.scope(), Refusal.TIMEOUT.scope(), Refusal.ABORTED.scope())) {
+        for (Scope busy : List.of(Refusal.SERVER_BUSY.scope(), Refusal.TIMEOUT.scope(), Refusal.ABORTED.scope())) {
             assertEquals(Next.BUSY, CraftChestPullPolicy.onRefusal(busy), busy.name());
         }
+        // Re-review B N1: no room is its own scope, and it stops the pull the same way: no pause.
+        Scope full = SupplyWithdrawalPolicy.transferScope(TransferStatus.NO_ROOM);
+        assertEquals(Scope.INVENTORY_FULL, full);
+        assertEquals(Next.FULL, CraftChestPullPolicy.onRefusal(full));
+        assertFalse(CraftChestPullPolicy.countsTowardPause(Kind.REFUSED, full));
+        assertFalse(CraftChestPullPolicy.shouldPause(0, false, true, false, true),
+                "a pull stopped on a full inventory never pauses, owner away or not");
     }
 
     @Test
@@ -166,6 +174,7 @@ class CraftChestPullPolicyTest {
         expected.put(RequestStatus.PROMPT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.REJECT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, Next.STOP);  // covered without a fingerprint: fail closed
+        expected.put(RequestStatus.COVERED_BY_GRANT, Next.STOP);   // covered without a fingerprint: fail closed
         expected.put(RequestStatus.INELIGIBLE, Next.STOP);         // no verdict attached: fail closed
         expected.put(RequestStatus.OWNER_NOT_NEARBY, Next.OWNER_AWAY);
         expected.put(RequestStatus.DENIED, Next.SKIP_CHEST);
@@ -190,7 +199,7 @@ class CraftChestPullPolicyTest {
         expected.put(TransferStatus.CHEST_MISMATCH, Next.SKIP_CHEST);
         expected.put(TransferStatus.OUT_OF_REACH, Next.SKIP_CHEST);   // arrives as READY, never as a refusal
         expected.put(TransferStatus.NO_STOCK, Next.SKIP_TARGET);
-        expected.put(TransferStatus.NO_ROOM, Next.BUSY);
+        expected.put(TransferStatus.NO_ROOM, Next.FULL);
         expected.put(TransferStatus.NOT_PERMITTED, Next.STOP);
         expected.put(TransferStatus.INELIGIBLE_NOW, Next.SKIP_TARGET);
         assertEquals(EnumSet.allOf(TransferStatus.class), expected.keySet(), "a new TransferStatus needs a decision here");
@@ -269,13 +278,13 @@ class CraftChestPullPolicyTest {
     // ── the held ticket ──────────────────────────────────────────────────────────────────────
 
     @Test
-    void aHeldTicketIsSettledByAMoveOrARefusalThatIsNotBusy() {
+    void aHeldTicketIsSettledByAMoveOrARefusalThatIsNotBusyOrFull() {
         for (Scope scope : Scope.values()) {
             assertTrue(CraftChestPullPolicy.settlesHeldTicket(Kind.MOVED, scope), "moved " + scope);
             assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.READY, scope), "ready " + scope);
             assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.WAITING, scope), "waiting " + scope);
-            assertEquals(scope != Scope.BUSY, CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, scope),
-                    "refused " + scope);
+            assertEquals(scope != Scope.BUSY && scope != Scope.INVENTORY_FULL,
+                    CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, scope), "refused " + scope);
             assertTrue(CraftChestPullPolicy.settlesHeldTicket(null, scope), "no kind " + scope);
         }
         // A busy hop or a full inventory says nothing about the owner's answer: keep asking it first.
@@ -303,17 +312,18 @@ class CraftChestPullPolicyTest {
     }
 
     @Test
-    void aPullPausesOnlyOnTheOwnersDecisionOrAbsenceWhenItMovedNothingHeldNothingAndWasNotBusy() {
+    void aPullPausesOnlyOnTheOwnersDecisionOrAbsenceWhenItMovedNothingHeldNothingAndWasNotBusyOrFull() {
         boolean[] both = {false, true};
         for (int moved : new int[] {0, 3}) {
             for (boolean holding : both) {
-                for (boolean busy : both) {
+                for (boolean busyOrFull : both) {
                     for (boolean decided : both) {
                         for (boolean away : both) {
-                            boolean expected = moved == 0 && !holding && !busy && (decided || away);
-                            assertEquals(expected, CraftChestPullPolicy.shouldPause(moved, holding, busy, decided, away),
-                                    "moved=" + moved + " holding=" + holding + " busy=" + busy + " decided=" + decided
-                                            + " away=" + away);
+                            boolean expected = moved == 0 && !holding && !busyOrFull && (decided || away);
+                            assertEquals(expected,
+                                    CraftChestPullPolicy.shouldPause(moved, holding, busyOrFull, decided, away),
+                                    "moved=" + moved + " holding=" + holding + " busyOrFull=" + busyOrFull
+                                            + " decided=" + decided + " away=" + away);
                         }
                     }
                 }

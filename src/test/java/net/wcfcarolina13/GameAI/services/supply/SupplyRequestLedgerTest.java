@@ -477,9 +477,10 @@ class SupplyRequestLedgerTest {
         UUID first = openOk(cobble(8));
         assertEquals(ResponseStatus.GRANTED_ONCE, ledger.respond(first, OWNER, false, Choice.ALLOW_ONCE).status());
         assertTrue(ledger.isPermitted(cobble(8)));
-        // The grant goes unspent; after the cooldown the bot asks for the same thing again.
+        // The grant goes unspent; after the cooldown the bot asks for more of the same thing than it
+        // covers (for no more, the grant itself would answer: COVERED_BY_GRANT, no prompt).
         advance(15_000L);
-        UUID again = openOk(cobble(8));
+        UUID again = openOk(cobble(9));
         assertEquals(ResponseStatus.REJECTED, ledger.respond(again, OWNER, false, Choice.NO).status());
         assertFalse(ledger.isPermitted(cobble(8)), "the owner's latest answer was No");
         Consume consume = ledger.consumeGrant(cobble(8), PLENTY, 8);
@@ -498,6 +499,83 @@ class SupplyRequestLedgerTest {
         ledger.respond(cobbleHere, OWNER, false, Choice.NO);
         assertTrue(ledger.isPermitted(fp(OWNER, BOT, CHEST, STONE_AXE, 1)), "another item at the same chest");
         assertTrue(ledger.isPermitted(fp(OWNER, BOT_2, OTHER_CHEST, COBBLE, 8)), "another bot and chest");
+    }
+
+    // ── a live grant answers a fresh request ─────────────────────────────────────────────────
+
+    @Test
+    void aLiveOnceGrantCoversAFreshRequestWithoutAPrompt() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(20_000L); // past the prompt cooldown the answer set
+        OpenResult covered = ledger.open(cobble(8), PLENTY, 8);
+        assertEquals(OpenStatus.COVERED_BY_GRANT, covered.status());
+        assertNull(covered.requestId(), "no prompt");
+        assertEquals(cobble(8), covered.fingerprint());
+        assertEquals(Verdict.ELIGIBLE, covered.verdict());
+        assertFalse(ledger.hasPending(BOT));
+        // Read, not spent: asking again answers the same, and the take still spends it once.
+        assertEquals(OpenStatus.COVERED_BY_GRANT, ledger.open(cobble(5), PLENTY, 5).status());
+        assertEquals(ConsumeStatus.ONCE, ledger.consumeGrant(covered.fingerprint(), PLENTY, 8).status());
+        // Spent: the next request prompts as usual, and the cover set no prompt cooldown in between.
+        assertEquals(OpenStatus.OPENED, ledger.open(cobble(8), PLENTY, 8).status());
+    }
+
+    @Test
+    void aCoveredRequestLeavesThePromptCooldownAlone() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(15_000L);
+        assertEquals(OpenStatus.COVERED_BY_GRANT, ledger.open(cobble(8), PLENTY, 8).status());
+        // Another item right after: a covered request is not a prompt, so it did not restart the cooldown.
+        assertEquals(OpenStatus.OPENED, ledger.open(fp(OWNER, BOT, CHEST, TORCH, 4), PLENTY, 4).status());
+    }
+
+    @Test
+    void theGrantCoversOnlyWhatItAllowsAndOnlyWhileItLives() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(15_000L);
+        assertEquals(OpenStatus.OPENED, ledger.open(cobble(9), PLENTY, 9).status(), "more than allowed: ask");
+        assertEquals(OpenStatus.COVERED_BY_GRANT, ledger.open(cobble(8), PLENTY, 8).status(),
+                "a prompt pending for more does not hide the grant for eight");
+
+        ledger = newLedger(Config.defaults());
+        UUID second = openOk(cobble(8));
+        ledger.respond(second, OWNER, false, Choice.ALLOW_ONCE);
+        advance(60_000L); // the grant's deadline
+        assertEquals(OpenStatus.OPENED, ledger.open(cobble(8), PLENTY, 8).status(), "a lapsed grant covers nothing");
+    }
+
+    @Test
+    void thePolicyStillComesFirstAndAStandingPermissionOutranksTheGrant() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(15_000L);
+        // The stack fell to its reserve: refused before anyone walks, grant or not.
+        OpenResult drained = ledger.open(cobble(8), Stock.of(16), 8);
+        assertEquals(OpenStatus.INELIGIBLE, drained.status());
+        assertEquals(Verdict.RESERVE_EXHAUSTED, drained.verdict());
+        // The approved quantity is what the grant is checked against.
+        OpenResult cut = ledger.open(cobble(20), Stock.of(24), 20);
+        assertEquals(OpenStatus.COVERED_BY_GRANT, cut.status());
+        assertEquals(8, cut.fingerprint().qty());
+
+        ledger = newLedger(Config.defaults());
+        UUID always = openOk(cobble(8));
+        ledger.respond(always, OWNER, false, Choice.ALWAYS_COMMON); // a grant and a standing permission
+        advance(15_000L);
+        assertEquals(OpenStatus.COVERED_BY_ALWAYS, ledger.open(cobble(8), PLENTY, 8).status());
+    }
+
+    @Test
+    void aNoForTheSameTargetLeavesNoGrantToCoverIt() {
+        UUID first = openOk(cobble(4));
+        ledger.respond(first, OWNER, false, Choice.ALLOW_ONCE);
+        advance(15_000L);
+        UUID more = openOk(cobble(8));
+        ledger.respond(more, OWNER, false, Choice.NO);
+        assertEquals(OpenStatus.REJECT_COOLDOWN, ledger.open(cobble(4), PLENTY, 4).status());
     }
 
     // ── isPermitted ──────────────────────────────────────────────────────────────────────────
@@ -645,7 +723,8 @@ class SupplyRequestLedgerTest {
         assertEquals(Set.of(), ledger.alwaysSnapshot());
 
         advance(15_000L);
-        UUID always = openOk(cobble(8));
+        // Another item at the same chest: the unspent Allow once would answer cobble without a prompt.
+        UUID always = openOk(fp(OWNER, BOT, CHEST, TORCH, 4));
         ledger.respond(always, OWNER, false, Choice.ALWAYS_COMMON);
         UUID others = openOk(fp(OTHER_OWNER, OTHER_OWNERS_BOT, OTHER_CHEST, COBBLE, 8));
         ledger.respond(others, OTHER_OWNER, false, Choice.ALWAYS_COMMON);

@@ -3028,7 +3028,7 @@ public final class CraftingHelper {
         int moved = 0;
         boolean metOwnerDecision = false;
         boolean ownerAwaySeen = false;
-        boolean stoppedBusy = false;
+        boolean stoppedBusyOrFull = false;
         boolean pendingSettled = false;
         PullCandidate waitingOn = null;
         List<ItemStack> neverGranted = new ArrayList<>();
@@ -3081,8 +3081,9 @@ public final class CraftingHelper {
                     waitingOn = candidate;
                     endsPull = true;
                 }
-                case BUSY -> {
-                    stoppedBusy = true;
+                // Busy, or no room for what the owner permitted (the ticket stays): stop, no pause.
+                case BUSY, FULL -> {
+                    stoppedBusyOrFull = true;
                     endsPull = true;
                 }
                 case STOP -> endsPull = true;
@@ -3103,10 +3104,10 @@ public final class CraftingHelper {
             CHEST_PULL_PENDING.remove(botId, pending);
         }
         // A ticket of this material still open (held now, not listed this time, or only hit by a
-        // busy answer) must stay free for the next pull to redeem: no pause over it.
+        // busy or full-inventory answer) must stay free for the next pull to redeem: no pause over it.
         PendingPull held = CHEST_PULL_PENDING.get(botId);
         boolean holdingTicket = held != null && match.test(held.sample());
-        if (CraftChestPullPolicy.shouldPause(moved, holdingTicket, stoppedBusy, metOwnerDecision, ownerAwaySeen)) {
+        if (CraftChestPullPolicy.shouldPause(moved, holdingTicket, stoppedBusyOrFull, metOwnerDecision, ownerAwaySeen)) {
             CHEST_PULL_PAUSED_UNTIL.put(pauseKey, System.currentTimeMillis() + CraftChestPullPolicy.PAUSE_MS);
         } else {
             CHEST_PULL_PAUSED_UNTIL.remove(pauseKey);

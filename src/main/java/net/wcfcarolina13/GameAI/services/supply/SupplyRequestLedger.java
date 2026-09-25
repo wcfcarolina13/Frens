@@ -26,9 +26,9 @@ import java.util.function.Supplier;
  * after {@link #consumeGrant} says how many.
  *
  * <p><b>Lifecycle of one request.</b> {@link #open} checks the owner, the item and the reserve
- * through {@link SupplyRequestPolicy#assess}, then either reports that a standing permission
- * already covers it, refuses (cooldown, another prompt pending), or records a pending prompt with a
- * fresh id. {@link #respond} lets only the owner answer that id — a foreign click changes nothing —
+ * through {@link SupplyRequestPolicy#assess}, then either reports that a standing permission or a
+ * live grant already covers it, refuses (cooldown, another prompt pending), or records a pending
+ * prompt with a fresh id. {@link #respond} lets only the owner answer that id — a foreign click changes nothing —
  * and turns Allow once / Always into a single-use grant for exactly the pending fingerprint.
  * {@link #consumeGrant} re-assesses against the stock at transfer time and spends the grant.
  * A prompt nobody answers expires and grants nothing.
@@ -75,15 +75,22 @@ public final class SupplyRequestLedger {
         REJECT_COOLDOWN,
         /** A standing "always" permission covers it: no prompt, go straight to {@link #consumeGrant}. */
         COVERED_BY_ALWAYS,
+        /**
+         * An unspent, unexpired "Allow once" for this exact owner, bot, chest and item, for at least
+         * the approved quantity, already answers it: no second prompt for what the owner already
+         * allowed; go to {@link #consumeGrant}, which spends it.
+         */
+        COVERED_BY_GRANT,
         /** The policy refused it; see {@link OpenResult#verdict()}. */
         INELIGIBLE
     }
 
     /**
      * @param requestId   set for {@link OpenStatus#OPENED} only
-     * @param fingerprint for {@link OpenStatus#OPENED} and {@link OpenStatus#COVERED_BY_ALWAYS}:
-     *                    the request with its quantity cut to what the policy permits — the exact
-     *                    quantity to show in the prompt and to consume later; otherwise {@code null}
+     * @param fingerprint for {@link OpenStatus#OPENED}, {@link OpenStatus#COVERED_BY_ALWAYS} and
+     *                    {@link OpenStatus#COVERED_BY_GRANT}: the request with its quantity cut to
+     *                    what the policy permits — the exact quantity to show in the prompt and to
+     *                    consume later; otherwise {@code null}
      * @param verdict     the policy verdict ({@link Verdict#ELIGIBLE} unless {@link OpenStatus#INELIGIBLE})
      */
     public record OpenResult(OpenStatus status, UUID requestId, RequestFingerprint fingerprint,
@@ -206,10 +213,14 @@ public final class SupplyRequestLedger {
     /**
      * Asks to take {@code fp.qty()} of {@code fp.item()} from {@code fp.chest()}.
      *
-     * <p>Checks, in order: the policy (owner, item, need, reserve) → a standing permission →
-     * a recent No for this bot, chest and item id → a prompt already pending for this bot →
-     * this bot's prompt cooldown. A standing permission outranks an earlier No: it can only have
-     * been given after that No, since a covered request is never prompted.
+     * <p>Checks, in order: the policy (owner, item, need, reserve) → a standing permission → a
+     * live "Allow once" for this exact target → a recent No for this bot, chest and item id → a
+     * prompt already pending for this bot → this bot's prompt cooldown. A standing permission
+     * outranks an earlier No: it can only have been given after that No, since a covered request
+     * is never prompted. A live grant does too, as {@link #isPermitted} and {@link #consumeGrant}
+     * already let it: a No for its exact target withdraws it ({@link #respond}), so a grant that
+     * still lives was the latest answer for that target. The grant is only read here, never spent;
+     * the policy runs first, so a stack drained to its reserve is still refused before anyone walks.
      *
      * @param stock current chest contents for this item (both halves)
      * @param need  how many the bot actually needs
@@ -224,6 +235,9 @@ public final class SupplyRequestLedger {
         RequestFingerprint approved = fp.withQty(assessment.quantity());
         if (always.contains(new AlwaysScope(fp.owner(), fp.chest()))) {
             return new OpenResult(OpenStatus.COVERED_BY_ALWAYS, null, approved, Verdict.ELIGIBLE);
+        }
+        if (grantCovers(approved, now)) {
+            return new OpenResult(OpenStatus.COVERED_BY_GRANT, null, approved, Verdict.ELIGIBLE);
         }
         if (isActive(rejectCooldownUntil, new RejectKey(fp.bot(), fp.chest(), fp.itemId()), now)) {
             return new OpenResult(OpenStatus.REJECT_COOLDOWN, null, null, Verdict.ELIGIBLE);
@@ -419,11 +433,16 @@ public final class SupplyRequestLedger {
         if (fp == null) {
             return false;
         }
-        Grant grant = grants.get(Target.of(fp));
-        if (grant != null && clock.getAsLong() < grant.expiresAtMs() && fp.qty() <= grant.fp().qty()) {
+        if (grantCovers(fp, clock.getAsLong())) {
             return true;
         }
         return fp.owner() != null && always.contains(new AlwaysScope(fp.owner(), fp.chest()));
+    }
+
+    /** A live single-use grant for {@code fp}'s exact target, for at least {@code fp.qty()}: read, never spent or dropped. */
+    private boolean grantCovers(RequestFingerprint fp, long now) {
+        Grant grant = grants.get(Target.of(fp));
+        return grant != null && now < grant.expiresAtMs() && fp.qty() <= grant.fp().qty();
     }
 
     /** True while {@code bot} has an unexpired prompt waiting. */

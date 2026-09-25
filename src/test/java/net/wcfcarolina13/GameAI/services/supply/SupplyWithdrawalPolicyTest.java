@@ -361,13 +361,27 @@ class SupplyWithdrawalPolicyTest {
                 RequestStatus.NOT_RUNNING, RequestStatus.WRONG_THREAD)) {
             assertEquals(Scope.BUSY, SupplyWithdrawalPolicy.requestScope(s, null, null), s.name());
         }
-        for (TransferStatus s : EnumSet.of(TransferStatus.NO_ROOM, TransferStatus.WRONG_THREAD,
-                TransferStatus.NOT_RUNNING, TransferStatus.INVALID)) {
+        for (TransferStatus s : EnumSet.of(TransferStatus.WRONG_THREAD, TransferStatus.NOT_RUNNING,
+                TransferStatus.INVALID)) {
             assertEquals(Scope.BUSY, SupplyWithdrawalPolicy.transferScope(s), s.name());
         }
         for (Refusal r : EnumSet.of(Refusal.OTHER_REQUEST_PENDING, Refusal.NOT_RUNNING, Refusal.BOT_GONE,
                 Refusal.INVALID, Refusal.TIMEOUT, Refusal.ABORTED, Refusal.SERVER_BUSY, Refusal.ERROR)) {
             assertEquals(Scope.BUSY, r.scope(), r.name());
+        }
+        // INVENTORY_FULL: a permitted take with no room in the bot (re-review B N1), and nothing else.
+        assertEquals(Scope.INVENTORY_FULL, SupplyWithdrawalPolicy.transferScope(TransferStatus.NO_ROOM));
+        for (TransferStatus s : TransferStatus.values()) {
+            assertEquals(s == TransferStatus.NO_ROOM, SupplyWithdrawalPolicy.transferScope(s) == Scope.INVENTORY_FULL,
+                    s.name());
+        }
+        for (RequestStatus s : RequestStatus.values()) {
+            for (Verdict v : verdictsAndNull()) {
+                assertNotEquals(Scope.INVENTORY_FULL, SupplyWithdrawalPolicy.requestScope(s, null, v), s + "/" + v);
+            }
+        }
+        for (Refusal r : Refusal.values()) {
+            assertNotEquals(Scope.INVENTORY_FULL, r.scope(), r.name());
         }
         // Unmapped or nonsense as a refusal: fail closed.
         assertEquals(Scope.BOT, SupplyWithdrawalPolicy.requestScope(null, null, null));
@@ -441,6 +455,7 @@ class SupplyWithdrawalPolicyTest {
         // A refusal only when the ledger gave no fingerprint, which cannot happen: fail closed.
         expected.put(RequestStatus.OPENED, Scope.BOT);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, Scope.BOT);
+        expected.put(RequestStatus.COVERED_BY_GRANT, Scope.BOT);
         // INELIGIBLE depends on the verdict (above); with none attached it fails closed.
         expected.put(RequestStatus.INELIGIBLE, Scope.BOT);
         assertEquals(EnumSet.allOf(RequestStatus.class), expected.keySet(), "a new RequestStatus needs a scope here");
@@ -471,7 +486,7 @@ class SupplyWithdrawalPolicyTest {
         expected.put(TransferStatus.MOVED_SHORT, Scope.TARGET);
         expected.put(TransferStatus.NOT_PERMITTED, Scope.BOT);
         expected.put(TransferStatus.OWNER_OR_BOT_MISMATCH, Scope.BOT);
-        expected.put(TransferStatus.NO_ROOM, Scope.BUSY);
+        expected.put(TransferStatus.NO_ROOM, Scope.INVENTORY_FULL); // not BUSY: nothing a short wait fixes
         expected.put(TransferStatus.WRONG_THREAD, Scope.BUSY);
         expected.put(TransferStatus.NOT_RUNNING, Scope.BUSY);
         expected.put(TransferStatus.INVALID, Scope.BUSY);
@@ -556,6 +571,7 @@ class SupplyWithdrawalPolicyTest {
         Map<RequestStatus, RequestAction> expected = new EnumMap<>(RequestStatus.class);
         expected.put(RequestStatus.OPENED, RequestAction.WAIT);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, RequestAction.TAKE);
+        expected.put(RequestStatus.COVERED_BY_GRANT, RequestAction.TAKE);
         for (RequestStatus refused : EnumSet.of(RequestStatus.DUPLICATE_PENDING, RequestStatus.PROMPT_COOLDOWN,
                 RequestStatus.REJECT_COOLDOWN, RequestStatus.INELIGIBLE, RequestStatus.OWNER_NOT_NEARBY,
                 RequestStatus.DENIED, RequestStatus.INVALID, RequestStatus.NOT_RUNNING, RequestStatus.WRONG_THREAD)) {
@@ -576,7 +592,7 @@ class SupplyWithdrawalPolicyTest {
         expected.put(TransferStatus.MOVED, new TransferAction(Kind.MOVED, false, "MOVED", Scope.NONE));
         expected.put(TransferStatus.MOVED_SHORT, new TransferAction(Kind.MOVED, false, "MOVED_SHORT", Scope.NONE));
         expected.put(TransferStatus.OUT_OF_REACH, new TransferAction(Kind.READY, true, "OUT_OF_REACH", Scope.NONE));
-        expected.put(TransferStatus.NO_ROOM, new TransferAction(Kind.REFUSED, true, "NO_ROOM", Scope.BUSY));
+        expected.put(TransferStatus.NO_ROOM, new TransferAction(Kind.REFUSED, true, "NO_ROOM", Scope.INVENTORY_FULL));
         // The ledger keeps the grant when the policy refuses at transfer time, but the ticket goes:
         // kept, it would redeem as READY and send the bot walking for nothing while the grant lives.
         expected.put(TransferStatus.INELIGIBLE_NOW,
@@ -711,12 +727,14 @@ class SupplyWithdrawalPolicyTest {
         Stock axes = Stock.of(3);
         Outcome first = m.withdraw(CHEST, STONE_AXE, axes, true);
         m.answer(first, Choice.ALLOW_ONCE);
-        // The grant goes unspent (say the bot wandered off) and its ticket lapses...
+        // The grant (one axe) goes unspent and its ticket is lost; the bot now asks for two, which
+        // the grant does not cover, so the owner is asked again...
         m.tickets.clear();
         m.advance(16_000L);
-        Outcome again = m.withdraw(CHEST, STONE_AXE, axes, true);
-        assertEquals(Kind.WAITING, again.kind(), "re-asked");
+        Outcome again = m.withdraw(CHEST, STONE_AXE, axes, true, 2);
+        assertEquals(Kind.WAITING, again.kind(), "re-asked: a grant for one does not cover two");
         assertEquals(ResponseStatus.REJECTED, m.answer(again, Choice.NO));
+        // ...and their No withdraws the earlier Allow once too: not even the one axe it covered moves.
         Outcome after = m.withdraw(CHEST, STONE_AXE, axes, true);
         assertEquals(Kind.REFUSED, after.kind(), "the latest answer wins");
         assertEquals(Scope.BOT, after.scope());
@@ -739,8 +757,9 @@ class SupplyWithdrawalPolicyTest {
     /**
      * A grant the policy refuses at the chest (the stack fell to its reserve while the bot walked)
      * drops the ticket, so the next call is a fresh request that the policy refuses first: no
-     * READY, no walk, no prompt, no cooldown. The documented edge: once the stock recovers while
-     * the grant still lives, that request prompts the owner once more.
+     * READY, no walk, no prompt, no cooldown. Once the stock recovers while the grant still lives,
+     * that request is covered by the grant: READY, then taken, and the owner is not asked again
+     * (re-review A's minor; it replaces the redundant prompt this edge used to cost).
      */
     @Test
     void aTakeThePolicyRefusesAtTheChestDropsTheTicketAndTheNextAskIsRefusedBeforeAnyPrompt() {
@@ -765,8 +784,70 @@ class SupplyWithdrawalPolicyTest {
 
         m.advance(15_000L);
         Outcome recovered = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
-        assertEquals(Kind.WAITING, recovered.kind(), "the edge: the grant still lives, yet the owner is asked again");
+        assertEquals(Kind.READY, recovered.kind(), "the grant still lives and covers it: walk there");
+        assertEquals(1, m.prompts, "the owner is not asked again");
+        assertFalse(m.ledger.hasPending(BOT));
+        assertEquals(1, m.tickets.count(BOT));
+        Outcome taken = m.withdraw(CHEST, STONE_AXE, threeAxes, true);
+        assertEquals(Kind.MOVED, taken.kind());
+        assertEquals(1, taken.moved());
+        assertEquals(1, m.prompts);
+    }
+
+    /**
+     * Re-review A minor: a ticket is dropped while its "Allow once" lives, the item restocks, and
+     * a site that never waits steps again. Before, that request opened a second prompt and the new
+     * ticket redeemed under the first grant while the second prompt was still open, so the owner
+     * answered a prompt for an axe already taken. Now the request is covered by the grant: no
+     * second prompt, READY, then the take spends the grant, and nothing is left for the owner to
+     * answer. Once the grant is spent, the next ask prompts as usual.
+     */
+    @Test
+    void rereviewAMinorARestockedItemTheOwnerAlreadyAllowedIsTakenWithoutASecondPrompt() {
+        Model m = new Model();
+        Stock threeAxes = Stock.of(3);
+        Outcome asked = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
+        assertEquals(Kind.WAITING, asked.kind());
+        m.answer(asked, Choice.ALLOW_ONCE);
+        m.advance(5_000L);
+        assertEquals(Scope.TARGET, m.withdraw(CHEST, STONE_AXE, Stock.of(1), true).scope(), "drained at the chest");
+        assertEquals(0, m.tickets.count(BOT), "the ticket is gone, the grant is not");
+
+        m.advance(20_000L); // restocked; the grant lives 60 s from the answer
+        Outcome ready = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
+        assertEquals(Kind.READY, ready.kind(), "covered by the grant: walk there");
+        assertNull(ready.requestId(), "no prompt opened");
+        assertFalse(m.ledger.hasPending(BOT), "nothing left for the owner to answer");
+        m.advance(3_000L);
+        Outcome taken = m.withdraw(CHEST, STONE_AXE, threeAxes, true);
+        assertEquals(Kind.MOVED, taken.kind());
+        assertEquals(1, m.prompts, "one prompt, one Allow once, one axe");
+        assertEquals(0, m.tickets.count(BOT));
+
+        // The grant is spent: the next axe is asked for again (past the answer's prompt cooldown).
+        Outcome next = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
+        assertEquals(Kind.WAITING, next.kind());
         assertEquals(2, m.prompts);
+    }
+
+    /**
+     * The policy still comes first under a standing permission: an "always" chest whose only axe
+     * is its spare refuses the axe (TARGET) before anyone walks, however often it is asked.
+     */
+    @Test
+    void anAlwaysChestAtItsReserveIsRefusedBeforeAnyWalk() {
+        Model m = new Model();
+        Outcome asked = m.withdraw(CHEST, STONE_AXE, Stock.of(3), true);
+        m.answer(asked, Choice.ALWAYS_COMMON);
+        assertEquals(Kind.MOVED, m.withdraw(CHEST, STONE_AXE, Stock.of(3), true).kind(), "the answer's grant");
+        for (int i = 0; i < 3; i++) {
+            m.advance(20_000L);
+            Outcome spare = m.withdraw(CHEST, STONE_AXE, Stock.of(1), false);
+            assertEquals(Kind.REFUSED, spare.kind(), "never READY: nothing to walk for");
+            assertEquals(Scope.TARGET, spare.scope());
+            assertEquals(0, m.tickets.count(BOT));
+        }
+        assertEquals(1, m.prompts);
     }
 
     // ── waiting ──────────────────────────────────────────────────────────────────────────────
@@ -863,13 +944,17 @@ class SupplyWithdrawalPolicyTest {
         }
 
         Outcome withdraw(ChestKey chest, ItemKey item, Stock stock, boolean inReach) {
+            return withdraw(chest, item, stock, inReach, 1);
+        }
+
+        Outcome withdraw(ChestKey chest, ItemKey item, Stock stock, boolean inReach, int qty) {
             long t = now[0];
             Ticket ticket = tickets.find(BOT, TicketKey.of(chest, item), t, DEFAULTS);
             boolean pending = ledger.hasPending(BOT);
             boolean permitted = ticket != null && ledger.isPermitted(ticket.fp());
             switch (SupplyWithdrawalPolicy.ticketStep(ticket != null, pending, permitted)) {
                 case REDEEM:
-                    return redeem(ticket, stock, inReach);
+                    return redeem(ticket, stock, inReach, qty);
                 case WAIT:
                     return new Outcome(Kind.WAITING, 0, Scope.NONE, null);
                 case DROP_NOT_PERMITTED:
@@ -881,11 +966,11 @@ class SupplyWithdrawalPolicyTest {
                 default:
                     break;
             }
-            OpenResult opened = ledger.open(new RequestFingerprint(OWNER, BOT, chest, item, 1), stock, 1);
+            OpenResult opened = ledger.open(new RequestFingerprint(OWNER, BOT, chest, item, qty), stock, qty);
             RequestStatus status = RequestStatus.valueOf(opened.status().name());
             switch (SupplyWithdrawalPolicy.onRequest(status)) {
                 case TAKE:
-                    return redeem(tickets.record(opened.fingerprint(), t), stock, inReach);
+                    return redeem(tickets.record(opened.fingerprint(), t), stock, inReach, qty);
                 case WAIT:
                     prompts++;
                     tickets.record(opened.fingerprint(), t);
@@ -896,11 +981,11 @@ class SupplyWithdrawalPolicyTest {
             }
         }
 
-        private Outcome redeem(Ticket ticket, Stock stock, boolean inReach) {
+        private Outcome redeem(Ticket ticket, Stock stock, boolean inReach, int need) {
             if (!inReach) {
                 return new Outcome(Kind.READY, 0, Scope.NONE, null);
             }
-            Consume consume = ledger.consumeGrant(ticket.fp(), stock, 1);
+            Consume consume = ledger.consumeGrant(ticket.fp(), stock, need);
             TransferStatus status = consume.permitted() ? TransferStatus.MOVED
                     : SupplyChestRules.transferRefusal(consume.status());
             TransferAction action = SupplyWithdrawalPolicy.onTransfer(status, consume.quantity());

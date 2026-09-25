@@ -29,6 +29,9 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  *   <li>{@link Scope#BOT}: stop the pass; one step on the caller's backoff (a miss).</li>
  *   <li>{@link Scope#BUSY}: stop the pass and hold like a prompt still open: the caller looks
  *       again at its short cadence. Never a miss, never a pause.</li>
+ *   <li>{@link Scope#INVENTORY_FULL}: stop the pass (nothing more fits). Never a miss, never a
+ *       pause, and never a hold: the caller goes on with its other work as if nothing were found,
+ *       since nothing here frees a slot. {@code MutualAidChestFoodPolicy} alone makes room, once.</li>
  * </ul>
  * A pass that met only item, chest and target refusals ends as "nothing found": no pause, no miss.
  *
@@ -86,12 +89,14 @@ public final class SupplyPullPolicy {
         HOLD,
         /** {@link Scope#BUSY}: stop, no miss; look again at the caller's short cadence. */
         BUSY,
+        /** {@link Scope#INVENTORY_FULL}: stop, no miss, no pause, no hold; the caller goes on as if nothing were found. */
+        FULL,
         /** {@link Scope#BOT}: stop; a miss. */
         STOP;
 
         /** Whether this answer ends the pass: nothing after it is asked. */
         public boolean stopsPass() {
-            return this == HOLD || this == BUSY || this == STOP;
+            return this == HOLD || this == BUSY || this == FULL || this == STOP;
         }
     }
 
@@ -114,6 +119,7 @@ public final class SupplyPullPolicy {
                 case TARGET -> Next.SKIP_TARGET;
                 case OWNER_ABSENT -> Next.OWNER_AWAY;
                 case BUSY -> Next.BUSY;
+                case INVENTORY_FULL -> Next.FULL;
                 case BOT, NONE -> Next.STOP;
             };
         };
@@ -129,11 +135,20 @@ public final class SupplyPullPolicy {
     }
 
     /**
-     * Whether an answer is busy ({@link Scope#BUSY}: another prompt of this bot open, no room, a
-     * busy server or hop, a stopped call): held like a wait, never a miss.
+     * Whether an answer is busy ({@link Scope#BUSY}: another prompt of this bot open, a busy
+     * server or hop, a stopped call): held like a wait, never a miss.
      */
     public static boolean isBusy(Kind kind, Scope scope) {
         return kind == Kind.REFUSED && refusalScope(scope) == Scope.BUSY;
+    }
+
+    /**
+     * Whether a permitted take found the bot's inventory full ({@link Scope#INVENTORY_FULL}): it
+     * ends the pass, but it is not held (a bot waiting for room nothing frees would wait for
+     * ever), not a miss and not a pause.
+     */
+    public static boolean isFull(Kind kind, Scope scope) {
+        return kind == Kind.REFUSED && refusalScope(scope) == Scope.INVENTORY_FULL;
     }
 
     /**
@@ -141,7 +156,7 @@ public final class SupplyPullPolicy {
      * ({@link Scope#BOT}: their No, an ignored prompt, a cooldown, no owner). Not a miss: anything
      * that moved or is waiting; {@link Scope#ITEM}, {@link Scope#CHEST} and {@link Scope#TARGET}
      * ("nothing found" here, as before chests were asked); {@link Scope#OWNER_ABSENT} (a flat
-     * recheck, not the owner's answer); and {@link Scope#BUSY}.
+     * recheck, not the owner's answer); {@link Scope#BUSY}; and {@link Scope#INVENTORY_FULL}.
      */
     public static boolean isMiss(Kind kind, Scope scope) {
         return kind == Kind.REFUSED && refusalScope(scope) == Scope.BOT;
@@ -187,6 +202,24 @@ public final class SupplyPullPolicy {
         return s == Scope.ITEM || s == Scope.TARGET;
     }
 
+    // ── Stopping a chest tool search ─────────────────────────────────────────────────────────
+
+    /**
+     * Whether a chest tool search ends before it asks, or walks to, its next chest: the task it
+     * ran under was told to stop. {@code inTaskAtStart} is read once, before the search's first
+     * hop, because {@code /bot stop} removes the task at once ({@code TaskService.forceAbort})
+     * while its abort latch stays set: read per chest, the check would find no task and go on to
+     * prompt for, or take from, the next chest for a bot its owner just stopped. A search begun
+     * outside any task ({@code DurabilityFallbackService}) never stops on the latch, which a
+     * {@code /bot come} or {@code follow} may have left set long before.
+     *
+     * @param inTaskAtStart  the bot had an active task when the search began
+     * @param abortRequested the bot's abort latch is set now
+     */
+    public static boolean stopsToolSearch(boolean inTaskAtStart, boolean abortRequested) {
+        return inTaskAtStart && abortRequested;
+    }
+
     // ── What a pull adds up to ───────────────────────────────────────────────────────────────
 
     /**
@@ -197,19 +230,20 @@ public final class SupplyPullPolicy {
      * @param moved     items moved into the bot
      * @param waiting   a prompt is open, or a grant waits for the bot ({@link #isWaiting})
      * @param busy      an answer was busy ({@link #isBusy})
+     * @param full      a permitted take found the bot's inventory full ({@link #isFull}); not held
      * @param missed    at least one answer was a miss ({@link #isMiss})
      * @param ownerAway an answer found the owner away ({@link #isOwnerAway})
      * @param halted    an answer stopped the pull ({@link Next#stopsPass()}); later items were not asked
      */
-    public record Pull(int moved, boolean waiting, boolean busy, boolean missed, boolean ownerAway,
+    public record Pull(int moved, boolean waiting, boolean busy, boolean full, boolean missed, boolean ownerAway,
                        boolean halted) {
-        public static final Pull NOTHING = new Pull(0, false, false, false, false, false);
+        public static final Pull NOTHING = new Pull(0, false, false, false, false, false, false);
 
         public Pull plus(Pull other) {
             if (other == null) {
                 return this;
             }
-            return new Pull(moved + other.moved, waiting || other.waiting, busy || other.busy,
+            return new Pull(moved + other.moved, waiting || other.waiting, busy || other.busy, full || other.full,
                     missed || other.missed, ownerAway || other.ownerAway, halted || other.halted);
         }
 
@@ -217,7 +251,10 @@ public final class SupplyPullPolicy {
             return moved > 0;
         }
 
-        /** Whether the pass held: a prompt open, a grant waiting, or a busy answer. The caller comes back soon. */
+        /**
+         * Whether the pass held: a prompt open, a grant waiting, or a busy answer. The caller comes
+         * back soon. A full inventory is not a hold ({@link #full}).
+         */
         public boolean held() {
             return waiting || busy;
         }
@@ -230,6 +267,7 @@ public final class SupplyPullPolicy {
         return new Pull(t.moved() + took,
                 t.waiting() || isWaiting(kind),
                 t.busy() || isBusy(kind, scope),
+                t.full() || isFull(kind, scope),
                 t.missed() || isMiss(kind, scope),
                 t.ownerAway() || isOwnerAway(kind, scope),
                 t.halted() || next(kind, scope).stopsPass());
@@ -238,11 +276,13 @@ public final class SupplyPullPolicy {
     /**
      * Whether a finished pass earns the flat owner-away wait ({@link #OWNER_AWAY_PAUSE_MS}): it
      * found the owner away and ended empty-handed without anything else to say — nothing moved,
-     * nothing held (no prompt open, no grant waiting, no busy stop) and no miss (the owner's own
-     * answer backs off on the miss ladder instead).
+     * nothing held (no prompt open, no grant waiting, no busy stop), no full inventory (that stop
+     * is never a pause, and it ended the pass before every chest was asked) and no miss (the
+     * owner's own answer backs off on the miss ladder instead).
      */
     public static boolean ownerAwayDefers(Pull pass) {
-        return pass != null && pass.ownerAway() && !pass.movedAny() && !pass.held() && !pass.missed();
+        return pass != null && pass.ownerAway() && !pass.movedAny() && !pass.held() && !pass.full()
+                && !pass.missed();
     }
 
     /** What an idle pull does to its caller's ask backoff. */
@@ -254,8 +294,9 @@ public final class SupplyPullPolicy {
         /** The owner is away and nothing else happened: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched. */
         OWNER_AWAY,
         /**
-         * Leave it: nothing was asked or only nothing was found, or the pass held (a prompt still
-         * open, a grant waiting, a busy answer: the next pull must be free to come back soon).
+         * Leave it: nothing was asked or only nothing was found, the inventory was full, or the
+         * pass held (a prompt still open, a grant waiting, a busy answer: the next pull must be
+         * free to come back soon).
          */
         NONE
     }
@@ -263,7 +304,8 @@ public final class SupplyPullPolicy {
     /**
      * A held pass outranks everything (an open prompt's grant must stay redeemable, and a busy
      * answer is retried soon); then a miss (the owner decided); then a move; then the owner being
-     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting).
+     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting). A
+     * pass a full inventory stopped is none of these: {@link Backoff#NONE} unless it moved first.
      */
     public static Backoff idleBackoff(Pull pull) {
         if (pull == null || pull.held()) {
@@ -282,7 +324,8 @@ public final class SupplyPullPolicy {
      * Whether the idle wooden fallback holds (no craft, no woodcut) to come back soon: only while
      * the pull held (a prompt open, a grant waiting, a busy answer) and the bot still lacks the
      * weapon or axe the fallback exists for. Waiting on, say, a helmet does not hold up a bot that
-     * already has both.
+     * already has both. A full inventory never holds it: nothing the fallback waits on would free
+     * a slot, so it crafts or cuts wood as if nothing were found.
      */
     public static boolean holdsIdleFallback(Pull pull, boolean stillMissingWeaponOrAxe) {
         return pull != null && pull.held() && stillMissingWeaponOrAxe;
@@ -301,7 +344,7 @@ public final class SupplyPullPolicy {
      * {@link #idleBackoff}: 0 when it took something; {@link #WAITING_RECHECK_MS} when it held
      * (come back soon to redeem a grant, or to retry a busy answer); {@link #missPauseMs} after a
      * miss; {@link #OWNER_AWAY_PAUSE_MS} when the owner was away and nothing else happened; and 0
-     * when it asked nothing or found nothing.
+     * when it asked nothing, found nothing, or found the inventory full.
      */
     public static long retrievalPauseMs(Pull search, int priorMisses) {
         if (search == null || search.movedAny()) {

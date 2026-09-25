@@ -17,7 +17,8 @@ import java.util.List;
  * food in this chest only; {@link Scope#OWNER_ABSENT} skips the chest (both halves) and, if the
  * attempt then ends with nothing taken, asked or stopped, defers a flat
  * {@link #OWNER_AWAY_DEFER_TICKS}; {@link Scope#BOT} stops and pauses {@link #BOT_PAUSE_TICKS};
- * {@link Scope#BUSY} stops, and the next attempt comes after the usual {@link #THROTTLE_TICKS}.
+ * {@link Scope#BUSY} stops, and the next attempt comes after the usual {@link #THROTTLE_TICKS};
+ * {@link Scope#INVENTORY_FULL} makes room once and asks the same food again, then stops like busy.
  *
  * <p>No Minecraft types, so it is tested without the game. {@link Kind} and {@link Scope} are plain
  * enums nested in the supply classes; loading them does not load the outer classes.
@@ -103,8 +104,9 @@ public final class MutualAidChestFoodPolicy {
          */
         OWNER_AWAY,
         /**
-         * Nothing more to try now: a busy answer ({@link Scope#BUSY}), or a grant this site cannot
-         * walk to. The next attempt after the usual {@link #THROTTLE_TICKS}.
+         * Nothing more to try now: a busy answer ({@link Scope#BUSY}), a full inventory room could
+         * not be made in, or a grant this site cannot walk to. The next attempt after the usual
+         * {@link #THROTTLE_TICKS}.
          */
         STOP,
         /** The owner's decision ({@link Scope#BOT}): stop; no chest is asked for {@link #BOT_PAUSE_TICKS}. */
@@ -119,8 +121,9 @@ public final class MutualAidChestFoodPolicy {
     /**
      * Decides from the result's kind and, for a refusal, its scope only; the reason string is for
      * the logs. The one site fact it takes is whether a piece of this food still fits the bot: a
-     * permitted take the bot has no room for comes back {@link Scope#BUSY} (the ticket is kept),
-     * and only then is room made, once, and the same food asked again.
+     * permitted take the bot has no room for comes back {@link Scope#INVENTORY_FULL} (the ticket is
+     * kept), and only then is room made, once, and the same food asked again. A busy answer
+     * ({@link Scope#BUSY}: another prompt of this bot open, a busy hop) never makes room.
      *
      * @param kind         the facade's result kind
      * @param scope        the facade's refusal scope ({@code SupplyWithdrawals.Result#scope()})
@@ -156,11 +159,14 @@ public final class MutualAidChestFoodPolicy {
                 return Next.NEXT_TARGET;
             case OWNER_ABSENT:
                 return Next.OWNER_AWAY;
-            case BUSY:
+            case INVENTORY_FULL:
                 // No room for even one piece of a permitted take: make room once and ask again. Room
-                // made and still nothing fits (nothing here is droppable), or busy for another reason:
-                // stop; the next attempt after the throttle.
+                // made and still nothing fits (nothing here is droppable), or the site sees room the
+                // facade did not: stop; the next attempt after the throttle.
                 return !roomForOne && !roomMadeOnce ? Next.MAKE_ROOM_AND_RETRY : Next.STOP;
+            case BUSY:
+                // Contention or a busy hop, nothing about room: never drop a stack over it.
+                return Next.STOP;
             case BOT:
             case NONE:
             default:

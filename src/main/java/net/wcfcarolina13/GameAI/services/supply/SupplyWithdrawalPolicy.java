@@ -47,7 +47,7 @@ public final class SupplyWithdrawalPolicy {
 
     /**
      * How far a refusal reaches, so a caller can decide what to try next without reading the
-     * reason string (which stays for the logs). Every refusal carries exactly one of the six
+     * reason string (which stays for the logs). Every refusal carries exactly one of the seven
      * refusal scopes; the sites' rule for each is in their policies.
      */
     public enum Scope {
@@ -78,10 +78,17 @@ public final class SupplyWithdrawalPolicy {
         BOT,
         /**
          * Nothing the owner decided and nothing about the item or the chest: another prompt of this
-         * bot is open, the bot has no room, the server or the hop is busy, the call was stopped.
-         * Stop the pass and come back soon; never a miss, never a pause.
+         * bot is open, the server or the hop is busy, the call was stopped. Stop the pass and come
+         * back soon; never a miss, never a pause.
          */
-        BUSY
+        BUSY,
+        /**
+         * A permitted take found no room in the bot's inventory ({@code NO_ROOM}; the ticket is kept,
+         * so a caller that makes room may call again). Nothing the owner decided, and nothing a
+         * short wait fixes: stop the pass; never a miss, never a pause, and never a reason to hold
+         * other work (a full bot that waits for room it never makes would wait for ever).
+         */
+        INVENTORY_FULL
     }
 
     /**
@@ -136,9 +143,9 @@ public final class SupplyWithdrawalPolicy {
      * ineligible verdict reaches the item, the item in this chest or the bot ({@link #verdictScope});
      * an owner away is {@link Scope#OWNER_ABSENT}; a prompt or reject cooldown stops the bot; a
      * prompt of this bot already open, or the service not able to answer, is {@link Scope#BUSY}.
-     * {@code OPENED} and {@code COVERED_BY_ALWAYS} are refusals only when the ledger gave no
-     * fingerprint, which cannot happen: they fail closed ({@link Scope#BOT}), like a {@code null}
-     * status or verdict.
+     * {@code OPENED}, {@code COVERED_BY_ALWAYS} and {@code COVERED_BY_GRANT} are refusals only when
+     * the ledger gave no fingerprint, which cannot happen: they fail closed ({@link Scope#BOT}), like
+     * a {@code null} status or verdict.
      *
      * @param access  the outcome's access verdict; only a {@code DENIED} carries one, and any value counts
      * @param verdict the outcome's policy verdict; read for {@code INELIGIBLE} only
@@ -148,7 +155,7 @@ public final class SupplyWithdrawalPolicy {
             return Scope.BOT;
         }
         return switch (status) {
-            case PROMPT_COOLDOWN, REJECT_COOLDOWN, OPENED, COVERED_BY_ALWAYS -> Scope.BOT;
+            case PROMPT_COOLDOWN, REJECT_COOLDOWN, OPENED, COVERED_BY_ALWAYS, COVERED_BY_GRANT -> Scope.BOT;
             case INELIGIBLE -> verdictScope(verdict);
             case OWNER_NOT_NEARBY -> Scope.OWNER_ABSENT;
             case DENIED -> Scope.CHEST;
@@ -176,8 +183,9 @@ public final class SupplyWithdrawalPolicy {
     /**
      * The scope of a transfer's status when it is a refusal: the chest for a denied or changed
      * chest; the item in this chest when none is left, the policy refuses it now, or a take moved
-     * nothing; the bot for no permission or another owner; busy for no room, the wrong thread, the
-     * service stopped or a missing argument. {@code MOVED}/{@code MOVED_SHORT} are refusals only
+     * nothing; the bot for no permission or another owner; {@link Scope#INVENTORY_FULL} for no
+     * room; busy for the wrong thread, the service stopped or a missing argument.
+     * {@code MOVED}/{@code MOVED_SHORT} are refusals only
      * when nothing moved, and {@code OUT_OF_REACH} never is (it reports {@link Kind#READY}; mapped
      * with the chest for completeness). A {@code null} status fails closed ({@link Scope#BOT}).
      */
@@ -189,7 +197,8 @@ public final class SupplyWithdrawalPolicy {
             case DENIED, CHEST_MISMATCH, OUT_OF_REACH -> Scope.CHEST;
             case NO_STOCK, INELIGIBLE_NOW, MOVED, MOVED_SHORT -> Scope.TARGET;
             case NOT_PERMITTED, OWNER_OR_BOT_MISMATCH -> Scope.BOT;
-            case NO_ROOM, WRONG_THREAD, NOT_RUNNING, INVALID -> Scope.BUSY;
+            case NO_ROOM -> Scope.INVENTORY_FULL;
+            case WRONG_THREAD, NOT_RUNNING, INVALID -> Scope.BUSY;
         };
     }
 
@@ -474,7 +483,10 @@ public final class SupplyWithdrawalPolicy {
 
     /** What the facade does after a request. */
     public enum RequestAction {
-        /** A standing permission covers it: keep a ticket, then take if in reach, else report READY. */
+        /**
+         * A standing permission, or the owner's unspent "Allow once" for this chest and item, covers
+         * it: keep a ticket, then take if in reach, else report READY.
+         */
         TAKE,
         /** A prompt went to the owner: keep a ticket and report WAITING. */
         WAIT,
@@ -487,7 +499,7 @@ public final class SupplyWithdrawalPolicy {
             return RequestAction.REFUSE;
         }
         return switch (status) {
-            case COVERED_BY_ALWAYS -> RequestAction.TAKE;
+            case COVERED_BY_ALWAYS, COVERED_BY_GRANT -> RequestAction.TAKE;
             case OPENED -> RequestAction.WAIT;
             case DUPLICATE_PENDING, PROMPT_COOLDOWN, REJECT_COOLDOWN, INELIGIBLE, OWNER_NOT_NEARBY, DENIED,
                  INVALID, NOT_RUNNING, WRONG_THREAD -> RequestAction.REFUSE;
@@ -518,9 +530,9 @@ public final class SupplyWithdrawalPolicy {
      * while the bot walked) drops the ticket too, although the ledger keeps the grant: kept, the
      * ticket would redeem as READY on every later call while the grant lives, and the caller would
      * walk there and back for nothing each time. Without it the next call is a fresh request, which
-     * the policy refuses before any prompt or cooldown while the stock stays as it is. The edge: if
-     * the stock recovers while the grant still lives, that request prompts the owner once more
-     * (or meets the prompt cooldown their answer set), though the grant would have covered it.
+     * the policy refuses before any prompt, cooldown or walk while the stock stays as it is. Once
+     * the stock recovers while the grant still lives, that request finds the grant
+     * ({@code COVERED_BY_GRANT}) and takes under it without prompting the owner again.
      */
     public static TransferAction onTransfer(TransferStatus status, int moved) {
         if (status == null) {

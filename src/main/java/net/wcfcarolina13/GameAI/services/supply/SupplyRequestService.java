@@ -125,7 +125,7 @@ public final class SupplyRequestService {
 
     // ── Outcomes ─────────────────────────────────────────────────────────────────────────────
 
-    /** What {@link #request} did. The first six mirror {@link OpenStatus}; the rest are the adapter's own. */
+    /** What {@link #request} did. The first seven mirror {@link OpenStatus}; the rest are the adapter's own. */
     public enum RequestStatus {
         /** A prompt was opened and sent to the owner. */
         OPENED,
@@ -137,6 +137,11 @@ public final class SupplyRequestService {
         REJECT_COOLDOWN,
         /** A standing permission covers it: no prompt; the caller may go to {@link #transferNow}. */
         COVERED_BY_ALWAYS,
+        /**
+         * The owner's unspent "Allow once" for this exact chest and item already covers it: no
+         * second prompt; the caller may go to {@link #transferNow}, which spends it.
+         */
+        COVERED_BY_GRANT,
         /** The policy refused it (see {@link RequestOutcome#verdict()}), including {@code NO_OWNER}. */
         INELIGIBLE,
         /**
@@ -158,8 +163,8 @@ public final class SupplyRequestService {
      * @param status  what happened
      * @param ledger  the ledger's answer when it was consulted, else {@code null}; for
      *                {@link RequestStatus#OPENED} it carries the request id and the approved
-     *                fingerprint, for {@link RequestStatus#COVERED_BY_ALWAYS} the fingerprint to
-     *                hand to {@link #transferNow}
+     *                fingerprint, for {@link RequestStatus#COVERED_BY_ALWAYS} and
+     *                {@link RequestStatus#COVERED_BY_GRANT} the fingerprint to hand to {@link #transferNow}
      * @param access  the access verdict when the chest was examined, else {@code null}
      * @param verdict the policy verdict when the policy was consulted, else {@code null}
      */
@@ -368,8 +373,10 @@ public final class SupplyRequestService {
      * this owner and chest, the owner online, in the bot's world and within
      * {@link #OWNER_PROMPT_RANGE_BLOCKS} → the ledger. So {@link RequestStatus#DENIED} comes before
      * {@link RequestStatus#OWNER_NOT_NEARBY}, and "always" really means without asking: the owner
-     * need not be anywhere near. On {@link RequestStatus#OPENED} the owner gets one message with
-     * three clickable answers.
+     * need not be anywhere near. The ledger answers {@link RequestStatus#COVERED_BY_GRANT} instead
+     * of prompting when the owner's unspent "Allow once" already covers the ask (a request made
+     * after the ticket that held it was dropped); that one still needs the owner in range here.
+     * On {@link RequestStatus#OPENED} the owner gets one message with three clickable answers.
      *
      * @param sample a stack of the exact item wanted (id and components), usually read from the chest
      * @param qty    how many the bot asks for
@@ -442,6 +449,7 @@ public final class SupplyRequestService {
             case PROMPT_COOLDOWN -> RequestStatus.PROMPT_COOLDOWN;
             case REJECT_COOLDOWN -> RequestStatus.REJECT_COOLDOWN;
             case COVERED_BY_ALWAYS -> RequestStatus.COVERED_BY_ALWAYS;
+            case COVERED_BY_GRANT -> RequestStatus.COVERED_BY_GRANT;
             case INELIGIBLE -> RequestStatus.INELIGIBLE;
         };
     }

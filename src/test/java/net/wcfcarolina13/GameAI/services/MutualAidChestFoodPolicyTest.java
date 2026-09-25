@@ -1,6 +1,10 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.wcfcarolina13.GameAI.services.MutualAidChestFoodPolicy.Next;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import org.junit.jupiter.api.Test;
@@ -113,6 +117,7 @@ class MutualAidChestFoodPolicyTest {
             Scope.OWNER_ABSENT, Next.OWNER_AWAY,
             Scope.BOT, Next.PAUSE,
             Scope.BUSY, Next.STOP,
+            Scope.INVENTORY_FULL, Next.STOP, // with room for one piece; without it, room is made once
             Scope.NONE, Next.PAUSE)); // a refusal never carries NONE; if one did, fail closed
 
     @Test
@@ -135,7 +140,7 @@ class MutualAidChestFoodPolicyTest {
                             case MOVED -> Next.TAKEN;
                             case WAITING -> Next.WAIT;
                             case READY -> Next.STOP;
-                            case REFUSED -> scope == Scope.BUSY && !room && !made
+                            case REFUSED -> scope == Scope.INVENTORY_FULL && !room && !made
                                     ? Next.MAKE_ROOM_AND_RETRY : REFUSAL_NEXT.get(scope);
                         };
                         assertEquals(expected, MutualAidChestFoodPolicy.afterWithdraw(kind, scope, room, made), at);
@@ -157,18 +162,35 @@ class MutualAidChestFoodPolicyTest {
 
     @Test
     void noRoomMakesRoomOnceThenEndsTheAttempt() {
-        // NO_ROOM is busy: the ticket is kept, so room is made once and the same food asked again.
-        assertEquals(Next.MAKE_ROOM_AND_RETRY,
-                MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, false));
+        // NO_ROOM is INVENTORY_FULL: the ticket is kept, so room is made once and the same food asked again.
+        Scope full = SupplyWithdrawalPolicy.transferScope(TransferStatus.NO_ROOM);
+        assertEquals(Scope.INVENTORY_FULL, full);
+        assertEquals(Next.MAKE_ROOM_AND_RETRY, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, full, false, false));
         // Room was made and still nothing fits: asking another chest could only open a prompt it cannot redeem.
-        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, true));
-        // Busy with room (another prompt open, say): stop; the next attempt after the throttle.
-        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, false));
-        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, true));
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, full, false, true));
+        // The site sees room the facade did not: nothing to drop; stop, the next attempt after the throttle.
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, full, true, false));
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, full, true, true));
     }
 
     @Test
-    void roomOnlyMattersForABusyRefusalAndRoomIsMadeAtMostOnce() {
+    void aBusyAnswerNeverDropsAStackToMakeRoom() {
+        // Re-review B minor: another of this bot's prompts open (OTHER_REQUEST_PENDING) used to read
+        // as "no room" whenever the bot happened to be full, and dropped a stack over it.
+        for (Scope busy : List.of(Refusal.OTHER_REQUEST_PENDING.scope(), Refusal.SERVER_BUSY.scope(),
+                SupplyWithdrawalPolicy.requestScope(RequestStatus.DUPLICATE_PENDING, null, null))) {
+            assertEquals(Scope.BUSY, busy);
+            for (boolean room : BOTH) {
+                for (boolean made : BOTH) {
+                    assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, busy, room, made),
+                            "room=" + room + " made=" + made);
+                }
+            }
+        }
+    }
+
+    @Test
+    void roomOnlyMattersForAFullInventoryAndRoomIsMadeAtMostOnce() {
         for (Kind kind : Kind.values()) {
             for (Scope scope : Scope.values()) {
                 Next reference = MutualAidChestFoodPolicy.afterWithdraw(kind, scope, true, false);
@@ -180,9 +202,9 @@ class MutualAidChestFoodPolicyTest {
                             assertNotEquals(Next.MAKE_ROOM_AND_RETRY, next, at);
                         }
                         if (next == Next.MAKE_ROOM_AND_RETRY) {
-                            assertTrue(kind == Kind.REFUSED && scope == Scope.BUSY && !room, at);
+                            assertTrue(kind == Kind.REFUSED && scope == Scope.INVENTORY_FULL && !room, at);
                         }
-                        if (kind != Kind.REFUSED || scope != Scope.BUSY) {
+                        if (kind != Kind.REFUSED || scope != Scope.INVENTORY_FULL) {
                             assertEquals(reference, next, at);
                         }
                     }
@@ -192,11 +214,12 @@ class MutualAidChestFoodPolicyTest {
     }
 
     @Test
-    void onlyTheOwnersDecisionAndABusyAnswerEndTheAttemptEarly() {
+    void onlyTheOwnersDecisionABusyAnswerAndAFullInventoryEndTheAttemptEarly() {
         Set<Next> goOn = EnumSet.of(Next.NEXT_ITEM, Next.NEXT_TARGET, Next.NEXT_CHEST, Next.OWNER_AWAY);
         for (Scope scope : Scope.values()) {
             Next next = MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, scope, true, false);
-            boolean endsTheAttempt = scope == Scope.BOT || scope == Scope.BUSY || scope == Scope.NONE;
+            boolean endsTheAttempt = scope == Scope.BOT || scope == Scope.BUSY || scope == Scope.INVENTORY_FULL
+                    || scope == Scope.NONE;
             assertEquals(!endsTheAttempt, goOn.contains(next), scope.name());
         }
         // FD concern 1: the owner away skips only that chest, so a farther "always" chest still serves.

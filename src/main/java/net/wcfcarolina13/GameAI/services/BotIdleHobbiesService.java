@@ -1274,10 +1274,11 @@ public final class BotIdleHobbiesService {
                 || !ToolProvisionService.hasUsableAxe(bot);
         if (SupplyPullPolicy.holdsIdleFallback(pull, stillMissingTool)) {
             // The owner has a supply prompt open for what the bot lacks (or a grant waits for it),
-            // or the ask was busy (another prompt of this bot open, no room): don't craft or cut a
-            // tree over it. Look again at the probe's pace; the next pull takes the grant, or comes
+            // or the ask was busy (another prompt of this bot open, a busy hop): don't craft or cut
+            // a tree over it. Look again at the probe's pace; the next pull takes the grant, or comes
             // back NOT_PERMITTED (refused or expired) and counts as a failure on the idle supply
-            // backoff, after which this pass crafts or cuts as before.
+            // backoff, after which this pass crafts or cuts as before. A full inventory never holds
+            // here (nothing below frees a slot): it falls through to the craft or woodcut.
             NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + WOODEN_FALLBACK_SUPPLY_WAIT_TICKS);
             LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
             return true;

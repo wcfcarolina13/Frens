@@ -608,7 +608,8 @@ public final class BotMutualAidService {
      * facade (never walking, never waiting), then eats if the bot needs to. Chests only; a double
      * chest is read and asked as one. A food refused for itself is not asked again in any chest
      * this attempt; a chest whose owner was found away is skipped (an "always" chest further on
-     * may still serve); the owner's decision or a busy answer ends the attempt. How long the bot
+     * may still serve); the owner's decision, a busy answer, or a full inventory room could not be
+     * made in ends the attempt. How long the bot
      * then leaves chests alone is {@link MutualAidChestFoodPolicy#probeDelayTicks}; an attempt that
      * found the owner away and got nothing else defers a flat minute
      * ({@link MutualAidChestFoodPolicy#endOfAttempt}). Server thread.

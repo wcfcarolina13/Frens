@@ -3,6 +3,8 @@ package net.wcfcarolina13.GameAI.services;
 import net.wcfcarolina13.GameAI.services.SupplyPullPolicy.Backoff;
 import net.wcfcarolina13.GameAI.services.SupplyPullPolicy.Next;
 import net.wcfcarolina13.GameAI.services.SupplyPullPolicy.Pull;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
@@ -30,11 +32,12 @@ class SupplyPullPolicyTest {
             Scope.OWNER_ABSENT, Next.OWNER_AWAY,
             Scope.BOT, Next.STOP,
             Scope.BUSY, Next.BUSY,
+            Scope.INVENTORY_FULL, Next.FULL,
             Scope.NONE, Next.STOP));
     /** Only the owner's decision is a miss (NONE on a refusal reads BOT). */
     private static final Set<Scope> MISSES = EnumSet.of(Scope.BOT, Scope.NONE);
-    /** Answers that end the pass: the owner's decision and a busy answer. */
-    private static final Set<Scope> STOPS = EnumSet.of(Scope.BOT, Scope.BUSY, Scope.NONE);
+    /** Answers that end the pass: the owner's decision, a busy answer and a full inventory. */
+    private static final Set<Scope> STOPS = EnumSet.of(Scope.BOT, Scope.BUSY, Scope.INVENTORY_FULL, Scope.NONE);
 
     // ── one answer: Scope × Kind ─────────────────────────────────────────────────────────────
 
@@ -69,6 +72,7 @@ class SupplyPullPolicyTest {
                 assertEquals(kind == Kind.MOVED ? 3 : 0, p.moved(), at);
                 assertEquals(kind == Kind.WAITING || kind == Kind.READY, p.waiting(), at);
                 assertEquals(refused && read == Scope.BUSY, p.busy(), at);
+                assertEquals(refused && read == Scope.INVENTORY_FULL, p.full(), at);
                 assertEquals(refused && read == Scope.BOT, p.missed(), at);
                 assertEquals(refused && read == Scope.OWNER_ABSENT, p.ownerAway(), at);
                 assertEquals(SupplyPullPolicy.next(kind, scope).stopsPass(), p.halted(), at);
@@ -80,9 +84,10 @@ class SupplyPullPolicyTest {
     }
 
     @Test
-    void onlyTheOwnersDecisionAHoldOrABusyAnswerEndsThePass() {
+    void onlyTheOwnersDecisionAHoldABusyAnswerOrAFullInventoryEndsThePass() {
         for (Next next : Next.values()) {
-            assertEquals(next == Next.STOP || next == Next.HOLD || next == Next.BUSY, next.stopsPass(), next.name());
+            assertEquals(next == Next.STOP || next == Next.HOLD || next == Next.BUSY || next == Next.FULL,
+                    next.stopsPass(), next.name());
         }
         for (Scope scope : Scope.values()) {
             assertEquals(STOPS.contains(scope), SupplyPullPolicy.next(Kind.REFUSED, scope).stopsPass(), scope.name());
@@ -116,18 +121,21 @@ class SupplyPullPolicyTest {
     }
 
     @Test
-    void busyAndOwnerAwayAreTheirOwnAnswers() {
+    void busyFullAndOwnerAwayAreTheirOwnAnswers() {
         for (Scope scope : Scope.values()) {
             assertEquals(scope == Scope.BUSY, SupplyPullPolicy.isBusy(Kind.REFUSED, scope), scope.name());
+            assertEquals(scope == Scope.INVENTORY_FULL, SupplyPullPolicy.isFull(Kind.REFUSED, scope), scope.name());
             assertEquals(scope == Scope.OWNER_ABSENT, SupplyPullPolicy.isOwnerAway(Kind.REFUSED, scope), scope.name());
             for (Kind kind : Kind.values()) {
                 if (kind != Kind.REFUSED) {
                     assertFalse(SupplyPullPolicy.isBusy(kind, scope), kind + " " + scope);
+                    assertFalse(SupplyPullPolicy.isFull(kind, scope), kind + " " + scope);
                     assertFalse(SupplyPullPolicy.isOwnerAway(kind, scope), kind + " " + scope);
                 }
             }
         }
         assertFalse(SupplyPullPolicy.isBusy(Kind.REFUSED, null));
+        assertFalse(SupplyPullPolicy.isFull(Kind.REFUSED, null));
         assertFalse(SupplyPullPolicy.isOwnerAway(Kind.REFUSED, null));
     }
 
@@ -155,6 +163,22 @@ class SupplyPullPolicyTest {
         assertTrue(SupplyPullPolicy.tryNextStack(Kind.REFUSED, Scope.TARGET));
     }
 
+    // ── stopping a chest tool search ─────────────────────────────────────────────────────────
+
+    /**
+     * Re-review B N2: /bot stop lands while the bot walks to the first chest. forceAbort removes the
+     * task at once, so a task read per chest is already false while the abort latch stays set. Read
+     * once at the start, the search stops before the next chest. The durability fallback's search,
+     * begun outside any task, still ignores a latch a /bot come left behind.
+     */
+    @Test
+    void rereviewBN2ATaskStopEndsTheToolSearchThoughTheTaskIsAlreadyGone() {
+        assertTrue(SupplyPullPolicy.stopsToolSearch(true, true), "/bot stop mid-search: the task began it");
+        assertFalse(SupplyPullPolicy.stopsToolSearch(true, false));
+        assertFalse(SupplyPullPolicy.stopsToolSearch(false, true), "no task at the start: a stale latch is ignored");
+        assertFalse(SupplyPullPolicy.stopsToolSearch(false, false));
+    }
+
     // ── a pass ───────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -165,19 +189,21 @@ class SupplyPullPolicyTest {
         p = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.TARGET);
         assertEquals(Pull.NOTHING, p, "item, chest and target refusals add nothing: nothing found");
         p = SupplyPullPolicy.fold(p, Kind.MOVED, 4, Scope.NONE);
-        assertEquals(new Pull(4, false, false, false, false, false), p);
+        assertEquals(new Pull(4, false, false, false, false, false, false), p);
         p = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.OWNER_ABSENT);
-        assertEquals(new Pull(4, false, false, false, true, false), p, "the owner away does not halt");
+        assertEquals(new Pull(4, false, false, false, false, true, false), p, "the owner away does not halt");
         p = SupplyPullPolicy.fold(p, Kind.WAITING, 0, Scope.NONE);
-        assertEquals(new Pull(4, true, false, false, true, true), p);
-        assertEquals(new Pull(0, false, false, true, false, true), SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.BOT));
-        assertEquals(new Pull(0, false, true, false, false, true), SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.BUSY));
+        assertEquals(new Pull(4, true, false, false, false, true, true), p);
+        assertEquals(new Pull(0, false, false, false, true, false, true), SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.BOT));
+        assertEquals(new Pull(0, false, true, false, false, false, true), SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.BUSY));
+        assertEquals(new Pull(0, false, false, true, false, false, true),
+                SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.INVENTORY_FULL));
         // A refused kind never adds to the moved count, whatever number it carries.
         assertEquals(0, SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 5, Scope.TARGET).moved());
-        assertEquals(new Pull(5, true, true, true, true, true),
-                new Pull(1, false, true, true, false, false).plus(new Pull(4, true, false, false, true, true)));
-        assertEquals(new Pull(1, false, false, false, false, false),
-                new Pull(1, false, false, false, false, false).plus(null));
+        assertEquals(new Pull(5, true, true, true, true, true, true),
+                new Pull(1, false, true, false, true, false, false).plus(new Pull(4, true, false, true, false, true, true)));
+        assertEquals(new Pull(1, false, false, false, false, false, false),
+                new Pull(1, false, false, false, false, false, false).plus(null));
     }
 
     /** One pass over answers in order, as the chest loops run it: stop at the first answer that ends the pass. */
@@ -225,11 +251,14 @@ class SupplyPullPolicyTest {
         for (int moved : new int[] {0, 2}) {
             for (boolean waiting : both) {
                 for (boolean busy : both) {
-                    for (boolean missed : both) {
-                        for (boolean away : both) {
-                            Pull p = new Pull(moved, waiting, busy, missed, away, waiting || busy || missed);
-                            boolean expected = away && moved == 0 && !waiting && !busy && !missed;
-                            assertEquals(expected, SupplyPullPolicy.ownerAwayDefers(p), p.toString());
+                    for (boolean full : both) {
+                        for (boolean missed : both) {
+                            for (boolean away : both) {
+                                Pull p = new Pull(moved, waiting, busy, full, missed, away,
+                                        waiting || busy || full || missed);
+                                boolean expected = away && moved == 0 && !waiting && !busy && !full && !missed;
+                                assertEquals(expected, SupplyPullPolicy.ownerAwayDefers(p), p.toString());
+                            }
                         }
                     }
                 }
@@ -250,7 +279,7 @@ class SupplyPullPolicyTest {
 
     @Test
     void aBusyAnswerStopsThePassAndHoldsLikeAnOpenPrompt() {
-        // Another prompt of this bot open (OTHER_REQUEST_PENDING), no room, a busy server: never a miss.
+        // Another prompt of this bot open (OTHER_REQUEST_PENDING), a busy server: never a miss.
         Pull p = pass(Kind.REFUSED, Scope.OWNER_ABSENT, Kind.REFUSED, Scope.BUSY, Kind.MOVED, Scope.NONE);
         assertEquals(0, p.moved(), "nothing after the busy answer is asked");
         assertTrue(p.busy() && p.held() && p.halted());
@@ -260,6 +289,43 @@ class SupplyPullPolicyTest {
         assertEquals(3, SupplyPullPolicy.nextMissCount(3, p));
         assertFalse(SupplyPullPolicy.ownerAwayDefers(p), "held, so no flat minute either");
         assertTrue(SupplyPullPolicy.holdsIdleFallback(p, true));
+    }
+
+    /**
+     * Re-review B N1: a toolless bot with 36 full slots and an in-reach "always" chest holding an
+     * axe. Every ask is covered, finds no room (NO_ROOM, the facade keeps the ticket) and nothing
+     * ever frees a slot. The pass stops, but it must not hold the idle wooden fallback, or the bot
+     * would never craft or cut wood again: it falls through as if nothing were found, pass after
+     * pass, with no miss, no pause and no owner-away defer.
+     */
+    @Test
+    void rereviewBN1AFullBotWithAnAlwaysChestAxeDoesNotHoldTheIdleFallback() {
+        SupplyWithdrawalPolicy.TransferAction noRoom = SupplyWithdrawalPolicy.onTransfer(TransferStatus.NO_ROOM, 0);
+        assertEquals(Kind.REFUSED, noRoom.kind());
+        assertEquals(Scope.INVENTORY_FULL, noRoom.scope(), "not BUSY: nothing a short wait fixes");
+        assertTrue(noRoom.keepTicket(), "a caller that makes room may still take it");
+        int misses = 0;
+        for (int probe = 0; probe < 5; probe++) {
+            // idle-weapon finds nothing (TARGET), idle-axe gets NO_ROOM, and the rest is not asked.
+            Pull p = pass(Kind.REFUSED, Scope.TARGET, noRoom.kind(), noRoom.scope(), Kind.MOVED, Scope.NONE);
+            assertEquals(0, p.moved(), "nothing after the full inventory is asked");
+            assertTrue(p.full() && p.halted());
+            assertFalse(p.held(), "a full inventory is not a hold");
+            assertFalse(p.missed());
+            assertFalse(SupplyPullPolicy.holdsIdleFallback(p, true), "the fallback crafts or cuts wood");
+            assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(p));
+            assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(p, misses), "never a pause");
+            misses = SupplyPullPolicy.nextMissCount(misses, p);
+        }
+        assertEquals(0, misses, "never a miss, however often it repeats");
+        // An owner-away chest before it does not turn the full stop into the flat minute either.
+        Pull awayThenFull = pass(Kind.REFUSED, Scope.OWNER_ABSENT, Kind.REFUSED, Scope.INVENTORY_FULL);
+        assertFalse(SupplyPullPolicy.ownerAwayDefers(awayThenFull));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(awayThenFull));
+        assertFalse(SupplyPullPolicy.holdsIdleFallback(awayThenFull, true));
+        // What moved before the inventory filled still counts as a success.
+        Pull movedThenFull = pass(Kind.MOVED, Scope.NONE, Kind.REFUSED, Scope.INVENTORY_FULL);
+        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(movedThenFull));
     }
 
     @Test
@@ -276,24 +342,27 @@ class SupplyPullPolicyTest {
 
     @Test
     void aHeldPassNeverBacksOffSoItsGrantCanBeRedeemed() {
-        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(0, true, false, true, false, true)));
-        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(2, true, false, false, true, true)));
-        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(0, false, true, false, true, true)));
-        assertEquals(Backoff.FAILURE, SupplyPullPolicy.idleBackoff(new Pull(0, false, false, true, false, true)));
-        assertEquals(Backoff.FAILURE, SupplyPullPolicy.idleBackoff(new Pull(3, false, false, true, false, true)));
-        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(new Pull(1, false, false, false, false, false)));
-        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(new Pull(1, false, false, false, true, false)));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(0, true, false, false, true, false, true)));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(2, true, false, false, false, true, true)));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(0, false, true, false, false, true, true)));
+        assertEquals(Backoff.FAILURE, SupplyPullPolicy.idleBackoff(new Pull(0, false, false, false, true, false, true)));
+        assertEquals(Backoff.FAILURE, SupplyPullPolicy.idleBackoff(new Pull(3, false, false, false, true, false, true)));
+        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(new Pull(1, false, false, false, false, false, false)));
+        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(new Pull(1, false, false, false, false, true, false)));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(new Pull(0, false, false, true, false, true, true)));
         assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(Pull.NOTHING));
         assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(null));
     }
 
     @Test
     void theIdleFallbackHoldsOnlyWhileTheIdlePullHeldForAToolItStillLacks() {
-        assertTrue(SupplyPullPolicy.holdsIdleFallback(new Pull(0, true, false, false, false, true), true));
-        assertTrue(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, true, false, false, true), true));
-        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, true, false, false, false, true), false));
-        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, false, true, false, true), true));
-        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, false, false, true, false), true));
+        assertTrue(SupplyPullPolicy.holdsIdleFallback(new Pull(0, true, false, false, false, false, true), true));
+        assertTrue(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, true, false, false, false, true), true));
+        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, true, false, false, false, false, true), false));
+        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, false, false, true, false, true), true));
+        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, false, false, false, true, false), true));
+        assertFalse(SupplyPullPolicy.holdsIdleFallback(new Pull(0, false, false, true, false, false, true), true),
+                "a full inventory never holds it");
         assertFalse(SupplyPullPolicy.holdsIdleFallback(null, true));
     }
 
@@ -312,35 +381,37 @@ class SupplyPullPolicyTest {
 
     @Test
     void aRetrievalComesBackSoonAfterAHoldBacksOffAfterAMissAndWaitsFlatForAnAbsentOwner() {
-        Pull waiting = new Pull(0, true, false, false, false, true);
-        Pull busy = new Pull(0, false, true, false, true, true);
-        Pull away = new Pull(0, false, false, false, true, false);
-        Pull missed = new Pull(0, false, false, true, false, true);
+        Pull waiting = new Pull(0, true, false, false, false, false, true);
+        Pull busy = new Pull(0, false, true, false, false, true, true);
+        Pull away = new Pull(0, false, false, false, false, true, false);
+        Pull missed = new Pull(0, false, false, false, true, false, true);
         assertEquals(SupplyPullPolicy.WAITING_RECHECK_MS, SupplyPullPolicy.retrievalPauseMs(waiting, 3));
         assertEquals(SupplyPullPolicy.WAITING_RECHECK_MS, SupplyPullPolicy.retrievalPauseMs(busy, 3));
         assertEquals(SupplyPullPolicy.OWNER_AWAY_PAUSE_MS, SupplyPullPolicy.retrievalPauseMs(away, 0));
         assertEquals(60_000L, SupplyPullPolicy.retrievalPauseMs(missed, 0));
         assertEquals(240_000L, SupplyPullPolicy.retrievalPauseMs(missed, 2));
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(Pull.NOTHING, 2));
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(new Pull(0, false, false, true, false, true, true), 2),
+                "a full inventory never pauses the search");
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(null, 2));
-        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(new Pull(1, false, false, true, false, true), 2),
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(new Pull(1, false, false, false, true, false, true), 2),
                 "a search that took its tool never pauses");
         assertTrue(SupplyPullPolicy.WAITING_RECHECK_MS < 60_000L, "must recheck well inside a grant's 60 s life");
     }
 
     @Test
     void theMissCounterResetsOnAMoveAndClimbsOnlyOnTheOwnersDecision() {
-        assertEquals(0, SupplyPullPolicy.nextMissCount(4, new Pull(1, false, false, true, false, true)));
-        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, true, false, true, false, true)));
-        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, true, false, false, true)));
-        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, false, true, false)));
+        assertEquals(0, SupplyPullPolicy.nextMissCount(4, new Pull(1, false, false, false, true, false, true)));
+        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, true, false, false, true, false, true)));
+        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, true, false, false, false, true)));
+        assertEquals(2, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, false, false, true, false)));
         assertEquals(2, SupplyPullPolicy.nextMissCount(2, Pull.NOTHING));
         assertEquals(2, SupplyPullPolicy.nextMissCount(2, null));
-        assertEquals(3, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, true, false, true)));
-        assertEquals(3, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, true, true, true)));
-        assertEquals(1, SupplyPullPolicy.nextMissCount(-1, new Pull(0, false, false, true, false, true)));
+        assertEquals(3, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, false, true, false, true)));
+        assertEquals(3, SupplyPullPolicy.nextMissCount(2, new Pull(0, false, false, false, true, true, true)));
+        assertEquals(1, SupplyPullPolicy.nextMissCount(-1, new Pull(0, false, false, false, true, false, true)));
         assertEquals(HobbyBackoffPolicy.MAX_FAILURE_COUNT, SupplyPullPolicy.nextMissCount(
-                HobbyBackoffPolicy.MAX_FAILURE_COUNT, new Pull(0, false, false, true, false, true)));
+                HobbyBackoffPolicy.MAX_FAILURE_COUNT, new Pull(0, false, false, false, true, false, true)));
     }
 
     @Test

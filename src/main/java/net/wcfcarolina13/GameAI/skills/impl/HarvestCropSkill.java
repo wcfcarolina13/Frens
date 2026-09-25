@@ -527,8 +527,8 @@ public class HarvestCropSkill implements Skill {
      * it again; a chest whose owner was found away is skipped for the rest of this pass (both
      * halves), and a pass that got nothing else pauses every ask for
      * {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_MS} ({@link SeedRestock#endPass}); a prompt still
-     * open or a busy answer (another prompt open, a busy server, a full inventory) ends this pass
-     * and the next target asks again; the owner's decision (a No, an ignored prompt, a cooldown)
+     * open, a busy answer (another prompt open, a busy server) or a full inventory ends this pass and
+     * the next target asks again; the owner's decision (a No, an ignored prompt, a cooldown)
      * sets {@link SeedRestock#stopAsking}.
      */
     private static int restockFromChest(ServerPlayerEntity bot,
@@ -575,6 +575,8 @@ public class HarvestCropSkill implements Skill {
                 }
             }
             case HOLD, BUSY -> LOGGER.debug("Harvest seed restock: holding this pass ({} {} {} at {})",
+                    result.kind(), result.reason(), result.scope(), chestPos.toShortString());
+            case FULL -> LOGGER.debug("Harvest seed restock: inventory full, ending this pass ({} {} {} at {})",
                     result.kind(), result.reason(), result.scope(), chestPos.toShortString());
             case STOP -> {
                 restock.stopAsking = true;
