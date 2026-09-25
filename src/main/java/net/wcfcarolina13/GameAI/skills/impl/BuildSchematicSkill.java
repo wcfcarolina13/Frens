@@ -969,6 +969,16 @@ public final class BuildSchematicSkill implements Skill {
      * Move the bot closer to a target block using pathfinding.
      */
     private boolean moveToReachBlock(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
+        return moveToReachBlock(source, bot, target, true);
+    }
+
+    /**
+     * @param allowEgress false for local micro-repositions (the line-of-sight retry): those keep the
+     *                    1.1.217 straight move, so trying both sides of a wall block does not walk
+     *                    the bot out through the doorway and back for each side
+     */
+    private boolean moveToReachBlock(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target,
+                                     boolean allowEgress) {
         // Find a standable position near the target
         Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                 bot, target, MovementService.MovementOptions.skillLoot());
@@ -980,7 +990,9 @@ public final class BuildSchematicSkill implements Skill {
 
         // From inside the footprint to a stance past the wall line: leave through the doorway
         // first. Any outcome other than OK leaves the move below exactly as before.
-        InteriorEgressService.egressIfNeeded(source, bot, target, plan.get().finalDestination());
+        if (allowEgress) {
+            InteriorEgressService.egressIfNeeded(source, bot, target, plan.get().finalDestination());
+        }
 
         // Use survival-style movement: no teleport override, no snap
         MovementService.MovementResult result = MovementService.execute(source, bot, plan.get(), false, true, true, false);
@@ -1070,9 +1082,14 @@ public final class BuildSchematicSkill implements Skill {
 
             // If LOS is the issue, try a few micro-repositions around the target and retry.
             if (result.reason() != null && result.reason().startsWith("no-line-of-sight-to-support") && source != null) {
-                for (Direction dir : Direction.Type.HORIZONTAL) {
+                // Bot's own side of the target first (nearest neighbour), so a wall block is retried from
+                // the side the bot is on before the far side.
+                BlockPos botPos = bot.getBlockPos();
+                List<Direction> nudgeDirs = new ArrayList<>(List.of(Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST));
+                nudgeDirs.sort(Comparator.comparingDouble(d -> botPos.getSquaredDistance(pos.offset(d))));
+                for (Direction dir : nudgeDirs) {
                     BlockPos nudge = pos.offset(dir);
-                    moveToReachBlock(source, bot, nudge);
+                    moveToReachBlock(source, bot, nudge, false);
                     BotActions.PlaceResult retry = BotActions.tryPlaceBlockAt(bot, pos, preferredFace, candidates);
                     if (retry.success()) {
                         LOGGER.debug("Placed {} at {} after micro-reposition", targetState.getBlock().getName().getString(), pos.toShortString());

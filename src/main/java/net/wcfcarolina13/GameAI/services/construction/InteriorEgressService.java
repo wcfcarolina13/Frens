@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 /**
  * Walks a bot out of an active construction footprint through its doorway before a move to
@@ -120,9 +121,14 @@ public final class InteriorEgressService {
         }
 
         Route r = route.get();
-        String failedStep = walkRoute(source, bot, ctx, r);
+        String failedStep = walkRoute(world, source, bot, ctx, r);
         boolean ok = failedStep == null;
-        int failures = ok ? 0 : state.consecutiveFailures() + 1;
+        if (!ok && !"aborted".equals(failedStep) && SkillManager.shouldAbortSkill(bot)) {
+            failedStep = "aborted";
+        }
+        // A /bot stop during the walk is not a routing failure: it does not count toward the switch-off.
+        int failures = ok ? 0
+                : "aborted".equals(failedStep) ? state.consecutiveFailures() : state.consecutiveFailures() + 1;
         STATE.put(botId, new SessionState(state.sessionId(), failures, state.noDoorwayLogged()));
         LOGGER.info("[egress] bot={} plan={} door={},{} src={} waypoints={} approachSkipped={} outcome={} botPos={} target={}{}",
                 bot.getName().getString(),
@@ -232,12 +238,34 @@ public final class InteriorEgressService {
                 open.add(doorway);
             }
         }
-        Optional<Route> route = InteriorEgressPolicy.chooseRoute(f, open, nowBlocked, botX, botZ, targetX, targetZ);
+        // Footing: the opening and the way out must have ground within MAX_EGRESS_DROP. On a raised
+        // floor (a watchtower top with its railing unfinished) a missing fence reads as a doorway.
+        Predicate<Cell> standable = standable(world, ctx.navY());
+        Optional<Route> route = InteriorEgressPolicy.chooseRoute(f, open, nowBlocked, botX, botZ, targetX, targetZ, standable);
         if (route.isPresent()) {
             return route;
         }
         List<Doorway> gaps = InteriorEgressPolicy.unbuiltGaps(f, ctx.band().blockedColumns(), nowBlocked);
-        return InteriorEgressPolicy.chooseRoute(f, gaps, nowBlocked, botX, botZ, targetX, targetZ);
+        return InteriorEgressPolicy.chooseRoute(f, gaps, nowBlocked, botX, botZ, targetX, targetZ, standable);
+    }
+
+    private static Predicate<Cell> standable(ServerWorld world, int botFeetY) {
+        return c -> InteriorEgressPolicy.groundAcceptable(botFeetY, groundYAt(world, c.x(), c.z(), botFeetY));
+    }
+
+    /**
+     * Y of the first block with a collision shape (walkable partials included) at or below the
+     * bot's floor level, down to {@link InteriorEgressPolicy#MAX_EGRESS_DROP} below it; else
+     * {@link InteriorEgressPolicy#NO_GROUND}. Same off-thread block reads as {@link #isWalkableColumn}.
+     */
+    private static int groundYAt(ServerWorld world, int x, int z, int botFeetY) {
+        for (int y = botFeetY - 1; y >= botFeetY - 1 - InteriorEgressPolicy.MAX_EGRESS_DROP; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            if (!world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()) {
+                return y;
+            }
+        }
+        return InteriorEgressPolicy.NO_GROUND;
     }
 
     /** Feet and head cells passable: no collision, or a door/gate the mover can open. */
@@ -262,7 +290,8 @@ public final class InteriorEgressService {
      * and the exit may sit a block lower, and MovementService re-targets a non-standable
      * destination to the nearest standable cell.
      */
-    private static String walkRoute(ServerCommandSource source, ServerPlayerEntity bot, Context ctx, Route route) {
+    private static String walkRoute(ServerWorld world, ServerCommandSource source, ServerPlayerEntity bot,
+                                    Context ctx, Route route) {
         Footprint f = ctx.footprint();
         if (!route.approachSkippable()) {
             walkLeg(source, bot, route.approach(), ctx.navY());
@@ -287,12 +316,15 @@ public final class InteriorEgressService {
         }
         BlockPos now = bot.getBlockPos();
         if (f.contains(now.getX(), now.getZ())) {
-            // Still in the wall line or interior: one push further along the outward normal.
+            // Still in the wall line or interior: one push further along the outward normal, but only
+            // over cells with ground within MAX_EGRESS_DROP (pulled in, or skipped, otherwise).
             Doorway d = route.doorway();
-            Cell further = new Cell(route.exit().x() + d.outDx() * EXTENSION_DISTANCE,
-                    route.exit().z() + d.outDz() * EXTENSION_DISTANCE);
-            walkLeg(source, bot, further, ctx.navY());
-            now = bot.getBlockPos();
+            Optional<Cell> further = InteriorEgressPolicy.farthestStandable(route.exit(), d.outDx(), d.outDz(),
+                    EXTENSION_DISTANCE, standable(world, now.getY()));
+            if (further.isPresent()) {
+                walkLeg(source, bot, further.get(), ctx.navY());
+                now = bot.getBlockPos();
+            }
         }
         if (f.strictlyInside(now.getX(), now.getZ())) {
             return reachedOpening ? "exit" : "opening";

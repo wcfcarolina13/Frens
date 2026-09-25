@@ -67,6 +67,18 @@ class InteriorEgressPolicyTest {
     }
 
     @Test
+    void stanceOneStepFromTheBotIsNotACrossing() {
+        // Bot just inside the north door, stance = the doorway cell: a local step, no egress.
+        assertFalse(InteriorEgressPolicy.needsEgress(BOX, 2, 1, 2, 0, 2, 0));
+        // Diagonal single step onto the corner.
+        assertFalse(InteriorEgressPolicy.needsEgress(BOX, 1, 1, 0, 0, 0, 0));
+        // Two cells from the wall line: still a crossing.
+        assertTrue(InteriorEgressPolicy.needsEgress(BOX, 2, 2, 2, 0, 2, 0));
+        // Adjacent target but a far exterior stance: the mover walks to the stance, so exit.
+        assertTrue(InteriorEgressPolicy.needsEgress(BOX, 2, 1, 2, 0, 2, -2));
+    }
+
+    @Test
     void footprintWithoutInteriorNeverNeedsEgress() {
         // defensive_gatehouse: 3 wide x 2 deep, no strictly-inside cell.
         Footprint gatehouse = new Footprint(0, 0, 2, 1);
@@ -265,6 +277,100 @@ class InteriorEgressPolicyTest {
         now.remove(packColumn(0, 0));
         now.remove(packColumn(4, 4));
         assertTrue(InteriorEgressPolicy.unbuiltGaps(closed.footprint(), closed.blockedColumns(), now).isEmpty());
+    }
+
+    // ---- footing: never walk off a raised floor ----
+
+    private static final int FEET_Y = 65;
+
+    @Test
+    void groundAcceptsFlatAndDropsUpToTwo() {
+        assertTrue(InteriorEgressPolicy.groundAcceptable(FEET_Y, FEET_Y - 1), "flat");
+        assertTrue(InteriorEgressPolicy.groundAcceptable(FEET_Y, FEET_Y - 2), "drop 1");
+        assertTrue(InteriorEgressPolicy.groundAcceptable(FEET_Y, FEET_Y - 3), "drop 2");
+        assertFalse(InteriorEgressPolicy.groundAcceptable(FEET_Y, FEET_Y - 4), "drop 3");
+        assertFalse(InteriorEgressPolicy.groundAcceptable(FEET_Y, FEET_Y), "ground at feet level is not a floor");
+        assertFalse(InteriorEgressPolicy.groundAcceptable(FEET_Y, InteriorEgressPolicy.NO_GROUND));
+    }
+
+    @Test
+    void exitAcceptableNeedsGroundUnderOpeningAndExit() {
+        assertTrue(InteriorEgressPolicy.exitAcceptable(FEET_Y, FEET_Y - 1, FEET_Y - 3));
+        assertFalse(InteriorEgressPolicy.exitAcceptable(FEET_Y, FEET_Y - 1, InteriorEgressPolicy.NO_GROUND),
+                "tower top: floor under the opening, air past it");
+        assertFalse(InteriorEgressPolicy.exitAcceptable(FEET_Y, InteriorEgressPolicy.NO_GROUND, FEET_Y - 1));
+        assertFalse(InteriorEgressPolicy.exitAcceptable(FEET_Y, FEET_Y - 1, FEET_Y - 9), "8-block tower drop");
+    }
+
+    @Test
+    void raisedFloorWithAMissingRailingHasNoRoute() {
+        // Platform floor under the whole footprint, nothing within reach below it outside.
+        Doorway gap = new Doorway(2, 0, 0, -1, Source.UNBUILT_GAP);
+        java.util.function.Predicate<Cell> ground = groundMap(c -> BOX.contains(c.x(), c.z()) ? FEET_Y - 1 : FEET_Y - 9);
+        assertTrue(InteriorEgressPolicy.chooseRoute(BOX, List.of(gap), Set.of(), 2, 2, 2, -6, ground).isEmpty());
+    }
+
+    @Test
+    void exitPullsInToTheNearestCellWithGround() {
+        Doorway door = new Doorway(2, 0, 0, -1, Source.DESIGNED_GAP);
+        // One cell of ledge past the opening, then a drop.
+        java.util.function.Predicate<Cell> ground = groundMap(c -> c.z() >= -1 ? FEET_Y - 1 : FEET_Y - 9);
+        Route route = InteriorEgressPolicy.chooseRoute(BOX, List.of(door), Set.of(), 2, 2, 2, -6, ground).orElseThrow();
+        assertEquals(new Cell(2, 0), route.opening());
+        assertEquals(new Cell(2, -1), route.exit());
+    }
+
+    @Test
+    void holeBeforeSafeGroundRejectsTheDoor() {
+        Doorway door = new Doorway(2, 0, 0, -1, Source.DESIGNED_GAP);
+        // A one-wide ditch right outside the door: the far side is fine but the walk crosses the hole.
+        java.util.function.Predicate<Cell> ground = groundMap(c -> c.z() == -1 ? FEET_Y - 6 : FEET_Y - 1);
+        assertTrue(InteriorEgressPolicy.chooseRoute(BOX, List.of(door), Set.of(), 2, 2, 2, -6, ground).isEmpty());
+    }
+
+    @Test
+    void openingWithoutGroundRejectsTheDoor() {
+        Doorway door = new Doorway(2, 0, 0, -1, Source.DESIGNED_GAP);
+        java.util.function.Predicate<Cell> ground = groundMap(c -> c.z() == 0 ? InteriorEgressPolicy.NO_GROUND : FEET_Y - 1);
+        assertTrue(InteriorEgressPolicy.chooseRoute(BOX, List.of(door), Set.of(), 2, 2, 2, -6, ground).isEmpty());
+    }
+
+    @Test
+    void doorOverADropFallsThroughToASafeDoor() {
+        Footprint big = new Footprint(0, 0, 10, 10);
+        Doorway north = new Doorway(5, 0, 0, -1, Source.DESIGNED_GAP);
+        Doorway south = new Doorway(5, 10, 0, 1, Source.DESIGNED_GAP);
+        // North is the shorter trip, but there is nothing under its exit.
+        java.util.function.Predicate<Cell> ground = groundMap(c -> c.z() < 0 ? InteriorEgressPolicy.NO_GROUND : FEET_Y - 1);
+        Route route = InteriorEgressPolicy.chooseRoute(big, List.of(north, south), Set.of(), 5, 2, 5, -4, ground).orElseThrow();
+        assertEquals(south, route.doorway());
+        assertEquals(new Cell(5, 12), route.exit());
+    }
+
+    @Test
+    void flatGroundKeepsTheUncheckedRoute() {
+        Band band = smallShelter().bandAt(1);
+        Optional<Route> unchecked = InteriorEgressPolicy.chooseRoute(
+                band.footprint(), band.designedDoorways(), band.blockedColumns(), 3, 3, 2, -6);
+        Optional<Route> checked = InteriorEgressPolicy.chooseRoute(
+                band.footprint(), band.designedDoorways(), band.blockedColumns(), 3, 3, 2, -6, groundMap(c -> FEET_Y - 1));
+        assertEquals(unchecked, checked);
+    }
+
+    @Test
+    void extensionPushStopsBeforeTheEdge() {
+        Cell exit = new Cell(2, -2);
+        assertEquals(Optional.of(new Cell(2, -4)),
+                InteriorEgressPolicy.farthestStandable(exit, 0, -1, 2, groundMap(c -> FEET_Y - 1)));
+        assertEquals(Optional.of(new Cell(2, -3)),
+                InteriorEgressPolicy.farthestStandable(exit, 0, -1, 2, groundMap(c -> c.z() >= -3 ? FEET_Y - 1 : FEET_Y - 9)));
+        assertTrue(InteriorEgressPolicy.farthestStandable(exit, 0, -1, 2,
+                groundMap(c -> c.z() >= -2 ? FEET_Y - 1 : InteriorEgressPolicy.NO_GROUND)).isEmpty(), "no push at all");
+    }
+
+    /** Per-column ground Y, run through the same acceptance rule the runtime uses. */
+    private static java.util.function.Predicate<Cell> groundMap(java.util.function.ToIntFunction<Cell> groundY) {
+        return c -> InteriorEgressPolicy.groundAcceptable(FEET_Y, groundY.applyAsInt(c));
     }
 
     @Test

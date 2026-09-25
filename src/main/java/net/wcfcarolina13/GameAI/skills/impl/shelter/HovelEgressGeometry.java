@@ -39,6 +39,9 @@ final class HovelEgressGeometry {
     /** How far off the door axis a fallback exit cell may be. */
     static final int EXIT_MAX_LATERAL = 2;
 
+    /** Consecutive failed egresses after which one hovel build stops trying the door route (Fortify's cap). */
+    static final int MAX_CONSECUTIVE_EGRESS_FAILURES = 2;
+
     private HovelEgressGeometry() {
     }
 
@@ -75,6 +78,26 @@ final class HovelEgressGeometry {
         if (Math.max(Math.abs(botX - targetX), Math.abs(botZ - targetZ)) <= 1) return false;
         if (botZone == FootprintZone.ON_WALL && Math.abs(botFeetY - floorStandY) > 1) return false;
         return true;
+    }
+
+    /**
+     * What the exterior-access guard returns when a door egress fails. Before 1.1.218 the guard ran the
+     * egress only for a strictly INSIDE bot heading to a strictly OUTSIDE target and returned its result;
+     * every other pair (a wall-line bot or a wall-line target) went straight on to the normal move. A failed
+     * egress keeps that: proceed unless the pair is INSIDE to OUTSIDE. For INSIDE to OUTSIDE the old egress
+     * judged success by the exit move alone, so a failure where that move reported arrival
+     * ({@code moverSucceeded}, the {@code not-outside} step) proceeds too.
+     */
+    static boolean proceedAfterEgressFailure(FootprintZone botZone, FootprintZone targetZone, boolean moverSucceeded) {
+        return moverSucceeded || botZone != FootprintZone.INSIDE || targetZone != FootprintZone.OUTSIDE;
+    }
+
+    /**
+     * Whether an egress attempt counts toward {@link #MAX_CONSECUTIVE_EGRESS_FAILURES}. An abort
+     * ({@code /bot stop}) during the walk is not a routing failure.
+     */
+    static boolean countsTowardEgressCap(boolean ok, boolean aborted) {
+        return !ok && !aborted;
     }
 
     /**

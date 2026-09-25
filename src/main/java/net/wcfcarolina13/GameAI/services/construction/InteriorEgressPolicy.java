@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Pure geometry for leaving a construction footprint through its doorway instead of
@@ -32,6 +33,10 @@ public final class InteriorEgressPolicy {
     /** Exit distance beyond the opening, along the outward normal. */
     public static final int EXIT_DISTANCE = 2;
     private static final int MAX_EXIT_DISTANCE = 64;
+    /** Deepest drop below the bot's floor an egress waypoint may have (3+ hurts; off a tower it is a fall). */
+    public static final int MAX_EGRESS_DROP = 2;
+    /** Ground Y for a column with nothing to stand on within {@link #MAX_EGRESS_DROP}. */
+    public static final int NO_GROUND = Integer.MIN_VALUE;
 
     private InteriorEgressPolicy() {}
 
@@ -196,14 +201,17 @@ public final class InteriorEgressPolicy {
     /**
      * Egress for a move whose requested target and resolved stance may differ. Both must be
      * outside the strict interior: a wall-top stance picked for an interior target is reached
-     * from inside, and an interior stance picked for a wall target needs no exit.
+     * from inside, and an interior stance picked for a wall target needs no exit. A stance one
+     * step from the bot (Chebyshev distance 1, e.g. the doorway cell beside it) is a local step,
+     * not a crossing, same exemption as the hovel's.
      */
     public static boolean needsEgress(Footprint footprint,
                                       int botX, int botZ,
                                       int targetX, int targetZ,
                                       int stanceX, int stanceZ) {
         return needsEgress(footprint, botX, botZ, targetX, targetZ)
-                && !footprint.strictlyInside(stanceX, stanceZ);
+                && !footprint.strictlyInside(stanceX, stanceZ)
+                && Math.max(Math.abs(stanceX - botX), Math.abs(stanceZ - botZ)) > 1;
     }
 
     /**
@@ -338,18 +346,94 @@ public final class InteriorEgressPolicy {
                                               Set<Long> blockedColumns,
                                               int botX, int botZ,
                                               int targetX, int targetZ) {
+        return chooseRoute(footprint, doorways, blockedColumns, botX, botZ, targetX, targetZ, c -> true);
+    }
+
+    /**
+     * {@link #chooseRoute(Footprint, List, Set, int, int, int, int)} with a footing check: a
+     * doorway is used only if {@link #withSafeExit} finds standable ground under its opening and
+     * on the way out ({@code standable} is the caller's per-column ground test, see
+     * {@link #groundAcceptable}). On a raised floor a missing railing reads as a doorway; this
+     * keeps the egress from walking the bot off the edge.
+     */
+    public static Optional<Route> chooseRoute(Footprint footprint,
+                                              List<Doorway> doorways,
+                                              Set<Long> blockedColumns,
+                                              int botX, int botZ,
+                                              int targetX, int targetZ,
+                                              Predicate<Cell> standable) {
         if (footprint == null || doorways == null || doorways.isEmpty()) {
             return Optional.empty();
         }
+        Predicate<Cell> ground = standable == null ? c -> true : standable;
         List<Doorway> ordered = new ArrayList<>(doorways);
         ordered.sort(Comparator.comparingInt(d -> tripCost(d, botX, botZ, targetX, targetZ)));
         for (Doorway doorway : ordered) {
-            Optional<Route> route = route(footprint, doorway, blockedColumns, botX, botZ);
+            Optional<Route> route = route(footprint, doorway, blockedColumns, botX, botZ)
+                    .flatMap(r -> withSafeExit(r, ground));
             if (route.isPresent()) {
                 return route;
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Ground under a cell is acceptable for the egress walk when its top is level with the bot's
+     * floor or at most {@link #MAX_EGRESS_DROP} blocks below it. {@code groundY} is the Y of the
+     * supporting block (anything with a collision shape, walkable partials included), or
+     * {@link #NO_GROUND} when nothing supports the cell within that drop.
+     */
+    public static boolean groundAcceptable(int botFeetY, int groundY) {
+        if (groundY == NO_GROUND) {
+            return false;
+        }
+        int drop = botFeetY - 1 - groundY;
+        return drop >= 0 && drop <= MAX_EGRESS_DROP;
+    }
+
+    /** Both the opening and the exit have acceptable ground ({@link #groundAcceptable}). */
+    public static boolean exitAcceptable(int botFeetY, int openingGroundY, int exitGroundY) {
+        return groundAcceptable(botFeetY, openingGroundY) && groundAcceptable(botFeetY, exitGroundY);
+    }
+
+    /**
+     * The route with its exit pulled in to the farthest cell (at least one past the opening, at
+     * most the route's own exit) that is reachable over standable cells only; empty when the
+     * opening itself or the first cell past it fails. Cells are checked contiguously so the walk
+     * never crosses a hole to reach safe ground beyond it.
+     */
+    public static Optional<Route> withSafeExit(Route route, Predicate<Cell> standable) {
+        if (route == null || standable == null) {
+            return Optional.ofNullable(route);
+        }
+        if (!standable.test(route.opening())) {
+            return Optional.empty();
+        }
+        Doorway d = route.doorway();
+        int exitDistance = (route.exit().x() - route.opening().x()) * d.outDx()
+                + (route.exit().z() - route.opening().z()) * d.outDz();
+        return farthestStandable(route.opening(), d.outDx(), d.outDz(), exitDistance, standable)
+                .map(exit -> new Route(d, route.approach(), route.opening(), exit, route.approachSkippable()));
+    }
+
+    /**
+     * Farthest cell 1..{@code maxDistance} steps from {@code from} along ({@code dx}, {@code dz})
+     * such that every cell from step 1 up to it passes {@code standable}; empty when step 1 fails.
+     */
+    public static Optional<Cell> farthestStandable(Cell from, int dx, int dz, int maxDistance, Predicate<Cell> standable) {
+        if (from == null || standable == null) {
+            return Optional.empty();
+        }
+        Cell best = null;
+        for (int k = 1; k <= maxDistance; k++) {
+            Cell c = new Cell(from.x() + dx * k, from.z() + dz * k);
+            if (!standable.test(c)) {
+                break;
+            }
+            best = c;
+        }
+        return Optional.ofNullable(best);
     }
 
     static int tripCost(Doorway doorway, int botX, int botZ, int targetX, int targetZ) {

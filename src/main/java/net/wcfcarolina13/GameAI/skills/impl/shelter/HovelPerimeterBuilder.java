@@ -71,6 +71,9 @@ public final class HovelPerimeterBuilder {
     private Direction activeDoorSide;
     // True while ensureExteriorAccessForDestination is running a door egress (one builder per build, one worker thread).
     private boolean doorEgressInProgress;
+    // Consecutive failed door egresses this build; at the cap the guard stops trying the door route.
+    private int doorEgressConsecutiveFailures;
+    private boolean doorEgressDisabled;
 
     // Tracks scaffold bases (X/Z) used in this build to avoid redundant pillars.
     private final Set<BlockPos> usedScaffoldBasesXZ = new HashSet<>();
@@ -395,6 +398,8 @@ public final class HovelPerimeterBuilder {
         this.activeBuildCenter = buildCenter;
         this.activeRadius = radius;
         this.activeDoorSide = doorSide;
+        this.doorEgressConsecutiveFailures = 0;
+        this.doorEgressDisabled = false;
 
         // Persist/restore scaffold memory so a resumed build doesn't rebuild the same pillars.
         // If the resume doesn't match this build signature, we start clean.
@@ -2387,6 +2392,10 @@ public final class HovelPerimeterBuilder {
                 center.getY() + 1)) {
             return true;
         }
+        if (doorEgressDisabled) {
+            // Fortify's cap: after repeated failures the normal move (and its fallback ladder) runs as before.
+            return true;
+        }
         Direction doorSide = resolveDoorSideForExit(bot);
         HovelDoorAccessService.EgressOutcome outcome;
         doorEgressInProgress = true;
@@ -2395,15 +2404,34 @@ public final class HovelPerimeterBuilder {
         } finally {
             doorEgressInProgress = false;
         }
-        LOGGER.info("[hovel-egress] bot={} door={} from={} outcome={} botPos={} target={} route={}",
+        boolean aborted = !outcome.ok() && SkillManager.shouldAbortSkill(bot);
+        if (outcome.ok()) {
+            doorEgressConsecutiveFailures = 0;
+        } else if (HovelEgressGeometry.countsTowardEgressCap(outcome.ok(), aborted)) {
+            doorEgressConsecutiveFailures++;
+        }
+        // A failure only fails the move where 1.1.217 would have failed it (INSIDE -> OUTSIDE with the exit move
+        // failing); a wall-line bot or target proceeds with the normal move, as it did before the egress covered
+        // those cases, and so does "not-outside" (the exit move reported arrival, which 1.1.217 took as success).
+        boolean proceed = outcome.ok() || HovelEgressGeometry.proceedAfterEgressFailure(
+                botZone, targetZone, "not-outside".equals(outcome.failedStep()));
+        LOGGER.info("[hovel-egress] bot={} door={} from={} to={} outcome={}{} guard={} botPos={} target={} route={}",
                 bot.getName().getString(),
                 doorSide.asString(),
                 botZone,
+                targetZone,
                 outcome.describe(),
+                aborted ? "(aborted)" : "",
+                proceed ? "proceed" : "fail",
                 botPos.toShortString(),
                 destination.toShortString(),
                 outcome.route());
-        return outcome.ok();
+        if (doorEgressConsecutiveFailures >= HovelEgressGeometry.MAX_CONSECUTIVE_EGRESS_FAILURES) {
+            doorEgressDisabled = true;
+            LOGGER.info("[hovel-egress] disabled after {} failures bot={}",
+                    HovelEgressGeometry.MAX_CONSECUTIVE_EGRESS_FAILURES, bot.getName().getString());
+        }
+        return proceed;
     }
 
     private boolean ensureInteriorAccessForDestination(ServerWorld world,

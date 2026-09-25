@@ -236,6 +236,11 @@ final class HovelDoorAccessService {
         }
         clearDoorwayNearby(world, bot, center, radius, doorSide, reachDistanceSq, ops::mineSoft);
         if (!isOutside(bot, center, radius)) {
+            if (sameColumn(bot.getBlockPos(), doorCell)) {
+                // Stopped in the doorway (arrival tolerance): the wall is behind it, so the caller's normal
+                // move from here is the straight step out that 1.1.217 made.
+                return EgressOutcome.success(route.append(" end=doorway").toString());
+            }
             return EgressOutcome.failure(moved ? "not-outside" : "exit", route.toString());
         }
         return EgressOutcome.success(route.toString());

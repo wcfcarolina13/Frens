@@ -251,6 +251,28 @@ class HovelEgressGeometryTest {
         assertFalse(HovelEgressGeometry.isInFrontOfDoor(CX - 5, CZ, CX, CZ, r, 1, 0), "behind the far wall");
     }
 
+    // ---- guard verdict after a failed egress ---------------------------------------------------------
+
+    @Test
+    void failedEgressFailsTheMoveOnlyWhere1_1_217Did() {
+        // 1.1.217 ran the egress only INSIDE -> OUTSIDE and returned its result: false when a move failed.
+        assertFalse(HovelEgressGeometry.proceedAfterEgressFailure(INSIDE, OUTSIDE, false));
+        // ... and true when the exit move reported arrival, even short of OUTSIDE.
+        assertTrue(HovelEgressGeometry.proceedAfterEgressFailure(INSIDE, OUTSIDE, true), "mover said arrived");
+        // Everything else went straight to the normal move then, and still does.
+        assertTrue(HovelEgressGeometry.proceedAfterEgressFailure(INSIDE, ON_WALL, false), "wall-line target");
+        assertTrue(HovelEgressGeometry.proceedAfterEgressFailure(ON_WALL, OUTSIDE, false), "wall-line bot");
+        assertTrue(HovelEgressGeometry.proceedAfterEgressFailure(ON_WALL, ON_WALL, false), "both on the wall line");
+    }
+
+    @Test
+    void abortDoesNotCountTowardTheEgressCap() {
+        assertTrue(HovelEgressGeometry.countsTowardEgressCap(false, false));
+        assertFalse(HovelEgressGeometry.countsTowardEgressCap(false, true), "/bot stop mid-egress");
+        assertFalse(HovelEgressGeometry.countsTowardEgressCap(true, false));
+        assertEquals(2, HovelEgressGeometry.MAX_CONSECUTIVE_EGRESS_FAILURES, "Fortify's cap");
+    }
+
     @Test
     void verticalScanIsNearestFirstDownBeforeUp() {
         assertArrayEquals(new int[] {0}, HovelEgressGeometry.verticalScanOffsets(0));
