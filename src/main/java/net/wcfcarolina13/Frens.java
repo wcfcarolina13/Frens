@@ -1312,13 +1312,15 @@ public class Frens implements ModInitializer {
 
             ChatTarget target = resolveChatTargets(raw, sender);
             if (target.otherAddressee()) {
-                // Addressed to another online human: close the ambient reply window and do
-                // nothing bot-facing (no soul routing, no overhear, no legacy raw parser).
+                // Addressed to another online human: close the ambient reply window and the DM
+                // follow-up window, and do nothing bot-facing (no soul routing, no overhear, no
+                // legacy raw parser).
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.noteOtherAddresseeChat(sender);
                 return;
             }
             if (!target.bots().isEmpty()) {
-                // Explicit address: close any open ambient reply window. Observational only.
+                // Explicit address: close any open ambient reply window and the DM follow-up
+                // window. Observational only.
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.noteAddressedChat(sender);
                 List<ServerPlayerEntity> routedBots = dedupeTargetBots(target.bots());
                 // Fast-path: local quest system (no LLM).
@@ -1411,6 +1413,13 @@ public class Frens implements ModInitializer {
                 if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
                     handleLegacyInlineActionPrompt(routedBots.get(0), sender, target.prompt());
                 }
+                return;
+            }
+
+            // DM follow-up window: a bot's soul DM reply was delivered to this player within the
+            // last 30 s, so an unaddressed line continues that conversation -- but only when the
+            // DM path would accept it silently; otherwise the line falls through unchanged.
+            if (tryRouteDmFollowUp(sender, raw)) {
                 return;
             }
 
@@ -1590,6 +1599,34 @@ public class Frens implements ModInitializer {
             // Don't let optional soul-communication wiring break chat: an unroutable soft
             // broadcast is simply plain chat.
             LOGGER.warn("SoulGroupRouter.canRouteParty threw; treating soft broadcast as unaddressed: {}", t.toString());
+            return false;
+        }
+    }
+
+    /**
+     * Routes an unaddressed line through the sender's open DM follow-up window, when there is one,
+     * its bot is online and registered, and the soul DM path accepts the line silently.
+     */
+    private static boolean tryRouteDmFollowUp(ServerPlayerEntity sender, String raw) {
+        if (serverInstance == null || sender == null || raw == null || raw.isBlank()) {
+            return false;
+        }
+        try {
+            java.util.Optional<net.wcfcarolina13.GameAI.souls.SoulDmFollowUpWindow.Open> window =
+                    net.wcfcarolina13.GameAI.souls.SoulRuntime.dmFollowUp(sender.getUuid());
+            if (window.isEmpty()) {
+                return false;
+            }
+            ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(window.get().botId());
+            if (bot == null || bot.isRemoved() || !BotEventHandler.isRegisteredBot(bot)) {
+                return false;
+            }
+            return net.wcfcarolina13.GameAI.souls.SoulChatRouter.routeDmFollowUp(bot, sender, raw.trim(),
+                    window.get().ageMs())
+                    == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED;
+        } catch (Throwable t) {
+            // Don't let optional soul-communication wiring break chat.
+            LOGGER.warn("DM follow-up routing threw; treating line as unaddressed: {}", t.toString());
             return false;
         }
     }

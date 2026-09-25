@@ -129,6 +129,12 @@ public final class SoulRuntime {
     /** Ambient/local-chat scheduler; production-only, null in the test seam. */
     private volatile SoulLocalDirector localDirector;
     /**
+     * DM follow-up window (addressee rule R1). Present in both constructors; opened from the
+     * {@link #submitTurn} completion hook (store executor thread, map operations only) and read by
+     * the server-thread chat callback through {@link #dmFollowUp(UUID)}.
+     */
+    private final SoulDmFollowUpWindow dmFollowUp = new SoulDmFollowUpWindow(System::currentTimeMillis);
+    /**
      * The server this runtime was started against ({@code null} under the test seam). Read only
      * on the server thread by the Phase 2 mind hooks: player names for consolidation, the bot's
      * world day, and the periodic open-thread sweep.
@@ -500,7 +506,34 @@ public final class SoulRuntime {
             return CompletableFuture.completedFuture(SoulConversationService.Submission.FAILED);
         }
         noteThreadAnswered(turn.key().botId());
-        return pipelineRef.get().conversationService().submit(turn);
+        boolean direct = turn.key().channel() == SoulTypes.Channel.DIRECT;
+        if (direct) {
+            dmFollowUp.noteSubmitted(turn.key().playerId(), turn.routingId());
+        }
+        CompletableFuture<SoulConversationService.Submission> outcome =
+                pipelineRef.get().conversationService().submit(turn);
+        if (direct && outcome != null) {
+            // DELIVERED completes only after the private send succeeded (SoulConversationService
+            // commitSpoken), on the store executor -- map operations only from here.
+            outcome.whenComplete((submission, error) -> {
+                if (error == null && submission == SoulConversationService.Submission.DELIVERED
+                        && dmFollowUp.noteDelivered(turn.key().playerId(), turn.key().botId(),
+                                turn.routingId())) {
+                    LOGGER.debug("[souls] dm follow-up window open player={} bot={} routingId={}",
+                            turn.key().playerId(), turn.key().botId(), turn.routingId());
+                }
+            });
+        }
+        return outcome;
+    }
+
+    /**
+     * The player's open DM follow-up window (a soul DM reply was delivered to them within the
+     * last {@link SoulDmFollowUpWindow#WINDOW_MS}), or empty -- also when no runtime is running.
+     */
+    public static Optional<SoulDmFollowUpWindow.Open> dmFollowUp(UUID playerId) {
+        SoulRuntime runtime = INSTANCE.get();
+        return runtime == null ? Optional.empty() : runtime.dmFollowUp.current(playerId);
     }
 
     /**
@@ -674,11 +707,15 @@ public final class SoulRuntime {
         }
     }
 
-    /** An explicit address closes any open reply window (local-chat spec §7). */
+    /**
+     * An explicit address closes any open reply window (local-chat spec §7) and the DM follow-up
+     * window -- a DM this address starts reopens the latter once its reply is delivered.
+     */
     public static void noteAddressedChat(net.minecraft.server.network.ServerPlayerEntity player) {
         try {
             SoulRuntime runtime = INSTANCE.get();
             if (runtime != null && player != null) {
+                runtime.dmFollowUp.close(player.getUuid());
                 SoulLocalDirector director = runtime.localDirector;
                 if (director != null) {
                     director.noteAddressedChat(player.getUuid());
@@ -697,13 +734,14 @@ public final class SoulRuntime {
 
     /**
      * A line addressed to another online human (addressee rule R3): closes the ambient reply
-     * window and nothing else. Unlike {@link #noteAddressedChat} it does not mark any bot's open
-     * threads answered -- the player was talking to someone else.
+     * window and the DM follow-up window, and nothing else. Unlike {@link #noteAddressedChat} it
+     * does not mark any bot's open threads answered -- the player was talking to someone else.
      */
     public static void noteOtherAddresseeChat(net.minecraft.server.network.ServerPlayerEntity player) {
         try {
             SoulRuntime runtime = INSTANCE.get();
             if (runtime != null && player != null) {
+                runtime.dmFollowUp.close(player.getUuid());
                 SoulLocalDirector director = runtime.localDirector;
                 if (director != null) {
                     director.noteAddressedChat(player.getUuid());
@@ -722,7 +760,8 @@ public final class SoulRuntime {
      *       rejoining player their own stale timestamps;</li>
      *   <li>the local director's per-player state — cooldown, verdict/score history, reply
      *       window, pending-continuation flag ({@link SoulLocalDirector#forget}) — which holds
-     *       the player's last chat line and open reply window.</li>
+     *       the player's last chat line and open reply window;</li>
+     *   <li>the DM follow-up window and pending DM id ({@link SoulDmFollowUpWindow#close}).</li>
      * </ul>
      */
     public static void forgetPlayer(UUID playerId) {
@@ -731,6 +770,7 @@ public final class SoulRuntime {
             SoulPlayerActivity.forget(playerId);
             SoulRuntime runtime = INSTANCE.get();
             if (runtime != null) {
+                runtime.dmFollowUp.close(playerId);
                 SoulLocalDirector director = runtime.localDirector;
                 if (director != null) {
                     director.forget(playerId);

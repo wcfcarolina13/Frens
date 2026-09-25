@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -122,6 +124,40 @@ public final class SoulChatRouter {
                 && content != null && !content.isBlank();
     }
 
+    /** The first of {@link #tryRoute}'s fixed-order gates that is closed, or {@link Gate#OPEN}. */
+    public enum Gate { NOT_SOUL, LOADING, INVALID_PIPELINE, UNAUTHORIZED, UNREACHABLE, OPEN }
+
+    /**
+     * Pure gate order shared by {@link #tryRoute} and {@link #tryRouteSilently}, so the two can
+     * never drift: the coarse {@link #decide} (master switch, index readiness, cached profile),
+     * then index readiness, pipeline availability, exact authorization, and reachability. The
+     * suppliers are consulted lazily, in that order, only once every earlier gate is open —
+     * authorization and reachability read live world state and are timed by the caller.
+     */
+    public static Gate firstClosedGate(boolean masterEnabled, boolean indexReady, boolean profileActive,
+                                       BooleanSupplier pipelineAvailable, BooleanSupplier authorized,
+                                       Supplier<SoulTypes.Reachability> reachability) {
+        // pipelineAvailable/authorized/reachability don't affect decide's outcome (see its
+        // Javadoc) -- LOCAL/false/false are safe placeholders there.
+        if (decide(masterEnabled, indexReady, profileActive, false, false, SoulTypes.Reachability.LOCAL)
+                == RouteOutcome.NOT_SOUL) {
+            return Gate.NOT_SOUL;
+        }
+        if (!indexReady) {
+            return Gate.LOADING;
+        }
+        if (!pipelineAvailable.getAsBoolean()) {
+            return Gate.INVALID_PIPELINE;
+        }
+        if (!authorized.getAsBoolean()) {
+            return Gate.UNAUTHORIZED;
+        }
+        if (reachability.get() == SoulTypes.Reachability.UNREACHABLE) {
+            return Gate.UNREACHABLE;
+        }
+        return Gate.OPEN;
+    }
+
     /**
      * Attempts to route one already-resolved single-target DM through the soul-communication
      * pilot. Returns {@link RouteOutcome#NOT_SOUL} the instant the coarse {@link #decide} check
@@ -130,6 +166,38 @@ public final class SoulChatRouter {
      * having already sent exactly one deterministic notice or submitted exactly one turn.
      */
     public static RouteOutcome tryRoute(ServerPlayerEntity bot, ServerPlayerEntity sender, String prompt) {
+        return route(bot, sender, prompt, false);
+    }
+
+    /**
+     * Silent variant for a line the player did not explicitly address to a bot (the DM follow-up
+     * window, addressee rule R1): submits exactly as {@link #tryRoute} does when every gate is
+     * open, and otherwise returns {@link RouteOutcome#NOT_SOUL} with no notice and no routing log
+     * line, so the caller's ordinary unaddressed handling runs unchanged. Same gate evaluation as
+     * {@link #tryRoute} ({@link #firstClosedGate}).
+     */
+    public static RouteOutcome tryRouteSilently(ServerPlayerEntity bot, ServerPlayerEntity sender, String prompt) {
+        return route(bot, sender, prompt, true);
+    }
+
+    /**
+     * Routes an unaddressed line through an open DM follow-up window ({@link #tryRouteSilently})
+     * and, when it is consumed, logs one content-free INFO line.
+     *
+     * @param windowAgeMs how long ago the window opened, for the log line only
+     */
+    public static RouteOutcome routeDmFollowUp(ServerPlayerEntity bot, ServerPlayerEntity sender, String line,
+                                               long windowAgeMs) {
+        RouteOutcome outcome = tryRouteSilently(bot, sender, line);
+        if (outcome == RouteOutcome.CONSUMED) {
+            LOGGER.info("[souls] dm follow-up routed player={} bot={} ageMs={}",
+                    sender.getName().getString(), bot.getName().getString(), windowAgeMs);
+        }
+        return outcome;
+    }
+
+    private static RouteOutcome route(ServerPlayerEntity bot, ServerPlayerEntity sender, String prompt,
+                                      boolean silent) {
         Objects.requireNonNull(bot, "bot");
         Objects.requireNonNull(sender, "sender");
         String safePrompt = prompt == null ? "" : prompt;
@@ -143,65 +211,76 @@ public final class SoulChatRouter {
         UUID routingId = UUID.randomUUID();
         long routeStartNanos = System.nanoTime();
 
-        boolean masterEnabled = runtime.isMasterEnabled();
-        boolean indexReady = runtime.isReady();
-        boolean profileActive = runtime.hasActiveProfile(bot.getUuid());
-
-        // Coarse gate first: cheap synchronous/cached reads only, no Minecraft-world scanning.
-        // pipelineAvailable/authorized/reachability don't affect this outcome (see decide's
-        // Javadoc) -- LOCAL/false/false are safe placeholders here, never consulted by decide.
-        RouteOutcome coarse = decide(masterEnabled, indexReady, profileActive, false, false,
-                SoulTypes.Reachability.LOCAL);
-        if (coarse == RouteOutcome.NOT_SOUL) {
+        // Gates in fixed order; authorization and reachability are timed as they are evaluated.
+        long[] authorizationMs = {0L};
+        long[] reachabilityMs = {0L};
+        SoulTypes.Reachability[] reachability = {null};
+        Gate gate = firstClosedGate(runtime.isMasterEnabled(), runtime.isReady(),
+                runtime.hasActiveProfile(bot.getUuid()),
+                runtime::pipelineAvailable,
+                () -> {
+                    long authStartNanos = System.nanoTime();
+                    boolean authorized = CompanionCommunicationPolicy.isPrivateSoulAuthorized(sender, bot);
+                    authorizationMs[0] = elapsedMs(authStartNanos);
+                    return authorized;
+                },
+                () -> {
+                    long reachStartNanos = System.nanoTime();
+                    reachability[0] = CompanionCommunicationPolicy.classifySoulReachability(bot, sender);
+                    reachabilityMs[0] = elapsedMs(reachStartNanos);
+                    return reachability[0];
+                });
+        if (gate == Gate.NOT_SOUL) {
+            return RouteOutcome.NOT_SOUL;
+        }
+        if (silent && gate != Gate.OPEN) {
             return RouteOutcome.NOT_SOUL;
         }
 
-        if (!indexReady) {
-            logRouting(routingId, bot, sender, "loading", null, routeStartNanos, 0L, 0L, 0L);
-            sendNotice(sender, bot.getName().getString() + "'s conversation memory is still loading. Try again in a moment.");
-            return RouteOutcome.CONSUMED;
-        }
-
-        boolean pipelineAvailable = runtime.pipelineAvailable();
-        if (!pipelineAvailable) {
-            logRouting(routingId, bot, sender, "invalid-pipeline", null, routeStartNanos, 0L, 0L, 0L);
-            sendNotice(sender, bot.getName().getString() + "'s local conversation model is not ready: " + runtime.safeValidationError());
-            return RouteOutcome.CONSUMED;
-        }
-
-        long authStartNanos = System.nanoTime();
-        boolean authorized = CompanionCommunicationPolicy.isPrivateSoulAuthorized(sender, bot);
-        long authorizationMs = elapsedMs(authStartNanos);
-        if (!authorized) {
-            logRouting(routingId, bot, sender, "unauthorized", null, routeStartNanos, authorizationMs, 0L, 0L);
-            sendNotice(sender, bot.getName().getString() + "'s private conversation is available only to their owner or an operator.");
-            return RouteOutcome.CONSUMED;
-        }
-
-        long reachStartNanos = System.nanoTime();
-        SoulTypes.Reachability reachability = CompanionCommunicationPolicy.classifySoulReachability(bot, sender);
-        long reachabilityMs = elapsedMs(reachStartNanos);
-        if (reachability == SoulTypes.Reachability.UNREACHABLE) {
-            logRouting(routingId, bot, sender, "unreachable", reachability, routeStartNanos, authorizationMs,
-                    reachabilityMs, 0L);
-            sendNotice(sender, "You cannot reach " + bot.getName().getString() + " from here.");
-            return RouteOutcome.CONSUMED;
+        switch (gate) {
+            case LOADING -> {
+                logRouting(routingId, bot, sender, "loading", null, routeStartNanos, 0L, 0L, 0L);
+                sendNotice(sender, bot.getName().getString() + "'s conversation memory is still loading. Try again in a moment.");
+                return RouteOutcome.CONSUMED;
+            }
+            case INVALID_PIPELINE -> {
+                logRouting(routingId, bot, sender, "invalid-pipeline", null, routeStartNanos, 0L, 0L, 0L);
+                sendNotice(sender, bot.getName().getString() + "'s local conversation model is not ready: " + runtime.safeValidationError());
+                return RouteOutcome.CONSUMED;
+            }
+            case UNAUTHORIZED -> {
+                logRouting(routingId, bot, sender, "unauthorized", null, routeStartNanos, authorizationMs[0], 0L, 0L);
+                sendNotice(sender, bot.getName().getString() + "'s private conversation is available only to their owner or an operator.");
+                return RouteOutcome.CONSUMED;
+            }
+            case UNREACHABLE -> {
+                logRouting(routingId, bot, sender, "unreachable", reachability[0], routeStartNanos, authorizationMs[0],
+                        reachabilityMs[0], 0L);
+                sendNotice(sender, "You cannot reach " + bot.getName().getString() + " from here.");
+                return RouteOutcome.CONSUMED;
+            }
+            default -> {
+                // OPEN: fall through to submission.
+            }
         }
 
         MinecraftServer server = bot.getEntityWorld().getServer();
+        if (server == null && silent) {
+            return RouteOutcome.NOT_SOUL;
+        }
         if (server == null) {
             // Defensive only: the chat callback this is invoked from always runs on a live server
             // thread with a registered bot. No deterministic-notice text is specified for this
             // case in the brief, so fail closed the same way an unreachable turn does rather than
             // fabricate a new message.
-            logRouting(routingId, bot, sender, "no-server", reachability, routeStartNanos, authorizationMs,
-                    reachabilityMs, 0L);
+            logRouting(routingId, bot, sender, "no-server", reachability[0], routeStartNanos, authorizationMs[0],
+                    reachabilityMs[0], 0L);
             sendNotice(sender, "You cannot reach " + bot.getName().getString() + " from here.");
             return RouteOutcome.CONSUMED;
         }
 
         long snapshotStartNanos = System.nanoTime();
-        SoulTypes.GroundingSnapshot grounding = SoulSnapshotBuilder.capture(server, bot, sender, reachability);
+        SoulTypes.GroundingSnapshot grounding = SoulSnapshotBuilder.capture(server, bot, sender, reachability[0]);
         long snapshotMs = elapsedMs(snapshotStartNanos);
 
         String profileId = runtime.cachedState(bot.getUuid()).map(SoulTypes.SoulState::profileId).orElse("");
@@ -210,8 +289,10 @@ public final class SoulChatRouter {
         SoulTypes.AcceptedTurn turn = new SoulTypes.AcceptedTurn(key, bot.getName().getString(),
                 sender.getName().getString(), safePrompt, profileId, grounding, Instant.now(), routingId);
 
-        logRouting(routingId, bot, sender, "submitted", reachability, routeStartNanos, authorizationMs,
-                reachabilityMs, snapshotMs, grounding);
+        logRouting(routingId, bot, sender, "submitted", reachability[0], routeStartNanos, authorizationMs[0],
+                reachabilityMs[0], snapshotMs, grounding);
+        // SoulRuntime#submitTurn records this routingId as the player's newest DM and opens the
+        // DM follow-up window when this exact turn's reply is delivered.
         runtime.submitTurn(turn);
         return RouteOutcome.CONSUMED;
     }

@@ -216,4 +216,123 @@ class SoulChatRouterTest {
         assertEquals(SoulConversationService.Submission.FAILED, result.join());
         verify(conversationService, never()).submit(turn);
     }
+
+    // === Own coverage: firstClosedGate -- the one gate order tryRoute and tryRouteSilently share ===
+
+    private static SoulChatRouter.Gate gate(boolean master, boolean ready, boolean profile, boolean pipeline,
+                                            boolean authorized, SoulTypes.Reachability reachability) {
+        return SoulChatRouter.firstClosedGate(master, ready, profile, () -> pipeline, () -> authorized,
+                () -> reachability);
+    }
+
+    @Test
+    void gateOrderMatchesTryRoutesNoticeOrder() {
+        assertEquals(SoulChatRouter.Gate.NOT_SOUL, gate(false, true, true, true, true, LOCAL));
+        assertEquals(SoulChatRouter.Gate.NOT_SOUL, gate(true, true, false, true, true, LOCAL));
+        assertEquals(SoulChatRouter.Gate.LOADING, gate(true, false, false, false, false, UNREACHABLE));
+        assertEquals(SoulChatRouter.Gate.INVALID_PIPELINE, gate(true, true, true, false, false, UNREACHABLE));
+        assertEquals(SoulChatRouter.Gate.UNAUTHORIZED, gate(true, true, true, true, false, UNREACHABLE));
+        assertEquals(SoulChatRouter.Gate.UNREACHABLE, gate(true, true, true, true, true, UNREACHABLE));
+        assertEquals(SoulChatRouter.Gate.OPEN, gate(true, true, true, true, true, LOCAL));
+        assertEquals(SoulChatRouter.Gate.OPEN, gate(true, true, true, true, true, SoulTypes.Reachability.REMOTE));
+    }
+
+    @Test
+    void gateConsultsLiveChecksLazilyInOrder() {
+        List<String> consulted = new java.util.ArrayList<>();
+        SoulChatRouter.Gate result = SoulChatRouter.firstClosedGate(true, true, true,
+                () -> { consulted.add("pipeline"); return true; },
+                () -> { consulted.add("authorized"); return false; },
+                () -> { consulted.add("reachability"); return LOCAL; });
+        assertEquals(SoulChatRouter.Gate.UNAUTHORIZED, result);
+        assertEquals(List.of("pipeline", "authorized"), consulted,
+                "reachability is never computed once authorization failed");
+
+        consulted.clear();
+        SoulChatRouter.firstClosedGate(true, false, true,
+                () -> { consulted.add("pipeline"); return true; },
+                () -> { consulted.add("authorized"); return true; },
+                () -> { consulted.add("reachability"); return LOCAL; });
+        assertTrue(consulted.isEmpty(), "a loading index short-circuits every live check");
+    }
+
+    // === Own coverage: submitTurn opens the DM follow-up window only on DELIVERED ===
+
+    private static SoulRuntime runtimeWith(SoulConversationService conversationService) {
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), mock(SoulStore.class),
+                mock(SoulModelProvider.class), mock(SoulGenerationScheduler.class), conversationService);
+        SoulRuntime.installForTest(runtime);
+        return runtime;
+    }
+
+    @Test
+    void deliveredDirectReplyOpensTheFollowUpWindowForThatBot() {
+        SoulConversationService conversationService = mock(SoulConversationService.class);
+        runtimeWith(conversationService);
+        SoulTypes.AcceptedTurn turn = acceptedTurn();
+        when(conversationService.submit(turn))
+                .thenReturn(CompletableFuture.completedFuture(SoulConversationService.Submission.DELIVERED));
+
+        SoulRuntime.current().orElseThrow().submitTurn(turn).join();
+
+        Optional<SoulDmFollowUpWindow.Open> open = SoulRuntime.dmFollowUp(turn.key().playerId());
+        assertTrue(open.isPresent());
+        assertEquals(turn.key().botId(), open.get().botId());
+    }
+
+    @Test
+    void failedDirectReplyOpensNoFollowUpWindow() {
+        SoulConversationService conversationService = mock(SoulConversationService.class);
+        runtimeWith(conversationService);
+        SoulTypes.AcceptedTurn turn = acceptedTurn();
+        when(conversationService.submit(turn))
+                .thenReturn(CompletableFuture.completedFuture(SoulConversationService.Submission.FAILED));
+
+        SoulRuntime.current().orElseThrow().submitTurn(turn).join();
+
+        assertTrue(SoulRuntime.dmFollowUp(turn.key().playerId()).isEmpty());
+    }
+
+    @Test
+    void lateReplyToAnOlderDmDoesNotOpenTheWindow() {
+        SoulConversationService conversationService = mock(SoulConversationService.class);
+        SoulRuntime runtime = runtimeWith(conversationService);
+        SoulTypes.AcceptedTurn older = acceptedTurn();
+        CompletableFuture<SoulConversationService.Submission> olderReply = new CompletableFuture<>();
+        when(conversationService.submit(older)).thenReturn(olderReply);
+        SoulTypes.AcceptedTurn newer = new SoulTypes.AcceptedTurn(
+                new SoulTypes.ConversationKey(UUID.randomUUID(), older.key().playerId(), SoulTypes.Channel.DIRECT),
+                "Wren", "Player", "hi wren", "frens:wren", older.grounding(), Instant.now());
+        CompletableFuture<SoulConversationService.Submission> newerReply = new CompletableFuture<>();
+        when(conversationService.submit(newer)).thenReturn(newerReply);
+
+        runtime.submitTurn(older);
+        runtime.submitTurn(newer);
+        olderReply.complete(SoulConversationService.Submission.DELIVERED);
+        assertTrue(SoulRuntime.dmFollowUp(older.key().playerId()).isEmpty(),
+                "the older DM's slow reply must not open the window");
+        newerReply.complete(SoulConversationService.Submission.DELIVERED);
+        assertEquals(newer.key().botId(),
+                SoulRuntime.dmFollowUp(older.key().playerId()).orElseThrow().botId());
+    }
+
+    @Test
+    void forgetPlayerClosesTheFollowUpWindow() {
+        SoulConversationService conversationService = mock(SoulConversationService.class);
+        runtimeWith(conversationService);
+        SoulTypes.AcceptedTurn turn = acceptedTurn();
+        when(conversationService.submit(turn))
+                .thenReturn(CompletableFuture.completedFuture(SoulConversationService.Submission.DELIVERED));
+        SoulRuntime.current().orElseThrow().submitTurn(turn).join();
+
+        SoulRuntime.forgetPlayer(turn.key().playerId());
+
+        assertTrue(SoulRuntime.dmFollowUp(turn.key().playerId()).isEmpty());
+    }
+
+    @Test
+    void noRuntimeMeansNoFollowUpWindow() {
+        SoulRuntime.stop();
+        assertTrue(SoulRuntime.dmFollowUp(UUID.randomUUID()).isEmpty());
+    }
 }
