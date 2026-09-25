@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.AlwaysScope;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ConsumeStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Category;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
@@ -13,6 +14,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Config;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferStatus;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -296,6 +298,17 @@ public final class SupplyChestRules {
     private static boolean matches(SlotView slot, ItemKey item) {
         String fp = slot.componentsFp() == null ? "" : slot.componentsFp();
         return slot.itemId().equals(item.itemId()) && fp.equals(item.componentsFp());
+    }
+
+    /**
+     * Why a transfer the ledger did not permit moved nothing: the policy refused the chest's stock
+     * or the bot's need as they are now ({@link TransferStatus#INELIGIBLE_NOW}; the grant or
+     * permission still stands), or nothing covers it at all — no grant, an expired one, one for
+     * fewer items, no standing permission ({@link TransferStatus#NOT_PERMITTED}). Only for a
+     * {@code consumeGrant} that did not permit the move.
+     */
+    public static TransferStatus transferRefusal(ConsumeStatus status) {
+        return status == ConsumeStatus.INELIGIBLE ? TransferStatus.INELIGIBLE_NOW : TransferStatus.NOT_PERMITTED;
     }
 
     // ── Item components ──────────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenResult;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Response;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ResponseStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Revoked;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
@@ -429,7 +430,8 @@ class SupplyRequestLedgerTest {
         ledger.respond(theirs, OTHER_OWNER, false, Choice.ALWAYS_COMMON);
         UUID waiting = openOk(fp(OWNER, BOT_2, thirdChest, COBBLE, 8));
 
-        assertEquals(2, ledger.revokeAllAlways(OWNER));
+        // Two standing permissions, and the one live grant the owner's "always" answer left.
+        assertEquals(new Revoked(2, 1), ledger.revokeAllAlways(OWNER));
         assertFalse(ledger.hasAlways(OWNER, CHEST));
         assertFalse(ledger.hasAlways(OWNER, netherChest));
         assertEquals(Set.of(new AlwaysScope(OTHER_OWNER, CHEST)), ledger.alwaysSnapshot());
@@ -442,16 +444,60 @@ class SupplyRequestLedgerTest {
         assertEquals(OpenStatus.PROMPT_COOLDOWN, ledger.open(fp(OWNER, BOT, thirdChest, TORCH, 4), PLENTY, 4).status());
         assertEquals(ResponseStatus.GRANTED_ONCE, ledger.respond(waiting, OWNER, false, Choice.ALLOW_ONCE).status());
 
-        assertEquals(0, ledger.revokeAllAlways(OWNER));
-        assertEquals(0, ledger.revokeAllAlways(null));
+        // The Allow once just given is withdrawn too, and counted; then nothing is left.
+        assertEquals(new Revoked(0, 1), ledger.revokeAllAlways(OWNER));
+        assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(fp(OWNER, BOT_2, thirdChest, COBBLE, 8), PLENTY, 8)
+                .status());
+        assertTrue(ledger.revokeAllAlways(OWNER).nothing());
+        assertEquals(Revoked.NOTHING, ledger.revokeAllAlways(null));
     }
 
     @Test
-    void revokeAllWithNoPermissionStillWithdrawsUnspentGrants() {
+    void revokeAllWithNoPermissionStillWithdrawsAndCountsUnspentGrants() {
         UUID id = openOk(cobble(8));
         ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
-        assertEquals(0, ledger.revokeAllAlways(OWNER));
+        Revoked revoked = ledger.revokeAllAlways(OWNER);
+        assertEquals(new Revoked(0, 1), revoked);
+        assertFalse(revoked.nothing(), "so the reply never says there was nothing to revoke");
         assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
+    }
+
+    @Test
+    void revokeAllDropsButDoesNotCountAGrantThatAlreadyLapsed() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(60_000L); // now == the grant's deadline: it permits nothing any more
+        assertEquals(Revoked.NOTHING, ledger.revokeAllAlways(OWNER));
+    }
+
+    // ── the latest answer wins ───────────────────────────────────────────────────────────────
+
+    @Test
+    void aNoWithdrawsAnEarlierAllowOnceForTheSameTarget() {
+        UUID first = openOk(cobble(8));
+        assertEquals(ResponseStatus.GRANTED_ONCE, ledger.respond(first, OWNER, false, Choice.ALLOW_ONCE).status());
+        assertTrue(ledger.isPermitted(cobble(8)));
+        // The grant goes unspent; after the cooldown the bot asks for the same thing again.
+        advance(15_000L);
+        UUID again = openOk(cobble(8));
+        assertEquals(ResponseStatus.REJECTED, ledger.respond(again, OWNER, false, Choice.NO).status());
+        assertFalse(ledger.isPermitted(cobble(8)), "the owner's latest answer was No");
+        Consume consume = ledger.consumeGrant(cobble(8), PLENTY, 8);
+        assertEquals(ConsumeStatus.NO_GRANT, consume.status());
+        assertEquals(0, consume.quantity(), "nothing moves");
+    }
+
+    @Test
+    void aNoLeavesOtherTargetsGrantsAlone() {
+        UUID axe = openOk(fp(OWNER, BOT, CHEST, STONE_AXE, 1));
+        ledger.respond(axe, OWNER, false, Choice.ALLOW_ONCE);
+        UUID elsewhere = openOk(fp(OWNER, BOT_2, OTHER_CHEST, COBBLE, 8));
+        ledger.respond(elsewhere, OWNER, false, Choice.ALLOW_ONCE);
+        advance(15_000L);
+        UUID cobbleHere = openOk(cobble(8));
+        ledger.respond(cobbleHere, OWNER, false, Choice.NO);
+        assertTrue(ledger.isPermitted(fp(OWNER, BOT, CHEST, STONE_AXE, 1)), "another item at the same chest");
+        assertTrue(ledger.isPermitted(fp(OWNER, BOT_2, OTHER_CHEST, COBBLE, 8)), "another bot and chest");
     }
 
     // ── isPermitted ──────────────────────────────────────────────────────────────────────────

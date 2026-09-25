@@ -14,6 +14,7 @@ import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Response;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ResponseStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Revoked;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService;
 
@@ -124,14 +125,19 @@ public final class SupplyCommands {
             source.sendError(Text.literal("Companion supplies aren't ready yet. Try again in a moment."));
             return 0;
         }
-        int removed = SupplyRequestService.revokeAll(player);
-        if (removed > 0) {
-            source.sendFeedback(() -> Text.literal("Revoked " + removed
-                    + " standing permission(s): your companions will ask again before taking from any chest."), false);
-            return removed;
+        Revoked removed = SupplyRequestService.revokeAll(player);
+        if (removed.nothing()) {
+            source.sendFeedback(() -> Text.literal("Nothing to revoke: you hadn't allowed \"always\" for any chest,"
+                    + " and no \"Allow once\" was waiting to be used."), false);
+            return 0;
         }
-        source.sendFeedback(() -> Text.literal(
-                "Nothing to revoke: you hadn't allowed \"always\" for any chest."), false);
-        return 0;
+        String what = removed.permissions() > 0 && removed.grants() > 0
+                ? removed.permissions() + " standing permission(s) and " + removed.grants() + " unused \"Allow once\""
+                : removed.permissions() > 0
+                        ? removed.permissions() + " standing permission(s)"
+                        : removed.grants() + " unused \"Allow once\"";
+        source.sendFeedback(() -> Text.literal("Revoked " + what
+                + ": your companions will ask again before taking from any chest."), false);
+        return removed.permissions() + removed.grants();
     }
 }

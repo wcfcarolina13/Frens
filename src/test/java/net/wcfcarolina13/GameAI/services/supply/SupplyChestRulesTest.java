@@ -8,6 +8,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.AccessFacts;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.Ownership;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.SlotView;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.AlwaysScope;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ConsumeStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
@@ -16,6 +17,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -663,6 +665,20 @@ class SupplyChestRulesTest {
         assertEquals(List.of(), SupplyChestRules.withdrawPlan(chest, WORN_AXE, -1));
         assertEquals(List.of(), SupplyChestRules.withdrawPlan(null, WORN_AXE, 3));
         assertEquals(List.of(), SupplyChestRules.withdrawPlan(chest, null, 3));
+    }
+
+    @Test
+    void aTransferThePolicyRefusesNowIsNotTheOwnersNo() {
+        for (ConsumeStatus status : ConsumeStatus.values()) {
+            if (status == ConsumeStatus.ONCE || status == ConsumeStatus.ALWAYS) {
+                continue; // permitted: the transfer moves items
+            }
+            TransferStatus expected = status == ConsumeStatus.INELIGIBLE
+                    ? TransferStatus.INELIGIBLE_NOW   // the reserve drained or the need went; the grant stands
+                    : TransferStatus.NOT_PERMITTED;   // no grant, an expired one, one for fewer items
+            assertEquals(expected, SupplyChestRules.transferRefusal(status), status.name());
+        }
+        assertEquals(TransferStatus.NOT_PERMITTED, SupplyChestRules.transferRefusal(null));
     }
 
     @Test

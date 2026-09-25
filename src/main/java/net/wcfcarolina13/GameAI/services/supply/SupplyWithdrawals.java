@@ -11,23 +11,28 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.RequestFingerprint;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestOutcome;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferOutcome;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop.Hop;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.OwnerAwayMemo;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Ticket;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TicketBook;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TicketKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TransferAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -36,30 +41,40 @@ import java.util.function.Supplier;
  * The one way a companion takes items out of a chest on its own. Every automatic withdrawal —
  * a tool, seeds, food, crafting materials, idle equipment — calls {@link #withdraw}, and this is
  * the only class that calls {@link SupplyRequestService#request} and
- * {@link SupplyRequestService#transferNow} ({@code SupplyDormancyTest} keeps it that way). What the
- * owner does themselves — {@code /bot withdraw}, Quick Fetch — is the owner's own act and does not
- * come through here.
+ * {@link SupplyRequestService#transferNow} ({@code SupplyEntryPointTest} keeps it that way). What
+ * the owner does themselves — {@code /bot withdraw}, Quick Fetch — is the owner's own act and does
+ * not come through here.
  *
  * <p><b>Ask, walk, take.</b> Asking and taking are separate: the owner answers a prompt in chat,
- * and the bot may have to walk to the chest. Between calls the facade keeps a per-bot
- * <i>ticket</i>: the request's fingerprint, the only key the owner's grant can be spent with (a
- * fresh request would hit the bot's prompt cooldown instead). A caller that must walk calls once
- * with {@link WaitMode#NONE} before walking — {@link Kind#REFUSED} means skip this chest and don't
- * walk — walks, then calls again with the same chest and item to take. One ticket per bot; a
- * ticket lives for the prompt's lifetime plus the grant's, and is swept once a second. A ticket
- * whose prompt was refused or expired, or whose grant lapsed, is dropped with {@code NOT_PERMITTED}
- * before any reach check, so {@link Kind#READY} always means permitted.
+ * and the bot may have to walk to the chest. Between calls the facade keeps <i>tickets</i>: a
+ * request's fingerprint, the only key the owner's grant can be spent with (a fresh request would
+ * hit the bot's prompt cooldown instead). A caller that must walk calls once with
+ * {@link WaitMode#NONE} before walking — {@link Kind#REFUSED} means don't walk — walks, then calls
+ * again with the same chest and item to take. A bot keeps one ticket per chest and exact item, so
+ * asking about anything else never costs it a grant the owner already gave. A ticket lives for
+ * the prompt's lifetime plus the grant's and is swept once a second. A ticket whose prompt was
+ * refused or expired, or whose grant lapsed, is dropped with {@code NOT_PERMITTED} before any
+ * reach check, so {@link Kind#READY} always means permitted.
+ *
+ * <p><b>Refusals carry a scope</b> ({@link Result#scope()}, {@link Scope}): how far the answer
+ * reaches — this item, this chest, everything the bot asks for now, the owner being away, or
+ * nothing but the moment. Callers decide from it; the reason string is for the logs.
+ *
+ * <p><b>Quiet refusals.</b> A bot with no owner is refused ({@code NO_OWNER}) without asking the
+ * ledger. After the owner is found away from a chest, the bot does not ask about that chest again
+ * for {@link SupplyWithdrawalPolicy#OWNER_AWAY_MEMO_MS} unless a standing permission covers it.
+ * Neither logs at INFO.
  *
  * <p>{@link #grantableEstimate} lets a caller count, before asking, how much of a chest's stock
  * the policy could ever grant (allowlist and reserve only; advisory).
  *
  * <p><b>Threading.</b> Any thread. On the server thread a call runs one non-blocking step, and
  * {@link WaitMode#UNTIL_ANSWERED} is treated as {@link WaitMode#NONE} (with one WARN per run of
- * the game). Off it, each step runs on the server thread through a bounded hop (about 2.5 s); a
- * step the worker gave up on before it started does nothing when it finally runs. With
+ * the game). Off it, each step runs on the server thread through {@link SupplyServerHop} (about
+ * 2.5 s); a step the worker gave up on before it started does nothing when it finally runs. With
  * {@link WaitMode#UNTIL_ANSWERED} a worker that got {@link Kind#WAITING} polls the ledger every
  * 500 ms — without touching the world — until the prompt is answered or expires, then takes one
- * more step.
+ * more step. Once the server is stopping, every step refuses.
  */
 public final class SupplyWithdrawals {
 
@@ -86,33 +101,50 @@ public final class SupplyWithdrawals {
         READY,
         /** The owner has not answered yet: call again later (the ticket is kept). */
         WAITING,
-        /** Nothing will be taken now; {@link Result#reason()} says why. */
+        /** Nothing will be taken now; {@link Result#scope()} says how far that reaches. */
         REFUSED
     }
 
     /**
      * @param kind   what happened
      * @param moved  items moved into the bot's inventory (0 unless {@link Kind#MOVED})
-     * @param reason a short machine-readable why: for {@link Kind#REFUSED} one of
-     *               {@code NOT_RUNNING}, {@code BOT_GONE}, {@code INVALID}, {@code INELIGIBLE(<verdict>)}
-     *               (the item is never asked for), {@code OTHER_REQUEST_PENDING}, a request status
-     *               such as {@code PROMPT_COOLDOWN}, {@code REJECT_COOLDOWN}, {@code OWNER_NOT_NEARBY},
-     *               {@code DENIED(<access>)} or {@code INELIGIBLE(<verdict>)}, a transfer status such as
-     *               {@code NO_ROOM} (the ticket is kept: make room and call again), {@code NOT_PERMITTED}
-     *               or {@code NO_STOCK}, {@code TIMEOUT}, {@code ABORTED}, {@code SERVER_BUSY} or
-     *               {@code ERROR}
+     * @param reason a short why, for the logs: a {@link Refusal} name, {@code INELIGIBLE(<verdict>)}
+     *               from the pre-filter, a request status such as {@code PROMPT_COOLDOWN} or
+     *               {@code DENIED(<access>)}, a transfer status such as {@code NO_ROOM} (the ticket
+     *               is kept: make room and call again) or {@code INELIGIBLE_NOW}; {@code ASKED} or
+     *               {@code PENDING} while waiting, {@code OUT_OF_REACH} when ready
+     * @param scope  how far a refusal reaches; {@link Scope#NONE} exactly when {@code kind} is not
+     *               {@link Kind#REFUSED} (a refusal given no scope reads {@link Scope#BOT}; see
+     *               {@link SupplyWithdrawalPolicy#resultScope})
      */
-    public record Result(Kind kind, int moved, String reason) {
-        static Result refused(String reason) {
-            return new Result(Kind.REFUSED, 0, reason);
+    public record Result(Kind kind, int moved, String reason, Scope scope) {
+        public Result {
+            scope = SupplyWithdrawalPolicy.resultScope(kind, scope);
+        }
+
+        /**
+         * A result without a scope: a refusal reads {@link Scope#BOT} (fail closed).
+         *
+         * @deprecated kept only so callers written before refusal scopes compile; pass a scope
+         *             ({@link #refused(String, Scope)}) instead
+         */
+        @Deprecated
+        public Result(Kind kind, int moved, String reason) {
+            this(kind, moved, reason, null);
+        }
+
+        /** A refusal with the given reason and scope. */
+        public static Result refused(String reason, Scope scope) {
+            return new Result(Kind.REFUSED, 0, reason, scope);
+        }
+
+        /** One of the facade's own refusals: its name and its scope. */
+        public static Result refused(Refusal refusal) {
+            return refused(refusal.name(), refusal.scope());
         }
     }
 
-    /** A request this bot asked or was covered for, kept between the ask and the take. */
-    private record Ticket(RequestFingerprint fp, BlockPos chestPos, long openedAtMs, String purpose) {
-    }
-
-    /** One step's result, and whether it is worth an INFO line (a repeat or a pre-filter refusal is not). */
+    /** One step's result, and whether it is worth an INFO line (a repeat or a quiet refusal is not). */
     private record Step(Result result, boolean quiet) {
         static Step loud(Result result) {
             return new Step(result, false);
@@ -123,8 +155,10 @@ public final class SupplyWithdrawals {
         }
     }
 
-    /** One ticket per bot. Touched only on the server thread; concurrent so the sweep and stop are safe too. */
-    private static final ConcurrentHashMap<UUID, Ticket> TICKETS = new ConcurrentHashMap<>();
+    /** Every bot's tickets, one per chest and exact item. Touched on the server thread; thread-safe for the sweep and stop. */
+    private static final TicketBook TICKETS = new TicketBook();
+    /** (bot, chest) pairs that recently found the owner away. */
+    private static final OwnerAwayMemo OWNER_AWAY = new OwnerAwayMemo();
     private static final AtomicBoolean WARNED_WAIT_ON_SERVER_THREAD = new AtomicBoolean();
     private static final AtomicBoolean WARNED_ESTIMATE_OFF_THREAD = new AtomicBoolean();
 
@@ -156,12 +190,10 @@ public final class SupplyWithdrawals {
                     + " not waiting there, this call and any like it run without waiting", purposeText(purpose));
         }
         WaitMode effective = SupplyWithdrawalPolicy.effectiveMode(mode, onServerThread);
-        Supplier<Step> oneStep = () -> step(bot, chestPos, sample, qty, need, purpose);
+        Supplier<Step> oneStep = () -> step(bot, chestPos, sample, qty, need);
         Step outcome;
         if (srv == null) {
-            outcome = Step.loud(Result.refused("NOT_RUNNING"));
-        } else if (onServerThread) {
-            outcome = oneStep.get();
+            outcome = Step.loud(Result.refused(Refusal.NOT_RUNNING));
         } else {
             outcome = onServer(srv, oneStep);
             if (effective == WaitMode.UNTIL_ANSWERED && outcome.result().kind() == Kind.WAITING) {
@@ -206,80 +238,88 @@ public final class SupplyWithdrawals {
 
     // ── One step (server thread) ─────────────────────────────────────────────────────────────
 
-    private static Step step(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample, int qty, int need,
-                             String purpose) {
+    private static Step step(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample, int qty, int need) {
         SupplyRequestPolicy.Config config = SupplyRequestService.config();
-        if (!SupplyRequestService.isRunning() || config == null) {
-            return Step.loud(Result.refused("NOT_RUNNING"));
+        // A hop queued before the stop can still run in shutdown()'s task pump, after the bots were saved.
+        if (TaskService.isServerStopping() || !SupplyRequestService.isRunning() || config == null) {
+            return Step.loud(Result.refused(Refusal.NOT_RUNNING));
         }
         if (bot == null || bot.isRemoved()) {
-            return Step.loud(Result.refused("BOT_GONE"));
+            return Step.loud(Result.refused(Refusal.BOT_GONE));
         }
         if (chestPos == null || sample == null || sample.isEmpty() || qty <= 0 || need <= 0) {
-            return Step.loud(Result.refused("INVALID"));
+            return Step.loud(Result.refused(Refusal.INVALID));
+        }
+        // Nobody may approve anything for an owner-less bot: said here, quietly, so a retry costs no request.
+        UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        if (owner == null) {
+            return Step.quiet(Result.refused(Refusal.NO_OWNER));
         }
         ServerWorld world = bot.getEntityWorld();
         ItemKey item = SupplyRequestService.itemKeyOf(world, sample);
         // The same config the ledger decides with: an item it would refuse is never asked about.
         Verdict verdict = SupplyRequestPolicy.classify(item, config);
-        if (!SupplyWithdrawalPolicy.passesPreFilter(verdict)) {
-            return Step.quiet(Result.refused("INELIGIBLE(" + verdict + ")"));
+        Scope preFilter = SupplyWithdrawalPolicy.preFilterScope(verdict);
+        if (preFilter != Scope.NONE) {
+            return Step.quiet(Result.refused("INELIGIBLE(" + verdict + ")", preFilter));
+        }
+        ChestKey chestKey = SupplyRequestService.chestKeyAt(world, chestPos);
+        if (chestKey == null) {
+            // Nothing to match a ticket against, so nothing is dropped either; ask again later.
+            return Step.loud(Result.refused(Refusal.CHEST_UNREADABLE));
         }
 
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
-        Ticket ticket = TICKETS.get(botId);
-        if (ticket != null && !SupplyWithdrawalPolicy.isTicketLive(ticket.openedAtMs(), now,
-                SupplyRequestService.timings())) {
-            TICKETS.remove(botId, ticket);
-            ticket = null;
-        }
+        Ticket ticket = TICKETS.find(botId, TicketKey.of(chestKey, item), now, SupplyRequestService.timings());
         boolean pending = SupplyRequestService.isPending(botId);
-        boolean matches = ticket != null && SupplyWithdrawalPolicy.ticketMatches(ticket.fp(),
-                SupplyRequestService.chestKeyAt(world, chestPos), item);
         boolean permitted = ticket != null && SupplyRequestService.isPermitted(ticket.fp());
-        switch (SupplyWithdrawalPolicy.ticketStep(ticket != null, matches, pending, permitted)) {
-            case WAIT:
-                return Step.quiet(new Result(Kind.WAITING, 0, "PENDING"));
+        switch (SupplyWithdrawalPolicy.ticketStep(ticket != null, pending, permitted)) {
             case REDEEM:
                 return redeem(bot, world, chestPos, ticket, need);
+            case WAIT:
+                return Step.quiet(new Result(Kind.WAITING, 0, "PENDING", Scope.NONE));
             case DROP_NOT_PERMITTED:
                 // Refused, expired or lapsed: say so before any reach check, so nobody walks for nothing.
-                TICKETS.remove(botId, ticket);
-                return Step.loud(Result.refused("NOT_PERMITTED"));
+                TICKETS.drop(ticket);
+                return Step.loud(Result.refused(Refusal.NOT_PERMITTED));
             case OTHER_PENDING:
-                return Step.quiet(Result.refused("OTHER_REQUEST_PENDING"));
-            case DROP_AND_REQUEST:
-                // Its grant, if the owner gave one, simply expires unspent.
-                TICKETS.remove(botId, ticket);
-                LOGGER.debug("[supply] withdraw bot={} dropped its ticket for {} at {} (purpose={})",
-                        bot.getName().getString(), ticket.fp().itemId(), ticket.chestPos().toShortString(),
-                        purposeText(ticket.purpose()));
-                break;
+                return Step.quiet(Result.refused(Refusal.OTHER_REQUEST_PENDING));
             case REQUEST:
+            default:
                 break;
         }
 
+        // The owner was just found away from this chest; a standing permission needs nobody nearby.
+        if (OWNER_AWAY.isAway(botId, chestKey, now) && !SupplyRequestService.hasAlways(owner, chestKey)) {
+            return Step.quiet(Result.refused(Refusal.OWNER_NOT_NEARBY));
+        }
         RequestOutcome asked = SupplyRequestService.request(bot, chestPos, sample, qty, need);
         RequestFingerprint fp = asked.fingerprint();
         switch (SupplyWithdrawalPolicy.onRequest(asked.status())) {
             case TAKE:
                 if (fp == null) {
-                    return Step.loud(Result.refused(asked.logText()));
+                    return Step.loud(refusedBy(asked));
                 }
-                Ticket covered = new Ticket(fp, chestPos.toImmutable(), now, purpose);
-                TICKETS.put(botId, covered);
-                return redeem(bot, world, chestPos, covered, need);
+                return redeem(bot, world, chestPos, TICKETS.record(fp, now), need);
             case WAIT:
                 if (fp == null) {
-                    return Step.loud(Result.refused(asked.logText()));
+                    return Step.loud(refusedBy(asked));
                 }
-                TICKETS.put(botId, new Ticket(fp, chestPos.toImmutable(), now, purpose));
-                return Step.loud(new Result(Kind.WAITING, 0, "ASKED"));
+                TICKETS.record(fp, now);
+                return Step.loud(new Result(Kind.WAITING, 0, "ASKED", Scope.NONE));
             case REFUSE:
             default:
-                return Step.loud(Result.refused(asked.logText()));
+                if (asked.status() == RequestStatus.OWNER_NOT_NEARBY) {
+                    OWNER_AWAY.noteAway(botId, chestKey, now);
+                }
+                return Step.loud(refusedBy(asked));
         }
+    }
+
+    private static Result refusedBy(RequestOutcome asked) {
+        return Result.refused(asked.logText(),
+                SupplyWithdrawalPolicy.requestScope(asked.status(), asked.access(), asked.verdict()));
     }
 
     /**
@@ -289,18 +329,18 @@ public final class SupplyWithdrawals {
      */
     private static Step redeem(ServerPlayerEntity bot, ServerWorld world, BlockPos chestPos, Ticket ticket, int need) {
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
-            return Step.loud(new Result(Kind.READY, 0, "OUT_OF_REACH"));
+            return Step.loud(new Result(Kind.READY, 0, "OUT_OF_REACH", Scope.NONE));
         }
         TransferOutcome transfer = SupplyRequestService.transferNow(bot, chestPos, ticket.fp(), need);
         TransferAction action = SupplyWithdrawalPolicy.onTransfer(transfer.status(), transfer.moved());
         if (!action.keepTicket()) {
-            TICKETS.remove(bot.getUuid(), ticket);
+            TICKETS.drop(ticket);
         }
         if (transfer.moved() > 0) {
             refreshRegistrySnapshot(bot, world, chestPos);
         }
         int moved = action.kind() == Kind.MOVED ? transfer.moved() : 0;
-        return Step.loud(new Result(action.kind(), moved, action.reason()));
+        return Step.loud(new Result(action.kind(), moved, action.reason(), action.scope()));
     }
 
     /**
@@ -333,78 +373,19 @@ public final class SupplyWithdrawals {
     // ── Worker side ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Runs {@code body} on the server thread and waits a bounded time for it. Whichever side
-     * claims the step first owns it: the server task claims it when it starts, and a worker whose
-     * wait ran out claims it to abandon it, so a late task finds it claimed and does nothing. A
-     * task that already started is waited for, because its items may already have moved.
+     * Runs one step on the server thread through {@link SupplyServerHop}: inline there, otherwise
+     * a bounded, abandon-safe hop (a step the worker gave up on before it started does nothing; one
+     * that started is waited for, since its items may already have moved).
      */
     private static Step onServer(MinecraftServer srv, Supplier<Step> body) {
-        CompletableFuture<Step> done = new CompletableFuture<>();
-        AtomicBoolean claimed = new AtomicBoolean();
-        try {
-            srv.execute(() -> {
-                if (!claimed.compareAndSet(false, true)) {
-                    return; // abandoned by the worker before it started
-                }
-                if (!srv.isOnThread()) {
-                    // A stopped server runs execute() inline on the caller: never touch the world off-thread.
-                    done.complete(Step.loud(Result.refused("NOT_RUNNING")));
-                    return;
-                }
-                try {
-                    done.complete(body.get());
-                } catch (RuntimeException e) {
-                    LOGGER.warn("[supply] withdraw step failed on the server thread", e);
-                } finally {
-                    done.complete(Step.loud(Result.refused("ERROR"))); // no-op once completed
-                }
-            });
-        } catch (RuntimeException rejected) {
-            return Step.loud(Result.refused("NOT_RUNNING"));
-        }
-        try {
-            return done.get(HOP_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException | InterruptedException e) {
-            boolean interrupted = e instanceof InterruptedException;
-            if (claimed.compareAndSet(false, true)) {
-                if (interrupted) {
-                    Thread.currentThread().interrupt();
-                }
-                return Step.loud(Result.refused(interrupted ? "ABORTED" : "SERVER_BUSY"));
-            }
-            return awaitStarted(done, interrupted);
-        } catch (ExecutionException e) {
-            return Step.loud(Result.refused("ERROR"));
-        }
-    }
-
-    /** Waits for a step that has already started on the server thread; keeps any interrupt for later. */
-    private static Step awaitStarted(CompletableFuture<Step> done, boolean interrupted) {
-        boolean restore = interrupted;
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(HOP_TIMEOUT_MS);
-        try {
-            while (true) {
-                long left = deadline - System.nanoTime();
-                if (left <= 0L) {
-                    LOGGER.warn("[supply] withdraw step still running on the server thread after {} ms more;"
-                            + " its result is lost to this caller", HOP_TIMEOUT_MS);
-                    return Step.loud(Result.refused("SERVER_BUSY"));
-                }
-                try {
-                    return done.get(left, TimeUnit.NANOSECONDS);
-                } catch (InterruptedException e) {
-                    restore = true;
-                } catch (TimeoutException e) {
-                    // loop: the deadline check reports it
-                } catch (ExecutionException e) {
-                    return Step.loud(Result.refused("ERROR"));
-                }
-            }
-        } finally {
-            if (restore) {
-                Thread.currentThread().interrupt();
-            }
-        }
+        Hop<Step> hop = SupplyServerHop.hop(srv, body, HOP_TIMEOUT_MS);
+        return switch (hop.status()) {
+            case DONE -> hop.value();
+            case NOT_RUNNING -> Step.loud(Result.refused(Refusal.NOT_RUNNING));
+            case TIMED_OUT, UNFINISHED -> Step.loud(Result.refused(Refusal.SERVER_BUSY));
+            case INTERRUPTED -> Step.loud(Result.refused(Refusal.ABORTED));
+            case FAILED -> Step.loud(Result.refused(Refusal.ERROR));
+        };
     }
 
     /**
@@ -429,9 +410,9 @@ public final class SupplyWithdrawals {
                 case SETTLED:
                     return onServer(srv, oneStep);
                 case TIMED_OUT:
-                    return Step.loud(Result.refused("TIMEOUT"));
+                    return Step.loud(Result.refused(Refusal.TIMEOUT));
                 case ABORTED:
-                    return Step.loud(Result.refused("ABORTED"));
+                    return Step.loud(Result.refused(Refusal.ABORTED));
                 case KEEP_WAITING:
                 default:
                     break;
@@ -440,37 +421,43 @@ public final class SupplyWithdrawals {
                 Thread.sleep(POLL_INTERVAL_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return Step.loud(Result.refused("ABORTED"));
+                return Step.loud(Result.refused(Refusal.ABORTED));
             }
         }
     }
 
     // ── Lifecycle (called by SupplyRequestService) ───────────────────────────────────────────
 
-    /** Drops every ticket too old to redeem anything. Called from the service's once-a-second tick. */
+    /**
+     * Drops every ticket too old to redeem anything and every lapsed owner-away note. Called from
+     * the service's once-a-second tick.
+     */
     static void sweepTickets(long nowMs, Timings timings) {
-        TICKETS.values().removeIf(t -> !SupplyWithdrawalPolicy.isTicketLive(t.openedAtMs(), nowMs, timings));
+        TICKETS.sweep(nowMs, timings);
+        OWNER_AWAY.sweep(nowMs);
     }
 
-    /** Forgets every ticket. Called at SERVER_STOPPED. */
+    /** Forgets every ticket and owner-away note. Called at SERVER_STOPPED. */
     static void clearTickets() {
         TICKETS.clear();
+        OWNER_AWAY.clear();
     }
 
     // ── Logging ──────────────────────────────────────────────────────────────────────────────
 
-    /** One line per call: INFO, or DEBUG for a pre-filter refusal or a repeat of a known wait. */
+    /** One line per call: INFO, or DEBUG for a quiet refusal or a repeat of a known wait. */
     private static void log(Step outcome, ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample, int qty,
                             int need, String purpose, WaitMode mode) {
         if (outcome.quiet() ? !LOGGER.isDebugEnabled() : !LOGGER.isInfoEnabled()) {
             return;
         }
         Result r = outcome.result();
-        String line = "[supply] withdraw bot={} chest={} item={} qty={} need={} purpose={} mode={} result={} moved={} reason={}";
+        String line = "[supply] withdraw bot={} chest={} item={} qty={} need={} purpose={} mode={} result={} moved={}"
+                + " reason={} scope={}";
         Object[] args = {bot == null ? "-" : bot.getName().getString(),
                 chestPos == null ? "-" : chestPos.getX() + "," + chestPos.getY() + "," + chestPos.getZ(),
                 sample == null || sample.isEmpty() ? "-" : Registries.ITEM.getId(sample.getItem()).toString(),
-                qty, need, purposeText(purpose), mode, r.kind(), r.moved(), r.reason()};
+                qty, need, purposeText(purpose), mode, r.kind(), r.moved(), r.reason(), r.scope()};
         if (outcome.quiet()) {
             LOGGER.debug(line, args);
         } else {

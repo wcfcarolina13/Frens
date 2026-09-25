@@ -44,6 +44,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenResult;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Response;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ResponseStatus;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Revoked;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
@@ -82,7 +83,7 @@ import java.util.concurrent.TimeUnit;
  * <p><b>One way in (supplies Phase 3).</b> {@link #request} and {@link #transferNow} have exactly
  * one caller, {@link SupplyWithdrawals}: every automatic chest withdrawal a companion makes goes
  * through that facade, which keeps the request's fingerprint between the ask and the take.
- * {@code SupplyDormancyTest} scans the source tree so no other file reaches them. What the owner
+ * {@code SupplyEntryPointTest} scans the source tree so no other file reaches them. What the owner
  * does themselves — {@code /bot withdraw} and Quick Fetch — is the owner's own act and stays
  * outside this service. Also live: loading and saving the ALWAYS file, the once-a-second sweep of
  * the ledger and the facade's tickets, and {@link #answer} / {@link #revoke} / {@link #revokeAll}
@@ -213,8 +214,14 @@ public final class SupplyRequestService {
         NO_STOCK,
         /** The bot's inventory has no room for the item; no grant was consumed. */
         NO_ROOM,
-        /** No live grant or standing permission covers it, or the policy now refuses it (e.g. the reserve). */
-        NOT_PERMITTED
+        /** No live grant or standing permission covers it (none given, the owner said No, expired, or for fewer items). */
+        NOT_PERMITTED,
+        /**
+         * A grant or standing permission covers it, but the policy refuses the chest's stock or the
+         * bot's need as they are now (the reserve drained, or the need went, while the bot walked);
+         * nothing was consumed and the grant stands.
+         */
+        INELIGIBLE_NOW
     }
 
     /** What {@link #transferNow} did: how many items it moved (0 unless MOVED or MOVED_SHORT) and why. */
@@ -244,9 +251,9 @@ public final class SupplyRequestService {
 
     /**
      * Once a second: drops expired prompts, grants and cooldowns, so an ignored prompt closes on
-     * time even when nothing else touches the ledger, and the facade's tickets that have outlived
-     * any grant they could redeem. Housekeeping only — nobody is messaged; an owner who clicks a
-     * swept prompt reads "no longer open".
+     * time even when nothing else touches the ledger, the facade's tickets that have outlived
+     * any grant they could redeem, and its lapsed owner-away notes. Housekeeping only — nobody is
+     * messaged; an owner who clicks a swept prompt reads "no longer open".
      */
     private static void tick(MinecraftServer ticking) {
         if (ticking.getTicks() % SWEEP_INTERVAL_TICKS != 0) {
@@ -606,7 +613,7 @@ public final class SupplyRequestService {
         RequestFingerprint capped = fp.withQty(Math.min(fp.qty(), capacity));
         Consume consume = book.consumeGrant(capped, stockNow, need);
         if (!consume.permitted()) {
-            return TransferResult.refused(TransferStatus.NOT_PERMITTED,
+            return TransferResult.refused(SupplyChestRules.transferRefusal(consume.status()),
                     consume.status() + "(" + consume.verdict() + ")");
         }
         int quantity = consume.quantity();
@@ -679,22 +686,23 @@ public final class SupplyRequestService {
      * dimension, and every unspent grant their answers left ({@link SupplyRequestLedger#revokeAllAlways}).
      * A prompt still waiting for the owner stays open.
      *
-     * @return how many standing permissions were removed; {@code 0} also when the service is not
-     *         running or this is not the server thread
+     * @return how many standing permissions and unspent grants were removed; nothing also when the
+     *         service is not running or this is not the server thread
      */
-    public static int revokeAll(ServerPlayerEntity owner) {
+    public static Revoked revokeAll(ServerPlayerEntity owner) {
         if (offServerThread("revokeAll")) {
-            return 0;
+            return Revoked.NOTHING;
         }
         SupplyRequestLedger book = ledger;
         if (book == null || server == null || owner == null) {
-            return 0;
+            return Revoked.NOTHING;
         }
-        int removed = book.revokeAllAlways(owner.getUuid());
-        if (removed > 0) {
+        Revoked removed = book.revokeAllAlways(owner.getUuid());
+        if (removed.permissions() > 0) {
             markDirty();
         }
-        LOGGER.info("[supply] revoke-all owner={} removed={}", nameOf(owner), removed);
+        LOGGER.info("[supply] revoke-all owner={} removed={} grants={}", nameOf(owner), removed.permissions(),
+                removed.grants());
         return removed;
     }
 
@@ -929,6 +937,15 @@ public final class SupplyRequestService {
     static boolean isPermitted(RequestFingerprint fp) {
         SupplyRequestLedger book = ledger;
         return book != null && book.isPermitted(fp);
+    }
+
+    /**
+     * Whether {@code owner} has a standing permission for {@code chest}; {@code false} when not
+     * running. Any thread: the ledger is synchronized.
+     */
+    static boolean hasAlways(UUID owner, ChestKey chest) {
+        SupplyRequestLedger book = ledger;
+        return book != null && book.hasAlways(owner, chest);
     }
 
     /** The running server, or {@code null}. */

@@ -132,6 +132,20 @@ public final class SupplyRequestLedger {
         }
     }
 
+    /**
+     * What {@link #revokeAllAlways} withdrew.
+     *
+     * @param permissions standing "always" permissions removed
+     * @param grants      unspent, unexpired grants removed (answers the bots had not used yet)
+     */
+    public record Revoked(int permissions, int grants) {
+        public static final Revoked NOTHING = new Revoked(0, 0);
+
+        public boolean nothing() {
+            return permissions == 0 && grants == 0;
+        }
+    }
+
     /** A grant's identity: the fingerprint minus the quantity. */
     private record Target(UUID owner, UUID bot, ChestKey chest, ItemKey item) {
         static Target of(RequestFingerprint fp) {
@@ -243,7 +257,8 @@ public final class SupplyRequestLedger {
      * <p>A responder who may not answer ({@link SupplyRequestPolicy#mayRespond}) gets
      * {@link ResponseStatus#FOREIGN_CALLER} and the prompt stays exactly as it was, so a stranger's
      * click can neither approve nor cancel it. Any other outcome closes the prompt, so answering
-     * twice finds nothing.
+     * twice finds nothing. The latest answer wins: a No also withdraws any unspent grant an earlier
+     * answer left for the same owner, bot, chest and exact item.
      */
     public synchronized Response respond(UUID requestId, UUID responder, boolean responderIsOperator,
                                          Choice choice) {
@@ -265,6 +280,8 @@ public final class SupplyRequestLedger {
         extendPromptCooldown(fp.bot(), now);
         return switch (choice) {
             case NO -> {
+                // The latest answer wins: an earlier "Allow once" for this exact target is withdrawn.
+                grants.remove(Target.of(fp));
                 rejectCooldownUntil.put(new RejectKey(fp.bot(), fp.chest(), fp.itemId()),
                         now + timings.rejectCooldownMs());
                 yield new Response(ResponseStatus.REJECTED, fp);
@@ -367,16 +384,28 @@ public final class SupplyRequestLedger {
      * and every cooldown stays as it was: this undoes permissions, it does not forget the bots'
      * recent asking.
      *
-     * @return how many standing permissions were removed (unspent grants are not counted)
+     * @return how many standing permissions and how many live unspent grants were removed (a grant
+     *         already past its deadline is dropped too, but not counted: it permitted nothing)
      */
-    public synchronized int revokeAllAlways(UUID owner) {
+    public synchronized Revoked revokeAllAlways(UUID owner) {
         if (owner == null) {
-            return 0;
+            return Revoked.NOTHING;
         }
         int before = always.size();
         always.removeIf(s -> owner.equals(s.owner()));
-        grants.keySet().removeIf(t -> owner.equals(t.owner()));
-        return before - always.size();
+        long now = clock.getAsLong();
+        int liveGrants = 0;
+        Iterator<Map.Entry<Target, Grant>> it = grants.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Target, Grant> entry = it.next();
+            if (owner.equals(entry.getKey().owner())) {
+                if (now < entry.getValue().expiresAtMs()) {
+                    liveGrants++;
+                }
+                it.remove();
+            }
+        }
+        return new Revoked(before - always.size(), liveGrants);
     }
 
     /**

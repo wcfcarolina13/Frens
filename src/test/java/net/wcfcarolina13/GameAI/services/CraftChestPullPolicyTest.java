@@ -98,6 +98,7 @@ class CraftChestPullPolicyTest {
         expected.put(TransferStatus.NO_STOCK, Next.NEXT);
         expected.put(TransferStatus.NO_ROOM, Next.STOP);
         expected.put(TransferStatus.NOT_PERMITTED, Next.SKIP_CHEST);
+        expected.put(TransferStatus.INELIGIBLE_NOW, Next.STOP);   // not parsed yet: unknown reasons fail closed
         assertEquals(EnumSet.allOf(TransferStatus.class), expected.keySet(), "a new TransferStatus needs a decision here");
         expected.forEach((status, next) ->
                 assertEquals(next, CraftChestPullPolicy.onRefusal(status.name()), status.name()));

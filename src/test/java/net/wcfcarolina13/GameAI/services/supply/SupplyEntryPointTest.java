@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -32,21 +33,29 @@ import static org.junit.jupiter.api.Assertions.fail;
  * other file, and on any use of them inside the service beyond their declarations. Their private
  * bodies, {@code evaluateRequest} and {@code evaluateTransfer}, stay pinned: each is named exactly
  * twice in the service (its declaration and the first statement of its public entry point) and
- * never outside it, the facade included. A file outside {@code supply/} that names the service may
- * not hold a string literal naming any of the four methods, which is what reflection would need.
- * {@code SupplyCommands} only answers and revokes. The scan fails loudly when the source tree
- * cannot be found, so it can never pass by reading nothing.
+ * never outside it, the facade included.
  *
- * <p>(The class keeps its Phase 2 name, under which the plans and changelog cite it.)
+ * <p>The ways around that are closed too: no file but the service may hold a string literal naming
+ * any of the four methods while naming the service (reflection); nothing anywhere may hold a field,
+ * variable, parameter, return type, type argument, cast or array of type {@code SupplyRequestService}
+ * (a static called through an instance, {@code svc.request(...)}, would escape the qualified-name
+ * scan); the facade's public static methods are exactly {@code withdraw} and
+ * {@code grantableEstimate}, so no pass-through can be added beside them; and
+ * {@code SupplyServerHop}, the shared hop the sites use, never names the service. {@code SupplyCommands}
+ * only answers and revokes. The scan fails loudly when the source tree cannot be found, so it can
+ * never pass by reading nothing.
  */
-class SupplyDormancyTest {
+class SupplyEntryPointTest {
 
     private static final String SERVICE = "SupplyRequestService.java";
     private static final String FACADE = "SupplyWithdrawals.java";
+    private static final String HOP = "SupplyServerHop.java";
     private static final String COMMANDS = "SupplyCommands.java";
     private static final String SUPPLY_DIR = "net/wcfcarolina13/GameAI/services/supply/";
     /** The only files that may name request/transferNow. */
     private static final Set<String> ENTRY_POINT_FILES = Set.of(SUPPLY_DIR + SERVICE, SUPPLY_DIR + FACADE);
+    /** The facade's whole public static surface. */
+    private static final Set<String> FACADE_PUBLIC_STATICS = Set.of("withdraw", "grantableEstimate");
     private static final String ROUTED =
             "supplies Phase 3 routes automatic withdrawals through SupplyWithdrawals: ";
 
@@ -78,6 +87,28 @@ class SupplyDormancyTest {
     private static final Pattern REFLECTIVE_NAME =
             Pattern.compile("\"\\s*(?:request|transferNow|evaluateRequest|evaluateTransfer)\\s*\"");
     private static final Pattern NAMES_THE_SERVICE = Pattern.compile("\\bSupplyRequestService\\b");
+
+    /**
+     * {@code SupplyRequestService} used as a type: a field, local, parameter, for-each variable or
+     * method return type; a type argument; a cast; an array; a constructor call.
+     */
+    private static final Pattern SERVICE_TYPED = Pattern.compile(
+            "\\bSupplyRequestService\\s+[A-Za-z_$][\\w$]*\\s*[=;,:)(]"
+                    + "|[<,]\\s*(?:\\?\\s*(?:extends|super)\\s+)?SupplyRequestService\\s*[>,\\[]"
+                    + "|\\(\\s*SupplyRequestService\\s*\\)"
+                    + "|\\bSupplyRequestService\\s*\\[\\s*\\]"
+                    + "|\\bnew\\s+SupplyRequestService\\s*\\(");
+    /**
+     * A {@code public static} method declaration in member text: the name right before its
+     * parameter list, with no statement, block, assignment or parameter list in between.
+     */
+    private static final Pattern PUBLIC_STATIC_MEMBER =
+            Pattern.compile("\\bpublic\\s+static\\b([^;{}=()]*?)\\b([A-Za-z_$][\\w$]*)\\s*\\(");
+    private static final Pattern TYPE_KEYWORD = Pattern.compile("\\b(?:class|record|enum|interface)\\b");
+
+    /** The shared hop's signature, which the sites call. */
+    private static final String HOP_CALL_SIGNATURE =
+            "public static <T> T call(MinecraftServer server, Supplier<T> task, long timeoutMs, T fallback)";
 
     private static Map<String, String> sources;
 
@@ -115,6 +146,7 @@ class SupplyDormancyTest {
         String service = sources.get(SUPPLY_DIR + SERVICE);
         assertNotNull(service, "SupplyRequestService.java not found where expected");
         assertNotNull(sources.get(SUPPLY_DIR + FACADE), "SupplyWithdrawals.java not found where expected");
+        assertNotNull(sources.get(SUPPLY_DIR + HOP), "SupplyServerHop.java not found where expected");
         assertTrue(sources.containsKey("net/wcfcarolina13/Commands/" + COMMANDS), "SupplyCommands.java not found");
         // The entry points still exist under these names; renaming them must update this test.
         assertTrue(service.contains("public static RequestOutcome request("), "request( declaration moved or renamed");
@@ -151,10 +183,18 @@ class SupplyDormancyTest {
     }
 
     @Test
-    void noFileOutsideSupplyNamesTheEntryPointsForReflection() {
+    void theFacadesPublicStaticsAreExactlyWithdrawAndTheEstimate() {
+        String facade = sources.get(SUPPLY_DIR + FACADE);
+        assertNotNull(facade);
+        assertEquals(FACADE_PUBLIC_STATICS, publicStaticMethods(facade),
+                ROUTED + "a public static beside withdraw/grantableEstimate could pass request(/transferNow( through");
+    }
+
+    @Test
+    void noFileButTheServiceNamesTheEntryPointsForReflection() {
         List<String> offenders = new ArrayList<>();
         for (Map.Entry<String, String> e : sources.entrySet()) {
-            if (e.getKey().startsWith(SUPPLY_DIR)) {
+            if (e.getKey().equals(SUPPLY_DIR + SERVICE)) {
                 continue;
             }
             String text = e.getValue();
@@ -164,6 +204,33 @@ class SupplyDormancyTest {
         }
         assertEquals(List.of(), offenders,
                 "a file naming SupplyRequestService may not hold \"request\"/\"transferNow\"/\"evaluate…\" strings");
+    }
+
+    @Test
+    void nothingHoldsTheServiceAsAValue() {
+        List<String> offenders = new ArrayList<>();
+        int naming = 0;
+        for (Map.Entry<String, String> e : sources.entrySet()) {
+            if (!NAMES_THE_SERVICE.matcher(e.getValue()).find()) {
+                continue; // a file that never names the type cannot hold a value of it
+            }
+            naming++;
+            Matcher m = SERVICE_TYPED.matcher(stripLiterals(e.getValue()));
+            if (m.find()) {
+                offenders.add(e.getKey() + ": " + m.group().trim());
+            }
+        }
+        assertTrue(naming >= 4, "the scan must see the service, the facade, its policy and the commands: " + naming);
+        assertEquals(List.of(), offenders,
+                ROUTED + "SupplyRequestService is static-only; a value of its type would let svc.request( escape the scan");
+    }
+
+    @Test
+    void theSharedHopNeverNamesTheService() {
+        String hop = sources.get(SUPPLY_DIR + HOP);
+        assertNotNull(hop);
+        assertFalse(NAMES_THE_SERVICE.matcher(hop).find(), "SupplyServerHop is a plain hop; it never reaches the service");
+        assertTrue(hop.contains(HOP_CALL_SIGNATURE), "the sites call " + HOP_CALL_SIGNATURE);
     }
 
     @Test
@@ -242,10 +309,72 @@ class SupplyDormancyTest {
     }
 
     @Test
+    void theServiceTypedPatternCatchesEveryWayToHoldAValue() {
+        for (String shape : List.of(
+                "private static SupplyRequestService svc;",
+                "SupplyRequestService s = null; s.request(bot, pos, st, 1, 1);",
+                "void f(SupplyRequestService svc) {",
+                "void f(int a, SupplyRequestService svc, int b) {",
+                "void f(final SupplyRequestService\n        svc)",
+                "for (SupplyRequestService s : all) {",
+                "static SupplyRequestService instance() {",
+                "List<SupplyRequestService> all;",
+                "Map<String, ? extends SupplyRequestService> m;",
+                "Map<SupplyRequestService, Integer> m;",
+                "var s = (SupplyRequestService) null;",
+                "SupplyRequestService[] arr;",
+                "Object o = new SupplyRequestService();")) {
+            assertTrue(SERVICE_TYPED.matcher(shape).find(), shape);
+        }
+        for (String fine : List.of(
+                "SupplyRequestService.request(bot, p, s, 1, 1);",
+                "SupplyRequestService.RequestStatus status = x;",
+                "Map<SupplyRequestService.RequestStatus, Next> m;",
+                "import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService;",
+                "public final class SupplyRequestService {",
+                "private SupplyRequestService() {",
+                "Predicate<RequestFingerprint> p = SupplyRequestService::isPermitted;",
+                "if (!SupplyRequestService.isRunning()) { return; }")) {
+            assertFalse(SERVICE_TYPED.matcher(fine).find(), fine);
+        }
+        assertFalse(SERVICE_TYPED.matcher(stripLiterals("LOGGER.info(\"SupplyRequestService x;\");")).find(),
+                "string literals are not code");
+    }
+
+    @Test
+    void publicStaticsAreReadFromTheTopLevelClassBodyOnly() {
+        String source = stripComments("package p;\n"
+                + "import static java.util.Objects.requireNonNull;\n"
+                + "public final class F {\n"
+                + "    public static final long LIMIT = Math.max(1L, 2L);\n"
+                + "    public static final Set<String> NAMES = Set.of(\"a\");\n"
+                + "    private static final String TEXT = \"public static fake(int x) { }\";\n"
+                + "    public enum Mode { A, B }\n"
+                + "    public record Result(int kind, String reason) {\n"
+                + "        public static Result refused(String reason) { return new Result(0, reason); }\n"
+                + "    }\n"
+                + "    public static final class Book { public static int size() { return 0; } }\n"
+                + "    public static Result withdraw(int a, java.util.function.BooleanSupplier b) {\n"
+                + "        if (a > 0) { return new Result(1, \"}\"); }\n"
+                + "        char c = '{';\n"
+                + "        return null;\n"
+                + "    }\n"
+                + "    public static <T extends Comparable<T>> List<T> sorted(List<T> in) { return in; }\n"
+                + "    public static int[] counts() { return new int[0]; }\n"
+                + "    static void packagePrivate() { }\n"
+                + "    private static void hidden() { }\n"
+                + "    public void instance() { }\n"
+                + "}\n");
+        assertEquals(Set.of("withdraw", "sorted", "counts"), publicStaticMethods(source));
+    }
+
+    @Test
     void commentsAreStrippedBeforeScanning() {
         assertFalse(stripComments("// SupplyRequestService.request(a)\n/* transferNow( */ int x;").contains("request("));
         assertTrue(stripComments("a(); // note\nb();").contains("b();"));
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────────────────────
 
     private static int count(Pattern pattern, String text) {
         Matcher m = pattern.matcher(text);
@@ -254,6 +383,55 @@ class SupplyDormancyTest {
             n++;
         }
         return n;
+    }
+
+    /**
+     * The names of the {@code public static} methods declared directly in the one top-level class
+     * of {@code source} (comments already stripped): nested types' members, fields and method
+     * bodies are not read.
+     */
+    private static Set<String> publicStaticMethods(String source) {
+        String members = topLevelMemberText(stripLiterals(source));
+        Set<String> names = new TreeSet<>();
+        Matcher m = PUBLIC_STATIC_MEMBER.matcher(members);
+        while (m.find()) {
+            if (!TYPE_KEYWORD.matcher(m.group(1)).find()) {
+                names.add(m.group(2));
+            }
+        }
+        return names;
+    }
+
+    /**
+     * {@code source} with everything inside a member's braces (method bodies, nested type bodies,
+     * initializers) blanked out. The braces that open and close those blocks stay, so a member
+     * declaration never runs on into the next one.
+     */
+    private static String topLevelMemberText(String source) {
+        StringBuilder kept = new StringBuilder(source.length());
+        int depth = 0;
+        for (int i = 0; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') {
+                depth++;
+                kept.append(depth <= 2 ? c : ' ');
+            } else if (c == '}') {
+                kept.append(depth <= 2 ? c : ' ');
+                depth--;
+            } else {
+                kept.append(depth <= 1 ? c : ' ');
+            }
+        }
+        return kept.toString();
+    }
+
+    private static final Pattern TEXT_BLOCK = Pattern.compile("\"\"\"[\\s\\S]*?\"\"\"");
+    private static final Pattern LITERAL = Pattern.compile("\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])'");
+
+    /** Blanks text blocks, string and char literals, so braces or names inside them are not read as code. */
+    private static String stripLiterals(String source) {
+        String noBlocks = TEXT_BLOCK.matcher(source).replaceAll("\"\"");
+        return LITERAL.matcher(noBlocks).replaceAll(m -> m.group().startsWith("\"") ? "\"\"" : "' '");
     }
 
     /** Removes block and line comments; string literals are left alone (none of the guarded shapes are URLs). */
