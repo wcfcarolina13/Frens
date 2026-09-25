@@ -11,7 +11,6 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -80,8 +79,6 @@ public final class HuntSkill implements Skill {
     private static final int DEFAULT_HUNT_RADIUS = 48;
     private static final int DEFAULT_HUNT_Y_SPAN = 8;
     private static final int MAX_RELOCATION_SEGMENTS_PER_SEARCH = 3;
-    private static final int FOOD_CONTAINER_RADIUS = 12;
-    private static final int FOOD_CONTAINER_YSPAN = 4;
     private static final int MIN_PEACEFUL_COUNT = 3;
     private static final double ATTACK_RANGE_SQ = 9.0D;
     private static final long ATTACK_TIMEOUT_MS = 12_000L;
@@ -310,7 +307,7 @@ public final class HuntSkill implements Skill {
                 BotMutualAidService.tryRegroupWithLastInteraction(bot, world);
             }
 
-            if (maybeEatEmergencyFood(bot, world)) {
+            if (maybeEatEmergencyFood(bot)) {
                 // Give the eat animation a moment to settle.
                 sleep(400L);
             }
@@ -318,7 +315,7 @@ public final class HuntSkill implements Skill {
             if (bot.getHungerManager().getFoodLevel() <= STARVING_HUNGER
                     && BotMutualAidService.trySeekFoodFromNearbyBot(bot, world)) {
                 sleep(900L);
-                if (maybeEatEmergencyFood(bot, world)) {
+                if (maybeEatEmergencyFood(bot)) {
                     sleep(400L);
                 }
             }
@@ -418,7 +415,7 @@ public final class HuntSkill implements Skill {
             if (candidate.target.zombie() && !canHuntZombie(bot)) {
                 return SkillExecutionResult.failure("I'm not geared enough to fight zombies.");
             }
-            if (candidate.target.zombie() && !ensureMeleeWeapon(bot, world, source, commander)) {
+            if (candidate.target.zombie() && !ensureMeleeWeapon(bot, source, commander)) {
                 LOGGER.info("Hunt blocked: no melee weapon available for {}", bot.getName().getString());
                 return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
@@ -1211,14 +1208,10 @@ public final class HuntSkill implements Skill {
     }
 
     private static boolean ensureMeleeWeapon(ServerPlayerEntity bot,
-                                             ServerWorld world,
                                              ServerCommandSource source,
                                              ServerPlayerEntity commander) {
         if (BotActions.selectBestMeleeWeapon(bot)) {
             return true;
-        }
-        if (withdrawWeaponFromContainers(bot, world)) {
-            return BotActions.selectBestMeleeWeapon(bot);
         }
         if (craftSwordIfPossible(bot, source, commander)) {
             return BotActions.selectBestMeleeWeapon(bot);
@@ -1243,61 +1236,6 @@ public final class HuntSkill implements Skill {
         return total;
     }
 
-    private static int countInContainers(ServerWorld world, BlockPos origin, Item item) {
-        int total = 0;
-        for (ContainerSlot slot : scanContainers(world, origin)) {
-            if (slot.stack.isOf(item)) {
-                total += slot.stack.getCount();
-            }
-        }
-        return total;
-    }
-
-    private static boolean withdrawWeaponFromContainers(ServerPlayerEntity bot, ServerWorld world) {
-        ContainerSlot best = null;
-        int bestScore = -1;
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            int score = weaponScore(slot.stack);
-            if (score > bestScore) {
-                bestScore = score;
-                best = slot;
-            }
-        }
-        if (best == null || bestScore <= 0) {
-            return false;
-        }
-        ItemStack taken = best.inv.removeStack(best.slot, 1);
-        if (taken.isEmpty()) {
-            return false;
-        }
-        boolean inserted = bot.getInventory().insertStack(taken);
-        if (!inserted) {
-            best.inv.setStack(best.slot, taken);
-            best.inv.markDirty();
-            return false;
-        }
-        best.inv.markDirty();
-        bot.getInventory().markDirty();
-        return true;
-    }
-
-    private static int weaponScore(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) {
-            return 0;
-        }
-        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        boolean weapon = key.contains("sword") || key.contains("axe") || key.contains("trident")
-                || key.contains("mace") || key.contains("dagger");
-        if (!weapon) {
-            return 0;
-        }
-        if (key.contains("diamond")) return 40;
-        if (key.contains("iron")) return 30;
-        if (key.contains("stone") || key.contains("cobble")) return 20;
-        if (key.contains("wood")) return 10;
-        return 5;
-    }
-
     private static boolean canHuntZombie(ServerPlayerEntity bot) {
         if (bot.getHealth() < ZOMBIE_MIN_HEALTH) {
             return false;
@@ -1315,18 +1253,22 @@ public final class HuntSkill implements Skill {
                 || !bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET).isEmpty();
     }
 
-    private static boolean maybeEatEmergencyFood(ServerPlayerEntity bot,
-                                                ServerWorld world) {
+    /**
+     * Eats from the bot's own inventory when starving or in an emergency. Chest food is not taken
+     * here: {@code BotMutualAidService}'s tick asks shared chests through the supply facade, and it
+     * runs during hunts too.
+     */
+    private static boolean maybeEatEmergencyFood(ServerPlayerEntity bot) {
         boolean emergency = bot.getHealth() <= EMERGENCY_HEALTH || bot.getHungerManager().getFoodLevel() <= EMERGENCY_HUNGER;
         boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_HUNGER;
 
-        FoodCandidate cooked = findFoodCandidate(bot, world, true);
+        FoodCandidate cooked = findFoodCandidate(bot, true);
         if (cooked != null && (starving || emergency)) {
             return consumeCandidate(bot, cooked);
         }
 
         if (emergency) {
-            FoodCandidate raw = findFoodCandidate(bot, world, false);
+            FoodCandidate raw = findFoodCandidate(bot, false);
             if (raw != null) {
                 return consumeCandidate(bot, raw);
             }
@@ -1334,9 +1276,9 @@ public final class HuntSkill implements Skill {
         return false;
     }
 
-    private static FoodCandidate findFoodCandidate(ServerPlayerEntity bot, ServerWorld world, boolean cookedOnly) {
+    private static FoodCandidate findFoodCandidate(ServerPlayerEntity bot, boolean cookedOnly) {
         FoodCandidate best = null;
-        for (FoodCandidate candidate : collectFoodCandidates(bot, world)) {
+        for (FoodCandidate candidate : collectFoodCandidates(bot)) {
             if (cookedOnly && (candidate.raw || candidate.rotten)) {
                 continue;
             }
@@ -1347,17 +1289,11 @@ public final class HuntSkill implements Skill {
         return best;
     }
 
-    private static List<FoodCandidate> collectFoodCandidates(ServerPlayerEntity bot, ServerWorld world) {
+    private static List<FoodCandidate> collectFoodCandidates(ServerPlayerEntity bot) {
         List<FoodCandidate> out = new ArrayList<>();
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
-            FoodCandidate candidate = buildFoodCandidate(stack, null, i, null);
-            if (candidate != null) {
-                out.add(candidate);
-            }
-        }
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            FoodCandidate candidate = buildFoodCandidate(slot.stack, slot.inv, slot.slot, slot.pos);
+            FoodCandidate candidate = buildFoodCandidate(stack, i);
             if (candidate != null) {
                 out.add(candidate);
             }
@@ -1365,7 +1301,7 @@ public final class HuntSkill implements Skill {
         return out;
     }
 
-    private static FoodCandidate buildFoodCandidate(ItemStack stack, Inventory inv, int slot, BlockPos pos) {
+    private static FoodCandidate buildFoodCandidate(ItemStack stack, int slot) {
         if (stack == null || stack.isEmpty()) {
             return null;
         }
@@ -1376,34 +1312,14 @@ public final class HuntSkill implements Skill {
         boolean raw = RAW_MEAT.contains(stack.getItem());
         boolean rotten = stack.isOf(Items.ROTTEN_FLESH);
         double score = food.nutrition() + (food.saturation() * 2.0);
-        return new FoodCandidate(inv, pos, slot, stack, raw, rotten, score);
+        return new FoodCandidate(slot, stack, raw, rotten, score);
     }
 
     private static boolean consumeCandidate(ServerPlayerEntity bot, FoodCandidate candidate) {
         if (candidate == null) {
             return false;
         }
-        if (candidate.inv == null) {
-            return consumeInventoryFood(bot, candidate.slot);
-        }
-
-        // Pull one item from container into the hotbar (swap if needed).
-        ItemStack taken = candidate.inv.removeStack(candidate.slot, 1);
-        if (taken.isEmpty()) {
-            return false;
-        }
-        int hotbarSlot = findEmptyHotbarSlot(bot);
-        if (hotbarSlot == -1) {
-            hotbarSlot = 0;
-        }
-        ItemStack displaced = bot.getInventory().getStack(hotbarSlot);
-        bot.getInventory().setStack(hotbarSlot, taken);
-        if (!displaced.isEmpty()) {
-            candidate.inv.setStack(candidate.slot, displaced);
-        }
-        candidate.inv.markDirty();
-        bot.getInventory().markDirty();
-        return consumeInventoryFood(bot, hotbarSlot);
+        return consumeInventoryFood(bot, candidate.slot);
     }
 
     private static boolean consumeInventoryFood(ServerPlayerEntity bot, int slot) {
@@ -1437,29 +1353,6 @@ public final class HuntSkill implements Skill {
             }
         }
         return -1;
-    }
-
-    private static List<ContainerSlot> scanContainers(ServerWorld world, BlockPos origin) {
-        List<ContainerSlot> out = new ArrayList<>();
-        int r = FOOD_CONTAINER_RADIUS;
-        int y = FOOD_CONTAINER_YSPAN;
-        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -y, -r), origin.add(r, y, r))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            var be = world.getBlockEntity(pos);
-            if (!(be instanceof Inventory inv)) {
-                continue;
-            }
-            for (int i = 0; i < inv.size(); i++) {
-                ItemStack stack = inv.getStack(i);
-                if (stack == null || stack.isEmpty()) {
-                    continue;
-                }
-                out.add(new ContainerSlot(inv, pos.toImmutable(), i, stack));
-            }
-        }
-        return out;
     }
 
     private static void runDropSweep(ServerCommandSource source, ServerPlayerEntity bot) {
@@ -1631,7 +1524,7 @@ public final class HuntSkill implements Skill {
         if (bot.getHungerManager().getFoodLevel() > 19) {
             return;
         }
-        FoodCandidate cooked = findFoodCandidate(bot, world, true);
+        FoodCandidate cooked = findFoodCandidate(bot, true);
         if (cooked != null) {
             consumeCandidate(bot, cooked);
         }
@@ -1815,11 +1708,7 @@ public final class HuntSkill implements Skill {
                                boolean autoStopOnHunger,
                                boolean hobby) {}
 
-    private record ContainerSlot(Inventory inv, BlockPos pos, int slot, ItemStack stack) {}
-
-    private record FoodCandidate(Inventory inv,
-                                 BlockPos pos,
-                                 int slot,
+    private record FoodCandidate(int slot,
                                  ItemStack stack,
                                  boolean raw,
                                  boolean rotten,
