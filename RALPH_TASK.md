@@ -26,6 +26,10 @@ block). (3) Egress follow-ups: outside→inside entry routing, Fortify onto the 
 
 **Needs Bradley:** unchanged from the 1.1.217 block below, plus: un-owned bot supply approvals (who approves?).
 
+**Research artifacts (local only, untracked — contain Bradley's real chat lines, repo is public):**
+`.superpowers/research/2026-09-25-decision-model-eval/` (labeled sets t1–t3, runner, results, REPORT.md, JEV_FRENS_REPORT.md,
+probes). Reuse them before re-proposing any model router.
+
 ---
 
 ## Session Handoff 2026-09-25 (1.1.217) — superseded

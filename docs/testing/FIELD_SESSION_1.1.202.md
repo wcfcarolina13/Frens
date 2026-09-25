@@ -937,6 +937,7 @@ Observed across several scenes; collect as the session runs.
   - Claude watches for: `Shared state unavailable for idle-hobbies` and any `NoClassDefFoundError`/`OllamaBaseException` — must NOT appear.
   - Pass when: neither appears in a full session.
 - [ ] **BotTorchHoldService not firing (P1, diagnostic-first)**
+  - Log evidence 2026-09-07/08 (1.1.216): it DOES fire — Jake held 5 times at light 6–7 but yielded within ≤1 s at light 8 (spatial flicker); Bob had `no-torch-in-inventory`. 1.1.217 added hysteresis (keep until light ≥12) — use Phase 6o's torch items; this item passes if 6o's do.
   - Bradley does: follow-mode in a dim cave and at night, with a torch in the bot's inventory.
   - Claude watches for (1.1.202 state-change diagnostics): `[torch-hold] <Bot> verdict=reject gate=<gate> dist=<d> light=<l> mob=<id>` and `[torch-hold] <Bot> verdict=hold gate=none ... action=promoted+held slot=<n> savedSlot=<m>`. Gates: `mode-<M>`, `active-task`, `using-item`, `mounted`, `sleeping`, `light-above-7`, `audible-hostile-8`, `visible-hostile-16`, `no-torch-in-inventory`. Each line prints only when the verdict changes.
   - Pass when: the rejecting gate is named (expected suspects: the 8-block audible-hostile suppression, or foreign-swap cycling against the combat loadout / AutoFaceEntity). Do not fix in-session — collect the reason.
