@@ -1297,7 +1297,11 @@ public final class ToolProvisionService {
             return SupplyPullPolicy.Pull.NOTHING;
         }
         if (!server.isOnThread()) {
-            return callOnServer(server, () -> pullFromReachableChests(bot, world, wanted, order, desired, purpose),
+            // A stopped server runs execute() inline on the caller: take nothing then, rather than
+            // recurse back into this branch.
+            return callOnServer(server, () -> server.isOnThread()
+                            ? pullFromReachableChests(bot, world, wanted, order, desired, purpose)
+                            : SupplyPullPolicy.Pull.NOTHING,
                     2500L, SupplyPullPolicy.Pull.NOTHING);
         }
         List<ChestItemGroup> groups = groupByChestAndItem(scanAccessibleContainers(bot, world, bot.getBlockPos()), wanted);

@@ -91,6 +91,34 @@ public final class BotIdleHobbiesService {
     private static final Map<UUID, Long> NEXT_COBBLESTONE_TOOLS_TICK = new ConcurrentHashMap<>();
 
     /**
+     * Backoff key (in the per-hobby maps below) for the wooden fallback's chest asks, separate from
+     * the woodcut it may lead to. A pull that asked the owner's supply ledger and got nothing (a
+     * refusal, an ignored prompt coming back {@code NOT_PERMITTED}, a cooldown, the reserve) is one
+     * failure on the {@link HobbyBackoffPolicy} ladder, and no pull asks again until it runs out:
+     * the probe below runs every 5 s during a woodcut backoff and would otherwise re-prompt an
+     * owner who ignores it as soon as the ledger allowed. A pull still waiting for an answer is not
+     * a failure (the next pull must be free to redeem the grant); a pull that moved something and
+     * missed nothing clears it.
+     */
+    private static final String IDLE_SUPPLY_BACKOFF_KEY = "idle-supply";
+    /**
+     * How soon the wooden fallback looks again while the owner has a supply prompt open for the
+     * weapon or axe it lacks (the probe's pace): quick enough to take a grant, which lives 60 s
+     * from the owner's click, and the repeat asks are quiet.
+     */
+    private static final long WOODEN_FALLBACK_SUPPLY_WAIT_TICKS = HobbyBackoffPolicy.AVAILABILITY_PROBE_TICKS;
+    /**
+     * Failure-counter keys (in {@link #HOBBY_FAILURE_COUNT}) for the idle craft fallbacks. A craft
+     * can fail because {@code CraftingHelper} is waiting on a supply prompt, so after the first
+     * failure each keeps climbing {@link SupplyPullPolicy#craftRetryTicks} instead of retrying at
+     * its flat pace forever.
+     */
+    private static final String CRAFT_WOODEN_FALLBACK_KEY = "craft-wooden-fallback";
+    private static final String CRAFT_LEATHER_ARMOR_KEY = "craft-leather-armor";
+    private static final String CRAFT_WOODEN_TOOLS_KEY = "craft-wooden-tools";
+    private static final String CRAFT_STONE_TOOLS_KEY = "craft-stone-tools";
+
+    /**
      * Per-bot, per-hobby escalating backoff (see {@link HobbyBackoffPolicy}).
      *
      * <p>Keyed per hobby rather than globally so a hobby that keeps failing (woodcut with no axe
@@ -1235,10 +1263,24 @@ public final class BotIdleHobbiesService {
             return true;
         }
 
-        boolean moved = ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe)
-                .movedAny();
+        SupplyPullPolicy.Pull pull = pullIdleFallbackSupplies(bot, world, needWeapon, needAxe, nowTick);
+        boolean moved = pull.movedAny();
+        boolean stillMissingTool = !ToolProvisionService.hasServiceableMeleeWeapon(bot)
+                || !ToolProvisionService.hasUsableAxe(bot);
+        if (SupplyPullPolicy.holdsIdleFallback(pull, stillMissingTool)) {
+            // The owner has a supply prompt open for what the bot lacks (or a grant waits for it):
+            // don't craft or cut a tree over their answer. Look again at the probe's pace; the next
+            // pull takes the grant, or comes back NOT_PERMITTED (refused or expired) and counts as
+            // a failure on the idle supply backoff, after which this pass crafts or cuts as before.
+            NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + WOODEN_FALLBACK_SUPPLY_WAIT_TICKS);
+            LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+            return true;
+        }
         boolean craftReady = ToolProvisionService.canCraftIdleWoodenFallback(bot, needWeapon, needAxe);
         boolean crafted = craftReady && tryCraftIdleWoodenFallback(bot);
+        if (crafted) {
+            idleCraftFailureWaitTicks(botUuid, CRAFT_WOODEN_FALLBACK_KEY, true, WOODEN_FALLBACK_CRAFT_RETRY_TICKS);
+        }
         CombatInventoryManager.ensureCombatLoadout(bot);
         if (!ToolProvisionService.hasServiceableMeleeWeapon(bot) || !ToolProvisionService.hasUsableAxe(bot)) {
             if (!BotFleeService.isAtSurface(bot, world)) {
@@ -1247,12 +1289,13 @@ public final class BotIdleHobbiesService {
                 return true;
             }
             if (craftReady && !crafted) {
-                long retryAt = nowTick + WOODEN_FALLBACK_CRAFT_RETRY_TICKS;
-                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, retryAt);
+                long waitTicks = idleCraftFailureWaitTicks(botUuid, CRAFT_WOODEN_FALLBACK_KEY, false,
+                        WOODEN_FALLBACK_CRAFT_RETRY_TICKS);
+                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + waitTicks);
                 LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
                 LOGGER.warn("Idle wooden fallback: {} craft attempt failed; backing off for {} ticks",
                         bot.getName().getString(),
-                        WOODEN_FALLBACK_CRAFT_RETRY_TICKS);
+                        waitTicks);
                 return true;
             }
             if (canStartFallbackWoodcut(world, bot)) {
@@ -1334,12 +1377,13 @@ public final class BotIdleHobbiesService {
         if (!ToolProvisionService.hasAnyEmptyArmorSlot(bot)) {
             return false;
         }
-        // At least 4 leather needed (boots, the cheapest piece)
-        if (ToolProvisionService.countLeatherAvailable(bot, world) < 4) {
-            return false;
-        }
+        // Cooldown before the chest scan: both just return false, and the scan is not free every tick.
         long nextAllowed = NEXT_LEATHER_ARMOR_TICK.getOrDefault(bot.getUuid(), 0L);
         if (nowTick < nextAllowed) {
+            return false;
+        }
+        // At least 4 leather needed (boots, the cheapest piece)
+        if (ToolProvisionService.countLeatherAvailable(bot, world) < 4) {
             return false;
         }
 
@@ -1357,7 +1401,8 @@ public final class BotIdleHobbiesService {
             LOGGER.info("Idle leather armor: {} crafted leather armor", bot.getName().getString());
         }
         // Retry sooner if succeeded (might have more leather for next piece), longer backoff if no craft
-        NEXT_LEATHER_ARMOR_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
+        long failureWait = idleCraftFailureWaitTicks(bot.getUuid(), CRAFT_LEATHER_ARMOR_KEY, crafted, 2400L);
+        NEXT_LEATHER_ARMOR_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : failureWait));
         return crafted;
     }
 
@@ -1405,7 +1450,8 @@ public final class BotIdleHobbiesService {
                     !hasAnyPickaxe(bot) ? "needed" : "ready",
                     !hasAnyShovel(bot) ? "needed" : "ready");
         }
-        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
+        long failureWait = idleCraftFailureWaitTicks(bot.getUuid(), CRAFT_WOODEN_TOOLS_KEY, crafted, 2400L);
+        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : failureWait));
         return crafted;
     }
 
@@ -1520,10 +1566,12 @@ public final class BotIdleHobbiesService {
         boolean canUpgradeShovel  = ToolProvisionService.hasOnlyWoodenTool(bot, "shovel");
         if (!canUpgradePickaxe && !canUpgradeSword && !canUpgradeAxe && !canUpgradeShovel) return false;
 
-        if (!ToolProvisionService.hasStoneMaterialsAvailable(bot, world)) return false;
-
+        // Cooldown before the chest scan: both just return false, and the scan (three materials
+        // across every chest in range) is not free every tick.
         long nextAllowed = NEXT_COBBLESTONE_TOOLS_TICK.getOrDefault(bot.getUuid(), 0L);
         if (nowTick < nextAllowed) return false;
+
+        if (!ToolProvisionService.hasStoneMaterialsAvailable(bot, world)) return false;
 
         ServerCommandSource source = bot.getCommandSource().withSilent();
         ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
@@ -1539,7 +1587,8 @@ public final class BotIdleHobbiesService {
             CombatInventoryManager.ensureCombatLoadout(bot);
             LOGGER.info("Idle stone upgrade: {} upgraded wooden tools to stone", bot.getName().getString());
         }
-        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
+        long failureWait = idleCraftFailureWaitTicks(bot.getUuid(), CRAFT_STONE_TOOLS_KEY, crafted, 2400L);
+        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : failureWait));
         return crafted;
     }
 
@@ -1782,7 +1831,9 @@ public final class BotIdleHobbiesService {
      * signature measures, and resetting on it is what re-opens the storm.
      *
      * <p>The pull is a world/inventory mutation, so this must stay on the server tick thread; its
-     * only caller already is.
+     * only caller already is. It goes through {@link #pullIdleFallbackSupplies}, so a probe asks the
+     * owner nothing while the idle supply backoff runs, and a probe that asks and gets nothing
+     * extends it: an ignored prompt is not re-sent every five seconds.
      *
      * @return true when the backoff was cleared by this probe
      */
@@ -1801,7 +1852,7 @@ public final class BotIdleHobbiesService {
             return false;
         }
         LAST_WOODEN_FALLBACK_PROBE_TICK.put(botUuid, nowTick);
-        ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe);
+        pullIdleFallbackSupplies(bot, world, needWeapon, needAxe, nowTick);
         boolean axeHeld = ToolProvisionService.hasUsableAxe(bot);
         boolean craftable = ToolProvisionService.canCraftIdleWoodenFallback(bot, needWeapon, needAxe);
         if (!HobbyBackoffPolicy.probeClearsBackoff(axeHeld, craftable)) {
@@ -1817,6 +1868,53 @@ public final class BotIdleHobbiesService {
         LOGGER.info("Idle wooden fallback: {} availability probe cleared the woodcut backoff (axe={}, craftable={})",
                 bot.getName().getString(), axeHeld, craftable);
         return true;
+    }
+
+    /**
+     * The wooden fallback's chest pull ({@link ToolProvisionService#pullNearbyAccessibleIdleFallbackSupplies}),
+     * behind the idle supply backoff ({@link #IDLE_SUPPLY_BACKOFF_KEY}): while it runs nothing is
+     * asked and {@link SupplyPullPolicy.Pull#NOTHING} comes back; afterwards the pull's outcome is
+     * folded in ({@link SupplyPullPolicy#idleBackoff}). Server tick thread only, like every writer
+     * of the backoff maps.
+     */
+    private static SupplyPullPolicy.Pull pullIdleFallbackSupplies(ServerPlayerEntity bot,
+                                                                  ServerWorld world,
+                                                                  boolean needWeapon,
+                                                                  boolean needAxe,
+                                                                  long nowTick) {
+        if (isHobbyBackedOff(bot, IDLE_SUPPLY_BACKOFF_KEY, nowTick)) {
+            return SupplyPullPolicy.Pull.NOTHING;
+        }
+        SupplyPullPolicy.Pull pull =
+                ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe);
+        switch (SupplyPullPolicy.idleBackoff(pull)) {
+            case SUCCESS -> recordHobbyAttempt(bot.getUuid(), IDLE_SUPPLY_BACKOFF_KEY, true, false, nowTick);
+            case FAILURE -> recordHobbyAttempt(bot.getUuid(), IDLE_SUPPLY_BACKOFF_KEY, false, false, nowTick);
+            case NONE -> {
+            }
+        }
+        return pull;
+    }
+
+    /**
+     * Folds one idle craft attempt into its failure counter ({@code key} in
+     * {@link #HOBBY_FAILURE_COUNT}) and returns the wait before the next attempt if it failed:
+     * {@code flatTicks} the first time, then {@link SupplyPullPolicy#craftRetryTicks} up the ladder.
+     * A success clears the counter (and the returned wait is unused). Server tick thread only.
+     */
+    private static long idleCraftFailureWaitTicks(UUID botUuid, String key, boolean crafted, long flatTicks) {
+        int prior = hobbyFailureCount(botUuid, key);
+        int updated = HobbyBackoffPolicy.nextFailureCount(prior, crafted);
+        if (updated <= 0) {
+            Map<String, Integer> counts = HOBBY_FAILURE_COUNT.get(botUuid);
+            if (counts != null) {
+                counts.remove(normalizeHobbyKey(key));
+            }
+        } else {
+            HOBBY_FAILURE_COUNT.computeIfAbsent(botUuid, u -> new ConcurrentHashMap<>())
+                    .put(normalizeHobbyKey(key), updated);
+        }
+        return SupplyPullPolicy.craftRetryTicks(flatTicks, prior);
     }
 
     /** Hobby the wooden fallback dispatches; the only hobby reachable without going through pickHobby. */

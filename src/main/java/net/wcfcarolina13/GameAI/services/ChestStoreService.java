@@ -779,7 +779,9 @@ public final class ChestStoreService {
                 + " botWorld=" + worldKeyName(bot.getEntityWorld())
                 + " amount=" + want
                 + " mode=" + mode);
-        SupplyAsk ask = callOnServer(server, () -> askBeforeWalking(bot, chestPos, want, matcher, purpose, mode),
+        // Only ever on the server thread: a stopped server runs execute() inline on the caller.
+        SupplyAsk ask = callOnServer(server,
+                () -> server.isOnThread() ? askBeforeWalking(bot, chestPos, want, matcher, purpose, mode) : null,
                 2500, null);
         if (ask == null) {
             return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "SERVER_BUSY");
