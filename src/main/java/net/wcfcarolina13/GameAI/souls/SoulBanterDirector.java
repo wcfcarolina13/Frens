@@ -174,7 +174,7 @@ public final class SoulBanterDirector {
             return;
         }
         if (!speechFloorOpen(playerId)) {
-            recordVerdict(playerId, Lane.IDLE, "vetoed:speech-floor");
+            recordVerdict(playerId, Lane.IDLE, speechFloorVerdict(playerId));
             return;
         }
         beginScene(playerId, rosterBots, Lane.IDLE);
@@ -207,7 +207,7 @@ public final class SoulBanterDirector {
             return;
         }
         if (!speechFloorOpen(playerId)) {
-            recordVerdict(playerId, Lane.ACTIVE, "vetoed:speech-floor");
+            recordVerdict(playerId, Lane.ACTIVE, speechFloorVerdict(playerId));
             return;
         }
         beginScene(playerId, rosterBots, Lane.ACTIVE);
@@ -227,6 +227,16 @@ public final class SoulBanterDirector {
         // every 5s evaluation instant, and because a floor veto does not consume nextEligibleAtMs
         // the lane would simply be starved forever. See SpeechFloorPolicy.isOpenFor.
         return SpeechFloorService.isFloorOpen(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_LINE);
+    }
+
+    /**
+     * Veto verdict naming what holds the floor, e.g. {@code vetoed:speech-floor armedBy=scene-end}.
+     * Low cardinality (a scene request is only ever held by a scene line or a post-scene quiet),
+     * so {@link #recordVerdict}'s log-on-change stays quiet.
+     */
+    private static String speechFloorVerdict(UUID playerId) {
+        return "vetoed:speech-floor armedBy="
+                + SpeechFloorService.armedByLabel(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_LINE);
     }
 
     /** Phase A tail shared by both lanes: fetch recent events off-thread, hop back, fire. */
@@ -269,7 +279,7 @@ public final class SoulBanterDirector {
         // Re-check the cross-lane floor: Phase A's event fetch ran off-thread, so a scripted line
         // or another scene may have taken the audience while we were waiting.
         if (!speechFloorOpen(playerId)) {
-            recordVerdict(playerId, lane, "vetoed:speech-floor");
+            recordVerdict(playerId, lane, speechFloorVerdict(playerId));
             return;
         }
 
@@ -382,6 +392,12 @@ public final class SoulBanterDirector {
         recordVerdict(playerId, lane, "fired");
         LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} act={} topic=\"{}\" addressPlayer={}",
                 lane, playerId, routingId, roster.size(), seed.length(), seeded.act(), seeded.topic(), addressPlayer);
+        // 1.1.217 gap C1: hold the scripted lanes off for the 5–16 s of generation between this
+        // fire and the scene's first line, so a scripted line cannot land and then collide with
+        // line 1. Scenes speak through the reservation (it never vetoes this scene's own
+        // playback), the first delivered line supersedes it, and it is capped at
+        // SCENE_PENDING_FLOOR_MS in case no release ever arrives.
+        SpeechFloorService.noteSpeech(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_PENDING);
         runtime.submitGroupTurn(turn).thenAccept(submission -> {
             // 2026-08-29 field fix (+ review round): a fired scene arms the full 8–15 min
             // cooldown up front, so a generation that then FAILS (observed: 3B output rejected
@@ -390,6 +406,11 @@ public final class SoulBanterDirector {
             // min-merge would also shorten a cooldown deliberately re-armed by notePlayerScene
             // when a real player conversation started while this generation was in flight.
             if (submission == SoulGroupConversationService.Submission.FAILED) {
+                // Unconditional, unlike the refund below: the refund can lose to a
+                // notePlayerScene re-arm, but no line of this scene will ever supersede the
+                // reservation, so it must be dropped either way. May run on a provider worker
+                // (or synchronously here when the future is already complete) — map op only.
+                SpeechFloorService.releasePending(playerId);
                 if (cooldowns(lane).replace(playerId, armedUntilMs,
                         clock.getAsLong() + RETRY_AFTER_VETO_MS)) {
                     recordVerdict(playerId, lane, "fired-but-failed");

@@ -3,6 +3,8 @@ package net.wcfcarolina13.GameAI.souls;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -310,11 +312,19 @@ public final class SoulLocalDirector {
         lastScore.put(playerId, bestScore);
         LOGGER.info("[souls] local player={} bot={} outcome=fired routingId={} score={}",
                 playerId, candidateBot.getUuid(), routingId, bestScore);
+        // 1.1.217 gap C1, same as the banter director: reserve the floor against the scripted
+        // lanes for the generation window so a scripted line cannot land and then collide with
+        // this reaction's line. Only scripted lanes respect the reservation; the scene's first
+        // delivered line supersedes it and its ceiling bounds a lost release.
+        SpeechFloorService.noteSpeech(playerId, SpeechFloorPolicy.Source.SOUL_SCENE_PENDING);
         runtime.submitGroupTurn(turn).thenAccept(submission -> {
             // Same failure-refund rule as the banter director (review round, minor #1): a
             // MALFORMED generation must not burn the full 6–12 min window. Conditional replace
             // of exactly the value this fire wrote, so a deliberate re-arm meanwhile stands.
             if (submission == SoulGroupConversationService.Submission.FAILED) {
+                // Unconditional: no line of this scene will supersede the reservation. Map op
+                // only, safe on the provider worker that completes the future.
+                SpeechFloorService.releasePending(playerId);
                 if (nextEligibleAtMs.replace(playerId, armedUntilMs,
                         clock.getAsLong() + RETRY_AFTER_VETO_MS)) {
                     recordVerdict(playerId, "fired-but-failed");

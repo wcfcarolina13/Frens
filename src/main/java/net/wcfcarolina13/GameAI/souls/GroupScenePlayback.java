@@ -278,13 +278,16 @@ public final class GroupScenePlayback {
         state.deliveredLines.add(line);
         // Cross-lane speech floor: the scene owner is the audience. Each delivered line holds the
         // scripted ambient lanes off so nothing is wedged between two lines of a conversation.
-        SpeechFloorService.noteSpeech(scene.turn().ownerId(), SpeechFloorPolicy.Source.SOUL_SCENE_LINE);
+        // The floor covers this line's own hold (audio + gap, 1.1.217 gap C2) — a fixed 6 s floor
+        // reopened ~2 s before the next line of an 8 s voiced exchange. A scene-line arm also
+        // supersedes the pending reservation the director took when this scene fired.
+        long holdMs = lineDurationMs(surfaces.audio() ? audio : Optional.empty(), line.text().length());
+        SpeechFloorService.noteSpeech(scene.turn().ownerId(), SpeechFloorPolicy.Source.SOUL_SCENE_LINE, holdMs);
 
         LOGGER.info("[souls] scene-playback routingId={} line={}/{} speaker={} text={} voiced={} listeners={}",
                 scene.turn().routingId(), state.lineIndex + 1, scene.lines().size(),
                 speaker.botId(), surfaces.text(), surfaces.audio(), listeners.size());
-        advanceToNextLine(state, now,
-                lineDurationMs(surfaces.audio() ? audio : Optional.empty(), line.text().length()));
+        advanceToNextLine(state, now, holdMs);
     }
 
     private static boolean inCombat(ServerPlayerEntity entity) {
@@ -306,6 +309,12 @@ public final class GroupScenePlayback {
         // Only when the scene actually said something, though: finish() also runs for aborted and
         // zero-line scenes (no roster, no audio, a provider miss), and muting the audience for
         // twenty seconds because a conversation FAILED to happen is silence nobody asked for.
+        //
+        // The pending reservation taken when this scene fired is dropped unconditionally: a scene
+        // that finishes without delivering a line (every line skipped-muted, aborted before line
+        // 1) never superseded it, and holding the scripted lanes off for the rest of the 30 s
+        // ceiling after the scene is already gone is the same silence nobody asked for.
+        SpeechFloorService.releasePending(state.scene.turn().ownerId());
         if (state.delivered > 0) {
             SpeechFloorService.noteSpeech(state.scene.turn().ownerId(), SpeechFloorPolicy.Source.SOUL_SCENE_END);
         }
