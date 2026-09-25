@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services.construction;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.DoorBlock;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.wcfcarolina13.GameAI.schematic.SchematicData;
@@ -70,8 +71,16 @@ public final class ConstructionBlueprintService {
             Direction suggestedDoorSide,
             List<BlockPos> cornerPositions,
             List<BlockPos> perimeterPositions,
-            List<BlockPos> roofPositions
-    ) {}
+            List<BlockPos> roofPositions,
+            // Walk-through door cells (DoorBlock only). BuildSchematicSkill skips DoorBlock and
+            // DoorPlacementService fills them post-build, so these stay open during the build.
+            // Outward direction is derived from the footprint edge (InteriorEgressPolicy).
+            List<BlockPos> doorPositions
+    ) {
+        public ConstructionPlan {
+            doorPositions = doorPositions == null ? List.of() : List.copyOf(doorPositions);
+        }
+    }
 
     /**
      * Analyze a schematic and generate a construction plan.
@@ -90,6 +99,7 @@ public final class ConstructionBlueprintService {
         int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
         
         Set<BlockPos> doorPositions = new HashSet<>();
+        List<BlockPos> walkThroughDoors = new ArrayList<>();
         List<BlockPos> corners = new ArrayList<>();
         List<BlockPos> perimeter = new ArrayList<>();
         List<BlockPos> roof = new ArrayList<>();
@@ -121,6 +131,9 @@ public final class ConstructionBlueprintService {
             // Track special positions
             if (category == BuildCategory.DOOR) {
                 doorPositions.add(worldPos);
+                if (state.getBlock() instanceof DoorBlock) {
+                    walkThroughDoors.add(worldPos.toImmutable());
+                }
             } else if (category == BuildCategory.CORNER) {
                 corners.add(worldPos);
             } else if (category == BuildCategory.ROOF) {
@@ -149,7 +162,8 @@ public final class ConstructionBlueprintService {
                 targets, worldOrigin, center, 
                 worldOrigin.getY() + minY, worldOrigin.getY() + maxY,
                 width, depth, height,
-                doorSide, corners, perimeter, roof
+                doorSide, corners, perimeter, roof,
+                walkThroughDoors
         );
     }
 

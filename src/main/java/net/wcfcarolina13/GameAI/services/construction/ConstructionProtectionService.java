@@ -5,9 +5,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Tracks task-scoped construction positions that movement recovery must not mine through.
@@ -20,15 +22,25 @@ public final class ConstructionProtectionService {
     private static final Logger LOGGER = LoggerFactory.getLogger("construction-protection");
 
     private static final ConcurrentHashMap<UUID, ProtectionContext> ACTIVE_PROTECTIONS = new ConcurrentHashMap<>();
+    private static final AtomicLong SESSION_SEQUENCE = new AtomicLong();
 
     private ConstructionProtectionService() {}
 
     private record ProtectionContext(
             String taskId,
+            long sessionId,
             Set<BlockPos> plannedPositions,
             Set<BlockPos> stationPositions,
-            ProtectionBounds footprintBounds
+            ProtectionBounds footprintBounds,
+            InteriorEgressPolicy.Layout egressLayout
     ) {}
+
+    /**
+     * Read-only egress view of the active construction: task id for logs, a session id that
+     * changes on every {@link #activate} (the same schematic rebuilt gets a fresh one), and the
+     * planned layout for footprint/doorway queries at a given feet Y.
+     */
+    public record EgressView(String taskId, long sessionId, InteriorEgressPolicy.Layout layout) {}
 
     private record ProtectionBounds(
             int minX,
@@ -56,25 +68,71 @@ public final class ConstructionProtectionService {
                                 String taskId,
                                 Set<BlockPos> plannedPositions,
                                 Set<BlockPos> stationPositions) {
+        activate(botId, taskId, plannedPositions, stationPositions, Set.of());
+    }
+
+    /**
+     * @param doorPositions planned walk-through door cells (subset of {@code plannedPositions});
+     *                      they stay open during the build, so egress treats their columns as
+     *                      walkable doorways
+     */
+    public static void activate(UUID botId,
+                                String taskId,
+                                Set<BlockPos> plannedPositions,
+                                Set<BlockPos> stationPositions,
+                                Set<BlockPos> doorPositions) {
         if (botId == null) {
             return;
         }
         Set<BlockPos> plannedCopy = immutableCopy(plannedPositions);
         Set<BlockPos> stationCopy = immutableCopy(stationPositions);
+        Set<BlockPos> doorCopy = immutableCopy(doorPositions);
         ProtectionBounds bounds = computeBounds(plannedCopy);
         String resolvedTaskId = taskId == null ? "construction" : taskId;
         ACTIVE_PROTECTIONS.put(botId, new ProtectionContext(
                 resolvedTaskId,
+                SESSION_SEQUENCE.incrementAndGet(),
                 plannedCopy,
                 stationCopy,
-                bounds
+                bounds,
+                buildEgressLayout(plannedCopy, doorCopy)
         ));
-        LOGGER.info("construction protection active: bot={} task={} planned={} stations={} bounds={}",
+        LOGGER.info("construction protection active: bot={} task={} planned={} stations={} doors={} bounds={}",
                 botId,
                 resolvedTaskId,
                 plannedCopy.size(),
                 stationCopy.size(),
+                doorCopy.size(),
                 bounds == null ? "none" : bounds.summary());
+    }
+
+    /** Footprint/doorway query surface for interior egress; empty when no construction is active. */
+    public static Optional<EgressView> egressView(UUID botId) {
+        if (botId == null) {
+            return Optional.empty();
+        }
+        ProtectionContext context = ACTIVE_PROTECTIONS.get(botId);
+        if (context == null || context.egressLayout().isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new EgressView(context.taskId(), context.sessionId(), context.egressLayout()));
+    }
+
+    private static InteriorEgressPolicy.Layout buildEgressLayout(Set<BlockPos> planned, Set<BlockPos> doors) {
+        InteriorEgressPolicy.Layout.Builder builder = InteriorEgressPolicy.Layout.builder();
+        for (BlockPos pos : planned) {
+            if (doors.contains(pos)) {
+                builder.door(pos.getX(), pos.getY(), pos.getZ());
+            } else {
+                builder.solid(pos.getX(), pos.getY(), pos.getZ());
+            }
+        }
+        for (BlockPos pos : doors) {
+            if (!planned.contains(pos)) {
+                builder.door(pos.getX(), pos.getY(), pos.getZ());
+            }
+        }
+        return builder.build();
     }
 
     public static void clear(UUID botId) {
