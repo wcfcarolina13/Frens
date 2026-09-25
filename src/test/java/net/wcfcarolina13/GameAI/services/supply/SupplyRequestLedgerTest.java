@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services.supply;
 
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.AlwaysScope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Consume;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ConsumeStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenResult;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SupplyRequestLedgerTest {
@@ -414,6 +416,96 @@ class SupplyRequestLedgerTest {
         assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
         advance(15_000L);
         assertEquals(OpenStatus.OPENED, ledger.open(fp(OWNER, BOT, CHEST, TORCH, 4), PLENTY, 4).status());
+    }
+
+    // ── always: persistence seams ────────────────────────────────────────────────────────────
+
+    @Test
+    void aRestoredPermissionCoversRequestsWithoutAPromptOrAGrant() {
+        ledger.restoreAlways(OWNER, CHEST);
+        assertTrue(ledger.hasAlways(OWNER, CHEST));
+
+        OpenResult covered = ledger.open(cobble(8), PLENTY, 8);
+        assertEquals(OpenStatus.COVERED_BY_ALWAYS, covered.status());
+        assertNull(covered.requestId());
+        assertEquals(8, covered.fingerprint().qty());
+        assertFalse(ledger.hasPending(BOT));
+
+        // No grant was seeded: every consume is ALWAYS, never ONCE, and nothing is spent.
+        for (int i = 0; i < 3; i++) {
+            Consume c = ledger.consumeGrant(cobble(8), PLENTY, 8);
+            assertEquals(ConsumeStatus.ALWAYS, c.status());
+            assertEquals(8, c.quantity());
+        }
+        // Any of that owner's bots; reserves and eligibility still hold.
+        assertEquals(ConsumeStatus.ALWAYS, ledger.consumeGrant(fp(OWNER, BOT_2, CHEST, TORCH, 4), PLENTY, 4).status());
+        assertEquals(4, ledger.consumeGrant(cobble(8), Stock.of(20), 8).quantity());
+        assertEquals(Verdict.RESERVE_EXHAUSTED, ledger.consumeGrant(cobble(8), Stock.of(16), 8).verdict());
+        assertEquals(Verdict.NOT_ALLOWLISTED,
+                ledger.open(fp(OWNER, BOT, CHEST, ItemKey.plain("minecraft:diamond"), 1), PLENTY, 1).verdict());
+        // Scoped like an answered permission: other owners and chests still prompt.
+        assertEquals(OpenStatus.OPENED,
+                ledger.open(fp(OTHER_OWNER, OTHER_OWNERS_BOT, CHEST, COBBLE, 8), PLENTY, 8).status());
+        assertEquals(OpenStatus.OPENED, ledger.open(fp(OWNER, BOT, OTHER_CHEST, COBBLE, 8), PLENTY, 8).status());
+    }
+
+    @Test
+    void restoreRecordsExactlyWhatAnAlwaysAnswerRecords() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALWAYS_COMMON);
+
+        SupplyRequestLedger restored = newLedger(Config.defaults());
+        restored.restoreAlways(OWNER, CHEST);
+        assertEquals(ledger.alwaysSnapshot(), restored.alwaysSnapshot());
+        assertEquals(Set.of(new AlwaysScope(OWNER, CHEST)), restored.alwaysSnapshot());
+        // Restoring twice is idempotent, and a restored permission revokes like an answered one.
+        restored.restoreAlways(OWNER, CHEST);
+        assertEquals(1, restored.alwaysSnapshot().size());
+        assertTrue(restored.revokeAlways(OWNER, CHEST));
+        assertEquals(Set.of(), restored.alwaysSnapshot());
+        assertEquals(OpenStatus.OPENED, restored.open(cobble(8), PLENTY, 8).status());
+    }
+
+    @Test
+    void restoreLeavesPromptsAndCooldownsAlone() {
+        UUID id = openOk(fp(OWNER, BOT, OTHER_CHEST, COBBLE, 8));
+        ledger.restoreAlways(OWNER, CHEST);
+        assertTrue(ledger.hasPending(BOT));
+        assertEquals(ResponseStatus.GRANTED_ONCE, ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE).status());
+        // BOT is in its prompt cooldown, and the restored permission did not reset it.
+        assertEquals(OpenStatus.PROMPT_COOLDOWN, ledger.open(fp(OWNER, BOT, OTHER_CHEST, TORCH, 4), PLENTY, 4).status());
+    }
+
+    @Test
+    void restoreIgnoresNullArguments() {
+        ledger.restoreAlways(null, CHEST);
+        ledger.restoreAlways(OWNER, null);
+        assertEquals(Set.of(), ledger.alwaysSnapshot());
+        assertThrows(NullPointerException.class, () -> new AlwaysScope(null, CHEST));
+        assertThrows(NullPointerException.class, () -> new AlwaysScope(OWNER, null));
+    }
+
+    @Test
+    void snapshotFollowsAlwaysAnswersAndRevocationsOnly() {
+        assertEquals(Set.of(), ledger.alwaysSnapshot());
+        UUID once = openOk(cobble(8));
+        ledger.respond(once, OWNER, false, Choice.ALLOW_ONCE);
+        assertEquals(Set.of(), ledger.alwaysSnapshot());
+
+        advance(15_000L);
+        UUID always = openOk(cobble(8));
+        ledger.respond(always, OWNER, false, Choice.ALWAYS_COMMON);
+        UUID others = openOk(fp(OTHER_OWNER, OTHER_OWNERS_BOT, OTHER_CHEST, COBBLE, 8));
+        ledger.respond(others, OTHER_OWNER, false, Choice.ALWAYS_COMMON);
+        Set<AlwaysScope> both = ledger.alwaysSnapshot();
+        assertEquals(Set.of(new AlwaysScope(OWNER, CHEST), new AlwaysScope(OTHER_OWNER, OTHER_CHEST)), both);
+
+        assertTrue(ledger.revokeAlways(OWNER, CHEST));
+        assertEquals(Set.of(new AlwaysScope(OTHER_OWNER, OTHER_CHEST)), ledger.alwaysSnapshot());
+        // The earlier snapshot is a copy: immutable and unaffected by the revocation.
+        assertEquals(2, both.size());
+        assertThrows(UnsupportedOperationException.class, () -> both.add(new AlwaysScope(OWNER, OTHER_CHEST)));
+        assertThrows(UnsupportedOperationException.class, both::clear);
     }
 
     // ── clearing ─────────────────────────────────────────────────────────────────────────────

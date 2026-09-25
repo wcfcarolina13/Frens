@@ -69,6 +69,13 @@ public final class BotChestRegistryService {
         public int totalSlots = -1;
         public int emptySlots = -1;
         public long lastVerifiedAtMs;
+        /**
+         * Owner of the bot that placed this chest, as {@link UUID#toString()}, stamped when the
+         * chest is (re-)registered. {@code null} = unknown: every record written before 1.1.219
+         * (Gson leaves the absent field null) and any chest placed by an un-owned bot. Never
+         * backfilled from the bot's current config owner — that can change after placement.
+         */
+        public String ownerUuid;
 
         public ChestRecord() {}
 
@@ -196,6 +203,9 @@ public final class BotChestRegistryService {
 
         WorldData wd = worldData(server, world);
         String key = botKey(bot);
+        // The bot just placed this chest, so its owner now is the placer's owner.
+        UUID placerOwner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        String ownerUuid = placerOwner == null ? null : placerOwner.toString();
         synchronized (LOCK) {
             if (wd.chestsByBot == null) wd.chestsByBot = new HashMap<>();
             List<ChestRecord> records = wd.chestsByBot.computeIfAbsent(key, ignored -> new ArrayList<>());
@@ -206,16 +216,57 @@ public final class BotChestRegistryService {
                     r.destroyed = false;
                     r.context = context != null ? context : r.context;
                     r.placedAtMs = System.currentTimeMillis();
+                    r.ownerUuid = ownerUuid;
                     flush();
                     return;
                 }
             }
 
-            records.add(new ChestRecord(pos, context));
+            ChestRecord record = new ChestRecord(pos, context);
+            record.ownerUuid = ownerUuid;
+            records.add(record);
         }
         flush();
         LOGGER.info("Registered chest for {} at {},{},{} ({})",
                 bot.getName().getString(), pos.getX(), pos.getY(), pos.getZ(), context);
+    }
+
+    /**
+     * The recorded owner of every record, under any bot alias, at exactly {@code pos} in
+     * {@code world} — destroyed records included, since re-placing a chest revives them. One
+     * element per record; a {@code null} element is a record whose owner is unknown. An empty list
+     * means no bot ever recorded a chest there. Input for {@code SupplyChestRules.ownership}.
+     * The registry is keyed by level name and dimension, not by save, so a same-named save's
+     * records at this position are included too.
+     *
+     * <p>A {@code null} world or position, or a world without a server, cannot be looked up and
+     * returns a single unknown owner, which that rule denies.
+     */
+    public static List<String> recordedOwnersAt(ServerWorld world, BlockPos pos) {
+        MinecraftServer server = world == null ? null : world.getServer();
+        if (server == null || pos == null) {
+            return Collections.singletonList(null);
+        }
+        ensureLoaded();
+        String key = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            WorldData wd = DATA.worlds == null ? null : DATA.worlds.get(key);
+            if (wd == null || wd.chestsByBot == null) {
+                return List.of();
+            }
+            List<String> owners = new ArrayList<>();
+            for (List<ChestRecord> records : wd.chestsByBot.values()) {
+                if (records == null) {
+                    continue;
+                }
+                for (ChestRecord r : records) {
+                    if (r != null && r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
+                        owners.add(r.ownerUuid);
+                    }
+                }
+            }
+            return owners.isEmpty() ? List.of() : Collections.unmodifiableList(owners);
+        }
     }
 
     /** Get all chest records for a bot in the given world. */

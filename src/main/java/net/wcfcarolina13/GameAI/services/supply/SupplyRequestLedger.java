@@ -145,7 +145,17 @@ public final class SupplyRequestLedger {
     private record Grant(RequestFingerprint fp, long expiresAtMs) {
     }
 
-    private record Scope(UUID owner, ChestKey chest) {
+    /**
+     * A standing "always" permission: common supplies from {@code chest} for any bot of
+     * {@code owner}. Public so the adapter can persist {@link #alwaysSnapshot()} and seed it back
+     * through {@link #restoreAlways}; this is the only structure those, {@link #respond},
+     * {@link #revokeAlways} and {@link #clearOwner} read and write.
+     */
+    public record AlwaysScope(UUID owner, ChestKey chest) {
+        public AlwaysScope {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(chest, "chest");
+        }
     }
 
     private record RejectKey(UUID bot, ChestKey chest, String itemId) {
@@ -160,7 +170,7 @@ public final class SupplyRequestLedger {
     private final Map<UUID, UUID> pendingIdByBot = new HashMap<>();
     /** One grant per target: a newer grant replaces an older one rather than stacking beside it. */
     private final Map<Target, Grant> grants = new HashMap<>();
-    private final Set<Scope> always = new HashSet<>();
+    private final Set<AlwaysScope> always = new HashSet<>();
     private final Map<UUID, Long> promptCooldownUntil = new HashMap<>();
     private final Map<RejectKey, Long> rejectCooldownUntil = new HashMap<>();
 
@@ -198,7 +208,7 @@ public final class SupplyRequestLedger {
             return new OpenResult(OpenStatus.INELIGIBLE, null, null, assessment.verdict());
         }
         RequestFingerprint approved = fp.withQty(assessment.quantity());
-        if (always.contains(new Scope(fp.owner(), fp.chest()))) {
+        if (always.contains(new AlwaysScope(fp.owner(), fp.chest()))) {
             return new OpenResult(OpenStatus.COVERED_BY_ALWAYS, null, approved, Verdict.ELIGIBLE);
         }
         if (isActive(rejectCooldownUntil, new RejectKey(fp.bot(), fp.chest(), fp.itemId()), now)) {
@@ -265,7 +275,7 @@ public final class SupplyRequestLedger {
             }
             case ALWAYS_COMMON -> {
                 grants.put(Target.of(fp), new Grant(fp, now + timings.grantLifetimeMs()));
-                always.add(new Scope(fp.owner(), fp.chest()));
+                always.add(new AlwaysScope(fp.owner(), fp.chest()));
                 yield new Response(ResponseStatus.GRANTED_ALWAYS, fp);
             }
         };
@@ -305,7 +315,7 @@ public final class SupplyRequestLedger {
                 return new Consume(ConsumeStatus.ONCE, assessment.quantity(), Verdict.ELIGIBLE);
             }
         }
-        if (fp.owner() != null && always.contains(new Scope(fp.owner(), fp.chest()))) {
+        if (fp.owner() != null && always.contains(new AlwaysScope(fp.owner(), fp.chest()))) {
             if (!assessment.eligible()) {
                 return new Consume(ConsumeStatus.INELIGIBLE, 0, assessment.verdict());
             }
@@ -317,7 +327,24 @@ public final class SupplyRequestLedger {
     }
 
     public synchronized boolean hasAlways(UUID owner, ChestKey chest) {
-        return owner != null && chest != null && always.contains(new Scope(owner, chest));
+        return owner != null && chest != null && always.contains(new AlwaysScope(owner, chest));
+    }
+
+    /**
+     * Seeds a standing permission for (owner, chest) exactly as an {@link Choice#ALWAYS_COMMON}
+     * answer records it, without a grant and without touching any prompt or cooldown. For loading
+     * persisted permissions at server start; a {@code null} argument is ignored.
+     */
+    public synchronized void restoreAlways(UUID owner, ChestKey chest) {
+        if (owner == null || chest == null) {
+            return;
+        }
+        always.add(new AlwaysScope(owner, chest));
+    }
+
+    /** An immutable copy of every standing permission, for persisting. */
+    public synchronized Set<AlwaysScope> alwaysSnapshot() {
+        return Set.copyOf(always);
     }
 
     /**
@@ -328,7 +355,7 @@ public final class SupplyRequestLedger {
         if (owner == null || chest == null) {
             return false;
         }
-        boolean removed = always.remove(new Scope(owner, chest));
+        boolean removed = always.remove(new AlwaysScope(owner, chest));
         grants.keySet().removeIf(t -> owner.equals(t.owner()) && chest.equals(t.chest()));
         return removed;
     }

@@ -106,9 +106,12 @@ public final class SupplyRequestPolicy {
     /**
      * One chest, identified the same way from either half of a double chest.
      *
-     * @param worldId {@code levelName/dimension}, e.g. {@code "New World/minecraft:overworld"} —
-     *                the same spelling {@code BotChestRegistryService.serverWorldKey} writes, so
-     *                the key is unique across saves and dimensions
+     * @param worldId the save's identity plus the dimension, built by
+     *                {@link SupplyChestRules#worldId(String, String)} from
+     *                {@code BotWorldStateService.currentWorldKey(server)} ({@code levelName#rootPathHash})
+     *                and the dimension id, e.g. {@code "New World#1a2b3c/minecraft:overworld"}. Not
+     *                {@code BotChestRegistryService.serverWorldKey}'s {@code levelName/dimension}:
+     *                two saves can share a level name, so that spelling is not unique across saves
      */
     public record ChestKey(String worldId, int x, int y, int z) {
         public ChestKey {
