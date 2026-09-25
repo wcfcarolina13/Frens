@@ -31,8 +31,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>No hostile within 16 blocks AND line of sight (visible threat).</li>
  *   <li>No hostile within 8 blocks regardless of LOS (audible threat — proxy
  *       for footsteps and mob ambient sounds).</li>
- *   <li>Block-light + sky-light at the bot's position is ≤ 7 (the vanilla mob-spawn
- *       threshold; "this is the kind of dim where torches matter").</li>
+ *   <li>The light level at the bot's feet — {@code world.getLightLevel(pos)}, which is
+ *       max(sky light − ambient darkness, block light), not a sum — is dim enough, with
+ *       hysteresis from {@link TorchHoldPolicy}: ≤ 7 to take a torch out (the vanilla mob-spawn
+ *       threshold), and a torch already in hand is kept through ≤ 11 and put away at 12+.</li>
  *   <li>The bot has at least one torch reachable from the inventory.</li>
  * </ul>
  *
@@ -52,7 +54,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BotTorchHoldService {
     private static final Logger LOGGER = LoggerFactory.getLogger("torch-hold");
 
-    private static final int LIGHT_THRESHOLD = 7;
     private static final double VISIBLE_HOSTILE_RADIUS = 16.0D;
     private static final double AUDIBLE_HOSTILE_RADIUS = 8.0D;
     private static final long EVAL_INTERVAL_TICKS = 5L;
@@ -105,7 +106,9 @@ public final class BotTorchHoldService {
             }
         }
 
-        Verdict verdict = evalHold(bot, world, id);
+        // "Holding" = we put the torch up and nobody has swapped it away since (the block above
+        // just dropped our state if they had). Drives the light gate's hysteresis.
+        Verdict verdict = evalHold(bot, world, id, savedSlot != null);
         boolean shouldHold = verdict.gate == null;
 
         if (shouldHold) {
@@ -125,9 +128,12 @@ public final class BotTorchHoldService {
                 }
                 BotActions.selectHotbarSlot(bot, torchSlot);
             }
+            // Report the slot we will yield back to (read fresh: the put above may have just
+            // recorded it), not the slot that happened to be selected this tick.
+            Integer yieldTo = SAVED_SELECTED_SLOT.get(id);
             logVerdictIfChanged(bot, id, verdict,
                     String.format(" action=%s slot=%d savedSlot=%d",
-                            promoted ? "promoted+held" : "held", torchSlot, currentSlot));
+                            promoted ? "promoted+held" : "held", torchSlot, yieldTo == null ? -1 : yieldTo));
         } else if (savedSlot != null) {
             BotActions.selectHotbarSlot(bot, savedSlot);
             SAVED_SELECTED_SLOT.remove(id);
@@ -178,10 +184,14 @@ public final class BotTorchHoldService {
      * (or a gate of {@code null} meaning "hold a torch now"), along with the
      * measured values that drove the decision. Gate names are stable strings and
      * carry their threshold where one exists (e.g. {@code audible-hostile-8}) so
-     * a field log line is self-explanatory. This method has NO side effects and
-     * changes no gate's logic — it only reports.
+     * a field log line is self-explanatory. This method has NO side effects.
+     *
+     * <p>{@code holding} only affects the light gate: its threshold comes from
+     * {@link TorchHoldPolicy#lightThreshold(boolean)} (7 to take a torch out, 11 to keep one),
+     * and the gate name carries whichever threshold applied ({@code light-above-7} or
+     * {@code light-above-11}).
      */
-    private static Verdict evalHold(ServerPlayerEntity bot, ServerWorld world, UUID id) {
+    private static Verdict evalHold(ServerPlayerEntity bot, ServerWorld world, UUID id, boolean holding) {
         int light = world.getLightLevel(bot.getBlockPos());
 
         Mode mode = BotEventHandler.getModePublic(bot);
@@ -191,7 +201,8 @@ public final class BotTorchHoldService {
         if (bot.hasVehicle()) return new Verdict("mounted", -1.0D, light, null);
         if (bot.isSleeping()) return new Verdict("sleeping", -1.0D, light, null);
 
-        if (light > LIGHT_THRESHOLD) return new Verdict("light-above-" + LIGHT_THRESHOLD, -1.0D, light, null);
+        int lightThreshold = TorchHoldPolicy.lightThreshold(holding);
+        if (light > lightThreshold) return new Verdict("light-above-" + lightThreshold, -1.0D, light, null);
 
         // Combat suppression — visible OR audible hostile.
         List<Entity> visible = BotThreatService.findHostilesAround(bot, VISIBLE_HOSTILE_RADIUS);
@@ -294,6 +305,46 @@ public final class BotTorchHoldService {
                 || key.contains("bottle")
                 || key.contains("bucket")
                 || stack.getItem().getComponents().contains(net.minecraft.component.DataComponentTypes.FOOD);
+    }
+
+    /**
+     * Teardown: puts every bot's pre-torch slot back in hand, then clears all state.
+     *
+     * <p>Must run BEFORE any bot save that can be the last one. The selected slot is persisted by
+     * both the Frens inventory snapshot ({@code BotInventoryStorageService}, {@code SelectedSlot})
+     * and the vanilla player {@code .dat}, while {@link #SAVED_SELECTED_SLOT} is memory-only — so a
+     * bot saved mid-hold reloads with the torch in hand and no record of what to yield back to,
+     * and never yields. Callers: SERVER_STOPPING before {@code BotPersistenceService.saveAll}
+     * (dedicated), and the integrated-server real-player DISCONNECT before
+     * {@code saveBotsBeforeShutdown} (the save that actually lands on a singleplayer quit).
+     *
+     * <p>Mirrors the tick's foreign-swap rule: a bot whose selected slot is no longer our torch
+     * slot already belongs to another service and is left alone. Idempotent — a second call finds
+     * the map empty. Each bot is isolated in a try/catch so a failure here can never skip the save
+     * that follows it.
+     *
+     * <p>Threading: mutates the selected hotbar slot. SERVER_STOPPING runs on the server thread;
+     * the integrated-server DISCONNECT has been observed on a Netty IO thread, where the
+     * surrounding pre-shutdown save already mutates bots (dismount) — see that call site.
+     */
+    public static void yieldAll(MinecraftServer server) {
+        if (server != null) {
+            for (var entry : SAVED_SELECTED_SLOT.entrySet()) {
+                try {
+                    ServerPlayerEntity bot = server.getPlayerManager().getPlayer(entry.getKey());
+                    if (bot == null || bot.isRemoved()) continue;
+                    int torchSlot = findTorchHotbarSlot(bot);
+                    if (torchSlot < 0 || bot.getInventory().getSelectedSlot() != torchSlot) continue;
+                    int savedSlot = entry.getValue();
+                    BotActions.selectHotbarSlot(bot, savedSlot);
+                    LOGGER.info("[torch-hold] {} action=yield-on-teardown slot={}",
+                            bot.getName().getString(), savedSlot);
+                } catch (Exception e) {
+                    LOGGER.warn("torch-hold teardown yield failed for {}: {}", entry.getKey(), e.getMessage());
+                }
+            }
+        }
+        reset();
     }
 
     public static void reset() {

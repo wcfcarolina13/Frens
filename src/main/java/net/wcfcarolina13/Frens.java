@@ -861,6 +861,9 @@ public class Frens implements ModInitializer {
                     net.wcfcarolina13.GameAI.services.RideSyncService.secureLeashedMountOnDisconnect(bot);
                 }
             }
+            // Put any torch this service raised back to the bot's own slot BEFORE saving: the
+            // selected slot is persisted, the torch-hold bookkeeping is not. Also clears its state.
+            net.wcfcarolina13.GameAI.services.BotTorchHoldService.yieldAll(server);
             BotPersistenceService.saveAll(server);
             net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.flushSync(server);
             net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.shutdownExecutors();
@@ -871,7 +874,6 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAnimalDefenseService.reset();
             net.wcfcarolina13.GameAI.services.BotPillagerAlertService.reset();
             net.wcfcarolina13.GameAI.services.BotRespawnPromptService.clearAll();
-            net.wcfcarolina13.GameAI.services.BotTorchHoldService.reset();
             net.wcfcarolina13.GameAI.services.BotRandomDanceService.reset();
             net.wcfcarolina13.GameAI.services.EmotecraftBridge.reset();
             // LAST: flush any debounced bot-home state to disk, then stop its writer thread.
@@ -969,6 +971,11 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.ChatUtils.VoiceLineMuteService.clearPlayerMask(player.getUuid());
             net.wcfcarolina13.GameAI.services.TravelWaitService.cancel(player.getUuid());
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
+                // On a singleplayer quit THIS is the bot save that lands (SERVER_STOPPING's saveAll
+                // has been observed to find no bots), so torches must be put away here too. This
+                // handler has been observed on a Netty IO thread; yieldAll only re-selects a hotbar
+                // slot, matching the dismount the pre-shutdown save below already does here.
+                net.wcfcarolina13.GameAI.services.BotTorchHoldService.yieldAll(server);
                 BotPersistenceService.saveBotsBeforeShutdown(server);
             }
         });
