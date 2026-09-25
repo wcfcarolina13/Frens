@@ -707,6 +707,7 @@ public class Frens implements ModInitializer {
 
         modCommandRegistry.register();
         configCommand.register();
+        net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.register(); net.wcfcarolina13.Commands.SupplyCommands.register();
         try {
             SQLiteDB.createDB();
         } catch (Exception e) {

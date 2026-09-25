@@ -231,6 +231,63 @@ public final class SupplyChestRules {
         return targetType == null ? Stock.of(items) : new Stock(items, clampToInt(typeCount));
     }
 
+    // ── Transfer ─────────────────────────────────────────────────────────────────────────────
+
+    /** Take {@code count} items from slot index {@code slot} of the list a plan was made from. */
+    public record Take(int slot, int count) {
+    }
+
+    /**
+     * How many more of exactly {@code item} fit in {@code slots} (the bot's main inventory, one
+     * entry per slot, {@code null} for an empty slot). An empty slot holds {@code maxPerStack}; a
+     * slot already holding the same id and component fingerprint holds the difference to
+     * {@code maxPerStack}; any other slot holds none. The count is a lower bound: a component
+     * fingerprint that reads differently for an equal stack only loses room, never invents it.
+     */
+    public static int capacity(List<SlotView> slots, ItemKey item, int maxPerStack) {
+        if (slots == null || item == null || maxPerStack <= 0) {
+            return 0;
+        }
+        long room = 0;
+        for (SlotView slot : slots) {
+            if (slot == null || slot.itemId() == null || slot.count() <= 0) {
+                room += maxPerStack;
+            } else if (matches(slot, item)) {
+                room += Math.max(0, maxPerStack - slot.count());
+            }
+        }
+        return clampToInt(room);
+    }
+
+    /**
+     * Which chest slots to take {@code quantity} of exactly {@code item} from: matching slots
+     * (same id and component fingerprint) in slot order, as much of each as still needed. The
+     * plan never totals more than {@code quantity}; it totals less only when the slots hold less.
+     * Indices refer to positions in {@code slots}; {@code null} entries are empty slots.
+     */
+    public static List<Take> withdrawPlan(List<SlotView> slots, ItemKey item, int quantity) {
+        if (slots == null || item == null || quantity <= 0) {
+            return List.of();
+        }
+        List<Take> plan = new ArrayList<>();
+        int remaining = quantity;
+        for (int i = 0; i < slots.size() && remaining > 0; i++) {
+            SlotView slot = slots.get(i);
+            if (slot == null || slot.itemId() == null || slot.count() <= 0 || !matches(slot, item)) {
+                continue;
+            }
+            int take = Math.min(slot.count(), remaining);
+            plan.add(new Take(i, take));
+            remaining -= take;
+        }
+        return List.copyOf(plan);
+    }
+
+    private static boolean matches(SlotView slot, ItemKey item) {
+        String fp = slot.componentsFp() == null ? "" : slot.componentsFp();
+        return slot.itemId().equals(item.itemId()) && fp.equals(item.componentsFp());
+    }
+
     // ── Item components ──────────────────────────────────────────────────────────────────────
 
     /** Joins the entries of a {@link #componentsFp} fingerprint. Registry ids never contain it. */
@@ -387,6 +444,7 @@ public final class SupplyChestRules {
     public static final String COMMAND_ROOT = "frens";
     public static final String COMMAND_SUPPLY = "supply";
     public static final String COMMAND_ANSWER = "answer";
+    public static final String COMMAND_REVOKE = "revoke";
 
     /** The question shown to the owner, before the clickable choices. */
     public static String promptText(String botName, int qty, String itemName, int x, int y, int z) {
@@ -410,6 +468,11 @@ public final class SupplyChestRules {
         Objects.requireNonNull(requestId, "requestId");
         return "/" + COMMAND_ROOT + " " + COMMAND_SUPPLY + " " + COMMAND_ANSWER + " " + requestId
                 + " " + choiceToken(choice);
+    }
+
+    /** Exactly {@code /frens supply revoke <x> <y> <z>}, for telling the owner how to undo "always". */
+    public static String revokeCommand(int x, int y, int z) {
+        return "/" + COMMAND_ROOT + " " + COMMAND_SUPPLY + " " + COMMAND_REVOKE + " " + x + " " + y + " " + z;
     }
 
     /** The choice for {@code once}, {@code always} or {@code no}, ignoring case and surrounding space. */

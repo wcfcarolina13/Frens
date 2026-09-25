@@ -483,6 +483,72 @@ class SupplyChestRulesTest {
         }
     }
 
+    // ── capacity and withdraw plan ───────────────────────────────────────────────────────────
+
+    private static final ItemKey COBBLE = ItemKey.plain("minecraft:cobblestone");
+    private static final ItemKey WORN_AXE = new ItemKey("minecraft:stone_axe", "minecraft:damage=5",
+            Set.of("minecraft:damage"));
+
+    @Test
+    void capacityCountsEmptySlotsAndRoomOnMatchingStacksOnly() {
+        List<SlotView> inv = Arrays.asList(
+                null,                                                  // empty: 64
+                new SlotView("minecraft:cobblestone", "", 60),         // same: 4
+                new SlotView("minecraft:cobblestone", "x=1", 10),      // other fp: 0
+                new SlotView("minecraft:dirt", null, 1),               // other id: 0
+                new SlotView(null, null, 5),                           // no id: empty, 64
+                new SlotView("minecraft:cobblestone", null, 0));       // count 0: empty, 64
+        assertEquals(64 + 4 + 64 + 64, SupplyChestRules.capacity(inv, COBBLE, 64));
+    }
+
+    @Test
+    void capacityIsZeroWhenFullOrInputsMissing() {
+        List<SlotView> full = List.of(new SlotView("minecraft:cobblestone", "", 64),
+                new SlotView("minecraft:dirt", "", 64));
+        assertEquals(0, SupplyChestRules.capacity(full, COBBLE, 64));
+        assertEquals(0, SupplyChestRules.capacity(null, COBBLE, 64));
+        assertEquals(0, SupplyChestRules.capacity(Arrays.asList((SlotView) null), null, 64));
+        assertEquals(0, SupplyChestRules.capacity(Arrays.asList((SlotView) null), COBBLE, 0));
+        // An over-full stack never yields negative room.
+        assertEquals(0, SupplyChestRules.capacity(List.of(new SlotView("minecraft:cobblestone", "", 99)), COBBLE, 64));
+    }
+
+    @Test
+    void capacityForUnstackableEquipmentIsOnePerEmptySlot() {
+        List<SlotView> inv = Arrays.asList(null, new SlotView("minecraft:stone_axe", "minecraft:damage=5", 1), null);
+        assertEquals(2, SupplyChestRules.capacity(inv, WORN_AXE, 1));
+    }
+
+    @Test
+    void withdrawPlanTakesExactlyTheQuantityFromMatchingSlotsInOrder() {
+        List<SlotView> chest = Arrays.asList(
+                new SlotView("minecraft:cobblestone", "x=1", 64),      // other fp: skipped
+                null,
+                new SlotView("minecraft:cobblestone", "", 10),
+                new SlotView("minecraft:dirt", "", 64),
+                new SlotView("minecraft:cobblestone", null, 64),       // null fp reads as ""
+                new SlotView("minecraft:cobblestone", "", 64));
+        List<SupplyChestRules.Take> plan = SupplyChestRules.withdrawPlan(chest, COBBLE, 30);
+        assertEquals(List.of(new SupplyChestRules.Take(2, 10), new SupplyChestRules.Take(4, 20)), plan);
+        assertEquals(30, plan.stream().mapToInt(SupplyChestRules.Take::count).sum());
+    }
+
+    @Test
+    void withdrawPlanStopsShortOnlyWhenTheChestHoldsLess() {
+        List<SlotView> chest = List.of(new SlotView("minecraft:stone_axe", "minecraft:damage=5", 1),
+                new SlotView("minecraft:stone_axe", "", 1));
+        assertEquals(List.of(new SupplyChestRules.Take(0, 1)), SupplyChestRules.withdrawPlan(chest, WORN_AXE, 3));
+        assertEquals(List.of(), SupplyChestRules.withdrawPlan(chest, WORN_AXE, 0));
+        assertEquals(List.of(), SupplyChestRules.withdrawPlan(chest, WORN_AXE, -1));
+        assertEquals(List.of(), SupplyChestRules.withdrawPlan(null, WORN_AXE, 3));
+        assertEquals(List.of(), SupplyChestRules.withdrawPlan(chest, null, 3));
+    }
+
+    @Test
+    void revokeCommandMatchesTheRegisteredLiterals() {
+        assertEquals("/frens supply revoke 10 64 -5", SupplyChestRules.revokeCommand(10, 64, -5));
+    }
+
     @Test
     void promptTextNamesBotQuantityItemAndPosition() {
         assertEquals("Jake asks to take 8 Cobblestone from the chest at 10, 64, -5.",
