@@ -18,6 +18,9 @@ public final class MutualAidChestFoodPolicy {
     /** A full hunger bar. */
     public static final int MAX_FOOD_LEVEL = 20;
 
+    /** The facade's reason when the bot has no recorded owner ({@code SupplyRequestPolicy.Verdict.NO_OWNER}). */
+    static final String INELIGIBLE_NO_OWNER = "INELIGIBLE(NO_OWNER)";
+
     private MutualAidChestFoodPolicy() {
     }
 
@@ -101,6 +104,10 @@ public final class MutualAidChestFoodPolicy {
         String why = reason == null ? "" : reason;
         if (is(why, "NO_ROOM")) {
             return roomMadeOnce ? Next.STOP : Next.MAKE_ROOM_AND_RETRY;
+        }
+        // A bot with no owner has nobody to approve anything: asking about other food or chests is pointless.
+        if (why.equals(INELIGIBLE_NO_OWNER)) {
+            return Next.STOP;
         }
         // The policy or the reserve refuses this food, the owner said No to it lately, or it is gone.
         if (is(why, "INELIGIBLE") || is(why, "REJECT_COOLDOWN") || is(why, "NO_STOCK")) {

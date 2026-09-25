@@ -91,6 +91,12 @@ class MutualAidChestFoodPolicyTest {
     }
 
     @Test
+    void aBotWithNoOwnerStopsInsteadOfAskingAboutEveryFood() {
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, "INELIGIBLE(NO_OWNER)", false));
+        assertEquals("INELIGIBLE(NO_OWNER)", MutualAidChestFoodPolicy.INELIGIBLE_NO_OWNER);
+    }
+
+    @Test
     void refusalsAboutThisChestTryTheNextChest() {
         for (String reason : List.of("DENIED(DENY_NOT_CHEST)", "DENIED(DENY_FOREIGN)", "DENIED", "OWNER_NOT_NEARBY",
                 "PROMPT_COOLDOWN")) {
