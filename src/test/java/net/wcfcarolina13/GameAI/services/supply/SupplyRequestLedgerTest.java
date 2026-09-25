@@ -454,6 +454,76 @@ class SupplyRequestLedgerTest {
         assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
     }
 
+    // ── isPermitted ──────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void aLiveOnceGrantPermitsUpToItsQuantityUntilItsDeadline() {
+        UUID id = openOk(cobble(8));
+        assertFalse(ledger.isPermitted(cobble(8)), "an unanswered prompt permits nothing");
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        assertTrue(ledger.isPermitted(cobble(8)));
+        assertTrue(ledger.isPermitted(cobble(1)));
+        assertFalse(ledger.isPermitted(cobble(9)), "more than granted");
+        advance(60_000L - 1);
+        assertTrue(ledger.isPermitted(cobble(8)));
+        advance(1L);
+        assertFalse(ledger.isPermitted(cobble(8)), "now == deadline is expired");
+    }
+
+    @Test
+    void isPermittedNeverSpendsOrDropsAGrant() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        for (int i = 0; i < 3; i++) {
+            assertTrue(ledger.isPermitted(cobble(8)));
+        }
+        assertEquals(ConsumeStatus.ONCE, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
+        assertFalse(ledger.isPermitted(cobble(8)), "the grant is spent");
+    }
+
+    @Test
+    void aRefusedOrExpiredPromptPermitsNothing() {
+        UUID refused = openOk(cobble(8));
+        ledger.respond(refused, OWNER, false, Choice.NO);
+        assertFalse(ledger.isPermitted(cobble(8)));
+
+        UUID ignored = openOk(fp(OWNER, BOT_2, CHEST, COBBLE, 8));
+        advance(30_000L);
+        assertEquals(ResponseStatus.EXPIRED, ledger.respond(ignored, OWNER, false, Choice.ALLOW_ONCE).status());
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT_2, CHEST, COBBLE, 8)));
+    }
+
+    @Test
+    void aGrantPermitsOnlyItsOwnOwnerBotChestAndItem() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        assertFalse(ledger.isPermitted(fp(OTHER_OWNER, BOT, CHEST, COBBLE, 8)), "a foreign owner");
+        assertFalse(ledger.isPermitted(fp(OTHER_OWNER, OTHER_OWNERS_BOT, CHEST, COBBLE, 8)), "a foreign owner's bot");
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT_2, CHEST, COBBLE, 8)), "another bot");
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT, OTHER_CHEST, COBBLE, 8)), "another chest");
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT, CHEST, TORCH, 8)), "another item");
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT, CHEST,
+                new ItemKey("minecraft:cobblestone", "minecraft:damage=1", Set.of("minecraft:damage")), 8)),
+                "the same id with other components");
+        assertFalse(ledger.isPermitted(null));
+    }
+
+    @Test
+    void aStandingPermissionPermitsAnyQuantityForThatOwnerAndChestOnly() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALWAYS_COMMON);
+        advance(60_000L);
+        // The once-grant that came with the answer has lapsed; the standing permission has not.
+        assertTrue(ledger.isPermitted(cobble(8)));
+        assertTrue(ledger.isPermitted(cobble(40)));
+        assertTrue(ledger.isPermitted(fp(OWNER, BOT_2, CHEST, TORCH, 4)), "any of that owner's bots and items");
+        assertFalse(ledger.isPermitted(fp(OWNER, BOT, OTHER_CHEST, COBBLE, 8)), "another chest");
+        assertFalse(ledger.isPermitted(fp(OTHER_OWNER, OTHER_OWNERS_BOT, CHEST, COBBLE, 8)), "a foreign owner");
+        assertFalse(ledger.isPermitted(fp(null, BOT, CHEST, COBBLE, 8)), "an un-owned bot");
+        assertTrue(ledger.revokeAlways(OWNER, CHEST));
+        assertFalse(ledger.isPermitted(cobble(8)));
+    }
+
     // ── always: persistence seams ────────────────────────────────────────────────────────────
 
     @Test

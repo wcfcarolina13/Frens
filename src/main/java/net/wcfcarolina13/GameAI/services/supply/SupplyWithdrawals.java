@@ -46,7 +46,12 @@ import java.util.function.Supplier;
  * fresh request would hit the bot's prompt cooldown instead). A caller that must walk calls once
  * with {@link WaitMode#NONE} before walking — {@link Kind#REFUSED} means skip this chest and don't
  * walk — walks, then calls again with the same chest and item to take. One ticket per bot; a
- * ticket lives for the prompt's lifetime plus the grant's, and is swept once a second.
+ * ticket lives for the prompt's lifetime plus the grant's, and is swept once a second. A ticket
+ * whose prompt was refused or expired, or whose grant lapsed, is dropped with {@code NOT_PERMITTED}
+ * before any reach check, so {@link Kind#READY} always means permitted.
+ *
+ * <p>{@link #grantableEstimate} lets a caller count, before asking, how much of a chest's stock
+ * the policy could ever grant (allowlist and reserve only; advisory).
  *
  * <p><b>Threading.</b> Any thread. On the server thread a call runs one non-blocking step, and
  * {@link WaitMode#UNTIL_ANSWERED} is treated as {@link WaitMode#NONE} (with one WARN per run of
@@ -121,6 +126,7 @@ public final class SupplyWithdrawals {
     /** One ticket per bot. Touched only on the server thread; concurrent so the sweep and stop are safe too. */
     private static final ConcurrentHashMap<UUID, Ticket> TICKETS = new ConcurrentHashMap<>();
     private static final AtomicBoolean WARNED_WAIT_ON_SERVER_THREAD = new AtomicBoolean();
+    private static final AtomicBoolean WARNED_ESTIMATE_OFF_THREAD = new AtomicBoolean();
 
     private SupplyWithdrawals() {
     }
@@ -166,6 +172,38 @@ public final class SupplyWithdrawals {
         return outcome.result();
     }
 
+    /**
+     * Roughly how many of {@code stack}'s exact item a companion could be granted from
+     * {@code countInThisChest} of it in one chest half: 0 when the item fails the pre-filter under
+     * the running ledger's own config, otherwise the count less the item's reserve, never below 0
+     * ({@link SupplyWithdrawalPolicy#grantableEstimate}). For counting what automatic work may rely
+     * on before asking. Advisory: no ledger state (permissions, cooldowns, pending prompts) and no
+     * owner is consulted, and nothing is asked, logged or moved.
+     *
+     * <p>Server thread only (the item's components are read through the world's registries); on
+     * any other thread it returns 0 and logs one WARN per run of the game. Also 0 when the service
+     * is not running or an argument is missing.
+     */
+    public static int grantableEstimate(ServerWorld world, ItemStack stack, int countInThisChest) {
+        MinecraftServer srv = world == null ? null : world.getServer();
+        if (srv == null) {
+            return 0;
+        }
+        if (!srv.isOnThread()) {
+            if (WARNED_ESTIMATE_OFF_THREAD.compareAndSet(false, true)) {
+                LOGGER.warn("[supply] grantableEstimate called off the server thread ({}); counting 0 there",
+                        Thread.currentThread().getName());
+            }
+            return 0;
+        }
+        SupplyRequestPolicy.Config config = SupplyRequestService.config();
+        if (config == null || stack == null || stack.isEmpty() || countInThisChest <= 0) {
+            return 0;
+        }
+        return SupplyWithdrawalPolicy.grantableEstimate(SupplyRequestService.itemKeyOf(world, stack), config,
+                countInThisChest);
+    }
+
     // ── One step (server thread) ─────────────────────────────────────────────────────────────
 
     private static Step step(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample, int qty, int need,
@@ -199,11 +237,16 @@ public final class SupplyWithdrawals {
         boolean pending = SupplyRequestService.isPending(botId);
         boolean matches = ticket != null && SupplyWithdrawalPolicy.ticketMatches(ticket.fp(),
                 SupplyRequestService.chestKeyAt(world, chestPos), item);
-        switch (SupplyWithdrawalPolicy.ticketStep(ticket != null, matches, pending)) {
+        boolean permitted = ticket != null && SupplyRequestService.isPermitted(ticket.fp());
+        switch (SupplyWithdrawalPolicy.ticketStep(ticket != null, matches, pending, permitted)) {
             case WAIT:
                 return Step.quiet(new Result(Kind.WAITING, 0, "PENDING"));
             case REDEEM:
                 return redeem(bot, world, chestPos, ticket, need);
+            case DROP_NOT_PERMITTED:
+                // Refused, expired or lapsed: say so before any reach check, so nobody walks for nothing.
+                TICKETS.remove(botId, ticket);
+                return Step.loud(Result.refused("NOT_PERMITTED"));
             case OTHER_PENDING:
                 return Step.quiet(Result.refused("OTHER_REQUEST_PENDING"));
             case DROP_AND_REQUEST:
@@ -239,7 +282,11 @@ public final class SupplyWithdrawals {
         }
     }
 
-    /** Takes what {@code ticket} permits if the bot can reach the chest; otherwise READY. */
+    /**
+     * Takes what {@code ticket} permits if the bot can reach the chest; otherwise READY. Reached
+     * only for a permitted ticket (a matching one the ledger still covers, or one just covered by a
+     * standing permission), so READY always means "permitted, walk there".
+     */
     private static Step redeem(ServerPlayerEntity bot, ServerWorld world, BlockPos chestPos, Ticket ticket, int need) {
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
             return Step.loud(new Result(Kind.READY, 0, "OUT_OF_REACH"));

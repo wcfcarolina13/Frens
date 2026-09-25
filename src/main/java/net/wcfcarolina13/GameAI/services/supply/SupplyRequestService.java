@@ -922,6 +922,15 @@ public final class SupplyRequestService {
         return book != null && book.hasPending(bot);
     }
 
+    /**
+     * Whether a live grant or a standing permission covers {@code fp} ({@link SupplyRequestLedger#isPermitted});
+     * {@code false} when not running. Any thread: the ledger is synchronized.
+     */
+    static boolean isPermitted(RequestFingerprint fp) {
+        SupplyRequestLedger book = ledger;
+        return book != null && book.isPermitted(fp);
+    }
+
     /** The running server, or {@code null}. */
     static MinecraftServer server() {
         return server;

@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.services.supply;
 
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Config;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.RequestFingerprint;
@@ -51,6 +52,41 @@ class SupplyWithdrawalPolicyTest {
     }
 
     @Test
+    void theEstimateIsTheCountLessTheReserveForAnEligibleItem() {
+        Config cfg = Config.defaults();
+        int reserve = SupplyRequestPolicy.DEFAULT_MATERIAL_RESERVE;
+        assertEquals(20 - reserve, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, 20));
+        assertEquals(1, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, reserve + 1));
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, reserve), "the reserve stays");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, 3));
+        // Equipment keeps its spare.
+        ItemKey stoneAxe = ItemKey.plain("minecraft:stone_axe");
+        assertEquals(3 - SupplyRequestPolicy.DEFAULT_EQUIPMENT_SPARE,
+                SupplyWithdrawalPolicy.grantableEstimate(stoneAxe, cfg, 3));
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(stoneAxe, cfg, 1), "a lone axe is the spare");
+        // A worn tool is still common: damage is an allowed component.
+        ItemKey wornAxe = new ItemKey("minecraft:stone_axe", "minecraft:damage=5", Set.of("minecraft:damage"));
+        assertEquals(1, SupplyWithdrawalPolicy.grantableEstimate(wornAxe, cfg, 2));
+    }
+
+    @Test
+    void theEstimateIsZeroForAnythingThePreFilterRefuses() {
+        Config cfg = Config.defaults();
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(ItemKey.plain("minecraft:diamond"), cfg, 64),
+                "not allowlisted");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(ItemKey.plain("minecraft:iron_axe"), cfg, 5),
+                "tier not allowed");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(new ItemKey("minecraft:cobblestone",
+                "minecraft:custom_name=\"x\"", Set.of("minecraft:custom_name")), cfg, 64), "protected components");
+        // The same config decides: allowing iron makes the iron axe count.
+        assertEquals(4, SupplyWithdrawalPolicy.grantableEstimate(ItemKey.plain("minecraft:iron_axe"),
+                cfg.withAllowedTiers(Set.of("iron")), 5));
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, null, 64), "no config: not running");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(null, cfg, 64));
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, -5));
+    }
+
+    @Test
     void waitingIsForWorkersOnly() {
         assertEquals(WaitMode.UNTIL_ANSWERED, SupplyWithdrawalPolicy.effectiveMode(WaitMode.UNTIL_ANSWERED, false));
         assertEquals(WaitMode.NONE, SupplyWithdrawalPolicy.effectiveMode(WaitMode.UNTIL_ANSWERED, true));
@@ -64,16 +100,42 @@ class SupplyWithdrawalPolicyTest {
 
     @Test
     void theTicketStepCoversEveryCombination() {
-        for (boolean matches : new boolean[] {false, true}) {
-            for (boolean pending : new boolean[] {false, true}) {
-                // Without a ticket nothing matches: always a fresh request (the ledger refuses a duplicate).
-                assertEquals(TicketStep.REQUEST, SupplyWithdrawalPolicy.ticketStep(false, matches, pending));
+        boolean[] both = {false, true};
+        for (boolean matches : both) {
+            for (boolean pending : both) {
+                for (boolean permitted : both) {
+                    // Without a ticket nothing matches: always a fresh request (the ledger refuses a duplicate).
+                    assertEquals(TicketStep.REQUEST, SupplyWithdrawalPolicy.ticketStep(false, matches, pending, permitted));
+                }
             }
         }
-        assertEquals(TicketStep.WAIT, SupplyWithdrawalPolicy.ticketStep(true, true, true));
-        assertEquals(TicketStep.REDEEM, SupplyWithdrawalPolicy.ticketStep(true, true, false));
-        assertEquals(TicketStep.OTHER_PENDING, SupplyWithdrawalPolicy.ticketStep(true, false, true));
-        assertEquals(TicketStep.DROP_AND_REQUEST, SupplyWithdrawalPolicy.ticketStep(true, false, false));
+        for (boolean permitted : both) {
+            // A waiting prompt wins; permission is read only once nothing is pending.
+            assertEquals(TicketStep.WAIT, SupplyWithdrawalPolicy.ticketStep(true, true, true, permitted));
+            // A ticket for something else is judged by the pending prompt alone.
+            assertEquals(TicketStep.OTHER_PENDING, SupplyWithdrawalPolicy.ticketStep(true, false, true, permitted));
+            assertEquals(TicketStep.DROP_AND_REQUEST, SupplyWithdrawalPolicy.ticketStep(true, false, false, permitted));
+        }
+        assertEquals(TicketStep.REDEEM, SupplyWithdrawalPolicy.ticketStep(true, true, false, true));
+        assertEquals(TicketStep.DROP_NOT_PERMITTED, SupplyWithdrawalPolicy.ticketStep(true, true, false, false));
+    }
+
+    @Test
+    void onlyAPermittedTicketIsRedeemedSoReadyAlwaysMeansPermitted() {
+        // REDEEM is the only step that can lead to READY; it needs a match, nothing pending and a permission.
+        boolean[] both = {false, true};
+        for (boolean hasTicket : both) {
+            for (boolean matches : both) {
+                for (boolean pending : both) {
+                    for (boolean permitted : both) {
+                        boolean redeem = SupplyWithdrawalPolicy.ticketStep(hasTicket, matches, pending, permitted)
+                                == TicketStep.REDEEM;
+                        assertEquals(hasTicket && matches && !pending && permitted, redeem,
+                                hasTicket + "/" + matches + "/" + pending + "/" + permitted);
+                    }
+                }
+            }
+        }
     }
 
     @Test

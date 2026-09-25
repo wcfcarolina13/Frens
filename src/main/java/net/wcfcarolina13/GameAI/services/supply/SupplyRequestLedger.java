@@ -379,6 +379,24 @@ public final class SupplyRequestLedger {
         return before - always.size();
     }
 
+    /**
+     * Whether a transfer for {@code fp} would find a permission, ignoring stock and need: a live
+     * single-use grant for the same owner, bot, chest and exact item whose quantity is at least
+     * {@code fp.qty()}, or a standing permission for ({@code fp.owner()}, {@code fp.chest()}).
+     * The same matching {@link #consumeGrant} applies, without the policy re-check and without
+     * spending or dropping anything. An instant equal to a grant's deadline is expired.
+     */
+    public synchronized boolean isPermitted(RequestFingerprint fp) {
+        if (fp == null) {
+            return false;
+        }
+        Grant grant = grants.get(Target.of(fp));
+        if (grant != null && clock.getAsLong() < grant.expiresAtMs() && fp.qty() <= grant.fp().qty()) {
+            return true;
+        }
+        return fp.owner() != null && always.contains(new AlwaysScope(fp.owner(), fp.chest()));
+    }
+
     /** True while {@code bot} has an unexpired prompt waiting. */
     public synchronized boolean hasPending(UUID bot) {
         UUID id = bot == null ? null : pendingIdByBot.get(bot);

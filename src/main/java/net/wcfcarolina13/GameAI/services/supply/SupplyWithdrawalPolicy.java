@@ -11,9 +11,10 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
 
 /**
- * Pure decisions behind {@link SupplyWithdrawals}: whether an item is worth asking about at all,
- * what to do with a bot's ticket, what a request's or a transfer's status means for the caller
- * and the ticket, how long a ticket lives, and when a worker stops waiting for the owner.
+ * Pure decisions behind {@link SupplyWithdrawals}: whether an item is worth asking about at all
+ * and roughly how many a chest could grant, what to do with a bot's ticket, what a request's or a
+ * transfer's status means for the caller and the ticket, how long a ticket lives, and when a
+ * worker stops waiting for the owner.
  *
  * <p>No Minecraft types: the enums it reads are nested in {@link SupplyRequestService} and
  * {@link SupplyWithdrawals} but are plain enums, and loading one does not load its outer class.
@@ -40,6 +41,24 @@ public final class SupplyWithdrawalPolicy {
         return classified == Verdict.ELIGIBLE;
     }
 
+    // ── Availability estimate ────────────────────────────────────────────────────────────────
+
+    /**
+     * How many of {@code item} a companion could be granted from {@code countInThisChest} of it:
+     * 0 when the item fails the pre-filter under {@code cfg}, otherwise the count less the item's
+     * reserve ({@link SupplyRequestPolicy#reserveFor}), never below 0. Advisory, for counting what
+     * automatic work may rely on. From the counts alone it never exceeds what a request for this
+     * chest could be granted, since a grant counts both halves and, for equipment, the whole type;
+     * it can fall short of it. It sees no ledger state, so a cooldown, a refusal or a missing
+     * owner can still leave nothing to take.
+     */
+    public static int grantableEstimate(ItemKey item, SupplyRequestPolicy.Config cfg, int countInThisChest) {
+        if (item == null || cfg == null || !passesPreFilter(SupplyRequestPolicy.classify(item, cfg))) {
+            return 0;
+        }
+        return Math.max(0, countInThisChest - SupplyRequestPolicy.reserveFor(item, cfg));
+    }
+
     // ── Wait mode ────────────────────────────────────────────────────────────────────────────
 
     /**
@@ -55,14 +74,23 @@ public final class SupplyWithdrawalPolicy {
 
     // ── Tickets ──────────────────────────────────────────────────────────────────────────────
 
-    /** What one step does with the bot's ticket, before anything is asked or moved. */
+    /** What one step does with the bot's ticket, before anything is asked, walked to or moved. */
     public enum TicketStep {
         /** No ticket: make a request. */
         REQUEST,
         /** The ticket is for this chest and item and the owner has not answered: wait. */
         WAIT,
-        /** The ticket is for this chest and item and nothing is pending: take (or walk first). */
+        /**
+         * The ticket is for this chest and item, nothing is pending, and a grant or standing
+         * permission covers it: take now, or report READY so the caller walks there first.
+         */
         REDEEM,
+        /**
+         * The ticket is for this chest and item, nothing is pending, and nothing covers it (the
+         * owner said No, the prompt expired, or the grant lapsed): drop it and refuse, so the
+         * caller never walks to a chest it may not take from.
+         */
+        DROP_NOT_PERMITTED,
         /** The ticket is for something else and its prompt is still waiting: refuse, ask nothing. */
         OTHER_PENDING,
         /** The ticket is for something else and nothing is pending: drop it, then make a request. */
@@ -73,13 +101,18 @@ public final class SupplyWithdrawalPolicy {
      * @param hasTicket the bot holds a live ticket
      * @param matches   that ticket is for this chest and item ({@link #ticketMatches})
      * @param pending   the bot has a prompt waiting for the owner
+     * @param permitted a live grant or standing permission covers the ticket's fingerprint;
+     *                  read only for a matching ticket with nothing pending
      */
-    public static TicketStep ticketStep(boolean hasTicket, boolean matches, boolean pending) {
+    public static TicketStep ticketStep(boolean hasTicket, boolean matches, boolean pending, boolean permitted) {
         if (!hasTicket) {
             return TicketStep.REQUEST;
         }
         if (matches) {
-            return pending ? TicketStep.WAIT : TicketStep.REDEEM;
+            if (pending) {
+                return TicketStep.WAIT;
+            }
+            return permitted ? TicketStep.REDEEM : TicketStep.DROP_NOT_PERMITTED;
         }
         return pending ? TicketStep.OTHER_PENDING : TicketStep.DROP_AND_REQUEST;
     }
