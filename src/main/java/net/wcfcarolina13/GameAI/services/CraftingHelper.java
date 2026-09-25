@@ -27,6 +27,8 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,9 +46,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Minimal crafting helper focused on basic block crafts (starting with crafting tables).
@@ -110,6 +116,15 @@ public final class CraftingHelper {
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_CRAFT_COOLDOWN_MS = 60_000L;
+
+    // Chest pulls (withdrawFromNearbyChests). A pull that asked and got nothing pauses that
+    // material for the bot (CraftChestPullPolicy.PAUSE_MS), keyed "<bot uuid>|<material>".
+    private static final Map<String, Long> CHEST_PULL_PAUSED_UNTIL = new ConcurrentHashMap<>();
+    // The chest and item a bot's unanswered supply prompt is about: the facade keeps one ticket per
+    // bot and only an ask for that same chest and item redeems it, so the next pull asks it first.
+    private static final Map<UUID, PendingPull> CHEST_PULL_PENDING = new ConcurrentHashMap<>();
+    // How long a worker waits for the server thread to list chest stacks before pulling nothing.
+    private static final long CHEST_PULL_SCAN_HOP_MS = 2_500L;
     private static final int LOCAL_PLACEMENT_RELOCATION_RADIUS = 4;
     private static final int UTILITY_PLACEMENT_REJECTION_SAMPLE_LIMIT = 3;
     private static final Set<net.minecraft.block.Block> SOFT_PLACEMENT_BLOCKS = Set.of(
@@ -510,7 +525,8 @@ public final class CraftingHelper {
         Item woolItem = chosen.wool();
         int woolInInv = countItem(bot, woolItem);
         if (woolInInv < desiredWool) {
-            withdrawFromNearbyChests(bot, source, s -> s.isOf(woolItem), desiredWool - woolInInv);
+            withdrawFromNearbyChests(bot, source, s -> s.isOf(woolItem), desiredWool - woolInInv,
+                    Registries.ITEM.getId(woolItem).toString());
         }
 
         int plankCount = countPlanks(bot);
@@ -2852,14 +2868,16 @@ public final class CraftingHelper {
         }
         int missing = neededPlanks - have;
         // Pull planks first, then logs (convert to planks).
-        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS), missing);
+        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS), missing,
+                "planks");
         have = countPlanks(bot);
         if (have >= neededPlanks) {
             return true;
         }
         missing = neededPlanks - have;
         int logsNeeded = (int) Math.ceil(missing / 4.0);
-        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded);
+        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded,
+                "logs");
         ensurePlanksFromLogs(bot, neededPlanks);
         return countPlanks(bot) >= neededPlanks;
     }
@@ -2875,7 +2893,7 @@ public final class CraftingHelper {
         int missing = neededCobble - have;
         withdrawFromNearbyChests(bot, source,
                 s -> s.isOf(Items.COBBLESTONE) || s.isOf(Items.COBBLED_DEEPSLATE) || s.isOf(Items.BLACKSTONE),
-                missing);
+                missing, "cobble");
     }
 
     private static void ensureItemAvailable(ServerPlayerEntity bot, ServerCommandSource source, Item item, int needed) {
@@ -2886,9 +2904,18 @@ public final class CraftingHelper {
         if (have >= needed) {
             return;
         }
-        withdrawFromNearbyChests(bot, source, s -> s.isOf(item), needed - have);
+        withdrawFromNearbyChests(bot, source, s -> s.isOf(item), needed - have,
+                Registries.ITEM.getId(item).toString());
     }
 
+    /**
+     * The bot's own count of each item plus what a chest pull could be granted of it, for choosing
+     * a recipe variant. Chests count only on the server thread (a block entity reads as absent
+     * anywhere else, so off it this has always been the inventory alone) and, as the pull there,
+     * only chests within reach. Each chest half adds what the supply policy could grant from it
+     * ({@link SupplyWithdrawals#grantableEstimate}: allowlisted, above the reserve), so a variant is
+     * never chosen for chest stock the bot may not take.
+     */
     private static Map<Item, Integer> countItemsInInventoryAndNearbyChests(ServerPlayerEntity bot,
                                                                           ServerCommandSource source,
                                                                           List<Item> items) {
@@ -2902,55 +2929,262 @@ public final class CraftingHelper {
         if (!(source.getWorld() instanceof ServerWorld world)) {
             return totals;
         }
+        MinecraftServer server = world.getServer();
+        if (server == null || !server.isOnThread()) {
+            return totals;
+        }
         Set<Item> itemSet = new HashSet<>(items);
-        for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
-            var be = world.getBlockEntity(chestPos);
-            if (!(be instanceof ChestBlockEntity chest)) {
-                continue;
-            }
-            for (int i = 0; i < chest.size(); i++) {
-                ItemStack stack = chest.getStack(i);
-                if (stack.isEmpty()) continue;
-                Item item = stack.getItem();
-                if (!itemSet.contains(item)) continue;
-                totals.put(item, totals.getOrDefault(item, 0) + stack.getCount());
+        for (PullCandidate candidate : findPullCandidates(world, bot, s -> itemSet.contains(s.getItem()), true)) {
+            int grantable = SupplyWithdrawals.grantableEstimate(world, candidate.sample(), candidate.count());
+            if (grantable > 0) {
+                totals.merge(candidate.sample().getItem(), grantable, Integer::sum);
             }
         }
         return totals;
     }
 
+    /**
+     * A chest stack worth asking for: the chest half it was seen in, a one-item copy of it, and
+     * how many of that exact item the half held when listed.
+     */
+    private record PullCandidate(BlockPos chestPos, ItemStack sample, int count) {
+    }
+
+    /** The chest and item a bot's unanswered supply prompt is about, and when it was first seen waiting. */
+    private record PendingPull(BlockPos chestPos, ItemStack sample, long sinceMs) {
+    }
+
+    /**
+     * Takes up to {@code desired} items matching {@code match} from nearby chests into the bot,
+     * through {@link SupplyWithdrawals}: the owner is asked unless a standing permission covers the
+     * chest, and an item the supply policy never grants is refused without asking. Returns how many
+     * moved. Every ask uses {@link SupplyWithdrawals.WaitMode#NONE}, so nothing here ever waits on
+     * the owner; an unanswered prompt leaves a ticket that the next pull redeems (it asks that chest
+     * and item first).
+     *
+     * <p>Runs on the caller's thread. On the server thread it asks only chests already within
+     * reach and never walks. Off it, per chest stack: ask (a refusal skips it, no walk), walk, ask
+     * again. Chest stacks are listed on the server thread either way. What each answer does next,
+     * and when a pull pauses its material for the bot, is {@link CraftChestPullPolicy}.
+     *
+     * @param material a short label for the pause key and the facade's log purpose, e.g. {@code "planks"}
+     */
     private static int withdrawFromNearbyChests(ServerPlayerEntity bot,
                                                ServerCommandSource source,
                                                Predicate<ItemStack> match,
-                                               int desired) {
+                                               int desired,
+                                               String material) {
         if (bot == null || source == null || desired <= 0 || match == null) {
             return 0;
         }
         if (!(source.getWorld() instanceof ServerWorld world)) {
             return 0;
         }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return 0;
+        }
+        UUID botId = bot.getUuid();
+        String pauseKey = botId + "|" + material;
+        if (CraftChestPullPolicy.isPaused(CHEST_PULL_PAUSED_UNTIL.get(pauseKey), System.currentTimeMillis())) {
+            LOGGER.debug("Chest pull for {} paused for {}", material, bot.getName().getString());
+            return 0;
+        }
+        boolean onServerThread = server.isOnThread();
+        List<PullCandidate> candidates = onServerThread
+                ? findPullCandidates(world, bot, match, true)
+                : callOnServer(server, () -> findPullCandidates(world, bot, match, false), List.of());
+
+        PendingPull pending = CHEST_PULL_PENDING.get(botId);
+        if (pending != null && System.currentTimeMillis() - pending.sinceMs()
+                >= SupplyWithdrawalPolicy.ticketLifetimeMs(null)) {
+            CHEST_PULL_PENDING.remove(botId, pending);
+            pending = null;
+        }
+        // Asked first when listed; forgotten once asked unless it is still waiting (below).
+        boolean pendingListed = false;
+        if (pending != null && match.test(pending.sample())) {
+            List<PullCandidate> reordered = askedFirst(candidates, pending);
+            pendingListed = reordered != null;
+            if (pendingListed) {
+                candidates = reordered;
+            }
+        }
+
+        String purpose = "craft-" + material;
         int moved = 0;
-        for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
+        boolean askedLoudly = false;
+        PullCandidate waitingOn = null;
+        List<ItemStack> neverGranted = new ArrayList<>();
+        Set<BlockPos> skippedChests = new HashSet<>();
+        for (PullCandidate candidate : candidates) {
             if (moved >= desired) {
                 break;
             }
-            var be = world.getBlockEntity(chestPos);
-            if (!(be instanceof ChestBlockEntity chest)) {
+            if (skippedChests.contains(candidate.chestPos()) || containsSameItem(neverGranted, candidate.sample())) {
                 continue;
             }
-            int available = countMatchingStacks(chest, match, desired - moved);
-            if (available <= 0) {
-                continue;
+            int want = desired - moved;
+            SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(),
+                    candidate.sample(), want, want, purpose, SupplyWithdrawals.WaitMode.NONE, null);
+            askedLoudly |= CraftChestPullPolicy.isLoud(result.kind(), result.reason());
+            CraftChestPullPolicy.Next next = CraftChestPullPolicy.afterAsk(result.kind(), result.reason(),
+                    onServerThread);
+            if (next == CraftChestPullPolicy.Next.WALK) {
+                // Off the server thread only; the second ask checks reach itself.
+                moveNearBlock(bot, source, candidate.chestPos(), STATION_REACH_SQ);
+                result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(), candidate.sample(), want, want,
+                        purpose, SupplyWithdrawals.WaitMode.NONE, null);
+                askedLoudly |= CraftChestPullPolicy.isLoud(result.kind(), result.reason());
+                next = CraftChestPullPolicy.afterWalk(result.kind(), result.reason());
             }
-            if (!moveNearBlock(bot, source, chestPos, STATION_REACH_SQ)) {
-                continue;
+            if (result.kind() == SupplyWithdrawals.Kind.MOVED) {
+                moved += result.moved();
             }
-            if (!BlockInteractionService.canInteract(bot, chestPos, STATION_REACH_SQ)) {
-                continue;
+            if (next == CraftChestPullPolicy.Next.SKIP_ITEM) {
+                neverGranted.add(candidate.sample());
+            } else if (next == CraftChestPullPolicy.Next.SKIP_CHEST) {
+                skippedChests.add(candidate.chestPos());
+            } else if (next == CraftChestPullPolicy.Next.STOP_WAITING) {
+                waitingOn = candidate;
+                break;
+            } else if (next == CraftChestPullPolicy.Next.STOP) {
+                break;
             }
-            moved += withdrawFromInventory(chest, bot.getInventory(), match, desired - moved);
+        }
+
+        if (waitingOn != null) {
+            if (!isSamePull(pending, waitingOn)) {
+                CHEST_PULL_PENDING.put(botId,
+                        new PendingPull(waitingOn.chestPos(), waitingOn.sample(), System.currentTimeMillis()));
+            }
+        } else if (pendingListed) {
+            CHEST_PULL_PENDING.remove(botId, pending);
+        }
+        if (CraftChestPullPolicy.shouldPause(moved, waitingOn != null, askedLoudly)) {
+            CHEST_PULL_PAUSED_UNTIL.put(pauseKey, System.currentTimeMillis() + CraftChestPullPolicy.PAUSE_MS);
+        } else {
+            CHEST_PULL_PAUSED_UNTIL.remove(pauseKey);
         }
         return moved;
+    }
+
+    /**
+     * Server thread only (a block entity reads as absent anywhere else). The stacks worth asking
+     * for in each chest half near the bot: nearest chest first, then slot order, one entry per
+     * distinct item (id and components). {@code inReachOnly} keeps chests the bot can use from
+     * where it stands.
+     */
+    private static List<PullCandidate> findPullCandidates(ServerWorld world, ServerPlayerEntity bot,
+                                                          Predicate<ItemStack> match, boolean inReachOnly) {
+        List<PullCandidate> candidates = new ArrayList<>();
+        MinecraftServer server = world.getServer();
+        if (server == null || !server.isOnThread() || bot.isRemoved()) {
+            return candidates;
+        }
+        for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
+            if (inReachOnly && !BlockInteractionService.canInteract(bot, chestPos, STATION_REACH_SQ)) {
+                continue;
+            }
+            if (!(world.getBlockEntity(chestPos) instanceof ChestBlockEntity chest)) {
+                continue;
+            }
+            List<PullCandidate> inChest = new ArrayList<>();
+            for (int i = 0; i < chest.size(); i++) {
+                ItemStack stack = chest.getStack(i);
+                if (stack.isEmpty() || !match.test(stack)) {
+                    continue;
+                }
+                int at = indexOfSameItem(inChest, stack);
+                if (at >= 0) {
+                    PullCandidate first = inChest.get(at);
+                    inChest.set(at, new PullCandidate(chestPos, first.sample(), first.count() + stack.getCount()));
+                } else {
+                    inChest.add(new PullCandidate(chestPos, stack.copyWithCount(1), stack.getCount()));
+                }
+            }
+            candidates.addAll(inChest);
+        }
+        return candidates;
+    }
+
+    private static int indexOfSameItem(List<PullCandidate> candidates, ItemStack stack) {
+        for (int i = 0; i < candidates.size(); i++) {
+            if (ItemStack.areItemsAndComponentsEqual(candidates.get(i).sample(), stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * {@code candidates} with the one for {@code pending}'s chest and item moved to the front, or
+     * {@code null} when it is not listed (out of reach, out of range, or gone from the chest).
+     */
+    private static List<PullCandidate> askedFirst(List<PullCandidate> candidates, PendingPull pending) {
+        for (int i = 0; i < candidates.size(); i++) {
+            PullCandidate candidate = candidates.get(i);
+            if (isSamePull(pending, candidate)) {
+                if (i == 0) {
+                    return candidates;
+                }
+                List<PullCandidate> reordered = new ArrayList<>(candidates.size());
+                reordered.add(candidate);
+                for (int j = 0; j < candidates.size(); j++) {
+                    if (j != i) {
+                        reordered.add(candidates.get(j));
+                    }
+                }
+                return reordered;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSamePull(PendingPull pending, PullCandidate candidate) {
+        return pending != null && candidate != null && pending.chestPos().equals(candidate.chestPos())
+                && ItemStack.areItemsAndComponentsEqual(pending.sample(), candidate.sample());
+    }
+
+    private static boolean containsSameItem(List<ItemStack> stacks, ItemStack stack) {
+        for (ItemStack other : stacks) {
+            if (ItemStack.areItemsAndComponentsEqual(other, stack)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Runs a read-only {@code task} on the server thread and waits up to
+     * {@link #CHEST_PULL_SCAN_HOP_MS} for it; {@code fallback} when it cannot. A task that runs
+     * after the wait gave up only reads, so it is harmless.
+     */
+    private static <T> T callOnServer(MinecraftServer server, Supplier<T> task, T fallback) {
+        if (server.isOnThread()) {
+            return task.get();
+        }
+        CompletableFuture<T> result = new CompletableFuture<>();
+        try {
+            server.execute(() -> {
+                try {
+                    result.complete(task.get());
+                } catch (RuntimeException e) {
+                    LOGGER.warn("Chest pull scan failed on the server thread", e);
+                    result.complete(fallback);
+                }
+            });
+        } catch (RuntimeException rejected) {
+            return fallback;
+        }
+        try {
+            return result.get(CHEST_PULL_SCAN_HOP_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (ExecutionException | TimeoutException e) {
+            return fallback;
+        }
     }
 
     private static List<BlockPos> findNearbyChests(ServerWorld world, BlockPos origin, int radius) {
@@ -3014,50 +3248,6 @@ public final class CraftingHelper {
                 bot.getHorizontalFacing());
         MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
         return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
-    }
-
-    private static int withdrawFromInventory(Inventory from,
-                                            Inventory to,
-                                            Predicate<ItemStack> match,
-                                            int amount) {
-        int moved = 0;
-        for (int i = 0; i < from.size() && moved < amount; i++) {
-            ItemStack stack = from.getStack(i);
-            if (stack.isEmpty() || !match.test(stack)) {
-                continue;
-            }
-            int toMove = Math.min(stack.getCount(), amount - moved);
-            ItemStack split = stack.split(toMove);
-            if (split.isEmpty()) {
-                continue;
-            }
-            ItemStack remainder = insertIntoInventory(to, split);
-            if (!remainder.isEmpty()) {
-                // Put back what didn't fit.
-                stack.increment(remainder.getCount());
-                from.setStack(i, stack);
-                break;
-            }
-            moved += toMove;
-        }
-        return moved;
-    }
-
-    private static int countMatchingStacks(ChestBlockEntity chest,
-                                           Predicate<ItemStack> match,
-                                           int limit) {
-        if (chest == null || match == null || limit <= 0) {
-            return 0;
-        }
-        int total = 0;
-        for (int i = 0; i < chest.size() && total < limit; i++) {
-            ItemStack stack = chest.getStack(i);
-            if (stack.isEmpty() || !match.test(stack)) {
-                continue;
-            }
-            total += stack.getCount();
-        }
-        return total;
     }
 
     private static ItemStack insertIntoInventory(Inventory inv, ItemStack stack) {
