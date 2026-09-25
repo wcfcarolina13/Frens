@@ -418,6 +418,42 @@ class SupplyRequestLedgerTest {
         assertEquals(OpenStatus.OPENED, ledger.open(fp(OWNER, BOT, CHEST, TORCH, 4), PLENTY, 4).status());
     }
 
+    @Test
+    void revokeAllWithdrawsEveryPermissionAndGrantOfThatOwnerOnly() {
+        ChestKey netherChest = new ChestKey(NETHER, 10, 64, 10);
+        ChestKey thirdChest = new ChestKey(WORLD, 30, 64, 30);
+        UUID mine = openOk(cobble(8));
+        ledger.respond(mine, OWNER, false, Choice.ALWAYS_COMMON);
+        ledger.restoreAlways(OWNER, netherChest);
+        UUID theirs = openOk(fp(OTHER_OWNER, OTHER_OWNERS_BOT, CHEST, COBBLE, 8));
+        ledger.respond(theirs, OTHER_OWNER, false, Choice.ALWAYS_COMMON);
+        UUID waiting = openOk(fp(OWNER, BOT_2, thirdChest, COBBLE, 8));
+
+        assertEquals(2, ledger.revokeAllAlways(OWNER));
+        assertFalse(ledger.hasAlways(OWNER, CHEST));
+        assertFalse(ledger.hasAlways(OWNER, netherChest));
+        assertEquals(Set.of(new AlwaysScope(OTHER_OWNER, CHEST)), ledger.alwaysSnapshot());
+        // The unspent grant from the owner's "always" answer is gone too; the other owner's stays.
+        assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
+        assertEquals(ConsumeStatus.ONCE,
+                ledger.consumeGrant(fp(OTHER_OWNER, OTHER_OWNERS_BOT, CHEST, COBBLE, 8), PLENTY, 8).status());
+        // Not clearOwner: the waiting prompt and the bots' cooldowns are untouched.
+        assertTrue(ledger.hasPending(BOT_2));
+        assertEquals(OpenStatus.PROMPT_COOLDOWN, ledger.open(fp(OWNER, BOT, thirdChest, TORCH, 4), PLENTY, 4).status());
+        assertEquals(ResponseStatus.GRANTED_ONCE, ledger.respond(waiting, OWNER, false, Choice.ALLOW_ONCE).status());
+
+        assertEquals(0, ledger.revokeAllAlways(OWNER));
+        assertEquals(0, ledger.revokeAllAlways(null));
+    }
+
+    @Test
+    void revokeAllWithNoPermissionStillWithdrawsUnspentGrants() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        assertEquals(0, ledger.revokeAllAlways(OWNER));
+        assertEquals(ConsumeStatus.NO_GRANT, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
+    }
+
     // ── always: persistence seams ────────────────────────────────────────────────────────────
 
     @Test

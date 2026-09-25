@@ -91,6 +91,18 @@ class SupplyChestRulesTest {
     }
 
     @Test
+    void aHalfWithOnlyOwnerlessRecordsReadsAsUnrecorded() {
+        // The registry leaves owner-less (pre-1.1.219) records out, so such a half arrives empty.
+        assertEquals(Ownership.PLAYER_STORAGE, SupplyChestRules.ownership(OWNER, recs(), null));
+        assertEquals(Ownership.PLAYER_STORAGE, SupplyChestRules.ownership(OWNER, recs(), recs()));
+        // Next to an owned half it is a mixed chest, which fails safe.
+        assertEquals(Ownership.DENY_MIXED, SupplyChestRules.ownership(OWNER, recs(), recs(O)));
+        assertEquals(Ownership.DENY_FOREIGN, SupplyChestRules.ownership(OWNER, recs(), recs(F)));
+        // The failed-lookup sentinel is still a null element, and still denies.
+        assertEquals(Ownership.DENY_UNKNOWN, SupplyChestRules.ownership(OWNER, recs(), recs((String) null)));
+    }
+
+    @Test
     void aBotWithoutAnOwnerOrAMissingLookupIsUnknown() {
         assertEquals(Ownership.DENY_UNKNOWN, SupplyChestRules.ownership(null, recs(), null));
         assertEquals(Ownership.DENY_UNKNOWN, SupplyChestRules.ownership(null, recs(O), recs(O)));
@@ -502,6 +514,44 @@ class SupplyChestRulesTest {
     }
 
     @Test
+    void theEntryCountIsTheRawArrayLengthReadableOrNot() {
+        assertEquals(0, SupplyChestRules.alwaysEntryCount(SupplyChestRules.encodeAlways(List.of())));
+        assertEquals(4, SupplyChestRules.alwaysEntryCount(SupplyChestRules.encodeAlways(sampleScopes(SAVE))));
+        String junk = "{\"version\":1,\"always\":[{\"junk\":1}]}";
+        assertEquals(1, SupplyChestRules.alwaysEntryCount(junk));
+        assertEquals(List.of(), SupplyChestRules.decodeAlways(junk, SAVE));
+        for (String json : Arrays.asList(null, "", "  ", "not json", "{", "[]", "{}", "\"text\"", "{\"version\":1}",
+                "{\"always\":5}", "{\"always\":{}}", "{\"always\":null}", "[{\"always\":[]}]")) {
+            assertNull(SupplyChestRules.alwaysEntryCount(json), String.valueOf(json));
+        }
+    }
+
+    @Test
+    void anEmptyCurrentFileLoadsQuietly() {
+        // What revoking the last permission writes: version 1, an empty array, nothing restored.
+        String empty = SupplyChestRules.encodeAlways(List.of());
+        assertFalse(SupplyChestRules.alwaysLoadWarns(SupplyChestRules.alwaysFileVersion(empty),
+                SupplyChestRules.alwaysEntryCount(empty), SupplyChestRules.decodeAlways(empty, SAVE).size()));
+        String full = SupplyChestRules.encodeAlways(sampleScopes(SAVE));
+        assertFalse(SupplyChestRules.alwaysLoadWarns(SupplyChestRules.alwaysFileVersion(full),
+                SupplyChestRules.alwaysEntryCount(full), SupplyChestRules.decodeAlways(full, SAVE).size()));
+    }
+
+    @Test
+    void aBadVersionAnUnreadableArrayOrALostEntryWarns() {
+        String junk = "{\"version\":1,\"always\":[{\"junk\":1}]}";
+        assertTrue(SupplyChestRules.alwaysLoadWarns(SupplyChestRules.alwaysFileVersion(junk),
+                SupplyChestRules.alwaysEntryCount(junk), SupplyChestRules.decodeAlways(junk, SAVE).size()));
+        int v = SupplyChestRules.ALWAYS_FORMAT_VERSION;
+        assertTrue(SupplyChestRules.alwaysLoadWarns(null, 0, 0), "missing version");
+        assertTrue(SupplyChestRules.alwaysLoadWarns(v + 1, 0, 0), "newer version");
+        assertTrue(SupplyChestRules.alwaysLoadWarns(v, null, 0), "no readable array");
+        assertTrue(SupplyChestRules.alwaysLoadWarns(v, 3, 2), "one entry lost");
+        assertFalse(SupplyChestRules.alwaysLoadWarns(v, 3, 3));
+        assertFalse(SupplyChestRules.alwaysLoadWarns(v, 0, 0));
+    }
+
+    @Test
     void aSavedSnapshotRestoresIntoAFreshLedger() {
         long[] now = {0L};
         long[] ids = {0L};
@@ -618,6 +668,11 @@ class SupplyChestRulesTest {
     @Test
     void revokeCommandMatchesTheRegisteredLiterals() {
         assertEquals("/frens supply revoke 10 64 -5", SupplyChestRules.revokeCommand(10, 64, -5));
+    }
+
+    @Test
+    void revokeAllCommandMatchesTheRegisteredLiterals() {
+        assertEquals("/frens supply revoke all", SupplyChestRules.revokeAllCommand());
     }
 
     @Test

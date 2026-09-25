@@ -22,11 +22,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * {@code /frens supply answer <requestId> once|always|no} and {@code /frens supply revoke <x> <y> <z>}.
+ * {@code /frens supply answer <requestId> once|always|no}, {@code /frens supply revoke <x> <y> <z>}
+ * and {@code /frens supply revoke all}.
  *
  * <p>A root of its own because {@code /bot} is op-only and a bot's owner need not be an operator.
  * Players only; there is no operator requirement. Authority is the request id plus the ledger's
- * owner check for {@code answer}, and the caller's own UUID for {@code revoke} (a player can only
+ * owner check for {@code answer}, and the caller's own UUID for both revokes (a player can only
  * withdraw permissions they gave). This class never opens a request or moves an item.
  */
 public final class SupplyCommands {
@@ -53,6 +54,8 @@ public final class SupplyCommands {
                                                                 builder))
                                                         .executes(SupplyCommands::answer))))
                                 .then(CommandManager.literal(SupplyChestRules.COMMAND_REVOKE)
+                                        .then(CommandManager.literal(SupplyChestRules.COMMAND_REVOKE_ALL)
+                                                .executes(SupplyCommands::revokeAll))
                                         .then(CommandManager.argument(ARG_POS, BlockPosArgumentType.blockPos())
                                                 .executes(SupplyCommands::revoke))))));
     }
@@ -107,6 +110,28 @@ public final class SupplyCommands {
         }
         source.sendFeedback(() -> Text.literal(
                 "Nothing to revoke: you hadn't allowed \"always\" for the chest at " + where + "."), false);
+        return 0;
+    }
+
+    private static int revokeAll(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getPlayer();
+        if (player == null) {
+            source.sendError(Text.literal("Only a player can revoke a supply permission."));
+            return 0;
+        }
+        if (!SupplyRequestService.isRunning()) {
+            source.sendError(Text.literal("Companion supplies aren't ready yet. Try again in a moment."));
+            return 0;
+        }
+        int removed = SupplyRequestService.revokeAll(player);
+        if (removed > 0) {
+            source.sendFeedback(() -> Text.literal("Revoked " + removed
+                    + " standing permission(s): your companions will ask again before taking from any chest."), false);
+            return removed;
+        }
+        source.sendFeedback(() -> Text.literal(
+                "Nothing to revoke: you hadn't allowed \"always\" for any chest."), false);
         return 0;
     }
 }

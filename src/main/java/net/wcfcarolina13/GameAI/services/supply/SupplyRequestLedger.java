@@ -149,7 +149,7 @@ public final class SupplyRequestLedger {
      * A standing "always" permission: common supplies from {@code chest} for any bot of
      * {@code owner}. Public so the adapter can persist {@link #alwaysSnapshot()} and seed it back
      * through {@link #restoreAlways}; this is the only structure those, {@link #respond},
-     * {@link #revokeAlways} and {@link #clearOwner} read and write.
+     * {@link #revokeAlways}, {@link #revokeAllAlways} and {@link #clearOwner} read and write.
      */
     public record AlwaysScope(UUID owner, ChestKey chest) {
         public AlwaysScope {
@@ -358,6 +358,25 @@ public final class SupplyRequestLedger {
         boolean removed = always.remove(new AlwaysScope(owner, chest));
         grants.keySet().removeIf(t -> owner.equals(t.owner()) && chest.equals(t.chest()));
         return removed;
+    }
+
+    /**
+     * Withdraws every standing permission {@code owner} gave, at every chest, and every unspent
+     * grant that owner's answers left anywhere, so nothing more leaves any of their chests without
+     * a new prompt. Unlike {@link #clearOwner}, a prompt still waiting for the owner stays open
+     * and every cooldown stays as it was: this undoes permissions, it does not forget the bots'
+     * recent asking.
+     *
+     * @return how many standing permissions were removed (unspent grants are not counted)
+     */
+    public synchronized int revokeAllAlways(UUID owner) {
+        if (owner == null) {
+            return 0;
+        }
+        int before = always.size();
+        always.removeIf(s -> owner.equals(s.owner()));
+        grants.keySet().removeIf(t -> owner.equals(t.owner()));
+        return before - always.size();
     }
 
     /** True while {@code bot} has an unexpired prompt waiting. */

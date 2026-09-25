@@ -71,9 +71,11 @@ public final class BotChestRegistryService {
         public long lastVerifiedAtMs;
         /**
          * Owner of the bot that placed this chest, as {@link UUID#toString()}, stamped when the
-         * chest is (re-)registered. {@code null} = unknown: every record written before 1.1.219
-         * (Gson leaves the absent field null) and any chest placed by an un-owned bot. Never
+         * chest is (re-)registered. {@code null} for every record written before 1.1.219 (Gson
+         * leaves the absent field null) and for any chest placed by an un-owned bot. Never
          * backfilled from the bot's current config owner — that can change after placement.
+         * {@link #recordedOwnersAt} skips a record whose owner is {@code null}, so for companion
+         * supplies such a chest reads as if no bot had recorded it (the player's own storage).
          */
         public String ownerUuid;
 
@@ -232,15 +234,17 @@ public final class BotChestRegistryService {
     }
 
     /**
-     * The recorded owner of every record, under any bot alias, at exactly {@code pos} in
+     * The recorded owner of every owned record, under any bot alias, at exactly {@code pos} in
      * {@code world} — destroyed records included, since re-placing a chest revives them. One
-     * element per record; a {@code null} element is a record whose owner is unknown. An empty list
-     * means no bot ever recorded a chest there. Input for {@code SupplyChestRules.ownership}.
-     * The registry is keyed by level name and dimension, not by save, so a same-named save's
-     * records at this position are included too.
+     * element per record. A record with no owner ({@link ChestRecord#ownerUuid} {@code null}:
+     * written before 1.1.219, or placed by an un-owned bot) is skipped, so a position holding only
+     * such records returns an empty list, the same as no record at all. Input for
+     * {@code SupplyChestRules.ownership}. The registry is keyed by level name and dimension, not
+     * by save, so a same-named save's records at this position are included too.
      *
      * <p>A {@code null} world or position, or a world without a server, cannot be looked up and
-     * returns a single unknown owner, which that rule denies.
+     * returns a single {@code null} element, which that rule denies. Records never yield a
+     * {@code null} element, so it always means a failed lookup.
      */
     public static List<String> recordedOwnersAt(ServerWorld world, BlockPos pos) {
         MinecraftServer server = world == null ? null : world.getServer();
@@ -260,7 +264,9 @@ public final class BotChestRegistryService {
                     continue;
                 }
                 for (ChestRecord r : records) {
-                    if (r != null && r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
+                    // An owner-less record reads as no record; null stays reserved for the sentinel.
+                    if (r != null && r.ownerUuid != null
+                            && r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
                         owners.add(r.ownerUuid);
                     }
                 }

@@ -51,13 +51,20 @@ public final class SupplyChestRules {
      * Only {@link #PLAYER_STORAGE} and {@link #OWNER_STORAGE} may lead to a prompt.
      */
     public enum Ownership {
-        /** No bot ever recorded placing either half: the player's own storage. */
+        /**
+         * No owned record on either half: the player's own storage. Records without an owner
+         * (written before 1.1.219, or placed by an un-owned bot) are left out by the registry, so
+         * a chest holding only those lands here too.
+         */
         PLAYER_STORAGE,
         /** Every record on every half names the bot's owner. Still prompts. */
         OWNER_STORAGE,
         /** Some record names a different owner. */
         DENY_FOREIGN,
-        /** Some record has no readable owner (every record written before 1.1.219), or the bot has no owner. */
+        /**
+         * Some record's owner is blank or not a UUID, the registry lookup failed (its {@code null}
+         * sentinel), or the bot has no owner.
+         */
         DENY_UNKNOWN,
         /** A double chest where one half has records and the other has none. */
         DENY_MIXED
@@ -66,10 +73,11 @@ public final class SupplyChestRules {
     /**
      * Classifies a chest from the owner strings recorded on its halves.
      *
-     * <p>Each list holds one element per record at that half (from
-     * {@code BotChestRegistryService.recordedOwnersAt}); a {@code null}, blank or unparseable element
-     * is a record whose owner is unknown, and an empty list means no record. {@code halfBOrNull} is
-     * {@code null} for a single chest.
+     * <p>Each list holds one element per owned record at that half (from
+     * {@code BotChestRegistryService.recordedOwnersAt}, which leaves owner-less records out); a
+     * blank or unparseable element is a record whose owner cannot be read, a {@code null} element
+     * is the registry's failed-lookup sentinel, and both deny. An empty list means no owned
+     * record. {@code halfBOrNull} is {@code null} for a single chest.
      *
      * <p>Precedence, first match wins: {@code botOwner == null} or {@code halfA == null} →
      * {@link Ownership#DENY_UNKNOWN} (for a missing owner the request itself is already
@@ -482,6 +490,42 @@ public final class SupplyChestRules {
         }
     }
 
+    /**
+     * How many entries a saved ALWAYS file's {@code "always"} array holds, readable or not, or
+     * {@code null} when the text is not a JSON object or has no {@code "always"} array. Never
+     * throws. Compared with what {@link #decodeAlways} returned, it tells a deliberately empty
+     * file (every permission revoked) from one whose entries could not be read.
+     */
+    public static Integer alwaysEntryCount(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonElement root = JsonParser.parseString(json);
+            if (!root.isJsonObject()) {
+                return null;
+            }
+            JsonElement always = root.getAsJsonObject().get("always");
+            return always != null && always.isJsonArray() ? always.getAsJsonArray().size() : null;
+        } catch (RuntimeException malformed) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether loading a saved ALWAYS file deserves a WARN: its version is missing or not
+     * {@link #ALWAYS_FORMAT_VERSION}, its entry array is missing or unreadable, or fewer entries
+     * were restored than it holds. A current-version file with an empty array — what revoking the
+     * last permission writes — is quiet.
+     *
+     * @param version    {@link #alwaysFileVersion} of the file
+     * @param entryCount {@link #alwaysEntryCount} of the file
+     * @param restored   how many permissions {@link #decodeAlways} gave back
+     */
+    public static boolean alwaysLoadWarns(Integer version, Integer entryCount, int restored) {
+        return version == null || version != ALWAYS_FORMAT_VERSION || entryCount == null || restored < entryCount;
+    }
+
     // ── Prompt and command text ──────────────────────────────────────────────────────────────
 
     /** Root literal of the supplies commands; verified free (no other {@code /frens} root exists). */
@@ -489,6 +533,8 @@ public final class SupplyChestRules {
     public static final String COMMAND_SUPPLY = "supply";
     public static final String COMMAND_ANSWER = "answer";
     public static final String COMMAND_REVOKE = "revoke";
+    /** The literal after {@link #COMMAND_REVOKE} that withdraws every standing permission at once. */
+    public static final String COMMAND_REVOKE_ALL = "all";
 
     /** The question shown to the owner, before the clickable choices. */
     public static String promptText(String botName, int qty, String itemName, int x, int y, int z) {
@@ -517,6 +563,11 @@ public final class SupplyChestRules {
     /** Exactly {@code /frens supply revoke <x> <y> <z>}, for telling the owner how to undo "always". */
     public static String revokeCommand(int x, int y, int z) {
         return "/" + COMMAND_ROOT + " " + COMMAND_SUPPLY + " " + COMMAND_REVOKE + " " + x + " " + y + " " + z;
+    }
+
+    /** Exactly {@code /frens supply revoke all}: withdraws every standing permission the caller gave. */
+    public static String revokeAllCommand() {
+        return "/" + COMMAND_ROOT + " " + COMMAND_SUPPLY + " " + COMMAND_REVOKE + " " + COMMAND_REVOKE_ALL;
     }
 
     /** The choice for {@code once}, {@code always} or {@code no}, ignoring case and surrounding space. */

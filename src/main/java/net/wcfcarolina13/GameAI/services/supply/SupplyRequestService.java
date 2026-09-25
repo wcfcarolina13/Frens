@@ -5,6 +5,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
 import net.minecraft.block.entity.BlockEntity;
@@ -33,6 +34,7 @@ import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.BotWorldStateService;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
+import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.Access;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.AccessFacts;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.SlotView;
@@ -81,8 +83,8 @@ import java.util.concurrent.TimeUnit;
  * production caller: no skill, service, tick hook or command reaches them, and
  * {@code SupplyDormancyTest} scans the source tree to keep it that way. They stay unwired until
  * Phase 3 has closed the existing automatic chest withdrawals. What is live now: loading and
- * saving the ALWAYS file, and {@link #answer} / {@link #revoke} behind {@code /frens supply},
- * which are inert while no request can be opened.
+ * saving the ALWAYS file, the once-a-second ledger sweep, and {@link #answer} / {@link #revoke} /
+ * {@link #revokeAll} behind {@code /frens supply}, which are inert while no request can be opened.
  *
  * <p><b>Threading.</b> Every public method except {@link #register()} and {@link #isRunning()}
  * must run on the server thread; called anywhere else it logs a WARN and returns its failure
@@ -101,6 +103,8 @@ public final class SupplyRequestService {
     private static final long WRITE_MAX_LATENCY_MS = 5_000L;
     /** How long SERVER_STOPPING waits for a write already in flight before giving up on it. */
     private static final long WRITER_STOP_WAIT_MS = 2_000L;
+    /** The housekeeping sweep runs on every tick divisible by this: once a second. */
+    private static final int SWEEP_INTERVAL_TICKS = 20;
 
     /** Component-map key for a component type missing from the registry; never allowlisted. */
     private static final String UNREGISTERED_COMPONENT = "frens:unregistered_component";
@@ -185,9 +189,10 @@ public final class SupplyRequestService {
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────────────────
 
-    /** Hooks server start and stop. Called once from mod init. */
+    /** Hooks server start, the housekeeping tick and stop. Called once from mod init. */
     public static void register() {
         ServerLifecycleEvents.SERVER_STARTED.register(SupplyRequestService::start);
+        ServerTickEvents.END_SERVER_TICK.register(SupplyRequestService::tick);
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> stop());
         ServerLifecycleEvents.SERVER_STOPPED.register(s -> {
             ledger = null;
@@ -200,6 +205,22 @@ public final class SupplyRequestService {
     /** True between server start and stop. */
     public static boolean isRunning() {
         return server != null && ledger != null;
+    }
+
+    /**
+     * Once a second: drops expired prompts, grants and cooldowns, so an ignored prompt closes on
+     * time even when nothing else touches the ledger. Housekeeping only — nobody is messaged; an
+     * owner who clicks a swept prompt reads "no longer open".
+     */
+    private static void tick(MinecraftServer ticking) {
+        if (ticking.getTicks() % SWEEP_INTERVAL_TICKS != 0) {
+            return;
+        }
+        SupplyRequestLedger book = ledger;
+        if (book == null || server != ticking || !ticking.isRunning() || TaskService.isServerStopping()) {
+            return;
+        }
+        book.sweep();
     }
 
     private static void start(MinecraftServer started) {
@@ -216,13 +237,17 @@ public final class SupplyRequestService {
                     restored++;
                 }
                 Integer version = SupplyChestRules.alwaysFileVersion(json);
-                if (restored == 0 || version == null || version != SupplyChestRules.ALWAYS_FORMAT_VERSION) {
+                Integer entries = SupplyChestRules.alwaysEntryCount(json);
+                // An empty array at the current version is what revoking the last permission
+                // writes, so it stays quiet; only a bad version, an unreadable array or entries
+                // that did not decode warn.
+                if (SupplyChestRules.alwaysLoadWarns(version, entries, restored)) {
                     // One line, counts and version only: the file's contents are never logged.
                     // Whatever did decode stays restored; the next change rewrites the file.
-                    LOGGER.warn("[supply] {} gave {} standing permission(s), format version {} (expected {});"
+                    LOGGER.warn("[supply] {} gave {} of {} standing permission(s), format version {} (expected {});"
                                     + " anything unreadable is dropped at the next write",
-                            file, restored, version == null ? "missing" : version,
-                            SupplyChestRules.ALWAYS_FORMAT_VERSION);
+                            file, restored, entries == null ? "unreadable" : entries,
+                            version == null ? "missing" : version, SupplyChestRules.ALWAYS_FORMAT_VERSION);
                 }
             } catch (IOException | RuntimeException e) {
                 LOGGER.warn("[supply] could not read {}; starting with no standing permissions: {}",
@@ -452,11 +477,13 @@ public final class SupplyRequestService {
         };
     }
 
+    /** How to undo an "always": this chest's revoke command, then the one for every chest. */
     private static String revokeHint(RequestFingerprint fp) {
         ChestKey chest = fp == null ? null : fp.chest();
-        return chest == null ? "/" + SupplyChestRules.COMMAND_ROOT + " " + SupplyChestRules.COMMAND_SUPPLY
+        String thisChest = chest == null ? "/" + SupplyChestRules.COMMAND_ROOT + " " + SupplyChestRules.COMMAND_SUPPLY
                 + " " + SupplyChestRules.COMMAND_REVOKE
                 : SupplyChestRules.revokeCommand(chest.x(), chest.y(), chest.z());
+        return thisChest + ", or " + SupplyChestRules.revokeAllCommand() + " for every chest";
     }
 
     // ── Transfer ─────────────────────────────────────────────────────────────────────────────
@@ -597,6 +624,30 @@ public final class SupplyRequestService {
             markDirty();
         }
         LOGGER.info("[supply] revoke owner={} chest={} removed={}", nameOf(owner), posText(pos), removed);
+        return removed;
+    }
+
+    /**
+     * Withdraws every standing permission {@code owner} gave in this save, whatever the chest or
+     * dimension, and every unspent grant their answers left ({@link SupplyRequestLedger#revokeAllAlways}).
+     * A prompt still waiting for the owner stays open.
+     *
+     * @return how many standing permissions were removed; {@code 0} also when the service is not
+     *         running or this is not the server thread
+     */
+    public static int revokeAll(ServerPlayerEntity owner) {
+        if (offServerThread("revokeAll")) {
+            return 0;
+        }
+        SupplyRequestLedger book = ledger;
+        if (book == null || server == null || owner == null) {
+            return 0;
+        }
+        int removed = book.revokeAllAlways(owner.getUuid());
+        if (removed > 0) {
+            markDirty();
+        }
+        LOGGER.info("[supply] revoke-all owner={} removed={}", nameOf(owner), removed);
         return removed;
     }
 
