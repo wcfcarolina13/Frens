@@ -105,20 +105,43 @@ class MutualAidChestFoodPolicyTest {
         }
     }
 
+    /** The common per-scope rule, as this site spells it (with room for one piece). */
+    private static final Map<Scope, Next> REFUSAL_NEXT = new EnumMap<>(Map.of(
+            Scope.ITEM, Next.NEXT_ITEM,
+            Scope.CHEST, Next.NEXT_CHEST,
+            Scope.TARGET, Next.NEXT_TARGET,
+            Scope.OWNER_ABSENT, Next.OWNER_AWAY,
+            Scope.BOT, Next.PAUSE,
+            Scope.BUSY, Next.STOP,
+            Scope.NONE, Next.PAUSE)); // a refusal never carries NONE; if one did, fail closed
+
     @Test
     void everyRefusalScopeFollowsTheSharedSiteRule() {
-        Map<Scope, Next> expected = new EnumMap<>(Scope.class);
-        expected.put(Scope.ITEM, Next.NEXT_ITEM);
-        expected.put(Scope.CHEST, Next.NEXT_CHEST);
-        expected.put(Scope.TARGET, Next.NEXT_CHEST);
-        expected.put(Scope.BOT, Next.PAUSE);
-        expected.put(Scope.OWNER_ABSENT, Next.DEFER);
-        expected.put(Scope.BUSY, Next.NEXT_TARGET);
-        expected.put(Scope.NONE, Next.PAUSE); // a refusal never carries NONE; if one did, fail closed
-        assertEquals(EnumSet.allOf(Scope.class), expected.keySet(), "every Scope needs an expectation");
+        assertEquals(EnumSet.allOf(Scope.class), REFUSAL_NEXT.keySet(), "every Scope needs an expectation");
         for (Scope scope : Scope.values()) {
-            assertEquals(expected.get(scope), MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, scope, true, false),
+            assertEquals(REFUSAL_NEXT.get(scope), MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, scope, true, false),
                     scope.name());
+        }
+    }
+
+    @Test
+    void everyKindAndScopeIsDecidedOnce() {
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : Scope.values()) {
+                for (boolean room : BOTH) {
+                    for (boolean made : BOTH) {
+                        String at = kind + "/" + scope + " room=" + room + " made=" + made;
+                        Next expected = switch (kind) {
+                            case MOVED -> Next.TAKEN;
+                            case WAITING -> Next.WAIT;
+                            case READY -> Next.STOP;
+                            case REFUSED -> scope == Scope.BUSY && !room && !made
+                                    ? Next.MAKE_ROOM_AND_RETRY : REFUSAL_NEXT.get(scope);
+                        };
+                        assertEquals(expected, MutualAidChestFoodPolicy.afterWithdraw(kind, scope, room, made), at);
+                    }
+                }
+            }
         }
     }
 
@@ -134,16 +157,18 @@ class MutualAidChestFoodPolicyTest {
 
     @Test
     void noRoomMakesRoomOnceThenEndsTheAttempt() {
+        // NO_ROOM is busy: the ticket is kept, so room is made once and the same food asked again.
         assertEquals(Next.MAKE_ROOM_AND_RETRY,
                 MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, false));
         // Room was made and still nothing fits: asking another chest could only open a prompt it cannot redeem.
         assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, true));
-        // With room, a transient refusal only leaves this target, made room or not.
-        assertEquals(Next.NEXT_TARGET, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, true));
+        // Busy with room (another prompt open, say): stop; the next attempt after the throttle.
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, false));
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, true));
     }
 
     @Test
-    void roomOnlyMattersForATransientRefusalAndRoomIsMadeAtMostOnce() {
+    void roomOnlyMattersForABusyRefusalAndRoomIsMadeAtMostOnce() {
         for (Kind kind : Kind.values()) {
             for (Scope scope : Scope.values()) {
                 Next reference = MutualAidChestFoodPolicy.afterWithdraw(kind, scope, true, false);
@@ -167,19 +192,42 @@ class MutualAidChestFoodPolicyTest {
     }
 
     @Test
-    void onlyTheBotAndOwnerAbsentScopesEndThePassEarly() {
-        Set<Next> goOn = EnumSet.of(Next.NEXT_ITEM, Next.NEXT_TARGET, Next.NEXT_CHEST);
+    void onlyTheOwnersDecisionAndABusyAnswerEndTheAttemptEarly() {
+        Set<Next> goOn = EnumSet.of(Next.NEXT_ITEM, Next.NEXT_TARGET, Next.NEXT_CHEST, Next.OWNER_AWAY);
         for (Scope scope : Scope.values()) {
             Next next = MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, scope, true, false);
-            boolean endsThePass = scope == Scope.BOT || scope == Scope.OWNER_ABSENT || scope == Scope.NONE;
-            assertEquals(!endsThePass, goOn.contains(next), scope.name());
+            boolean endsTheAttempt = scope == Scope.BOT || scope == Scope.BUSY || scope == Scope.NONE;
+            assertEquals(!endsTheAttempt, goOn.contains(next), scope.name());
+        }
+        // FD concern 1: the owner away skips only that chest, so a farther "always" chest still serves.
+        assertEquals(Next.OWNER_AWAY, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.OWNER_ABSENT, true, false));
+        // A food at its reserve in this chest leaves the chest's other foods to ask.
+        assertEquals(Next.NEXT_TARGET, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.TARGET, true, false));
+    }
+
+    @Test
+    void anAttemptThatFoundTheOwnerAwayAndNothingElseDefersAFlatMinute() {
+        assertEquals(Next.DEFER, MutualAidChestFoodPolicy.endOfAttempt(true));
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.endOfAttempt(false), "nothing found: the usual throttle");
+        assertEquals(MutualAidChestFoodPolicy.OWNER_AWAY_DEFER_TICKS,
+                MutualAidChestFoodPolicy.probeDelayTicks(MutualAidChestFoodPolicy.endOfAttempt(true)));
+        assertEquals(MutualAidChestFoodPolicy.THROTTLE_TICKS,
+                MutualAidChestFoodPolicy.probeDelayTicks(MutualAidChestFoodPolicy.endOfAttempt(false)));
+        // No single answer defers on its own: only the end of an attempt that tried every chest.
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : Scope.values()) {
+                for (boolean room : BOTH) {
+                    assertNotEquals(Next.DEFER, MutualAidChestFoodPolicy.afterWithdraw(kind, scope, room, false),
+                            kind + "/" + scope);
+                }
+            }
         }
     }
 
     // ── probeDelayTicks ──────────────────────────────────────────────────────────────────────
 
     @Test
-    void aBotOrOwnerAbsentRefusalHoldsChestsOffSixtySecondsAndEverythingElseKeepsTheThrottle() {
+    void onlyTheOwnersDecisionHoldsChestsOffSixtySecondsPerAnswerAndEverythingElseKeepsTheThrottle() {
         assertEquals(20L * 8L, MutualAidChestFoodPolicy.THROTTLE_TICKS);
         assertEquals(20L * 60L, MutualAidChestFoodPolicy.BOT_PAUSE_TICKS);
         assertEquals(20L * 60L, MutualAidChestFoodPolicy.OWNER_AWAY_DEFER_TICKS);
@@ -190,11 +238,12 @@ class MutualAidChestFoodPolicyTest {
             assertEquals(expected, MutualAidChestFoodPolicy.probeDelayTicks(next), next.name());
         }
         assertEquals(MutualAidChestFoodPolicy.THROTTLE_TICKS, MutualAidChestFoodPolicy.probeDelayTicks(null));
-        // Per scope, end to end: an ignored or refused prompt, a cooldown or another prompt open waits a minute.
+        // Per scope, end to end: only the owner's decision waits a minute; a busy answer (FD concern 2:
+        // another prompt open) keeps the 8 s throttle.
         for (Scope scope : Scope.values()) {
             long delay = MutualAidChestFoodPolicy.probeDelayTicks(
                     MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, scope, true, false));
-            boolean held = scope == Scope.BOT || scope == Scope.OWNER_ABSENT || scope == Scope.NONE;
+            boolean held = scope == Scope.BOT || scope == Scope.NONE;
             assertEquals(held ? 20L * 60L : MutualAidChestFoodPolicy.THROTTLE_TICKS, delay, scope.name());
         }
     }

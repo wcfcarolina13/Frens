@@ -116,8 +116,9 @@ public final class CraftingHelper {
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_CRAFT_COOLDOWN_MS = 60_000L;
 
-    // Chest pulls (withdrawFromNearbyChests). A pull that met a refusal and got nothing pauses that
-    // material for the bot (CraftChestPullPolicy.PAUSE_MS), keyed "<bot uuid>|<material>".
+    // Chest pulls (withdrawFromNearbyChests). A pull the owner's decision ended, or that found the
+    // owner away, and that got nothing and holds nothing pauses that material for the bot
+    // (CraftChestPullPolicy.shouldPause, PAUSE_MS), keyed "<bot uuid>|<material>".
     // Neither map is cleared at server stop (this class has no lifecycle hook): both are hints with
     // wall-clock deadlines — a pause ends after PAUSE_MS, a held ticket is forgotten after the
     // facade's ticket lifetime — and at most one entry per bot (per material for pauses).
@@ -3025,22 +3026,27 @@ public final class CraftingHelper {
 
         String purpose = "craft-" + material;
         int moved = 0;
-        boolean metRefusal = false;
+        boolean metOwnerDecision = false;
+        boolean ownerAwaySeen = false;
+        boolean stoppedBusy = false;
         boolean pendingSettled = false;
         PullCandidate waitingOn = null;
         List<ItemStack> neverGranted = new ArrayList<>();
         Set<BlockPos> skippedChests = new HashSet<>();
+        List<PullCandidate> skippedTargets = new ArrayList<>();
         for (PullCandidate candidate : candidates) {
             if (moved >= desired) {
                 break;
             }
-            if (skippedChests.contains(candidate.chestPos()) || containsSameItem(neverGranted, candidate.sample())) {
+            if (skippedChests.contains(candidate.chestPos()) || containsSameItem(neverGranted, candidate.sample())
+                    || isSkippedTarget(skippedTargets, candidate)) {
                 continue;
             }
             int want = desired - moved;
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(),
                     candidate.sample(), want, want, purpose, SupplyWithdrawals.WaitMode.NONE, null);
-            metRefusal |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+            metOwnerDecision |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+            ownerAwaySeen |= CraftChestPullPolicy.isOwnerAway(result.kind(), result.scope());
             CraftChestPullPolicy.Next next = CraftChestPullPolicy.afterAsk(result.kind(), result.scope(),
                     onServerThread);
             if (next == CraftChestPullPolicy.Next.WALK) {
@@ -3048,7 +3054,8 @@ public final class CraftingHelper {
                 moveNearBlock(bot, source, candidate.chestPos(), STATION_REACH_SQ);
                 result = SupplyWithdrawals.withdraw(bot, candidate.chestPos(), candidate.sample(), want, want,
                         purpose, SupplyWithdrawals.WaitMode.NONE, null);
-                metRefusal |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+                metOwnerDecision |= CraftChestPullPolicy.countsTowardPause(result.kind(), result.scope());
+                ownerAwaySeen |= CraftChestPullPolicy.isOwnerAway(result.kind(), result.scope());
                 next = CraftChestPullPolicy.afterWalk(result.kind(), result.scope());
             }
             if (result.kind() == SupplyWithdrawals.Kind.MOVED) {
@@ -3058,18 +3065,31 @@ public final class CraftingHelper {
                     && CraftChestPullPolicy.settlesHeldTicket(result.kind(), result.scope())) {
                 pendingSettled = true;
             }
-            if (next == CraftChestPullPolicy.Next.SKIP_ITEM) {
-                neverGranted.add(candidate.sample());
-            } else if (next == CraftChestPullPolicy.Next.SKIP_CHEST) {
-                // A double chest is one chest to the facade: its other half would answer the same.
-                skippedChests.add(candidate.chestPos());
-                if (candidate.otherHalf() != null) {
-                    skippedChests.add(candidate.otherHalf());
+            boolean endsPull = false;
+            switch (next) {
+                case SKIP_ITEM -> neverGranted.add(candidate.sample());
+                case SKIP_CHEST, OWNER_AWAY -> {
+                    // A double chest is one chest to the facade: its other half would answer the same.
+                    skippedChests.add(candidate.chestPos());
+                    if (candidate.otherHalf() != null) {
+                        skippedChests.add(candidate.otherHalf());
+                    }
                 }
-            } else if (next == CraftChestPullPolicy.Next.HOLD) {
-                waitingOn = candidate;
-                break;
-            } else if (next == CraftChestPullPolicy.Next.STOP) {
+                // This item in this chest (either half: one grant covers both); its other items are still asked.
+                case SKIP_TARGET -> skippedTargets.add(candidate);
+                case HOLD -> {
+                    waitingOn = candidate;
+                    endsPull = true;
+                }
+                case BUSY -> {
+                    stoppedBusy = true;
+                    endsPull = true;
+                }
+                case STOP -> endsPull = true;
+                case NEXT, WALK -> {
+                }
+            }
+            if (endsPull) {
                 break;
             }
         }
@@ -3083,10 +3103,10 @@ public final class CraftingHelper {
             CHEST_PULL_PENDING.remove(botId, pending);
         }
         // A ticket of this material still open (held now, not listed this time, or only hit by a
-        // transient failure) must stay free for the next pull to redeem: no pause over it.
+        // busy answer) must stay free for the next pull to redeem: no pause over it.
         PendingPull held = CHEST_PULL_PENDING.get(botId);
         boolean holdingTicket = held != null && match.test(held.sample());
-        if (CraftChestPullPolicy.shouldPause(moved, holdingTicket, metRefusal)) {
+        if (CraftChestPullPolicy.shouldPause(moved, holdingTicket, stoppedBusy, metOwnerDecision, ownerAwaySeen)) {
             CHEST_PULL_PAUSED_UNTIL.put(pauseKey, System.currentTimeMillis() + CraftChestPullPolicy.PAUSE_MS);
         } else {
             CHEST_PULL_PAUSED_UNTIL.remove(pauseKey);
@@ -3166,6 +3186,17 @@ public final class CraftingHelper {
             }
         }
         return null;
+    }
+
+    /** Whether {@code candidate}'s item in its chest (either half) was refused for that chest alone this pull. */
+    private static boolean isSkippedTarget(List<PullCandidate> skippedTargets, PullCandidate candidate) {
+        for (PullCandidate skipped : skippedTargets) {
+            if (skipped.isInChest(candidate.chestPos())
+                    && ItemStack.areItemsAndComponentsEqual(skipped.sample(), candidate.sample())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether {@code candidate} is {@code pending}'s item in {@code pending}'s chest (either half: one ticket covers both). */

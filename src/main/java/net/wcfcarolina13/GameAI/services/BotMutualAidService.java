@@ -607,8 +607,11 @@ public final class BotMutualAidService {
      * Takes food from the first in-reach shared chest whose owner allows it, through the supply
      * facade (never walking, never waiting), then eats if the bot needs to. Chests only; a double
      * chest is read and asked as one. A food refused for itself is not asked again in any chest
-     * this attempt; a refusal that reaches the whole bot, or finds the owner away, ends the attempt
-     * and holds the bot off chests for {@link MutualAidChestFoodPolicy#probeDelayTicks}. Server thread.
+     * this attempt; a chest whose owner was found away is skipped (an "always" chest further on
+     * may still serve); the owner's decision or a busy answer ends the attempt. How long the bot
+     * then leaves chests alone is {@link MutualAidChestFoodPolicy#probeDelayTicks}; an attempt that
+     * found the owner away and got nothing else defers a flat minute
+     * ({@link MutualAidChestFoodPolicy#endOfAttempt}). Server thread.
      */
     private static boolean tryTakeFoodFromSharedChest(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null || bot.isRemoved()) {
@@ -619,6 +622,7 @@ public final class BotMutualAidService {
         boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD;
         Set<BlockPos> tried = new HashSet<>();
         List<ItemStack> refusedFoods = new ArrayList<>();
+        boolean ownerAwaySeen = false;
         for (BlockPos chestPos : MutualAidChestFoodPolicy.askedFirst(collectCandidateFoodChests(bot, world), asked)) {
             if (tried.contains(chestPos) || !BlockInteractionService.canInteract(bot, chestPos)) {
                 continue;
@@ -649,11 +653,17 @@ public final class BotMutualAidService {
                 HealingService.autoEat(bot);
                 return true;
             }
+            if (next == Next.OWNER_AWAY) {
+                // Both halves are already in tried; a chest further on may be one the owner allows always.
+                ownerAwaySeen = true;
+                continue;
+            }
             if (next != Next.NEXT_CHEST) {
                 holdOffChestFood(bot, world, next);
                 return false;
             }
         }
+        holdOffChestFood(bot, world, MutualAidChestFoodPolicy.endOfAttempt(ownerAwaySeen));
         return false;
     }
 
@@ -674,9 +684,10 @@ public final class BotMutualAidService {
     /**
      * Asks the chest for its cheapest food the policy could grant, then the next, until one is
      * taken, asked about, or refused for the whole chest (or the whole bot). A food refused for
-     * itself goes into {@code refusedFoods} and is skipped in every chest this attempt. Room is
-     * made in the bot only once the facade says an otherwise permitted take has none (it keeps the
-     * ticket for that), and then the same food is asked for once more.
+     * itself goes into {@code refusedFoods} and is skipped in every chest this attempt; a food this
+     * chest cannot grant is skipped here only. Room is made in the bot only once the facade says an
+     * otherwise permitted take has none (it keeps the ticket for that), and then the same food is
+     * asked for once more.
      */
     private static Next takeFoodFromChest(ServerPlayerEntity bot, ServerWorld world, BlockPos chestPos,
                                           Inventory chest, boolean starving, List<ItemStack> refusedFoods) {

@@ -747,7 +747,8 @@ public final class ChestStoreService {
      *   <li>On the server thread: chest blocks only ({@link SupplyPullPolicy#NOT_CHEST} for a
      *       barrel or anything else, never asked); each distinct stack {@code matcher} accepts, in
      *       slot order, is asked about with {@link SupplyWithdrawals.WaitMode#NONE} while the item
-     *       asked about is one the policy never grants ({@link SupplyPullPolicy#tryNextStack}).
+     *       asked about is one the policy never grants, or one this chest cannot grant (nothing
+     *       above its reserve): {@link SupplyPullPolicy#tryNextStack}.
      *       Nothing matching: {@link SupplyPullPolicy#NO_MATCH}. Already within reach and covered:
      *       taken now. The hop is {@link SupplyServerHop}'s: an ask the worker gave up on before it
      *       started never runs, so it cannot open a prompt nobody will walk for.</li>
@@ -762,7 +763,7 @@ public final class ChestStoreService {
      * carry a scope like the facade's: a missing argument, no server or a hop that did not run
      * are {@link Scope#BUSY}; {@link SupplyPullPolicy#NOT_CHEST},
      * {@link SupplyPullPolicy#NO_MATCH} and {@link SupplyPullPolicy#UNREACHABLE} are
-     * {@link Scope#CHEST}.
+     * {@link Scope#CHEST}, which no caller counts as a miss ("nothing found here").
      *
      * @param amount  how many to ask for (at least 1)
      * @param purpose a short label for the supply log, e.g. {@code "harvest-seeds"}

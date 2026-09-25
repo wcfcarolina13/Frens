@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -818,10 +819,12 @@ public final class ToolProvisionService {
      * supply facade ({@link #pullFromReachableChests}). Server tick; never walks, never waits.
      *
      * <p>One prompt per bot: the first item the owner is asked about ends the pull
-     * ({@link SupplyPullPolicy.Pull#halted()}), and so does any refusal that answers for every
-     * other item too (a cooldown, the owner refusing or ignoring a prompt, the owner being away).
-     * The caller reads the result: {@code waiting} means don't craft or cut a tree over the
-     * owner's pending answer, {@code missed} and {@code ownerAway} feed its ask backoff.
+     * ({@link SupplyPullPolicy.Pull#halted()}), and so does an answer that would hold for every
+     * other item too: the owner's decision (a cooldown, a No, an ignored prompt) or a busy one
+     * (another prompt open, no room). The owner being away skips only the chests it was found
+     * for, so a chest the owner granted "always" is still reached. The caller reads the result:
+     * {@link SupplyPullPolicy.Pull#held()} means don't craft or cut a tree yet, {@code missed}
+     * and {@code ownerAway} feed its ask backoff ({@link SupplyPullPolicy#idleBackoff}).
      */
     public static SupplyPullPolicy.Pull pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
                                                                                 ServerWorld world,
@@ -1278,10 +1281,10 @@ public final class ToolProvisionService {
      * {@link SupplyWithdrawals#withdraw} with {@link SupplyWithdrawals.WaitMode#NONE}, in
      * {@code order} (scan order when {@code null}). Never walks, never waits. Stops once
      * {@code desired} items moved, or on an answer that stops the pass ({@link SupplyPullPolicy#next}):
-     * a prompt now open, the owner away, or a refusal that answers for everything else too. An
-     * item the policy never grants is refused without a prompt and skipped everywhere; a chest
-     * that refuses is skipped, both halves of a double chest; a chest with a transient refusal is
-     * skipped for this pull only.
+     * a prompt now open or a grant waiting, a busy answer, or the owner's decision. Otherwise by
+     * the refusal's scope: an item the policy never grants is skipped everywhere; a chest that
+     * refuses, or whose owner was found away, is skipped, both halves of a double chest; an item
+     * this chest cannot grant is skipped in this chest only (both halves).
      *
      * <p>Server thread. Called off it (a skill such as {@code LeashToFenceSkill} reaching
      * {@link #ensureLead}), the whole pull runs in one bounded, abandon-safe
@@ -1314,12 +1317,14 @@ public final class ToolProvisionService {
         SupplyPullPolicy.Pull pull = SupplyPullPolicy.Pull.NOTHING;
         Set<BlockPos> skippedChests = new HashSet<>();
         List<ItemStack> skippedItems = new ArrayList<>();
+        Map<BlockPos, List<ItemStack>> skippedTargets = new HashMap<>();
         for (ChestItemGroup group : groups) {
             int left = desired - pull.moved();
             if (left <= 0) {
                 break;
             }
-            if (skippedChests.contains(group.pos) || containsSameItem(skippedItems, group.sample)) {
+            if (skippedChests.contains(group.pos) || containsSameItem(skippedItems, group.sample)
+                    || containsSameItem(skippedTargets.getOrDefault(group.pos, List.of()), group.sample)) {
                 continue;
             }
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, group.pos, group.sample, left, left,
@@ -1327,15 +1332,22 @@ public final class ToolProvisionService {
             pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.scope());
             switch (SupplyPullPolicy.next(result.kind(), result.scope())) {
                 case SKIP_ITEM -> skippedItems.add(group.sample);
-                case SKIP_CHEST -> {
+                case SKIP_CHEST, OWNER_AWAY -> {
                     skippedChests.add(group.pos);
                     BlockPos otherHalf = ChestStoreService.otherChestHalf(world, group.pos);
                     if (otherHalf != null) {
                         skippedChests.add(otherHalf);
                     }
                 }
-                case RETRY_LATER -> skippedChests.add(group.pos);
-                case STOP, OWNER_AWAY -> {
+                case SKIP_TARGET -> {
+                    // One grant covers both halves: the other half's stack of this item answers the same.
+                    skippedTargets.computeIfAbsent(group.pos, p -> new ArrayList<>()).add(group.sample);
+                    BlockPos otherHalf = ChestStoreService.otherChestHalf(world, group.pos);
+                    if (otherHalf != null) {
+                        skippedTargets.computeIfAbsent(otherHalf, p -> new ArrayList<>()).add(group.sample);
+                    }
+                }
+                case HOLD, BUSY, STOP -> {
                     return pull;
                 }
                 case NEXT -> {
@@ -1704,15 +1716,18 @@ public final class ToolProvisionService {
      * Runs on a worker thread; the registry snapshot refresh hops through {@link SupplyServerHop}.
      *
      * <p>Chests are tried best tool first, then nearest, until one gives a tool or an answer stops
-     * the search ({@link SupplyPullPolicy#next}); a chest that refuses is skipped with its other
-     * half. After a search that took nothing, this bot's {@link SupplyWithdrawals.WaitMode#NONE}
-     * searches pause ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s while a prompt is open, a
-     * flat 60 s while the owner is away, 60 s doubling to 10 min per miss), because Woodcut calls
-     * this before every log while it has no axe and would otherwise re-prompt the owner as fast as
-     * it mines. An {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search (Woodcut's start: the
-     * owner is there to answer) is never paused. A search looking again at a prompt still open
-     * leaves the registry file alone (nothing moved, so its snapshots are unchanged) and logs at
-     * DEBUG; the facade logged the ask once.
+     * the search ({@link SupplyPullPolicy#next}: a prompt open or a grant waiting, a busy answer,
+     * the owner's decision). Each ask reads the chest's merged view and tries its stacks in turn,
+     * so any other answer is final for that chest, and its other half is skipped. After a search
+     * that took nothing, this bot's {@link SupplyWithdrawals.WaitMode#NONE} searches pause
+     * ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s after a search that held, 60 s doubling to
+     * 10 min per miss, a flat 60 s when only the owner's absence stood in the way, none when
+     * nothing was found), because Woodcut calls this before every log while it has no axe and
+     * would otherwise re-prompt the owner as fast as it mines. An
+     * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search (Woodcut's start: the owner is
+     * there to answer) is never paused. A search looking again after one that held leaves the
+     * registry file alone (nothing moved, so its snapshots are unchanged) and logs at DEBUG; the
+     * facade logged the ask once.
      *
      * @param mode {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} to wait at the chest for the
      *             owner's answer (Woodcut's start only)
@@ -1816,10 +1831,10 @@ public final class ToolProvisionService {
         Set<BlockPos> skippedHalves = new HashSet<>();
         SupplyWithdrawals.Result last = null;
         for (ChestCandidate candidate : candidates) {
-            // A transient refusal (ABORTED among them) no longer ends the search, so a stop
-            // request ends it here, before the next chest is asked or walked to. Only a running
-            // task's stop: DurabilityFallbackService also searches outside any task, where a
-            // stale abort latch (a /bot come or follow) must not cancel a search nobody stopped.
+            // A stop request ends the search here, before the next chest is asked or walked to
+            // (an ABORTED answer already stops it as busy). Only a running task's stop:
+            // DurabilityFallbackService also searches outside any task, where a stale abort latch
+            // (a /bot come or follow) must not cancel a search nobody stopped.
             if (TaskService.hasActiveTask(botUuid) && TaskService.isAbortRequested(botUuid)) {
                 break;
             }
@@ -1840,12 +1855,11 @@ public final class ToolProvisionService {
             if (next.stopsPass()) {
                 break;
             }
-            if (next == SupplyPullPolicy.Next.SKIP_CHEST || next == SupplyPullPolicy.Next.SKIP_ITEM) {
-                // The ask read the chest's merged view, so its other half would answer the same.
-                BlockPos otherHalf = ChestStoreService.otherChestHalf(world, candidate.pos);
-                if (otherHalf != null) {
-                    skippedHalves.add(otherHalf);
-                }
+            // SKIP_ITEM, SKIP_CHEST, SKIP_TARGET or OWNER_AWAY: the ask read the chest's merged
+            // view and tried each matching stack, so its other half would answer the same.
+            BlockPos otherHalf = ChestStoreService.otherChestHalf(world, candidate.pos);
+            if (otherHalf != null) {
+                skippedHalves.add(otherHalf);
             }
             LOGGER.debug("Chest tool retrieval: chest at {} gave nothing for {} ({} {} {})",
                     candidate.pos.toShortString(), bot.getName().getString(), result.kind(), result.reason(),
@@ -1853,7 +1867,7 @@ public final class ToolProvisionService {
         }
 
         long pauseMs = recordToolSearch(botUuid, paused, search);
-        if (pauseMs > 0L && !(relook && search.waiting())) {
+        if (pauseMs > 0L && !(relook && search.held())) {
             LOGGER.info("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {} {}); next search in {} s",
                     bot.getName().getString(), candidates.size(),
                     last == null ? "-" : last.kind(), last == null ? "-" : last.reason(),
@@ -1871,9 +1885,9 @@ public final class ToolProvisionService {
      * Records how a chest tool search that took nothing ended and returns its pause
      * ({@link SupplyPullPolicy#retrievalPauseMs}); the miss count moves per
      * {@link SupplyPullPolicy#nextMissCount}. A search that sets no pause (it asked nothing, or
-     * met only transient trouble) leaves a pause still running as it was, for the unpaused
-     * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search, and clears the open-prompt mark,
-     * so the next search refreshes the registry snapshots again.
+     * found nothing) leaves a pause still running as it was, for the unpaused
+     * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search, and clears the held mark, so the
+     * next search refreshes the registry snapshots again.
      */
     private static long recordToolSearch(UUID botUuid, RetrievalPause prior, SupplyPullPolicy.Pull search) {
         int priorMisses = prior == null ? 0 : prior.misses();
@@ -1884,7 +1898,7 @@ public final class ToolProvisionService {
         if (untilMs <= nowMs && misses <= 0) {
             TOOL_RETRIEVAL_PAUSES.remove(botUuid);
         } else {
-            TOOL_RETRIEVAL_PAUSES.put(botUuid, new RetrievalPause(untilMs, misses, search.waiting()));
+            TOOL_RETRIEVAL_PAUSES.put(botUuid, new RetrievalPause(untilMs, misses, search.held()));
         }
         return pauseMs;
     }
@@ -1903,7 +1917,8 @@ public final class ToolProvisionService {
      *
      * @param untilMs        when its next {@link SupplyWithdrawals.WaitMode#NONE} search may ask again
      * @param misses         consecutive searches that asked and got nothing; a withdrawal resets it
-     * @param awaitingAnswer the last search ended on an open prompt: the next one only looks again
+     * @param awaitingAnswer the last search held (a prompt open, a grant waiting, a busy answer):
+     *                       the next one only looks again
      */
     private record RetrievalPause(long untilMs, int misses, boolean awaitingAnswer) {
     }

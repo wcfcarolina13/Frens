@@ -16,13 +16,21 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  * did not take from, all {@link Scope#CHEST}: {@link #NOT_CHEST}, {@link #NO_MATCH} and
  * {@link #UNREACHABLE}.
  *
- * <p>The per-scope rule, shared with {@code CraftChestPullPolicy} and
- * {@code MutualAidChestFoodPolicy}: {@link Scope#ITEM} skips the item everywhere this pass;
- * {@link Scope#CHEST} skips the chest (both halves of a double chest); {@link Scope#BOT} stops
- * the pass and the caller pauses; {@link Scope#OWNER_ABSENT} stops the pass for a flat
- * {@link #OWNER_AWAY_PAUSE_MS} that is never a miss; {@link Scope#BUSY} leaves that chest for
- * the next cycle without stopping the rest or counting a miss. {@link Scope#TARGET} reads as
- * {@link Scope#CHEST} for now.
+ * <p>The per-scope rule, identical in {@code CraftChestPullPolicy} and
+ * {@code MutualAidChestFoodPolicy}:
+ * <ul>
+ *   <li>{@link Scope#ITEM}: skip this item everywhere this pass.</li>
+ *   <li>{@link Scope#CHEST}: skip this chest, both halves of a double chest, this pass.</li>
+ *   <li>{@link Scope#TARGET}: skip this item in this chest only; other items in this chest, and
+ *       this item in other chests, are still tried.</li>
+ *   <li>{@link Scope#OWNER_ABSENT}: skip this chest (both halves) and remember; a pass that ends
+ *       having moved nothing, with no prompt open, no grant waiting and no busy stop, waits a flat
+ *       {@link #OWNER_AWAY_PAUSE_MS}. Never a miss, never climbs.</li>
+ *   <li>{@link Scope#BOT}: stop the pass; one step on the caller's backoff (a miss).</li>
+ *   <li>{@link Scope#BUSY}: stop the pass and hold like a prompt still open: the caller looks
+ *       again at its short cadence. Never a miss, never a pause.</li>
+ * </ul>
+ * A pass that met only item, chest and target refusals ends as "nothing found": no pause, no miss.
  *
  * <p>No Minecraft types: {@link Kind}, {@link WaitMode} and {@link Scope} are plain nested enums,
  * and loading one does not load its outer class.
@@ -37,20 +45,21 @@ public final class SupplyPullPolicy {
     public static final String UNREACHABLE = "UNREACHABLE";
 
     /**
-     * How soon a caller whose last answer was "waiting for the owner" may look again. A grant
-     * lives 60 s from the owner's click, so a few seconds keeps it comfortably redeemable.
+     * How soon a caller whose last pass held (a prompt open, a grant waiting for the bot, or a
+     * busy answer) may look again. A grant lives 60 s from the owner's click, so a few seconds
+     * keeps it comfortably redeemable.
      */
     public static final long WAITING_RECHECK_MS = 5_000L;
-    /** The first pause after a pass that asked and got nothing; doubles per further miss. */
+    /** The first pause after a pass the owner's answer ended; doubles per further miss. */
     public static final long MISS_PAUSE_MS = 60_000L;
     /** The longest pause after repeated misses: 10 minutes, the hobby ladder's ceiling. */
     public static final long MAX_MISS_PAUSE_MS = 600_000L;
     /** Largest doubling applied to {@link #MISS_PAUSE_MS} ({@code 60 s << 4} already exceeds the ceiling). */
     public static final int MISS_PAUSE_CAP_SHIFT = 4;
     /**
-     * The flat wait after the owner was found away from a chest nothing standing covers: long
-     * enough not to re-ask (and re-log) every few seconds, short enough that a returning owner
-     * is asked within a minute. Never climbs, never counts as a miss.
+     * The flat wait after a pass that found the owner away and got nothing else: long enough not
+     * to re-ask (and re-log) every few seconds, short enough that a returning owner is asked
+     * within a minute. Never climbs, never counts as a miss.
      */
     public static final long OWNER_AWAY_PAUSE_MS = 60_000L;
     /** {@link #OWNER_AWAY_PAUSE_MS} in server ticks, for tick-keyed backoffs. */
@@ -69,23 +78,28 @@ public final class SupplyPullPolicy {
         SKIP_ITEM,
         /** {@link Scope#CHEST}: this chest will not serve this pass: skip it, both halves of a double chest. */
         SKIP_CHEST,
-        /** {@link Scope#BUSY}: leave this chest for the next cycle; go on with the others. */
-        RETRY_LATER,
-        /** {@link Scope#BOT}, or a prompt is open or a grant waits for the bot: stop the pass. */
-        STOP,
-        /** {@link Scope#OWNER_ABSENT}: stop the pass; recheck after {@link #OWNER_AWAY_PAUSE_MS}. */
-        OWNER_AWAY;
+        /** {@link Scope#TARGET}: skip this item in this chest (both halves) only; go on with the rest. */
+        SKIP_TARGET,
+        /** {@link Scope#OWNER_ABSENT}: skip this chest (both halves) and remember; see {@link #ownerAwayDefers}. */
+        OWNER_AWAY,
+        /** {@code WAITING} or {@code READY}: a prompt is open or a grant waits for the bot. Stop, no miss. */
+        HOLD,
+        /** {@link Scope#BUSY}: stop, no miss; look again at the caller's short cadence. */
+        BUSY,
+        /** {@link Scope#BOT}: stop; a miss. */
+        STOP;
 
         /** Whether this answer ends the pass: nothing after it is asked. */
         public boolean stopsPass() {
-            return this == STOP || this == OWNER_AWAY;
+            return this == HOLD || this == BUSY || this == STOP;
         }
     }
 
     /**
-     * How far one answer reaches. {@code MOVED}: go on. {@code WAITING} and {@code READY}: stop
+     * How far one answer reaches. {@code MOVED}: go on. {@code WAITING} and {@code READY}: hold
      * (one prompt per bot, and a caller that does not walk cannot take a grant out of reach). A
-     * refusal by its scope; a refusal without one reads {@link Scope#BOT} (fail closed).
+     * refusal by its scope; a refusal without one reads {@link Scope#BOT} (fail closed), and so
+     * does a missing kind.
      */
     public static Next next(Kind kind, Scope scope) {
         if (kind == null) {
@@ -93,12 +107,13 @@ public final class SupplyPullPolicy {
         }
         return switch (kind) {
             case MOVED -> Next.NEXT;
-            case READY, WAITING -> Next.STOP;
+            case READY, WAITING -> Next.HOLD;
             case REFUSED -> switch (refusalScope(scope)) {
                 case ITEM -> Next.SKIP_ITEM;
-                case CHEST, TARGET -> Next.SKIP_CHEST;
-                case BUSY -> Next.RETRY_LATER;
+                case CHEST -> Next.SKIP_CHEST;
+                case TARGET -> Next.SKIP_TARGET;
                 case OWNER_ABSENT -> Next.OWNER_AWAY;
+                case BUSY -> Next.BUSY;
                 case BOT, NONE -> Next.STOP;
             };
         };
@@ -114,18 +129,22 @@ public final class SupplyPullPolicy {
     }
 
     /**
-     * Whether an answer is a miss, one step on the caller's backoff: a refusal for this chest
-     * ({@link Scope#CHEST}, {@link Scope#TARGET}) or for everything the bot asks for now
-     * ({@link Scope#BOT}). Not a miss: anything that moved or is waiting; {@link Scope#ITEM} (the
-     * pre-filter, nothing asked); {@link Scope#OWNER_ABSENT} (a flat recheck, not the owner's
-     * answer); and {@link Scope#BUSY} (nothing about the owner, the item or the chest).
+     * Whether an answer is busy ({@link Scope#BUSY}: another prompt of this bot open, no room, a
+     * busy server or hop, a stopped call): held like a wait, never a miss.
+     */
+    public static boolean isBusy(Kind kind, Scope scope) {
+        return kind == Kind.REFUSED && refusalScope(scope) == Scope.BUSY;
+    }
+
+    /**
+     * Whether an answer is a miss, one step on the caller's backoff: only the owner's decision
+     * ({@link Scope#BOT}: their No, an ignored prompt, a cooldown, no owner). Not a miss: anything
+     * that moved or is waiting; {@link Scope#ITEM}, {@link Scope#CHEST} and {@link Scope#TARGET}
+     * ("nothing found" here, as before chests were asked); {@link Scope#OWNER_ABSENT} (a flat
+     * recheck, not the owner's answer); and {@link Scope#BUSY}.
      */
     public static boolean isMiss(Kind kind, Scope scope) {
-        if (kind != Kind.REFUSED) {
-            return false;
-        }
-        Scope s = refusalScope(scope);
-        return s == Scope.CHEST || s == Scope.TARGET || s == Scope.BOT;
+        return kind == Kind.REFUSED && refusalScope(scope) == Scope.BOT;
     }
 
     /** Whether an answer found the owner away from a chest nothing standing covers. */
@@ -156,38 +175,51 @@ public final class SupplyPullPolicy {
 
     /**
      * Within one chest, whether the next distinct matching stack is worth asking about after this
-     * answer: only when this exact item is never granted ({@link Scope#ITEM}). Any other refusal
-     * answers for the whole chest, or more.
+     * answer: when this exact item is never granted ({@link Scope#ITEM}) or this chest cannot
+     * grant this item ({@link Scope#TARGET}). Any other refusal answers for the whole chest, or
+     * more.
      */
     public static boolean tryNextStack(Kind kind, Scope scope) {
-        return kind == Kind.REFUSED && refusalScope(scope) == Scope.ITEM;
+        if (kind != Kind.REFUSED) {
+            return false;
+        }
+        Scope s = refusalScope(scope);
+        return s == Scope.ITEM || s == Scope.TARGET;
     }
 
     // ── What a pull adds up to ───────────────────────────────────────────────────────────────
 
     /**
-     * What one pull achieved across every chest and item it tried: an idle pull
-     * ({@code ToolProvisionService}'s reachable-chest choke point) or a chest tool search.
+     * What one pass achieved across every chest and item it tried: an idle pull
+     * ({@code ToolProvisionService}'s reachable-chest choke point), a chest tool search, or a
+     * harvest seed restock.
      *
      * @param moved     items moved into the bot
      * @param waiting   a prompt is open, or a grant waits for the bot ({@link #isWaiting})
+     * @param busy      an answer was busy ({@link #isBusy})
      * @param missed    at least one answer was a miss ({@link #isMiss})
      * @param ownerAway an answer found the owner away ({@link #isOwnerAway})
      * @param halted    an answer stopped the pull ({@link Next#stopsPass()}); later items were not asked
      */
-    public record Pull(int moved, boolean waiting, boolean missed, boolean ownerAway, boolean halted) {
-        public static final Pull NOTHING = new Pull(0, false, false, false, false);
+    public record Pull(int moved, boolean waiting, boolean busy, boolean missed, boolean ownerAway,
+                       boolean halted) {
+        public static final Pull NOTHING = new Pull(0, false, false, false, false, false);
 
         public Pull plus(Pull other) {
             if (other == null) {
                 return this;
             }
-            return new Pull(moved + other.moved, waiting || other.waiting, missed || other.missed,
-                    ownerAway || other.ownerAway, halted || other.halted);
+            return new Pull(moved + other.moved, waiting || other.waiting, busy || other.busy,
+                    missed || other.missed, ownerAway || other.ownerAway, halted || other.halted);
         }
 
         public boolean movedAny() {
             return moved > 0;
+        }
+
+        /** Whether the pass held: a prompt open, a grant waiting, or a busy answer. The caller comes back soon. */
+        public boolean held() {
+            return waiting || busy;
         }
     }
 
@@ -197,48 +229,63 @@ public final class SupplyPullPolicy {
         int took = kind == Kind.MOVED ? Math.max(0, moved) : 0;
         return new Pull(t.moved() + took,
                 t.waiting() || isWaiting(kind),
+                t.busy() || isBusy(kind, scope),
                 t.missed() || isMiss(kind, scope),
                 t.ownerAway() || isOwnerAway(kind, scope),
                 t.halted() || next(kind, scope).stopsPass());
+    }
+
+    /**
+     * Whether a finished pass earns the flat owner-away wait ({@link #OWNER_AWAY_PAUSE_MS}): it
+     * found the owner away and ended empty-handed without anything else to say — nothing moved,
+     * nothing held (no prompt open, no grant waiting, no busy stop) and no miss (the owner's own
+     * answer backs off on the miss ladder instead).
+     */
+    public static boolean ownerAwayDefers(Pull pass) {
+        return pass != null && pass.ownerAway() && !pass.movedAny() && !pass.held() && !pass.missed();
     }
 
     /** What an idle pull does to its caller's ask backoff. */
     public enum Backoff {
         /** Moved something and missed nothing: clear the backoff. */
         SUCCESS,
-        /** Asked and got nothing, with no prompt open: one more failure on the ladder. */
+        /** The owner's answer ended it (a miss): one more failure on the ladder. */
         FAILURE,
-        /** The owner is away: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched. */
+        /** The owner is away and nothing else happened: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched. */
         OWNER_AWAY,
-        /** Leave it: nothing was asked, or a prompt is still open (the next pull must be free to redeem it). */
+        /**
+         * Leave it: nothing was asked or only nothing was found, or the pass held (a prompt still
+         * open, a grant waiting, a busy answer: the next pull must be free to come back soon).
+         */
         NONE
     }
 
     /**
-     * An open prompt outranks everything (its grant must stay redeemable); then the owner being
-     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting);
-     * then a miss; then a move.
+     * A held pass outranks everything (an open prompt's grant must stay redeemable, and a busy
+     * answer is retried soon); then a miss (the owner decided); then a move; then the owner being
+     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting).
      */
     public static Backoff idleBackoff(Pull pull) {
-        if (pull == null || pull.waiting()) {
+        if (pull == null || pull.held()) {
             return Backoff.NONE;
-        }
-        if (pull.ownerAway()) {
-            return Backoff.OWNER_AWAY;
         }
         if (pull.missed()) {
             return Backoff.FAILURE;
         }
-        return pull.movedAny() ? Backoff.SUCCESS : Backoff.NONE;
+        if (pull.movedAny()) {
+            return Backoff.SUCCESS;
+        }
+        return ownerAwayDefers(pull) ? Backoff.OWNER_AWAY : Backoff.NONE;
     }
 
     /**
-     * Whether the idle wooden fallback holds (no craft, no woodcut) to wait for the owner: only
-     * while a prompt is open and the bot still lacks the weapon or axe the fallback exists for.
-     * Waiting on, say, a helmet does not hold up a bot that already has both.
+     * Whether the idle wooden fallback holds (no craft, no woodcut) to come back soon: only while
+     * the pull held (a prompt open, a grant waiting, a busy answer) and the bot still lacks the
+     * weapon or axe the fallback exists for. Waiting on, say, a helmet does not hold up a bot that
+     * already has both.
      */
     public static boolean holdsIdleFallback(Pull pull, boolean stillMissingWeaponOrAxe) {
-        return pull != null && pull.waiting() && stillMissingWeaponOrAxe;
+        return pull != null && pull.held() && stillMissingWeaponOrAxe;
     }
 
     // ── How long to leave the owner alone ────────────────────────────────────────────────────
@@ -251,32 +298,33 @@ public final class SupplyPullPolicy {
 
     /**
      * How long a chest tool search waits before it asks again, in the same order as
-     * {@link #idleBackoff}: {@link #WAITING_RECHECK_MS} when it ended on an open prompt (come back
-     * soon to redeem it), {@link #OWNER_AWAY_PAUSE_MS} when the owner was away,
-     * {@link #missPauseMs} after a miss, and 0 when it took something or asked nothing.
+     * {@link #idleBackoff}: 0 when it took something; {@link #WAITING_RECHECK_MS} when it held
+     * (come back soon to redeem a grant, or to retry a busy answer); {@link #missPauseMs} after a
+     * miss; {@link #OWNER_AWAY_PAUSE_MS} when the owner was away and nothing else happened; and 0
+     * when it asked nothing or found nothing.
      */
     public static long retrievalPauseMs(Pull search, int priorMisses) {
         if (search == null || search.movedAny()) {
             return 0L;
         }
-        if (search.waiting()) {
+        if (search.held()) {
             return WAITING_RECHECK_MS;
         }
-        if (search.ownerAway()) {
-            return OWNER_AWAY_PAUSE_MS;
+        if (search.missed()) {
+            return missPauseMs(priorMisses);
         }
-        return search.missed() ? missPauseMs(priorMisses) : 0L;
+        return ownerAwayDefers(search) ? OWNER_AWAY_PAUSE_MS : 0L;
     }
 
     /**
-     * The miss counter after a chest tool search: reset by a move, unchanged while waiting or
-     * while the owner is away, +1 on a miss.
+     * The miss counter after a chest tool search: reset by a move, unchanged while it held, +1 on
+     * a miss, unchanged otherwise (the owner away, nothing found).
      */
     public static int nextMissCount(int prior, Pull search) {
         if (search != null && search.movedAny()) {
             return 0;
         }
-        if (search == null || search.waiting() || search.ownerAway() || !search.missed()) {
+        if (search == null || search.held() || !search.missed()) {
             return Math.max(prior, 0);
         }
         return HobbyBackoffPolicy.nextFailureCount(prior, false);

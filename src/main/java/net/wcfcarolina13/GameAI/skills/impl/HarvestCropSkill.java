@@ -501,28 +501,35 @@ public class HarvestCropSkill implements Skill {
         if (missing <= 0) {
             return 0;
         }
-        for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
-            int moved = restockFromChest(bot, source, candidate.pos(), seedItem, missing, restock);
-            if (moved > 0) {
-                return moved;
+        restock.beginPass();
+        try {
+            for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
+                int moved = restockFromChest(bot, source, candidate.pos(), seedItem, missing, restock);
+                if (moved > 0) {
+                    return moved;
+                }
+                if (!restock.mayAsk()) {
+                    return 0;
+                }
             }
-            if (!restock.mayAsk()) {
-                return 0;
-            }
+            return 0;
+        } finally {
+            restock.endPass();
         }
-        return 0;
     }
 
     /**
      * One chest's answer for one seed, through the supply facade (it walks only once asking says
      * it may, and waits there once for the owner's answer); returns the count taken. By the
-     * answer's scope ({@link SupplyPullPolicy#next}): a chest that will not serve this seed, or
-     * holds only stacks of it the policy never grants, is remembered (both halves of a double
-     * chest), so later replant targets don't ask it again; a transient refusal (a busy server, a
-     * full inventory) leaves the chest for the next target; the owner away pauses every ask for
-     * {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_MS}; an answer that holds for every chest (the owner
-     * refused or ignored the prompt, a cooldown, another prompt open) sets
-     * {@link SeedRestock#stopAsking}.
+     * answer's scope ({@link SupplyPullPolicy#next}): a chest that will not serve this seed, holds
+     * only stacks of it the policy never grants, or cannot grant it (nothing above its reserve) is
+     * remembered for this seed (both halves of a double chest), so later replant targets don't ask
+     * it again; a chest whose owner was found away is skipped for the rest of this pass (both
+     * halves), and a pass that got nothing else pauses every ask for
+     * {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_MS} ({@link SeedRestock#endPass}); a prompt still
+     * open or a busy answer (another prompt open, a busy server, a full inventory) ends this pass
+     * and the next target asks again; the owner's decision (a No, an ignored prompt, a cooldown)
+     * sets {@link SeedRestock#stopAsking}.
      */
     private static int restockFromChest(ServerPlayerEntity bot,
                                         ServerCommandSource source,
@@ -530,11 +537,11 @@ public class HarvestCropSkill implements Skill {
                                         Item seedItem,
                                         int missing,
                                         SeedRestock restock) {
-        // A transient refusal (ABORTED among them) no longer ends the chest loop, so a stop request
-        // ends the run here, before the next chest is asked or walked to.
+        // A busy answer (ABORTED among them) ends only this pass, so a stop request ends the run
+        // here, before the next chest is asked or walked to.
         abortIfRequested(bot);
         ChestSeed key = new ChestSeed(chestPos.asLong(), seedItem);
-        if (!restock.mayAsk() || restock.fruitless.contains(key)) {
+        if (!restock.mayAsk() || restock.fruitless.contains(key) || restock.ownerAwayChests.contains(chestPos.asLong())) {
             return 0;
         }
         SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
@@ -545,12 +552,13 @@ public class HarvestCropSkill implements Skill {
                 stack -> stack != null && !stack.isEmpty() && stack.isOf(seedItem),
                 "harvest-seeds",
                 SupplyWithdrawals.WaitMode.UNTIL_ANSWERED);
+        restock.pass = SupplyPullPolicy.fold(restock.pass, result.kind(), result.moved(), result.scope());
         if (result.kind() == SupplyWithdrawals.Kind.MOVED && result.moved() > 0) {
             LOGGER.info("Harvest restocked {}x {} from chest {}", result.moved(), seedItem, chestPos.toShortString());
             return result.moved();
         }
         switch (SupplyPullPolicy.next(result.kind(), result.scope())) {
-            case SKIP_CHEST, SKIP_ITEM -> {
+            case SKIP_CHEST, SKIP_ITEM, SKIP_TARGET -> {
                 // The chest's merged view was read: its other half holds the same stacks.
                 restock.fruitless.add(key);
                 BlockPos otherHalf = ChestStoreService.otherChestHalf(bot.getEntityWorld(), chestPos);
@@ -558,19 +566,23 @@ public class HarvestCropSkill implements Skill {
                     restock.fruitless.add(new ChestSeed(otherHalf.asLong(), seedItem));
                 }
             }
-            case NEXT, RETRY_LATER -> {
-                // Nothing about this chest or the owner: a later target may ask it again.
-            }
             case OWNER_AWAY -> {
-                restock.askAgainAtMs = System.currentTimeMillis() + SupplyPullPolicy.OWNER_AWAY_PAUSE_MS;
-                LOGGER.info("Harvest seed restock: owner away; not asking chests for {} s ({} {} at {})",
-                        SupplyPullPolicy.OWNER_AWAY_PAUSE_MS / 1000L, result.reason(), result.scope(),
-                        chestPos.toShortString());
+                // This pass only: another chest, one the owner granted "always", may still serve.
+                restock.ownerAwayChests.add(chestPos.asLong());
+                BlockPos otherHalf = ChestStoreService.otherChestHalf(bot.getEntityWorld(), chestPos);
+                if (otherHalf != null) {
+                    restock.ownerAwayChests.add(otherHalf.asLong());
+                }
             }
+            case HOLD, BUSY -> LOGGER.debug("Harvest seed restock: holding this pass ({} {} {} at {})",
+                    result.kind(), result.reason(), result.scope(), chestPos.toShortString());
             case STOP -> {
                 restock.stopAsking = true;
                 LOGGER.info("Harvest seed restock: not asking chests again this run ({} {} {} at {})",
                         result.kind(), result.reason(), result.scope(), chestPos.toShortString());
+            }
+            case NEXT -> {
+                // Moved nothing yet reported MOVED: nothing to remember.
             }
         }
         return 0;
@@ -708,34 +720,65 @@ public class HarvestCropSkill implements Skill {
         // Each (seed, chest) pair is asked at most once a run and nothing is walked to before the
         // chest is read and the owner asked, so this is no longer four seeds times a walk to every
         // chest; the first answer that holds for every chest ends it.
-        for (Item seed : PLANTABLE_SEEDS) {
-            for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
-                int moved = restockFromChest(bot, source, candidate.pos(), seed, Math.max(1, wanted), restock);
-                if (moved > 0) {
-                    return moved;
-                }
-                if (!restock.mayAsk()) {
-                    return 0;
+        restock.beginPass();
+        try {
+            for (Item seed : PLANTABLE_SEEDS) {
+                for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
+                    int moved = restockFromChest(bot, source, candidate.pos(), seed, Math.max(1, wanted), restock);
+                    if (moved > 0) {
+                        return moved;
+                    }
+                    if (!restock.mayAsk()) {
+                        return 0;
+                    }
                 }
             }
+            return 0;
+        } finally {
+            restock.endPass();
         }
-        return 0;
     }
 
-    /** One harvest run's chest restocking, shared by the replant and the empty-farmland passes. */
+    /**
+     * One harvest run's chest restocking, shared by the replant and the empty-farmland passes. A
+     * pass is one restock's walk over the nearby chests ({@link #beginPass} … {@link #endPass}).
+     */
     private static final class SeedRestock {
         /** Restocks that moved seeds, for the run summary. */
         int pulls;
-        /** An answer that holds for every chest came back: no more chest asks this run. */
+        /** The owner's decision came back (a No, an ignored prompt, a cooldown): no more chest asks this run. */
         boolean stopAsking;
-        /** The owner was found away: no chest is asked before this time (epoch ms). */
+        /** A pass found the owner away and got nothing else: no chest is asked before this time (epoch ms). */
         long askAgainAtMs;
         /** Chest and seed pairs that will not serve this run: not asked again. */
         final Set<ChestSeed> fruitless = new HashSet<>();
+        /** This pass's answers ({@link SupplyPullPolicy#fold}); a held or stopped pass asks nothing more. */
+        SupplyPullPolicy.Pull pass = SupplyPullPolicy.Pull.NOTHING;
+        /** This pass's chests (both halves) whose owner was found away: not asked again until the pass ends. */
+        final Set<Long> ownerAwayChests = new HashSet<>();
 
         /** Whether any chest may be asked now. */
         boolean mayAsk() {
-            return !stopAsking && System.currentTimeMillis() >= askAgainAtMs;
+            return !stopAsking && !pass.halted() && System.currentTimeMillis() >= askAgainAtMs;
+        }
+
+        void beginPass() {
+            pass = SupplyPullPolicy.Pull.NOTHING;
+            ownerAwayChests.clear();
+        }
+
+        /**
+         * A pass that found the owner away and got nothing else ({@link SupplyPullPolicy#ownerAwayDefers})
+         * pauses every ask for the flat {@link SupplyPullPolicy#OWNER_AWAY_PAUSE_MS}; the next pass
+         * starts clean.
+         */
+        void endPass() {
+            if (!stopAsking && SupplyPullPolicy.ownerAwayDefers(pass)) {
+                askAgainAtMs = System.currentTimeMillis() + SupplyPullPolicy.OWNER_AWAY_PAUSE_MS;
+                LOGGER.info("Harvest seed restock: owner away; not asking chests for {} s",
+                        SupplyPullPolicy.OWNER_AWAY_PAUSE_MS / 1000L);
+            }
+            beginPass();
         }
     }
 

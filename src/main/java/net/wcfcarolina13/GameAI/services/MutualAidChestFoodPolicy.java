@@ -11,6 +11,14 @@ import java.util.List;
  * ask for, which chest to try first, what one supply-facade answer means for the rest of the
  * attempt, and how long the bot then leaves chests alone.
  *
+ * <p>A refusal is read by its {@link Scope} alone, by the rule every supply site follows
+ * ({@code SupplyPullPolicy} spells it out): {@link Scope#ITEM} skips the food everywhere this
+ * attempt; {@link Scope#CHEST} skips the chest (both halves); {@link Scope#TARGET} skips this
+ * food in this chest only; {@link Scope#OWNER_ABSENT} skips the chest (both halves) and, if the
+ * attempt then ends with nothing taken, asked or stopped, defers a flat
+ * {@link #OWNER_AWAY_DEFER_TICKS}; {@link Scope#BOT} stops and pauses {@link #BOT_PAUSE_TICKS};
+ * {@link Scope#BUSY} stops, and the next attempt comes after the usual {@link #THROTTLE_TICKS}.
+ *
  * <p>No Minecraft types, so it is tested without the game. {@link Kind} and {@link Scope} are plain
  * enums nested in the supply classes; loading them does not load the outer classes.
  */
@@ -22,11 +30,11 @@ public final class MutualAidChestFoodPolicy {
     /** Between two shared-chest food attempts by one bot, whatever the first came to (8 s). */
     public static final long THROTTLE_TICKS = 20L * 8L;
     /**
-     * After a refusal that reaches everything the bot asks for now (the owner's No, an ignored
-     * prompt, a cooldown, another prompt open, no owner): no chest is asked for 60 s.
+     * After the owner's decision (a No, an ignored prompt, a cooldown, no owner): no chest is asked
+     * for 60 s.
      */
     public static final long BOT_PAUSE_TICKS = 20L * 60L;
-    /** After the owner was found away from the chest: no chest is asked for a flat 60 s. */
+    /** After an attempt that found the owner away and got nothing else: no chest is asked for a flat 60 s. */
     public static final long OWNER_AWAY_DEFER_TICKS = 20L * 60L;
 
     private MutualAidChestFoodPolicy() {
@@ -85,15 +93,26 @@ public final class MutualAidChestFoodPolicy {
         MAKE_ROOM_AND_RETRY,
         /** Refused for this food wherever it is ({@link Scope#ITEM}): skip it in every chest this attempt. */
         NEXT_ITEM,
-        /** Nothing but the moment ({@link Scope#BUSY}): leave this food in this chest for the next attempt; go on. */
+        /** This chest cannot grant this food ({@link Scope#TARGET}): try its next food; this food elsewhere is still asked. */
         NEXT_TARGET,
         /** Refused for this chest ({@link Scope#CHEST}): try the next chest (a double chest's other half is skipped too). */
         NEXT_CHEST,
-        /** Nothing more to try now; the next attempt after the usual {@link #THROTTLE_TICKS}. */
+        /**
+         * The owner is away ({@link Scope#OWNER_ABSENT}): try the next chest (both halves skipped),
+         * one the owner granted "always" may serve; the attempt remembers it ({@link #endOfAttempt}).
+         */
+        OWNER_AWAY,
+        /**
+         * Nothing more to try now: a busy answer ({@link Scope#BUSY}), or a grant this site cannot
+         * walk to. The next attempt after the usual {@link #THROTTLE_TICKS}.
+         */
         STOP,
-        /** Refused for everything this bot asks now ({@link Scope#BOT}): stop; no chest is asked for {@link #BOT_PAUSE_TICKS}. */
+        /** The owner's decision ({@link Scope#BOT}): stop; no chest is asked for {@link #BOT_PAUSE_TICKS}. */
         PAUSE,
-        /** The owner is away ({@link Scope#OWNER_ABSENT}): stop; no chest is asked for {@link #OWNER_AWAY_DEFER_TICKS}. */
+        /**
+         * The attempt tried every chest, found the owner away at one at least, and got nothing
+         * else: no chest is asked for {@link #OWNER_AWAY_DEFER_TICKS}. Only {@link #endOfAttempt} says so.
+         */
         DEFER
     }
 
@@ -101,7 +120,7 @@ public final class MutualAidChestFoodPolicy {
      * Decides from the result's kind and, for a refusal, its scope only; the reason string is for
      * the logs. The one site fact it takes is whether a piece of this food still fits the bot: a
      * permitted take the bot has no room for comes back {@link Scope#BUSY} (the ticket is kept),
-     * and only then is room made, once. {@link Scope#TARGET} reads as {@link Scope#CHEST} for now.
+     * and only then is room made, once, and the same food asked again.
      *
      * @param kind         the facade's result kind
      * @param scope        the facade's refusal scope ({@code SupplyWithdrawals.Result#scope()})
@@ -132,22 +151,30 @@ public final class MutualAidChestFoodPolicy {
             case ITEM:
                 return Next.NEXT_ITEM;
             case CHEST:
-            case TARGET:
                 return Next.NEXT_CHEST;
+            case TARGET:
+                return Next.NEXT_TARGET;
             case OWNER_ABSENT:
-                return Next.DEFER;
+                return Next.OWNER_AWAY;
             case BUSY:
-                if (roomForOne) {
-                    return Next.NEXT_TARGET;
-                }
-                // Room was made and still nothing fits: nothing here is droppable, and asking another
-                // chest could only open a prompt the bot cannot redeem. Try again next attempt.
-                return roomMadeOnce ? Next.STOP : Next.MAKE_ROOM_AND_RETRY;
+                // No room for even one piece of a permitted take: make room once and ask again. Room
+                // made and still nothing fits (nothing here is droppable), or busy for another reason:
+                // stop; the next attempt after the throttle.
+                return !roomForOne && !roomMadeOnce ? Next.MAKE_ROOM_AND_RETRY : Next.STOP;
             case BOT:
             case NONE:
             default:
                 return Next.PAUSE;
         }
+    }
+
+    /**
+     * How an attempt that tried every chest without taking, asking or stopping ends: deferred a
+     * flat minute when it found the owner away at a chest ({@link Next#DEFER}), else the usual
+     * throttle ({@link Next#STOP}, "nothing found").
+     */
+    public static Next endOfAttempt(boolean ownerAwaySeen) {
+        return ownerAwaySeen ? Next.DEFER : Next.STOP;
     }
 
     /** How long, in server ticks, before this bot asks a chest for food again after an attempt ended in {@code next}. */
