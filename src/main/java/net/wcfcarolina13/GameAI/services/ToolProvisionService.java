@@ -1817,8 +1817,10 @@ public final class ToolProvisionService {
         SupplyWithdrawals.Result last = null;
         for (ChestCandidate candidate : candidates) {
             // A transient refusal (ABORTED among them) no longer ends the search, so a stop
-            // request ends it here, before the next chest is asked or walked to.
-            if (TaskService.isAbortRequested(botUuid)) {
+            // request ends it here, before the next chest is asked or walked to. Only a running
+            // task's stop: DurabilityFallbackService also searches outside any task, where a
+            // stale abort latch (a /bot come or follow) must not cancel a search nobody stopped.
+            if (TaskService.hasActiveTask(botUuid) && TaskService.isAbortRequested(botUuid)) {
                 break;
             }
             if (skippedHalves.contains(candidate.pos)) {
