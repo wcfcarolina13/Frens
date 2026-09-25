@@ -28,8 +28,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@code transferNow(...)} must have no production caller until Phase 3 has closed the existing
  * automatic chest withdrawals. This scans {@code src/main/java} (comments stripped) and fails on
  * any call, method reference or static import of either outside {@code SupplyRequestService}
- * itself, and on any use of them inside it beyond their declarations. The scan fails loudly when
- * the source tree cannot be found, so it can never pass by reading nothing.
+ * itself, and on any use of them inside it beyond their declarations. Their private bodies,
+ * {@code evaluateRequest} and {@code evaluateTransfer}, are pinned the same way: each is named
+ * exactly twice in the service (its declaration and the first statement of its public entry
+ * point) and never outside it. A file outside {@code supply/} that names the service may not hold
+ * a string literal naming any of the four methods, which is what reflection would need. The scan
+ * fails loudly when the source tree cannot be found, so it can never pass by reading nothing.
  */
 class SupplyDormancyTest {
 
@@ -48,6 +52,20 @@ class SupplyDormancyTest {
     private static final Pattern BARE_REQUEST_CALL = Pattern.compile("(?<![\\w.])request\\s*\\(");
     private static final Pattern TRANSFER_NOW_CALL = Pattern.compile("\\btransferNow\\s*\\(");
     private static final Pattern SELF_REFERENCE = Pattern.compile("::\\s*(?:request|transferNow)\\b");
+
+    /** Any mention of the private bodies: a call, a method reference or a name in a string. */
+    private static final Pattern EVALUATE_REQUEST = Pattern.compile("\\bevaluateRequest\\b");
+    private static final Pattern EVALUATE_TRANSFER = Pattern.compile("\\bevaluateTransfer\\b");
+    private static final Pattern EVALUATE_ANY = Pattern.compile("\\bevaluate(?:Request|Transfer)\\b");
+    /** The one permitted call of each body: the first statement of its public entry point. */
+    private static final Pattern REQUEST_PINNED_CALL = Pattern.compile(
+            "public static RequestOutcome request\\([^)]*\\)\\s*\\{\\s*RequestOutcome\\s+outcome\\s*=\\s*evaluateRequest\\s*\\(");
+    private static final Pattern TRANSFER_PINNED_CALL = Pattern.compile(
+            "public static int transferNow\\([^)]*\\)\\s*\\{\\s*TransferResult\\s+result\\s*=\\s*evaluateTransfer\\s*\\(");
+    /** A string literal that is exactly one of the four method names, as reflection would pass it. */
+    private static final Pattern REFLECTIVE_NAME =
+            Pattern.compile("\"\\s*(?:request|transferNow|evaluateRequest|evaluateTransfer)\\s*\"");
+    private static final Pattern NAMES_THE_SERVICE = Pattern.compile("\\bSupplyRequestService\\b");
 
     private static Map<String, String> sources;
 
@@ -99,12 +117,28 @@ class SupplyDormancyTest {
             }
             String text = e.getValue();
             if (QUALIFIED_USE.matcher(text).find() || STATIC_IMPORT.matcher(text).find()
-                    || TRANSFER_NOW.matcher(text).find()) {
+                    || TRANSFER_NOW.matcher(text).find() || EVALUATE_ANY.matcher(text).find()) {
                 offenders.add(e.getKey());
             }
         }
         assertEquals(List.of(), offenders,
                 "supplies Phase 2 is dormant: request(/transferNow( must have no caller until Phase 3");
+    }
+
+    @Test
+    void noFileOutsideSupplyNamesTheDormantMethodsForReflection() {
+        List<String> offenders = new ArrayList<>();
+        for (Map.Entry<String, String> e : sources.entrySet()) {
+            if (e.getKey().startsWith(SUPPLY_DIR)) {
+                continue;
+            }
+            String text = e.getValue();
+            if (NAMES_THE_SERVICE.matcher(text).find() && REFLECTIVE_NAME.matcher(text).find()) {
+                offenders.add(e.getKey());
+            }
+        }
+        assertEquals(List.of(), offenders,
+                "a file naming SupplyRequestService may not hold \"request\"/\"transferNow\"/\"evaluate…\" strings");
     }
 
     @Test
@@ -114,6 +148,22 @@ class SupplyDormancyTest {
         assertEquals(1, count(BARE_REQUEST_CALL, service), "request( must appear only as its declaration");
         assertEquals(1, count(TRANSFER_NOW_CALL, service), "transferNow( must appear only as its declaration");
         assertFalse(SELF_REFERENCE.matcher(service).find(), "no method reference to request/transferNow");
+    }
+
+    @Test
+    void thePrivateBodiesAreReachedOnlyThroughTheirEntryPoints() {
+        String service = sources.get(SUPPLY_DIR + SERVICE);
+        assertNotNull(service);
+        assertTrue(service.contains("private static RequestOutcome evaluateRequest("),
+                "evaluateRequest( declaration moved, renamed or made non-private");
+        assertTrue(service.contains("private static TransferResult evaluateTransfer("),
+                "evaluateTransfer( declaration moved, renamed or made non-private");
+        assertEquals(2, count(EVALUATE_REQUEST, service),
+                "evaluateRequest may be named only by its declaration and its one call in request(");
+        assertEquals(2, count(EVALUATE_TRANSFER, service),
+                "evaluateTransfer may be named only by its declaration and its one call in transferNow(");
+        assertEquals(1, count(REQUEST_PINNED_CALL, service), "request( must open by calling evaluateRequest(");
+        assertEquals(1, count(TRANSFER_PINNED_CALL, service), "transferNow( must open by calling evaluateTransfer(");
     }
 
     @Test
@@ -138,6 +188,20 @@ class SupplyDormancyTest {
         assertFalse(QUALIFIED_USE.matcher("SupplyRequestService.requestCount()").find());
         assertEquals(1, count(BARE_REQUEST_CALL, "static RequestOutcome request(ServerPlayerEntity bot) { evaluate(x); ledger.request(y); }"));
         assertEquals(0, count(BARE_REQUEST_CALL, "LOGGER.info(\"[supply] request bot={}\"); requestId(); fooRequest(1);"));
+
+        assertTrue(EVALUATE_ANY.matcher("TransferResult r = evaluateTransfer(bot, pos, fp, 1);").find());
+        assertTrue(EVALUATE_ANY.matcher("Function<?, ?> f = SupplyRequestService::evaluateRequest;").find());
+        assertFalse(EVALUATE_ANY.matcher("evaluateRequests(); reevaluateTransfer();").find());
+        assertTrue(REQUEST_PINNED_CALL.matcher("public static RequestOutcome request(ServerPlayerEntity bot,\n"
+                + "        BlockPos chestPos, ItemStack sample, int qty, int need) {\n"
+                + "    RequestOutcome outcome = evaluateRequest(bot, chestPos, sample, qty, need);").find());
+        assertFalse(REQUEST_PINNED_CALL.matcher("public static RequestOutcome request(ServerPlayerEntity bot) {\n"
+                + "    log(); RequestOutcome outcome = evaluateRequest(bot);").find());
+        assertTrue(TRANSFER_PINNED_CALL.matcher("public static int transferNow(ServerPlayerEntity bot, int need) {"
+                + " TransferResult result = evaluateTransfer(bot, need);").find());
+        assertTrue(REFLECTIVE_NAME.matcher("SupplyRequestService.class.getDeclaredMethod(\"request\", A.class)").find());
+        assertTrue(REFLECTIVE_NAME.matcher("m = c.getDeclaredMethod( \"evaluateTransfer\" );").find());
+        assertFalse(REFLECTIVE_NAME.matcher("LOGGER.info(\"[supply] request bot={}\"); x(\"requests\");").find());
     }
 
     @Test

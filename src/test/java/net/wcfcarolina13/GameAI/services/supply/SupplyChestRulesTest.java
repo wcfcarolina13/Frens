@@ -13,6 +13,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Config;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -326,6 +328,56 @@ class SupplyChestRulesTest {
         assertThrows(IllegalArgumentException.class, () -> SupplyChestRules.worldId("New World#1a2b", ""));
     }
 
+    // ── revoke keys ──────────────────────────────────────────────────────────────────────────
+
+    private static final String WORLD = "New World#1a2b/minecraft:overworld";
+
+    private static ChestKey key(int x, int y, int z) {
+        return new ChestKey(WORLD, x, y, z);
+    }
+
+    @Test
+    void aSingleChestRevokesOnlyItsOwnKey() {
+        assertEquals(List.of(key(10, 64, 10)), SupplyChestRules.revokeKeys(WORLD, new Pos(10, 64, 10), null));
+    }
+
+    @Test
+    void aDoubleChestRevokesItsCanonicalKeyAndEachHalfsOwnKey() {
+        // Granted on (10,64,10) as a single chest; a chest added at (9,64,10) moved the canonical
+        // key. Revoking from either half must still reach the permission stored under (10,64,10).
+        Pos placedFirst = new Pos(10, 64, 10);
+        Pos addedLater = new Pos(9, 64, 10);
+        List<ChestKey> fromOld = SupplyChestRules.revokeKeys(WORLD, placedFirst, addedLater);
+        List<ChestKey> fromNew = SupplyChestRules.revokeKeys(WORLD, addedLater, placedFirst);
+        // Canonical first, then whichever half's own key is not already listed; no duplicates.
+        assertEquals(List.of(key(9, 64, 10), key(10, 64, 10)), fromOld);
+        assertEquals(List.of(key(9, 64, 10), key(10, 64, 10)), fromNew);
+    }
+
+    @Test
+    void revokeKeysClearAPermissionStoredUnderAStaleKey() {
+        SupplyRequestLedger ledger = new SupplyRequestLedger(() -> 0L, () -> new UUID(9, 1), Timings.defaults(), CFG);
+        ledger.restoreAlways(OWNER, key(10, 64, 10)); // granted while the chest was single
+        ChestKey canonicalNow = ChestKey.canonical(WORLD, new Pos(10, 64, 10), new Pos(9, 64, 10));
+        assertFalse(ledger.revokeAlways(OWNER, canonicalNow), "the old single-key revoke missed it");
+
+        boolean removed = false;
+        for (ChestKey k : SupplyChestRules.revokeKeys(WORLD, new Pos(9, 64, 10), new Pos(10, 64, 10))) {
+            removed |= ledger.revokeAlways(OWNER, k);
+        }
+        assertTrue(removed);
+        assertEquals(Set.of(), ledger.alwaysSnapshot());
+    }
+
+    @Test
+    void aPartnerThatIsNotAHorizontalNeighbourIsIgnored() {
+        Pos half = new Pos(10, 64, 10);
+        for (Pos far : List.of(new Pos(8, 64, 10), new Pos(10, 65, 10), new Pos(9, 64, 9), new Pos(10, 64, 10))) {
+            assertEquals(List.of(key(10, 64, 10)), SupplyChestRules.revokeKeys(WORLD, half, far), far.toString());
+        }
+        assertThrows(NullPointerException.class, () -> SupplyChestRules.revokeKeys(WORLD, null, half));
+    }
+
     // ── ALWAYS codec ─────────────────────────────────────────────────────────────────────────
 
     /** A level name may hold '/' and ':'; the dimension must still split off cleanly. */
@@ -428,6 +480,25 @@ class SupplyChestRulesTest {
         String json = "{\"version\":1,\"always\":[" + String.join(",", bad) + "," + valid + "]}";
         assertEquals(List.of(scope(OWNER, SAVE, "minecraft:overworld", 1, 2, 3)),
                 SupplyChestRules.decodeAlways(json, SAVE));
+    }
+
+    @Test
+    void theFileVersionIsReadWithoutDecodingTheEntries() {
+        String written = SupplyChestRules.encodeAlways(sampleScopes(SAVE));
+        assertEquals(SupplyChestRules.ALWAYS_FORMAT_VERSION, SupplyChestRules.alwaysFileVersion(written));
+        assertEquals(SupplyChestRules.ALWAYS_FORMAT_VERSION,
+                SupplyChestRules.alwaysFileVersion(SupplyChestRules.encodeAlways(List.of())));
+        assertEquals(2, SupplyChestRules.alwaysFileVersion("{\"version\":2,\"always\":[]}"));
+        assertEquals(0, SupplyChestRules.alwaysFileVersion("{\"version\":0}"));
+    }
+
+    @Test
+    void aMissingOrUnreadableVersionIsNull() {
+        for (String json : Arrays.asList(null, "", "  ", "not json", "{", "[]", "{}", "\"text\"", "[{\"version\":1}]",
+                "{\"version\":\"1\"}", "{\"version\":1.5}", "{\"version\":null}", "{\"version\":3000000000}",
+                "{\"always\":[]}")) {
+            assertNull(SupplyChestRules.alwaysFileVersion(json), String.valueOf(json));
+        }
     }
 
     @Test

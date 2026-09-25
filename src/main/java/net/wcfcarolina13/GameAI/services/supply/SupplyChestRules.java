@@ -11,12 +11,14 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Choice;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Config;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -353,6 +355,31 @@ public final class SupplyChestRules {
         return saveKey + "/" + dimensionId;
     }
 
+    // ── Revoke ───────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Every key a standing permission for the chest at {@code half} may be stored under: the
+     * chest's {@link ChestKey#canonical canonical} key, {@code half}'s own single-chest key, and,
+     * for a double chest, the partner's own single-chest key. A permission is stored under the
+     * canonical key of the chest as it was when granted, so a chest that has since gained or lost
+     * a half would otherwise keep a stale permission that revives when the chest changes back.
+     *
+     * <p>A partner that is not a horizontal neighbour on the same y is ignored, exactly as
+     * {@link ChestKey#canonical} ignores it, so a mis-resolved partner never revokes an unrelated
+     * chest. Duplicates are removed; the canonical key comes first.
+     */
+    public static List<ChestKey> revokeKeys(String worldId, Pos half, Pos partnerOrNull) {
+        Objects.requireNonNull(half, "half");
+        Pos partner = partnerOrNull != null && half.isHorizontalNeighbour(partnerOrNull) ? partnerOrNull : null;
+        Set<ChestKey> keys = new LinkedHashSet<>();
+        keys.add(ChestKey.canonical(worldId, half, partner));
+        keys.add(ChestKey.canonical(worldId, half, null));
+        if (partner != null) {
+            keys.add(ChestKey.canonical(worldId, partner, null));
+        }
+        return List.copyOf(keys);
+    }
+
     // ── ALWAYS persistence ───────────────────────────────────────────────────────────────────
 
     /** Version written by {@link #encodeAlways}. */
@@ -436,6 +463,23 @@ public final class SupplyChestRules {
             }
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * The {@code "version"} a saved ALWAYS file declares, or {@code null} when the text is not a
+     * JSON object or has no integer {@code "version"}. Never throws. {@link #decodeAlways} does not
+     * look at the version; the adapter compares this with {@link #ALWAYS_FORMAT_VERSION} to warn.
+     */
+    public static Integer alwaysFileVersion(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonElement root = JsonParser.parseString(json);
+            return root.isJsonObject() ? intField(root.getAsJsonObject(), "version") : null;
+        } catch (RuntimeException malformed) {
+            return null;
+        }
     }
 
     // ── Prompt and command text ──────────────────────────────────────────────────────────────

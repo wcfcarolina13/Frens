@@ -69,6 +69,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Server adapter for companion supply requests: reads chests, stacks and players on the server
@@ -98,6 +99,8 @@ public final class SupplyRequestService {
     private static final String ALWAYS_FILE = "supply_always.json";
     private static final long WRITE_QUIET_MS = 500L;
     private static final long WRITE_MAX_LATENCY_MS = 5_000L;
+    /** How long SERVER_STOPPING waits for a write already in flight before giving up on it. */
+    private static final long WRITER_STOP_WAIT_MS = 2_000L;
 
     /** Component-map key for a component type missing from the registry; never allowlisted. */
     private static final String UNREGISTERED_COMPONENT = "frens:unregistered_component";
@@ -129,7 +132,10 @@ public final class SupplyRequestService {
         COVERED_BY_ALWAYS,
         /** The policy refused it (see {@link RequestOutcome#verdict()}), including {@code NO_OWNER}. */
         INELIGIBLE,
-        /** The owner is offline, in another world, or further than {@link #OWNER_PROMPT_RANGE_BLOCKS}. */
+        /**
+         * No standing permission covers the chest, and the owner is offline, in another world, or
+         * further than {@link #OWNER_PROMPT_RANGE_BLOCKS}.
+         */
         OWNER_NOT_NEARBY,
         /** The chest may not be touched (see {@link RequestOutcome#access()}). */
         DENIED,
@@ -209,6 +215,15 @@ public final class SupplyRequestService {
                     fresh.restoreAlways(scope.owner(), scope.chest());
                     restored++;
                 }
+                Integer version = SupplyChestRules.alwaysFileVersion(json);
+                if (restored == 0 || version == null || version != SupplyChestRules.ALWAYS_FORMAT_VERSION) {
+                    // One line, counts and version only: the file's contents are never logged.
+                    // Whatever did decode stays restored; the next change rewrites the file.
+                    LOGGER.warn("[supply] {} gave {} standing permission(s), format version {} (expected {});"
+                                    + " anything unreadable is dropped at the next write",
+                            file, restored, version == null ? "missing" : version,
+                            SupplyChestRules.ALWAYS_FORMAT_VERSION);
+                }
             } catch (IOException | RuntimeException e) {
                 LOGGER.warn("[supply] could not read {}; starting with no standing permissions: {}",
                         file, e.toString());
@@ -239,7 +254,19 @@ public final class SupplyRequestService {
         }
         ScheduledExecutorService exec = writeExecutor;
         if (exec != null) {
-            exec.shutdownNow();
+            // shutdown(), not shutdownNow(): a write already running on the writer thread may
+            // hold the last change (flushNow saw nothing dirty because that write took it), and
+            // interrupting it would lose that change. The writer cancelled its pending task, so
+            // this waits only for a write in flight, and never longer than the bound.
+            exec.shutdown();
+            try {
+                if (!exec.awaitTermination(WRITER_STOP_WAIT_MS, TimeUnit.MILLISECONDS)) {
+                    LOGGER.warn("[supply] standing-permission write still running after {} ms at stop",
+                            WRITER_STOP_WAIT_MS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -268,9 +295,12 @@ public final class SupplyRequestService {
      * the chest at {@code chestPos}. DORMANT: no production caller (see the class comment).
      *
      * <p>Order: owner (none → the policy's {@code NO_OWNER}; never the recruiter or controller) →
-     * owner online, in the bot's world and within {@link #OWNER_PROMPT_RANGE_BLOCKS} → chest access
-     * ({@link SupplyChestRules#access}) → the ledger. On {@link RequestStatus#OPENED} the owner gets
-     * one message with three clickable answers.
+     * chest access ({@link SupplyChestRules#access}) → unless a standing permission already covers
+     * this owner and chest, the owner online, in the bot's world and within
+     * {@link #OWNER_PROMPT_RANGE_BLOCKS} → the ledger. So {@link RequestStatus#DENIED} comes before
+     * {@link RequestStatus#OWNER_NOT_NEARBY}, and "always" really means without asking: the owner
+     * need not be anywhere near. On {@link RequestStatus#OPENED} the owner gets one message with
+     * three clickable answers.
      *
      * @param sample a stack of the exact item wanted (id and components), usually read from the chest
      * @param qty    how many the bot asks for
@@ -307,15 +337,20 @@ public final class SupplyRequestService {
             Verdict verdict = SupplyRequestPolicy.assess(null, item, Stock.of(0), qty, need, book.config()).verdict();
             return new RequestOutcome(RequestStatus.INELIGIBLE, null, null, verdict);
         }
-        ServerPlayerEntity ownerPlayer = srv.getPlayerManager().getPlayer(owner);
-        if (ownerPlayer == null
-                || !CompanionCommunicationPolicy.isWithinVisibleRange(bot, ownerPlayer, OWNER_PROMPT_RANGE_BLOCKS)) {
-            return RequestOutcome.of(RequestStatus.OWNER_NOT_NEARBY);
-        }
 
         ChestRead chest = readChest(srv, world, chestPos, bot, owner);
         if (chest.access() != Access.OK) {
             return new RequestOutcome(RequestStatus.DENIED, null, chest.access(), null);
+        }
+        // A standing permission needs no prompt, so it needs no owner nearby either. Only an
+        // uncovered request, the one that may prompt, requires the owner in range.
+        ServerPlayerEntity ownerPlayer = null;
+        if (!book.hasAlways(owner, chest.key())) {
+            ownerPlayer = srv.getPlayerManager().getPlayer(owner);
+            if (ownerPlayer == null
+                    || !CompanionCommunicationPolicy.isWithinVisibleRange(bot, ownerPlayer, OWNER_PROMPT_RANGE_BLOCKS)) {
+                return RequestOutcome.of(RequestStatus.OWNER_NOT_NEARBY);
+            }
         }
         Stock stock = SupplyChestRules.stock(slotViews(chest.inventory(), item.itemId(), ops), item, book.config());
         RequestFingerprint fp = new RequestFingerprint(owner, bot.getUuid(), chest.key(), item, qty);
@@ -323,7 +358,10 @@ public final class SupplyRequestService {
         book.sweep();
         OpenResult opened = book.open(fp, stock, need);
         RequestOutcome outcome = new RequestOutcome(statusOf(opened.status()), opened, Access.OK, opened.verdict());
-        if (opened.status() == OpenStatus.OPENED && opened.requestId() != null && opened.fingerprint() != null) {
+        // A covered request never opens a prompt (the ledger checks "always" before prompting), so
+        // ownerPlayer is set whenever this sends; the null check only keeps that fail-closed.
+        if (opened.status() == OpenStatus.OPENED && ownerPlayer != null
+                && opened.requestId() != null && opened.fingerprint() != null) {
             sendPrompt(ownerPlayer, bot, sample, chestPos, opened.requestId(), opened.fingerprint().qty());
         }
         return outcome;
@@ -532,7 +570,9 @@ public final class SupplyRequestService {
 
     /**
      * Withdraws {@code owner}'s standing permission for the chest at {@code pos} in the owner's
-     * current world (either half of a double chest names the same chest).
+     * current world (either half of a double chest names the same chest). It clears every key
+     * from {@link SupplyChestRules#revokeKeys}: the chest's key now and each half's own key, so a
+     * permission granted before the chest gained or lost a half is withdrawn too.
      *
      * @return whether a permission was removed; {@code false} also when the service is not
      *         running or this is not the server thread
@@ -547,8 +587,12 @@ public final class SupplyRequestService {
             return false;
         }
         ServerWorld world = owner.getEntityWorld();
-        ChestKey key = chestKey(srv, world, pos, partnerOf(world, pos));
-        boolean removed = book.revokeAlways(owner.getUuid(), key);
+        BlockPos partner = partnerOf(world, pos);
+        boolean removed = false;
+        for (ChestKey key : SupplyChestRules.revokeKeys(worldIdOf(srv, world), toPos(pos),
+                partner == null ? null : toPos(partner))) {
+            removed |= book.revokeAlways(owner.getUuid(), key);
+        }
         if (removed) {
             markDirty();
         }
@@ -624,15 +668,34 @@ public final class SupplyRequestService {
         return new ChestRead(Access.OK, key, inventory);
     }
 
-    /** Both halves are the same chest block, facing the same way, with opposite halves. */
+    /**
+     * Whether {@code b} is the other half of {@code a}'s double chest, by vanilla's merge rule:
+     * each half's block accepts the other ({@link ChestBlock#canMergeWith}: the same block for a
+     * plain chest, any copper chest for a copper one, whatever its oxidation or wax), both face
+     * the same way, and the halves are opposite. Anything else, a state without the chest
+     * properties included, is not a partner.
+     *
+     * <p>Copper halves at different stages are one chest here, and vanilla re-syncs them to one
+     * block on the next neighbour update. Until it does, {@code ChestBlock.getInventory}, like
+     * vanilla's own chest screen, merges only identical blocks and returns the clicked half
+     * alone. The key, locks, territory and ownership still cover both halves; the smaller stock
+     * read can only mean fewer items taken.
+     */
     private static boolean isPartner(BlockState a, BlockState b) {
-        if (b == null || b.getBlock() != a.getBlock()) {
+        if (a == null || b == null
+                || !(a.getBlock() instanceof ChestBlock blockA) || !(b.getBlock() instanceof ChestBlock blockB)
+                || !hasChestProperties(a) || !hasChestProperties(b)
+                || !blockA.canMergeWith(b) || !blockB.canMergeWith(a)) {
             return false;
         }
         ChestType typeA = a.get(ChestBlock.CHEST_TYPE);
         ChestType typeB = b.get(ChestBlock.CHEST_TYPE);
         return typeA != ChestType.SINGLE && typeB == typeA.getOpposite()
                 && a.get(ChestBlock.FACING) == b.get(ChestBlock.FACING);
+    }
+
+    private static boolean hasChestProperties(BlockState state) {
+        return state.contains(ChestBlock.CHEST_TYPE) && state.contains(ChestBlock.FACING);
     }
 
     /** The other half of a loaded double chest at {@code pos}, or {@code null}. Never loads a chunk. */
@@ -660,9 +723,12 @@ public final class SupplyRequestService {
     }
 
     private static ChestKey chestKey(MinecraftServer srv, ServerWorld world, BlockPos posA, BlockPos posBOrNull) {
-        String worldId = SupplyChestRules.worldId(BotWorldStateService.currentWorldKey(srv),
+        return ChestKey.canonical(worldIdOf(srv, world), toPos(posA), posBOrNull == null ? null : toPos(posBOrNull));
+    }
+
+    private static String worldIdOf(MinecraftServer srv, ServerWorld world) {
+        return SupplyChestRules.worldId(BotWorldStateService.currentWorldKey(srv),
                 world.getRegistryKey().getValue().toString());
-        return ChestKey.canonical(worldId, toPos(posA), posBOrNull == null ? null : toPos(posBOrNull));
     }
 
     private static Pos toPos(BlockPos p) {
