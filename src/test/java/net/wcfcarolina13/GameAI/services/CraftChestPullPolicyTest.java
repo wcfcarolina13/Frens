@@ -30,9 +30,10 @@ class CraftChestPullPolicyTest {
         Map<Scope, Next> expected = new EnumMap<>(Scope.class);
         expected.put(Scope.ITEM, Next.SKIP_ITEM);
         expected.put(Scope.CHEST, Next.SKIP_CHEST);
+        expected.put(Scope.TARGET, Next.SKIP_CHEST);
         expected.put(Scope.BOT, Next.STOP);
         expected.put(Scope.OWNER_ABSENT, Next.STOP);
-        expected.put(Scope.TRANSIENT, Next.NEXT);          // this stack only; the pass goes on
+        expected.put(Scope.BUSY, Next.NEXT);               // this stack only; the pass goes on
         expected.put(Scope.NONE, Next.STOP);               // never a refusal's scope: fail closed
         assertEquals(EnumSet.allOf(Scope.class), expected.keySet(), "a new Scope needs a decision here");
         expected.forEach((scope, next) -> {
@@ -52,8 +53,8 @@ class CraftChestPullPolicyTest {
                 SupplyWithdrawalPolicy.transferScope(TransferStatus.NOT_PERMITTED)));
         assertTrue(CraftChestPullPolicy.countsTowardPause(Kind.REFUSED, Refusal.NOT_PERMITTED.scope()));
         assertTrue(CraftChestPullPolicy.shouldPause(0, false, true));
-        // Aligned with the other supply sites: a duplicate prompt is the bot's, not the chest's.
-        assertEquals(Next.STOP, CraftChestPullPolicy.onRefusal(
+        // A duplicate prompt is contention, not the owner's answer: it never counts toward the pause.
+        assertFalse(CraftChestPullPolicy.countsTowardPause(Kind.REFUSED,
                 SupplyWithdrawalPolicy.requestScope(RequestStatus.DUPLICATE_PENDING, null, null)));
     }
 
@@ -64,9 +65,9 @@ class CraftChestPullPolicyTest {
         expected.put(Refusal.BOT_GONE, Next.NEXT);
         expected.put(Refusal.INVALID, Next.NEXT);
         expected.put(Refusal.NO_OWNER, Next.STOP);
-        expected.put(Refusal.CHEST_UNREADABLE, Next.NEXT);
+        expected.put(Refusal.CHEST_UNREADABLE, Next.SKIP_CHEST);
         expected.put(Refusal.OWNER_NOT_NEARBY, Next.STOP);
-        expected.put(Refusal.OTHER_REQUEST_PENDING, Next.STOP);
+        expected.put(Refusal.OTHER_REQUEST_PENDING, Next.NEXT);
         expected.put(Refusal.NOT_PERMITTED, Next.STOP);
         expected.put(Refusal.TIMEOUT, Next.NEXT);
         expected.put(Refusal.ABORTED, Next.NEXT);
@@ -81,7 +82,7 @@ class CraftChestPullPolicyTest {
     void everyRequestStatusAsARefusalHasADeliberateNext() {
         Map<RequestStatus, Next> expected = new EnumMap<>(RequestStatus.class);
         expected.put(RequestStatus.OPENED, Next.STOP);             // a prompt without a fingerprint: fail closed
-        expected.put(RequestStatus.DUPLICATE_PENDING, Next.STOP);
+        expected.put(RequestStatus.DUPLICATE_PENDING, Next.NEXT);
         expected.put(RequestStatus.PROMPT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.REJECT_COOLDOWN, Next.STOP);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, Next.STOP);  // covered without a fingerprint: fail closed
@@ -99,15 +100,15 @@ class CraftChestPullPolicyTest {
     @Test
     void everyTransferStatusAsARefusalHasADeliberateNext() {
         Map<TransferStatus, Next> expected = new EnumMap<>(TransferStatus.class);
-        expected.put(TransferStatus.MOVED, Next.NEXT);          // a refusal only when nothing moved
-        expected.put(TransferStatus.MOVED_SHORT, Next.NEXT);
+        expected.put(TransferStatus.MOVED, Next.SKIP_CHEST);    // a refusal only when nothing moved
+        expected.put(TransferStatus.MOVED_SHORT, Next.SKIP_CHEST);
         expected.put(TransferStatus.WRONG_THREAD, Next.NEXT);
         expected.put(TransferStatus.NOT_RUNNING, Next.NEXT);
         expected.put(TransferStatus.INVALID, Next.NEXT);
         expected.put(TransferStatus.OWNER_OR_BOT_MISMATCH, Next.STOP);
         expected.put(TransferStatus.DENIED, Next.SKIP_CHEST);
         expected.put(TransferStatus.CHEST_MISMATCH, Next.SKIP_CHEST);
-        expected.put(TransferStatus.OUT_OF_REACH, Next.NEXT);   // arrives as READY, never as a refusal
+        expected.put(TransferStatus.OUT_OF_REACH, Next.SKIP_CHEST); // arrives as READY, never as a refusal
         expected.put(TransferStatus.NO_STOCK, Next.SKIP_CHEST);
         expected.put(TransferStatus.NO_ROOM, Next.NEXT);
         expected.put(TransferStatus.NOT_PERMITTED, Next.STOP);
@@ -193,7 +194,7 @@ class CraftChestPullPolicyTest {
             assertTrue(CraftChestPullPolicy.settlesHeldTicket(Kind.MOVED, scope), "moved " + scope);
             assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.READY, scope), "ready " + scope);
             assertFalse(CraftChestPullPolicy.settlesHeldTicket(Kind.WAITING, scope), "waiting " + scope);
-            assertEquals(scope != Scope.TRANSIENT, CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, scope),
+            assertEquals(scope != Scope.BUSY, CraftChestPullPolicy.settlesHeldTicket(Kind.REFUSED, scope),
                     "refused " + scope);
             assertTrue(CraftChestPullPolicy.settlesHeldTicket(null, scope), "no kind " + scope);
         }
@@ -208,7 +209,7 @@ class CraftChestPullPolicyTest {
 
     @Test
     void onlyARefusalFromTheOwnersSideCountsTowardThePause() {
-        EnumSet<Scope> counting = EnumSet.of(Scope.CHEST, Scope.BOT, Scope.OWNER_ABSENT);
+        EnumSet<Scope> counting = EnumSet.of(Scope.CHEST, Scope.TARGET, Scope.BOT, Scope.OWNER_ABSENT);
         for (Kind kind : Kind.values()) {
             for (Scope scope : Scope.values()) {
                 boolean expected = kind == Kind.REFUSED && counting.contains(scope);

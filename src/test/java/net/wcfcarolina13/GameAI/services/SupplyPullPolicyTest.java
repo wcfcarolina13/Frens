@@ -23,11 +23,12 @@ class SupplyPullPolicyTest {
     private static final Map<Scope, Next> REFUSAL_NEXT = new EnumMap<>(Map.of(
             Scope.ITEM, Next.SKIP_ITEM,
             Scope.CHEST, Next.SKIP_CHEST,
+            Scope.TARGET, Next.SKIP_CHEST,
             Scope.BOT, Next.STOP,
             Scope.OWNER_ABSENT, Next.OWNER_AWAY,
-            Scope.TRANSIENT, Next.RETRY_LATER,
+            Scope.BUSY, Next.RETRY_LATER,
             Scope.NONE, Next.STOP));
-    private static final Set<Scope> MISSES = EnumSet.of(Scope.CHEST, Scope.BOT, Scope.NONE);
+    private static final Set<Scope> MISSES = EnumSet.of(Scope.CHEST, Scope.TARGET, Scope.BOT, Scope.NONE);
 
     @Test
     void everyRefusalScopeReachesAsFarAsTheCommonRuleSays() {
@@ -59,7 +60,7 @@ class SupplyPullPolicyTest {
             assertEquals(stops, SupplyPullPolicy.next(Kind.REFUSED, scope).stopsPass(), scope.name());
         }
         // A transient refusal leaves its chest for later and never stops the rest of the run.
-        assertFalse(SupplyPullPolicy.next(Kind.REFUSED, Scope.TRANSIENT).stopsPass());
+        assertFalse(SupplyPullPolicy.next(Kind.REFUSED, Scope.BUSY).stopsPass());
     }
 
     @Test
@@ -127,7 +128,7 @@ class SupplyPullPolicyTest {
     void aPullTalliesMovesWaitsMissesOwnerAwayAndStops() {
         Pull p = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.ITEM);
         assertEquals(Pull.NOTHING, p);
-        p = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.TRANSIENT);
+        p = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.BUSY);
         assertEquals(Pull.NOTHING, p, "a transient refusal adds nothing");
         p = SupplyPullPolicy.fold(p, Kind.MOVED, 4, Scope.NONE);
         assertEquals(new Pull(4, false, false, false, false), p);
@@ -139,7 +140,7 @@ class SupplyPullPolicyTest {
         assertEquals(new Pull(0, false, false, true, true),
                 SupplyPullPolicy.fold(null, Kind.REFUSED, 0, Scope.OWNER_ABSENT));
         // A refused kind never adds to the moved count, whatever number it carries.
-        assertEquals(0, SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 5, Scope.TRANSIENT).moved());
+        assertEquals(0, SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 5, Scope.BUSY).moved());
         assertEquals(new Pull(5, true, true, true, true),
                 new Pull(1, false, true, false, false).plus(new Pull(4, true, false, true, true)));
         assertEquals(new Pull(1, false, false, false, false), new Pull(1, false, false, false, false).plus(null));
@@ -231,7 +232,7 @@ class SupplyPullPolicyTest {
         }
         assertEquals(0, misses);
         // Transient trouble (a busy server, a full inventory) never climbs either, and pauses nothing.
-        Pull busy = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.TRANSIENT);
+        Pull busy = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.BUSY);
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(busy, 3));
         assertEquals(3, SupplyPullPolicy.nextMissCount(3, busy));
     }

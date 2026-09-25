@@ -85,7 +85,7 @@ public final class MutualAidChestFoodPolicy {
         MAKE_ROOM_AND_RETRY,
         /** Refused for this food wherever it is ({@link Scope#ITEM}): skip it in every chest this attempt. */
         NEXT_ITEM,
-        /** Nothing but the moment ({@link Scope#TRANSIENT}): leave this food in this chest for the next attempt; go on. */
+        /** Nothing but the moment ({@link Scope#BUSY}): leave this food in this chest for the next attempt; go on. */
         NEXT_TARGET,
         /** Refused for this chest ({@link Scope#CHEST}): try the next chest (a double chest's other half is skipped too). */
         NEXT_CHEST,
@@ -100,8 +100,8 @@ public final class MutualAidChestFoodPolicy {
     /**
      * Decides from the result's kind and, for a refusal, its scope only; the reason string is for
      * the logs. The one site fact it takes is whether a piece of this food still fits the bot: a
-     * permitted take the bot has no room for comes back {@link Scope#TRANSIENT} (the ticket is
-     * kept), and only then is room made, once.
+     * permitted take the bot has no room for comes back {@link Scope#BUSY} (the ticket is kept),
+     * and only then is room made, once. {@link Scope#TARGET} reads as {@link Scope#CHEST} for now.
      *
      * @param kind         the facade's result kind
      * @param scope        the facade's refusal scope ({@code SupplyWithdrawals.Result#scope()})
@@ -132,10 +132,11 @@ public final class MutualAidChestFoodPolicy {
             case ITEM:
                 return Next.NEXT_ITEM;
             case CHEST:
+            case TARGET:
                 return Next.NEXT_CHEST;
             case OWNER_ABSENT:
                 return Next.DEFER;
-            case TRANSIENT:
+            case BUSY:
                 if (roomForOne) {
                     return Next.NEXT_TARGET;
                 }

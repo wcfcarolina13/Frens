@@ -415,9 +415,8 @@ public final class SupplyRequestService {
         // uncovered request, the one that may prompt, requires the owner in range.
         ServerPlayerEntity ownerPlayer = null;
         if (!book.hasAlways(owner, chest.key())) {
-            ownerPlayer = srv.getPlayerManager().getPlayer(owner);
-            if (ownerPlayer == null
-                    || !CompanionCommunicationPolicy.isWithinVisibleRange(bot, ownerPlayer, OWNER_PROMPT_RANGE_BLOCKS)) {
+            ownerPlayer = ownerInPromptRange(srv, bot, owner);
+            if (ownerPlayer == null) {
                 return RequestOutcome.of(RequestStatus.OWNER_NOT_NEARBY);
             }
         }
@@ -946,6 +945,27 @@ public final class SupplyRequestService {
     static boolean hasAlways(UUID owner, ChestKey chest) {
         SupplyRequestLedger book = ledger;
         return book != null && book.hasAlways(owner, chest);
+    }
+
+    /**
+     * Whether {@code owner} is online, in {@code bot}'s world and within
+     * {@link #OWNER_PROMPT_RANGE_BLOCKS} of it: the check a request makes before it may prompt.
+     * {@code false} when not running. Server thread (it reads the player list and positions).
+     */
+    static boolean isOwnerInPromptRange(ServerPlayerEntity bot, UUID owner) {
+        MinecraftServer srv = server;
+        return srv != null && ownerInPromptRange(srv, bot, owner) != null;
+    }
+
+    /** The owner's player when online, in {@code bot}'s world and within prompt range of it, else {@code null}. */
+    private static ServerPlayerEntity ownerInPromptRange(MinecraftServer srv, ServerPlayerEntity bot, UUID owner) {
+        if (bot == null || owner == null) {
+            return null;
+        }
+        ServerPlayerEntity ownerPlayer = srv.getPlayerManager().getPlayer(owner);
+        return ownerPlayer != null
+                && CompanionCommunicationPolicy.isWithinVisibleRange(bot, ownerPlayer, OWNER_PROMPT_RANGE_BLOCKS)
+                ? ownerPlayer : null;
     }
 
     /** The running server, or {@code null}. */

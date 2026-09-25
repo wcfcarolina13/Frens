@@ -110,9 +110,10 @@ class MutualAidChestFoodPolicyTest {
         Map<Scope, Next> expected = new EnumMap<>(Scope.class);
         expected.put(Scope.ITEM, Next.NEXT_ITEM);
         expected.put(Scope.CHEST, Next.NEXT_CHEST);
+        expected.put(Scope.TARGET, Next.NEXT_CHEST);
         expected.put(Scope.BOT, Next.PAUSE);
         expected.put(Scope.OWNER_ABSENT, Next.DEFER);
-        expected.put(Scope.TRANSIENT, Next.NEXT_TARGET);
+        expected.put(Scope.BUSY, Next.NEXT_TARGET);
         expected.put(Scope.NONE, Next.PAUSE); // a refusal never carries NONE; if one did, fail closed
         assertEquals(EnumSet.allOf(Scope.class), expected.keySet(), "every Scope needs an expectation");
         for (Scope scope : Scope.values()) {
@@ -134,11 +135,11 @@ class MutualAidChestFoodPolicyTest {
     @Test
     void noRoomMakesRoomOnceThenEndsTheAttempt() {
         assertEquals(Next.MAKE_ROOM_AND_RETRY,
-                MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.TRANSIENT, false, false));
+                MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, false));
         // Room was made and still nothing fits: asking another chest could only open a prompt it cannot redeem.
-        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.TRANSIENT, false, true));
+        assertEquals(Next.STOP, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, false, true));
         // With room, a transient refusal only leaves this target, made room or not.
-        assertEquals(Next.NEXT_TARGET, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.TRANSIENT, true, true));
+        assertEquals(Next.NEXT_TARGET, MutualAidChestFoodPolicy.afterWithdraw(Kind.REFUSED, Scope.BUSY, true, true));
     }
 
     @Test
@@ -154,9 +155,9 @@ class MutualAidChestFoodPolicyTest {
                             assertNotEquals(Next.MAKE_ROOM_AND_RETRY, next, at);
                         }
                         if (next == Next.MAKE_ROOM_AND_RETRY) {
-                            assertTrue(kind == Kind.REFUSED && scope == Scope.TRANSIENT && !room, at);
+                            assertTrue(kind == Kind.REFUSED && scope == Scope.BUSY && !room, at);
                         }
-                        if (kind != Kind.REFUSED || scope != Scope.TRANSIENT) {
+                        if (kind != Kind.REFUSED || scope != Scope.BUSY) {
                             assertEquals(reference, next, at);
                         }
                     }

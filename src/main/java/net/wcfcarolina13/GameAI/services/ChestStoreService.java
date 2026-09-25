@@ -760,7 +760,7 @@ public final class ChestStoreService {
      *
      * Worker thread (it walks, and may wait). Deposits are unchanged. This method's own refusals
      * carry a scope like the facade's: a missing argument, no server or a hop that did not run
-     * are {@link Scope#TRANSIENT}; {@link SupplyPullPolicy#NOT_CHEST},
+     * are {@link Scope#BUSY}; {@link SupplyPullPolicy#NOT_CHEST},
      * {@link SupplyPullPolicy#NO_MATCH} and {@link SupplyPullPolicy#UNREACHABLE} are
      * {@link Scope#CHEST}.
      *

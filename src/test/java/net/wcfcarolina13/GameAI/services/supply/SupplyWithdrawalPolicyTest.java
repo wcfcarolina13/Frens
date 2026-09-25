@@ -257,34 +257,143 @@ class SupplyWithdrawalPolicyTest {
     // ── owner away ───────────────────────────────────────────────────────────────────────────
 
     @Test
-    void theOwnerAwayNoteLastsFifteenSecondsPerBotAndChest() {
-        assertEquals(15_000L, SupplyWithdrawalPolicy.OWNER_AWAY_MEMO_MS);
+    void theOwnerAwayNoteLastsThirtySecondsPerBot() {
+        assertEquals(30_000L, SupplyWithdrawalPolicy.OWNER_AWAY_MEMO_MS);
         OwnerAwayMemo memo = new OwnerAwayMemo();
         long t = 5_000L;
-        assertFalse(memo.isAway(BOT, CHEST, t));
-        memo.noteAway(BOT, CHEST, t);
-        assertTrue(memo.isAway(BOT, CHEST, t));
-        assertTrue(memo.isAway(BOT, CHEST, t + 14_999L));
-        assertFalse(memo.isAway(BOT, OTHER_CHEST, t), "another chest is asked about as usual");
-        assertFalse(memo.isAway(OTHER_BOT, CHEST, t), "another bot is asked about as usual");
-        assertFalse(memo.isAway(BOT, CHEST, t + 15_000L), "now == deadline has lapsed");
-        assertFalse(memo.isAway(BOT, CHEST, t + 1L), "a lapsed note is gone");
+        assertFalse(memo.isAway(BOT, t));
+        memo.noteAway(BOT, t);
+        assertTrue(memo.isAway(BOT, t));
+        assertTrue(memo.isAway(BOT, t + 29_999L), "one note answers for every chest this bot asks");
+        assertFalse(memo.isAway(OTHER_BOT, t), "another bot is asked about as usual");
+        assertFalse(memo.isAway(BOT, t + 30_000L), "now == deadline has lapsed");
+        assertFalse(memo.isAway(BOT, t + 1L), "a lapsed note is gone");
 
-        memo.noteAway(BOT, CHEST, t);
-        memo.noteAway(OTHER_BOT, CHEST, t + 10_000L);
-        memo.sweep(t + 15_000L);
-        assertFalse(memo.isAway(BOT, CHEST, t + 1L), "the sweep dropped the lapsed note");
-        assertTrue(memo.isAway(OTHER_BOT, CHEST, t + 15_000L));
+        memo.noteAway(BOT, t);
+        memo.noteAway(OTHER_BOT, t + 10_000L);
+        memo.sweep(t + 30_000L);
+        assertFalse(memo.isAway(BOT, t + 1L), "the sweep dropped the lapsed note");
+        assertTrue(memo.isAway(OTHER_BOT, t + 30_000L));
         memo.clear();
-        assertFalse(memo.isAway(OTHER_BOT, CHEST, t + 15_000L));
+        assertFalse(memo.isAway(OTHER_BOT, t + 30_000L), "cleared at SERVER_STOPPED");
 
-        memo.noteAway(null, CHEST, t);
-        memo.noteAway(BOT, null, t);
-        assertFalse(memo.isAway(null, CHEST, t));
-        assertFalse(memo.isAway(BOT, null, t));
+        memo.noteAway(null, t);
+        assertFalse(memo.isAway(null, t));
+    }
+
+    @Test
+    void forgettingOneBotsNoteLeavesTheOthers() {
+        OwnerAwayMemo memo = new OwnerAwayMemo();
+        memo.noteAway(BOT, 0L);
+        memo.noteAway(OTHER_BOT, 0L);
+        memo.forget(BOT);
+        memo.forget(null);
+        assertFalse(memo.isAway(BOT, 1L), "the owner came back: asked on the next call");
+        assertTrue(memo.isAway(OTHER_BOT, 1L));
+    }
+
+    @Test
+    void anOwnerAwayNoteRefusesQuietlyOnlyWhileTheOwnerStaysAwayFromAnUncoveredChest() {
+        boolean[] both = {false, true};
+        for (boolean always : both) {
+            for (boolean inRange : both) {
+                assertEquals(SupplyWithdrawalPolicy.OwnerAwayStep.ASK,
+                        SupplyWithdrawalPolicy.ownerAwayStep(false, always, inRange), "not noted: ask as usual");
+                SupplyWithdrawalPolicy.OwnerAwayStep noted = SupplyWithdrawalPolicy.ownerAwayStep(true, always, inRange);
+                if (always) {
+                    assertEquals(SupplyWithdrawalPolicy.OwnerAwayStep.ASK, noted, "an Always chest needs nobody nearby");
+                } else if (inRange) {
+                    assertEquals(SupplyWithdrawalPolicy.OwnerAwayStep.FORGET_AND_ASK, noted, "the owner is back");
+                } else {
+                    assertEquals(SupplyWithdrawalPolicy.OwnerAwayStep.REFUSE_QUIETLY, noted);
+                }
+            }
+        }
+        // As a refusal the quiet answer is the owner being away, never the owner's decision.
+        assertEquals(Scope.OWNER_ABSENT, Refusal.OWNER_NOT_NEARBY.scope());
     }
 
     // ── refusal scope: every value, no string literals ───────────────────────────────────────
+
+    /**
+     * The whole table in one place, scope by scope: which reasons reach how far. The per-enum tests
+     * below check every value of each enum against the same mapping.
+     */
+    @Test
+    void theScopeTableReadsScopeByScope() {
+        // ITEM: never granted from any chest.
+        assertEquals(Scope.ITEM, SupplyWithdrawalPolicy.preFilterScope(Verdict.NOT_ALLOWLISTED));
+        for (Verdict v : EnumSet.of(Verdict.NOT_ALLOWLISTED, Verdict.TIER_NOT_ALLOWED, Verdict.PROTECTED_COMPONENTS,
+                Verdict.NO_NEED)) {
+            assertEquals(Scope.ITEM, SupplyWithdrawalPolicy.verdictScope(v), v.name());
+        }
+        // CHEST: this chest refuses everything.
+        for (Access a : accessesAndNull()) {
+            assertEquals(Scope.CHEST, SupplyWithdrawalPolicy.requestScope(RequestStatus.DENIED, a, null), "DENIED/" + a);
+        }
+        for (TransferStatus s : EnumSet.of(TransferStatus.DENIED, TransferStatus.CHEST_MISMATCH,
+                TransferStatus.OUT_OF_REACH)) {
+            assertEquals(Scope.CHEST, SupplyWithdrawalPolicy.transferScope(s), s.name());
+        }
+        assertEquals(Scope.CHEST, Refusal.CHEST_UNREADABLE.scope());
+        // TARGET: this item in this chest only.
+        assertEquals(Scope.TARGET, SupplyWithdrawalPolicy.verdictScope(Verdict.RESERVE_EXHAUSTED));
+        for (TransferStatus s : EnumSet.of(TransferStatus.NO_STOCK, TransferStatus.INELIGIBLE_NOW)) {
+            assertEquals(Scope.TARGET, SupplyWithdrawalPolicy.transferScope(s), s.name());
+        }
+        assertEquals(Scope.TARGET, SupplyWithdrawalPolicy.onTransfer(TransferStatus.MOVED, 0).scope());
+        assertEquals(Scope.TARGET, SupplyWithdrawalPolicy.onTransfer(TransferStatus.MOVED_SHORT, 0).scope());
+        // OWNER_ABSENT: the owner is away; not their answer.
+        assertEquals(Scope.OWNER_ABSENT, SupplyWithdrawalPolicy.requestScope(RequestStatus.OWNER_NOT_NEARBY, null, null));
+        assertEquals(Scope.OWNER_ABSENT, Refusal.OWNER_NOT_NEARBY.scope());
+        // BOT: the owner decided, or can never be asked.
+        for (RequestStatus s : EnumSet.of(RequestStatus.PROMPT_COOLDOWN, RequestStatus.REJECT_COOLDOWN)) {
+            assertEquals(Scope.BOT, SupplyWithdrawalPolicy.requestScope(s, null, null), s.name());
+        }
+        for (TransferStatus s : EnumSet.of(TransferStatus.NOT_PERMITTED, TransferStatus.OWNER_OR_BOT_MISMATCH)) {
+            assertEquals(Scope.BOT, SupplyWithdrawalPolicy.transferScope(s), s.name());
+        }
+        assertEquals(Scope.BOT, Refusal.NOT_PERMITTED.scope());
+        assertEquals(Scope.BOT, Refusal.NO_OWNER.scope());
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.verdictScope(Verdict.NO_OWNER));
+        // BUSY: nothing the owner decided, nothing about the item or the chest.
+        for (RequestStatus s : EnumSet.of(RequestStatus.DUPLICATE_PENDING, RequestStatus.INVALID,
+                RequestStatus.NOT_RUNNING, RequestStatus.WRONG_THREAD)) {
+            assertEquals(Scope.BUSY, SupplyWithdrawalPolicy.requestScope(s, null, null), s.name());
+        }
+        for (TransferStatus s : EnumSet.of(TransferStatus.NO_ROOM, TransferStatus.WRONG_THREAD,
+                TransferStatus.NOT_RUNNING, TransferStatus.INVALID)) {
+            assertEquals(Scope.BUSY, SupplyWithdrawalPolicy.transferScope(s), s.name());
+        }
+        for (Refusal r : EnumSet.of(Refusal.OTHER_REQUEST_PENDING, Refusal.NOT_RUNNING, Refusal.BOT_GONE,
+                Refusal.INVALID, Refusal.TIMEOUT, Refusal.ABORTED, Refusal.SERVER_BUSY, Refusal.ERROR)) {
+            assertEquals(Scope.BUSY, r.scope(), r.name());
+        }
+        // Unmapped or nonsense as a refusal: fail closed.
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.requestScope(null, null, null));
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.transferScope(null));
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.verdictScope(null));
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.resultScope(Kind.REFUSED, null));
+    }
+
+    @Test
+    void everyRefusalScopeIsReachedAndNoneIsNeverARefusal() {
+        Set<Scope> reached = EnumSet.noneOf(Scope.class);
+        for (Verdict v : Verdict.values()) {
+            reached.add(SupplyWithdrawalPolicy.verdictScope(v));
+        }
+        for (RequestStatus s : RequestStatus.values()) {
+            reached.add(SupplyWithdrawalPolicy.requestScope(s, null, null));
+        }
+        for (TransferStatus s : TransferStatus.values()) {
+            reached.add(SupplyWithdrawalPolicy.transferScope(s));
+        }
+        for (Refusal r : Refusal.values()) {
+            reached.add(r.scope());
+        }
+        assertEquals(EnumSet.complementOf(EnumSet.of(Scope.NONE)), reached,
+                "every refusal scope has a reason, and no reason reads as NONE");
+    }
 
     @Test
     void everyVerdictMapsToExactlyOneScope() {
@@ -293,7 +402,7 @@ class SupplyWithdrawalPolicyTest {
         expected.put(Verdict.TIER_NOT_ALLOWED, Scope.ITEM);
         expected.put(Verdict.PROTECTED_COMPONENTS, Scope.ITEM);
         expected.put(Verdict.NO_NEED, Scope.ITEM);
-        expected.put(Verdict.RESERVE_EXHAUSTED, Scope.CHEST);
+        expected.put(Verdict.RESERVE_EXHAUSTED, Scope.TARGET);
         expected.put(Verdict.NO_OWNER, Scope.BOT);
         expected.put(Verdict.ELIGIBLE, Scope.BOT); // nonsense as a refusal: fail closed
         assertEquals(EnumSet.allOf(Verdict.class), expected.keySet(), "a new Verdict needs a scope here");
@@ -321,14 +430,14 @@ class SupplyWithdrawalPolicyTest {
     @Test
     void everyRequestStatusMapsToExactlyOneScope() {
         Map<RequestStatus, Scope> expected = new EnumMap<>(RequestStatus.class);
-        expected.put(RequestStatus.DUPLICATE_PENDING, Scope.BOT);
-        expected.put(RequestStatus.PROMPT_COOLDOWN, Scope.BOT);
+        expected.put(RequestStatus.DUPLICATE_PENDING, Scope.BUSY); // another prompt of this bot is open
+        expected.put(RequestStatus.PROMPT_COOLDOWN, Scope.BOT);      // BUSY here would alternate prompts for ever
         expected.put(RequestStatus.REJECT_COOLDOWN, Scope.BOT);
         expected.put(RequestStatus.OWNER_NOT_NEARBY, Scope.OWNER_ABSENT);
         expected.put(RequestStatus.DENIED, Scope.CHEST);
-        expected.put(RequestStatus.INVALID, Scope.TRANSIENT);
-        expected.put(RequestStatus.NOT_RUNNING, Scope.TRANSIENT);
-        expected.put(RequestStatus.WRONG_THREAD, Scope.TRANSIENT);
+        expected.put(RequestStatus.INVALID, Scope.BUSY);
+        expected.put(RequestStatus.NOT_RUNNING, Scope.BUSY);
+        expected.put(RequestStatus.WRONG_THREAD, Scope.BUSY);
         // A refusal only when the ledger gave no fingerprint, which cannot happen: fail closed.
         expected.put(RequestStatus.OPENED, Scope.BOT);
         expected.put(RequestStatus.COVERED_BY_ALWAYS, Scope.BOT);
@@ -347,7 +456,7 @@ class SupplyWithdrawalPolicyTest {
                 }
             }
         }
-        assertEquals(Scope.TRANSIENT, SupplyWithdrawalPolicy.requestScope(null, null, null));
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.requestScope(null, null, null), "unmapped: fail closed");
     }
 
     @Test
@@ -355,39 +464,39 @@ class SupplyWithdrawalPolicyTest {
         Map<TransferStatus, Scope> expected = new EnumMap<>(TransferStatus.class);
         expected.put(TransferStatus.DENIED, Scope.CHEST);
         expected.put(TransferStatus.CHEST_MISMATCH, Scope.CHEST);
-        expected.put(TransferStatus.NO_STOCK, Scope.CHEST);
-        expected.put(TransferStatus.INELIGIBLE_NOW, Scope.CHEST);
+        expected.put(TransferStatus.OUT_OF_REACH, Scope.CHEST);     // reported as READY, never as a refusal
+        expected.put(TransferStatus.NO_STOCK, Scope.TARGET);
+        expected.put(TransferStatus.INELIGIBLE_NOW, Scope.TARGET);
+        expected.put(TransferStatus.MOVED, Scope.TARGET);           // a refusal only when nothing moved
+        expected.put(TransferStatus.MOVED_SHORT, Scope.TARGET);
         expected.put(TransferStatus.NOT_PERMITTED, Scope.BOT);
         expected.put(TransferStatus.OWNER_OR_BOT_MISMATCH, Scope.BOT);
-        expected.put(TransferStatus.NO_ROOM, Scope.TRANSIENT);
-        expected.put(TransferStatus.OUT_OF_REACH, Scope.TRANSIENT); // reported as READY, never as a refusal
-        expected.put(TransferStatus.WRONG_THREAD, Scope.TRANSIENT);
-        expected.put(TransferStatus.NOT_RUNNING, Scope.TRANSIENT);
-        expected.put(TransferStatus.INVALID, Scope.TRANSIENT);
-        expected.put(TransferStatus.MOVED, Scope.TRANSIENT);        // a refusal only when nothing moved
-        expected.put(TransferStatus.MOVED_SHORT, Scope.TRANSIENT);
+        expected.put(TransferStatus.NO_ROOM, Scope.BUSY);
+        expected.put(TransferStatus.WRONG_THREAD, Scope.BUSY);
+        expected.put(TransferStatus.NOT_RUNNING, Scope.BUSY);
+        expected.put(TransferStatus.INVALID, Scope.BUSY);
         assertEquals(EnumSet.allOf(TransferStatus.class), expected.keySet(), "a new TransferStatus needs a scope here");
         for (TransferStatus s : TransferStatus.values()) {
             assertEquals(expected.get(s), SupplyWithdrawalPolicy.transferScope(s), s.name());
         }
-        assertEquals(Scope.TRANSIENT, SupplyWithdrawalPolicy.transferScope(null));
+        assertEquals(Scope.BOT, SupplyWithdrawalPolicy.transferScope(null), "unmapped: fail closed");
     }
 
     @Test
     void everyFacadeRefusalHasExactlyOneScope() {
         Map<Refusal, Scope> expected = new EnumMap<>(Refusal.class);
         expected.put(Refusal.NO_OWNER, Scope.BOT);
-        expected.put(Refusal.OTHER_REQUEST_PENDING, Scope.BOT);
         expected.put(Refusal.NOT_PERMITTED, Scope.BOT);
         expected.put(Refusal.OWNER_NOT_NEARBY, Scope.OWNER_ABSENT);
-        expected.put(Refusal.NOT_RUNNING, Scope.TRANSIENT);
-        expected.put(Refusal.BOT_GONE, Scope.TRANSIENT);
-        expected.put(Refusal.INVALID, Scope.TRANSIENT);
-        expected.put(Refusal.CHEST_UNREADABLE, Scope.TRANSIENT);
-        expected.put(Refusal.TIMEOUT, Scope.TRANSIENT);
-        expected.put(Refusal.ABORTED, Scope.TRANSIENT);
-        expected.put(Refusal.SERVER_BUSY, Scope.TRANSIENT);
-        expected.put(Refusal.ERROR, Scope.TRANSIENT);
+        expected.put(Refusal.CHEST_UNREADABLE, Scope.CHEST);
+        expected.put(Refusal.OTHER_REQUEST_PENDING, Scope.BUSY);
+        expected.put(Refusal.NOT_RUNNING, Scope.BUSY);
+        expected.put(Refusal.BOT_GONE, Scope.BUSY);
+        expected.put(Refusal.INVALID, Scope.BUSY);
+        expected.put(Refusal.TIMEOUT, Scope.BUSY);
+        expected.put(Refusal.ABORTED, Scope.BUSY);
+        expected.put(Refusal.SERVER_BUSY, Scope.BUSY);
+        expected.put(Refusal.ERROR, Scope.BUSY);
         assertEquals(EnumSet.allOf(Refusal.class), expected.keySet(), "a new Refusal needs a scope here");
         for (Refusal r : Refusal.values()) {
             assertEquals(expected.get(r), r.scope(), r.name());
@@ -467,10 +576,11 @@ class SupplyWithdrawalPolicyTest {
         expected.put(TransferStatus.MOVED, new TransferAction(Kind.MOVED, false, "MOVED", Scope.NONE));
         expected.put(TransferStatus.MOVED_SHORT, new TransferAction(Kind.MOVED, false, "MOVED_SHORT", Scope.NONE));
         expected.put(TransferStatus.OUT_OF_REACH, new TransferAction(Kind.READY, true, "OUT_OF_REACH", Scope.NONE));
-        expected.put(TransferStatus.NO_ROOM, new TransferAction(Kind.REFUSED, true, "NO_ROOM", Scope.TRANSIENT));
-        // The ledger keeps the grant when the policy refuses at transfer time; so does the ticket.
+        expected.put(TransferStatus.NO_ROOM, new TransferAction(Kind.REFUSED, true, "NO_ROOM", Scope.BUSY));
+        // The ledger keeps the grant when the policy refuses at transfer time, but the ticket goes:
+        // kept, it would redeem as READY and send the bot walking for nothing while the grant lives.
         expected.put(TransferStatus.INELIGIBLE_NOW,
-                new TransferAction(Kind.REFUSED, true, "INELIGIBLE_NOW", Scope.CHEST));
+                new TransferAction(Kind.REFUSED, false, "INELIGIBLE_NOW", Scope.TARGET));
         for (TransferStatus dropped : EnumSet.of(TransferStatus.WRONG_THREAD, TransferStatus.NOT_RUNNING,
                 TransferStatus.INVALID, TransferStatus.OWNER_OR_BOT_MISMATCH, TransferStatus.DENIED,
                 TransferStatus.CHEST_MISMATCH, TransferStatus.NO_STOCK, TransferStatus.NOT_PERMITTED)) {
@@ -485,21 +595,20 @@ class SupplyWithdrawalPolicyTest {
     }
 
     @Test
-    void aMoveThatMovedNothingIsATransientRefusalAndTheTicketGoes() {
-        assertEquals(new TransferAction(Kind.REFUSED, false, "MOVED_SHORT", Scope.TRANSIENT),
+    void aMoveThatMovedNothingIsATargetRefusalAndTheTicketGoes() {
+        assertEquals(new TransferAction(Kind.REFUSED, false, "MOVED_SHORT", Scope.TARGET),
                 SupplyWithdrawalPolicy.onTransfer(TransferStatus.MOVED_SHORT, 0));
-        assertEquals(new TransferAction(Kind.REFUSED, false, "MOVED", Scope.TRANSIENT),
+        assertEquals(new TransferAction(Kind.REFUSED, false, "MOVED", Scope.TARGET),
                 SupplyWithdrawalPolicy.onTransfer(TransferStatus.MOVED, 0));
-        assertEquals(new TransferAction(Kind.REFUSED, false, "INVALID", Scope.TRANSIENT),
+        assertEquals(new TransferAction(Kind.REFUSED, false, "INVALID", Scope.BUSY),
                 SupplyWithdrawalPolicy.onTransfer(null, 3));
     }
 
     @Test
-    void reachRoomAndAPolicyRefusalNowKeepTheTicket() {
+    void onlyReachAndRoomKeepTheTicket() {
         for (TransferStatus s : TransferStatus.values()) {
             boolean kept = SupplyWithdrawalPolicy.onTransfer(s, 1).keepTicket();
-            assertEquals(s == TransferStatus.OUT_OF_REACH || s == TransferStatus.NO_ROOM
-                    || s == TransferStatus.INELIGIBLE_NOW, kept, s.name());
+            assertEquals(s == TransferStatus.OUT_OF_REACH || s == TransferStatus.NO_ROOM, kept, s.name());
         }
     }
 
@@ -507,8 +616,10 @@ class SupplyWithdrawalPolicyTest {
 
     /**
      * R1: idle equipment asks, in ascending score, for a lone wooden sword (the chest's spare, so
-     * RESERVE_EXHAUSTED) before the wooden axe, whose prompt opened. After "Allow once" the next
-     * pass asks about the sword first again; the axe still redeems and the owner sees one prompt.
+     * RESERVE_EXHAUSTED) before the wooden axe in the same chest, whose prompt opened. The sword's
+     * refusal is that item in that chest only ({@link Scope#TARGET}), so the axe in the same chest
+     * is still asked. After "Allow once" the next pass asks about the sword first again; the axe
+     * still redeems and the owner sees one prompt.
      */
     @Test
     void r1TheLoneSwordAskedBeforeThePromptedAxeLeavesTheAxesAllowOnce() {
@@ -516,7 +627,8 @@ class SupplyWithdrawalPolicyTest {
         Stock oneSword = Stock.of(1);
         Stock twoAxes = Stock.of(2);
 
-        assertEquals(Scope.CHEST, m.withdraw(CHEST, WOODEN_SWORD, oneSword, true).scope(), "the spare stays: next item");
+        assertEquals(Scope.TARGET, m.withdraw(CHEST, WOODEN_SWORD, oneSword, true).scope(),
+                "the spare stays: the next item in this same chest");
         Outcome asked = m.withdraw(CHEST, WOODEN_AXE, twoAxes, true);
         assertEquals(Kind.WAITING, asked.kind());
         assertEquals(ResponseStatus.GRANTED_ONCE, m.answer(asked, Choice.ALLOW_ONCE));
@@ -524,7 +636,7 @@ class SupplyWithdrawalPolicyTest {
         m.advance(2_000L);
         Outcome sword = m.withdraw(CHEST, WOODEN_SWORD, oneSword, true);
         assertEquals(Kind.REFUSED, sword.kind());
-        assertEquals(Scope.CHEST, sword.scope());
+        assertEquals(Scope.TARGET, sword.scope());
         Outcome axe = m.withdraw(CHEST, WOODEN_AXE, twoAxes, true);
         assertEquals(Kind.MOVED, axe.kind(), "the Allow once is spent by the axe's own call");
         assertEquals(1, axe.moved());
@@ -543,17 +655,17 @@ class SupplyWithdrawalPolicyTest {
         Stock loneStoneAxe = Stock.of(1);
         Stock twoWoodenAxes = Stock.of(2);
 
-        assertEquals(Scope.CHEST, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, false).scope());
+        assertEquals(Scope.TARGET, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, false).scope());
         Outcome asked = m.withdraw(OTHER_CHEST, WOODEN_AXE, twoWoodenAxes, false);
         assertEquals(Kind.WAITING, asked.kind());
         m.answer(asked, Choice.ALLOW_ONCE);
 
         m.advance(3_000L);
-        assertEquals(Scope.CHEST, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, false).scope());
+        assertEquals(Scope.TARGET, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, false).scope());
         Outcome ready = m.withdraw(OTHER_CHEST, WOODEN_AXE, twoWoodenAxes, false);
         assertEquals(Kind.READY, ready.kind(), "permitted: walk there");
         m.advance(4_000L);
-        assertEquals(Scope.CHEST, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, true).scope(), "asked again on the way");
+        assertEquals(Scope.TARGET, m.withdraw(CHEST, STONE_AXE, loneStoneAxe, true).scope(), "asked again on the way");
         Outcome taken = m.withdraw(OTHER_CHEST, WOODEN_AXE, twoWoodenAxes, true);
         assertEquals(Kind.MOVED, taken.kind());
         assertEquals(1, m.prompts);
@@ -618,10 +730,43 @@ class SupplyWithdrawalPolicyTest {
         assertEquals(Kind.WAITING, asked.kind());
         Outcome bread = m.withdraw(CHEST, BREAD, Stock.of(40), true);
         assertEquals(Kind.REFUSED, bread.kind());
-        assertEquals(Scope.BOT, bread.scope());
+        assertEquals(Scope.BUSY, bread.scope(), "contention, not the owner's answer: no miss, no pause");
         assertEquals(1, m.prompts);
         assertEquals(1, m.tickets.count(BOT));
         assertEquals(Kind.WAITING, m.withdraw(CHEST, STONE_AXE, Stock.of(3), true).kind(), "its own ticket waits");
+    }
+
+    /**
+     * A grant the policy refuses at the chest (the stack fell to its reserve while the bot walked)
+     * drops the ticket, so the next call is a fresh request that the policy refuses first: no
+     * READY, no walk, no prompt, no cooldown. The documented edge: once the stock recovers while
+     * the grant still lives, that request prompts the owner once more.
+     */
+    @Test
+    void aTakeThePolicyRefusesAtTheChestDropsTheTicketAndTheNextAskIsRefusedBeforeAnyPrompt() {
+        Model m = new Model();
+        Stock threeAxes = Stock.of(3);
+        Stock loneAxe = Stock.of(1);
+
+        Outcome asked = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
+        m.answer(asked, Choice.ALLOW_ONCE);
+        assertEquals(Kind.READY, m.withdraw(CHEST, STONE_AXE, threeAxes, false).kind(), "permitted: walk there");
+
+        m.advance(5_000L);
+        Outcome atChest = m.withdraw(CHEST, STONE_AXE, loneAxe, true);
+        assertEquals(Kind.REFUSED, atChest.kind(), "someone took two while the bot walked");
+        assertEquals(Scope.TARGET, atChest.scope());
+        assertEquals(0, m.tickets.count(BOT), "the ticket is gone: nothing redeems as READY again");
+
+        Outcome again = m.withdraw(CHEST, STONE_AXE, loneAxe, false);
+        assertEquals(Kind.REFUSED, again.kind(), "refused by the policy, not walked to");
+        assertEquals(Scope.TARGET, again.scope());
+        assertEquals(1, m.prompts, "no prompt for it");
+
+        m.advance(15_000L);
+        Outcome recovered = m.withdraw(CHEST, STONE_AXE, threeAxes, false);
+        assertEquals(Kind.WAITING, recovered.kind(), "the edge: the grant still lives, yet the owner is asked again");
+        assertEquals(2, m.prompts);
     }
 
     // ── waiting ──────────────────────────────────────────────────────────────────────────────

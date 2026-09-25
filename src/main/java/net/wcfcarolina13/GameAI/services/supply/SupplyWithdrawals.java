@@ -54,16 +54,18 @@ import java.util.function.Supplier;
  * asking about anything else never costs it a grant the owner already gave. A ticket lives for
  * the prompt's lifetime plus the grant's and is swept once a second. A ticket whose prompt was
  * refused or expired, or whose grant lapsed, is dropped with {@code NOT_PERMITTED} before any
- * reach check, so {@link Kind#READY} always means permitted.
+ * reach check, so {@link Kind#READY} always means permitted. A take the policy refuses at the
+ * chest ({@code INELIGIBLE_NOW}) drops its ticket too, so it is not walked for again.
  *
  * <p><b>Refusals carry a scope</b> ({@link Result#scope()}, {@link Scope}): how far the answer
- * reaches — this item, this chest, everything the bot asks for now, the owner being away, or
- * nothing but the moment. Callers decide from it; the reason string is for the logs.
+ * reaches — this item anywhere, this chest, this item in this chest, the owner being away, the
+ * owner's decision for everything the bot asks now, or a busy moment. Callers decide from it; the
+ * reason string is for the logs.
  *
  * <p><b>Quiet refusals.</b> A bot with no owner is refused ({@code NO_OWNER}) without asking the
- * ledger. After the owner is found away from a chest, the bot does not ask about that chest again
- * for {@link SupplyWithdrawalPolicy#OWNER_AWAY_MEMO_MS} unless a standing permission covers it.
- * Neither logs at INFO.
+ * ledger. After a request finds the owner away from the bot, the bot asks about no chest a
+ * standing permission does not cover for {@link SupplyWithdrawalPolicy#OWNER_AWAY_MEMO_MS}, or
+ * until the owner is back in prompt range, whichever comes first. Neither logs at INFO.
  *
  * <p>{@link #grantableEstimate} lets a caller count, before asking, how much of a chest's stock
  * the policy could ever grant (allowlist and reserve only; advisory).
@@ -111,8 +113,9 @@ public final class SupplyWithdrawals {
      * @param reason a short why, for the logs: a {@link Refusal} name, {@code INELIGIBLE(<verdict>)}
      *               from the pre-filter, a request status such as {@code PROMPT_COOLDOWN} or
      *               {@code DENIED(<access>)}, a transfer status such as {@code NO_ROOM} (the ticket
-     *               is kept: make room and call again) or {@code INELIGIBLE_NOW}; {@code ASKED} or
-     *               {@code PENDING} while waiting, {@code OUT_OF_REACH} when ready
+     *               is kept: make room and call again) or {@code INELIGIBLE_NOW} (the ticket is
+     *               dropped); {@code ASKED} or {@code PENDING} while waiting, {@code OUT_OF_REACH}
+     *               when ready
      * @param scope  how far a refusal reaches; {@link Scope#NONE} exactly when {@code kind} is not
      *               {@link Kind#REFUSED} (a refusal given no scope reads {@link Scope#BOT}; see
      *               {@link SupplyWithdrawalPolicy#resultScope})
@@ -146,7 +149,7 @@ public final class SupplyWithdrawals {
 
     /** Every bot's tickets, one per chest and exact item. Touched on the server thread; thread-safe for the sweep and stop. */
     private static final TicketBook TICKETS = new TicketBook();
-    /** (bot, chest) pairs that recently found the owner away. */
+    /** Bots whose request recently found their owner away. */
     private static final OwnerAwayMemo OWNER_AWAY = new OwnerAwayMemo();
     private static final AtomicBoolean WARNED_WAIT_ON_SERVER_THREAD = new AtomicBoolean();
     private static final AtomicBoolean WARNED_ESTIMATE_OFF_THREAD = new AtomicBoolean();
@@ -254,7 +257,7 @@ public final class SupplyWithdrawals {
         }
         ChestKey chestKey = SupplyRequestService.chestKeyAt(world, chestPos);
         if (chestKey == null) {
-            // Nothing to match a ticket against, so nothing is dropped either; ask again later.
+            // Nothing to match a ticket against, so nothing is dropped either; the caller skips this chest.
             return Step.loud(Result.refused(Refusal.CHEST_UNREADABLE));
         }
 
@@ -279,9 +282,19 @@ public final class SupplyWithdrawals {
                 break;
         }
 
-        // The owner was just found away from this chest; a standing permission needs nobody nearby.
-        if (OWNER_AWAY.isAway(botId, chestKey, now) && !SupplyRequestService.hasAlways(owner, chestKey)) {
-            return Step.quiet(Result.refused(Refusal.OWNER_NOT_NEARBY));
+        // A request just found the owner away from this bot; a standing permission needs nobody nearby.
+        boolean notedAway = OWNER_AWAY.isAway(botId, now);
+        switch (SupplyWithdrawalPolicy.ownerAwayStep(notedAway,
+                notedAway && SupplyRequestService.hasAlways(owner, chestKey),
+                notedAway && SupplyRequestService.isOwnerInPromptRange(bot, owner))) {
+            case REFUSE_QUIETLY:
+                return Step.quiet(Result.refused(Refusal.OWNER_NOT_NEARBY));
+            case FORGET_AND_ASK:
+                OWNER_AWAY.forget(botId);
+                break;
+            case ASK:
+            default:
+                break;
         }
         RequestOutcome asked = SupplyRequestService.request(bot, chestPos, sample, qty, need);
         RequestFingerprint fp = asked.fingerprint();
@@ -300,7 +313,7 @@ public final class SupplyWithdrawals {
             case REFUSE:
             default:
                 if (asked.status() == RequestStatus.OWNER_NOT_NEARBY) {
-                    OWNER_AWAY.noteAway(botId, chestKey, now);
+                    OWNER_AWAY.noteAway(botId, now);
                 }
                 return Step.loud(refusedBy(asked));
         }

@@ -20,8 +20,9 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  * {@code MutualAidChestFoodPolicy}: {@link Scope#ITEM} skips the item everywhere this pass;
  * {@link Scope#CHEST} skips the chest (both halves of a double chest); {@link Scope#BOT} stops
  * the pass and the caller pauses; {@link Scope#OWNER_ABSENT} stops the pass for a flat
- * {@link #OWNER_AWAY_PAUSE_MS} that is never a miss; {@link Scope#TRANSIENT} leaves that chest for
- * the next cycle without stopping the rest or counting a miss.
+ * {@link #OWNER_AWAY_PAUSE_MS} that is never a miss; {@link Scope#BUSY} leaves that chest for
+ * the next cycle without stopping the rest or counting a miss. {@link Scope#TARGET} reads as
+ * {@link Scope#CHEST} for now.
  *
  * <p>No Minecraft types: {@link Kind}, {@link WaitMode} and {@link Scope} are plain nested enums,
  * and loading one does not load its outer class.
@@ -68,7 +69,7 @@ public final class SupplyPullPolicy {
         SKIP_ITEM,
         /** {@link Scope#CHEST}: this chest will not serve this pass: skip it, both halves of a double chest. */
         SKIP_CHEST,
-        /** {@link Scope#TRANSIENT}: leave this chest for the next cycle; go on with the others. */
+        /** {@link Scope#BUSY}: leave this chest for the next cycle; go on with the others. */
         RETRY_LATER,
         /** {@link Scope#BOT}, or a prompt is open or a grant waits for the bot: stop the pass. */
         STOP,
@@ -95,8 +96,8 @@ public final class SupplyPullPolicy {
             case READY, WAITING -> Next.STOP;
             case REFUSED -> switch (refusalScope(scope)) {
                 case ITEM -> Next.SKIP_ITEM;
-                case CHEST -> Next.SKIP_CHEST;
-                case TRANSIENT -> Next.RETRY_LATER;
+                case CHEST, TARGET -> Next.SKIP_CHEST;
+                case BUSY -> Next.RETRY_LATER;
                 case OWNER_ABSENT -> Next.OWNER_AWAY;
                 case BOT, NONE -> Next.STOP;
             };
@@ -114,17 +115,17 @@ public final class SupplyPullPolicy {
 
     /**
      * Whether an answer is a miss, one step on the caller's backoff: a refusal for this chest
-     * ({@link Scope#CHEST}) or for everything the bot asks for now ({@link Scope#BOT}). Not a
-     * miss: anything that moved or is waiting; {@link Scope#ITEM} (the pre-filter, nothing
-     * asked); {@link Scope#OWNER_ABSENT} (a flat recheck, not the owner's answer); and
-     * {@link Scope#TRANSIENT} (nothing about the owner, the item or the chest).
+     * ({@link Scope#CHEST}, {@link Scope#TARGET}) or for everything the bot asks for now
+     * ({@link Scope#BOT}). Not a miss: anything that moved or is waiting; {@link Scope#ITEM} (the
+     * pre-filter, nothing asked); {@link Scope#OWNER_ABSENT} (a flat recheck, not the owner's
+     * answer); and {@link Scope#BUSY} (nothing about the owner, the item or the chest).
      */
     public static boolean isMiss(Kind kind, Scope scope) {
         if (kind != Kind.REFUSED) {
             return false;
         }
         Scope s = refusalScope(scope);
-        return s == Scope.CHEST || s == Scope.BOT;
+        return s == Scope.CHEST || s == Scope.TARGET || s == Scope.BOT;
     }
 
     /** Whether an answer found the owner away from a chest nothing standing covers. */

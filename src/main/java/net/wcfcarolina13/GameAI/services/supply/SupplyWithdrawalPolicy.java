@@ -18,8 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Pure decisions behind {@link SupplyWithdrawals}: whether an item is worth asking about at all
  * and roughly how many a chest could grant, how far a refusal reaches ({@link Scope}), what to do
  * with a bot's tickets, what a request's or a transfer's status means for the caller and the
- * ticket, how long a ticket lives, when an owner found away is asked again, and when a worker
- * stops waiting for the owner.
+ * ticket, how long a ticket lives, when a bot whose owner was found away asks again, and when a
+ * worker stops waiting for the owner.
  *
  * <p>No Minecraft types: the enums it reads are nested in {@link SupplyRequestService} and
  * {@link SupplyWithdrawals} but are plain enums, and loading one does not load its outer class.
@@ -33,11 +33,12 @@ public final class SupplyWithdrawalPolicy {
     public static final long WAIT_SLACK_MS = 2_000L;
 
     /**
-     * How long a bot does not ask about a chest again after the owner was found away from it
-     * ({@code OWNER_NOT_NEARBY}): long enough that retries cost no request and no INFO line, short
-     * enough that an owner walking back is asked soon.
+     * How long a bot asks no chest a standing permission does not cover after a request found its
+     * owner away ({@code OWNER_NOT_NEARBY}): long enough that the next chests, items and retries of
+     * every caller cost no request and no INFO line. The note is dropped sooner once the owner is
+     * back in prompt range, so a returning owner is asked on the bot's next ask.
      */
-    public static final long OWNER_AWAY_MEMO_MS = 15_000L;
+    public static final long OWNER_AWAY_MEMO_MS = 30_000L;
 
     private SupplyWithdrawalPolicy() {
     }
@@ -46,24 +47,41 @@ public final class SupplyWithdrawalPolicy {
 
     /**
      * How far a refusal reaches, so a caller can decide what to try next without reading the
-     * reason string (which stays for the logs).
+     * reason string (which stays for the logs). Every refusal carries exactly one of the six
+     * refusal scopes; the sites' rule for each is in their policies.
      */
     public enum Scope {
         /** Not a refusal: {@link Kind#MOVED}, {@link Kind#READY} and {@link Kind#WAITING} carry this. */
         NONE,
-        /** This item is never granted, from any chest: skip the item. */
+        /** This item is never granted, from any chest (the pre-filter, the allowlist, no need): skip the item everywhere. */
         ITEM,
-        /** This chest only (denied, too little above its reserve, gone, changed): try another chest. */
+        /** This chest refuses everything (denied, changed, out of reach, unreadable): skip the chest, both halves. */
         CHEST,
         /**
-         * Everything this bot might ask for now: another prompt pending, a cooldown, the owner's No
-         * or an ignored prompt, no owner at all. Stop the pass.
+         * This item in this chest only (nothing above its reserve, none left, the policy refusing it
+         * now, a take that moved nothing): other items in this chest, and this item in other chests,
+         * may still be granted.
+         */
+        TARGET,
+        /**
+         * The owner is away and nothing standing covers the chest: not the owner's answer. A chest
+         * the owner granted "always" needs nobody nearby, so skip only this chest and recheck later.
+         */
+        OWNER_ABSENT,
+        /**
+         * The owner decided, or can never be asked: their No, an ignored prompt, a cooldown, no
+         * owner at all. Everything this bot asks now gets the same: stop the pass, and back off.
+         * {@code PROMPT_COOLDOWN} belongs here and not in {@link #BUSY}: an ignored prompt for one
+         * item expires into a cooldown, and a pass that went on to ask another item after it would
+         * prompt the owner again as soon as the cooldown ends, for ever, alternating items.
          */
         BOT,
-        /** The owner is away and nothing standing covers the chest: recheck later; not the owner's answer. */
-        OWNER_ABSENT,
-        /** Nothing about the owner, the item or the chest: the hop, the bot's room or reach, the server. Retry later. */
-        TRANSIENT
+        /**
+         * Nothing the owner decided and nothing about the item or the chest: another prompt of this
+         * bot is open, the bot has no room, the server or the hop is busy, the call was stopped.
+         * Stop the pass and come back soon; never a miss, never a pause.
+         */
+        BUSY
     }
 
     /**
@@ -72,32 +90,35 @@ public final class SupplyWithdrawalPolicy {
      */
     public enum Refusal {
         /** The service is not running, or the server is stopping. */
-        NOT_RUNNING(Scope.TRANSIENT),
+        NOT_RUNNING(Scope.BUSY),
         /** The bot is gone (removed, or never given). */
-        BOT_GONE(Scope.TRANSIENT),
+        BOT_GONE(Scope.BUSY),
         /** A required argument was missing or not positive. */
-        INVALID(Scope.TRANSIENT),
+        INVALID(Scope.BUSY),
         /** The bot has no recorded owner, so nobody may approve anything for it. */
         NO_OWNER(Scope.BOT),
         /**
          * The chest's key could not be read (unloaded, not a chest, or a half whose partner cannot
          * be resolved without loading a chunk). Nothing is matched or dropped.
          */
-        CHEST_UNREADABLE(Scope.TRANSIENT),
-        /** The owner was found away from this chest moments ago; asked again after {@link #OWNER_AWAY_MEMO_MS}. */
+        CHEST_UNREADABLE(Scope.CHEST),
+        /**
+         * A request found the owner away within the last {@link #OWNER_AWAY_MEMO_MS}, and no
+         * standing permission covers this chest.
+         */
         OWNER_NOT_NEARBY(Scope.OWNER_ABSENT),
         /** Another of this bot's prompts is waiting for the owner. */
-        OTHER_REQUEST_PENDING(Scope.BOT),
+        OTHER_REQUEST_PENDING(Scope.BUSY),
         /** This chest and item's ticket is no longer covered: the owner said No, the prompt expired, or the grant lapsed. */
         NOT_PERMITTED(Scope.BOT),
         /** An {@link WaitMode#UNTIL_ANSWERED} wait ran out while the prompt was still open. */
-        TIMEOUT(Scope.TRANSIENT),
+        TIMEOUT(Scope.BUSY),
         /** The caller, the thread, the bot or the server stopped the call. */
-        ABORTED(Scope.TRANSIENT),
+        ABORTED(Scope.BUSY),
         /** The server thread did not run the step in time. */
-        SERVER_BUSY(Scope.TRANSIENT),
+        SERVER_BUSY(Scope.BUSY),
         /** The step threw on the server thread. */
-        ERROR(Scope.TRANSIENT);
+        ERROR(Scope.BUSY);
 
         private final Scope scope;
 
@@ -111,32 +132,35 @@ public final class SupplyWithdrawalPolicy {
     }
 
     /**
-     * The scope of a refused request: a cooldown or a pending prompt stops the bot; an ineligible
-     * verdict reaches the item, the chest or the bot ({@link #verdictScope}); a denied chest is
-     * that chest's whatever the access; an owner away is {@link Scope#OWNER_ABSENT}; the rest is
-     * transient. {@code OPENED} and {@code COVERED_BY_ALWAYS} are refusals only when the ledger gave
-     * no fingerprint, which cannot happen: they fail closed, like a {@code null} verdict.
+     * The scope of a refused request: a denied chest is that chest's whatever the access; an
+     * ineligible verdict reaches the item, the item in this chest or the bot ({@link #verdictScope});
+     * an owner away is {@link Scope#OWNER_ABSENT}; a prompt or reject cooldown stops the bot; a
+     * prompt of this bot already open, or the service not able to answer, is {@link Scope#BUSY}.
+     * {@code OPENED} and {@code COVERED_BY_ALWAYS} are refusals only when the ledger gave no
+     * fingerprint, which cannot happen: they fail closed ({@link Scope#BOT}), like a {@code null}
+     * status or verdict.
      *
      * @param access  the outcome's access verdict; only a {@code DENIED} carries one, and any value counts
      * @param verdict the outcome's policy verdict; read for {@code INELIGIBLE} only
      */
     public static Scope requestScope(RequestStatus status, Access access, Verdict verdict) {
         if (status == null) {
-            return Scope.TRANSIENT;
+            return Scope.BOT;
         }
         return switch (status) {
-            case DUPLICATE_PENDING, PROMPT_COOLDOWN, REJECT_COOLDOWN, OPENED, COVERED_BY_ALWAYS -> Scope.BOT;
+            case PROMPT_COOLDOWN, REJECT_COOLDOWN, OPENED, COVERED_BY_ALWAYS -> Scope.BOT;
             case INELIGIBLE -> verdictScope(verdict);
             case OWNER_NOT_NEARBY -> Scope.OWNER_ABSENT;
             case DENIED -> Scope.CHEST;
-            case INVALID, NOT_RUNNING, WRONG_THREAD -> Scope.TRANSIENT;
+            case DUPLICATE_PENDING, INVALID, NOT_RUNNING, WRONG_THREAD -> Scope.BUSY;
         };
     }
 
     /**
      * The scope of an ineligible verdict: the item for anything no chest will ever grant it (and a
-     * need of nothing), the chest for its reserve, the bot for a missing owner. {@code ELIGIBLE} or
-     * {@code null} as a refusal is nonsense and fails closed ({@link Scope#BOT}).
+     * need of nothing), the item in this chest for this chest's reserve, the bot for a missing
+     * owner. {@code ELIGIBLE} or {@code null} as a refusal is nonsense and fails closed
+     * ({@link Scope#BOT}).
      */
     public static Scope verdictScope(Verdict verdict) {
         if (verdict == null) {
@@ -144,25 +168,28 @@ public final class SupplyWithdrawalPolicy {
         }
         return switch (verdict) {
             case NOT_ALLOWLISTED, PROTECTED_COMPONENTS, TIER_NOT_ALLOWED, NO_NEED -> Scope.ITEM;
-            case RESERVE_EXHAUSTED -> Scope.CHEST;
+            case RESERVE_EXHAUSTED -> Scope.TARGET;
             case NO_OWNER, ELIGIBLE -> Scope.BOT;
         };
     }
 
     /**
-     * The scope of a transfer's status when it is a refusal: the chest for a denied, changed or
-     * emptied chest and for a policy refusal at transfer time; the bot for no permission or another
-     * owner; transient otherwise. {@code MOVED}/{@code MOVED_SHORT} are refusals only when nothing
-     * moved, and {@code OUT_OF_REACH} never is (it reports {@link Kind#READY}).
+     * The scope of a transfer's status when it is a refusal: the chest for a denied or changed
+     * chest; the item in this chest when none is left, the policy refuses it now, or a take moved
+     * nothing; the bot for no permission or another owner; busy for no room, the wrong thread, the
+     * service stopped or a missing argument. {@code MOVED}/{@code MOVED_SHORT} are refusals only
+     * when nothing moved, and {@code OUT_OF_REACH} never is (it reports {@link Kind#READY}; mapped
+     * with the chest for completeness). A {@code null} status fails closed ({@link Scope#BOT}).
      */
     public static Scope transferScope(TransferStatus status) {
         if (status == null) {
-            return Scope.TRANSIENT;
+            return Scope.BOT;
         }
         return switch (status) {
-            case DENIED, CHEST_MISMATCH, NO_STOCK, INELIGIBLE_NOW -> Scope.CHEST;
+            case DENIED, CHEST_MISMATCH, OUT_OF_REACH -> Scope.CHEST;
+            case NO_STOCK, INELIGIBLE_NOW, MOVED, MOVED_SHORT -> Scope.TARGET;
             case NOT_PERMITTED, OWNER_OR_BOT_MISMATCH -> Scope.BOT;
-            case MOVED, MOVED_SHORT, OUT_OF_REACH, NO_ROOM, WRONG_THREAD, NOT_RUNNING, INVALID -> Scope.TRANSIENT;
+            case NO_ROOM, WRONG_THREAD, NOT_RUNNING, INVALID -> Scope.BUSY;
         };
     }
 
@@ -374,38 +401,42 @@ public final class SupplyWithdrawalPolicy {
     // ── Owner away ───────────────────────────────────────────────────────────────────────────
 
     /**
-     * Which (bot, chest) pairs recently found the owner away, each for {@link #OWNER_AWAY_MEMO_MS}.
-     * While a pair is noted, the facade refuses a new request for it quietly instead of asking the
-     * ledger again, unless a standing permission covers the chest (which needs no owner nearby).
-     * Thread-safe.
+     * Which bots recently found their owner away, each for {@link #OWNER_AWAY_MEMO_MS} after the
+     * request that found it. The owner's range is measured from the bot, not the chest, so one
+     * note answers for every chest: while a bot is noted, the facade refuses its new requests
+     * quietly instead of asking the ledger again, except for a chest a standing permission covers
+     * (which needs no owner nearby). Thread-safe.
      */
     public static final class OwnerAwayMemo {
-        private record Id(UUID bot, ChestKey chest) {
-        }
+        private final ConcurrentHashMap<UUID, Long> until = new ConcurrentHashMap<>();
 
-        private final ConcurrentHashMap<Id, Long> until = new ConcurrentHashMap<>();
-
-        public void noteAway(UUID bot, ChestKey chest, long nowMs) {
-            if (bot != null && chest != null) {
-                until.put(new Id(bot, chest), nowMs + OWNER_AWAY_MEMO_MS);
+        public void noteAway(UUID bot, long nowMs) {
+            if (bot != null) {
+                until.put(bot, nowMs + OWNER_AWAY_MEMO_MS);
             }
         }
 
-        /** Whether the owner was found away from {@code chest} for {@code bot} within the memo's time. */
-        public boolean isAway(UUID bot, ChestKey chest, long nowMs) {
-            if (bot == null || chest == null) {
+        /** Whether a request for {@code bot} found its owner away within the memo's time. */
+        public boolean isAway(UUID bot, long nowMs) {
+            if (bot == null) {
                 return false;
             }
-            Id id = new Id(bot, chest);
-            Long deadline = until.get(id);
+            Long deadline = until.get(bot);
             if (deadline == null) {
                 return false;
             }
             if (nowMs >= deadline) {
-                until.remove(id, deadline);
+                until.remove(bot, deadline);
                 return false;
             }
             return true;
+        }
+
+        /** Drops {@code bot}'s note, as when its owner is back in range. */
+        public void forget(UUID bot) {
+            if (bot != null) {
+                until.remove(bot);
+            }
         }
 
         public void sweep(long nowMs) {
@@ -415,6 +446,28 @@ public final class SupplyWithdrawalPolicy {
         public void clear() {
             until.clear();
         }
+    }
+
+    /** What the facade does, at a new request, with the bot's owner-away note. */
+    public enum OwnerAwayStep {
+        /** Not noted away, or a standing permission covers the chest: ask the ledger as usual. */
+        ASK,
+        /** Noted away, but the owner is back in prompt range: drop the note, then ask. */
+        FORGET_AND_ASK,
+        /** Noted away, still away, and nothing standing covers the chest: refuse quietly, ask nothing. */
+        REFUSE_QUIETLY
+    }
+
+    /**
+     * @param notedAway    the bot's owner-away note is live ({@link OwnerAwayMemo#isAway})
+     * @param alwaysCovers the owner has a standing permission for this chest (it needs nobody nearby)
+     * @param ownerInRange the owner is online, in the bot's world and within prompt range now
+     */
+    public static OwnerAwayStep ownerAwayStep(boolean notedAway, boolean alwaysCovers, boolean ownerInRange) {
+        if (!notedAway || alwaysCovers) {
+            return OwnerAwayStep.ASK;
+        }
+        return ownerInRange ? OwnerAwayStep.FORGET_AND_ASK : OwnerAwayStep.REFUSE_QUIETLY;
     }
 
     // ── Request outcome ──────────────────────────────────────────────────────────────────────
@@ -458,10 +511,16 @@ public final class SupplyWithdrawalPolicy {
      * Items moved → {@link Kind#MOVED}, ticket dropped (a once-grant is spent; under a standing
      * permission the next call asks afresh). Out of reach → {@link Kind#READY}, ticket kept: walk,
      * then call again. No room → {@link Kind#REFUSED} with the ticket kept, so the caller may make
-     * room and call again. Refused by the policy now ({@code INELIGIBLE_NOW}: the reserve drained
-     * or the need went while the bot walked) → {@link Kind#REFUSED} with the ticket kept, as the
-     * ledger keeps the grant. Anything else → {@link Kind#REFUSED}, ticket dropped. A move that
+     * room and call again. Anything else → {@link Kind#REFUSED}, ticket dropped. A move that
      * reports success but moved nothing is a refusal: the grant is spent all the same.
+     *
+     * <p>Refused by the policy now ({@code INELIGIBLE_NOW}: the reserve drained or the need went
+     * while the bot walked) drops the ticket too, although the ledger keeps the grant: kept, the
+     * ticket would redeem as READY on every later call while the grant lives, and the caller would
+     * walk there and back for nothing each time. Without it the next call is a fresh request, which
+     * the policy refuses before any prompt or cooldown while the stock stays as it is. The edge: if
+     * the stock recovers while the grant still lives, that request prompts the owner once more
+     * (or meets the prompt cooldown their answer set), though the grant would have covered it.
      */
     public static TransferAction onTransfer(TransferStatus status, int moved) {
         if (status == null) {
@@ -470,9 +529,9 @@ public final class SupplyWithdrawalPolicy {
         return switch (status) {
             case MOVED, MOVED_SHORT -> action(moved > 0 ? Kind.MOVED : Kind.REFUSED, false, status);
             case OUT_OF_REACH -> action(Kind.READY, true, status);
-            case NO_ROOM, INELIGIBLE_NOW -> action(Kind.REFUSED, true, status);
+            case NO_ROOM -> action(Kind.REFUSED, true, status);
             case WRONG_THREAD, NOT_RUNNING, INVALID, OWNER_OR_BOT_MISMATCH, DENIED, CHEST_MISMATCH, NO_STOCK,
-                 NOT_PERMITTED -> action(Kind.REFUSED, false, status);
+                 NOT_PERMITTED, INELIGIBLE_NOW -> action(Kind.REFUSED, false, status);
         };
     }
 

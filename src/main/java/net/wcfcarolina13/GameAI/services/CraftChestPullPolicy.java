@@ -15,7 +15,8 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
  * <p>A refusal is read by its {@link Scope} alone; the reason string is for the logs. The rule is
  * the one every supply site follows: {@link Scope#ITEM} skips the item, {@link Scope#CHEST} the
  * chest (both halves of a double chest), {@link Scope#BOT} and {@link Scope#OWNER_ABSENT} stop the
- * pass and pause it, {@link Scope#TRANSIENT} leaves only this chest stack for a later pull.
+ * pass and pause it, {@link Scope#BUSY} leaves only this chest stack for a later pull.
+ * {@link Scope#TARGET} reads as {@link Scope#CHEST} for now.
  */
 public final class CraftChestPullPolicy {
 
@@ -87,8 +88,8 @@ public final class CraftChestPullPolicy {
      * How far a refusal reaches: {@link Scope#ITEM} → {@link Next#SKIP_ITEM}; {@link Scope#CHEST}
      * → {@link Next#SKIP_CHEST}; {@link Scope#BOT} (the owner's No or an ignored prompt, another
      * prompt pending, a cooldown, no owner) and {@link Scope#OWNER_ABSENT} → {@link Next#STOP};
-     * {@link Scope#TRANSIENT} (a busy hop, no room, the service stopping) → {@link Next#NEXT}, this
-     * stack only. {@link Scope#NONE} or none at all is not a refusal's scope: fail closed.
+     * {@link Scope#BUSY} (a busy hop, no room, the service stopping) → {@link Next#NEXT}, this
+     * stack only; {@link Scope#TARGET} as {@link Scope#CHEST}. {@link Scope#NONE} or none at all is not a refusal's scope: fail closed.
      */
     public static Next onRefusal(Scope scope) {
         if (scope == null) {
@@ -96,9 +97,9 @@ public final class CraftChestPullPolicy {
         }
         return switch (scope) {
             case ITEM -> Next.SKIP_ITEM;
-            case CHEST -> Next.SKIP_CHEST;
+            case CHEST, TARGET -> Next.SKIP_CHEST;
             case BOT, OWNER_ABSENT, NONE -> Next.STOP;
-            case TRANSIENT -> Next.NEXT;
+            case BUSY -> Next.NEXT;
         };
     }
 
@@ -115,7 +116,7 @@ public final class CraftChestPullPolicy {
         return switch (kind) {
             case MOVED -> true;
             case READY, WAITING -> false;
-            case REFUSED -> scope != Scope.TRANSIENT;
+            case REFUSED -> scope != Scope.BUSY;
         };
     }
 
@@ -123,16 +124,16 @@ public final class CraftChestPullPolicy {
      * Whether one answer counts toward the pull's pause: a refusal from the owner's ledger or its
      * chest ({@link Scope#CHEST}, {@link Scope#BOT}), or the owner found away
      * ({@link Scope#OWNER_ABSENT}). Never an item the policy never grants ({@link Scope#ITEM}: no
-     * ask was made) or a transient failure ({@link Scope#TRANSIENT}: it says nothing about the
-     * owner), and never an answer that is not a refusal.
+     * ask was made) or a busy moment ({@link Scope#BUSY}: it says nothing about the owner), and
+     * never an answer that is not a refusal.
      */
     public static boolean countsTowardPause(Kind kind, Scope scope) {
         if (kind != Kind.REFUSED || scope == null) {
             return false;
         }
         return switch (scope) {
-            case CHEST, BOT, OWNER_ABSENT -> true;
-            case ITEM, TRANSIENT, NONE -> false;
+            case CHEST, TARGET, BOT, OWNER_ABSENT -> true;
+            case ITEM, BUSY, NONE -> false;
         };
     }
 
