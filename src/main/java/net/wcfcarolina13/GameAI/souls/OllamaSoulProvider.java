@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,8 +28,13 @@ import java.util.concurrent.CompletionException;
  * (non-2xx status, timeout, cancellation, malformed response) is mapped to a typed
  * {@link SoulTypes.FailureCode} and returned as a normal, successful future completion; the
  * raw HTTP response body is never surfaced in dialogue text or logs.
+ *
+ * <p>Every successful call logs one token-usage line (counts and timings only, never message
+ * text) so {@code num_ctx} can be sized from field data — see {@link #readUsage(JsonNode)}.
  */
 public final class OllamaSoulProvider implements SoulModelProvider {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("frens.souls");
 
     /** Test seam: lets tests inject a fake transport instead of a real {@link HttpClient}. */
     @FunctionalInterface
@@ -96,7 +103,7 @@ public final class OllamaSoulProvider implements SoulModelProvider {
             if (throwable != null) {
                 return mapFailure(throwable, elapsedMillis);
             }
-            return mapResponse(response, elapsedMillis);
+            return mapResponse(response, elapsedMillis, request.maxOutputTokens());
         });
 
         return new Call(resultFuture, () -> httpFuture.cancel(false));
@@ -162,7 +169,8 @@ public final class OllamaSoulProvider implements SoulModelProvider {
 
     // === Response mapping ===
 
-    private SoulTypes.ProviderResult mapResponse(HttpResponse<String> response, long elapsedMillis) {
+    private SoulTypes.ProviderResult mapResponse(HttpResponse<String> response, long elapsedMillis,
+                                                 int maxOutputTokens) {
         int status = response.statusCode();
         if (status < 200 || status >= 300) {
             return failureResult(SoulTypes.FailureCode.UNAVAILABLE, elapsedMillis);
@@ -173,11 +181,71 @@ public final class OllamaSoulProvider implements SoulModelProvider {
             if (!content.isTextual()) {
                 return failureResult(SoulTypes.FailureCode.MALFORMED, elapsedMillis);
             }
+            Usage usage = readUsage(root);
+            logUsage(usage, maxOutputTokens);
             return new SoulTypes.ProviderResult(true, content.asText(), null, id(), model,
-                    elapsedMillis, null, null, null);
+                    elapsedMillis, null, toInteger(usage.promptTokens()), toInteger(usage.evalTokens()));
         } catch (RuntimeException | JsonProcessingException ex) {
             return failureResult(SoulTypes.FailureCode.MALFORMED, elapsedMillis);
         }
+    }
+
+    // === Token usage ===
+
+    /**
+     * Token accounting from a non-streamed {@code /api/chat} response. Each value is {@code -1}
+     * when Ollama omitted the field or sent something non-numeric (older servers, a cached prompt
+     * that skipped evaluation).
+     *
+     * @param promptTokens {@code prompt_eval_count}
+     * @param evalTokens   {@code eval_count}
+     * @param loadMs       {@code load_duration}, nanoseconds converted to milliseconds
+     * @param promptEvalMs {@code prompt_eval_duration}, nanoseconds converted to milliseconds
+     */
+    record Usage(long promptTokens, long evalTokens, long loadMs, long promptEvalMs) {
+    }
+
+    static Usage readUsage(JsonNode root) {
+        return new Usage(
+                countOrMissing(root.path("prompt_eval_count")),
+                countOrMissing(root.path("eval_count")),
+                nanosToMillisOrMissing(root.path("load_duration")),
+                nanosToMillisOrMissing(root.path("prompt_eval_duration")));
+    }
+
+    /**
+     * True when the prompt plus the requested output budget ({@code num_predict}) fills more than
+     * 90% of the context window. An unknown prompt count ({@code < 0}) is never near the limit.
+     */
+    static boolean nearContextLimit(long promptTokens, int maxOutputTokens, int numCtx) {
+        if (promptTokens < 0 || numCtx <= 0) {
+            return false;
+        }
+        long needed = promptTokens + Math.max(0, maxOutputTokens);
+        return needed * 10L > numCtx * 9L;
+    }
+
+    private void logUsage(Usage usage, int maxOutputTokens) {
+        String line = String.format(Locale.ROOT,
+                "[souls] ollama usage model=%s promptTokens=%d evalTokens=%d loadMs=%d promptEvalMs=%d numCtx=%d",
+                model, usage.promptTokens(), usage.evalTokens(), usage.loadMs(), usage.promptEvalMs(), NUM_CTX);
+        if (nearContextLimit(usage.promptTokens(), maxOutputTokens, NUM_CTX)) {
+            LOGGER.warn("{} numPredict={} nearCtxLimit=true", line, maxOutputTokens);
+        } else {
+            LOGGER.info(line);
+        }
+    }
+
+    private static long countOrMissing(JsonNode node) {
+        return node.isNumber() ? node.asLong() : -1L;
+    }
+
+    private static long nanosToMillisOrMissing(JsonNode node) {
+        return node.isNumber() ? Math.max(0L, node.asLong()) / 1_000_000L : -1L;
+    }
+
+    private static Integer toInteger(long value) {
+        return value < 0 || value > Integer.MAX_VALUE ? null : (int) value;
     }
 
     private SoulTypes.ProviderResult mapFailure(Throwable throwable, long elapsedMillis) {
