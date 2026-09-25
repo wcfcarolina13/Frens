@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.217-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.218-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.217** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.218** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -867,6 +867,37 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Claude watches for: the hint on screen; `frens/group-chat-hint-seen.txt` in the world dir afterwards.
   - Pass when: it shows once for ~15 s, Open guide lands on the group-chat topic, and it does not come back after
     reconnecting.
+
+## Phase 6p — Construction interior egress (1.1.218)
+
+Bradley's report: the bot builds a house and gets stuck inside trying to reach the far side of a corner instead of
+walking out the doorway. Needs a flat, open build site; give the bot enough materials. No toggles.
+
+- [ ] **Schematic builder leaves through the doorway (1.1.218)**
+  - Bradley does: `/bot build small_hut` (then `small_shelter`) with the bot starting inside the footprint area once the
+    walls are half up — or just watch a full build.
+  - Claude watches for: `[egress] bot=… door=x,z src=DESIGNED_GAP … outcome=ok` when a stance is outside.
+  - Pass when: the bot walks out the gap instead of pressing into the wall; no `outcome=failed` run of two followed by the
+    old stall.
+- [ ] **Hovel builder uses the door from the wall line (1.1.218)**
+  - Bradley does: `/bot shelter hovel` and watch the corners.
+  - Claude watches for: `[hovel-egress] … from=ON_WALL|INSIDE … outcome=ok guard=proceed`.
+  - Pass when: corner stances on the far side are reached via the door; any `outcome=failed` line still shows
+    `guard=proceed` unless the bot was strictly inside heading strictly outside.
+- [ ] **No fall off a raised floor (1.1.218)**
+  - Bradley does: `/bot build watchtower` with materials for all but the top railing (or stop it before the railing).
+  - Claude watches for: `[egress]` lines while the bot is on the platform; its Y afterwards.
+  - Pass when: the bot never walks off the platform edge through a missing railing (no `[egress] … outcome=ok` whose exit is
+    past the edge; no fall damage).
+- [ ] **Line-of-sight retries stay local (1.1.218)**
+  - Bradley does: nothing extra — watch wall placement from inside.
+  - Claude watches for: `[egress]` lines clustered at the same wall block.
+  - Pass when: no out-and-back egress sequence per wall block; retries stay on the bot's side first.
+- [ ] **`/bot stop` mid-egress stops cleanly (1.1.218)**
+  - Bradley does: `/bot stop` while the bot walks out the doorway.
+  - Claude watches for: `outcome=aborted` (schematic) or `(aborted)` (hovel).
+  - Pass when: the bot stops at once and the next build still tries the doorway (an abort does not count toward the
+    2-failure switch).
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

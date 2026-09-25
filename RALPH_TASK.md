@@ -3,7 +3,32 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 — next session starts here
+## Session Handoff 2026-09-25 (1.1.218) — next session starts here
+
+**State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances if the natives pgrep passed — see
+the release commit). Suite 1078 green (1020 → 1078). Two builds this session: 1.1.217 (below) and 1.1.218.
+
+**Shipped in 1.1.218 — construction interior egress** (Bradley's "stuck inside the house instead of walking out the
+doorway"). Hovel: boundary-aware `HovelEgressGeometry` + aligned door waypoints; schematic/generic: `InteriorEgressPolicy`
++ `InteriorEgressService` from `BuildSchematicSkill.moveToReachBlock` and `ConstructionRecoveryService.moveTo`, doorways
+derived from plan air gaps (built-ins have no door blocks), 2-failure switch per build, fall guard (ground within a 2-block
+drop, contiguous). Review wave kept the 1.1.217 fallback wherever egress fails. Fortify untouched. Logs `[egress] …` and
+`[hovel-egress] …`. Details, rulings, deferrals in `changelog.md`.
+
+**Field checks pending:** Phase 6p (new, construction egress) and 6o (1.1.217), plus 6b–6n.
+
+**Next autonomous candidates:** (1) Companion supplies Phase 1 — scoped at `.superpowers/sdd/SCOPE-supplies-phase1.md`
+(pure `SupplyRequestPolicy` + `SupplyRequestLedger` in `GameAI/services/supply/`, no live withdrawals). The scoper found
+the plan's Phase 3 misses ≥4 withdrawal bypasses (HarvestCropSkill seeds :493,:635; HuntSkill weapon :1256-1275 and food
+:1391; NavigationArtifactService :1523-1535) and that bot-placed chest records follow the bot's CURRENT owner with
+unlinked double-chest halves — Phase 2 needs an explicit owner field. (2) Addressee rule fixes (listed below in the 1.1.217
+block). (3) Egress follow-ups: outside→inside entry routing, Fortify onto the shared helper.
+
+**Needs Bradley:** unchanged from the 1.1.217 block below, plus: un-owned bot supply approvals (who approves?).
+
+---
+
+## Session Handoff 2026-09-25 (1.1.217) — superseded
 
 **State:** main = origin/main @ 1.1.217 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1020 green (949 → 1020). The Codex branch `codex/companion-supplies-model-switch`
 (voice-preserving model switch, group-chat guide topic, one-time group-chat hint) was fast-forwarded into main and

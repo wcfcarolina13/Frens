@@ -2,6 +2,50 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Construction interior egress — builders walk out the doorway instead of into the wall; 1.1.218 (2026-09-25)
+
+Bradley's report: building a house, the bot gets stuck inside trying to reach the other side of a corner instead of
+walking out the doorway. He asked whether an LLM steering decisions would do better. It would not: a local 8B handed an
+ASCII map of the room picked a direction close to uniformly (east at 0.36 with the door west), and Jev-class decision
+models are text-only too. The scoper found a deterministic gap. Fortify already routes through its gate
+(`FortifyVillageSkill` ~4187-4421: inside approach → gate → exit at the bot's Y, boundary counts as outside). The hovel
+had a door exit whose footprint tests were BOTH strict, so a bot on the wall line was neither inside nor outside and
+skipped it, and its waypoints were loose nearest-standable picks. Schematic and generic builds had no egress at all:
+stations were chosen without an inside test, `ConstructionRecoveryService` nudged in straight lines, and protection of
+the whole planned volume left only outside stances, so the bot tried to cross the wall.
+
+- `76840036` + `189cf569` fix (hovel) — pure `HovelEgressGeometry` (INSIDE / ON_WALL / OUTSIDE; aligned
+  approach → door → exit waypoints), `HovelGeometryService.classifyFootprint` (the strict methods and their other callers
+  are unchanged), `exitInteriorViaDoor` returns an `EgressOutcome`. Log: `[hovel-egress] bot=… door=… from=… to=… outcome=…
+  guard=proceed|fail`.
+- `d6525329` feat — pure `InteriorEgressPolicy` + `ConstructionPlan.doorPositions` + `ConstructionProtectionService.egressView`.
+  **Scope correction:** no built-in schematic has a door block (small_hut, small_shelter and watchtower leave an air gap),
+  so doorways are derived from edge columns open at both feet and head height in the plan's walking-height band; windows
+  and feet-only gaps are rejected.
+- `1a12c154` fix — `InteriorEgressService.egressIfNeeded` from `BuildSchematicSkill.moveToReachBlock` and
+  `ConstructionRecoveryService.moveTo`; straight nudges and the wide-arc reposition no longer cross the wall line from
+  inside while a doorway route exists; off after 2 consecutive failures per build; refuses on the server thread.
+  Log: `[egress] bot=… plan=… door=x,z src=… waypoints=3 outcome=ok|failed:<step>|aborted`.
+- `662dca30` fix (review wave) — (1) a failed hovel egress falls back to the normal move everywhere 1.1.217 would have
+  proceeded (wall-line cases, `not-outside`, ending in the door cell), plus Fortify's 2-failure cap; (2) fall guard: a
+  doorway is used only if the opening and every cell out to the exit have ground (collision shape, partials included)
+  within a 2-block drop, checked contiguously; the extra push obeys the same rule. The review's scenario was a watchtower
+  with an unfinished railing, where a missing fence read as a doorway 8 blocks up; (3) the line-of-sight retry skips
+  egress and tries the bot's own side first; (4) a stance one step away is exempt; (5) `/bot stop` doesn't count toward
+  the caps.
+
+**Rulings (cost if wrong):** don't touch Fortify (cost: two egress implementations to keep in step); drop the straight
+`nudgeToward` fallback only while a doorway route exists (guardrail Sign amended; cost: a wasted egress before the
+2-failure switch); waypoint Y is the hovel blueprint's stand level, not the bot's Y (the doorway is fixed by the blueprint;
+cost: a wrong Y on uneven ground shows in `botPos=` on the log line).
+**Deferred:** Fortify onto the shared helper; outside→inside entry routing (hovel `enterInteriorViaDoor` still uses loose
+waypoints, schematic has none); a bot on an inside scaffold above the lintel (falls back); L-shaped .nbt footprints (the
+bounding box counts the notch as inside; the 2-failure switch bounds it); after egress, the mover's straight walk can
+re-enter for a stance directly opposite the door before A* takes over (no worse than before); closed door blocks are not
+opened (doorway rework is still Bradley's decision).
+
+Tests 1020 → 1078. **Field checks:** Phase 6p in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
 ## Field-log follow-ups — Piper pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation; ships the Sept 8–9 Codex work; 1.1.217 (2026-09-25)
 
 Driven by the five 1.21.11 sessions on 1.1.216 (2026-09-07 21:39 → 2026-09-08 20:15, Jake + Bob) that no session had
