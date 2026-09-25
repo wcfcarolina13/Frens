@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 (1.1.218) — next session starts here
 
-**State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1078 green (1020 → 1078). Two builds this session: 1.1.217 (below) and 1.1.218.
+**State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1122 green after supplies Phase 1 (1078 at the 1.1.218 release). Two builds this session: 1.1.217 (below) and 1.1.218.
 
 **Shipped in 1.1.218 — construction interior egress** (Bradley's "stuck inside the house instead of walking out the
 doorway"). Hovel: boundary-aware `HovelEgressGeometry` + aligned door waypoints; schematic/generic: `InteriorEgressPolicy`
@@ -16,8 +16,9 @@ drop, contiguous). Review wave kept the 1.1.217 fallback wherever egress fails. 
 
 **Field checks pending:** Phase 6p (new, construction egress) and 6o (1.1.217), plus 6b–6n.
 
-**Next autonomous candidates:** (1) Companion supplies Phase 1 — scoped at `.superpowers/sdd/SCOPE-supplies-phase1.md`
-(pure `SupplyRequestPolicy` + `SupplyRequestLedger` in `GameAI/services/supply/`, no live withdrawals). The scoper found
+**Also done this session (not released, no callers):** companion supplies Phase 1 `03ef2538` — pure
+`SupplyRequestPolicy` + `SupplyRequestLedger` in `GameAI/services/supply/` (tests 1122). Next for that track is Phase 2
+(adapter + authorization persistence). **Next autonomous candidates:** (1) Supplies Phase 2. The Phase 1 scoper found
 the plan's Phase 3 misses ≥4 withdrawal bypasses (HarvestCropSkill seeds :493,:635; HuntSkill weapon :1256-1275 and food
 :1391; NavigationArtifactService :1523-1535) and that bot-placed chest records follow the bot's CURRENT owner with
 unlinked double-chest halves — Phase 2 needs an explicit owner field. (2) Addressee rule fixes (listed below in the 1.1.217

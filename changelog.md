@@ -2,6 +2,23 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Companion supplies Phase 1 — pure chest request policy and ledger (2026-09-25, not released, no callers)
+
+Phase 1 of `docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`: `03ef2538`
+`GameAI/services/supply/SupplyRequestPolicy` (allowlist, tiers, reserves, component protection, owner binding, canonical
+double-chest `ChestKey`) and `SupplyRequestLedger` (pending prompts, once/always grants, prompt + rejection cooldowns,
+exact-fingerprint consume that re-runs the policy against stock at transfer time). Pure Java, no `net.minecraft`, nothing
+wired — no live withdrawals exist yet. Tests 1078 → 1122.
+
+**Rulings (cost if wrong):** un-owned bot → `NO_OWNER`, nothing grantable (Bradley's open question); operators may not
+approve unless `operatorMayApprove` (default off); "one spare per equipment type" = leave one of that type in the chest,
+capped by need; tiers default {wooden, stone, copper, leather} — iron is one `withAllowedTiers` change away (Bradley's
+iron-tier question); copper armor and spears are requestable via their tiers (cost: a one-line removal if unwanted);
+a standing Always outranks an earlier No for the same item; rejection cooldown covers every component variant of an item.
+**Scoping corrections recorded in the plan:** Phase 3 must also close HarvestCropSkill seed restock, HuntSkill weapon/food,
+and NavigationArtifactService withdrawals; bot-placed chest records follow the bot's current owner and double-chest halves
+are unlinked, so Phase 2 needs an explicit owner field and a both-halves check.
+
 ## Construction interior egress — builders walk out the doorway instead of into the wall; 1.1.218 (2026-09-25)
 
 Bradley's report: building a house, the bot gets stuck inside trying to reach the other side of a corner instead of
