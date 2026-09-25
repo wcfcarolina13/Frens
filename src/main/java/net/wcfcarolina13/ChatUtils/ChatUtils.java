@@ -82,21 +82,45 @@ public class ChatUtils {
             }
         }
 
-        LOGGER.info("Sending chat message (withDelay={}): '{}'", withDelay, message);
-
-        boolean forceTextFallback = shouldForceTextFallbackForVoiceOnly(recipient.botSender, message, category);
+        // Decide text visibility BEFORE logging, so the log only claims a send the player will see
+        // (1.1.217: a field check grepping "Sending chat message" false-failed on lines the text
+        // master had suppressed). The deferred task re-evaluates the same decision at send time and
+        // logs "Scripted chat delivered" — that line, not this one, is the delivery ground truth.
+        boolean textAllowed = TextLineVisibilityService.isTextAllowed(category);
+        boolean forceTextFallback = shouldForceTextFallbackForVoiceOnly(recipient.botSender, textAllowed, message);
+        boolean willSendText = shouldSendText(recipient.botSender, textAllowed, forceTextFallback);
 
         List<String> messageParts = splitMessage(message.trim());
-        LOGGER.info("Message split into {} parts", messageParts.size());
+        if (willSendText) {
+            LOGGER.info("Sending chat message (withDelay={}): '{}'", withDelay, message);
+            LOGGER.info("Message split into {} parts", messageParts.size());
+        } else {
+            // Voice may still play on the deferred task; only the text is withheld.
+            LOGGER.info("Scripted chat suppressed (text off) category={} bot={}",
+                    categoryId(category),
+                    recipient.bot != null ? recipient.bot.getName().getString() : "(none)");
+        }
 
         // This is the core fix. We are queuing a single task on the server's main thread.
         // The task itself handles all logic, including delays.
         server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay, forceTextFallback, category));
     }
 
-    private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, String rawMessage, VoiceLineCategory category) {
-        if (!botSender || TextLineVisibilityService.isTextAllowed(category)
-                || !BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
+    /**
+     * The chat text gate, as one pure decision: non-bot senders (a player's own command feedback)
+     * always see their text; a bot's scripted line shows when its category's text is allowed, or
+     * when the voice-only fallback forces it (text off, voice on, line has no voice clip).
+     */
+    static boolean shouldSendText(boolean botSender, boolean textAllowed, boolean forceFallback) {
+        return !botSender || textAllowed || forceFallback;
+    }
+
+    private static String categoryId(VoiceLineCategory category) {
+        return category != null ? category.id() : "(none)";
+    }
+
+    private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, boolean textAllowed, String rawMessage) {
+        if (!botSender || textAllowed || !BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
             return false;
         }
         String cleaned = stripLegacyFormatting(rawMessage == null ? "" : rawMessage.trim());
@@ -186,13 +210,18 @@ public class ChatUtils {
                 BotDialoguePlayer.tryPlayDialogueDetailed(source, cleanedMessage, category);
             }
 
-            boolean sendText = !botSender || TextLineVisibilityService.isTextAllowed(category) || forceTextFallback;
+            boolean sendText = shouldSendText(botSender, TextLineVisibilityService.isTextAllowed(category), forceTextFallback);
             if (!sendText) {
                 return;
             }
 
             String toSend = botSender ? (sourceName + ": " + cleanedMessage) : cleanedMessage;
             recipient.sendMessage(Text.literal(toSend), false);
+            if (botSender) {
+                // The one line field checks grep for: the player's chat actually received this part.
+                LOGGER.info("Scripted chat delivered bot={} category={} part={}",
+                        sourceName, categoryId(category), partIndex);
+            }
 
         } catch (Exception e) {
             LOGGER.error("Failed to send message part {}: {}", partIndex, e.getMessage(), e);
