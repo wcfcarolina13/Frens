@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.ChestBlock;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.BedItem;
@@ -18,17 +19,21 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService.ItemSnapshot;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -300,7 +305,7 @@ public final class ToolProvisionService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        int pulled = withdrawFromNearbyContainers(bot, world, Items.SADDLE, minCount - have);
+        pullFromReachableChests(bot, world, stack -> stack.isOf(Items.SADDLE), null, minCount - have, "saddle");
         have = countInventoryItem(bot, Items.SADDLE);
         if (have >= minCount) {
             return true;
@@ -372,7 +377,7 @@ public final class ToolProvisionService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        withdrawFromNearbyContainers(bot, world, Items.LEAD, minCount - have);
+        pullFromReachableChests(bot, world, stack -> stack.isOf(Items.LEAD), null, minCount - have, "lead");
         have = countInventoryItem(bot, Items.LEAD);
         if (have >= minCount) {
             return true;
@@ -472,7 +477,7 @@ public final class ToolProvisionService {
             return true;
         }
         if (bot.getEntityWorld() instanceof ServerWorld world) {
-            withdrawFromNearbyContainersByTag(bot, world, ItemTags.FENCES, minCount);
+            pullFromReachableChests(bot, world, stack -> stack.isIn(ItemTags.FENCES), null, minCount, "fence");
             if (countTagged(bot, ItemTags.FENCES) >= minCount) {
                 return true;
             }
@@ -804,53 +809,68 @@ public final class ToolProvisionService {
         return weaponScore(bot.getMainHandStack()) > 0;
     }
 
-    public static boolean pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
-                                                                   ServerWorld world,
-                                                                   boolean needWeapon,
-                                                                   boolean needAxe) {
+    /**
+     * The idle wooden fallback's pull: a weapon, an axe, armor for empty slots, then sticks, planks
+     * and logs for crafting, from the chests the bot can reach where it stands, each through the
+     * supply facade ({@link #pullFromReachableChests}). Server tick; never walks, never waits.
+     *
+     * <p>One prompt per bot: the first item the owner is asked about ends the pull
+     * ({@link SupplyPullPolicy.Pull#halted()}), and so does any refusal that answers for every
+     * other item too (a cooldown, the owner refusing or ignoring a prompt). The caller reads the
+     * result: {@code waiting} means don't craft or cut a tree over the owner's pending answer,
+     * {@code missed} feeds its ask backoff.
+     */
+    public static SupplyPullPolicy.Pull pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
+                                                                                ServerWorld world,
+                                                                                boolean needWeapon,
+                                                                                boolean needAxe) {
         if (bot == null || world == null) {
-            return false;
+            return SupplyPullPolicy.Pull.NOTHING;
         }
-        boolean moved = false;
+        SupplyPullPolicy.Pull pull = SupplyPullPolicy.Pull.NOTHING;
 
+        // Lowest score first, as the old max(reversed(score)) pick did.
         if (needWeapon && !hasServiceableMeleeWeapon(bot)) {
-            moved |= withdrawBestAccessibleSlot(bot, world, slot -> weaponScore(slot.stack) > 0,
-                    Comparator.comparingInt((ContainerSlot slot) -> weaponScore(slot.stack)).reversed());
+            pull = pull.plus(pullFromReachableChests(bot, world, stack -> weaponScore(stack) > 0,
+                    Comparator.comparingInt(ToolProvisionService::weaponScore), 1, "idle-weapon"));
         }
-        if (needAxe && !hasUsableAxe(bot)) {
-            moved |= withdrawBestAccessibleSlot(bot, world, slot -> axeScore(slot.stack) > 0,
-                    Comparator.comparingInt((ContainerSlot slot) -> axeScore(slot.stack)).reversed());
+        if (!pull.halted() && needAxe && !hasUsableAxe(bot)) {
+            pull = pull.plus(pullFromReachableChests(bot, world, stack -> axeScore(stack) > 0,
+                    Comparator.comparingInt(ToolProvisionService::axeScore), 1, "idle-axe"));
         }
-
-        moved |= withdrawMissingArmor(bot, world);
+        if (!pull.halted()) {
+            pull = pull.plus(withdrawMissingArmor(bot, world));
+        }
 
         boolean stillNeedWeapon = needWeapon && !hasServiceableMeleeWeapon(bot);
         boolean stillNeedAxe = needAxe && !hasUsableAxe(bot);
-        if (stillNeedWeapon || stillNeedAxe) {
+        if (!pull.halted() && (stillNeedWeapon || stillNeedAxe)) {
             int desiredSticks = requiredFallbackStickCount(stillNeedWeapon, stillNeedAxe);
             int desiredPlanks = requiredFallbackPlankCount(stillNeedWeapon, stillNeedAxe);
             int haveSticks = countInventoryItem(bot, Items.STICK);
             int havePlanks = countTagged(bot, ItemTags.PLANKS);
 
             if (haveSticks < desiredSticks) {
-                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isOf(Items.STICK), desiredSticks - haveSticks);
-                haveSticks = countInventoryItem(bot, Items.STICK);
+                pull = pull.plus(pullFromReachableChests(bot, world, stack -> stack.isOf(Items.STICK), null,
+                        desiredSticks - haveSticks, "idle-sticks"));
             }
-            if (havePlanks < desiredPlanks) {
-                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isIn(ItemTags.PLANKS), desiredPlanks - havePlanks);
+            if (!pull.halted() && havePlanks < desiredPlanks) {
+                pull = pull.plus(pullFromReachableChests(bot, world, stack -> stack.isIn(ItemTags.PLANKS), null,
+                        desiredPlanks - havePlanks, "idle-planks"));
                 havePlanks = countTagged(bot, ItemTags.PLANKS);
             }
-            if (havePlanks < desiredPlanks) {
+            if (!pull.halted() && havePlanks < desiredPlanks) {
                 int logsNeeded = (int) Math.ceil((desiredPlanks - havePlanks) / 4.0D);
-                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isIn(ItemTags.LOGS), logsNeeded);
+                pull = pull.plus(pullFromReachableChests(bot, world, stack -> stack.isIn(ItemTags.LOGS), null,
+                        logsNeeded, "idle-logs"));
             }
         }
 
-        if (moved) {
+        if (pull.movedAny()) {
             bot.getInventory().markDirty();
             CombatInventoryManager.ensureCombatLoadout(bot);
         }
-        return moved;
+        return pull;
     }
 
     public static boolean canCraftIdleWoodenFallback(ServerPlayerEntity bot,
@@ -1172,15 +1192,10 @@ public final class ToolProvisionService {
     }
 
     private static int countBedFiberPotential(ServerPlayerEntity bot, ServerWorld world) {
-        int wool = countTagged(bot, ItemTags.WOOL);
-        int string = countInventoryItem(bot, Items.STRING);
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (slot.stack.isIn(ItemTags.WOOL)) {
-                wool += slot.stack.getCount();
-            } else if (slot.stack.isOf(Items.STRING)) {
-                string += slot.stack.getCount();
-            }
-        }
+        int wool = countTagged(bot, ItemTags.WOOL)
+                + grantableChestCount(bot, world, stack -> stack.isIn(ItemTags.WOOL), false);
+        int string = countInventoryItem(bot, Items.STRING)
+                + grantableChestCount(bot, world, stack -> stack.isOf(Items.STRING), false);
         return wool + (string / 4);
     }
 
@@ -1201,12 +1216,8 @@ public final class ToolProvisionService {
         if (hasTaggedItem(bot, ItemTags.PLANKS) || hasTaggedItem(bot, ItemTags.LOGS)) {
             return true;
         }
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (slot.stack.isIn(ItemTags.PLANKS) || slot.stack.isIn(ItemTags.LOGS)) {
-                return true;
-            }
-        }
-        return false;
+        return grantableChestCount(bot, world,
+                stack -> stack.isIn(ItemTags.PLANKS) || stack.isIn(ItemTags.LOGS), false) > 0;
     }
 
     private static boolean hasTaggedItem(ServerPlayerEntity bot, net.minecraft.registry.tag.TagKey<Item> tag) {
@@ -1223,145 +1234,163 @@ public final class ToolProvisionService {
         if (countInventoryItem(bot, item) > 0) {
             return true;
         }
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (slot.stack.isOf(item)) {
+        return grantableChestCount(bot, world, stack -> stack.isOf(item), false) > 0;
+    }
+
+    /**
+     * How many of the stacks {@code wanted} accepts the supply policy could let this bot take from
+     * the chests around it ({@code reachableOnly}: only those it can reach from where it stands):
+     * each chest half's count of each exact item through
+     * {@link SupplyWithdrawals#grantableEstimate}, so an item the policy never grants counts 0 and
+     * an allowlisted one counts what lies above its reserve. Per half, so a double chest can only
+     * be undercounted. Counts nothing the owner has not been asked about yet; the facade still
+     * decides at the take.
+     *
+     * <p>Server thread only. Off it (a skill worker or the durability executor asking before a
+     * craft) chest stock counts as 0 rather than hopping, and the world is not read; callers
+     * count the bot's own inventory themselves.
+     */
+    private static int grantableChestCount(ServerPlayerEntity bot, ServerWorld world, Predicate<ItemStack> wanted,
+                                           boolean reachableOnly) {
+        if (bot == null || world == null || wanted == null) {
+            return 0;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null || !server.isOnThread()) {
+            return 0;
+        }
+        List<ContainerSlot> slots = reachableOnly
+                ? scanAccessibleContainers(bot, world, bot.getBlockPos())
+                : scanContainers(world, bot.getBlockPos());
+        int total = 0;
+        for (ChestItemGroup group : groupByChestAndItem(slots, wanted)) {
+            total += SupplyWithdrawals.grantableEstimate(world, group.sample, group.count);
+        }
+        return total;
+    }
+
+    /**
+     * The one way this class takes items out of a chest: from the chests the bot can reach where it
+     * stands, each distinct stack {@code wanted} accepts asked for through
+     * {@link SupplyWithdrawals#withdraw} with {@link SupplyWithdrawals.WaitMode#NONE}, in
+     * {@code order} (scan order when {@code null}). Never walks, never waits. Stops once
+     * {@code desired} items moved, or on an answer that stops the pass ({@link SupplyPullPolicy#next}):
+     * a prompt now open, or a refusal that answers for everything else too. An item the policy
+     * never grants is refused without a prompt and skipped everywhere; a chest that refuses is
+     * skipped.
+     *
+     * <p>Server thread. Called off it (a skill such as {@code LeashToFenceSkill} reaching
+     * {@link #ensureLead}), the whole pull runs in one bounded hop and reports nothing if the hop
+     * times out.
+     */
+    private static SupplyPullPolicy.Pull pullFromReachableChests(ServerPlayerEntity bot,
+                                                                 ServerWorld world,
+                                                                 Predicate<ItemStack> wanted,
+                                                                 Comparator<ItemStack> order,
+                                                                 int desired,
+                                                                 String purpose) {
+        if (bot == null || world == null || wanted == null || desired <= 0) {
+            return SupplyPullPolicy.Pull.NOTHING;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return SupplyPullPolicy.Pull.NOTHING;
+        }
+        if (!server.isOnThread()) {
+            return callOnServer(server, () -> pullFromReachableChests(bot, world, wanted, order, desired, purpose),
+                    2500L, SupplyPullPolicy.Pull.NOTHING);
+        }
+        List<ChestItemGroup> groups = groupByChestAndItem(scanAccessibleContainers(bot, world, bot.getBlockPos()), wanted);
+        if (order != null) {
+            groups.sort((a, b) -> order.compare(a.sample, b.sample));
+        }
+        SupplyPullPolicy.Pull pull = SupplyPullPolicy.Pull.NOTHING;
+        Set<BlockPos> skippedChests = new HashSet<>();
+        List<ItemStack> skippedItems = new ArrayList<>();
+        for (ChestItemGroup group : groups) {
+            int left = desired - pull.moved();
+            if (left <= 0) {
+                break;
+            }
+            if (skippedChests.contains(group.pos) || containsSameItem(skippedItems, group.sample)) {
+                continue;
+            }
+            SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, group.pos, group.sample, left, left,
+                    purpose, SupplyWithdrawals.WaitMode.NONE, null);
+            pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.reason());
+            switch (SupplyPullPolicy.next(result.kind(), result.reason())) {
+                case SKIP_ITEM -> skippedItems.add(group.sample);
+                case SKIP_CHEST -> skippedChests.add(group.pos);
+                case STOP -> {
+                    return pull;
+                }
+                case NEXT -> {
+                }
+            }
+        }
+        return pull;
+    }
+
+    private static SupplyPullPolicy.Pull withdrawMissingArmor(ServerPlayerEntity bot, ServerWorld world) {
+        SupplyPullPolicy.Pull pull = SupplyPullPolicy.Pull.NOTHING;
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+            if (pull.halted()) {
+                break;
+            }
+            if (!bot.getEquippedStack(slot).isEmpty()) {
+                continue;
+            }
+            // Lowest score first, as the old max(reversed(score)) pick did.
+            pull = pull.plus(pullFromReachableChests(bot, world,
+                    stack -> armorScore(stack, slot) > 0,
+                    Comparator.comparingInt((ItemStack stack) -> armorScore(stack, slot)), 1, "idle-armor"));
+        }
+        return pull;
+    }
+
+    /** One chest half's stock of one exact item (id and components), in first-seen slot order. */
+    private static final class ChestItemGroup {
+        final BlockPos pos;
+        final ItemStack sample;
+        int count;
+
+        ChestItemGroup(BlockPos pos, ItemStack sample, int count) {
+            this.pos = pos;
+            this.sample = sample;
+            this.count = count;
+        }
+    }
+
+    /** Groups the slots {@code wanted} accepts by chest half and exact item; each sample is a copy. */
+    private static List<ChestItemGroup> groupByChestAndItem(List<ContainerSlot> slots, Predicate<ItemStack> wanted) {
+        List<ChestItemGroup> groups = new ArrayList<>();
+        for (ContainerSlot slot : slots) {
+            if (slot.stack == null || slot.stack.isEmpty() || !wanted.test(slot.stack)) {
+                continue;
+            }
+            ChestItemGroup match = null;
+            for (ChestItemGroup group : groups) {
+                if (group.pos.equals(slot.pos) && ItemStack.areItemsAndComponentsEqual(group.sample, slot.stack)) {
+                    match = group;
+                    break;
+                }
+            }
+            if (match == null) {
+                groups.add(new ChestItemGroup(slot.pos, slot.stack.copy(), slot.stack.getCount()));
+            } else {
+                match.count += slot.stack.getCount();
+            }
+        }
+        return groups;
+    }
+
+    private static boolean containsSameItem(List<ItemStack> stacks, ItemStack stack) {
+        for (ItemStack other : stacks) {
+            if (ItemStack.areItemsAndComponentsEqual(other, stack)) {
                 return true;
             }
         }
         return false;
-    }
-
-    private static int withdrawFromNearbyContainers(ServerPlayerEntity bot, ServerWorld world, Item item, int desired) {
-        if (bot == null || world == null || item == null || desired <= 0) {
-            return 0;
-        }
-        int moved = 0;
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (moved >= desired) {
-                break;
-            }
-            ItemStack stack = slot.stack;
-            if (stack.isEmpty() || !stack.isOf(item)) {
-                continue;
-            }
-            int take = Math.min(stack.getCount(), desired - moved);
-            ItemStack extracted = stack.copy();
-            extracted.setCount(take);
-            boolean insertedAll = bot.getInventory().insertStack(extracted);
-            int inserted = take - extracted.getCount();
-            if (inserted <= 0) {
-                continue;
-            }
-            stack.decrement(inserted);
-            slot.inv.setStack(slot.slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
-            slot.inv.markDirty();
-            moved += inserted;
-        }
-        return moved;
-    }
-
-    private static int withdrawFromNearbyContainersByTag(ServerPlayerEntity bot,
-                                                         ServerWorld world,
-                                                         net.minecraft.registry.tag.TagKey<Item> tag,
-                                                         int desired) {
-        if (bot == null || world == null || tag == null || desired <= 0) {
-            return 0;
-        }
-        int moved = 0;
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (moved >= desired) {
-                break;
-            }
-            ItemStack stack = slot.stack;
-            if (stack.isEmpty() || !stack.isIn(tag)) {
-                continue;
-            }
-            int take = Math.min(stack.getCount(), desired - moved);
-            ItemStack extracted = stack.copy();
-            extracted.setCount(take);
-            boolean insertedAll = bot.getInventory().insertStack(extracted);
-            int inserted = take - extracted.getCount();
-            if (inserted <= 0) {
-                continue;
-            }
-            stack.decrement(inserted);
-            slot.inv.setStack(slot.slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
-            slot.inv.markDirty();
-            moved += inserted;
-        }
-        return moved;
-    }
-
-    private static boolean withdrawMissingArmor(ServerPlayerEntity bot, ServerWorld world) {
-        boolean moved = false;
-        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
-            if (!bot.getEquippedStack(slot).isEmpty()) {
-                continue;
-            }
-            moved |= withdrawBestAccessibleSlot(bot, world,
-                    entry -> armorScore(entry.stack, slot) > 0,
-                    Comparator.comparingInt((ContainerSlot entry) -> armorScore(entry.stack, slot)).reversed());
-        }
-        return moved;
-    }
-
-    private static boolean withdrawBestAccessibleSlot(ServerPlayerEntity bot,
-                                                      ServerWorld world,
-                                                      java.util.function.Predicate<ContainerSlot> filter,
-                                                      Comparator<ContainerSlot> ordering) {
-        if (bot == null || world == null || filter == null || ordering == null) {
-            return false;
-        }
-        ContainerSlot best = scanAccessibleContainers(bot, world, bot.getBlockPos()).stream()
-                .filter(filter)
-                .max(ordering)
-                .orElse(null);
-        return best != null && withdrawFromContainerSlot(best, bot, 1) > 0;
-    }
-
-    private static boolean withdrawAccessibleItems(ServerPlayerEntity bot,
-                                                   ServerWorld world,
-                                                   java.util.function.Predicate<ContainerSlot> filter,
-                                                   int desired) {
-        if (bot == null || world == null || filter == null || desired <= 0) {
-            return false;
-        }
-        int moved = 0;
-        for (ContainerSlot slot : scanAccessibleContainers(bot, world, bot.getBlockPos())) {
-            if (moved >= desired) {
-                break;
-            }
-            if (!filter.test(slot)) {
-                continue;
-            }
-            moved += withdrawFromContainerSlot(slot, bot, desired - moved);
-        }
-        return moved > 0;
-    }
-
-    private static int withdrawFromContainerSlot(ContainerSlot slot, ServerPlayerEntity bot, int desired) {
-        if (slot == null || bot == null || desired <= 0) {
-            return 0;
-        }
-        ItemStack stack = slot.inv.getStack(slot.slot);
-        if (stack == null || stack.isEmpty()) {
-            return 0;
-        }
-        int take = Math.min(stack.getCount(), desired);
-        ItemStack extracted = stack.copy();
-        extracted.setCount(take);
-        boolean insertedAll = bot.getInventory().insertStack(extracted);
-        int inserted = take - extracted.getCount();
-        if (inserted <= 0) {
-            return 0;
-        }
-        stack.decrement(inserted);
-        slot.inv.setStack(slot.slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
-        slot.inv.markDirty();
-        if (!insertedAll && !extracted.isEmpty()) {
-            LOGGER.debug("Idle fallback withdraw left {} behind for {}", extracted.getCount(), bot.getName().getString());
-        }
-        return inserted;
     }
 
     private static List<ContainerSlot> scanAccessibleContainers(ServerPlayerEntity bot, ServerWorld world, BlockPos origin) {
@@ -1510,12 +1539,21 @@ public final class ToolProvisionService {
         return false;
     }
 
+    /**
+     * Every non-empty slot of every chest (a {@link ChestBlock}: chest, trapped chest, copper
+     * chests) within {@link #CONTAINER_RADIUS} blocks and {@link #CONTAINER_YSPAN} up or down, one
+     * entry per half. Chests only: the supply policy never takes from a barrel, shulker box, hopper
+     * or furnace, so nothing else is offered or counted. Reads the world: server thread.
+     */
     private static List<ContainerSlot> scanContainers(ServerWorld world, BlockPos origin) {
         List<ContainerSlot> out = new ArrayList<>();
         int r = CONTAINER_RADIUS;
         int y = CONTAINER_YSPAN;
         for (BlockPos pos : BlockPos.iterate(origin.add(-r, -y, -r), origin.add(r, y, r))) {
             if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (!(world.getBlockState(pos).getBlock() instanceof ChestBlock)) {
                 continue;
             }
             var be = world.getBlockEntity(pos);
@@ -1547,14 +1585,10 @@ public final class ToolProvisionService {
 
     public static int countLeatherAvailable(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null) return 0;
-        int have = countInventoryItem(bot, Items.LEATHER);
-        if (world != null) {
-            have += scanAccessibleContainers(bot, world, bot.getBlockPos()).stream()
-                    .filter(s -> s.stack.isOf(Items.LEATHER))
-                    .mapToInt(s -> s.stack.getCount())
-                    .sum();
-        }
-        return have;
+        // Reachable chests only, as before; leather is not on the supply allowlist, so today the
+        // chests add nothing unless that list grows.
+        return countInventoryItem(bot, Items.LEATHER)
+                + grantableChestCount(bot, world, stack -> stack.isOf(Items.LEATHER), true);
     }
 
     public static boolean ensureLeatherArmorForSlot(ServerPlayerEntity bot,
@@ -1583,8 +1617,8 @@ public final class ToolProvisionService {
         if (bot.getEntityWorld() instanceof ServerWorld world) {
             int have = countInventoryItem(bot, Items.LEATHER);
             if (have < needed) {
-                withdrawAccessibleItems(bot, world,
-                        entry -> entry.stack.isOf(Items.LEATHER), needed - have);
+                pullFromReachableChests(bot, world, stack -> stack.isOf(Items.LEATHER), null, needed - have,
+                        "leather-armor");
             }
         }
         if (countInventoryItem(bot, Items.LEATHER) < needed) return false;
@@ -1660,10 +1694,11 @@ public final class ToolProvisionService {
     // ── Chest tool retrieval: general API ─────────��────────────────────
 
     /**
-     * Walk to a registered chest and retrieve one tool matching the given criteria.
-     * Runs on a worker thread. Uses callOnServer for snapshot refresh.
-     *
-     * @return true if a tool was withdrawn into the bot's inventory
+     * {@link #retrieveToolFromChests(ServerPlayerEntity, ServerWorld, ServerCommandSource, Predicate,
+     * Predicate, Comparator, int, SupplyWithdrawals.WaitMode)} without waiting for the owner:
+     * Woodcut's mid-task refill and {@code DurabilityFallbackService} (a shared executor that must
+     * never block on an owner). An open prompt makes this return {@code false}; a later call, once
+     * the owner answers, walks and takes.
      */
     public static boolean retrieveToolFromChests(ServerPlayerEntity bot,
                                                   ServerWorld world,
@@ -1672,9 +1707,47 @@ public final class ToolProvisionService {
                                                   Predicate<ItemStack> stackPredicate,
                                                   Comparator<ItemSnapshot> snapshotComparator,
                                                   int maxRange) {
+        return retrieveToolFromChests(bot, world, source, snapshotFilter, stackPredicate, snapshotComparator,
+                maxRange, SupplyWithdrawals.WaitMode.NONE);
+    }
+
+    /**
+     * Walk to a registered chest and retrieve one tool matching the given criteria, through the
+     * supply facade ({@link ChestStoreService#withdrawMatchingWalkOnly}): the owner is asked before
+     * the bot walks, and nothing is taken without their permission or a standing one.
+     * Runs on a worker thread. Uses callOnServer for snapshot refresh.
+     *
+     * <p>Chests are tried best tool first, then nearest, until one gives a tool or an answer stops
+     * the search ({@link SupplyPullPolicy#afterChest}). After a search that asked and got nothing,
+     * this bot's searches pause ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s while a prompt is
+     * open, then 60 s doubling to 10 min per miss), because Woodcut calls this before every log
+     * while it has no axe and would otherwise re-prompt the owner, and rewrite the chest registry,
+     * as fast as it mines.
+     *
+     * @param mode {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} to wait at the chest for the
+     *             owner's answer (Woodcut's start only)
+     * @return true if a tool was withdrawn into the bot's inventory
+     */
+    public static boolean retrieveToolFromChests(ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  ServerCommandSource source,
+                                                  Predicate<ItemSnapshot> snapshotFilter,
+                                                  Predicate<ItemStack> stackPredicate,
+                                                  Comparator<ItemSnapshot> snapshotComparator,
+                                                  int maxRange,
+                                                  SupplyWithdrawals.WaitMode mode) {
         if (bot == null || world == null || source == null) return false;
         MinecraftServer server = world.getServer();
         if (server == null) return false;
+
+        UUID botUuid = bot.getUuid();
+        long startedAtMs = System.currentTimeMillis();
+        Long pausedUntilMs = TOOL_RETRIEVAL_PAUSED_UNTIL_MS.get(botUuid);
+        if (pausedUntilMs != null && startedAtMs < pausedUntilMs) {
+            LOGGER.debug("Chest tool retrieval: {} paused for {} ms after its last supply answer",
+                    bot.getName().getString(), pausedUntilMs - startedAtMs);
+            return false;
+        }
 
         // Refresh snapshots on server thread (block entities must be read there)
         Boolean refreshed = callOnServer(server, () -> {
@@ -1736,20 +1809,51 @@ public final class ToolProvisionService {
                 candidates.size(), bot.getName().getString(), maxRange);
 
         // Try each candidate
+        boolean missed = false;
+        boolean endedWaiting = false;
+        SupplyWithdrawals.Result last = null;
         for (ChestCandidate candidate : candidates) {
-            int withdrawn = ChestStoreService.withdrawMatchingWalkOnly(
-                    source, bot, candidate.pos, 1, stackPredicate);
-            if (withdrawn > 0) {
+            SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
+                    source, bot, candidate.pos, 1, stackPredicate, "chest-tool", mode);
+            last = result;
+            SupplyPullPolicy.ChestLoop next = SupplyPullPolicy.afterChest(result.kind(), result.moved(), result.reason());
+            if (next == SupplyPullPolicy.ChestLoop.DONE) {
+                TOOL_RETRIEVAL_PAUSED_UNTIL_MS.remove(botUuid);
+                TOOL_RETRIEVAL_MISSES.remove(botUuid);
                 LOGGER.info("Chest tool retrieval: withdrew tool from chest at {} for {}",
                         candidate.pos.toShortString(), bot.getName().getString());
                 return true;
             }
-            LOGGER.debug("Chest tool retrieval: chest at {} had no valid match for {}",
-                    candidate.pos.toShortString(), bot.getName().getString());
+            missed |= SupplyPullPolicy.isMiss(result.kind(), result.reason());
+            if (next == SupplyPullPolicy.ChestLoop.STOP) {
+                endedWaiting = SupplyPullPolicy.isWaiting(result.kind(), result.reason());
+                break;
+            }
+            LOGGER.debug("Chest tool retrieval: chest at {} gave nothing for {} ({} {})",
+                    candidate.pos.toShortString(), bot.getName().getString(), result.kind(), result.reason());
         }
 
-        LOGGER.debug("Chest tool retrieval: all {} candidates exhausted for {}",
-                candidates.size(), bot.getName().getString());
+        int priorMisses = TOOL_RETRIEVAL_MISSES.getOrDefault(botUuid, 0);
+        long pauseMs = SupplyPullPolicy.retrievalPauseMs(endedWaiting, missed, priorMisses);
+        int misses = SupplyPullPolicy.nextMissCount(priorMisses, false, endedWaiting, missed);
+        if (misses > 0) {
+            TOOL_RETRIEVAL_MISSES.put(botUuid, misses);
+        }
+        if (pauseMs > 0L) {
+            TOOL_RETRIEVAL_PAUSED_UNTIL_MS.put(botUuid, System.currentTimeMillis() + pauseMs);
+            LOGGER.info("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {}); next search in {} s",
+                    bot.getName().getString(), candidates.size(),
+                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason(), pauseMs / 1000L);
+        } else {
+            LOGGER.debug("Chest tool retrieval: all {} candidates exhausted for {} without asking (last: {} {})",
+                    candidates.size(), bot.getName().getString(),
+                    last == null ? "-" : last.kind(), last == null ? "-" : last.reason());
+        }
         return false;
     }
+
+    /** Per bot: when its next chest tool search may ask again (see {@link #retrieveToolFromChests}). Any thread. */
+    private static final Map<UUID, Long> TOOL_RETRIEVAL_PAUSED_UNTIL_MS = new ConcurrentHashMap<>();
+    /** Per bot: consecutive tool searches that asked and got nothing; a withdrawal resets it. */
+    private static final Map<UUID, Integer> TOOL_RETRIEVAL_MISSES = new ConcurrentHashMap<>();
 }

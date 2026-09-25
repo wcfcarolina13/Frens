@@ -1235,7 +1235,8 @@ public final class BotIdleHobbiesService {
             return true;
         }
 
-        boolean moved = ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe);
+        boolean moved = ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe)
+                .movedAny();
         boolean craftReady = ToolProvisionService.canCraftIdleWoodenFallback(bot, needWeapon, needAxe);
         boolean crafted = craftReady && tryCraftIdleWoodenFallback(bot);
         CombatInventoryManager.ensureCombatLoadout(bot);

@@ -24,7 +24,9 @@ import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.SupplyPullPolicy;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -36,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -171,17 +174,18 @@ public class HarvestCropSkill implements Skill {
                 }
             }
 
+            // One restock state for the whole run, so an owner who refuses or ignores a seed prompt
+            // is asked once per run, not once per replant target.
+            SeedRestock restock = new SeedRestock();
             if (!replantTargets.isEmpty()) {
-                int[] restockCounter = new int[1];
-                replanted = replantCrops(bot, world, source, replantTargets, pendingSeedReserve, restockCounter);
-                chestRestocks = restockCounter[0];
+                replanted = replantCrops(bot, world, source, replantTargets, pendingSeedReserve, restock);
+                chestRestocks = restock.pulls;
             }
             List<BlockPos> emptyPlots = findEmptyFarmland(world, bot.getBlockPos());
             if (!emptyPlots.isEmpty()) {
                 emptyPlots.sort(Comparator.comparingDouble(p -> botPos.squaredDistanceTo(Vec3d.ofCenter(p))));
-                int[] restockCounter = new int[1];
-                replanted += plantEmptyFarmland(bot, world, source, emptyPlots, restockCounter);
-                chestRestocks += restockCounter[0];
+                replanted += plantEmptyFarmland(bot, world, source, emptyPlots, restock);
+                chestRestocks = restock.pulls;
             }
         } catch (SkillAbortException e) {
             BotActions.sneak(bot, false);
@@ -351,7 +355,7 @@ public class HarvestCropSkill implements Skill {
                                     ServerCommandSource source,
                                     List<ReplantTarget> targets,
                                     Map<Item, Integer> pendingSeedReserve,
-                                    int[] chestRestocks) {
+                                    SeedRestock restock) {
         if (bot == null || world == null || source == null || targets == null || targets.isEmpty()) {
             return 0;
         }
@@ -371,9 +375,10 @@ public class HarvestCropSkill implements Skill {
                 pendingSeedReserve.merge(target.seedItem(), -1, Integer::sum);
                 continue;
             }
-            int restocked = ensureSeedAvailability(bot, source, target.seedItem(), pendingSeedReserve.getOrDefault(target.seedItem(), 1));
-            if (restocked > 0 && chestRestocks != null && chestRestocks.length > 0) {
-                chestRestocks[0]++;
+            int restocked = ensureSeedAvailability(bot, source, target.seedItem(),
+                    pendingSeedReserve.getOrDefault(target.seedItem(), 1), restock);
+            if (restocked > 0) {
+                restock.pulls++;
             }
             int seedSlot = ensureSeedHotbar(bot, target.seedItem());
             if (seedSlot < 0) {
@@ -421,7 +426,7 @@ public class HarvestCropSkill implements Skill {
                                           ServerWorld world,
                                           ServerCommandSource source,
                                           List<BlockPos> emptyPlots,
-                                          int[] chestRestocks) {
+                                          SeedRestock restock) {
         if (bot == null || world == null || source == null || emptyPlots == null || emptyPlots.isEmpty()) {
             return 0;
         }
@@ -434,7 +439,7 @@ public class HarvestCropSkill implements Skill {
             if (!isMutationAuthorized(bot, world, plot.up())) {
                 continue;
             }
-            int seedSlot = ensureAnySeedHotbarOrRestock(bot, source, chestRestocks);
+            int seedSlot = ensureAnySeedHotbarOrRestock(bot, source, restock);
             if (seedSlot < 0) {
                 LOGGER.info("Harvest fallback planting stopped: no seeds available for remaining empty farmland");
                 break;
@@ -475,11 +480,15 @@ public class HarvestCropSkill implements Skill {
     private static int ensureSeedAvailability(ServerPlayerEntity bot,
                                               ServerCommandSource source,
                                               Item seedItem,
-                                              int neededCount) {
+                                              int neededCount,
+                                              SeedRestock restock) {
         if (bot == null || source == null || seedItem == null) {
             return 0;
         }
         if (countItem(bot.getInventory(), seedItem) >= Math.max(1, neededCount)) {
+            return 0;
+        }
+        if (restock.stopAsking) {
             return 0;
         }
         if (countEmptySlots(bot) == 0 && !attemptInventoryOffload(bot, source, Map.of(seedItem, Math.max(1, neededCount)), "seed-restock")) {
@@ -490,18 +499,57 @@ public class HarvestCropSkill implements Skill {
             return 0;
         }
         for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
-            int moved = ChestStoreService.withdrawMatchingWalkOnly(
-                    source,
-                    bot,
-                    candidate.pos(),
-                    missing,
-                    stack -> stack != null && !stack.isEmpty() && stack.isOf(seedItem));
+            int moved = restockFromChest(bot, source, candidate.pos(), seedItem, missing, restock);
             if (moved > 0) {
-                LOGGER.info("Harvest restocked {}x {} from chest {}", moved, seedItem, candidate.pos().toShortString());
                 return moved;
+            }
+            if (restock.stopAsking) {
+                return 0;
             }
         }
         return 0;
+    }
+
+    /**
+     * One chest's answer for one seed, through the supply facade (it walks only once asking says
+     * it may, and waits there once for the owner's answer); returns the count taken. Remembers a
+     * chest that gave nothing for this seed, so later replant targets don't ask it again, and sets
+     * {@link SeedRestock#stopAsking} after an answer that holds for every chest
+     * ({@link SupplyPullPolicy#afterChest}): the owner refused or ignored the prompt, a cooldown,
+     * another prompt open, an abort.
+     */
+    private static int restockFromChest(ServerPlayerEntity bot,
+                                        ServerCommandSource source,
+                                        BlockPos chestPos,
+                                        Item seedItem,
+                                        int missing,
+                                        SeedRestock restock) {
+        ChestSeed key = new ChestSeed(chestPos.asLong(), seedItem);
+        if (restock.stopAsking || restock.fruitless.contains(key)) {
+            return 0;
+        }
+        SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
+                source,
+                bot,
+                chestPos,
+                missing,
+                stack -> stack != null && !stack.isEmpty() && stack.isOf(seedItem),
+                "harvest-seeds",
+                SupplyWithdrawals.WaitMode.UNTIL_ANSWERED);
+        switch (SupplyPullPolicy.afterChest(result.kind(), result.moved(), result.reason())) {
+            case DONE:
+                LOGGER.info("Harvest restocked {}x {} from chest {}", result.moved(), seedItem, chestPos.toShortString());
+                return result.moved();
+            case STOP:
+                restock.stopAsking = true;
+                LOGGER.info("Harvest seed restock: not asking chests again this run ({} {} at {})",
+                        result.kind(), result.reason(), chestPos.toShortString());
+                return 0;
+            case NEXT_CHEST:
+            default:
+                restock.fruitless.add(key);
+                return 0;
+        }
     }
 
     private static boolean attemptInventoryOffload(ServerPlayerEntity bot,
@@ -586,14 +634,14 @@ public class HarvestCropSkill implements Skill {
 
     private static int ensureAnySeedHotbarOrRestock(ServerPlayerEntity bot,
                                                     ServerCommandSource source,
-                                                    int[] chestRestocks) {
+                                                    SeedRestock restock) {
         int slot = findAnySeedHotbarSlot(bot);
         if (slot >= 0) {
             return slot;
         }
-        int moved = restockAnyPlantableSeed(bot, source);
-        if (moved > 0 && chestRestocks != null && chestRestocks.length > 0) {
-            chestRestocks[0]++;
+        int moved = restockAnyPlantableSeed(bot, source, restock);
+        if (moved > 0) {
+            restock.pulls++;
         }
         return findAnySeedHotbarSlot(bot);
     }
@@ -623,28 +671,41 @@ public class HarvestCropSkill implements Skill {
         return -1;
     }
 
-    private static int restockAnyPlantableSeed(ServerPlayerEntity bot, ServerCommandSource source) {
-        if (bot == null || source == null) {
+    private static int restockAnyPlantableSeed(ServerPlayerEntity bot, ServerCommandSource source, SeedRestock restock) {
+        if (bot == null || source == null || restock.stopAsking) {
             return 0;
         }
         if (countEmptySlots(bot) == 0 && !attemptInventoryOffload(bot, source, Map.of(), "generic-seed-restock")) {
             return 0;
         }
+        // Each (seed, chest) pair is asked at most once a run and nothing is walked to before the
+        // chest is read and the owner asked, so this is no longer four seeds times a walk to every
+        // chest; the first answer that holds for every chest ends it.
         for (Item seed : PLANTABLE_SEEDS) {
             for (ChestStoreService.StorageChestCandidate candidate : findNearbyChestCandidates(source, bot)) {
-                int moved = ChestStoreService.withdrawMatchingWalkOnly(
-                        source,
-                        bot,
-                        candidate.pos(),
-                        1,
-                        stack -> stack != null && !stack.isEmpty() && stack.isOf(seed));
+                int moved = restockFromChest(bot, source, candidate.pos(), seed, 1, restock);
                 if (moved > 0) {
-                    LOGGER.info("Harvest restocked {}x {} from chest {}", moved, seed, candidate.pos().toShortString());
                     return moved;
+                }
+                if (restock.stopAsking) {
+                    return 0;
                 }
             }
         }
         return 0;
+    }
+
+    /** One harvest run's chest restocking, shared by the replant and the empty-farmland passes. */
+    private static final class SeedRestock {
+        /** Restocks that moved seeds, for the run summary. */
+        int pulls;
+        /** An answer that holds for every chest came back: no more chest asks this run. */
+        boolean stopAsking;
+        /** Chest and seed pairs that gave nothing this run: not asked again. */
+        final Set<ChestSeed> fruitless = new HashSet<>();
+    }
+
+    private record ChestSeed(long chestPos, Item seed) {
     }
 
     private static int findEmptyHotbarSlot(PlayerInventory inventory) {

@@ -21,6 +21,7 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -728,28 +729,129 @@ public final class ChestStoreService {
         return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, withScaffoldReserve(bot, matcher), true, WALK_ONLY);
     }
 
-    public static int withdrawMatchingWalkOnly(ServerCommandSource source,
-                                               ServerPlayerEntity bot,
-                                               BlockPos chestPos,
-                                               int amount,
-                                               Predicate<ItemStack> matcher) {
+    /**
+     * The automatic withdrawal: a companion takes up to {@code amount} of one item it wants
+     * ({@code matcher}) from the chest at {@code chestPos}, through {@link SupplyWithdrawals} — the
+     * owner is asked unless a standing permission covers the chest, and the supply policy's
+     * allowlist and reserve always hold. The owner's own {@code /bot withdraw} and Quick Fetch do
+     * not come through here.
+     *
+     * <ol>
+     *   <li>On the server thread: chest blocks only ({@link SupplyPullPolicy#NOT_CHEST} for a
+     *       barrel or anything else, never asked); each distinct stack {@code matcher} accepts, in
+     *       slot order, is asked about with {@link SupplyWithdrawals.WaitMode#NONE} until one is not
+     *       refused for its own sake ({@link SupplyPullPolicy#tryNextStack}). Nothing matching:
+     *       {@link SupplyPullPolicy#NO_MATCH}. Already within reach and covered: taken now.</li>
+     *   <li>Walk (the deposit approach, on this worker) only when
+     *       {@link SupplyPullPolicy#walkAfterAsk} says so: permitted, or a prompt is open and
+     *       {@code mode} waits for it. A refusal never walks.</li>
+     *   <li>Ask again for the same stack with {@code mode}; {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED}
+     *       waits there for the owner's answer, abandoned on the bot's abort latch.</li>
+     * </ol>
+     *
+     * Worker thread (it walks, and may wait). Deposits are unchanged.
+     *
+     * @param amount  how many to ask for (at least 1)
+     * @param purpose a short label for the supply log, e.g. {@code "harvest-seeds"}
+     * @return the facade's result; {@code MOVED} carries the count taken
+     */
+    public static SupplyWithdrawals.Result withdrawMatchingWalkOnly(ServerCommandSource source,
+                                                                   ServerPlayerEntity bot,
+                                                                   BlockPos chestPos,
+                                                                   int amount,
+                                                                   Predicate<ItemStack> matcher,
+                                                                   String purpose,
+                                                                   SupplyWithdrawals.WaitMode mode) {
         if (bot == null || chestPos == null || source == null || matcher == null) {
-            return 0;
+            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "INVALID");
         }
         MinecraftServer server = source.getServer();
         if (server == null) {
-            return 0;
+            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "NOT_RUNNING");
         }
 
-        int effectiveAmount = amount <= 0 ? Integer.MAX_VALUE : amount;
+        int want = Math.max(1, amount);
         debugChest("Withdraw walk-only: chest=" + chestPos.toShortString()
                 + " botPos=" + bot.getBlockPos().toShortString()
                 + " thread=" + Thread.currentThread().getName()
                 + " serverThread=" + server.isOnThread()
                 + " sourceWorld=" + worldKeyName(source.getWorld())
                 + " botWorld=" + worldKeyName(bot.getEntityWorld())
-                + " amount=" + effectiveAmount);
-        return performStoreTransferWithBot(source, bot, chestPos, effectiveAmount, matcher, false, WALK_ONLY);
+                + " amount=" + want
+                + " mode=" + mode);
+        SupplyAsk ask = callOnServer(server, () -> askBeforeWalking(bot, chestPos, want, matcher, purpose, mode),
+                2500, null);
+        if (ask == null) {
+            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, "SERVER_BUSY");
+        }
+        if (ask.walkFor() == null) {
+            return ask.result();
+        }
+
+        TransferAttemptResult reach = approachChestForTransfer(source, bot, chestPos, WALK_ONLY);
+        if (!reach.interacted()) {
+            // Any ticket the ask left stays with the facade; a later call can still redeem it.
+            return new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0, SupplyPullPolicy.UNREACHABLE);
+        }
+        return SupplyWithdrawals.withdraw(bot, chestPos, ask.walkFor(), want, want, purpose,
+                mode == null ? SupplyWithdrawals.WaitMode.NONE : mode,
+                () -> TaskService.isAbortRequested(bot.getUuid()));
+    }
+
+    /**
+     * The ask before walking: {@code walkFor} is the exact stack to walk for and take, or
+     * {@code null} when {@code result} is final (taken in reach, refused, or waiting without a walk).
+     */
+    private record SupplyAsk(SupplyWithdrawals.Result result, ItemStack walkFor) {
+    }
+
+    /** Server thread: step 1 of {@link #withdrawMatchingWalkOnly}. */
+    private static SupplyAsk askBeforeWalking(ServerPlayerEntity bot,
+                                              BlockPos chestPos,
+                                              int want,
+                                              Predicate<ItemStack> matcher,
+                                              String purpose,
+                                              SupplyWithdrawals.WaitMode mode) {
+        ServerWorld world = bot.getEntityWorld();
+        BlockState state = world.getBlockState(chestPos);
+        Inventory storage = state.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock
+                ? net.minecraft.block.ChestBlock.getInventory(chestBlock, state, world, chestPos, true)
+                : null;
+        if (storage == null) {
+            return new SupplyAsk(new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0,
+                    SupplyPullPolicy.NOT_CHEST), null);
+        }
+        List<ItemStack> samples = new ArrayList<>();
+        for (int i = 0; i < storage.size(); i++) {
+            ItemStack stack = storage.getStack(i);
+            if (stack == null || stack.isEmpty() || !matcher.test(stack)) {
+                continue;
+            }
+            boolean seen = false;
+            for (ItemStack sample : samples) {
+                if (ItemStack.areItemsAndComponentsEqual(sample, stack)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                samples.add(stack.copy());
+            }
+        }
+        SupplyWithdrawals.Result last = new SupplyWithdrawals.Result(SupplyWithdrawals.Kind.REFUSED, 0,
+                SupplyPullPolicy.NO_MATCH);
+        for (ItemStack sample : samples) {
+            SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, chestPos, sample, want, want, purpose,
+                    SupplyWithdrawals.WaitMode.NONE, null);
+            if (SupplyPullPolicy.walkAfterAsk(result.kind(), mode)) {
+                return new SupplyAsk(result, sample);
+            }
+            if (!SupplyPullPolicy.tryNextStack(result.kind(), result.reason())) {
+                return new SupplyAsk(result, null);
+            }
+            last = result;
+        }
+        return new SupplyAsk(last, null);
     }
 
     public static DepositProbeResult probeDepositMatchingWalkOnly(ServerCommandSource source,
@@ -872,6 +974,56 @@ public final class ChestStoreService {
             }
         }
 
+        TransferAttemptResult reach = approachChestForTransfer(source, bot, chestPos, movement);
+        if (!reach.interacted()) {
+            return reach;
+        }
+
+        Integer moved = callOnServer(server, () -> {
+            BlockState state = source.getWorld().getBlockState(chestPos);
+            Inventory storage;
+            if (state.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
+                storage = net.minecraft.block.ChestBlock.getInventory(chestBlock, state, source.getWorld(), chestPos, true);
+            } else {
+                var be2 = source.getWorld().getBlockEntity(chestPos);
+                if (!(be2 instanceof Inventory inv)) {
+                    return 0;
+                }
+                storage = inv;
+            }
+            if (storage == null) {
+                return 0;
+            }
+            int result;
+            if (deposit) {
+                result = moveItems(bot.getInventory(), storage, filter, amount);
+            } else {
+                result = moveItems(storage, bot.getInventory(), filter, amount);
+            }
+            // Capture contents snapshot after any successful interaction so full/empty metadata stays fresh.
+            if (source.getWorld() instanceof ServerWorld sw) {
+                BotChestRegistryService.updateContentsSnapshot(bot, chestPos, sw, storage);
+            }
+            return result;
+        }, 2500, 0);
+        int movedCount = moved != null ? moved : 0;
+        debugChest("Store transfer done: moved=" + movedCount + " chest=" + chestPos.toShortString());
+        return new TransferAttemptResult(movedCount, true, true, true);
+    }
+
+    /**
+     * Walks the bot to a stand from which it can open the chest, facing it, and opens a door in the
+     * way if that is what blocks it. The walk runs on the caller's (worker) thread, as it always has.
+     * Shared by every bot-driven transfer, deposits and the automatic supply withdrawal alike.
+     *
+     * @return {@code interacted() == true} when the bot can interact with the chest now; otherwise
+     *         the failure, exactly as the transfer reports it
+     */
+    private static TransferAttemptResult approachChestForTransfer(ServerCommandSource source,
+                                                                  ServerPlayerEntity bot,
+                                                                  BlockPos chestPos,
+                                                                  MovementFlags movement) {
+        MinecraftServer server = source.getServer();
         java.util.List<BlockPos> stands = callOnServer(server,
                 () -> findStandCandidatesNearChest(source.getWorld(), bot, chestPos),
                 1200,
@@ -922,37 +1074,7 @@ public final class ChestStoreService {
                     chestPos.toShortString(), bot.getName().getString(), bot.getBlockPos().toShortString());
             return new TransferAttemptResult(0, true, true, false, "interact-blocked");
         }
-
-        Integer moved = callOnServer(server, () -> {
-            BlockState state = source.getWorld().getBlockState(chestPos);
-            Inventory storage;
-            if (state.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
-                storage = net.minecraft.block.ChestBlock.getInventory(chestBlock, state, source.getWorld(), chestPos, true);
-            } else {
-                var be2 = source.getWorld().getBlockEntity(chestPos);
-                if (!(be2 instanceof Inventory inv)) {
-                    return 0;
-                }
-                storage = inv;
-            }
-            if (storage == null) {
-                return 0;
-            }
-            int result;
-            if (deposit) {
-                result = moveItems(bot.getInventory(), storage, filter, amount);
-            } else {
-                result = moveItems(storage, bot.getInventory(), filter, amount);
-            }
-            // Capture contents snapshot after any successful interaction so full/empty metadata stays fresh.
-            if (source.getWorld() instanceof ServerWorld sw) {
-                BotChestRegistryService.updateContentsSnapshot(bot, chestPos, sw, storage);
-            }
-            return result;
-        }, 2500, 0);
-        int movedCount = moved != null ? moved : 0;
-        debugChest("Store transfer done: moved=" + movedCount + " chest=" + chestPos.toShortString());
-        return new TransferAttemptResult(movedCount, true, true, true);
+        return new TransferAttemptResult(0, true, true, true);
     }
 
     private static ChestApproachResult reachChestInteractionStand(ServerCommandSource source,

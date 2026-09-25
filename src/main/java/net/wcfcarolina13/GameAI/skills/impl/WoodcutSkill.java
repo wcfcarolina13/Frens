@@ -4876,7 +4876,7 @@ public final class WoodcutSkill implements Skill {
                     ToolProvisionService.allowedAxeSnapshotFilter(),
                     ToolProvisionService.allowedWoodcutAxePredicate(),
                     ToolProvisionService.axeTierComparator(),
-                    32);
+                    32, net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode.UNTIL_ANSWERED);
             if (retrieved && selectAxe(bot)) {
                 ChatUtils.sendSystemMessage(source, "Found an axe in a nearby chest.");
                 return true;
