@@ -2,6 +2,89 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Companion supplies Phase 2 (dormant adapter) + chat addressee rule fixes; 1.1.219 (2026-09-25)
+
+Two items in one build. **Supplies Phase 2** is the chest adapter and authorization store for
+`docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`. It stays DORMANT on purpose: the
+request and transfer entry points have no callers, and a source-scan test fails the build if one appears. The
+existing automatic withdrawals (Phase 3) must be routed through the shared policy before anything wires them. The
+**addressee fixes** come from the 2026-09-25 decision-model eval: the eval said a model router was a no-go, but the
+rules could be fixed.
+
+### Companion supplies Phase 2
+- `86791185` feat (2a) — `BotChestRegistryService.ChestRecord.ownerUuid`, stamped from the placing bot's owner at
+  registration; never backfilled, so pre-1.1.219 records read as unknown. `recordedOwnersAt(world, pos)`.
+  `SupplyRequestLedger.AlwaysScope` + `restoreAlways` / `alwaysSnapshot`. Pure `SupplyChestRules`: ownership over
+  both halves (PLAYER_STORAGE / OWNER_STORAGE may prompt; DENY_FOREIGN / DENY_UNKNOWN / DENY_MIXED), access order
+  (unloaded, not a chest, zones unloaded, locked, territory, blocked, ownership), stock over both halves, component
+  fingerprint, the ALWAYS JSON codec, prompt and command strings. Fixed the policy Javadoc that claimed
+  `levelName/dim` is unique across saves.
+- `e3732272` feat (2b) — `SupplyRequestService` (server thread only): per-save `<save>/frens/supply_always.json`
+  loaded at SERVER_STARTED and written atomically through a DebouncedWriter, then flushed at SERVER_STOPPING;
+  `request` (owner online and within 32 blocks; access facts; exact ItemKey from live components; stock; ledger open;
+  clickable prompt to the owner), `answer`, `transferNow` (re-checks access, reach, and the fingerprint's
+  owner/bot/chest; caps qty at capacity before spending the grant; exact move + markDirty), `revoke`.
+  `SupplyCommands`: `/frens supply answer <id> once|always|no` and `/frens supply revoke <pos>` under a new non-op
+  root. The `/bot` root is op-only, so a non-op owner could never click a `/bot …` choice. `SupplyDormancyTest`
+  enforces zero callers.
+- `5c28366f` fix (review wave). Revoke now clears the chest's canonical key and each half's own key. Before this, a
+  chest that became a double kept its old Always permission, which came back once the new half was broken.
+  An Always-covered request no longer needs the owner nearby. An uncovered one still does, before any prompt.
+  Other fixes:
+  - The dormancy test pins the private `evaluate*` bodies to their single entry points, and it rejects
+    reflective name strings outside `supply/`.
+  - Chest partners use vanilla's `canMergeWith` rule (copper chests merge by tag).
+  - The writer shuts down gracefully: flush, `shutdown`, then a 2 s bounded wait.
+  - A WARN fires when the Always file restores nothing or has an unexpected version.
+
+**Rulings (cost if wrong):** Bradley 2026-09-25: iron tier stays out; nobody approves for an un-owned bot (both were
+already the defaults). One build for both items (cost: a larger release, but the changelog keeps them apart).
+Pre-1.1.219 bot-placed chests deny as DENY_UNKNOWN (cost: Bradley's existing supply chests can't be requested from
+until re-placed; revisit before Phase 3/4 wiring). worldId = save-root key + dimension (cost: ALWAYS permissions
+don't follow a copied save; fails safe). OWNER_STORAGE still prompts. The adapter never calls `clearOwner`, which would
+wipe persisted ALWAYS.
+**Deferred:** barrels; bot chest registry and `bot_zones` collide across saves that share a level name; `/bot
+feedconfirm` is op-only and a foreign click cancels it; Fabric Transfer API; the policy for legacy null-owner records;
+a tick sweep of the ledger once requests are live; revoking an Always set on a double chest from the surviving half after the keyed half is broken (a revoke-all command); a valid empty Always file WARNs at load (it can only be written once grants exist); a copper double chest at mixed oxidation under-counts stock until vanilla re-syncs the halves.
+
+### Addressee rule fixes
+- `96e7684f` feat — `ChatAddressing.resolve(raw, bots, humans)`:
+  - Soft broadcast: guys (with a determiner guard), everyone, everybody, y'all, you two, you both. It only counts
+    when no other human is online and the soul party path can route; otherwise the line is unaddressed.
+  - A line led by another online human's name is addressed to them. Nothing bot-facing runs: no soul reply,
+    no overhear, no legacy parser, no nearest-bot quest ask.
+  - A trailing ", Name" beats an earlier mention.
+  - The "Name, Name said…" comma run is fixed.
+  - `SoulGroupRouter.canRouteParty` shares the candidate and roster code with `tryRoute`.
+- `a533c944` feat — `SoulDmFollowUpWindow`: a 30 s window after a delivered DIRECT soul reply, opened from
+  `SoulRuntime.submitTurn`'s DELIVERED completion. A routingId guard stops a late reply to an older DM from taking
+  over the window. An unaddressed line inside the window goes to that bot through `SoulChatRouter.tryRouteSilently`,
+  which shares one gate evaluation with `tryRoute` and never sends a refusal notice.
+  Log: `[souls] dm follow-up routed player=… bot=… ageMs=…`.
+- `2d40353e` fix (review wave):
+  - Soft words count only when the line names no bot. "hey guys, Jake come here" goes to Jake; before the fix it
+    reached no one.
+  - The DM window skips lines the zzz trigger, the nearest-bot quest ask or the skill-resume prompt already
+    handled. The review's scenario: a "yes" to "continue?" resumed the skill and also became a DM turn.
+  - The window routes only while no other human is online. It refreshes on every reply, so with a friend
+    online every line could otherwise have kept going to the bot.
+  - Broadcast keywords and soft words are stopwords for human names.
+  - A DM to a different bot closes the open window at submit time.
+  - "Jake, Bob come here" addresses both again. A comma-joined name stays out of the run only when a clause cue
+    follows ("Bob, Jake said…").
+
+**Eval (t2, counts only; the lines stay local):** stateless 37/63 → 48/63 (real 17/24 → 18/24), 11 fixed, 0 broken.
+With the window counted as an upper bound: 54/63 (real 22/24). It breaks one real item, a side remark made right after
+a reply, and that cost was accepted.
+**Rulings (cost if wrong):** a new DM-specific window instead of reusing the ambient one. The ambient window gives a
+one-bot scene without DM history and drops short replies (cost: "lol" within 30 s becomes a DM turn). Soft words
+count only when no bot is named and no other human is online. The window is off while another human is online.
+Lines addressed to another human do nothing bot-facing. A reply to a whisper also opens the window.
+**Deferred:** a mid-sentence third-person mention → none (conflicts with an existing test); "you and Bob" clause
+parsing; nicknames and prefix matching for human names.
+
+Tests 1122 → 1242. **Field checks:** Phase 6q in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
 ## Companion supplies Phase 1 — pure chest request policy and ledger (2026-09-25, not released, no callers)
 
 Phase 1 of `docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`: `03ef2538`

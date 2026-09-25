@@ -36,7 +36,7 @@ Verification: initial lifecycle tests failed 2/33 before the patch; review found
 Each phase gets its detailed implementation/test plan before code. These are boundaries, not permission to ship disconnected or bypassable inventory logic.
 
 1. [x] Chest request policy and pending state: pure allowlist/reserve rules, exact request fingerprints, owner binding, expiry, rejection cooldown and replay tests. No live withdrawals yet. Done 2026-09-25 (see git log); rulings and scoping corrections below.
-2. Chest adapter and authorization persistence: new server request/transfer service, authorization store, dedicated command registrar, initialization hook and changelog. Reuse clickable chat choices rather than adding an unnecessary screen. Verify current Fabric lock APIs before implementation.
+2. [x] Chest adapter and authorization persistence (done 1.1.219, DORMANT — no callers; see "Supplies Phase 2" below): new server request/transfer service, authorization store, dedicated command registrar, initialization hook and changelog. Reuse clickable chat choices rather than adding an unnecessary screen. Verify current Fabric lock APIs before implementation.
 3. Close existing bypasses: ToolProvisionService raw withdrawals, ChestStoreService registered-tool withdrawals, and BotMutualAidService chest-food access route through the shared policy; integration tests cover simultaneous bots and changed stock. Restrict automatic supply discovery to supported chest containers.
 4. Storage-room walkthrough: add a need-driven proximity trigger independent of the idle weapon/axe early exit, enabling missing armor requests while following. Confirm following resumes without stealing task control.
 5. Helper request policy: eligibility, exclusive reservation, expiry/cancellation, one outstanding request and no recursive recruitment, with pure tests.
@@ -56,11 +56,11 @@ Files: `GameAI/services/supply/SupplyRequestPolicy.java` (pure rules), `SupplyRe
   - Materials: cobblestone and dirt; planks of all 12 wood types; the 9 overworld logs; sticks, torches, coal and charcoal; bread, apple, baked potato and the seven cooked meats and fish; wheat and beetroot seeds, carrot and potato.
   - Equipment table: axe, pickaxe, shovel, hoe, sword and spear in the tiers wooden, stone, copper and iron; helmet, chestplate, leggings and boots in leather, copper and iron.
   - Diamond, golden, netherite and chainmail gear is not in the table, so it is `NOT_ALLOWLISTED`.
-- `allowedTiers` defaults to `{wooden, stone, copper, leather}`. Leather is there as the armor counterpart of wooden; otherwise leather armor could not be allowlisted. Iron is already in the table and is `TIER_NOT_ALLOWED` by default, so allowing it takes one change: add `"iron"` to `DEFAULT_ALLOWED_TIERS`. Whether to do that is still Bradley's question. Copper armor is allowed by default through the copper tier.
+- `allowedTiers` defaults to `{wooden, stone, copper, leather}`. Leather is there as the armor counterpart of wooden; otherwise leather armor could not be allowlisted. Iron is already in the table and is `TIER_NOT_ALLOWED` by default, so allowing it takes one change: add `"iron"` to `DEFAULT_ALLOWED_TIERS`. Bradley ruled on 2026-09-25: iron stays out. Copper armor is allowed by default through the copper tier.
 - Reserves: materials keep 16 of the exact item in the chest (`materialReserve`). Equipment keeps one piece of the same equipment type (`equipmentSpare`). A grant is also capped by the bot's stated need and by the number of that exact item present. `grantable(stock, reserve, requested, need) = max(0, min(requested, need, stock - reserve))`.
 - `Stock(itemCount, typeCount)` is a contract for the Phase 2 adapter. Both counts cover both halves of a double chest. `typeCount` counts every stack whose id maps to the same type in the table, whatever its tier or components, and is never taken as lower than `itemCount`.
 - Owner binding: a bot with no owner is `NO_OWNER`, so nothing can be requested or granted for it. Only the owner may respond. An operator who is not the owner may respond only when `Config.operatorMayApprove` is set (default false). A foreign responder gets `FOREIGN_CALLER`, and the pending entry, its cooldowns and its grant state stay unchanged.
-- `ChestKey(worldId, x, y, z)`. `worldId` is `levelName/dimension`, matching `BotChestRegistryService.serverWorldKey`. `canonical(worldId, half, partnerOrNull)` takes the smaller position, compared as int tuples, so both halves give one key. A partner that is not a horizontal neighbour on the same y is ignored. That fails safe: the result is two chests and more prompts.
+- `ChestKey(worldId, x, y, z)`. `worldId` is `levelName/dimension` as Phase 1 wrote it; superseded in Phase 2: the adapter passes `SupplyChestRules.worldId(BotWorldStateService.currentWorldKey(server), dimension)`, because `levelName/dimension` collides across saves. `canonical(worldId, half, partnerOrNull)` takes the smaller position, compared as int tuples, so both halves give one key. A partner that is not a horizontal neighbour on the same y is ignored. That fails safe: the result is two chests and more prompts.
 - `RequestFingerprint(owner, bot, chest, ItemKey item, qty)` binds owner, bot, chest, item id and component fingerprint (through `item`) plus the quantity. A single-use grant is spent only by a fingerprint that matches on every field, with `qty` no larger than the grant. A larger ask gets `OVER_GRANT` and keeps the grant. Each target holds at most one grant, and a newer grant replaces the older one instead of adding to it.
 - Signatures widened from the sketch:
   - `open(fp, Stock, need)`: needs stock to return `INELIGIBLE(RESERVE_EXHAUSTED | NO_NEED)`, and cuts `fp.qty` to what is grantable. The cut fingerprint is what the prompt shows.
@@ -77,4 +77,36 @@ Files: `GameAI/services/supply/SupplyRequestPolicy.java` (pure rules), `SupplyRe
 - Exempt as owner-initiated: `/bot withdraw` (`modCommandRegistry`:2924) and the storage screen's Quick Fetch (`ChestRegistryNetworkManager`:304).
 - Bot-placed chest records take their owner from the bot's current owner (`BotChestRegistryService`:163, :341), and the two halves of a double chest are not linked. Phase 2 needs an explicit placer/owner field and a check on both halves.
 - Do not copy `BotFoodGivingService`'s click binding: it removes the pending entry before the player check, so a foreign click cancels it (:133-134, :161). The ledger's `respond` rejects a foreign responder without changing anything.
-- Open question for Bradley: who, if anyone, may approve for an un-owned bot. Phase 1 answers "nobody" (`NO_OWNER`).
+- Bradley ruled on 2026-09-25 that nobody may approve for an un-owned bot, so it keeps `NO_OWNER`.
+
+## Supplies Phase 2: chest adapter and authorization persistence (done, 1.1.219, DORMANT)
+
+Phase 2 was built in two parts and reviewed once:
+- 2a `86791185`: `ChestRecord.ownerUuid`, `recordedOwnersAt`, the ledger's `AlwaysScope`, `restoreAlways` and
+  `alwaysSnapshot`, and the pure `SupplyChestRules`.
+- 2b `e3732272`: `SupplyRequestService` and `SupplyCommands`.
+- Review-wave fix `5c28366f`.
+
+`request(` and `transferNow(` have no production callers. `SupplyDormancyTest` enforces this; it also pins the
+private bodies to their entry points and rejects reflective name strings. Rulings and deferrals are in the
+1.1.219 changelog entry. Scope notes (local): `.superpowers/sdd/SCOPE-supplies-phase2.md`.
+
+Rulings that Phase 3 inherits:
+- Ownership over both halves: PLAYER_STORAGE and OWNER_STORAGE prompt; DENY_FOREIGN, DENY_UNKNOWN and DENY_MIXED
+  refuse. Records made before 1.1.219 have no owner, so they read DENY_UNKNOWN until the chest is re-placed.
+  Decide on those before wiring.
+- Access refuses when: the chunk is unloaded; the block is not a chest; protected zones haven't loaded; either half is
+  locked; territory denies either half; the chest is blocked; or ownership denies.
+- The owner must be online and within 32 blocks. The exception is a request already covered by an Always
+  permission.
+- Prompts are clickable `/frens supply answer <requestId> once|always|no`, keyed by request id. A foreign click
+  gets a reply and changes nothing.
+- The transfer runs on the server thread in one tick: capacity, then `consumeGrant` with the quantity capped, then
+  the exact move, then `markDirty`.
+- The adapter never calls `clearOwner`, because that would wipe the persisted Always permissions.
+
+Before wiring:
+- decide the null-owner policy above;
+- add a tick sweep of the ledger;
+- stop a valid empty Always file from WARNing;
+- add a revoke-all command (revoking from the surviving half of a broken double chest can't see the old key).

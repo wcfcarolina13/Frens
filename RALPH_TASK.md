@@ -3,7 +3,61 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.218) — next session starts here
+## Session Handoff 2026-09-25 (1.1.219) — next session starts here
+
+**State:** main = origin/main @ 1.1.219 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1242 green (1122 → 1242). One build, two
+items. The work was done in a worktree branch and fast-forwarded into main.
+
+**Shipped in 1.1.219:**
+- **Companion supplies Phase 2 — DORMANT.**
+  - `SupplyRequestService`: request, answer, transferNow and revoke, all on the server thread.
+  - Always permissions per save in `<save>/frens/supply_always.json`.
+  - `/frens supply answer|revoke`, under a new non-op root. The `/bot` root is op-only.
+  - Bot-placed chest records now carry `ownerUuid`.
+  - Pure `SupplyChestRules`: ownership over both halves, access order, stock, fingerprint, codec.
+  - `request(` and `transferNow(` have **zero callers**, and `SupplyDormancyTest` fails the build if one appears.
+- **Addressee rule fixes.**
+  - Soft broadcast ("guys", "everyone", "you two"…). It counts only when no bot is named, no other human is online,
+    and the party path can route.
+  - A line that starts with another human's name does nothing bot-facing.
+  - A trailing ", Name" wins.
+  - Comma lists address both, unless a clause cue follows ("Bob, Jake said…" → Bob).
+  - A 30 s DM follow-up window after a delivered soul DM reply (`SoulDmFollowUpWindow`):
+    - A routingId guard stops a late reply to an older DM from taking the window.
+    - It is off while another human is online.
+    - It skips lines the zzz trigger, the quest ask or the skill-resume prompt already handled.
+  - Eval t2 (counts only): 37/63 → 48/63 (real 17/24 → 18/24), 0 broken; with the window as an upper bound,
+    54/63 (real 22/24).
+- Details, rulings and deferrals are in `changelog.md`. Scope notes (local, untracked):
+  `.superpowers/sdd/SCOPE-supplies-phase2.md`, `.superpowers/sdd/SCOPE-addressee.md`.
+
+**Bradley's rulings (2026-09-25):** iron tier stays out of supplies, and nobody approves for an un-owned bot. Both were
+already the defaults, so no code changed.
+
+**Field checks pending:** Phase 6q (new; addressee behaviour + supplies groundwork), 6p, 6o, plus 6b–6n. The checklist is now 195 items.
+
+**Next autonomous candidates:**
+1. **Supplies Phase 3**: route every existing automatic withdrawal through the shared policy.
+   - The plan's list: ToolProvisionService raw moves + `retrieveToolFromChests`, ChestStoreService registered-tool
+     withdrawals, BotMutualAidService chest food.
+   - Also the scoper's four: HarvestCropSkill seeds :493/:635, HuntSkill weapon :1256-1275 and food :1391 (its own
+     scan at :1442), NavigationArtifactService :1523-1535.
+   - Exempt: `/bot withdraw` and Quick Fetch.
+   - Before wiring:
+     - decide the policy for pre-1.1.219 null-owner chest records (today DENY_UNKNOWN until re-placed);
+     - add a ledger tick sweep;
+     - stop a valid empty Always file from WARNing;
+     - a revoke-all command.
+   - Phase 3 must land before any release that wires live withdrawals.
+2. Egress follow-ups: outside→inside entry routing, and Fortify onto the shared helper.
+3. Addressee deferrals: mid-sentence third-person mentions, "you and Bob" clauses, human nicknames.
+
+**Needs Bradley:** guided field session (6b–6q); doorway rework decision; ACTION REQUESTS interview; Bob's TTS reference
+sample; whether to lower `OLLAMA_NUM_PARALLEL`.
+
+---
+
+## Session Handoff 2026-09-25 (1.1.218) — superseded
 
 **State:** main = origin/main @ 1.1.218 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1122 green after supplies Phase 1 (1078 at the 1.1.218 release). Two builds this session: 1.1.217 (below) and 1.1.218.
 

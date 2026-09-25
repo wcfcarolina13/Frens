@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.218-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.219-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.218** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.219** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -898,6 +898,58 @@ walking out the doorway. Needs a flat, open build site; give the bot enough mate
   - Claude watches for: `outcome=aborted` (schematic) or `(aborted)` (hovel).
   - Pass when: the bot stops at once and the next build still tries the doorway (an abort does not count toward the
     2-failure switch).
+
+## Phase 6q — Who a chat line is for; supplies groundwork (1.1.219)
+
+The chat addressee rules and the 30 s DM follow-up window came out of the 2026-09-25 decision-model eval. The window
+opens only after a soul DM reply is actually delivered, and only while no other human is online. Souls on, Jake + Bob
+nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, so only the groundwork is checked here.
+
+- [ ] **A follow-up without a name reaches the same bot (1.1.219)**
+  - Bradley does: "Jake, how is the mining going?" — wait for Jake's reply — then within 30 s a follow-up with no name
+    ("why that?", "ok, and after that?").
+  - Claude watches for: `[souls] dm follow-up routed player=… bot=Jake ageMs=…` (ageMs < 30000), then Jake's reply.
+  - Pass when: Jake answers the follow-up in the same conversation; no "Processing your message" line; no refusal
+    notice.
+- [ ] **The window closes after 30 s and on a new address (1.1.219)**
+  - Bradley does: after Jake replies, wait ~40 s and type an unaddressed line; then DM Bob ("Bob, hi"), wait for Bob,
+    and send another unaddressed line.
+  - Claude watches for: no `dm follow-up routed` for the late line; the last line routed with `bot=Bob`.
+  - Pass when: the stale window never catches the late line, and the follow-up goes to the bot that answered last.
+- [ ] **"Guys" and "everyone" reach both bots (1.1.219)**
+  - Bradley does: with party chat on, "hey guys, what's the plan?" and "everyone follow me".
+  - Claude watches for: `[souls] scene-routing … outcome=…` with both bots as candidates.
+  - Pass when: both bots take part. With the party toggle OFF, the same line produces nothing: no "Processing your
+    message", no legacy LLM call.
+- [ ] **A named bot beats a soft word (1.1.219)**
+  - Bradley does: "hey guys, Jake come here".
+  - Claude watches for: a single-bot DM routing line for Jake, no scene-routing line.
+  - Pass when: only Jake responds.
+- [ ] **Trailing name and comma lists (1.1.219)**
+  - Bradley does: "where did Bob put the torches, Jake?" then "Jake, Bob come here" then "Bob, Jake says the chest is full".
+  - Claude watches for: the routing lines' bot names.
+  - Pass when: the first goes to Jake only; the second reaches both; the third goes to Bob only.
+- [ ] **A line for another person stays with them (1.1.219, needs a second player)**
+  - Bradley does: with a friend online, "<friend's name>, Jake is being weird".
+  - Claude watches for: no soul routing line, no scene line, no overhear reaction for that line.
+  - Pass when: neither bot reacts. Also: with the friend online, a DM follow-up window never opens (lines after Jake's
+    reply need his name again).
+- [ ] **Handled lines don't become DMs (1.1.219)**
+  - Bradley does: right after a Jake DM reply, type "zzz" at night near a bed.
+  - Claude watches for: the zzz trigger, and no `dm follow-up routed` for that line.
+  - Pass when: the bot sleeps and no DM turn fires for "zzz".
+- [ ] **Bot-placed chests record their owner (1.1.219, supplies groundwork)**
+  - Bradley does: let a bot fill its inventory until it places a supply chest, then open
+    `config/frens/bot_chest_registry.json`.
+  - Claude watches for: the new record.
+  - Pass when: the new record has `"ownerUuid"` set to Bradley's UUID. Records from before 1.1.219 have no owner;
+    that is expected and they are refused for future supply requests until re-placed.
+- [ ] **Supply commands are safe for non-ops (1.1.219)**
+  - Bradley does: as a non-op (or just as himself), `/frens supply answer 00000000-0000-0000-0000-000000000000 once` and
+    `/frens supply revoke ~ ~ ~` on a chest.
+  - Claude watches for: `[supply] answer … result=NOT_FOUND` (or NOT_RUNNING_OR_INVALID) and
+    `[supply] revoke … removed=false`; `[supply] started: 0 standing permission(s) restored` at world load.
+  - Pass when: both reply with a plain sentence, nothing errors, nothing moves.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
