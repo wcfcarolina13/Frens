@@ -696,6 +696,24 @@ public final class SoulRuntime {
     }
 
     /**
+     * A line addressed to another online human (addressee rule R3): closes the ambient reply
+     * window and nothing else. Unlike {@link #noteAddressedChat} it does not mark any bot's open
+     * threads answered -- the player was talking to someone else.
+     */
+    public static void noteOtherAddresseeChat(net.minecraft.server.network.ServerPlayerEntity player) {
+        try {
+            SoulRuntime runtime = INSTANCE.get();
+            if (runtime != null && player != null) {
+                SoulLocalDirector director = runtime.localDirector;
+                if (director != null) {
+                    director.noteAddressedChat(player.getUuid());
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
      * Disconnect-time cleanup for every piece of per-player soul state:
      * <ul>
      *   <li>the overheard-chat ring ({@link SoulLocalMemory#forget});</li>

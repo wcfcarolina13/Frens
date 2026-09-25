@@ -1310,7 +1310,13 @@ public class Frens implements ModInitializer {
             // as the player actively conversing.
             net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerChat(sender);
 
-            ChatTarget target = resolveChatTargets(raw);
+            ChatTarget target = resolveChatTargets(raw, sender);
+            if (target.otherAddressee()) {
+                // Addressed to another online human: close the ambient reply window and do
+                // nothing bot-facing (no soul routing, no overhear, no legacy raw parser).
+                net.wcfcarolina13.GameAI.souls.SoulRuntime.noteOtherAddresseeChat(sender);
+                return;
+            }
             if (!target.bots().isEmpty()) {
                 // Explicit address: close any open ambient reply window. Observational only.
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.noteAddressedChat(sender);
@@ -1353,6 +1359,13 @@ public class Frens implements ModInitializer {
                     } catch (Throwable t) {
                         // Don't let optional soul-communication wiring break chat.
                         LOGGER.warn("SoulGroupRouter threw; falling back to legacy routing: {}", t.toString());
+                    }
+                    if (target.softBroadcast()) {
+                        // A soft group address ("hey everyone") is honoured only on the soul party
+                        // path (resolveChatTargets demotes it when that path cannot route); if the
+                        // party route still did not take it, it is plain chat -- never the legacy
+                        // "Processing your message" loop.
+                        return;
                     }
                 }
 
@@ -1421,9 +1434,10 @@ public class Frens implements ModInitializer {
             return;
         }
 
-        // If message already explicitly targets bots ("Jake quest", "bots quest"), normal routing will handle it.
-        ChatTarget explicit = resolveChatTargets(raw);
-        if (!explicit.bots().isEmpty()) {
+        // If message already explicitly targets bots ("Jake quest", "bots quest"), normal routing
+        // will handle it; a line addressed to another human is not for the bots at all.
+        ChatTarget explicit = resolveChatTargets(raw, sender);
+        if (!explicit.bots().isEmpty() || explicit.otherAddressee()) {
             return;
         }
 
@@ -1501,27 +1515,41 @@ public class Frens implements ModInitializer {
         });
     }
 
-    private static ChatTarget resolveChatTargets(String raw) {
+    private static ChatTarget resolveChatTargets(String raw, ServerPlayerEntity sender) {
         if (serverInstance == null || raw == null) {
-            return new ChatTarget(List.of(), "", false);
+            return ChatTarget.NONE;
         }
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
         if (bots.isEmpty()) {
-            return new ChatTarget(List.of(), "", false);
+            return ChatTarget.NONE;
         }
         // Token matching + prompt extraction live in the pure, unit-tested ChatAddressing
-        // resolver; this method only maps the returned name index / broadcast flag back onto the
-        // live bot entities. A bot slot that is somehow null resolves as an empty name, which the
-        // resolver can never match.
+        // resolver; this method only maps the returned name index / flags back onto the live bot
+        // entities. A bot slot that is somehow null resolves as an empty name, which the resolver
+        // can never match.
         List<String> names = new ArrayList<>(bots.size());
         for (ServerPlayerEntity bot : bots) {
             names.add(bot == null ? "" : bot.getName().getString());
         }
-        java.util.Optional<ChatAddressing.Resolution> resolution = ChatAddressing.resolve(raw, names);
+        List<String> humans = otherOnlineHumanNames(sender);
+        java.util.Optional<ChatAddressing.Resolution> resolution = ChatAddressing.resolve(raw, names, humans);
         if (resolution.isEmpty()) {
-            return new ChatTarget(List.of(), "", false);
+            return ChatTarget.NONE;
         }
         ChatAddressing.Resolution resolved = resolution.get();
+        if (resolved.otherAddressee()) {
+            return new ChatTarget(List.of(), "", false, true, false);
+        }
+        // Soft group address: decided here, before the caller closes the ambient reply window or
+        // pings every bot's quest handler, so a demoted line is exactly an unaddressed one.
+        if (resolved.softBroadcast()) {
+            boolean otherHumanOnline = !humans.isEmpty();
+            boolean partyCanRoute = !otherHumanOnline && !resolved.prompt().isEmpty()
+                    && canRouteSoftBroadcast(bots, sender);
+            if (ChatAddressing.shouldDemoteSoftBroadcast(true, otherHumanOnline, partyCanRoute)) {
+                return ChatTarget.NONE;
+            }
+        }
         List<ServerPlayerEntity> targets;
         if (resolved.broadcast()) {
             targets = new ArrayList<>(bots);
@@ -1533,9 +1561,37 @@ public class Frens implements ModInitializer {
         }
         targets = dedupeTargetBots(targets);
         if (targets.isEmpty()) {
-            return new ChatTarget(List.of(), "", false);
+            return ChatTarget.NONE;
         }
-        return new ChatTarget(targets, resolved.prompt(), resolved.broadcast());
+        return new ChatTarget(targets, resolved.prompt(), resolved.broadcast(), false, resolved.softBroadcast());
+    }
+
+    /** Names of the online human players other than {@code sender} (bots excluded). */
+    private static List<String> otherOnlineHumanNames(ServerPlayerEntity sender) {
+        List<String> humans = new ArrayList<>();
+        for (ServerPlayerEntity player : serverInstance.getPlayerManager().getPlayerList()) {
+            if (player == null || player instanceof net.wcfcarolina13.Entity.createFakePlayer) {
+                continue;
+            }
+            if (sender != null && player.getUuid().equals(sender.getUuid())) {
+                continue;
+            }
+            humans.add(player.getName().getString());
+        }
+        return humans;
+    }
+
+    /** Whether the soul party path would route a soft broadcast from {@code sender} silently. */
+    private static boolean canRouteSoftBroadcast(List<ServerPlayerEntity> bots, ServerPlayerEntity sender) {
+        try {
+            boolean partyEnabled = CONFIG == null || CONFIG.isSoulPartyEnabled();
+            return net.wcfcarolina13.GameAI.souls.SoulGroupRouter.canRouteParty(bots, sender, partyEnabled);
+        } catch (Throwable t) {
+            // Don't let optional soul-communication wiring break chat: an unroutable soft
+            // broadcast is simply plain chat.
+            LOGGER.warn("SoulGroupRouter.canRouteParty threw; treating soft broadcast as unaddressed: {}", t.toString());
+            return false;
+        }
     }
 
     private static List<ServerPlayerEntity> dedupeTargetBots(List<ServerPlayerEntity> bots) {
@@ -1737,8 +1793,14 @@ public class Frens implements ModInitializer {
      * match, even when the server happens to have exactly one registered bot. Consumers that must
      * distinguish "explicitly addressed one bot" from "broadcast keyword that resolved to one
      * bot" (e.g. the exclusive soul-communication router) key off this flag rather than
-     * {@code bots.size()} alone.
+     * {@code bots.size()} alone. A soft group address ("hey everyone") also sets {@code broadcast},
+     * with {@code softBroadcast} marking it -- only ever present when the soul party path can
+     * route it; otherwise {@link #resolveChatTargets} has already demoted it to {@link #NONE}.
+     * {@code otherAddressee} marks a line addressed to another online human (no bots).
      */
-    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt, boolean broadcast) {
+    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt, boolean broadcast,
+                              boolean otherAddressee, boolean softBroadcast) {
+        /** Unaddressed: no bot targets, not another human's line. */
+        static final ChatTarget NONE = new ChatTarget(List.of(), "", false, false, false);
     }
 }

@@ -89,6 +89,65 @@ public final class SoulGroupRouter {
     }
 
     /**
+     * Pure silent-routability check for a soft group address ("hey everyone"): true only when
+     * {@link #tryRoute} would route the line without any deterministic notice — {@link #decide}
+     * is not {@link RouteOutcome#NOT_SOUL}, the index is ready, the pipeline is available, and at
+     * least one bot is eligible (one eligible bot downgrades to an ordinary DM, which is silent
+     * too). A soft broadcast that fails this is plain chat, not a refusal.
+     */
+    public static boolean routesSilently(boolean masterEnabled, boolean indexReady, boolean partyEnabled,
+                                         boolean pipelineAvailable, int eligibleCount) {
+        return decide(masterEnabled, indexReady, partyEnabled, eligibleCount) != RouteOutcome.NOT_SOUL
+                && indexReady && pipelineAvailable && eligibleCount >= 1;
+    }
+
+    /**
+     * Whether a soft broadcast from {@code sender} to {@code candidateBots} can be honoured on the
+     * soul party path ({@link #routesSilently}), evaluated from the same live facts
+     * {@link #tryRoute} uses. Server thread; reads only cached soul state and cheap per-bot
+     * authorization/reachability — no notice, no log, no submission.
+     */
+    public static boolean canRouteParty(List<ServerPlayerEntity> candidateBots, ServerPlayerEntity sender,
+                                        boolean partyEnabled) {
+        if (sender == null || candidateBots == null) {
+            return false;
+        }
+        Optional<SoulRuntime> maybeRuntime = SoulRuntime.current();
+        if (maybeRuntime.isEmpty()) {
+            return false;
+        }
+        SoulRuntime runtime = maybeRuntime.get();
+        int eligible = eligibleRoster(candidatesFor(runtime, nearestFirst(candidateBots, sender), sender)).size();
+        return routesSilently(runtime.isMasterEnabled(), runtime.isReady(), partyEnabled,
+                runtime.pipelineAvailable(), eligible);
+    }
+
+    /** Live, non-removed candidates sorted nearest-first, so the roster cap keeps the closest. */
+    private static List<ServerPlayerEntity> nearestFirst(List<ServerPlayerEntity> candidateBots,
+                                                         ServerPlayerEntity sender) {
+        List<ServerPlayerEntity> sorted = new ArrayList<>();
+        for (ServerPlayerEntity bot : candidateBots) {
+            if (bot != null && !bot.isRemoved()) {
+                sorted.add(bot);
+            }
+        }
+        sorted.sort(Comparator.comparingDouble(bot -> bot.squaredDistanceTo(sender)));
+        return sorted;
+    }
+
+    private static List<Candidate> candidatesFor(SoulRuntime runtime, List<ServerPlayerEntity> sorted,
+                                                 ServerPlayerEntity sender) {
+        List<Candidate> candidates = new ArrayList<>(sorted.size());
+        for (ServerPlayerEntity bot : sorted) {
+            candidates.add(new Candidate(bot.getUuid(),
+                    runtime.hasActiveProfile(bot.getUuid()),
+                    CompanionCommunicationPolicy.isPrivateSoulAuthorized(sender, bot),
+                    CompanionCommunicationPolicy.classifySoulReachability(bot, sender)));
+        }
+        return candidates;
+    }
+
+    /**
      * Attempts to route one broadcast/multi-name address as a group scene.
      *
      * @param candidateBots the resolved target bots (all registered bots for a broadcast)
@@ -116,21 +175,8 @@ public final class SoulGroupRouter {
         boolean indexReady = runtime.isReady();
 
         // Nearest-first, so the roster cap keeps the bots actually standing with the player.
-        List<ServerPlayerEntity> sorted = new ArrayList<>();
-        for (ServerPlayerEntity bot : candidateBots) {
-            if (bot != null && !bot.isRemoved()) {
-                sorted.add(bot);
-            }
-        }
-        sorted.sort(Comparator.comparingDouble(bot -> bot.squaredDistanceTo(sender)));
-
-        List<Candidate> candidates = new ArrayList<>(sorted.size());
-        for (ServerPlayerEntity bot : sorted) {
-            candidates.add(new Candidate(bot.getUuid(),
-                    runtime.hasActiveProfile(bot.getUuid()),
-                    CompanionCommunicationPolicy.isPrivateSoulAuthorized(sender, bot),
-                    CompanionCommunicationPolicy.classifySoulReachability(bot, sender)));
-        }
+        List<ServerPlayerEntity> sorted = nearestFirst(candidateBots, sender);
+        List<Candidate> candidates = candidatesFor(runtime, sorted, sender);
         List<UUID> rosterIds = eligibleRoster(candidates);
 
         RouteOutcome coarse = decide(masterEnabled, indexReady, partyEnabled, rosterIds.size());

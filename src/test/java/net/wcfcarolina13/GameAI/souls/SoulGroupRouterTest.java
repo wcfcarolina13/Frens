@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,5 +68,18 @@ class SoulGroupRouterTest {
         assertEquals(SoulGroupRouter.RouteOutcome.CONSUMED,
                 SoulGroupRouter.decide(true, true, true, 2));
         assertTrue(SoulGroupRouter.decide(true, true, true, 4) == SoulGroupRouter.RouteOutcome.CONSUMED);
+    }
+
+    // === Soft-broadcast gate: routes only when tryRoute would take it without a notice ===
+
+    @Test
+    void softBroadcastRoutesSilentlyOnlyWithAReadyPipelineAndAnEligibleBot() {
+        assertTrue(SoulGroupRouter.routesSilently(true, true, true, true, 1), "one eligible downgrades to a DM");
+        assertTrue(SoulGroupRouter.routesSilently(true, true, true, true, 3));
+        assertFalse(SoulGroupRouter.routesSilently(false, true, true, true, 2), "souls master off");
+        assertFalse(SoulGroupRouter.routesSilently(true, true, false, true, 2), "party kill switch off");
+        assertFalse(SoulGroupRouter.routesSilently(true, false, true, true, 2), "loading notice");
+        assertFalse(SoulGroupRouter.routesSilently(true, true, true, false, 2), "invalid-pipeline notice");
+        assertFalse(SoulGroupRouter.routesSilently(true, true, true, true, 0), "none-eligible notice");
     }
 }
