@@ -25,6 +25,7 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.services.MutualAidChestFoodPolicy.Next;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,13 +40,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 
 /**
  * Same-owner food support between bots and shared tactical chests.
@@ -80,8 +75,6 @@ public final class BotMutualAidService {
     private static final double DEFENSE_SCAN_RADIUS_SQ = DEFENSE_SCAN_RADIUS * DEFENSE_SCAN_RADIUS;
     private static final double ALLY_THREAT_RADIUS = 8.0D;
     private static final double DEFENSE_ENGAGE_REACH_SQ = 7.0D * 7.0D;
-    /** Between two shared-chest food attempts by one bot, whatever the first came to. */
-    private static final long CHEST_COOLDOWN_TICKS = 20L * 8L;
     /** How long a worker waits for its chest-food attempt to start on the server thread (the supply facade's hop budget). */
     private static final long CHEST_FOOD_HOP_TIMEOUT_MS = 2_500L;
     private static final String CHEST_FOOD_PURPOSE = "mutual-aid-food";
@@ -587,9 +580,11 @@ public final class BotMutualAidService {
     }
 
     /**
-     * At most one shared-chest food attempt per bot every {@link #CHEST_COOLDOWN_TICKS}, whatever
-     * it came to: a refusal, an unanswered prompt or an empty scan must not ask again next tick.
-     * Any thread; the attempt itself runs on the server thread.
+     * At most one shared-chest food attempt per bot every {@link MutualAidChestFoodPolicy#THROTTLE_TICKS},
+     * whatever it came to: a refusal, an unanswered prompt or an empty scan must not ask again next
+     * tick. An attempt the owner's answer or absence ended holds this bot off chests longer
+     * ({@link MutualAidChestFoodPolicy#probeDelayTicks}); the attempt itself records that. Any thread;
+     * the attempt runs on the server thread through {@link SupplyServerHop}.
      *
      * @return whether food moved into the bot (which has then eaten, if it needed to)
      */
@@ -602,61 +597,18 @@ public final class BotMutualAidService {
         if (nowTick < NEXT_CHEST_TICK.getOrDefault(botId, 0L)) {
             return false;
         }
-        NEXT_CHEST_TICK.put(botId, nowTick + CHEST_COOLDOWN_TICKS);
-        return onServerThread(server, () -> tryTakeFoodFromSharedChest(bot, world));
-    }
-
-    /**
-     * Runs {@code attempt} on the server thread and returns its answer: inline on the server
-     * thread; from a worker, waiting at most {@link #CHEST_FOOD_HOP_TIMEOUT_MS}. Abandon-safe the
-     * way the supply facade's hop is: the server task and a worker that stopped waiting race to
-     * claim the attempt, so one that starts after the worker gave up does nothing. An attempt
-     * already running when the wait ends still finishes on the server; the worker reads it as
-     * {@code false}.
-     */
-    private static boolean onServerThread(MinecraftServer server, BooleanSupplier attempt) {
-        if (server.isOnThread()) {
-            return attempt.getAsBoolean();
-        }
-        CompletableFuture<Boolean> done = new CompletableFuture<>();
-        AtomicBoolean claimed = new AtomicBoolean();
-        try {
-            server.execute(() -> {
-                if (!claimed.compareAndSet(false, true)) {
-                    return; // the worker stopped waiting before this started
-                }
-                if (!server.isOnThread()) {
-                    // A stopped server runs execute() inline on the caller: never touch the world off-thread.
-                    done.complete(Boolean.FALSE);
-                    return;
-                }
-                try {
-                    done.complete(attempt.getAsBoolean());
-                } catch (RuntimeException e) {
-                    LOGGER.warn("Mutual aid: chest food attempt failed on the server thread", e);
-                } finally {
-                    done.complete(Boolean.FALSE); // no-op once completed
-                }
-            });
-        } catch (RuntimeException rejected) {
-            return false;
-        }
-        try {
-            return done.get(CHEST_FOOD_HOP_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            claimed.compareAndSet(false, true);
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (TimeoutException | ExecutionException e) {
-            claimed.compareAndSet(false, true);
-            return false;
-        }
+        // Set before the hop, so a worker whose hop ran out cannot start a second take behind the first.
+        NEXT_CHEST_TICK.put(botId, nowTick + MutualAidChestFoodPolicy.THROTTLE_TICKS);
+        return Boolean.TRUE.equals(SupplyServerHop.call(server, () -> tryTakeFoodFromSharedChest(bot, world),
+                CHEST_FOOD_HOP_TIMEOUT_MS, Boolean.FALSE));
     }
 
     /**
      * Takes food from the first in-reach shared chest whose owner allows it, through the supply
      * facade (never walking, never waiting), then eats if the bot needs to. Chests only; a double
-     * chest is read and asked as one. Server thread.
+     * chest is read and asked as one. A food refused for itself is not asked again in any chest
+     * this attempt; a refusal that reaches the whole bot, or finds the owner away, ends the attempt
+     * and holds the bot off chests for {@link MutualAidChestFoodPolicy#probeDelayTicks}. Server thread.
      */
     private static boolean tryTakeFoodFromSharedChest(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null || bot.isRemoved()) {
@@ -666,6 +618,7 @@ public final class BotMutualAidService {
         BlockPos asked = ASKED_FOOD_CHEST.get(botId);
         boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD;
         Set<BlockPos> tried = new HashSet<>();
+        List<ItemStack> refusedFoods = new ArrayList<>();
         for (BlockPos chestPos : MutualAidChestFoodPolicy.askedFirst(collectCandidateFoodChests(bot, world), asked)) {
             if (tried.contains(chestPos) || !BlockInteractionService.canInteract(bot, chestPos)) {
                 continue;
@@ -684,7 +637,7 @@ public final class BotMutualAidService {
             if (otherHalf != null) {
                 tried.add(otherHalf);
             }
-            Next next = takeFoodFromChest(bot, world, chestPos, chest, starving);
+            Next next = takeFoodFromChest(bot, world, chestPos, chest, starving, refusedFoods);
             if (next == Next.WAIT) {
                 ASKED_FOOD_CHEST.put(botId, chestPos);
                 return false;
@@ -697,6 +650,7 @@ public final class BotMutualAidService {
                 return true;
             }
             if (next != Next.NEXT_CHEST) {
+                holdOffChestFood(bot, world, next);
                 return false;
             }
         }
@@ -704,15 +658,33 @@ public final class BotMutualAidService {
     }
 
     /**
+     * After an attempt ended in {@code next}, no chest is asked for food before
+     * {@link MutualAidChestFoodPolicy#probeDelayTicks} from now. Never shortens a hold already set.
+     * Written here, on the server thread, so a worker whose hop gave up still leaves the hold behind.
+     */
+    private static void holdOffChestFood(ServerPlayerEntity bot, ServerWorld world, Next next) {
+        long delay = MutualAidChestFoodPolicy.probeDelayTicks(next);
+        NEXT_CHEST_TICK.merge(bot.getUuid(), world.getServer().getTicks() + delay, Math::max);
+        if (delay > MutualAidChestFoodPolicy.THROTTLE_TICKS) {
+            LOGGER.debug("Mutual aid: {} leaves shared chests alone for {} s ({})",
+                    bot.getName().getString(), delay / 20L, next);
+        }
+    }
+
+    /**
      * Asks the chest for its cheapest food the policy could grant, then the next, until one is
-     * taken, asked about, or refused for the whole chest. Room is made in the bot only once the
-     * facade says an otherwise permitted take has none (it keeps the ticket for that), and then
-     * the same food is asked for once more.
+     * taken, asked about, or refused for the whole chest (or the whole bot). A food refused for
+     * itself goes into {@code refusedFoods} and is skipped in every chest this attempt. Room is
+     * made in the bot only once the facade says an otherwise permitted take has none (it keeps the
+     * ticket for that), and then the same food is asked for once more.
      */
     private static Next takeFoodFromChest(ServerPlayerEntity bot, ServerWorld world, BlockPos chestPos,
-                                          Inventory chest, boolean starving) {
+                                          Inventory chest, boolean starving, List<ItemStack> refusedFoods) {
         int foodLevel = bot.getHungerManager().getFoodLevel();
         for (ChestFood food : listChestFood(chest, starving)) {
+            if (isSameFoodListed(refusedFoods, food.sample())) {
+                continue;
+            }
             // 0: not allowlisted, or none above the reserve. Asking would only be refused, loudly.
             int grantable = SupplyWithdrawals.grantableEstimate(world, food.sample(), food.count());
             if (grantable <= 0) {
@@ -721,11 +693,13 @@ public final class BotMutualAidService {
             int pieces = MutualAidChestFoodPolicy.withdrawCount(foodLevel, starving,
                     nutritionValue(food.sample()), grantable);
             SupplyWithdrawals.Result result = askForFood(bot, chestPos, food.sample(), pieces);
-            Next next = MutualAidChestFoodPolicy.afterWithdraw(result.kind(), result.reason(), false);
+            Next next = MutualAidChestFoodPolicy.afterWithdraw(result.kind(), result.scope(),
+                    hasRoomForOne(bot, food.sample()), false);
             if (next == Next.MAKE_ROOM_AND_RETRY) {
                 ensureInventorySpaceForChestFood(bot);
                 result = askForFood(bot, chestPos, food.sample(), pieces);
-                next = MutualAidChestFoodPolicy.afterWithdraw(result.kind(), result.reason(), true);
+                next = MutualAidChestFoodPolicy.afterWithdraw(result.kind(), result.scope(),
+                        hasRoomForOne(bot, food.sample()), true);
             }
             if (next == Next.TAKEN) {
                 LOGGER.info("Mutual aid: {} took {}x {} from shared chest at {}",
@@ -734,11 +708,41 @@ public final class BotMutualAidService {
                         food.sample().getName().getString(),
                         chestPos.toShortString());
             }
-            if (next != Next.NEXT_ITEM) {
+            if (next == Next.NEXT_ITEM) {
+                refusedFoods.add(food.sample());
+                continue;
+            }
+            if (next != Next.NEXT_TARGET) {
                 return next;
             }
         }
         return Next.NEXT_CHEST;
+    }
+
+    private static boolean isSameFoodListed(List<ItemStack> foods, ItemStack sample) {
+        for (ItemStack food : foods) {
+            if (ItemStack.areItemsAndComponentsEqual(food, sample)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether one more piece of {@code sample} fits the bot's main inventory: an empty slot, or a
+     * stack of the exact item with room. The supply adapter counts room the same way before a take.
+     */
+    private static boolean hasRoomForOne(ServerPlayerEntity bot, ItemStack sample) {
+        for (ItemStack stack : bot.getInventory().getMainStacks()) {
+            if (stack.isEmpty()) {
+                return true;
+            }
+            if (ItemStack.areItemsAndComponentsEqual(stack, sample)
+                    && stack.getCount() < bot.getInventory().getMaxCount(stack)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static SupplyWithdrawals.Result askForFood(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample,
@@ -1024,15 +1028,19 @@ public final class BotMutualAidService {
                 || BotHomeService.isNearRecentSleep(bot, BASE_STORAGE_RADIUS, RECENT_SLEEP_WINDOW_MS);
     }
 
+    /**
+     * Frees one slot for chest food by dropping one stack, a cheap one first (never food the bot
+     * carries, never a protected or damageable item; the drop is registered so the bot does not
+     * sweep it back up).
+     * Server thread, inside the take: it must never walk, place a chest or deposit into one, so no
+     * offload to a nearby chest here.
+     */
     private static void ensureInventorySpaceForChestFood(ServerPlayerEntity bot) {
         if (bot == null || bot.getCommandSource() == null || bot.getInventory().getEmptySlot() != -1) {
             return;
         }
         Map<Item, Integer> reserveFood = collectReservedFood(bot);
-        CraftingHelper.offloadCheapItemsToNearbyChest(bot, bot.getCommandSource().withSilent(), 0, 0, reserveFood);
-        if (bot.getInventory().getEmptySlot() == -1) {
-            CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet());
-        }
+        CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet());
     }
 
     private static int pickBestInventoryFoodSlot(ServerPlayerEntity bot, boolean allowRotten) {
