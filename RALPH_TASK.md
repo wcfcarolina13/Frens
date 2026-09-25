@@ -5,8 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 — next session starts here
 
-**State:** main = origin/main @ 1.1.217 (pushed; deployed only if the natives pgrep showed the game closed — see the
-release commit / final message). Suite 1020 green (949 → 1020). The Codex branch `codex/companion-supplies-model-switch`
+**State:** main = origin/main @ 1.1.217 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1020 green (949 → 1020). The Codex branch `codex/companion-supplies-model-switch`
 (voice-preserving model switch, group-chat guide topic, one-time group-chat hint) was fast-forwarded into main and
 reviewed in this batch.
 
