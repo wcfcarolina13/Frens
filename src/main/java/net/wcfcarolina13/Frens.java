@@ -874,6 +874,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAnimalDefenseService.reset();
             net.wcfcarolina13.GameAI.services.BotPillagerAlertService.reset();
             net.wcfcarolina13.GameAI.services.BotRespawnPromptService.clearAll();
+            net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService.clearAll();
             net.wcfcarolina13.GameAI.services.BotRandomDanceService.reset();
             net.wcfcarolina13.GameAI.services.EmotecraftBridge.reset();
             // LAST: flush any debounced bot-home state to disk, then stop its writer thread.
@@ -964,6 +965,11 @@ public class Frens implements ModInitializer {
             // and chat recency, and local-chat director state (cooldown, last line, reply window)
             // — so nothing lingers for a player who is gone.
             net.wcfcarolina13.GameAI.souls.SoulRuntime.forgetPlayer(player.getUuid());
+            // Speech floors are keyed by audience (a real player): drop the departing player's so a
+            // quick rejoin does not start behind a stale floor (up to 20 s after a scene end).
+            if (!BotEventHandler.isRegisteredBot(player)) {
+                net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService.clear(player.getUuid());
+            }
             BotPersistenceService.onBotDisconnect(player);
             net.wcfcarolina13.network.ZoneNetworkManager.clearPendingCorner(player.getUuid());
             net.wcfcarolina13.GameAI.services.ZoneVisualizerService.onPlayerDisconnect(player.getUuid());

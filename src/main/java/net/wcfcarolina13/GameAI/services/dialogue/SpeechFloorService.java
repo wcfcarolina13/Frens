@@ -27,11 +27,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * deadline and the source that owns it live in one immutable {@link Floor} value so a concurrent
  * merge can never publish one lane's deadline under another lane's label.
  *
- * <p>Static, like the reaction services it gates. Those services register no SERVER_STOPPING
- * teardown of their own (only {@code END_SERVER_TICK}), so no lifecycle hook is invented here;
- * {@link #clear(UUID)} and {@link #clearAll()} exist for callers that want to reset a floor
- * explicitly (a test, a debug command, or a future teardown that already owns a hook). The map
- * itself is bounded by the number of audiences ever spoken to and stores one small record each.
+ * <p>Static, like the reaction services it gates, so it outlives a world: an integrated server
+ * keeps mod statics across quit-and-reload in the same JVM. Lifecycle hooks in {@code Frens}:
+ * {@link #clearAll()} runs in SERVER_STOPPING, and {@link #clear(UUID)} runs in the DISCONNECT
+ * handler for real players only (an audience is the owning player a bot speaks to). Without them a reloaded world could
+ * start behind a floor armed in the previous session — at most {@code POST_SCENE_QUIET_MS}
+ * (20 s), so this is housekeeping rather than a correctness fix. The map is bounded by the number
+ * of audiences ever spoken to and stores one small record each.
  */
 public final class SpeechFloorService {
 
