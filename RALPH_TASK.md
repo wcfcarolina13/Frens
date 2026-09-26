@@ -5,7 +5,8 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 (1.1.222) — next session starts here
 
-**State:** main = origin/main @ 1.1.222 (pushed; deployed to all three Prism instances 2026-09-25, game closed).
+**State:** main = origin/main @ 1.1.222 (pushed 2026-09-25; NOT deployed: the game was running at release. Deploy per
+CLAUDE.md "JAR Deploy Safety" once it is closed, then delete this note).
 Suite 1461 green (1434 → 1461). One build: the 1.1.221 deferrals 2 and 3. Done in a worktree branch and fast-forwarded
 into main.
 
