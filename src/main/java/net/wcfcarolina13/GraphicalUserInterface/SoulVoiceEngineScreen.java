@@ -11,6 +11,9 @@ import net.wcfcarolina13.GameAI.souls.SoulRuntime;
 import net.wcfcarolina13.GameAI.souls.voice.PocketInstaller;
 import net.wcfcarolina13.GameAI.souls.voice.PocketVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
+import net.wcfcarolina13.network.AiSetupNetworkManager;
+import net.wcfcarolina13.network.AiSetupStatus;
+import java.util.function.Consumer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,12 +52,18 @@ public class SoulVoiceEngineScreen extends Screen {
     }
 
     private final Screen parent;
+    private final Consumer<AiSetupStatus> listener = fresh -> { remoteStatus = fresh; clearAndInit(); };
+    private AiSetupStatus remoteStatus;
+    private SoulSetupScreenPolicy.Mode mode;
+    private boolean statusRequested;
     /** Built in {@link #init()}; {@link #render} draws titles/blurbs from the same list. */
     private List<EngineRow> rows = List.of();
 
     public SoulVoiceEngineScreen(Screen parent) {
         super(Text.literal("§bSoul Voice Engine"));
         this.parent = parent;
+        AiSetupNetworkManager.Client.registerOnce();
+        remoteStatus = AiSetupNetworkManager.Client.latestStatus();
     }
 
     private static boolean dreamsleeveAvailable(ManualConfig cfg) {
@@ -116,9 +125,20 @@ public class SoulVoiceEngineScreen extends Screen {
 
     @Override
     protected void init() {
+        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
+                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer());
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupNetworkManager.Client.setListener(listener);
+            remoteStatus = AiSetupNetworkManager.Client.latestStatus();
+            if (!statusRequested) {
+                statusRequested = AiSetupNetworkManager.Client.requestStatus();
+            }
+        }
         ManualConfig cfg = Frens.CONFIG;
-        rows = buildRows(cfg);
-        String current = cfg != null ? cfg.getSoulVoiceEngine() : "";
+        rows = mode == SoulSetupScreenPolicy.Mode.LOCAL ? buildRows(cfg) : buildRemoteRows();
+        String current = mode == SoulSetupScreenPolicy.Mode.LOCAL
+                ? cfg != null ? cfg.getSoulVoiceEngine() : ""
+                : remoteStatus != null ? remoteStatus.voice().engine() : "";
         int cx = (this.width - POPUP_WIDTH) / 2;
         int cy = (this.height - popupHeight()) / 2;
 
@@ -126,19 +146,27 @@ public class SoulVoiceEngineScreen extends Screen {
             EngineRow row = rows.get(i);
             boolean isCurrent = row.id().equals(current);
             int y = cy + 40 + i * ROW_H;
-            String label = !row.supported() ? "macOS only"
+            String label = mode != SoulSetupScreenPolicy.Mode.LOCAL
+                    ? isCurrent ? "§a" + row.shortName() + " ✔" : "Use " + row.shortName()
+                    : !row.supported() ? "macOS only"
                     : isCurrent && row.available() ? "§a" + row.shortName() + " ✔"
                     : row.available() ? "Use " + row.shortName()
                     : "Install " + row.shortName() + "…";
             ButtonWidget button = ButtonWidget.builder(Text.literal(label), b -> {
-                        if (row.available()) {
+                        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+                            if (mode == SoulSetupScreenPolicy.Mode.REMOTE_EDITOR) {
+                                AiSetupNetworkManager.Client.selectVoiceEngine(row.id());
+                            }
+                        } else if (row.available()) {
                             selectEngine(row.id());
                         } else if (row.installer() != null) {
                             row.installer().run();
                         }
                     })
                     .dimensions(cx + POPUP_WIDTH - PAD - BTN_W, y + 4, BTN_W, 20).build();
-            button.active = row.supported()
+            button.active = mode != SoulSetupScreenPolicy.Mode.LOCAL
+                    ? mode == SoulSetupScreenPolicy.Mode.REMOTE_EDITOR && !isCurrent
+                    : row.supported()
                     && !(row.available() && isCurrent)
                     && (row.available() || row.installer() != null);
             addDrawableChild(button);
@@ -148,7 +176,18 @@ public class SoulVoiceEngineScreen extends Screen {
                 .dimensions(cx + POPUP_WIDTH - PAD - 80, cy + popupHeight() - 28, 80, 20).build());
     }
 
+    private List<EngineRow> buildRemoteRows() {
+        return List.of(
+                new EngineRow(SoulVoiceSettings.ENGINE_DREAMSLEEVE, "Dreamsleeve",
+                        "Dreamsleeve — cloned bot voice", "§7Setup is managed on the server host.", true, null, true),
+                new EngineRow(SoulVoiceSettings.ENGINE_POCKET, "Pocket",
+                        "Pocket TTS — natural CPU voices", "§7Installed on server by its host.", true, null, true),
+                new EngineRow(SoulVoiceSettings.ENGINE_PIPER, "Piper",
+                        "Piper — lightweight generic voice", "§7Installed on server by its host.", true, null, true));
+    }
+
     private void selectEngine(String engine) {
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) return;
         ManualConfig cfg = Frens.CONFIG;
         if (cfg == null) {
             return;
@@ -170,6 +209,12 @@ public class SoulVoiceEngineScreen extends Screen {
         context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + popupHeight() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + popupHeight(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            context.drawTextWithShadow(this.textRenderer, "Runs on the server host", cx + PAD, cy + 24, 0xFFB0B0B0);
+            context.drawTextWithShadow(this.textRenderer,
+                    "Voices are installed on the server machine by its host", cx + PAD,
+                    cy + popupHeight() - 39, 0xFFB0B0B0);
+        }
 
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
@@ -181,6 +226,12 @@ public class SoulVoiceEngineScreen extends Screen {
         }
 
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    @Override
+    public void removed() {
+        AiSetupNetworkManager.Client.clearListener(listener);
+        super.removed();
     }
 
     @Override

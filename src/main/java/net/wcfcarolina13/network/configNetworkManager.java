@@ -6,6 +6,14 @@ import net.minecraft.server.network.ServerPlayerEntity;
 
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.FilingSystem.SharedConfig;
+import net.wcfcarolina13.GameAI.souls.SoulRuntime;
+import net.minecraft.text.Text;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Config networking: authoritative server-side global config, pushed to clients on join and on
@@ -17,6 +25,12 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
  */
 public final class configNetworkManager {
     private configNetworkManager() {}
+    private static final ConcurrentHashMap<UUID, Long> LAST_DENIAL_MS = new ConcurrentHashMap<>();
+    private static final ExecutorService SOUL_RELOAD_WORKER = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "frens-config-soul-reload");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     // ------------------------------------------------------------------ client -> server
 
@@ -168,18 +182,39 @@ public final class configNetworkManager {
             String json = payload.configJson();
             context.server().execute(() -> {
                 if (!canEditConfig(context.server(), sender)) {
-                    Frens.LOGGER.warn("Rejected config save from non-operator {}", sender.getName().getString());
+                    long now = System.currentTimeMillis();
+                    UUID senderId = sender.getUuid();
+                    Long previous = LAST_DENIAL_MS.get(senderId);
+                    if (ConfigSaveReloadPolicy.shouldNotifyDenial(now, previous)) {
+                        LAST_DENIAL_MS.put(senderId, now);
+                        Frens.LOGGER.warn("Rejected config save from non-operator {}", sender.getName().getString());
+                        sender.sendMessage(Text.literal("Only an operator or the host can change this server's Frens settings — your change was not saved."), false);
+                    } else {
+                        Frens.LOGGER.debug("Repeated rejected config save from non-operator {}", sender.getName().getString());
+                    }
                     sendConfigSync(sender);
                     return;
                 }
+                SharedConfig before = SharedConfig.capture(Frens.CONFIG);
                 if (!ConfigJsonUtil.applyConfigJson(json)) {
                     Frens.LOGGER.warn("Config save from {} could not be applied", sender.getName().getString());
                     sendConfigSync(sender);
                     return;
                 }
                 ManualConfig config = Frens.CONFIG;
+                boolean reloadSouls = ConfigSaveReloadPolicy.needsSoulReload(before, SharedConfig.capture(config));
                 if (config != null) {
                     config.save();
+                }
+                if (reloadSouls && config != null) {
+                    SoulRuntime.current().ifPresent(runtime ->
+                            CompletableFuture.supplyAsync(() -> runtime.reloadSettings(config), SOUL_RELOAD_WORKER)
+                                    .thenCompose(future -> future)
+                                    .whenComplete((ignored, error) -> context.server().execute(() -> {
+                                        if (error != null) {
+                                            Frens.LOGGER.warn("[souls] reloadSettings failed after shared config save: {}", error.toString());
+                                        }
+                                    })));
                 }
                 try {
                     net.wcfcarolina13.GameAI.services.BotControlApplier.refreshBotPreferences(context.server());

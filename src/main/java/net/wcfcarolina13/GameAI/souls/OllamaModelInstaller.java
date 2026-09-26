@@ -41,7 +41,7 @@ public final class OllamaModelInstaller {
 
     public static final List<KnownModel> KNOWN_MODELS = List.of(
             new KnownModel("llama3.1:8b", "Llama 3.1 8B",
-                    "Current default — best replies, slowest, heaviest.", 4.6, 12),
+                    "Largest option — best replies, slowest, heaviest.", 4.6, 12),
             new KnownModel("llama3.2:3b", "Llama 3.2 3B",
                     "Smaller — noticeably faster, decent replies.", 1.9, 6),
             new KnownModel("llama3.2:1b", "Llama 3.2 1B",

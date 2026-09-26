@@ -6,6 +6,9 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.GameAI.souls.OllamaModelInstaller;
+import net.wcfcarolina13.network.AiSetupNetworkManager;
+import net.wcfcarolina13.network.AiSetupStatus;
+import java.util.function.Consumer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +31,14 @@ public class SoulModelManagerScreen extends Screen {
     private static final int COL_TXT = 0xFFEFEFEF;
 
     private final Screen parent;
+    private final Consumer<AiSetupStatus> listener = fresh -> {
+        remoteStatus = fresh;
+        mode = SoulSetupScreenPolicy.mode(false, true, fresh.viewer().canEditServer());
+        refreshButtons();
+    };
+    private AiSetupStatus remoteStatus;
+    private SoulSetupScreenPolicy.Mode mode;
+    private boolean statusRequested;
 
     private volatile OllamaModelInstaller.Status status;
 
@@ -42,10 +53,21 @@ public class SoulModelManagerScreen extends Screen {
     public SoulModelManagerScreen(Screen parent) {
         super(Text.literal("§bSoul LLM Models"));
         this.parent = parent;
+        AiSetupNetworkManager.Client.registerOnce();
+        remoteStatus = AiSetupNetworkManager.Client.latestStatus();
     }
 
     @Override
     protected void init() {
+        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
+                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer());
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupNetworkManager.Client.setListener(listener);
+            remoteStatus = AiSetupNetworkManager.Client.latestStatus();
+            if (!statusRequested) {
+                statusRequested = AiSetupNetworkManager.Client.requestStatus();
+            }
+        }
         int cx = (this.width - POPUP_WIDTH) / 2;
         int cy = (this.height - POPUP_HEIGHT) / 2;
         modelButtons.clear();
@@ -66,13 +88,17 @@ public class SoulModelManagerScreen extends Screen {
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(cx + POPUP_WIDTH - PAD - 80, cy + POPUP_HEIGHT - 28, 80, 20).build());
 
-        if (status == null && phase == Phase.DETECTING) {
+        if (mode == SoulSetupScreenPolicy.Mode.LOCAL && status == null && phase == Phase.DETECTING) {
             startDetect();
         }
         refreshButtons();
     }
 
     private void startDetect() {
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupNetworkManager.Client.requestStatus();
+            return;
+        }
         phase = Phase.DETECTING;
         Thread t = new Thread(() -> {
             status = OllamaModelInstaller.detect();
@@ -85,23 +111,40 @@ public class SoulModelManagerScreen extends Screen {
     }
 
     private Text buttonLabel(OllamaModelInstaller.KnownModel model) {
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupStatus.Ollama ollama = remoteStatus == null ? null : remoteStatus.ollama();
+            if (ollama == null) return Text.literal("…");
+            boolean selected = remoteStatus.runtime().model().equals(model.tag());
+            return labelFor(SoulSetupScreenPolicy.modelButton(mode, ollama.isInstalled(model.tag()), selected, false),
+                    model, (long) (ollama.hostRamGb() * 1073741824.0));
+        }
         OllamaModelInstaller.Status s = status;
         if (s == null) {
             return Text.literal("…");
         }
-        if (model.tag().equals(s.currentModel())) {
-            return Text.literal("§aSelected ✔");
-        }
-        if (s.isInstalled(model.tag())) {
-            return Text.literal("Use");
-        }
-        // Surface the RAM warning where the click happens, not only in the description.
-        return Text.literal(OllamaModelInstaller.ramShortfallGb(model, s.totalRamBytes()) > 0
-                ? "Download ⚠"
-                : "Download");
+        return labelFor(SoulSetupScreenPolicy.modelButton(mode, s.isInstalled(model.tag()),
+                model.tag().equals(s.currentModel()), OllamaModelInstaller.activeJob() != null), model, s.totalRamBytes());
+    }
+
+    private Text labelFor(SoulSetupScreenPolicy.ModelButton decision,
+                          OllamaModelInstaller.KnownModel model, long ramBytes) {
+        return switch (decision.label()) {
+            case SELECTED -> Text.literal("§aSelected ✔");
+            case USE -> Text.literal("Use");
+            case DOWNLOAD -> Text.literal(OllamaModelInstaller.ramShortfallGb(model, ramBytes) > 0
+                    ? "Download ⚠" : "Download");
+        };
     }
 
     private void onModelButton(OllamaModelInstaller.KnownModel model) {
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupStatus.Ollama ollama = remoteStatus == null ? null : remoteStatus.ollama();
+            if (mode == SoulSetupScreenPolicy.Mode.REMOTE_EDITOR && ollama != null
+                    && ollama.isInstalled(model.tag()) && !model.tag().equals(remoteStatus.runtime().model())) {
+                AiSetupNetworkManager.Client.selectModel(model.tag());
+            }
+            return;
+        }
         OllamaModelInstaller.Status s = status;
         if (s == null || OllamaModelInstaller.activeJob() != null) {
             return;
@@ -121,6 +164,17 @@ public class SoulModelManagerScreen extends Screen {
     }
 
     private void refreshButtons() {
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            AiSetupStatus.Ollama ollama = remoteStatus == null ? null : remoteStatus.ollama();
+            for (int i = 0; i < modelButtons.size(); i++) {
+                OllamaModelInstaller.KnownModel model = OllamaModelInstaller.KNOWN_MODELS.get(i);
+                modelButtons.get(i).setMessage(buttonLabel(model));
+                modelButtons.get(i).active = ollama != null && ollama.reachable()
+                        && SoulSetupScreenPolicy.modelButton(mode, ollama.isInstalled(model.tag()),
+                        model.tag().equals(remoteStatus.runtime().model()), false).enabled();
+            }
+            return;
+        }
         OllamaModelInstaller.Status s = status;
         boolean interactable = s != null && s.reachable()
                 && OllamaModelInstaller.activeJob() == null;
@@ -128,7 +182,9 @@ public class SoulModelManagerScreen extends Screen {
         for (int i = 0; i < modelButtons.size() && i < models.size(); i++) {
             OllamaModelInstaller.KnownModel m = models.get(i);
             modelButtons.get(i).setMessage(buttonLabel(m));
-            modelButtons.get(i).active = interactable && s != null && !m.tag().equals(s.currentModel());
+            modelButtons.get(i).active = interactable && s != null
+                    && SoulSetupScreenPolicy.modelButton(mode, s.isInstalled(m.tag()),
+                    m.tag().equals(s.currentModel()), OllamaModelInstaller.activeJob() != null).enabled();
         }
     }
 
@@ -144,6 +200,12 @@ public class SoulModelManagerScreen extends Screen {
         context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + POPUP_HEIGHT + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
+
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            renderRemote(context, cx, cy);
+            super.render(context, mouseX, mouseY, delta);
+            return;
+        }
 
         OllamaModelInstaller.Status s = status;
         int y = cy + 24;
@@ -215,6 +277,43 @@ public class SoulModelManagerScreen extends Screen {
             }
         }
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private void renderRemote(DrawContext context, int cx, int cy) {
+        context.drawTextWithShadow(this.textRenderer, "Runs on the server host", cx + PAD, cy + 24, COL_DIM);
+        AiSetupStatus.Ollama ollama = remoteStatus == null ? null : remoteStatus.ollama();
+        if (mode == SoulSetupScreenPolicy.Mode.REMOTE_VIEWER) {
+            context.drawTextWithShadow(this.textRenderer,
+                    "Only the server operator or host can choose the model.", cx + PAD, cy + 38, COL_DIM);
+        } else if (ollama == null) {
+            context.drawTextWithShadow(this.textRenderer, "Waiting for server setup status…", cx + PAD, cy + 38, COL_DIM);
+        } else {
+            context.drawTextWithShadow(this.textRenderer,
+                    ollama.reachable() ? "Ollama " + ollama.version() + " is reachable"
+                            : "Ollama is not reachable on the server host", cx + PAD, cy + 38,
+                    ollama.reachable() ? COL_OK : COL_BAD);
+            context.drawTextWithShadow(this.textRenderer,
+                    "Server RAM: " + String.format("%.1f GB", ollama.hostRamGb()), cx + PAD, cy + 49, COL_DIM);
+        }
+        int rowY = cy + 72;
+        for (OllamaModelInstaller.KnownModel model : OllamaModelInstaller.KNOWN_MODELS) {
+            boolean installed = ollama != null && ollama.isInstalled(model.tag());
+            context.drawTextWithShadow(this.textRenderer, model.label() + " §7(" + model.tag() + ")"
+                    + (ollama == null ? "" : installed ? " §a· installed" : " §7· missing on server"),
+                    cx + PAD, rowY, COL_TXT);
+            context.drawTextWithShadow(this.textRenderer,
+                    ollama == null ? "Server model list unavailable."
+                            : installed ? model.description()
+                            : "Pull it on the server machine: ollama pull " + model.tag(),
+                    cx + PAD, rowY + 10, COL_DIM);
+            rowY += 34;
+        }
+    }
+
+    @Override
+    public void removed() {
+        AiSetupNetworkManager.Client.clearListener(listener);
+        super.removed();
     }
 
     @Override
