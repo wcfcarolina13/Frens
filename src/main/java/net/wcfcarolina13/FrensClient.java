@@ -1102,6 +1102,7 @@ public class FrensClient implements ClientModInitializer {
                 net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.render(context));
         SleepCommandHintHud.register();
         net.wcfcarolina13.network.GroupChatHint.Client.register();
+        net.wcfcarolina13.network.AiSetupNetworkManager.Client.registerOnce();
 
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(FrensClient::updateSchematicPreviewBox);

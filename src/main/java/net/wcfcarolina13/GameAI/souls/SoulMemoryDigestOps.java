@@ -462,8 +462,11 @@ final class SoulMemoryDigestOps {
         }
         eligible.sort(Comparator.comparingInt(SoulTypes.PlayerMemory::salience).reversed());
         SoulTypes.PlayerMemory pick = eligible.get(0);
+        // Provenance travels with the anchor: a PRIVATE memory names its owner, so the director
+        // marks the seed private without re-deriving it from the phrase text.
+        UUID privateOwner = pick.visibility() == SoulTypes.MemoryVisibility.PRIVATE ? pick.playerId() : null;
         return List.of(new SoulBanterSeed.Anchor(SoulMindOps.MEMORY_TOPIC_PREFIX + factKey(pick.fact()),
-                playerName + " once said: " + pick.fact(), SoulMindOps.MEMORY_ANCHOR_WEIGHT));
+                playerName + " once said: " + pick.fact(), SoulMindOps.MEMORY_ANCHOR_WEIGHT, privateOwner));
     }
 
     /**

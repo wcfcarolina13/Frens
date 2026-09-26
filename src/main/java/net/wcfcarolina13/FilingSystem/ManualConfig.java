@@ -57,8 +57,9 @@ public class ManualConfig {
     // --- Configuration fields (same as before) ---
     private volatile List<String> modelList = new ArrayList<>();
     private transient volatile ModelAvailabilityPolicy.Status modelListStatus = ModelAvailabilityPolicy.Status.UNKNOWN;
-    private transient final AtomicBoolean modelFetchInFlight = new AtomicBoolean();
-    private transient CompletableFuture<Void> modelFetchCompletion = CompletableFuture.completedFuture(null);
+    /** One model fetch at a time; a refresh with a changed provider/key/URL reruns once after it. */
+    private transient final ModelFetchCoalescer modelFetches = new ModelFetchCoalescer(
+            this::modelFetchSnapshot, this::startModelFetch);
     private static final AtomicBoolean OLLAMA_UNAVAILABLE_LOGGED = new AtomicBoolean();
     private String selectedLanguageModel;
     private String llmMode = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
@@ -197,92 +198,187 @@ public class ManualConfig {
      * Asynchronously updates the list of available models based on the selected provider.
      * This method fetches the model list and then saves the updated configuration to the file.
      */
-    public synchronized CompletableFuture<Void> updateModels() {
-        if (!modelFetchInFlight.compareAndSet(false, true)) {
-            return modelFetchCompletion;
+    public CompletableFuture<Void> updateModels() {
+        return modelFetches.request();
+    }
+
+    /**
+     * What a model fetch depends on: provider, that provider's key and the custom URL. Compared
+     * for equality only (never logged — it contains the API key).
+     */
+    private String modelFetchSnapshot() {
+        String provider = llmMode == null ? "" : llmMode;
+        String key = switch (provider) {
+            case "openai" -> openAIKey;
+            case "claude" -> claudeKey;
+            case "gemini" -> geminiKey;
+            case "grok" -> grokKey;
+            case "custom" -> customApiKey;
+            default -> "";
+        };
+        return provider + '\u0000' + (key == null ? "" : key) + '\u0000' + (customApiUrl == null ? "" : customApiUrl);
+    }
+
+    /**
+     * Coalesces model fetches. A request while one is in flight with the same snapshot shares it;
+     * with a different snapshot (API key, provider or URL changed) it sets a rerun flag, and exactly
+     * one follow-up fetch runs when the current one completes. Every caller gets the future of the
+     * final fetch of that chain.
+     */
+    static final class ModelFetchCoalescer {
+        private final java.util.function.Supplier<String> snapshot;
+        private final java.util.function.Function<String, CompletableFuture<?>> fetch;
+        private String running;
+        private boolean rerun;
+        private CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
+
+        ModelFetchCoalescer(java.util.function.Supplier<String> snapshot,
+                            java.util.function.Function<String, CompletableFuture<?>> fetch) {
+            this.snapshot = snapshot;
+            this.fetch = fetch;
         }
+
+        CompletableFuture<Void> request() {
+            String current = snapshot.get();
+            CompletableFuture<Void> chain;
+            synchronized (this) {
+                if (running != null) {
+                    if (!running.equals(current)) {
+                        rerun = true;
+                    }
+                    return result;
+                }
+                running = current;
+                rerun = false;
+                result = new CompletableFuture<>();
+                chain = result;
+            }
+            launch(current);
+            return chain;
+        }
+
+        synchronized boolean inFlight() {
+            return running != null;
+        }
+
+        private void launch(String current) {
+            CompletableFuture<?> one;
+            try {
+                one = fetch.apply(current);
+            } catch (RuntimeException ex) {
+                one = CompletableFuture.failedFuture(ex);
+            }
+            if (one == null) {
+                one = CompletableFuture.completedFuture(null);
+            }
+            one.whenComplete((ignored, failure) -> finished());
+        }
+
+        private void finished() {
+            String next = null;
+            CompletableFuture<Void> done = null;
+            synchronized (this) {
+                if (rerun) {
+                    rerun = false;
+                    next = snapshot.get();
+                    running = next;
+                } else {
+                    running = null;
+                    done = result;
+                }
+            }
+            if (next != null) {
+                launch(next);
+            } else {
+                done.complete(null);
+            }
+        }
+    }
+
+    /** Starts one fetch for the current provider; LOADING until it completes. */
+    private CompletableFuture<?> startModelFetch(String snapshot) {
         modelListStatus = ModelAvailabilityPolicy.Status.LOADING;
         String provider = llmMode;
         // Run the network operation on a separate thread to prevent freezing.
-        modelFetchCompletion = CompletableFuture.runAsync(() -> {
-            try {
-                List<String> fetchedModels = new ArrayList<>();
-                ModelFetcher modelFetcher = null;
-                String apiKey = "";
+        return CompletableFuture.runAsync(() -> fetchModelsNow(provider));
+    }
 
-                switch (provider) {
-                    case "ollama":
-                        try {
-                            fetchedModels = getLanguageModels.get();
-                            this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
-                            this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
-                            this.save();
-                            return;
-                        } catch (ollamaNotReachableException e) {
-                            this.modelList = List.of();
-                            this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
-                            logOllamaUnavailable(e);
-                            this.save();
-                            return;
-                        }
-                    case "openai":
-                        modelFetcher = new OpenAIModelFetcher();
-                        apiKey = this.openAIKey;
-                        break;
-                    case "claude":
-                        modelFetcher = new ClaudeModelFetcher();
-                        apiKey = this.claudeKey;
-                        break;
-                    case "gemini":
-                        modelFetcher = new GeminiModelFetcher();
-                        apiKey = this.geminiKey;
-                        break;
-                    case "grok":
-                        modelFetcher = new GrokModelFetcher();
-                        apiKey = this.grokKey;
-                        break;
-                    case "custom":
-                        if (!this.customApiUrl.isEmpty()) {
-                            modelFetcher = new GenericOpenAIModelFetcher(this.customApiUrl);
-                            apiKey = this.customApiKey;
-                        } else {
-                            LOGGER.error("Custom provider selected but no API URL configured");
-                            this.modelList = List.of();
-                            this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
-                            return;
-                        }
-                        break;
-                    default:
-                        LOGGER.error("Unsupported provider: {}", provider);
+    private void fetchModelsNow(String provider) {
+        try {
+            List<String> fetchedModels = new ArrayList<>();
+            ModelFetcher modelFetcher = null;
+            String apiKey = "";
+
+            switch (provider) {
+                case "ollama":
+                    try {
+                        fetchedModels = getLanguageModels.get();
+                        this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
+                        this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
+                        this.save();
+                        return;
+                    } catch (ollamaNotReachableException e) {
+                        this.modelList = List.of();
+                        this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
+                        logOllamaUnavailable(e);
+                        this.save();
+                        return;
+                    }
+                case "openai":
+                    modelFetcher = new OpenAIModelFetcher();
+                    apiKey = this.openAIKey;
+                    break;
+                case "claude":
+                    modelFetcher = new ClaudeModelFetcher();
+                    apiKey = this.claudeKey;
+                    break;
+                case "gemini":
+                    modelFetcher = new GeminiModelFetcher();
+                    apiKey = this.geminiKey;
+                    break;
+                case "grok":
+                    modelFetcher = new GrokModelFetcher();
+                    apiKey = this.grokKey;
+                    break;
+                case "custom":
+                    if (!this.customApiUrl.isEmpty()) {
+                        modelFetcher = new GenericOpenAIModelFetcher(this.customApiUrl);
+                        apiKey = this.customApiKey;
+                    } else {
+                        LOGGER.error("Custom provider selected but no API URL configured");
                         this.modelList = List.of();
                         this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
                         return;
-                }
-
-                if (modelFetcher != null && !apiKey.isEmpty()) {
-                    fetchedModels = modelFetcher.fetchModels(apiKey);
-                    LOGGER.debug("Retrieved models {} for provider: {}", fetchedModels, provider);
-                    if ("No models available. Please enter an API key".equals(selectedLanguageModel)) {
-                        selectedLanguageModel = "";
                     }
-                }
-                this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
-                this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
-                this.save();
-            } catch (Exception e) {
-                this.modelList = List.of();
-                if ("ollama".equals(provider)) {
-                    this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
-                    logOllamaUnavailable(e);
-                } else {
+                    break;
+                default:
+                    LOGGER.error("Unsupported provider: {}", provider);
+                    this.modelList = List.of();
                     this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
-                    LOGGER.error("Exception in updateModels: {}", e.getMessage(), e);
-                }
-                this.save();
+                    return;
             }
 
-        }).whenComplete((ignored, failure) -> modelFetchInFlight.set(false));
-        return modelFetchCompletion;
+            if (modelFetcher != null && !apiKey.isEmpty()) {
+                fetchedModels = modelFetcher.fetchModels(apiKey);
+                LOGGER.debug("Retrieved models {} for provider: {}", fetchedModels, provider);
+                if ("No models available. Please enter an API key".equals(selectedLanguageModel)) {
+                    selectedLanguageModel = "";
+                }
+            }
+            this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
+            this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
+            this.save();
+        } catch (Exception e) {
+            this.modelList = List.of();
+            if ("ollama".equals(provider)) {
+                this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
+                logOllamaUnavailable(e);
+            } else {
+                this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
+                LOGGER.error("Exception in updateModels: {}", e.getMessage(), e);
+            }
+            this.save();
+        }
     }
 
     private static void logOllamaUnavailable(Exception failure) {

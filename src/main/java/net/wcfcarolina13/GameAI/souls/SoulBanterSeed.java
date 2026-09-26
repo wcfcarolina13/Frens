@@ -85,7 +85,11 @@ final class SoulBanterSeed {
     }
 
     /** One candidate topic: a rotation key, the phrase the model sees, and a pick weight. */
-    record Anchor(String topic, String phrase, int weight) {
+    record Anchor(String topic, String phrase, int weight, java.util.UUID privateOwner) {
+        /** An anchor from no one's DM-private memory — every source except a PRIVATE player memory. */
+        Anchor(String topic, String phrase, int weight) {
+            this(topic, phrase, weight, null);
+        }
     }
 
     private SoulBanterSeed() {

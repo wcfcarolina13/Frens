@@ -277,6 +277,27 @@ class SoulMemoryDigestOpsTest {
         assertEquals(2, SoulMemoryDigestOps.aboutLines(mind, PLAYER, DM).size());
     }
 
+    @Test void privateMemoryAnchorCarriesItsOwnerAndPublicOneDoesNot() {
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti is scared of the dark", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE),
+                new SoulTypes.PlayerMemory(PLAYER, 2, "Roti wants a farm", 5, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PUBLIC)));
+        SoulPrivacyPolicy.Audience alone = SoulPrivacyPolicy.Audience.shared(PLAYER, Set.of(PLAYER));
+        SoulBanterSeed.Anchor privateAnchor =
+                SoulMemoryDigestOps.anchors(mind, PLAYER, "Roti", 9, new Random(1), alone).get(0);
+        assertEquals("Roti once said: Roti is scared of the dark", privateAnchor.phrase());
+        assertEquals(PLAYER, privateAnchor.privateOwner(), "provenance, not a phrase match, marks the seed private");
+
+        SoulPrivacyPolicy.Audience crowd = SoulPrivacyPolicy.Audience.shared(PLAYER, Set.of(PLAYER, UUID.randomUUID()));
+        SoulBanterSeed.Anchor publicAnchor =
+                SoulMemoryDigestOps.anchors(mind, PLAYER, "Roti", 9, new Random(1), crowd).get(0);
+        assertEquals("Roti once said: Roti wants a farm", publicAnchor.phrase());
+        assertEquals(null, publicAnchor.privateOwner());
+        // Every other anchor source uses the three-argument constructor: no owner.
+        assertEquals(null, new SoulBanterSeed.Anchor("t", "p", 1).privateOwner());
+    }
+
     @Test void aboutLinesCapsLineCountInSalienceDescendingOrder() {
         List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
         for (int i = 0; i < 8; i++) {

@@ -343,12 +343,8 @@ public final class SoulBanterDirector {
                     player.getName().getString(), currentDay, random, audience);
             mindAnchors.addAll(playerAnchors);
             for (SoulBanterSeed.Anchor anchor : playerAnchors) {
-                if (minds.get(i).playerMemories().stream().anyMatch(pm ->
-                        pm.playerId().equals(playerId)
-                                && pm.visibility() == SoulTypes.MemoryVisibility.PRIVATE
-                                && SoulPrivacyPolicy.admits(pm, audience)
-                                && anchor.phrase().equals(player.getName().getString()
-                                        + " once said: " + pm.fact()))) {
+                // Provenance set by SoulMemoryDigestOps.anchors for a PRIVATE memory.
+                if (anchor.privateOwner() != null) {
                     privateAnchorTopics.add(anchor.topic());
                 }
             }

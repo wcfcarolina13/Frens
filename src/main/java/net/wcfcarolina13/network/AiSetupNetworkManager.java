@@ -137,6 +137,7 @@ public final class AiSetupNetworkManager {
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             LAST_STATUS_MS.clear();
             LAST_ACTION_MS.clear();
+            SEQUENCER.clear();
             synchronized (PROBE_LOCK) {
                 cachedProbe = null;
                 cachedProbeAtMs = 0L;
@@ -217,9 +218,10 @@ public final class AiSetupNetworkManager {
 
     private static AiSetupStatus.Ollama runProbe() {
         OllamaModelInstaller.Status detected = OllamaModelInstaller.detect();
+        // The full list: SELECT_MODEL validates against every installed tag; only the JSON sent
+        // to clients is capped (AiSetupStatus.toJson, MAX_TAGS).
         List<String> tags = new ArrayList<>();
         for (OllamaModelInstaller.InstalledModel model : detected.installed()) {
-            if (tags.size() >= AiSetupStatus.MAX_TAGS) break;
             tags.add(model.tag());
         }
         double ramGb = detected.totalRamBytes() > 0 ? detected.totalRamBytes() / 1073741824.0 : -1;
@@ -248,14 +250,14 @@ public final class AiSetupNetworkManager {
             return;
         }
         LAST_STATUS_MS.put(playerId, now);
-        pushStatus(server, player);
+        pushStatus(server, player, true);
     }
 
     /**
      * Server thread: snapshots live state for {@code viewer} and sends it — immediately for a
      * non-operator, after the (cached) Ollama probe and a provider health check for an operator.
      */
-    static void pushStatus(MinecraftServer server, ServerPlayerEntity viewer) {
+    static void pushStatus(MinecraftServer server, ServerPlayerEntity viewer, boolean explicitRequest) {
         if (server == null || !isRealPlayer(viewer)) {
             return;
         }
@@ -263,7 +265,7 @@ public final class AiSetupNetworkManager {
         AiSetupStatus snapshot = snapshot(server, viewer, canEdit);
         UUID viewerId = viewer.getUuid();
         if (!canEdit) {
-            send(server, viewerId, snapshot.redactedForPlayer());
+            send(server, viewerId, snapshot.redactedForPlayer(), explicitRequest);
             return;
         }
         SoulRuntime runtime = SoulRuntime.current().orElse(null);
@@ -279,9 +281,9 @@ public final class AiSetupNetworkManager {
                     if (err != null) {
                         LOGGER.warn("[ai-setup] status probe failed: {}", err.toString());
                         send(server, viewerId, withProbe(snapshot,
-                                new AiSetupStatus.Ollama(false, "", List.of(), -1), false));
+                                new AiSetupStatus.Ollama(false, "", List.of(), -1), false), explicitRequest);
                     } else {
-                        send(server, viewerId, status);
+                        send(server, viewerId, status, explicitRequest);
                     }
                 }));
     }
@@ -337,14 +339,27 @@ public final class AiSetupNetworkManager {
         return new AiSetupStatus(canEdit, null, runtimeState, bots, voice, viewerState);
     }
 
-    /** Server thread: re-resolves the viewer (they may have left) and sends. */
-    private static void send(MinecraftServer server, UUID viewerId, AiSetupStatus status) {
+    /**
+     * Server thread: re-resolves the viewer (they may have left), downgrades a full record to the
+     * redacted one if they lost operator/host rights while the probe ran, and sends — only if
+     * their client declared the status channel (FrensClient registers it at client init).
+     */
+    private static void send(MinecraftServer server, UUID viewerId, AiSetupStatus status, boolean explicitRequest) {
         ServerPlayerEntity viewer = server.getPlayerManager().getPlayer(viewerId);
         if (!isRealPlayer(viewer) || status == null) {
             return;
         }
-        // Deliberately not gated on canSend: the client registers its receiver lazily when the
-        // checklist opens, and that channel may not have reached the server's sendable set yet.
+        if (status.full() && !canEditServer(server, viewer)) {
+            status = status.redactedForPlayer();
+        }
+        if (!ServerPlayNetworking.canSend(viewer, AiSetupStatusPayload.ID)) {
+            LOGGER.debug("[ai-setup] {} cannot receive the setup status channel; not sent",
+                    viewer.getName().getString());
+            if (explicitRequest) {
+                reply(server, viewerId, "Your game can't show the AI setup status yet. Reopen the checklist, or update Frens on your client.");
+            }
+            return;
+        }
         ServerPlayNetworking.send(viewer, new AiSetupStatusPayload(status.toJson()));
     }
 
@@ -403,17 +418,20 @@ public final class AiSetupNetworkManager {
             reply(server, playerId, "Frens configuration is unavailable.");
             return;
         }
+        // Every async completion below re-checks this ticket (requester online, gate still open,
+        // no newer action of the same kind accepted since) before it applies or reports anything.
+        Ticket ticket = new Ticket(playerId, action, arg, SEQUENCER.accept(ActionSequencer.kindOf(action, arg)));
         switch (action) {
             case SOULS_ON, SOULS_OFF -> {
                 boolean on = action == AiSetupActionPolicy.Action.SOULS_ON;
                 config.setSoulsEnabled(on);
                 config.save();
                 LOGGER.info("[ai-setup] {} set Soul Chat {}", name, on ? "on" : "off");
-                reloadThenReply(server, playerId, () -> on
+                reloadThenReply(server, ticket, () -> on
                         ? "Soul Chat is now ON for this world."
                         : "Soul Chat is now OFF for this world.");
             }
-            case SELECT_MODEL -> selectModel(server, playerId, arg);
+            case SELECT_MODEL -> selectModel(server, ticket, arg);
             case SELECT_VOICE_ENGINE -> {
                 if (!AiSetupActionPolicy.isKnownEngine(arg)) {
                     LOGGER.debug("[ai-setup] unknown voice engine '{}' from {}", BotAccessPolicy.logSafe(arg), name);
@@ -423,7 +441,7 @@ public final class AiSetupNetworkManager {
                 config.setSoulVoiceEngine(arg);
                 config.save();
                 LOGGER.info("[ai-setup] {} set soul voice engine {}", name, arg);
-                reloadThenReply(server, playerId, () -> {
+                reloadThenReply(server, ticket, () -> {
                     String msg = "Voice engine set to " + arg + ".";
                     SoulRuntime rt = SoulRuntime.current().orElse(null);
                     SoulVoiceSettings vs = rt != null ? rt.voiceSettings() : null;
@@ -433,8 +451,103 @@ public final class AiSetupNetworkManager {
                     return msg;
                 });
             }
-            case ENABLE_BOT -> enableBot(server, playerId, bot);
+            case ENABLE_BOT -> enableBot(server, ticket, bot);
         }
+    }
+
+    // ── Async re-check: requester still here, still permitted, not superseded ──
+
+    /** One accepted action, carried through its async completions. */
+    private record Ticket(UUID playerId, AiSetupActionPolicy.Action action, String arg, long seq) {
+        String kind() {
+            return ActionSequencer.kindOf(action, arg);
+        }
+    }
+
+    private enum Recheck { OK, PLAYER_GONE, NOT_PERMITTED, SUPERSEDED }
+
+    private static final ActionSequencer SEQUENCER = new ActionSequencer();
+
+    /**
+     * Per-action-kind monotonic sequence (server thread only). SOULS_ON/OFF share one kind (the
+     * switch); ENABLE_BOT is one kind per bot. Pure, so it is unit-tested.
+     */
+    static final class ActionSequencer {
+        private long next;
+        private final Map<String, Long> latest = new HashMap<>();
+
+        static String kindOf(AiSetupActionPolicy.Action action, String arg) {
+            if (action == null) {
+                return "";
+            }
+            return switch (action) {
+                case SOULS_ON, SOULS_OFF -> "SOULS";
+                case SELECT_MODEL -> "MODEL";
+                case SELECT_VOICE_ENGINE -> "VOICE_ENGINE";
+                case ENABLE_BOT -> "ENABLE_BOT:" + (arg == null ? "" : arg.trim().toLowerCase(java.util.Locale.ROOT));
+            };
+        }
+
+        /** Records a newly accepted action of {@code kind}; returns its sequence number. */
+        long accept(String kind) {
+            long seq = ++next;
+            latest.put(kind, seq);
+            return seq;
+        }
+
+        /** True while no newer action of {@code kind} has been accepted since {@code seq}. */
+        boolean isLatest(String kind, long seq) {
+            Long current = latest.get(kind);
+            return current != null && current == seq;
+        }
+
+        void clear() {
+            latest.clear();
+        }
+    }
+
+    /** Server thread: re-finds the requester and re-runs the gate for {@code ticket}. */
+    private static Recheck recheck(MinecraftServer server, Ticket ticket) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(ticket.playerId());
+        if (!isRealPlayer(player)) {
+            return Recheck.PLAYER_GONE;
+        }
+        boolean botRegistered = false;
+        boolean botAccess = false;
+        if (ticket.action() == AiSetupActionPolicy.Action.ENABLE_BOT) {
+            UUID botId = parseUuid(ticket.arg());
+            ServerPlayerEntity bot = botId == null ? null : server.getPlayerManager().getPlayer(botId);
+            BotAccessPolicy.Decision decision = BotAccessGate.decide(player, bot);
+            botRegistered = decision != BotAccessPolicy.Decision.DENY_NOT_BOT;
+            botAccess = BotAccessPolicy.allowed(decision);
+        }
+        if (AiSetupActionPolicy.gate(ticket.action(), canEditServer(server, player), botRegistered, botAccess)
+                != AiSetupActionPolicy.Verdict.ALLOW) {
+            return Recheck.NOT_PERMITTED;
+        }
+        return SEQUENCER.isLatest(ticket.kind(), ticket.seq()) ? Recheck.OK : Recheck.SUPERSEDED;
+    }
+
+    private static final String SUPERSEDED_MESSAGE = "An earlier AI setup change was replaced by a newer one.";
+    private static final String NOT_PERMITTED_MESSAGE =
+            "That AI setup change was dropped: you're no longer permitted to make it.";
+
+    /**
+     * Server thread: {@link #recheck}; on anything but OK tells the requester (if still online)
+     * and returns false.
+     */
+    private static boolean stillValid(MinecraftServer server, Ticket ticket) {
+        Recheck result = recheck(server, ticket);
+        if (result == Recheck.OK) {
+            return true;
+        }
+        LOGGER.debug("[ai-setup] {} dropped after async step: {}", ticket.action(), result);
+        if (result == Recheck.SUPERSEDED) {
+            reply(server, ticket.playerId(), SUPERSEDED_MESSAGE);
+        } else if (result == Recheck.NOT_PERMITTED) {
+            reply(server, ticket.playerId(), NOT_PERMITTED_MESSAGE);
+        }
+        return false;
     }
 
     /**
@@ -442,7 +555,8 @@ public final class AiSetupNetworkManager {
      * (cached) Ollama probe on a worker, then validates against the installed tags back on the
      * server thread.
      */
-    private static void selectModel(MinecraftServer server, UUID playerId, String tag) {
+    private static void selectModel(MinecraftServer server, Ticket ticket, String tag) {
+        UUID playerId = ticket.playerId();
         List<String> catalog = catalogTags();
         AiSetupActionPolicy.TagCheck syntax = AiSetupActionPolicy.checkTagSyntax(tag);
         if (syntax != AiSetupActionPolicy.TagCheck.OK) {
@@ -451,10 +565,13 @@ public final class AiSetupNetworkManager {
             return;
         }
         if (!AiSetupActionPolicy.needsInstalledTags(tag, catalog)) {
-            applyModel(server, playerId, tag);
+            applyModel(server, ticket, tag);
             return;
         }
         probeOllama().whenComplete((ollama, err) -> server.execute(() -> {
+            if (!stillValid(server, ticket)) {
+                return;
+            }
             List<String> installed = err == null && ollama != null && ollama.reachable()
                     ? ollama.installedTags() : null;
             AiSetupActionPolicy.TagCheck check = AiSetupActionPolicy.checkModelTag(tag, catalog, installed);
@@ -463,11 +580,11 @@ public final class AiSetupNetworkManager {
                 reply(server, playerId, AiSetupActionPolicy.tagProblem(check));
                 return;
             }
-            applyModel(server, playerId, tag);
+            applyModel(server, ticket, tag);
         }));
     }
 
-    private static void applyModel(MinecraftServer server, UUID playerId, String tag) {
+    private static void applyModel(MinecraftServer server, Ticket ticket, String tag) {
         ManualConfig config = Frens.CONFIG;
         if (config == null) {
             return;
@@ -475,7 +592,7 @@ public final class AiSetupNetworkManager {
         config.setSoulModel(tag);
         config.save();
         LOGGER.info("[ai-setup] soul model set to {}", tag);
-        reloadThenReply(server, playerId, () -> "Soul model set to '" + tag + "'.");
+        reloadThenReply(server, ticket, () -> "Soul model set to '" + tag + "'.");
     }
 
     /**
@@ -483,8 +600,9 @@ public final class AiSetupNetworkManager {
      * dedicated-server client keeps a mirror of it, and BotControlScreen saves that mirror back),
      * reloads the runtime on a worker, then replies and pushes a fresh status on the server thread.
      */
-    private static void reloadThenReply(MinecraftServer server, UUID playerId,
+    private static void reloadThenReply(MinecraftServer server, Ticket ticket,
                                         java.util.function.Supplier<String> message) {
+        UUID playerId = ticket.playerId();
         configNetworkManager.broadcastConfigSync(server);
         SoulRuntime runtime = SoulRuntime.current().orElse(null);
         if (runtime == null) {
@@ -496,6 +614,12 @@ public final class AiSetupNetworkManager {
         CompletableFuture.supplyAsync(() -> runtime.reloadSettings(config), RELOAD_EXECUTOR)
                 .thenCompose(f -> f)
                 .whenComplete((v, err) -> server.execute(() -> {
+                    // The change is already saved; a superseded or no-longer-permitted request only
+                    // loses its success line (the newer action reports for itself).
+                    if (!stillValid(server, ticket)) {
+                        pushStatusTo(server, playerId);
+                        return;
+                    }
                     if (err != null) {
                         LOGGER.warn("[ai-setup] reloadSettings failed after setup change: {}", err.toString());
                         reply(server, playerId, message.get() + " Reload reported an error; check the server log.");
@@ -509,12 +633,13 @@ public final class AiSetupNetworkManager {
     private static void pushStatusTo(MinecraftServer server, UUID playerId) {
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
         if (isRealPlayer(player)) {
-            pushStatus(server, player);
+            pushStatus(server, player, false);
         }
     }
 
     /** ENABLE_BOT: same binding as {@code /bot soul enable} (name-matched persona, else Jake). */
-    private static void enableBot(MinecraftServer server, UUID playerId, ServerPlayerEntity bot) {
+    private static void enableBot(MinecraftServer server, Ticket ticket, ServerPlayerEntity bot) {
+        UUID playerId = ticket.playerId();
         SoulRuntime runtime = SoulRuntime.current().orElse(null);
         if (runtime == null || bot == null) {
             reply(server, playerId, "The soul runtime is not running right now.");
@@ -527,8 +652,19 @@ public final class AiSetupNetworkManager {
         boolean fallback = AiSetupActionPolicy.isFallbackPersona(botName, profileId, jake);
         String persona = profileId.equals(jake) ? "Jake" : botName;
         runtime.bindProfile(botId, profileId)
-                .thenCompose(bound -> runtime.setActive(botId, true))
-                .whenComplete((state, err) -> {
+                .thenCompose(bound -> {
+                    // Re-check on the server thread before activating: requester still online and
+                    // permitted, bot still registered, no newer enable for this bot since.
+                    CompletableFuture<Boolean> valid = new CompletableFuture<>();
+                    server.execute(() -> valid.complete(stillValid(server, ticket)));
+                    return valid;
+                })
+                .thenCompose(valid -> valid ? runtime.setActive(botId, true).thenApply(st -> true)
+                        : CompletableFuture.completedFuture(false))
+                .whenComplete((activated, err) -> {
+                    if (err == null && !Boolean.TRUE.equals(activated)) {
+                        return;
+                    }
                     if (err != null) {
                         server.execute(() -> {
                             LOGGER.warn("[ai-setup] enable failed for bot {}: {}", botId, err.toString());
@@ -578,7 +714,11 @@ public final class AiSetupNetworkManager {
         private Client() {
         }
 
-        /** Registers the status receiver (idempotent). Screens call this in their constructor. */
+        /**
+         * Registers the status receiver (idempotent). FrensClient calls it at client init so the
+         * channel is declared before any connection (the server only sends to clients that
+         * declared it); the screens' calls are harmless no-ops kept as a fallback.
+         */
         public static void registerOnce() {
             if (receiverRegistered) {
                 return;

@@ -103,6 +103,14 @@ public class BotControlScreen extends Screen {
     private boolean globalsLoaded = false;
     /** Set when the AI setup checklist was opened from here; see init(). */
     private boolean returningFromAiSetup = false;
+    /**
+     * Whether the player flipped Soul Chat / Soul Voice in this screen session. Untouched, a save
+     * takes the live Frens.CONFIG value instead of the cached one, so an unrelated save never
+     * writes a stale value over a change made elsewhere (the setup checklist, /bot soul system,
+     * another operator) that arrived by config sync.
+     */
+    private boolean soulChatTouched = false;
+    private boolean soulVoiceTouched = false;
     private boolean globalsExpanded = false;
 
     // Bot selector
@@ -261,6 +269,7 @@ public class BotControlScreen extends Screen {
             // The checklist's "Turn on" changes Soul Chat on the server (and the synced config
             // mirror) — pick that up, or saving this screen would switch it straight back.
             globalValues[SOUL_CHAT_TOGGLE_INDEX] = Frens.CONFIG.isSoulsEnabled();
+            soulChatTouched = false;
         }
         returningFromAiSetup = false;
 
@@ -596,6 +605,12 @@ public class BotControlScreen extends Screen {
         // The live runtime reads a settings snapshot, so a change must trigger reloadSettings
         // (same pattern as BotSoulCommands.awaitReloadThenReport) or it would sit dormant
         // until the next server start.
+        if (!soulChatTouched) {
+            globalValues[SOUL_CHAT_TOGGLE_INDEX] = config.isSoulsEnabled();
+        }
+        if (!soulVoiceTouched) {
+            globalValues[SOUL_VOICE_TOGGLE_INDEX] = config.isSoulVoiceEnabled();
+        }
         boolean soulTogglesChanged = config.isSoulsEnabled() != globalValues[6]
                 || config.isSoulVoiceEnabled() != globalValues[7];
         config.setSoulsEnabled(globalValues[6]);
@@ -1545,6 +1560,11 @@ public class BotControlScreen extends Screen {
                 if (!inGutter && (chipRect.contains(mx, my) || rowRect.contains(mx, my))) {
                     int toggleIndex = globalRowIndices.get(v);
                     globalValues[toggleIndex] = !globalValues[toggleIndex];
+                    if (toggleIndex == SOUL_CHAT_TOGGLE_INDEX) {
+                        soulChatTouched = true;
+                    } else if (toggleIndex == SOUL_VOICE_TOGGLE_INDEX) {
+                        soulVoiceTouched = true;
+                    }
                     saveSettings();
                     return true;
                 }
