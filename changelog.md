@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Crafting window: search and sort; unreleased (2026-09-25)
+
+- The Crafting window (`CraftingHistoryScreen`) gets a search box (focused on open) and a sort button cycling A-Z → Z-A → Category → Base type → Learned. Search matches name, item id, category and base type, case-insensitive.
+- **Category** is the item's first vanilla creative tab, in tab order (Building Blocks, Colored, Natural, Functional, Redstone, Tools, Combat, Food, Ingredients); items in no tab fall under Other. The screen builds the creative display context itself (`ItemGroups.updateDisplayContext`), because tabs are empty until something does and the player may never have opened the creative inventory.
+- **Base type** is the material family read from the id path: the first `_` token that names a family wins (`stone_bricks` → Stone, `polished_andesite` → Stone, `dark_oak_door` → Wood, `raw_iron` → Iron). It is a name heuristic, not recipe-based (the client has no recipes); unknown items fall under Other (`armor_stand`, `jukebox`).
+- Grouped modes draw a header per group. Selection is kept by item id instead of row index, so re-sorting or filtering never crafts the wrong row, and a selection hidden by the filter is not crafted. **Learned** keeps the old server order.
+- Rules live in the pure `CraftingListPolicy` (8 tests, `CraftingListPolicyTest`); t 1461 → 1469.
+
 ## The server tick no longer walks to make room or to reach a crafting table; 1.1.222 (2026-09-25)
 
 Closes 1.1.221 deferrals 2 and 3. Three paths could run `MovementService` walks, nudges or a 6 s mining wait **on
