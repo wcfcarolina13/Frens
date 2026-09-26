@@ -93,8 +93,6 @@ public final class CraftingHelper {
             Items.JUNGLE_CHEST_BOAT, Items.ACACIA_CHEST_BOAT, Items.DARK_OAK_CHEST_BOAT,
             Items.MANGROVE_CHEST_BOAT, Items.CHERRY_CHEST_BOAT, Items.BAMBOO_CHEST_RAFT
     );
-    private static final int CRAFTING_TABLE_SEARCH_RADIUS = 40;
-    private static final int CRAFTING_TABLE_SEARCH_YSPAN = 6;
     private static final double MAX_REMEMBERED_TABLE_DIST_SQ = 140.0D * 140.0D;
     private static final Map<UUID, WorldPos> LAST_KNOWN_CRAFTING_TABLE = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -107,6 +105,11 @@ public final class CraftingHelper {
     // when multiple tool provisions all fail in quick succession.
     private static final Map<UUID, Long> CRAFT_TABLE_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_MSG_COOLDOWN_MS = 30_000L;
+    // When a server-thread ensureCraftingStation gives up instead of walking, the one INFO line the
+    // field checklist greps, at most once per bot per CraftingStationPolicy.DECLINE_LOG_INTERVAL_MS.
+    // Like the cooldown maps above it has no lifecycle hook: one entry per bot, dropped when a
+    // server-thread call finds or places a table in reach.
+    private static final Map<UUID, Long> CRAFT_STATION_DECLINE_LOGGED = new ConcurrentHashMap<>();
     // Separate cooldown for the "I don't know how to craft X" message. Evicted for a bot
     // as soon as any craftGeneric call succeeds, so the map does not grow unbounded.
     private static final Map<UUID, Long> UNKNOWN_CRAFT_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -1321,26 +1324,38 @@ public final class CraftingHelper {
 
     public static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source) {
         if (bot == null) return false;
+        // On the server thread (idle hobbies, /bot cook, auto-cook, RideSync) the bot never walks,
+        // nudges or carves: a walk there only sets velocity and waits for a tick that cannot run.
+        // It uses a table already in reach, or places one on a cell that is ready now.
+        boolean onServerThread = isServerThreadCall(source, bot);
         // If we recently failed to reach a distant table, skip expensive movement but still try
         // placing from inventory or crafting a new table (those are fast/local operations).
+        // A server-thread call has no movement to skip, so the cooldown does not apply there.
         boolean reachCooldownActive = false;
         Long lastFail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
-        if (lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS) {
+        if (CraftingStationPolicy.mayWalk(onServerThread)
+                && lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS) {
             reachCooldownActive = true;
         }
         // Check nearby crafting table
         BlockPos botPos = bot.getBlockPos();
         ServerWorld world = source.getWorld();
         BlockPos nearest = null;
-        int radius = CRAFTING_TABLE_SEARCH_RADIUS;
-        int ySpan = CRAFTING_TABLE_SEARCH_YSPAN;
+        int radius = CraftingStationPolicy.scanHorizontal(onServerThread);
+        int ySpan = CraftingStationPolicy.scanVertical(onServerThread);
+        // Set when the server thread passed over a table it would have had to walk to.
+        boolean skippedTableOutOfReach = false;
 
         // Prefer a remembered table location for this bot/world (fast, avoids large scans).
         WorldPos remembered = LAST_KNOWN_CRAFTING_TABLE.get(bot.getUuid());
         if (remembered != null && remembered.worldKey() != null && remembered.worldKey().equals(world.getRegistryKey())) {
             BlockPos pos = remembered.pos();
             if (pos != null && botPos.getSquaredDistance(pos) <= MAX_REMEMBERED_TABLE_DIST_SQ) {
-                nearest = pos.toImmutable();
+                if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
+                    nearest = pos.toImmutable();
+                } else {
+                    skippedTableOutOfReach = true;
+                }
             }
         }
 
@@ -1353,7 +1368,11 @@ public final class CraftingHelper {
             }
         }
         if (commanderLook != null && world.getBlockState(commanderLook).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-            nearest = commanderLook.toImmutable();
+            if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, commanderLook))) {
+                nearest = commanderLook.toImmutable();
+            } else {
+                skippedTableOutOfReach = true;
+            }
         }
 
         if (nearest == null) {
@@ -1363,6 +1382,10 @@ public final class CraftingHelper {
                     continue;
                 }
                 if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                    if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
+                        skippedTableOutOfReach = true;
+                        continue;
+                    }
                     double distSq = botPos.getSquaredDistance(pos);
                     if (distSq < best) {
                         best = distSq;
@@ -1389,8 +1412,20 @@ public final class CraftingHelper {
         }
         if (nearest != null) {
             double distSq = botPos.getSquaredDistance(nearest);
-            LOGGER.info("Found nearby crafting table at {}", nearest.toShortString());
+            logStationStep(onServerThread, "Found nearby crafting table at {}", nearest.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), nearest.toImmutable()));
+            if (!CraftingStationPolicy.mayWalk(onServerThread)) {
+                // Only a table in reach gets this far on the server thread: use it from here, with
+                // no stand search, approach walk, nudge or leaf clearing.
+                CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
+                    CRAFT_STATION_DECLINE_LOGGED.remove(bot.getUuid());
+                    return true;
+                }
+                logTickSideDecline(bot, "table-blocked");
+                return false;
+            }
             if (distSq > 36.0D) { // >6 blocks away
                 ChatUtils.sendSystemMessage(source,
                         "Give me a moment — I'll use the crafting table at "
@@ -1399,7 +1434,7 @@ public final class CraftingHelper {
 
             // If this table is far enough that its chunk may be unloaded, approach conservatively first
             // (avoid scanning standable blocks which can chunk-load and hitch).
-            if (!world.isChunkLoaded(nearest) && distSq > (CRAFTING_TABLE_SEARCH_RADIUS * (double) CRAFTING_TABLE_SEARCH_RADIUS)) {
+            if (!world.isChunkLoaded(nearest) && distSq > (CraftingStationPolicy.WORKER_SCAN_HORIZONTAL * (double) CraftingStationPolicy.WORKER_SCAN_HORIZONTAL)) {
                 boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
                 List<BlockPos> approaches = List.of(
                         nearest.north(),
@@ -1487,7 +1522,9 @@ public final class CraftingHelper {
                 boolean close = MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 2200L, 0.14, "craft-table-nudge");
                 if (!close) {
                     LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
-                    CRAFT_TABLE_REACH_FAILURE.put(bot.getUuid(), System.currentTimeMillis());
+                    if (CraftingStationPolicy.armsReachFailCooldown(onServerThread)) {
+                        CRAFT_TABLE_REACH_FAILURE.put(bot.getUuid(), System.currentTimeMillis());
+                    }
                     ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
                 }
                 if (close && ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
@@ -1505,24 +1542,29 @@ public final class CraftingHelper {
         if (slot != -1) {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
-                LOGGER.warn("Failed to place crafting table from inventory near {}", botPos.toShortString());
-                ChatUtils.sendSystemMessage(source, "I couldn't place a crafting table here.");
+                warnStationStep(onServerThread, "Failed to place crafting table from inventory near {}", botPos.toShortString());
+                tellStationFailure(bot, source, onServerThread, "I couldn't place a crafting table here.");
+                declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
             BlockPos placeAt = prepared.placePos();
             BotActions.PlaceResult placeResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
             boolean placed = placeResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
-            if (!placed && isLocalPlacementIntersection(placeResult)) {
+            if (!placed && isLocalPlacementIntersection(placeResult) && CraftingStationPolicy.mayWalk(onServerThread)) {
                 placed = retryCraftingTablePlacementAfterLocalReposition(source, bot, world, prepared, placeAt, "crafting-table-place");
             }
             if (!placed) {
-                LOGGER.warn("Failed to place crafting table from inventory near {} detail={}",
+                warnStationStep(onServerThread, "Failed to place crafting table from inventory near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                ChatUtils.sendSystemMessage(source, "I couldn't place a crafting table here.");
+                tellStationFailure(bot, source, onServerThread, "I couldn't place a crafting table here.");
+                declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
             LOGGER.info("Placed crafting table from inventory at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
+            if (!CraftingStationPolicy.mayWalk(onServerThread)) {
+                return usePlacedTableWithoutWalking(bot, placeAt);
+            }
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
             BlockPos approachTarget = prepared.standPos() != null ? prepared.standPos() : placeAt;
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -1562,8 +1604,9 @@ public final class CraftingHelper {
         // Don't spam-craft tables — if we crafted one recently, give up.
         Long lastCraft = CRAFT_TABLE_CRAFT_COOLDOWN.get(bot.getUuid());
         if (lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS) {
-            LOGGER.info("Skipping crafting table craft (cooldown active, last craft {}ms ago)",
+            logStationStep(onServerThread, "Skipping crafting table craft (cooldown active, last craft {}ms ago)",
                     System.currentTimeMillis() - lastCraft);
+            declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
             return false;
         }
         LOGGER.info("No crafting table found; attempting to craft one.");
@@ -1573,24 +1616,29 @@ public final class CraftingHelper {
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
-                LOGGER.warn("Crafted a crafting table but failed to place it near {}", botPos.toShortString());
-                ChatUtils.sendSystemMessage(source, "I crafted a crafting table but couldn't place it here.");
+                warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {}", botPos.toShortString());
+                tellStationFailure(bot, source, onServerThread, "I crafted a crafting table but couldn't place it here.");
+                declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
             BlockPos placeAt = prepared.placePos();
             BotActions.PlaceResult placeResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
             boolean placed = placeResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
-            if (!placed && isLocalPlacementIntersection(placeResult)) {
+            if (!placed && isLocalPlacementIntersection(placeResult) && CraftingStationPolicy.mayWalk(onServerThread)) {
                 placed = retryCraftingTablePlacementAfterLocalReposition(source, bot, world, prepared, placeAt, "crafting-table-crafted-place");
             }
             if (!placed) {
-                LOGGER.warn("Crafted a crafting table but failed to place it near {} detail={}",
+                warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                ChatUtils.sendSystemMessage(source, "I crafted a crafting table but couldn't place it here.");
+                tellStationFailure(bot, source, onServerThread, "I crafted a crafting table but couldn't place it here.");
+                declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
             LOGGER.info("Crafted and placed crafting table at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
+            if (!CraftingStationPolicy.mayWalk(onServerThread)) {
+                return usePlacedTableWithoutWalking(bot, placeAt);
+            }
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
             BlockPos approachTarget = prepared.standPos() != null ? prepared.standPos() : placeAt;
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -1612,9 +1660,93 @@ public final class CraftingHelper {
             return close;
         }
 
-        LOGGER.info("No crafting table within {} blocks of {}", radius, botPos.toShortString());
+        logStationStep(onServerThread, "No crafting table within {} blocks of {}", radius, botPos.toShortString());
         sendCraftTableNeededOnce(bot, source, "I need a crafting table nearby to craft that.");
+        declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
         return false;
+    }
+
+    /** Whether a station call runs on the server thread: asks the source's server, else the bot's. */
+    private static boolean isServerThreadCall(ServerCommandSource source, ServerPlayerEntity bot) {
+        MinecraftServer server = source != null ? source.getServer() : null;
+        if (server == null && bot != null && bot.getCommandSource() != null) {
+            server = bot.getCommandSource().getServer();
+        }
+        return server != null && server.isOnThread();
+    }
+
+    /**
+     * Whether a block is within station reach of where the bot stands: the distance half of
+     * {@link BlockInteractionService#canInteract}, whose sight-line half (and the door it may open)
+     * {@link #ensureStationInteractable} checks once a table is chosen.
+     */
+    private static boolean withinStationReach(ServerPlayerEntity bot, BlockPos pos) {
+        return bot != null && pos != null && bot.squaredDistanceTo(Vec3d.ofCenter(pos)) <= STATION_REACH_SQ;
+    }
+
+    /**
+     * Server thread, just after placing a table: use it if it is interactable from where the bot
+     * stands. The bot never walks to the placement's stand here; a table left out of reach stays
+     * placed for a later call to find in reach or remembered.
+     */
+    private static boolean usePlacedTableWithoutWalking(ServerPlayerEntity bot, BlockPos placeAt) {
+        if (ensureStationInteractable(bot, placeAt, STATION_REACH_SQ)) {
+            CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+            CRAFT_STATION_DECLINE_LOGGED.remove(bot.getUuid());
+            return true;
+        }
+        logTickSideDecline(bot, "placed-out-of-reach");
+        return false;
+    }
+
+    private static String placeFailureReason(BotActions.PlaceResult placeResult) {
+        return isLocalPlacementIntersection(placeResult) ? "place-intersects-bot" : "place-failed";
+    }
+
+    /** A per-call step line: its usual INFO off the server thread, DEBUG on it. */
+    private static void logStationStep(boolean onServerThread, String format, Object... args) {
+        if (CraftingStationPolicy.logAtInfo(onServerThread)) {
+            LOGGER.info(format, args);
+        } else {
+            LOGGER.debug(format, args);
+        }
+    }
+
+    /** A per-call placement failure: its usual WARN off the server thread, DEBUG on it. */
+    private static void warnStationStep(boolean onServerThread, String format, Object... args) {
+        if (CraftingStationPolicy.logAtInfo(onServerThread)) {
+            LOGGER.warn(format, args);
+        } else {
+            LOGGER.debug(format, args);
+        }
+    }
+
+    /** A placement failure told to the player: as always off the server thread, through the table-message throttle on it. */
+    private static void tellStationFailure(ServerPlayerEntity bot, ServerCommandSource source, boolean onServerThread, String msg) {
+        if (CraftingStationPolicy.throttlesFailureChat(onServerThread)) {
+            sendCraftTableNeededOnce(bot, source, msg);
+        } else {
+            ChatUtils.sendSystemMessage(source, msg);
+        }
+    }
+
+    /** On the server thread, where the bot may not walk, a failed call is a decline: say so (rate-limited). */
+    private static void declineIfTickSide(ServerPlayerEntity bot, boolean onServerThread, String reason) {
+        if (!CraftingStationPolicy.mayWalk(onServerThread)) {
+            logTickSideDecline(bot, reason);
+        }
+    }
+
+    /** The one line the field checklist greps, at most once per bot per {@link CraftingStationPolicy#DECLINE_LOG_INTERVAL_MS}. */
+    private static void logTickSideDecline(ServerPlayerEntity bot, String reason) {
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+        if (!CraftingStationPolicy.shouldLogDecline(now, CRAFT_STATION_DECLINE_LOGGED.get(botId))) {
+            return;
+        }
+        CRAFT_STATION_DECLINE_LOGGED.put(botId, now);
+        LOGGER.info("craft-station tick-side: no table in reach for {}, not walking (reason={})",
+                bot.getName().getString(), reason);
     }
 
     /**
@@ -1700,19 +1832,26 @@ public final class CraftingHelper {
         if (source == null || bot == null || world == null || origin == null) {
             return null;
         }
+        // On the server thread only a cell that is ready now will do: carving waits on mining the
+        // server thread itself would have to run, and a relocation is a walk.
+        boolean onServerThread = isServerThreadCall(source, bot);
         PlacementAttemptLog attemptLog = new PlacementAttemptLog(label, origin);
         PreparedPlacement immediate = findPreparedPlacement(world, origin, origin, label, false, false, attemptLog);
         if (immediate != null) {
             attemptLog.flush("ready", immediate, bot.getBlockPos(), false);
             return immediate;
         }
-        PreparedPlacement carved = carvePlacementPocket(source, bot, world, origin, origin, label, attemptLog);
+        PreparedPlacement carved = CraftingStationPolicy.mayCarve(onServerThread)
+                ? carvePlacementPocket(source, bot, world, origin, origin, label, attemptLog)
+                : null;
         if (carved != null) {
             attemptLog.flush("carved-pocket", carved, bot.getBlockPos(), false);
             return carved;
         }
 
-        BlockPos relocation = findPlacementRelocationStand(world, bot.getBlockPos(), origin);
+        BlockPos relocation = CraftingStationPolicy.mayWalk(onServerThread)
+                ? findPlacementRelocationStand(world, bot.getBlockPos(), origin)
+                : null;
         if (relocation != null && !relocation.equals(bot.getBlockPos())) {
             attemptLog.noteRelocation(relocation);
             if (moveToPlacementStand(source, bot, relocation, interactionReachSq, label + "-placement-relocate")) {
@@ -1722,7 +1861,9 @@ public final class CraftingHelper {
                     attemptLog.flush("relocated-ready", relocatedImmediate, bot.getBlockPos(), false);
                     return relocatedImmediate;
                 }
-                PreparedPlacement relocatedCarved = carvePlacementPocket(source, bot, world, movedOrigin, movedOrigin, label, attemptLog);
+                PreparedPlacement relocatedCarved = CraftingStationPolicy.mayCarve(onServerThread)
+                        ? carvePlacementPocket(source, bot, world, movedOrigin, movedOrigin, label, attemptLog)
+                        : null;
                 if (relocatedCarved != null) {
                     PreparedPlacement prepared = new PreparedPlacement(relocatedCarved.placePos(),
                             relocatedCarved.standPos(),
