@@ -283,6 +283,38 @@ class SoulGroupConversationServiceTest {
         assertTrue(player.enqueued.get(0).privatelySeeded());
     }
 
+    @Test
+    void privateSeedStaysPrivateWhenMindMemoryIsGoneBeforeAssembly() throws Exception {
+        SoulGroupTypes.GroupSceneTurn seeded = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.BANTER, OWNER_ID, "Bradley", turn.roster(),
+                "Bradley once said: scared of the dark", Instant.EPOCH, UUID.randomUUID(),
+                false, java.util.Set.of(OWNER_ID), OWNER_ID);
+
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                service.submit(seeded).get(2, SECONDS));
+        assertEquals(OWNER_ID, player.enqueued.get(0).privateSeedOwner());
+    }
+
+    @Test
+    void conflictingPrivateOwnersRejectSceneBeforeGeneration() throws Exception {
+        UUID other = UUID.randomUUID();
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(OWNER_ID, 3, "private fact", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE)));
+        SoulSettings settings = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        SoulGroupConversationService withMind = new SoulGroupConversationService(partyStore,
+                new SoulGroupPromptAssembler(id -> Optional.of(mind)), scheduler, provider,
+                new SoulGroupResponseValidator(), settings, player, status);
+        SoulGroupTypes.GroupSceneTurn conflicting = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.PLAYER, OWNER_ID, "Bradley", turn.roster(), "hello",
+                Instant.EPOCH, UUID.randomUUID(), false, java.util.Set.of(OWNER_ID), other);
+
+        assertEquals(SoulGroupConversationService.Submission.FAILED,
+                withMind.submit(conflicting).get(2, SECONDS));
+        assertTrue(player.enqueued.isEmpty());
+    }
+
     private static final String SIDE_CHANNEL_SCENE =
             "Jake: Mining tonight.\nSara: Fishing is safer.\n##FRENS {\"stance\":{\"Sara\":{\"warmth\":1}}}";
 

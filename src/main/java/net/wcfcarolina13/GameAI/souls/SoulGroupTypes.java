@@ -88,11 +88,13 @@ public final class SoulGroupTypes {
      * captured on the server thread ({@code SoulSnapshotBuilder.onlineHumanIds}) because the
      * prompt is assembled off-thread; it feeds {@link SoulPrivacyPolicy}'s alone-on-server
      * exception. Empty means unknown, and withholds every DM-private memory.
+     * {@code privateSeedOwner} is non-null only when the director placed that player's private
+     * memory anchor in the retained seed; it survives later mind cache changes.
      */
     public record GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                   List<SceneParticipant> roster, String playerMessage,
                                   Instant acceptedAt, UUID routingId, boolean addressPlayer,
-                                  Set<UUID> onlineHumanIds) {
+                                  Set<UUID> onlineHumanIds, UUID privateSeedOwner) {
         public GroupSceneTurn {
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(ownerId, "ownerId");
@@ -104,7 +106,15 @@ public final class SoulGroupTypes {
             onlineHumanIds = onlineHumanIds == null ? Set.of() : Set.copyOf(onlineHumanIds);
         }
 
-        /** Pre-1.1.224 shape: the online-humans set is unknown (empty), so private memories are withheld. */
+        /** Existing callers with no seed provenance have no private anchor in their seed. */
+        public GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
+                               List<SceneParticipant> roster, String playerMessage,
+                               Instant acceptedAt, UUID routingId, boolean addressPlayer,
+                               Set<UUID> onlineHumanIds) {
+            this(kind, ownerId, ownerDisplayName, roster, playerMessage, acceptedAt,
+                    routingId, addressPlayer, onlineHumanIds, null);
+        }
+
         public GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                List<SceneParticipant> roster, String playerMessage,
                                Instant acceptedAt, UUID routingId, boolean addressPlayer) {

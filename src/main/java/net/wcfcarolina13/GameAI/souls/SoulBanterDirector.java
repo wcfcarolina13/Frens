@@ -306,8 +306,8 @@ public final class SoulBanterDirector {
                         bot.getName().getString(), grounding));
                 groundings.add(grounding);
             } catch (RuntimeException captureFailure) {
-                LOGGER.warn("[souls] banter capture failed for bot {}: {}", botId,
-                        captureFailure.toString());
+                LOGGER.warn("[souls] banter capture failed for bot {} errorClass={}", botId,
+                        captureFailure.getClass().getName());
             }
         }
         if (roster.size() < 1) {
@@ -327,6 +327,7 @@ public final class SoulBanterDirector {
         int currentDay = (int) (player.getEntityWorld().getTimeOfDay() / 24000L);
         Set<String> seenBefore = new LinkedHashSet<>();
         List<SoulBanterSeed.Anchor> mindAnchors = new ArrayList<>();
+        Set<String> privateAnchorTopics = new LinkedHashSet<>();
         // 1.1.224: banter is heard by anyone in earshot, so a DM-private memory may seed it only
         // when this player is the only human online. Captured once, here on the server thread,
         // and carried on the turn for the (off-thread) prompt assembly.
@@ -338,8 +339,19 @@ public final class SoulBanterDirector {
             mindAnchors.addAll(SoulMindOps.anchors(minds.get(i), roster.get(i).displayName(),
                     currentDay, random));
             // Player-memory anchors: something the player once said, off cooldown.
-            mindAnchors.addAll(SoulMemoryDigestOps.anchors(minds.get(i), player.getUuid(),
-                    player.getName().getString(), currentDay, random, audience));
+            List<SoulBanterSeed.Anchor> playerAnchors = SoulMemoryDigestOps.anchors(minds.get(i), player.getUuid(),
+                    player.getName().getString(), currentDay, random, audience);
+            mindAnchors.addAll(playerAnchors);
+            for (SoulBanterSeed.Anchor anchor : playerAnchors) {
+                if (minds.get(i).playerMemories().stream().anyMatch(pm ->
+                        pm.playerId().equals(playerId)
+                                && pm.visibility() == SoulTypes.MemoryVisibility.PRIVATE
+                                && SoulPrivacyPolicy.admits(pm, audience)
+                                && anchor.phrase().equals(player.getName().getString()
+                                        + " once said: " + pm.fact()))) {
+                    privateAnchorTopics.add(anchor.topic());
+                }
+            }
             withheldPrivate += SoulMemoryDigestOps.withheldFor(minds.get(i), player.getUuid(), audience);
             // Phase 3b relation anchors: a typed belief this bot holds, off cooldown. Gated on
             // soulRelationsEnabled (live read) so the default-off build seeds exactly as before.
@@ -395,20 +407,21 @@ public final class SoulBanterDirector {
         }
         UUID routingId = UUID.randomUUID();
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
+        boolean privateAnchorUsed = privateAnchorTopics.contains(seeded.topic())
+                || seeded.supportTopics().stream().anyMatch(privateAnchorTopics::contains);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 kind(lane), playerId, player.getName().getString(),
-                roster, seed, Instant.now(), routingId, addressPlayer, onlineHumans);
+                roster, seed, Instant.now(), routingId, addressPlayer, onlineHumans,
+                privateAnchorUsed ? playerId : null);
         LOGGER.debug("[souls] banter privacy routingId={} withheldPrivateMemories={} onlineHumans={}",
                 routingId, withheldPrivate, onlineHumans.size());
         long armedUntilMs = now + nextDelay(lane);
         cooldowns(lane).put(playerId, armedUntilMs);
         recordVerdict(playerId, lane, "fired");
-        LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} act={} topic=\"{}\" addressPlayer={}",
-                lane, playerId, routingId, roster.size(), seed.length(), seeded.act(), seeded.topic(), addressPlayer);
-        // 1.1.223: the seed is the scene's whole steering input, so it is logged in full (INFO,
-        // like the fire line above — one line per scene, and DEBUG never reaches latest.log).
-        LOGGER.info("[souls] banter routingId={} support={} seed=\"{}\"",
-                routingId, seeded.supportTopics(), seed);
+        LOGGER.info("[souls] banter routingId={} outcome=fired rosterCount={} seedChars={} privateSeedCount={}",
+                routingId, roster.size(), seed.length(), privateAnchorUsed ? 1 : 0);
+        LOGGER.info("[souls] banter routingId={} supportCount={} seedChars={}",
+                routingId, seeded.supportTopics().size(), seed.length());
         // 1.1.217 gap C1: hold the scripted lanes off for the 5–16 s of generation between this
         // fire and the scene's first line, so a scripted line cannot land and then collide with
         // line 1. Scenes speak through the reservation (it never vetoes this scene's own
@@ -425,8 +438,8 @@ public final class SoulBanterDirector {
             // whenComplete, not thenAccept: an exceptionally completed future delivered no line
             // either, and must release the reservation and refund just like FAILED.
             if (error != null) {
-                LOGGER.warn("[souls] banter lane={} player={} routingId={} submission failed exceptionally: {}",
-                        lane, playerId, routingId, error.toString());
+                LOGGER.warn("[souls] banter lane={} player={} routingId={} submission failed errorClass={}",
+                        lane, playerId, routingId, error.getClass().getName());
             }
             if (error != null || submission == SoulGroupConversationService.Submission.FAILED) {
                 // Unconditional, unlike the refund below: the refund can lose to a

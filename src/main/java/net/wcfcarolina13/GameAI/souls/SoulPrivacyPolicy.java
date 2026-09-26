@@ -131,6 +131,23 @@ public final class SoulPrivacyPolicy {
     }
 
     /**
+     * Combines privacy provenance from the seed, ABOUT block, and admitted history. If distinct
+     * owners appear, no single-owner playback gate can protect both; callers must discard the
+     * scene before generation. The first owner remains in the decision for diagnostics only.
+     */
+    public record ScenePrivacy(UUID owner, boolean conflictingOwners) {
+    }
+
+    public static ScenePrivacy strictestOwner(UUID seed, UUID assembly, UUID history) {
+        UUID first = seed != null ? seed : assembly != null ? assembly : history;
+        boolean conflict = first != null
+                && ((seed != null && !seed.equals(first))
+                        || (assembly != null && !assembly.equals(first))
+                        || (history != null && !history.equals(first)));
+        return new ScenePrivacy(first, conflict);
+    }
+
+    /**
      * The tag of a memory digested from {@code sources} read off a {@code channel} transcript:
      * the channel's own tag ({@link #visibilityFor}), made PRIVATE when any source record is
      * marked {@code privateTo} — the stricter tag wins. A party digest only ever writes memories

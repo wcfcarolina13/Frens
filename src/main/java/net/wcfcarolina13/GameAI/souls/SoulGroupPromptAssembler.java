@@ -99,15 +99,28 @@ public final class SoulGroupPromptAssembler {
             List<SoulTypes.SoulProfile> profiles,
             List<SoulTypes.ConversationRecord> partyHistory,
             Duration timeout) {
+        return assembleWithPrivacy(correlationId, model, turn, profiles, partyHistory, timeout).request();
+    }
+
+    /** Request and provenance captured while its ABOUT and history content is selected. */
+    public record Assembled(SoulTypes.ProviderRequest request, UUID assemblyOwner, UUID historyOwner) {
+    }
+
+    public Assembled assembleWithPrivacy(
+            UUID correlationId, String model, SoulGroupTypes.GroupSceneTurn turn,
+            List<SoulTypes.SoulProfile> profiles,
+            List<SoulTypes.ConversationRecord> partyHistory, Duration timeout) {
         List<SoulTypes.Message> messages = new ArrayList<>();
         messages.add(sceneContract());
         messages.add(castBlock(turn, profiles));
         messages.add(stateBlock(turn));
         threadsBlock(turn).ifPresent(messages::add);
-        aboutBlock(turn).ifPresent(messages::add);
-        beliefsBlock(turn).ifPresent(messages::add);
         logWithheld(correlationId, turn);
-        messages.addAll(boundedHistory(partyHistory, turn.audience()));
+        AboutBlock about = aboutBlock(turn);
+        about.message().ifPresent(messages::add);
+        beliefsBlock(turn).ifPresent(messages::add);
+        HistoryBlock history = boundedHistory(partyHistory, turn.audience());
+        messages.addAll(history.messages());
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
             // Three variants (engagement spec §4): solo scenes always speak TO the owner; group
@@ -142,7 +155,8 @@ public final class SoulGroupPromptAssembler {
             case PLAYER -> new SoulTypes.Message(SoulTypes.Role.USER,
                     turn.ownerDisplayName() + ": " + turn.playerMessage());
         });
-        return new SoulTypes.ProviderRequest(correlationId, model, messages, timeout, maxOutputTokens());
+        return new Assembled(new SoulTypes.ProviderRequest(correlationId, model, messages,
+                timeout, maxOutputTokens()), about.privateOwner(), history.privateOwner());
     }
 
     /** "skill:woodcut" → "woodcutting"; unknown ids just lose the prefix and underscores. */
@@ -368,11 +382,15 @@ public final class SoulGroupPromptAssembler {
      * skipped; when no bot has anything the block is absent entirely. Each bot's lines are
      * already bounded by {@code SoulMemoryDigestOps#aboutLines}.
      */
-    private Optional<SoulTypes.Message> aboutBlock(SoulGroupTypes.GroupSceneTurn turn) {
+    private record AboutBlock(Optional<SoulTypes.Message> message, UUID privateOwner) {
+    }
+
+    private AboutBlock aboutBlock(SoulGroupTypes.GroupSceneTurn turn) {
         String owner = turn.ownerDisplayName();
         StringBuilder sb = new StringBuilder("ABOUT " + owner
                 + " (things " + owner + " said, as remembered)\n");
         boolean any = false;
+        UUID privateOwner = null;
         for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
             Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
             if (mind.isEmpty()) {
@@ -384,50 +402,21 @@ public final class SoulGroupPromptAssembler {
             if (lines.isEmpty()) {
                 continue;
             }
+            // Inspect the same mind snapshot and the lines actually admitted to this block.
+            if (mind.get().playerMemories().stream().anyMatch(memory ->
+                    memory.playerId().equals(turn.ownerId())
+                            && memory.visibility() == SoulTypes.MemoryVisibility.PRIVATE
+                            && SoulPrivacyPolicy.admits(memory, turn.audience())
+                            && lines.contains("- " + memory.fact()))) {
+                privateOwner = turn.ownerId();
+            }
             any = true;
             sb.append(participant.displayName()).append(" remembers:\n")
                     .append(String.join("\n", lines)).append('\n');
         }
-        return any
+        return new AboutBlock(any
                 ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))
-                : Optional.empty();
-    }
-
-    /**
-     * Whether this scene's shared prompt may carry at least one of the owner's PRIVATE memories —
-     * the ABOUT block, or the banter seed's "once said" anchor, both of which read the same roster
-     * minds through {@link SoulPrivacyPolicy#admits} with this turn's audience. True only under the
-     * alone-on-server exception; playback then gates every line on its current human recipients
-     * ({@link SoulPrivacyPolicy#mayDeliverPrivatelySeededLine}).
-     */
-    public boolean admitsPrivateMemory(SoulGroupTypes.GroupSceneTurn turn) {
-        return privateSeedOwner(turn, List.of()) != null;
-    }
-
-    /**
-     * The player this scene's prompt is privately seeded for, or null: the owner when an ABOUT
-     * line or banter anchor admits one of their PRIVATE memories, else the owner of any replayed
-     * {@code partyHistory} record marked private that this turn's audience admits (so a scene
-     * that continues a privately seeded one is itself privately seeded). Both routes pass the
-     * alone-on-server rule, so they can only ever name the single online human.
-     */
-    public UUID privateSeedOwner(SoulGroupTypes.GroupSceneTurn turn,
-                                 List<SoulTypes.ConversationRecord> partyHistory) {
-        if (admitsPrivateMemoryOfRoster(turn)) {
-            return turn.ownerId();
-        }
-        return SoulPrivacyPolicy.admittedPrivateRecordOwner(partyHistory, turn.audience());
-    }
-
-    private boolean admitsPrivateMemoryOfRoster(SoulGroupTypes.GroupSceneTurn turn) {
-        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
-            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
-            if (mind.isPresent()
-                    && SoulMemoryDigestOps.admittedPrivateFor(mind.get(), turn.ownerId(), turn.audience()) > 0) {
-                return true;
-            }
-        }
-        return false;
+                : Optional.empty(), privateOwner);
     }
 
     /**
@@ -562,8 +551,11 @@ public final class SoulGroupPromptAssembler {
      * and replays only where that owner's PRIVATE memories would be admitted
      * ({@link SoulPrivacyPolicy#admitsRecord}); it is skipped before the turn/char caps apply.
      */
-    private List<SoulTypes.Message> boundedHistory(List<SoulTypes.ConversationRecord> partyHistory,
-                                                   SoulPrivacyPolicy.Audience audience) {
+    private record HistoryBlock(List<SoulTypes.Message> messages, UUID privateOwner) {
+    }
+
+    private HistoryBlock boundedHistory(List<SoulTypes.ConversationRecord> partyHistory,
+                                       SoulPrivacyPolicy.Audience audience) {
         List<SoulTypes.ConversationRecord> relevant = new ArrayList<>();
         for (SoulTypes.ConversationRecord record : partyHistory) {
             if (record.kind() == SoulTypes.TurnKind.HEARD
@@ -582,6 +574,7 @@ public final class SoulGroupPromptAssembler {
 
         Deque<SoulTypes.Message> ordered = new ArrayDeque<>();
         int totalChars = 0;
+        UUID privateOwner = null;
         for (int i = capped.size() - 1; i >= 0; i--) {
             SoulTypes.ConversationRecord record = capped.get(i);
             int length = record.content().length();
@@ -589,12 +582,15 @@ public final class SoulGroupPromptAssembler {
                 break;
             }
             totalChars += length;
+            if (record.privateTo() != null) {
+                privateOwner = record.privateTo();
+            }
             SoulTypes.Role role = record.kind() == SoulTypes.TurnKind.HEARD
                     ? SoulTypes.Role.USER
                     : SoulTypes.Role.ASSISTANT;
             ordered.addFirst(new SoulTypes.Message(role, record.content()));
         }
-        return new ArrayList<>(ordered);
+        return new HistoryBlock(new ArrayList<>(ordered), privateOwner);
     }
 
     private static String truncate(String text, int maxChars) {

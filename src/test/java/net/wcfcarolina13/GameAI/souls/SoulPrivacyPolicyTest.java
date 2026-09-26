@@ -185,4 +185,29 @@ class SoulPrivacyPolicyTest {
         assertFalse(SoulPrivacyPolicy.mayDeriveSharedArtifacts(OWNER));
         assertFalse(SoulPrivacyPolicy.mayDeriveSharedArtifacts(OTHER));
     }
+
+    @Test void seedPrivateAnchorStaysPrivateAfterItsMindMemoryDisappears() {
+        SoulPrivacyPolicy.ScenePrivacy decision = SoulPrivacyPolicy.strictestOwner(OWNER, null, null);
+        assertEquals(OWNER, decision.owner());
+        assertFalse(decision.conflictingOwners());
+        assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(decision.owner(), Set.of(OWNER, OTHER)));
+    }
+
+    @Test void aboutMemoryStaysPrivateAfterLaterLookupFindsNothing() {
+        SoulPrivacyPolicy.ScenePrivacy decision = SoulPrivacyPolicy.strictestOwner(null, OWNER, null);
+        assertEquals(OWNER, decision.owner());
+        assertFalse(decision.conflictingOwners());
+    }
+
+    @Test void publicSceneHasNoPrivateOwner() {
+        SoulPrivacyPolicy.ScenePrivacy decision = SoulPrivacyPolicy.strictestOwner(null, null, null);
+        assertEquals(null, decision.owner());
+        assertFalse(decision.conflictingOwners());
+    }
+
+    @Test void distinctPrivateOwnersRejectSingleOwnerPlayback() {
+        SoulPrivacyPolicy.ScenePrivacy decision = SoulPrivacyPolicy.strictestOwner(OWNER, OTHER, null);
+        assertEquals(OWNER, decision.owner());
+        assertTrue(decision.conflictingOwners());
+    }
 }

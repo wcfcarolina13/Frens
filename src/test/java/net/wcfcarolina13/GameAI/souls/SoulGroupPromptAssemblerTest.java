@@ -514,6 +514,11 @@ class SoulGroupPromptAssemblerTest {
 
     // === 1.1.224 fix wave: privately seeded scenes are flagged for per-line playback gating ===
 
+    private static UUID assemblyOwner(SoulGroupPromptAssembler assembler, SoulGroupTypes.GroupSceneTurn turn) {
+        return assembler.assembleWithPrivacy(UUID.randomUUID(), "m", turn, twoProfiles(),
+                List.of(), Duration.ofSeconds(5)).assemblyOwner();
+    }
+
     @Test
     void sceneIsPrivatelySeededOnlyWhenAPrivateMemoryIsAdmitted() {
         UUID owner = UUID.randomUUID();
@@ -523,13 +528,13 @@ class SoulGroupPromptAssemblerTest {
                 "Bradley is scared of the dark");
         SoulGroupPromptAssembler assembler = new SoulGroupPromptAssembler(id -> Optional.of(privateMind));
         // Alone on the server: admitted, so the scene is privately seeded.
-        assertTrue(assembler.admitsPrivateMemory(
+        assertEquals(owner, assemblyOwner(assembler,
                 sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner))));
         // Another human online: withheld, so nothing private to guard.
-        assertFalse(assembler.admitsPrivateMemory(
+        assertEquals(null, assemblyOwner(assembler,
                 sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner, UUID.randomUUID()))));
         // Unknown online set: withheld.
-        assertFalse(assembler.admitsPrivateMemory(playerTurnWithOwner(owner, jake, sara)));
+        assertEquals(null, assemblyOwner(assembler, playerTurnWithOwner(owner, jake, sara)));
     }
 
     @Test
@@ -539,9 +544,9 @@ class SoulGroupPromptAssemblerTest {
         UUID sara = UUID.randomUUID();
         SoulTypes.SoulMind publicMind = mindRemembering(owner, "Bradley wants a farm");
         SoulGroupPromptAssembler assembler = new SoulGroupPromptAssembler(id -> Optional.of(publicMind));
-        assertFalse(assembler.admitsPrivateMemory(
+        assertEquals(null, assemblyOwner(assembler,
                 sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner))));
-        assertFalse(new SoulGroupPromptAssembler().admitsPrivateMemory(
+        assertEquals(null, assemblyOwner(new SoulGroupPromptAssembler(),
                 sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner))));
     }
 
@@ -573,7 +578,8 @@ class SoulGroupPromptAssemblerTest {
             assertFalse(replayed.contains("Jake: still scared of the dark, Bradley?"), kind + " replayed a private line");
             assertTrue(replayed.contains("Sara: fishing is safer."), kind.toString());
             assertTrue(replayed.contains("Bradley: evening plans?"), kind.toString());
-            assertEquals(null, assembler.privateSeedOwner(turn, history), kind.toString());
+            assertEquals(null, assembler.assembleWithPrivacy(UUID.randomUUID(), "m", turn,
+                    twoProfiles(), history, Duration.ofSeconds(5)).historyOwner(), kind.toString());
         }
     }
 
@@ -589,8 +595,10 @@ class SoulGroupPromptAssemblerTest {
         assertTrue(contents(assembler.assemble(UUID.randomUUID(), "m", turn, twoProfiles(), history,
                 Duration.ofSeconds(5))).contains("Jake: still scared of the dark, Bradley?"));
         // Continuing a privately seeded scene keeps the new one privately seeded (per-line gate + mark).
-        assertEquals(owner, assembler.privateSeedOwner(turn, history));
-        assertFalse(assembler.admitsPrivateMemory(turn), "no private memory in the minds — history alone seeds it");
+        SoulGroupPromptAssembler.Assembled assembled = assembler.assembleWithPrivacy(UUID.randomUUID(), "m",
+                turn, twoProfiles(), history, Duration.ofSeconds(5));
+        assertEquals(owner, assembled.historyOwner());
+        assertEquals(null, assembled.assemblyOwner(), "no private memory in the minds — history alone seeds it");
     }
 
     @Test
@@ -606,7 +614,8 @@ class SoulGroupPromptAssemblerTest {
                 history, Duration.ofSeconds(5)));
         assertFalse(replayed.contains("Jake: still scared of the dark, Bradley?"));
         assertTrue(replayed.contains("Sara: fishing is safer."));
-        assertEquals(null, assembler.privateSeedOwner(turn, history));
+        assertEquals(null, assembler.assembleWithPrivacy(UUID.randomUUID(), "m", turn,
+                twoProfiles(), history, Duration.ofSeconds(5)).historyOwner());
     }
 
     @Test
@@ -617,8 +626,26 @@ class SoulGroupPromptAssemblerTest {
         SoulTypes.SoulMind privateMind = mindRemembering(owner, SoulTypes.MemoryVisibility.PRIVATE,
                 "Bradley is scared of the dark");
         SoulGroupPromptAssembler minds = new SoulGroupPromptAssembler(id -> Optional.of(privateMind));
-        assertEquals(owner, minds.privateSeedOwner(
-                sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner)), List.of()));
+        assertEquals(owner, assemblyOwner(minds,
+                sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner))));
+    }
+
+    @Test
+    void aboutProvenanceSurvivesMemoryRemovalAfterAssembly() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        java.util.concurrent.atomic.AtomicReference<SoulTypes.SoulMind> current =
+                new java.util.concurrent.atomic.AtomicReference<>(mindRemembering(owner,
+                        SoulTypes.MemoryVisibility.PRIVATE, "Bradley is scared of the dark"));
+        SoulGroupPromptAssembler withMind = new SoulGroupPromptAssembler(id -> Optional.of(current.get()));
+        SoulGroupPromptAssembler.Assembled assembled = withMind.assembleWithPrivacy(UUID.randomUUID(), "m",
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner)),
+                twoProfiles(), List.of(), Duration.ofSeconds(5));
+        current.set(SoulTypes.SoulMind.empty());
+
+        assertTrue(aboutOf(assembled.request()).contains("scared of the dark"));
+        assertEquals(owner, assembled.assemblyOwner());
     }
 
     private static SoulTypes.SoulMind mindBelieving(SoulTypes.RelationFact... facts) {

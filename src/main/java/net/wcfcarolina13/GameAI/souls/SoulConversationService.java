@@ -222,9 +222,10 @@ public final class SoulConversationService {
             // Retrieval is additive grounding, never load-bearing for a turn.
         }
         if (!relevantKnowledge.isEmpty()) {
-            // Prompt-side ground truth for field debugging: what retrieval actually injected.
+            // Retrieved knowledge may include retained DM speech; log metadata only.
             org.slf4j.LoggerFactory.getLogger("frens-souls").info(
-                    "[souls] knowledge correlationId={} lines={}", correlationId, relevantKnowledge);
+                    "[souls] knowledge correlationId={} lines={} chars={}", correlationId,
+                    relevantKnowledge.size(), relevantKnowledge.stream().mapToInt(String::length).sum());
         }
         // What this bot remembers the player saying (digest memories) -- cached read only, so a
         // cold or unloaded mind simply contributes nothing rather than blocking the turn.

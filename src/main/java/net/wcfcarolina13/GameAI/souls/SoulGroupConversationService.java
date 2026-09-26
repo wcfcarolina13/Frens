@@ -196,14 +196,19 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return;
         }
 
-        SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), turn,
-                profiles, history, settings.timeout());
-        // 1.1.224 privacy: a prompt that admitted the owner's DM-private memory (alone-on-server)
-        // plays back only while nobody else would hear it — GroupScenePlayback re-checks per line.
-        // A replayed history line from an earlier privately seeded scene seeds this one too.
-        UUID privateSeedOwner = prompts.privateSeedOwner(turn, history);
+        SoulGroupPromptAssembler.Assembled assembled = prompts.assembleWithPrivacy(correlationId,
+                settings.model(), turn, profiles, history, settings.timeout());
+        SoulPrivacyPolicy.ScenePrivacy privacy = SoulPrivacyPolicy.strictestOwner(
+                turn.privateSeedOwner(), assembled.assemblyOwner(), assembled.historyOwner());
+        if (privacy.conflictingOwners()) {
+            // A single-owner playback gate cannot protect material private to two people.
+            LOGGER.info("[souls] scene correlationId={} outcome=privacy-conflict", correlationId);
+            failTurn(turn, token, correlationId, SoulTypes.FailureCode.INTERNAL, "", "", null, outcome);
+            return;
+        }
+        UUID privateSeedOwner = privacy.owner();
         int queueDepthAtSubmit = scheduler.queueDepth();
-        scheduler.submit(turn.key(), token.epoch(), () -> provider.generate(request))
+        scheduler.submit(turn.key(), token.epoch(), () -> provider.generate(assembled.request()))
                 .whenComplete((result, providerError) -> handleProviderResult(turn, token, correlationId,
                         privateSeedOwner, result, providerError, queueDepthAtSubmit, submitStartNanos, outcome));
     }
@@ -234,21 +239,15 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         };
         SoulGroupResponseValidator.SceneParse parse = validator.parse(result.text(), rosterNames, maxSceneLines,
                 turn.ownerDisplayName(), turn.kind() != SoulGroupTypes.SceneKind.PLAYER);
-        // Raw provider output is not persisted anywhere, so a rejected or solo-roster scene logs
-        // it (whitespace-collapsed, capped). The 2026-08-29 self-talk diagnosis had to be
-        // inferred from the delivered lines because this was invisible. 1.1.223: a scene that
-        // lost any line (grammar drop, cap, owner-address cut) logs it at INFO too, so every
-        // drop below can be read against what the model actually wrote; clean multi-speaker
-        // scenes log it at DEBUG.
-        boolean lostLines = !parse.dropped().isEmpty() || parse.ownerCutDropped() > 0;
-        if (!parse.accepted() || rosterNames.size() == 1 || lostLines) {
-            LOGGER.info("[souls] scene correlationId={} kind={} rosterSize={} accepted={} raw=\"{}\"",
-                    correlationId, turn.kind(), rosterNames.size(), parse.accepted(), rawForLog(result.text()));
-        } else {
+        LOGGER.info("[souls] scene correlationId={} kind={} rosterSize={} accepted={} rawChars={} dropped={} ownerCutDropped={}",
+                correlationId, turn.kind(), rosterNames.size(), parse.accepted(),
+                result.text() == null ? 0 : result.text().length(), parse.dropped().size(),
+                parse.ownerCutDropped());
+        if (privateSeedOwner == null && LOGGER.isDebugEnabled()) {
             LOGGER.debug("[souls] scene correlationId={} kind={} rosterSize={} accepted={} raw=\"{}\"",
                     correlationId, turn.kind(), rosterNames.size(), parse.accepted(), rawForLog(result.text()));
         }
-        logDrops(correlationId, turn, parse);
+        logDrops(correlationId, turn, parse, privateSeedOwner == null);
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
                     result.model(), result.elapsedMillis(), outcome);
@@ -399,23 +398,31 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      * DEBUG.
      */
     private static void logDrops(UUID correlationId, SoulGroupTypes.GroupSceneTurn turn,
-                                 SoulGroupResponseValidator.SceneParse parse) {
+                                 SoulGroupResponseValidator.SceneParse parse, boolean publicContent) {
         for (SoulGroupResponseValidator.DroppedLine drop : parse.dropped()) {
             boolean routine = drop.reason() == SoulGroupResponseValidator.DropReason.SCAFFOLD
                     || drop.reason() == SoulGroupResponseValidator.DropReason.NOISE;
-            String message = "[souls] scene correlationId={} kind={} dropped rawLine={} reason={} text=\"{}\"";
+            String message = "[souls] scene correlationId={} kind={} dropped rawLine={} reason={} chars={}";
             Object[] args = {correlationId, turn.kind(), drop.rawIndex(), drop.reason(),
-                    lineForLog(drop.text())};
+                    drop.text() == null ? 0 : drop.text().length()};
             if (routine) {
                 LOGGER.debug(message, args);
             } else {
                 LOGGER.info(message, args);
             }
+            if (publicContent && LOGGER.isDebugEnabled()) {
+                LOGGER.debug("[souls] scene correlationId={} dropped rawLine={} text=\"{}\"",
+                        correlationId, drop.rawIndex(), lineForLog(drop.text()));
+            }
         }
         if (parse.ownerCutIndex() >= 0) {
-            LOGGER.info("[souls] scene correlationId={} kind={} owner-address cut atLine={} dropped={} line=\"{}\"",
+            LOGGER.info("[souls] scene correlationId={} kind={} owner-address cut atLine={} dropped={} chars={}",
                     correlationId, turn.kind(), parse.ownerCutIndex(), parse.ownerCutDropped(),
-                    lineForLog(parse.lines().get(parse.ownerCutIndex()).text()));
+                    parse.lines().get(parse.ownerCutIndex()).text().length());
+            if (publicContent && LOGGER.isDebugEnabled()) {
+                LOGGER.debug("[souls] scene correlationId={} owner-address cut line=\"{}\"",
+                        correlationId, lineForLog(parse.lines().get(parse.ownerCutIndex()).text()));
+            }
         }
     }
 
@@ -454,8 +461,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         // shared prompts and the party digest treat it as that owner's PRIVATE material.
         partyStore.appendSpoken(token, taggedLine, metadata, privateTo).exceptionally(appendError -> {
             // The line was already delivered; a stale/failed append must not surface to chat.
-            LOGGER.warn("[souls] scene correlationId={} spoken-append failed: {}",
-                    token.correlationId(), appendError.toString());
+            LOGGER.warn("[souls] scene correlationId={} spoken-append failed errorClass={}",
+                    token.correlationId(), appendError.getClass().getName());
             return null;
         });
     }
