@@ -174,4 +174,15 @@ class SoulPrivacyPolicyTest {
         assertTrue(SoulPrivacyPolicy.digestible(spoken(null), null));
         assertFalse(SoulPrivacyPolicy.digestible(null, OWNER));
     }
+
+    // === Shared artifacts derived from a scene (open threads, peer stances, ##FRENS) ===
+
+    @Test void sceneWithNoPrivateSeedMayDeriveSharedArtifacts() {
+        assertTrue(SoulPrivacyPolicy.mayDeriveSharedArtifacts(null));
+    }
+
+    @Test void privatelySeededSceneDerivesNoSharedArtifactsWhoeverTheOwnerIs() {
+        assertFalse(SoulPrivacyPolicy.mayDeriveSharedArtifacts(OWNER));
+        assertFalse(SoulPrivacyPolicy.mayDeriveSharedArtifacts(OTHER));
+    }
 }

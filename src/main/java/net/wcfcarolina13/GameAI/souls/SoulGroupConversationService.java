@@ -256,7 +256,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
 
         List<SoulGroupTypes.SceneLine> lines = applyNovelty(turn, parse.lines());
-        applySideChannel(turn, correlationId, rosterNames, parse.sideChannelRaw());
+        applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw());
 
         sceneResults.put(correlationId, result);
         player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner));
@@ -275,11 +275,21 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      *
      * <p>The logged {@code applied} counts are elements ACCEPTED FOR APPLICATION at this seam —
      * the store write is asynchronous, so a per-mind day-guard may still no-op one of them.
+     *
+     * <p>1.1.224 privacy: a privately seeded scene applies nothing — its facts and stance deltas
+     * would land in minds every later shared prompt reads (BELIEFS, CURRENT STATE). Checked
+     * before the toggle so the rule holds whatever the toggle says.
      */
     private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn, UUID correlationId,
-                                  List<String> rosterNames, java.util.Optional<String> raw) {
+                                  UUID privateSeedOwner, List<String> rosterNames,
+                                  java.util.Optional<String> raw) {
         if (raw.isEmpty()) {
             return; // no sentinel — never an error, never logged
+        }
+        if (!SoulPrivacyPolicy.mayDeriveSharedArtifacts(privateSeedOwner)) {
+            LOGGER.debug("[souls] private-seeded scene: skipped thread/side-channel correlationId={}",
+                    correlationId);
+            return;
         }
         if (!structuredEnabled.getAsBoolean()) {
             // The validator stripped the line regardless, so nothing was spoken either way.

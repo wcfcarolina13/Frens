@@ -278,8 +278,10 @@ public final class SoulRuntime {
                         @Override
                         public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn,
                                                     int deliveredLines, int lastSpeakerIndex,
-                                                    List<SoulGroupTypes.SceneLine> delivered) {
-                            runtime.noteSceneDeliveredForMind(turn, lastSpeakerIndex, delivered);
+                                                    List<SoulGroupTypes.SceneLine> delivered,
+                                                    UUID privateSeedOwner) {
+                            runtime.noteSceneDeliveredForMind(turn, lastSpeakerIndex, delivered,
+                                    privateSeedOwner);
                             SoulLocalDirector local = runtime.localDirector;
                             if (local == null || turn.roster().isEmpty()) {
                                 return;
@@ -999,9 +1001,18 @@ public final class SoulRuntime {
     /**
      * Narrator-seeded scenes only: a closing line that asks the player something becomes an
      * open thread on its speaker (see {@link SoulMindOps#extractQuestion}).
+     *
+     * <p>1.1.224 privacy: a privately seeded scene derives neither threads nor peer stances —
+     * both are read back by every later shared prompt (OPEN THREADS, CURRENT STATE).
      */
     private void noteSceneDeliveredForMind(SoulGroupTypes.GroupSceneTurn turn, int lastSpeakerIndex,
-                                           List<SoulGroupTypes.SceneLine> delivered) {
+                                           List<SoulGroupTypes.SceneLine> delivered,
+                                           UUID privateSeedOwner) {
+        if (!SoulPrivacyPolicy.mayDeriveSharedArtifacts(privateSeedOwner)) {
+            LOGGER.debug("[souls] private-seeded scene: skipped thread/side-channel correlationId={}",
+                    turn.routingId());
+            return;
+        }
         notePeerStances(turn, delivered);
         if (!turn.kind().isNarratorSeeded() || lastSpeakerIndex < 0 || delivered == null
                 || delivered.isEmpty() || lastSpeakerIndex >= turn.roster().size()) {

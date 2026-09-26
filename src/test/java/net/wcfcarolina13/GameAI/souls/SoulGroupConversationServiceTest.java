@@ -283,6 +283,52 @@ class SoulGroupConversationServiceTest {
         assertTrue(player.enqueued.get(0).privatelySeeded());
     }
 
+    private static final String SIDE_CHANNEL_SCENE =
+            "Jake: Mining tonight.\nSara: Fishing is safer.\n##FRENS {\"stance\":{\"Sara\":{\"warmth\":1}}}";
+
+    private SoulGroupConversationService structuredService(SoulGroupPromptAssembler prompts,
+                                                           List<SoulSideChannelOps.SideEffects> applied) {
+        SoulSettings settings = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                true, SIDE_CHANNEL_SCENE, null, "test", "test-model", 5L, null, null, null)));
+        return new SoulGroupConversationService(partyStore, prompts, scheduler, provider,
+                new SoulGroupResponseValidator(), settings, player, status,
+                () -> false, () -> true, (sceneTurn, effects) -> applied.add(effects));
+    }
+
+    @Test
+    void privatelySeededSceneAppliesNoSideChannelEffects() throws Exception {
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(OWNER_ID, 3, "Bradley is scared of the dark", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE)));
+        List<SoulSideChannelOps.SideEffects> applied = new CopyOnWriteArrayList<>();
+        SoulGroupConversationService withMind = structuredService(
+                new SoulGroupPromptAssembler(id -> Optional.of(mind)), applied);
+        SoulGroupTypes.GroupSceneTurn alone = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.PLAYER,
+                OWNER_ID, "Bradley", turn.roster(), "what should we do tonight", Instant.EPOCH,
+                UUID.randomUUID(), false, java.util.Set.of(OWNER_ID));
+
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, withMind.submit(alone).get(2, SECONDS));
+        assertEquals(1, player.enqueued.size());
+        assertEquals(OWNER_ID, player.enqueued.get(0).privateSeedOwner());
+        assertEquals(2, player.enqueued.get(0).lines().size(), "the sentinel line is never spoken");
+        assertTrue(applied.isEmpty(), "a privately seeded scene must not fold ##FRENS into shared minds");
+    }
+
+    @Test
+    void sharedSceneStillAppliesSideChannelEffects() throws Exception {
+        List<SoulSideChannelOps.SideEffects> applied = new CopyOnWriteArrayList<>();
+        SoulGroupConversationService shared = structuredService(new SoulGroupPromptAssembler(), applied);
+
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, shared.submit(turn).get(2, SECONDS));
+        assertEquals(null, player.enqueued.get(0).privateSeedOwner());
+        assertEquals(1, applied.size(), "control: the same payload applies when the scene is not private");
+        assertEquals(1, applied.get(0).stanceDeltas().size());
+        assertEquals("Sara", applied.get(0).stanceDeltas().get(0).peerName());
+    }
+
     private static final class FakeScenePlayer implements SoulGroupConversationService.ScenePlayer {
         final List<GroupScenePlayback.PlayableScene> enqueued = new CopyOnWriteArrayList<>();
         volatile boolean active;

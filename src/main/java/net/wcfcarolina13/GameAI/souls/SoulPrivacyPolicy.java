@@ -185,6 +185,18 @@ public final class SoulPrivacyPolicy {
         return true;
     }
 
+    /**
+     * Whether a scene may leave anything behind in the roster's minds that a later SHARED prompt
+     * reads: an open thread from its closing question, peer stances from who asked whom, or the
+     * {@code ##FRENS} side channel's relation facts and stance deltas. A privately seeded scene
+     * ({@code privateSeedOwner} non-null) was built from the owner's DM-private material and heard
+     * by the owner alone, so it derives none of them; its lines survive only in the party
+     * transcript, marked {@code privateTo} the owner.
+     */
+    public static boolean mayDeriveSharedArtifacts(UUID privateSeedOwner) {
+        return privateSeedOwner == null;
+    }
+
     /** {@link #admits} as a predicate, for the memory readers in {@link SoulMemoryDigestOps}. */
     public static Predicate<SoulTypes.PlayerMemory> admitting(Audience audience) {
         return memory -> admits(memory, audience);

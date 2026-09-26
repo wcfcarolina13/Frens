@@ -71,10 +71,13 @@ public final class GroupScenePlayback {
          * the engagement handoff (spec §5) uses it to aim the reply window at whichever
          * companion the player would naturally answer. {@code delivered} holds the lines
          * actually delivered, in order (ontology Phase 2: the runtime extracts an open thread
-         * from the last one); empty when nothing was delivered.
+         * from the last one); empty when nothing was delivered. {@code privateSeedOwner} is the
+         * scene's {@link PlayableScene#privateSeedOwner()}: non-null means nothing derived from
+         * {@code delivered} may reach a shared prompt ({@link SoulPrivacyPolicy#mayDeriveSharedArtifacts}).
          */
         default void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int deliveredLines,
-                                     int lastSpeakerIndex, List<SoulGroupTypes.SceneLine> delivered) {
+                                     int lastSpeakerIndex, List<SoulGroupTypes.SceneLine> delivered,
+                                     UUID privateSeedOwner) {
         }
     }
 
@@ -352,7 +355,7 @@ public final class GroupScenePlayback {
                 state.scene.turn().routingId(), outcome, state.delivered, state.scene.lines().size());
         committer.sceneFinished(state.scene.token(), state.delivered, state.scene.lines().size());
         committer.sceneDelivered(state.scene.turn(), state.delivered, state.lastDeliveredParticipant,
-                List.copyOf(state.deliveredLines));
+                List.copyOf(state.deliveredLines), state.scene.privateSeedOwner());
     }
 
     private List<ServerPlayerEntity> playersInEarshot(ServerPlayerEntity speaker) {
