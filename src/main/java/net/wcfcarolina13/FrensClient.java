@@ -814,7 +814,7 @@ public class FrensClient implements ClientModInitializer {
                 ConfigJsonUtil.applyConfigJson(configJson);
                 MinecraftClient client = MinecraftClient.getInstance();
                 Screen parent = client.currentScreen;
-                client.setScreen(new ConfigManager(Text.literal("AI Player Configuration"), parent));
+                client.setScreen(new ConfigManager(Text.literal("Frens Configuration"), parent));
             });
         });
 
