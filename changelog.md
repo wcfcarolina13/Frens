@@ -2,6 +2,131 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## The server tick no longer walks to make room or to reach a crafting table; 1.1.222 (2026-09-25)
+
+Closes 1.1.221 deferrals 2 and 3. Three paths could run `MovementService` walks, nudges or a 6 s mining wait **on
+the server thread**:
+- `CraftingHelper.ensureCraftingStation`, reached from the idle tick;
+- MutualAid's make-room for dropped food;
+- MutualAid's make-room for an aid recipient.
+
+On the server thread those walks could never succeed. Movement input only sets velocity, and the tick that would move
+the bot is the thread that was sleeping. Teleport only happens with the per-bot `teleportDuringSkills`, which is off by
+default. So each one froze the whole server until its timeout, then failed.
+
+Scoping found more server-thread roots into `ensureCraftingStation` than the handoff listed:
+- the idle tick's four craft branches: wooden fallback, leather, cobble tools and the stone upgrade;
+- `/bot cook` and the auto-cook tick, via `SmeltingService.craftFurnace`;
+- RideSync's lead, saddle-stick and fence crafts, retried every second.
+
+The handoff's DropSweeper root was **wrong as written**: every sweep caller runs on a worker, so it is unchanged. The
+fix sits inside `ensureCraftingStation`, so it covers every root at once.
+
+### Crafting station (`a8ff4e5a`)
+- On the server thread, `ensureCraftingStation` uses only a table in reach. The scan is an 11×11×11 box, not
+  81×13×81 (about 85k block reads). A remembered or looked-at table counts only if it is in reach.
+- Placing a table from inventory on a ready adjacent cell stays allowed: a world mutation belongs on the server
+  thread, and without it the idle stone-tool upgrade could never get a table.
+- Removed on the server thread, in `prepareNearbyUtilityPlacement` and the stand logic:
+  - no carve (`mineBlock().get(6 s)` is a guaranteed 6 s freeze, because mining progress is posted back to the
+    thread that is waiting);
+  - no relocation walk;
+  - no stand walk or nudge;
+  - no reposition retry;
+  - no `clearPathObstructions`.
+- The `prepareNearbyUtilityPlacement` gate also covers both `placeChestNearBot`s when they run on the server thread.
+- Worker callers (`/bot craft`, skills, sweeps, cooking, fishing, sleep) behave exactly as before.
+- Pure `CraftingStationPolicy`: mayWalk / mayCarve / scan box / acceptKnownTable / armsReachFailCooldown / logAtInfo /
+  throttlesFailureChat / shouldLogDecline. It has tests and source pins.
+- On the server thread:
+  - per-step logs drop to DEBUG, and the placement-failure WARNs to DEBUG;
+  - failure chats go through the existing 30 s throttle;
+  - a miss never arms the 30 s reach-fail cooldown (a worker skill two seconds later can walk);
+  - one INFO per bot per 30 s:
+    `craft-station tick-side: no table in reach for <bot>, not walking (reason=…)`.
+- The reason is one of `table-blocked`, `no-placement-cell`, `place-intersects-bot`, `place-failed`,
+  `placed-out-of-reach`, `far-table` or `no-table`.
+
+### MutualAid make-room (`d91c6574`)
+- The dropped-food and aid-recipient make-room only **drop** a stack (`CraftingHelper.dropCheapStackForSpace`, which
+  keeps reserved items). This is the 1.1.221 chest-food precedent (`ee67be61`). They never walk to a chest, place one
+  or deposit into one.
+- The gear share checks the donor has something to give BEFORE the recipient makes room. Before, a full recipient
+  could throw a stack away for nothing.
+- A flower never makes a full bot drop anything; the gift is skipped.
+- A failed drop (nothing it may drop) backs off that bot's make-room of that kind for 10 s, instead of re-running and
+  logging every tick.
+  Log line: `mutual-aid make-room: <bot> has nothing it may drop, retry in 10 s (kind=…)`. The backoff is pure
+  `MutualAidMakeRoomPolicy`, with tests.
+- Source pins: BotMutualAidService has no `offloadCheapItemsToNearbyChest` anywhere. Both make-room bodies reach no
+  deposit, chest placement, ChestStoreService or MovementService, and each goes through the drop and the policy.
+
+### Review wave
+One opus review: MutualAid was merge-ready; the station gate had two Important findings, both server-thread only.
+`f56b95a7` fixes them plus three cheap Minors; one re-review.
+- **I1:** the tick-side "no placement cell" flush WARNed on every call. RideSync retries every second, so a mounted
+  bot holding a table got one WARN a second. It now logs at DEBUG on the server thread; the rate-limited
+  `craft-station tick-side … reason=no-placement-cell` line reports the case.
+- **I2:** the chat and reach cooldowns were cleared before the in-reach table was confirmed usable. A table behind
+  a wall (`table-blocked`) then sent "I need a crafting table placed nearby…" every second. The cooldowns are now
+  cleared only on success.
+- **M1:** the source pin now requires the server-thread gate to come before the first `clearPathObstructions(` or
+  `MovementService.` in the method. The fixer deleted the gate and the test failed.
+- **M4:** a destroyed remembered table stayed remembered, and every tick-side miss said `far-table`. It is now
+  forgotten before the reach test (loaded chunks only), so a miss says `no-table`.
+- **M5:** the make-room backoff is keyed per (bot, kind). A failed gear drop no longer blocks that bot's
+  dropped-food make-room.
+- Not changed, and not new: duplicate tables. At 1.1.221 a far table made the tick freeze, arm the reach cooldown,
+  then place or craft one anyway (at most one crafted table per 60 s per bot). Two cases are new:
+  - a bot with `teleportDuringSkills` now crafts a table locally instead of teleporting;
+  - a table 4.5–5.5 blocks away used to return false and now gets a second table beside the bot.
+- Recorded: a server-thread chest placement miss (label `chest`) is now DEBUG only. Nothing louder reports it; the
+  station decline line covers only crafting tables.
+
+### Rulings (made on Bradley's behalf; cost if wrong)
+- **In-reach only on the server thread; walking callers stay put** (Design A over moving the idle crafts to a
+  worker).
+  - Cost: a bot with `teleportDuringSkills` on used to freeze the server, then teleport to a far table; now it
+    places or crafts one beside itself, or fails.
+  - Moving the idle branches to a worker would spread an existing race: craftGeneric mutates the inventory off
+    the thread, as `/bot craft` already does.
+- **MutualAid make-room is drop-only.** Cost:
+  - cheap stacks land on the ground instead of in a chest;
+  - `dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap (pre-existing, now the only path);
+  - a dropped stack (pickup delay 40) can be re-picked if the food or gear isn't collected within 2 s (pre-existing
+    whenever no chest was near).
+- **A flower never makes room.** Cost: full bots stop receiving flowers.
+- **Gear checks the donor first.** No cost; it is still a behaviour change.
+- **Vertical scan ±5 on the server thread, not ±3.** ±3 misses tables that are in reach: 4 above, 5 below.
+- **An in-reach table that can't be made interactable fails the tick-side call** (`table-blocked`) instead of placing a
+  second table beside it. Cost: a tick-only caller next to a blocked table keeps failing until the bot moves or a
+  worker call runs.
+
+### Deferred (same class, not the named paths), with reasons
+- `SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:810/:831) on `/bot cook` and the auto-cook tick:
+  a short sleep, separate file.
+- A server-thread craft with a full inventory: `distributeOutput` → `offloadCheapItemsToNearbyChest` →
+  `ensureInteractable` walk, and `placeChestNearBot` (CH, still `moveToPlacementStand` on any thread when the ready
+  cell is out of reach). Same fix shape; wants its own scope.
+- `BotMutualAidService.processDefensiveSupport` → `approachBot` / `nudgeTowardUntilClose` (1.6–2.4 s freezes on the
+  tick when a hostile is near an ally). Needs a one-impulse or worker design, not a drop.
+- A WARN-only `isOnThread()` tripwire in `MovementService.execute` / `nudgeTowardUntilClose`, as a field instrument
+  for any remaining site.
+- The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may be running
+  (pre-existing).
+- A cheap-only mode for `dropCheapStackForSpace`, or a longer pickup delay on the dropped stack (CH signature change).
+- Dead code: CH `tickFollowStation`, `stashInChest` (with the `placeChestNearBot` overload only it calls), and the
+  unreachable "already have a table" block.
+- `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` walk on a full inventory (review M2),
+  the same class as the `distributeOutput` item above.
+- A flower gift keeps targeting its preferred recipient while that bot is full, so no other bot gets it (review M6;
+  cosmetic).
+- The worker path's own copy of the cooldown-cleared-before-usable pattern (I2). Workers don't retry every second.
+
+Tests 1434 → 1461.
+
+**Field checks:** Phase 6t.
+
 ## Companion supplies Phase 3: every automatic chest withdrawal asks through the supply policy; 1.1.221 (2026-09-25)
 
 Phase 3 of `docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`. The 1.1.219 adapter was

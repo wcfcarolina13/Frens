@@ -3,7 +3,79 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.221) — next session starts here
+## Session Handoff 2026-09-25 (1.1.222) — next session starts here
+
+**State:** main = origin/main @ 1.1.222 (pushed; deployed to all three Prism instances 2026-09-25, game closed).
+Suite 1461 green (1434 → 1461). One build: the 1.1.221 deferrals 2 and 3. Done in a worktree branch and fast-forwarded
+into main.
+
+**Shipped in 1.1.222: the server tick no longer walks to make room or to reach a crafting table.**
+- `CraftingHelper.ensureCraftingStation` on the server thread uses only a table in reach, or places one from inventory
+  on a ready adjacent cell. It never walks, carves (the 6 s `mineBlock().get` freeze), nudges or repositions.
+  - Covers every tick root: the idle tick's four craft branches, `/bot cook` and auto-cook (`craftFurnace`), and
+    RideSync's lead, saddle-stick and fence crafts.
+  - Worker callers are unchanged.
+  - Pure `CraftingStationPolicy`, with a rate-limited decline line:
+    `craft-station tick-side: no table in reach for <bot>, not walking (reason=…)`.
+- MutualAid dropped-food and aid-recipient make-room is drop-only (the 1.1.221 `ee67be61` precedent).
+  - Gear checks the donor has gear before the recipient drops.
+  - A flower never makes a full bot drop.
+  - A failed drop backs off 10 s per (bot, kind) (`MutualAidMakeRoomPolicy`).
+- Scoping: walks on the server thread could never succeed (the sleeping thread is the one that moves the bot), so each
+  one was a freeze followed by a failure. The DropSweeper root in the old deferral was wrong: every sweep caller is a
+  worker.
+- Details, rulings and deferrals are in `changelog.md`. Scope and review notes (local):
+  `.superpowers/sdd/SCOPE-tick-walks-1.1.222/`.
+
+**Rulings made on Bradley's behalf (cost if wrong in the changelog):**
+- In-reach only on the tick (Design A), rather than moving the idle crafts to a worker.
+- MutualAid make-room is drop-only.
+- A flower never makes room.
+- Gear checks the donor first.
+- The tick-side vertical scan is ±5.
+- A blocked in-reach table fails instead of getting a second table beside it.
+
+**Field checks pending:** Phase 6t (new, 7 items; `Can't keep up!` is the freeze detector), plus 6s (do its first item
+first), 6r, 6q, 6p, 6o and 6b–6n. The checklist is now 216 items.
+
+**Deferred (same class of bug), with reasons:**
+1. `SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:~810/~831) on `/bot cook` and the auto-cook tick.
+2. A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` →
+   `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope.
+3. `BotMutualAidService.processDefensiveSupport` → `approachBot` / `nudgeTowardUntilClose` (~:547/:551): a 1.6–2.4 s
+   tick freeze when a hostile is near an ally. Needs a one-impulse or worker design.
+4. A WARN-only `isOnThread()` tripwire in `MovementService.execute` / `nudgeTowardUntilClose`, as a field instrument
+   for any remaining site.
+5. The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run
+   (pre-existing).
+6. `dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked
+   after 2 s. Needs a cheap-only mode or a longer pickup delay (a CraftingHelper signature change).
+7. A flower keeps targeting a full preferred recipient (cosmetic).
+8. Dead code: CH `tickFollowStation`, `stashInChest` with its `placeChestNearBot` overload, and the unreachable
+   "already have a table" block.
+9. A server-thread chest placement miss logs only at DEBUG.
+
+**Deferred from 1.1.221 / 1.1.220:** unchanged (items 1 and 4–10 of the 1.1.221 block below; its items 2 and 3 are
+closed by this build).
+
+**Next autonomous candidates:**
+1. Deferrals 1–3 above: the remaining tick-thread sleeps and walks.
+2. Supplies Phase 4 (needs the WaitMode/need-bundling ruling).
+3. Egress follow-ups.
+4. Addressee deferrals.
+
+**Needs Bradley:** unchanged from 1.1.221:
+- the guided field session (6b–6t);
+- the food reserve of 16 as the survival cutoff;
+- the WaitMode-through-`ensure*` ruling;
+- the doorway rework;
+- the ACTION REQUESTS interview;
+- Bob's TTS sample;
+- `OLLAMA_NUM_PARALLEL`.
+
+---
+
+## Session Handoff 2026-09-25 (1.1.221) — superseded
 
 **State:** main = origin/main @ 1.1.221 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1434
 green (1280 → 1434). One build, one item: supplies Phase 3. Done in a worktree branch and fast-forwarded into main.

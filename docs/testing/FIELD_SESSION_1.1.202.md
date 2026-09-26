@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.221-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.222-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.221** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.222** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1051,6 +1051,65 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
   - Bradley does: `/frens supply revoke all`, then repeat the first check.
   - Claude watches for: `[supply] revoke-all owner=… removed=1`.
   - Pass when: the reply counts what it removed, and the next take prompts again.
+
+## Phase 6t — The game never freezes while a bot looks for a table or makes room (1.1.222)
+
+Before this build, three things a bot does on its own could stop the whole server for 2–6 s at a time:
+- an idle craft looking for a crafting table (the stone-tool upgrade, cobble tools, wooden fallback);
+- a hungry bot with a full bag making room for food on the ground;
+- a bot making room for gear another bot hands it.
+
+Each tried to walk on the server's own tick, which can never move the bot. Now:
+- on the tick, a bot only uses a table within reach, or places one from its inventory beside itself;
+- a full bot only drops a stack; it never walks to a chest.
+`/bot craft` and skills still walk to a far table as before.
+
+Souls optional; Jake is enough, plus Bob for the gear item. Stand within 32 blocks.
+Freeze detector for every item: no `Can't keep up!` line in the log.
+Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`, `mutual-aid make-room`.
+
+- [ ] **Idle stone upgrade with a table in reach (1.1.222)**
+  - Bradley does: give Jake a wooden pickaxe and a wooden shovel (no other pickaxe or shovel), 3 cobblestone and 2
+    sticks, with no planks or logs. Without the shovel he goes off to cut wood for one, which is a different hobby.
+    Put a crafting table 2 blocks from him and let him idle.
+  - Claude watches for: `Idle stone upgrade: Jake upgraded wooden tools to stone`, and no `Can't keep up!`.
+  - Pass when: he crafts the stone pickaxe at that table without going to look for another one, and the game never
+    stutters.
+- [ ] **A far table: no walk, no freeze, one quiet line (1.1.222)**
+  - Bradley does: the same kit, but the only crafting table is about 20 blocks away and Jake holds no table. Let him
+    idle for 3 minutes.
+  - Claude watches for: `craft-station tick-side: no table in reach for Jake, not walking (reason=far-table)` or
+    `(reason=no-table)`. After a miss the idle craft backs off 2 minutes, so expect one or two such lines, not a
+    stream. No `Can't keep up!`. No repeating `Failed to place` WARN.
+  - Pass when: he doesn't walk off to the far table on his own, the game never stutters, and the log stays that
+    quiet.
+- [ ] **A table in his bag gets placed beside him (1.1.222)**
+  - Bradley does: the same kit plus 1 crafting table in Jake's inventory, with no table nearby.
+  - Claude watches for: `Idle stone upgrade: Jake upgraded wooden tools to stone`, and no `Can't keep up!`.
+  - Pass when: a crafting table appears within 2 blocks of him and he crafts the stone pickaxe.
+- [ ] **`/bot craft` still walks to a far table (1.1.222, unchanged)**
+  - Bradley does: with a crafting table about 15 blocks away and planks in Jake's bag (no table in it), run
+    `/bot craft` for a wooden pickaxe.
+  - Claude watches for: no `craft-station tick-side` line for this command.
+  - Pass when: he walks to that table and crafts, as before.
+- [ ] **A starving bot with a full bag drops junk, not a chest walk (1.1.222)**
+  - Bradley does: fill Jake's bag with cobblestone and dirt stacks, put a chest 10 blocks away, then run
+    `/bot set hunger 4 Jake` and drop a bread at his feet.
+  - Claude watches for: `Dropped 64x … to free inventory space.`, then
+    `Mutual aid: Jake cleared inventory space for nearby dropped food`. No `Can't keep up!`.
+  - Pass when: he throws out one junk stack and eats the bread without walking to the chest. Rarely he may pick his
+    own stack back up after 2 s; that is known and accepted.
+- [ ] **Gear: the full bot only makes room when there is something to give (1.1.222)**
+  - Bradley does: fill Bob's bag with junk and take every sword, axe and pickaxe from him (the gear share counts any
+    axe or pickaxe as a weapon). Give Jake one weapon and no leather armour, and wait a minute. Then give Jake two
+    stone swords; he gives away a spare only when he holds at least two weapons.
+  - Claude watches for: no `to free inventory space` line for Bob in the first minute. After the sword, one
+    `Dropped …` for Bob, then `Mutual aid: Jake offered spare gear to Bob`.
+  - Pass when: Bob throws nothing away until Jake actually has a sword for him.
+- [ ] **A flower never makes a full bot drop anything (1.1.222)**
+  - Bradley does: keep Bob's bag full, and give Jake a few flowers.
+  - Claude watches for: no `to free inventory space` line for Bob.
+  - Pass when: Bob keeps all his stacks; the flower gift simply doesn't happen while he is full.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
