@@ -2,6 +2,55 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Modrinth publish-hardening: access control, DM privacy, no native downloads; 1.1.224 (2026-09-25)
+
+The last public Modrinth release is 1.1.1 (2026-04-14, commit 64a78e73). Codex audits (`.superpowers/sdd/modrinth/`, local) found 4 code blockers; three of them (1, 2 and 4 below) were live on Modrinth. Codex (Sol/Astra) did the scoping, the P1b and P4 implementation, and the reviews. Opus did P1a, P2, P3 and the fix waves.
+
+- **Bot access control (P1)** (`1746f8fc`, `05f82d32`, `6105c921`, `e1380c4f`, `366aec9d`). New pure `BotAccessPolicy` + `BotAccessGate`: owner, operator or the integrated host (host passes without op); the target must be a registered fake bot, so human targets are always denied; a deny logs a rate-limited `[bot-access] denied …` WARN.
+  - **Bot inventory screens.** Guide open is checked before the screen or access status is sent, and both `BotInventoryAccess` entry points are gated. `canUse` re-checks every tick: the owner keeps the 8-block rule, except on a remote-spell screen; op and host have remote access. Before, any online player's inventory, human or bot, could be opened by name.
+  - **Navigation spells.** A sunset return answer (accept and dismiss) needs a server-side offer (`NavigationOfferPolicy`: single-use, 120 s, keyed by bot and recipient). Remote Guidance and Chorus Recall authorise the target before any reagent, guidance or teleport.
+  - **Walls, villages and hunts.** Remove/rename resolve the entry type first. A wall needs its owner or op/host, and a mapped village needs op/host (`BaseAccessPolicy`). The three hunt packets need bot access.
+  - **Zones.** The zone list and zone viewing follow base visibility, so hidden bases no longer leak. Viewing is capped at 16 subscriptions per viewer and re-checked every particle tick.
+- **DM privacy (P2)** (`426f5e34`, `366aec9d`, `0e92693f`, `3893a354`).
+  - Digest memories are tagged PUBLIC or PRIVATE from their source channel. A DIRECT conversation makes a PRIVATE memory; the stricter tag wins a merge; legacy untagged memories load PRIVATE.
+  - `SoulPrivacyPolicy` admits a private memory only into (a) the addressed DM reply, or (b) a shared scene while its player is the only human online (captured on the server thread at turn creation).
+  - A scene seeded that way is flagged. Playback re-checks every line and stops the scene (`[souls] scene privacy stop`) if another human would receive it.
+  - Lines from such a scene are stored marked `privateTo`. They are only replayed into prompts when the owner is alone or in their own DM, and memories digested from them are PRIVATE.
+  - Such a scene derives no open threads, peer stances or `##FRENS` side-channel effects.
+- **No native downloads at startup (P3)** (`a7b8ce3b`). The memory DB never used sqlite-vec/vss: embeddings are stored as text and ranked with a Java cosine UDF. Removed:
+  - the download, extract, `xattr` quarantine stripping and native load (`VectorExtensionHelper` is deleted);
+  - `MemorySql` and `VectorMath` are extracted, with an in-memory round-trip test.
+  - The schema is unchanged.
+- **No NLP model downloads at startup** (`ddd19605`). They run only at the first real legacy-LLM demand: ollama4j present plus the world and bot LLM toggles on. The inline action parser is gated the same way.
+- **Legacy chat ownership** (`23f48970`, `366aec9d`). The orchestrator loop, the inline parser (including the raw bot-name path) and `LLMOrchestrator.handleChat` need owner, op or host. A pending FunctionCallerV2 confirmation re-authorises when consumed; if it no longer holds, the player gets "That request to <bot> has expired."
+- **Preference packets** (`5fb4c87d`, `366aec9d`). Unchanged values are ignored and changes are limited to one per player and preference per 500 ms. Saves are batched (at most one per 2 s, plus a flush at shutdown). Resyncs are limited to one per 500 ms.
+- **Permission predicate** (`ddf4ae55`). This was a live bug. The named-class literal never loaded in production, so bot command sources took the first static field of `PermissionPredicate`, probably NONE. It now resolves `LeveledPermissionPredicate.OWNERS` through the Fabric `MappingResolver` (intermediary `class_12086`/`field_63185`, falling back to `class_12096.ALL`). Review found no command-string injection path, and `isOperator(source)` still checks the real player.
+- **Housekeeping** (`c09d758c`, `ed709470`).
+  - `fabric.mod.json` gains issues and homepage links and `conflicts: ai-player`.
+  - Routine follow logs are at DEBUG unless `/bot config diagnostics on` (`verboseDiagnostics`, default off).
+  - The config title now reads "Frens Configuration".
+  - The startup system-property dump is gone.
+- **Rulings (Bradley pre-approved the recommended option; cost if wrong):**
+  - Hardening comes before action requests, per Bradley.
+  - Alone-on-server exception for private memories, with a per-line playback stop. Cost: a scene stops when someone walks up.
+  - Legacy memories default to PRIVATE. Cost: on multiplayer servers old memories vanish from group scenes until new party memories accrue.
+  - Unowned bots are denied to ordinary players. Cost: strangers can't use a bot nobody owns.
+  - The version range stays at `~1.21.10` because the owner deploys to 1.21.10 instances. Only 1.21.11 is listed on Modrinth.
+  - The `ai-player:` sound-rate warnings come from another mod's config, so they are out of scope.
+  - The NLP ZIP downloader repair is deferred; it can no longer run in the standard JAR.
+- **Rollback note:** a jar older than 1.1.224 fails to load party transcripts that contain `privateTo` records, so group scenes return INTERNAL until `/bot soul reset`. Upgrading is unaffected.
+- **Deferred:**
+  - misleading "Out of range" text after an inventory deny (modCommandRegistry);
+  - the recruiter-fallback prompt edge in `resolveController`;
+  - each rejected preference packet still queues one server task;
+  - NLP assets are requested once per JVM, with no retry;
+  - HEARD records (the owner's own replies) are never marked private.
+  - Server-log exposure: the banter seed is logged at INFO even when it holds a private anchor, and raw scene output is logged when lines drop (admin-only, not players).
+  - Suspected race: a private memory removed between the banter seed and prompt assembly could leave the scene flagged public.
+- **Next (proposed, Bradley to confirm):** 1.1.225 is onboarding (`.superpowers/sdd/modrinth/audit-onboarding.md`: the AI-companion setup checklist and multiplayer config reload). Then a clean-install smoke test and the Modrinth upload. 1.1.226 is chat action requests.
+- Tests 1551 → 1662.
+- **Field checks:** Phase 6v.
+
 ## Crafting search, gate follow, redstone doors, craft names, scene smoothing; 1.1.223 (2026-09-25)
 
 The field session of 2026-09-25 (21:23–21:33) ran 1.1.221, because 1.1.222 was never deployed; this build ships both. The build came out of four read-only investigations (a Codex/Astra log review, conversation coherence, request→action, and Jake at the gate) plus a redstone-door scope. Codex (Astra/Sol) did the log review, the batch review, the re-review, the redstone implementation and one fix wave.

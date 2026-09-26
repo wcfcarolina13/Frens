@@ -3,7 +3,55 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.223) — next session starts here
+## Session Handoff 2026-09-25 (1.1.224) — next session starts here
+
+**State:** main = origin/main @ 1.1.224 (deploy status in the docs commit that follows the release). Suite 1662 green
+(1551 → 1662). This is the Modrinth publish-hardening build. The last public Modrinth release is still 1.1.1.
+
+**Shipped in 1.1.224** (details, rulings and cost-if-wrong are in `changelog.md`):
+- **Bot access control.** `BotAccessPolicy`/`BotAccessGate`: owner/op/host only, registered fake bots only.
+  - Inventory screens, including `canUse` re-checked every tick, with a remote-spell exception.
+  - Navigation return prompts need a server offer (`NavigationOfferPolicy`); guidance and recall are authorised.
+  - Wall, village and base remove/rename resolve the entry type first (`BaseAccessPolicy`); the hunt packets are gated.
+  - Zones follow base visibility, capped at 16 per viewer.
+- **DM privacy.**
+  - PlayerMemory is tagged PUBLIC/PRIVATE; `SoulPrivacyPolicy` handles the alone-on-server exception.
+  - Privately seeded scenes stop per line if someone else could hear, mark their transcript lines `privateTo`, and
+    derive no open threads, peer stances or side-channel effects.
+- **No native sqlite-vec/vss.** Nothing ever needed it (Java cosine UDF). No startup NLP downloads.
+- **Legacy chat.** Ownership is checked on every route, and FunctionCallerV2 confirmations re-authorise when consumed.
+- **Preference packets.** Unchanged values are dropped, changes are rate-limited, and saves are batched.
+- **Permission predicate.** It now resolves OWNERS via the MappingResolver. This was a live bug: bot sources probably
+  ran with NONE.
+- **Housekeeping.** `fabric.mod.json` issues/homepage links and `conflicts: ai-player`; `/bot config diagnostics
+  on|off` (routine follow logs at DEBUG by default); config title; the startup property dump is removed.
+
+**Rollback warning:** a jar older than 1.1.224 fails to load party transcripts that contain `privateTo` records.
+Group scenes then return INTERNAL until `/bot soul reset`.
+
+**Field checks pending:** Phase 6v (new, 6 items; 3 need a second non-op account). Run `/bot config diagnostics on`
+first, or the follow-log greps in 6u and earlier won't match. Also still pending: 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n.
+
+**Next builds (PROPOSED 2026-09-25; Bradley to confirm the order):**
+1. **1.1.225 = onboarding** (`.superpowers/sdd/modrinth/audit-onboarding.md`).
+   - Blockers:
+     - The AI-companion activation journey dead-ends. The Bot Controls Soul Chat toggle alone does nothing;
+       `/bot soul enable <bot>` is undiscoverable and reports success while the global switch is off.
+     - Multiplayer: model and voice picks save locally with no server runtime reload; a non-op save is rejected with
+       only a WARN.
+   - Planned fixes: a "Set up AI companions" checklist screen (Ollama detected → model pulled → souls on → bot
+     enabled → test chat → voice); a first-run "no Ollama required" message; the "Ollama is not reachable!" entry is
+     removed from the model list; the false "Processing your message" is removed; a configured-but-missing model can
+     be re-downloaded.
+   - 1.1.224 leftovers (admin-only log exposure; banter seed/removal race) ride along.
+2. **Clean-install smoke test** of both journeys in a fresh Prism instance (ask Bradley before creating it), then
+   the Modrinth upload. The draft changelog is `.superpowers/sdd/modrinth/MODRINTH_CHANGELOG.md`; the clip
+   attribution (engine and voices) is still needed from Bradley.
+3. **1.1.226 = chat action requests.** Scope: `.superpowers/sdd/SCOPE-action-requests-1.1.224/README.md`.
+
+**Deferred:** as listed in the 1.1.224 changelog entry, plus the 1.1.223 deferrals below.
+
+## Session Handoff 2026-09-25 (1.1.223) — superseded
 
 **State:** main = origin/main @ 1.1.223, DEPLOYED to all three Prism instances (2026-09-25 22:40; javap-free check: 7 new
 policy classes present in each mods-dir JAR). This also ships the never-deployed 1.1.222. Suite 1551 green (1461 → 1551).
@@ -35,7 +83,7 @@ policy classes present in each mods-dir JAR). This also ships the never-deployed
      - DIRECT-conversation digests enter publicly audible group-scene prompts (`SoulMemoryDigestService:87` →
        `SoulGroupPromptAssembler:378`).
      - Startup downloads and loads sqlite-vec/vss natives without consent or a hash, and strips macOS quarantine
-       (`Frens:713-716`, `VectorExtensionHelper`).
+       (`Frens:713-716`, `VectorExtensionHelper`) — ✅ closed in 1.1.224 (native loading removed).
    - Cheap should-fixes:
      - The zone list leaks hidden bases (`ZoneNetworkManager:184`).
      - Wall delete/rename (`BaseNetworkManager:702`) and foreign hunt config (`HuntablesNetworkManager:77`) are not
