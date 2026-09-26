@@ -296,7 +296,8 @@ class SupplyPullPolicyTest {
      * axe. Every ask is covered, finds no room (NO_ROOM, the facade keeps the ticket) and nothing
      * ever frees a slot. The pass stops, but it must not hold the idle wooden fallback, or the bot
      * would never craft or cut wood again: it falls through as if nothing were found, pass after
-     * pass, with no miss, no pause and no owner-away defer.
+     * pass, with no miss and no owner-away defer. (A chest tool search still waits the flat
+     * minute: review FF I1.)
      */
     @Test
     void rereviewBN1AFullBotWithAnAlwaysChestAxeDoesNotHoldTheIdleFallback() {
@@ -314,11 +315,12 @@ class SupplyPullPolicyTest {
             assertFalse(p.missed());
             assertFalse(SupplyPullPolicy.holdsIdleFallback(p, true), "the fallback crafts or cuts wood");
             assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(p));
-            assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(p, misses), "never a pause");
+            assertEquals(SupplyPullPolicy.OWNER_AWAY_PAUSE_MS, SupplyPullPolicy.retrievalPauseMs(p, misses),
+                    "a flat minute, never the ladder");
             misses = SupplyPullPolicy.nextMissCount(misses, p);
         }
         assertEquals(0, misses, "never a miss, however often it repeats");
-        // An owner-away chest before it does not turn the full stop into the flat minute either.
+        // An owner-away chest before it does not turn the full stop into an owner-away defer either.
         Pull awayThenFull = pass(Kind.REFUSED, Scope.OWNER_ABSENT, Kind.REFUSED, Scope.INVENTORY_FULL);
         assertFalse(SupplyPullPolicy.ownerAwayDefers(awayThenFull));
         assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(awayThenFull));
@@ -326,6 +328,32 @@ class SupplyPullPolicyTest {
         // What moved before the inventory filled still counts as a success.
         Pull movedThenFull = pass(Kind.MOVED, Scope.NONE, Kind.REFUSED, Scope.INVENTORY_FULL);
         assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(movedThenFull));
+    }
+
+    /**
+     * Review FF I1: the axe breaks mid-tree, all 36 slots are full and an Always chest holds an
+     * axe. The facade answers READY before it checks room, so each search walks to the chest for
+     * NO_ROOM, and Woodcut searches before every log. The search now waits a flat 60 s: never a
+     * miss, never climbing, never a hold, and the idle fallback (N1) still does not hold.
+     */
+    @Test
+    void reviewFFI1AFullToolSearchPausesSixtySecondsWithoutAMiss() {
+        for (int misses : new int[] {0, 3, 7}) {
+            Pull p = pass(Kind.REFUSED, Scope.TARGET, Kind.REFUSED, Scope.INVENTORY_FULL, Kind.MOVED, Scope.NONE);
+            assertTrue(p.full() && p.halted());
+            assertFalse(p.held(), "not a hold: the next search refreshes the snapshots");
+            assertFalse(p.missed());
+            assertEquals(60_000L, SupplyPullPolicy.retrievalPauseMs(p, misses), "flat, whatever the misses");
+            assertEquals(SupplyPullPolicy.OWNER_AWAY_PAUSE_MS, SupplyPullPolicy.retrievalPauseMs(p, misses));
+            assertEquals(misses, SupplyPullPolicy.nextMissCount(misses, p), "the miss ladder is untouched");
+            assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(p));
+            assertFalse(SupplyPullPolicy.holdsIdleFallback(p, true), "N1: full never holds the idle fallback");
+        }
+        Pull awayThenFull = pass(Kind.REFUSED, Scope.OWNER_ABSENT, Kind.REFUSED, Scope.INVENTORY_FULL);
+        assertEquals(60_000L, SupplyPullPolicy.retrievalPauseMs(awayThenFull, 2));
+        assertEquals(2, SupplyPullPolicy.nextMissCount(2, awayThenFull));
+        Pull movedThenFull = pass(Kind.MOVED, Scope.NONE, Kind.REFUSED, Scope.INVENTORY_FULL);
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(movedThenFull, 2), "it took its tool");
     }
 
     @Test
@@ -391,8 +419,9 @@ class SupplyPullPolicyTest {
         assertEquals(60_000L, SupplyPullPolicy.retrievalPauseMs(missed, 0));
         assertEquals(240_000L, SupplyPullPolicy.retrievalPauseMs(missed, 2));
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(Pull.NOTHING, 2));
-        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(new Pull(0, false, false, true, false, true, true), 2),
-                "a full inventory never pauses the search");
+        assertEquals(SupplyPullPolicy.OWNER_AWAY_PAUSE_MS,
+                SupplyPullPolicy.retrievalPauseMs(new Pull(0, false, false, true, false, true, true), 2),
+                "a full inventory pauses the search a flat minute (review FF I1)");
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(null, 2));
         assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(new Pull(1, false, false, false, true, false, true), 2),
                 "a search that took its tool never pauses");

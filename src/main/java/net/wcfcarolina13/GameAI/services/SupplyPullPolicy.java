@@ -29,9 +29,11 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  *   <li>{@link Scope#BOT}: stop the pass; one step on the caller's backoff (a miss).</li>
  *   <li>{@link Scope#BUSY}: stop the pass and hold like a prompt still open: the caller looks
  *       again at its short cadence. Never a miss, never a pause.</li>
- *   <li>{@link Scope#INVENTORY_FULL}: stop the pass (nothing more fits). Never a miss, never a
- *       pause, and never a hold: the caller goes on with its other work as if nothing were found,
- *       since nothing here frees a slot. {@code MutualAidChestFoodPolicy} alone makes room, once.</li>
+ *   <li>{@link Scope#INVENTORY_FULL}: stop the pass (nothing more fits). Never a miss and never a
+ *       hold: the caller goes on with its other work as if nothing were found, since nothing here
+ *       frees a slot. A chest tool search then waits the flat {@link #OWNER_AWAY_PAUSE_MS}
+ *       ({@link #retrievalPauseMs}); the idle pull does not back off.
+ *       {@code MutualAidChestFoodPolicy} alone makes room, once.</li>
  * </ul>
  * A pass that met only item, chest and target refusals ends as "nothing found": no pause, no miss.
  *
@@ -277,7 +279,7 @@ public final class SupplyPullPolicy {
      * Whether a finished pass earns the flat owner-away wait ({@link #OWNER_AWAY_PAUSE_MS}): it
      * found the owner away and ended empty-handed without anything else to say — nothing moved,
      * nothing held (no prompt open, no grant waiting, no busy stop), no full inventory (that stop
-     * is never a pause, and it ended the pass before every chest was asked) and no miss (the
+     * pauses on its own, and it ended the pass before every chest was asked) and no miss (the
      * owner's own answer backs off on the miss ladder instead).
      */
     public static boolean ownerAwayDefers(Pull pass) {
@@ -343,8 +345,10 @@ public final class SupplyPullPolicy {
      * How long a chest tool search waits before it asks again, in the same order as
      * {@link #idleBackoff}: 0 when it took something; {@link #WAITING_RECHECK_MS} when it held
      * (come back soon to redeem a grant, or to retry a busy answer); {@link #missPauseMs} after a
-     * miss; {@link #OWNER_AWAY_PAUSE_MS} when the owner was away and nothing else happened; and 0
-     * when it asked nothing, found nothing, or found the inventory full.
+     * miss; the flat {@link #OWNER_AWAY_PAUSE_MS} when the inventory was full (the facade answers
+     * a full bot READY, so without it Woodcut would walk to the chest for NO_ROOM before every log;
+     * never a miss) or when the owner was away and nothing else happened; and 0 when it asked
+     * nothing or found nothing.
      */
     public static long retrievalPauseMs(Pull search, int priorMisses) {
         if (search == null || search.movedAny()) {
@@ -355,6 +359,9 @@ public final class SupplyPullPolicy {
         }
         if (search.missed()) {
             return missPauseMs(priorMisses);
+        }
+        if (search.full()) {
+            return OWNER_AWAY_PAUSE_MS;
         }
         return ownerAwayDefers(search) ? OWNER_AWAY_PAUSE_MS : 0L;
     }
