@@ -114,6 +114,27 @@ public final class SoulSnapshotBuilder {
         return assemble(botSnapshot, playerSnapshot, situationSnapshot, reachability, Instant.now());
     }
 
+    /**
+     * The human players online right now — every connected player that is neither a Frens fake
+     * bot nor a registered bot id. SERVER THREAD ONLY (reads the player list): group turns
+     * capture this at creation and carry it, because their prompts are assembled off-thread
+     * ({@link SoulPrivacyPolicy} alone-on-server exception, 1.1.224).
+     */
+    public static java.util.Set<java.util.UUID> onlineHumanIds(MinecraftServer server) {
+        if (server == null || server.getPlayerManager() == null) {
+            return java.util.Set.of();
+        }
+        java.util.Set<java.util.UUID> humans = new java.util.LinkedHashSet<>();
+        for (ServerPlayerEntity online : server.getPlayerManager().getPlayerList()) {
+            if (online instanceof net.wcfcarolina13.Entity.createFakePlayer
+                    || net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(online.getUuid())) {
+                continue;
+            }
+            humans.add(online.getUuid());
+        }
+        return java.util.Set.copyOf(humans);
+    }
+
     private static SoulTypes.BotSnapshot captureBot(MinecraftServer server, ServerPlayerEntity bot) {
         String botAlias = bot.getName().getString();
         ServerWorld world = (ServerWorld) bot.getEntityWorld();

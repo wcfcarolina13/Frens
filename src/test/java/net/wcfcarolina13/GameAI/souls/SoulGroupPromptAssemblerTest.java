@@ -435,13 +435,81 @@ class SoulGroupPromptAssemblerTest {
                 "hi", Instant.EPOCH, UUID.randomUUID(), false);
     }
 
+    /** Party-sourced (PUBLIC) memories: admitted to any group scene. */
     private static SoulTypes.SoulMind mindRemembering(UUID owner, String... facts) {
+        return mindRemembering(owner, SoulTypes.MemoryVisibility.PUBLIC, facts);
+    }
+
+    private static SoulTypes.SoulMind mindRemembering(UUID owner, SoulTypes.MemoryVisibility visibility,
+                                                      String... facts) {
         List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
         for (String fact : facts) {
-            memories.add(new SoulTypes.PlayerMemory(owner, 3, fact, 8, -1, List.of()));
+            memories.add(new SoulTypes.PlayerMemory(owner, 3, fact, 8, -1, List.of(), visibility));
         }
         return new SoulTypes.SoulMind(1, SoulTypes.Stance.BASELINE, List.of(), List.of(), Set.of(),
                 0L, 1, -1, memories, List.of(), java.util.Map.of());
+    }
+
+    private static SoulGroupTypes.GroupSceneTurn sceneWithOnline(SoulGroupTypes.SceneKind kind, UUID owner,
+                                                                  UUID jake, UUID sara, Set<UUID> online) {
+        return new SoulGroupTypes.GroupSceneTurn(kind, owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake")),
+                        new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara"))),
+                "hi", Instant.EPOCH, UUID.randomUUID(), false, online);
+    }
+
+    private static String aboutOf(SoulTypes.ProviderRequest req) {
+        return req.messages().stream().map(SoulTypes.Message::content)
+                .filter(c -> c.startsWith("ABOUT ")).findFirst().orElse("");
+    }
+
+    // === 1.1.224 P2: DM-private memories never reach an audible group prompt ===
+
+    @Test
+    void privateMemoryIsWithheldFromGroupSceneWhenAnotherHumanIsOnline() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(owner, 3, "Bradley is scared of the dark", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE),
+                new SoulTypes.PlayerMemory(owner, 3, "Bradley wants a farm", 5, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PUBLIC)));
+        SoulGroupPromptAssembler assembler = new SoulGroupPromptAssembler(id -> Optional.of(mind));
+        for (SoulGroupTypes.SceneKind kind : SoulGroupTypes.SceneKind.values()) {
+            String about = aboutOf(assembler.assemble(UUID.randomUUID(), "m",
+                    sceneWithOnline(kind, owner, jake, sara, Set.of(owner, UUID.randomUUID())),
+                    twoProfiles(), List.of(), Duration.ofSeconds(5)));
+            assertTrue(about.contains("- Bradley wants a farm"), kind + ": " + about);
+            assertFalse(about.contains("scared of the dark"), kind + " leaked a DM memory: " + about);
+        }
+    }
+
+    @Test
+    void privateMemoryReachesGroupSceneWhenOwnerIsAloneOnServer() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind mind = mindRemembering(owner, SoulTypes.MemoryVisibility.PRIVATE,
+                "Bradley is scared of the dark");
+        String about = aboutOf(new SoulGroupPromptAssembler(id -> Optional.of(mind)).assemble(UUID.randomUUID(), "m",
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner)),
+                twoProfiles(), List.of(), Duration.ofSeconds(5)));
+        assertTrue(about.contains("- Bradley is scared of the dark"), about);
+    }
+
+    @Test
+    void privateMemoryIsWithheldWhenTheOnlineSetIsUnknown() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind mind = mindRemembering(owner, SoulTypes.MemoryVisibility.PRIVATE,
+                "Bradley is scared of the dark");
+        // The pre-1.1.224 constructor carries no online set: fail closed.
+        SoulTypes.ProviderRequest req = new SoulGroupPromptAssembler(id -> Optional.of(mind)).assemble(
+                UUID.randomUUID(), "m", playerTurnWithOwner(owner, jake, sara), twoProfiles(), List.of(),
+                Duration.ofSeconds(5));
+        assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
     }
 
     private static SoulTypes.SoulMind mindBelieving(SoulTypes.RelationFact... facts) {

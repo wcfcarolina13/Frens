@@ -252,8 +252,12 @@ public final class SoulGroupRouter {
             return RouteOutcome.CONSUMED;
         }
 
-        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(sender.getUuid(),
-                sender.getName().getString(), roster, safePrompt, Instant.now(), routingId);
+        // Online humans captured on the server thread; the prompt is assembled off-thread
+        // (SoulPrivacyPolicy alone-on-server exception, 1.1.224).
+        SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
+                SoulGroupTypes.SceneKind.PLAYER, sender.getUuid(), sender.getName().getString(),
+                roster, safePrompt, Instant.now(), routingId, false,
+                SoulSnapshotBuilder.onlineHumanIds(server));
         logScene(routingId, sender, "submitted", candidates.size(), roster.size(), routeStartNanos);
         runtime.submitGroupTurn(turn);
         return RouteOutcome.CONSUMED;

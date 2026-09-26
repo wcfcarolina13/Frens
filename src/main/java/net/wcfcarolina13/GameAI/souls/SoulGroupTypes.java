@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.souls;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -83,10 +84,15 @@ public final class SoulGroupTypes {
      * An accepted group turn: N roster bots, one triggering owner, one message. {@code routingId}
      * plays the same correlation role as {@link SoulTypes.AcceptedTurn#routingId()} — minted at
      * the routing surface, adopted end to end, and reused to derive per-line voice group ids.
+     * {@code onlineHumanIds} is the set of human players online when the turn was created,
+     * captured on the server thread ({@code SoulSnapshotBuilder.onlineHumanIds}) because the
+     * prompt is assembled off-thread; it feeds {@link SoulPrivacyPolicy}'s alone-on-server
+     * exception. Empty means unknown, and withholds every DM-private memory.
      */
     public record GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                   List<SceneParticipant> roster, String playerMessage,
-                                  Instant acceptedAt, UUID routingId, boolean addressPlayer) {
+                                  Instant acceptedAt, UUID routingId, boolean addressPlayer,
+                                  Set<UUID> onlineHumanIds) {
         public GroupSceneTurn {
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(ownerId, "ownerId");
@@ -95,6 +101,20 @@ public final class SoulGroupTypes {
             ownerDisplayName = ownerDisplayName == null ? "" : ownerDisplayName;
             playerMessage = playerMessage == null ? "" : playerMessage;
             roster = roster == null ? List.of() : List.copyOf(roster);
+            onlineHumanIds = onlineHumanIds == null ? Set.of() : Set.copyOf(onlineHumanIds);
+        }
+
+        /** Pre-1.1.224 shape: the online-humans set is unknown (empty), so private memories are withheld. */
+        public GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
+                               List<SceneParticipant> roster, String playerMessage,
+                               Instant acceptedAt, UUID routingId, boolean addressPlayer) {
+            this(kind, ownerId, ownerDisplayName, roster, playerMessage, acceptedAt,
+                    routingId, addressPlayer, Set.of());
+        }
+
+        /** The audience every line of this scene may reach (anyone in earshot). */
+        public SoulPrivacyPolicy.Audience audience() {
+            return SoulPrivacyPolicy.Audience.shared(ownerId, onlineHumanIds);
         }
 
         /**

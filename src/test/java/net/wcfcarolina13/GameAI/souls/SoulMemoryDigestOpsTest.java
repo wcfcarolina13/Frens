@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class SoulMemoryDigestOpsTest {
     private static final UUID BOT = UUID.randomUUID();
     private static final UUID PLAYER = UUID.randomUUID();
+    /** The addressed DM reply to PLAYER: admits PLAYER's own private memories. */
+    private static final SoulPrivacyPolicy.Audience DM = SoulPrivacyPolicy.Audience.directMessage(PLAYER);
     private static long seq = 0;
 
     private static SoulTypes.ConversationRecord rec(SoulTypes.TurnKind kind, String content, UUID corr, List<UUID> parts) {
@@ -73,7 +75,8 @@ class SoulMemoryDigestOpsTest {
                 new SoulTypes.PlayerMemory(other, 1, "Sam likes cats", 5, -1, List.of())));
         UUID src = UUID.randomUUID();
         List<SoulTypes.PlayerMemory> merged = SoulMemoryDigestOps.merge(existing, PLAYER,
-                List.of("Roti really hates the Nether", "Roti wants a farm"), 4, List.of(src));
+                List.of("Roti really hates the Nether", "Roti wants a farm"), 4, List.of(src),
+                SoulTypes.MemoryVisibility.PRIVATE);
         SoulTypes.PlayerMemory bumped = merged.stream().filter(m -> m.fact().equals("Roti hates the Nether")).findFirst().orElseThrow();
         assertEquals(7, bumped.salience());
         assertEquals(List.of(src), bumped.sourceCorrelationIds());
@@ -83,7 +86,8 @@ class SoulMemoryDigestOpsTest {
         List<SoulTypes.PlayerMemory> many = new ArrayList<>();
         for (int i = 0; i < SoulMemoryDigestOps.MAX_PER_PLAYER; i++)
             many.add(new SoulTypes.PlayerMemory(PLAYER, i, "Roti fact number " + i + " alpha" + i, i + 1, -1, List.of()));
-        List<SoulTypes.PlayerMemory> capped = SoulMemoryDigestOps.merge(many, PLAYER, List.of("Roti brand new zeta"), 30, List.of());
+        List<SoulTypes.PlayerMemory> capped = SoulMemoryDigestOps.merge(many, PLAYER, List.of("Roti brand new zeta"), 30, List.of(),
+                SoulTypes.MemoryVisibility.PRIVATE);
         assertEquals(SoulMemoryDigestOps.MAX_PER_PLAYER, capped.size());
         assertFalse(capped.stream().anyMatch(m -> m.fact().endsWith("alpha0")));
     }
@@ -103,15 +107,15 @@ class SoulMemoryDigestOpsTest {
         assertEquals(5, recalled.playerMemories().get(0).lastRecalledDay());
 
         RandomGenerator rnd = new Random(1);
-        assertTrue(SoulMemoryDigestOps.anchors(recalled, PLAYER, "Roti", 6, rnd).isEmpty()); // cooldown
-        List<SoulBanterSeed.Anchor> a = SoulMemoryDigestOps.anchors(recalled, PLAYER, "Roti", 9, rnd);
+        assertTrue(SoulMemoryDigestOps.anchors(recalled, PLAYER, "Roti", 6, rnd, DM).isEmpty()); // cooldown
+        List<SoulBanterSeed.Anchor> a = SoulMemoryDigestOps.anchors(recalled, PLAYER, "Roti", 9, rnd, DM);
         assertEquals(1, a.size());
         assertEquals(SoulMindOps.MEMORY_TOPIC_PREFIX + key, a.get(0).topic());
         assertEquals("Roti once said: Roti wants a farm", a.get(0).phrase());
         assertEquals(SoulMindOps.MEMORY_ANCHOR_WEIGHT, a.get(0).weight());
 
-        assertEquals(List.of("- Roti wants a farm"), SoulMemoryDigestOps.aboutLines(recalled, PLAYER));
-        assertTrue(SoulMemoryDigestOps.aboutLines(recalled, UUID.randomUUID()).isEmpty());
+        assertEquals(List.of("- Roti wants a farm"), SoulMemoryDigestOps.aboutLines(recalled, PLAYER, DM));
+        assertTrue(SoulMemoryDigestOps.aboutLines(recalled, UUID.randomUUID(), DM).isEmpty());
 
         SoulTypes.SoulMind withCursor = SoulMemoryDigestOps.withCursor(recalled, "DIRECT:" + PLAYER, new SoulTypes.ConversationCursor(1L, 9L));
         assertEquals(new SoulTypes.ConversationCursor(1L, 9L), SoulMemoryDigestOps.cursorFor(withCursor, "DIRECT:" + PLAYER));
@@ -140,6 +144,79 @@ class SoulMemoryDigestOpsTest {
         assertEquals(PLAYER, archived.archivedPlayerMemories().get(0).playerId());
     }
 
+    // === 1.1.224 visibility tags (P2) ===
+
+    @Test void mergeTagsNewMemoriesWithTheSourceVisibility() {
+        List<SoulTypes.PlayerMemory> dm = SoulMemoryDigestOps.merge(List.of(), PLAYER,
+                List.of("Roti hates the Nether"), 1, List.of(),
+                SoulPrivacyPolicy.visibilityFor(SoulTypes.Channel.DIRECT));
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE, dm.get(0).visibility());
+
+        List<SoulTypes.PlayerMemory> party = SoulMemoryDigestOps.merge(List.of(), PLAYER,
+                List.of("Roti hates the Nether"), 1, List.of(),
+                SoulPrivacyPolicy.visibilityFor(SoulTypes.Channel.PARTY));
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC, party.get(0).visibility());
+    }
+
+    @Test void mixedSourceMergeKeepsTheStricterTag() {
+        List<SoulTypes.PlayerMemory> publicFirst = SoulMemoryDigestOps.merge(List.of(), PLAYER,
+                List.of("Roti hates the Nether"), 1, List.of(), SoulTypes.MemoryVisibility.PUBLIC);
+        List<SoulTypes.PlayerMemory> thenDm = SoulMemoryDigestOps.merge(publicFirst, PLAYER,
+                List.of("Roti really hates the Nether"), 2, List.of(), SoulTypes.MemoryVisibility.PRIVATE);
+        assertEquals(1, thenDm.size());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE, thenDm.get(0).visibility(), "private wins a PUBLIC+DM merge");
+
+        List<SoulTypes.PlayerMemory> privateFirst = SoulMemoryDigestOps.merge(List.of(), PLAYER,
+                List.of("Roti hates the Nether"), 1, List.of(), SoulTypes.MemoryVisibility.PRIVATE);
+        List<SoulTypes.PlayerMemory> thenParty = SoulMemoryDigestOps.merge(privateFirst, PLAYER,
+                List.of("Roti really hates the Nether"), 2, List.of(), SoulTypes.MemoryVisibility.PUBLIC);
+        assertEquals(1, thenParty.size());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE, thenParty.get(0).visibility(),
+                "a later party repeat never un-privates a DM memory");
+    }
+
+    @Test void legacyConstructorAndNullTagDefaultToPrivate() {
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti hates the Nether", 5, -1, List.of()).visibility());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti hates the Nether", 5, -1, List.of(), null).visibility());
+    }
+
+    @Test void decayAndRecallPreserveTheTag() {
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti wants a farm", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PUBLIC)));
+        SoulTypes.SoulMind decayed = SoulMemoryDigestOps.decay(mind);
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC, decayed.playerMemories().get(0).visibility());
+        SoulTypes.SoulMind recalled = SoulMemoryDigestOps.noteRecalled(decayed,
+                SoulMemoryDigestOps.factKey("Roti wants a farm"), 5);
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC, recalled.playerMemories().get(0).visibility());
+    }
+
+    @Test void sharedAudienceFiltersAboutLinesAndAnchorsAndCountsWithheld() {
+        UUID stranger = UUID.randomUUID();
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(PLAYER, 1, "Roti is scared of the dark", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE),
+                new SoulTypes.PlayerMemory(PLAYER, 2, "Roti wants a farm", 5, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PUBLIC)));
+        SoulPrivacyPolicy.Audience crowd = SoulPrivacyPolicy.Audience.shared(PLAYER, Set.of(PLAYER, stranger));
+        assertEquals(List.of("- Roti wants a farm"), SoulMemoryDigestOps.aboutLines(mind, PLAYER, crowd));
+        assertEquals(1, SoulMemoryDigestOps.withheldFor(mind, PLAYER, crowd));
+        List<SoulBanterSeed.Anchor> anchors = SoulMemoryDigestOps.anchors(mind, PLAYER, "Roti", 9, new Random(1), crowd);
+        assertEquals(List.of("Roti once said: Roti wants a farm"), anchors.stream().map(SoulBanterSeed.Anchor::phrase).toList(),
+                "the stronger private memory must not seed banter others can hear");
+
+        SoulPrivacyPolicy.Audience alone = SoulPrivacyPolicy.Audience.shared(PLAYER, Set.of(PLAYER));
+        assertEquals(List.of("- Roti is scared of the dark", "- Roti wants a farm"),
+                SoulMemoryDigestOps.aboutLines(mind, PLAYER, alone));
+        assertEquals(0, SoulMemoryDigestOps.withheldFor(mind, PLAYER, alone));
+        assertEquals("Roti once said: Roti is scared of the dark",
+                SoulMemoryDigestOps.anchors(mind, PLAYER, "Roti", 9, new Random(1), alone).get(0).phrase());
+
+        assertEquals(2, SoulMemoryDigestOps.aboutLines(mind, PLAYER, DM).size());
+    }
+
     @Test void aboutLinesCapsLineCountInSalienceDescendingOrder() {
         List<SoulTypes.PlayerMemory> memories = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
@@ -147,7 +224,7 @@ class SoulMemoryDigestOpsTest {
         }
         SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), memories);
 
-        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER);
+        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER, DM);
 
         assertEquals(SoulMemoryDigestOps.MAX_ABOUT_LINES, lines.size());
         assertEquals(List.of("- Roti fact 7", "- Roti fact 6", "- Roti fact 5", "- Roti fact 4", "- Roti fact 3"), lines);
@@ -161,7 +238,7 @@ class SoulMemoryDigestOpsTest {
         }
         SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), memories);
 
-        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER);
+        List<String> lines = SoulMemoryDigestOps.aboutLines(mind, PLAYER, DM);
 
         assertTrue(lines.size() < 5);
         assertTrue(String.join("\n", lines).length() <= SoulMemoryDigestOps.MAX_ABOUT_CHARS);

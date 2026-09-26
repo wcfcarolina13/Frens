@@ -175,6 +175,8 @@ public final class SoulMemoryDigestService {
         SoulTypes.ConversationKey schedulerKey =
                 new SoulTypes.ConversationKey(botId, playerId, SoulTypes.Channel.SYSTEM);
         List<UUID> sources = sources(material);
+        // 1.1.224: a DM digest is private to that player; a party digest was already heard.
+        SoulTypes.MemoryVisibility visibility = SoulPrivacyPolicy.visibilityFor(key.channel());
 
         return scheduler.submit(schedulerKey, 0L, () -> provider.generate(request))
                 .handle((result, error) -> Outcome.of(result, error, playerName))
@@ -195,7 +197,8 @@ public final class SoulMemoryDigestService {
                                 }
                                 return SoulMemoryDigestOps.withCursor(
                                         SoulMindOps.withPlayerMemories(mind, SoulMemoryDigestOps.merge(
-                                                mind.playerMemories(), playerId, outcome.facts(), day, sources)),
+                                                mind.playerMemories(), playerId, outcome.facts(), day, sources,
+                                                visibility)),
                                         cursorKey, material.next());
                             })
                             .thenAccept(ignored -> {

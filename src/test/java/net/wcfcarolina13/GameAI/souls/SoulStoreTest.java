@@ -671,6 +671,47 @@ class SoulStoreTest {
     }
 
     @Test
+    void legacyPlayerMemoryWithoutVisibilityLoadsAsPrivateToItsPlayer() throws Exception {
+        // 1.1.224 P2: mind.json written before the visibility tag existed. A missing tag must load
+        // as PRIVATE (fail closed) — never as PUBLIC — and no bulk rewrite is needed.
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        UUID source = UUID.randomUUID();
+        Path dir = worldRoot.resolve("frens/souls/v1").resolve(bot.toString());
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("mind.json"), "{\"schemaVersion\":1,\"playerStance\":{\"trust\":3,\"exasperation\":0,\"curiosity\":3},"
+                + "\"threads\":[],\"memories\":[],\"seen\":[],\"lastConsolidatedAtMs\":0,\"lastDay\":-1,\"lastTaskTrustDay\":-1,"
+                + "\"playerMemories\":[{\"playerId\":\"" + player + "\",\"day\":3,\"fact\":\"Roti is scared of the dark\","
+                + "\"salience\":7,\"lastRecalledDay\":-1,\"sourceCorrelationIds\":[\"" + source + "\"]}]}");
+        SoulTypes.SoulMind mind = store.mind(bot).get(2, SECONDS);
+        assertEquals(1, mind.playerMemories().size());
+        SoulTypes.PlayerMemory loaded = mind.playerMemories().get(0);
+        assertEquals(player, loaded.playerId());
+        assertEquals("Roti is scared of the dark", loaded.fact());
+        assertEquals(List.of(source), loaded.sourceCorrelationIds());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE, loaded.visibility());
+        assertTrue(SoulPrivacyPolicy.admits(loaded, SoulPrivacyPolicy.Audience.directMessage(player)));
+        assertFalse(SoulPrivacyPolicy.admits(loaded,
+                SoulPrivacyPolicy.Audience.shared(player, Set.of(player, UUID.randomUUID()))));
+    }
+
+    @Test
+    void playerMemoryVisibilityRoundTripsThroughMindJson() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        List<SoulTypes.PlayerMemory> memories = List.of(
+                new SoulTypes.PlayerMemory(player, 3, "Roti wants a farm", 7, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PUBLIC),
+                new SoulTypes.PlayerMemory(player, 4, "Roti is scared of the dark", 7, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE));
+        store.updateMind(bot, m -> SoulMindOps.withPlayerMemories(m, memories)).get(2, SECONDS);
+        String json = Files.readString(botDir(bot).resolve("mind.json"));
+        assertTrue(json.contains("\"visibility\":\"PUBLIC\""), json);
+        SoulStore reopened = new SoulStore(worldRoot, Executors.newSingleThreadExecutor());
+        assertEquals(memories, reopened.mind(bot).get(2, SECONDS).playerMemories());
+    }
+
+    @Test
     void relationsRoundTripThroughMindJson() throws Exception {
         UUID bot = UUID.randomUUID();
         List<SoulTypes.RelationFact> facts = List.of(

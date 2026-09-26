@@ -30,6 +30,8 @@ public final class SoulGroupPromptAssembler {
      */
     public static final String BANTER_HEARD_PREFIX = "[banter] ";
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("frens.souls");
+
     static final int MAX_HISTORY_TURNS = 12;
     static final int MAX_HISTORY_CHARS = 4_000;
     static final int MAX_IDENTITY_CHARS_PER_BOT = 600;
@@ -104,6 +106,7 @@ public final class SoulGroupPromptAssembler {
         threadsBlock(turn).ifPresent(messages::add);
         aboutBlock(turn).ifPresent(messages::add);
         beliefsBlock(turn).ifPresent(messages::add);
+        logWithheld(correlationId, turn);
         messages.addAll(boundedHistory(partyHistory));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
@@ -375,7 +378,9 @@ public final class SoulGroupPromptAssembler {
             if (mind.isEmpty()) {
                 continue;
             }
-            List<String> lines = SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId());
+            // Every group scene is audible to anyone in earshot: DM-private memories are admitted
+            // only when the owner is the only human online (SoulPrivacyPolicy, 1.1.224).
+            List<String> lines = SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId(), turn.audience());
             if (lines.isEmpty()) {
                 continue;
             }
@@ -386,6 +391,25 @@ public final class SoulGroupPromptAssembler {
         return any
                 ? Optional.of(new SoulTypes.Message(SoulTypes.Role.SYSTEM, sb.toString()))
                 : Optional.empty();
+    }
+
+    /**
+     * One DEBUG line per scene: how many of the owner's DM-private memories the roster held but
+     * this scene's audience may not hear. A count only — never the content.
+     */
+    private void logWithheld(UUID correlationId, SoulGroupTypes.GroupSceneTurn turn) {
+        if (!LOGGER.isDebugEnabled()) {
+            return;
+        }
+        int withheld = 0;
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            if (mind.isPresent()) {
+                withheld += SoulMemoryDigestOps.withheldFor(mind.get(), turn.ownerId(), turn.audience());
+            }
+        }
+        LOGGER.debug("[souls] scene privacy correlationId={} kind={} withheldPrivateMemories={} onlineHumans={}",
+                correlationId, turn.kind(), withheld, turn.onlineHumanIds().size());
     }
 
     // === BELIEFS (typed relation facts the bots hold) ===
@@ -414,8 +438,9 @@ public final class SoulGroupPromptAssembler {
             if (mind.isEmpty()) {
                 continue;
             }
+            // Dedup against the same privacy-filtered ABOUT lines the prompt actually carries.
             List<String> lines = SoulRelationOps.beliefLines(mind.get(),
-                    SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId()));
+                    SoulMemoryDigestOps.aboutLines(mind.get(), turn.ownerId(), turn.audience()));
             if (lines.isEmpty()) {
                 continue;
             }

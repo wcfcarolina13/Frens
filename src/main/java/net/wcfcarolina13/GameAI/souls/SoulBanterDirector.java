@@ -327,13 +327,20 @@ public final class SoulBanterDirector {
         int currentDay = (int) (player.getEntityWorld().getTimeOfDay() / 24000L);
         Set<String> seenBefore = new LinkedHashSet<>();
         List<SoulBanterSeed.Anchor> mindAnchors = new ArrayList<>();
+        // 1.1.224: banter is heard by anyone in earshot, so a DM-private memory may seed it only
+        // when this player is the only human online. Captured once, here on the server thread,
+        // and carried on the turn for the (off-thread) prompt assembly.
+        Set<UUID> onlineHumans = SoulSnapshotBuilder.onlineHumanIds(server);
+        SoulPrivacyPolicy.Audience audience = SoulPrivacyPolicy.Audience.shared(playerId, onlineHumans);
+        int withheldPrivate = 0;
         for (int i = 0; i < minds.size(); i++) {
             seenBefore.addAll(minds.get(i).seen());
             mindAnchors.addAll(SoulMindOps.anchors(minds.get(i), roster.get(i).displayName(),
                     currentDay, random));
             // Player-memory anchors: something the player once said, off cooldown.
             mindAnchors.addAll(SoulMemoryDigestOps.anchors(minds.get(i), player.getUuid(),
-                    player.getName().getString(), currentDay, random));
+                    player.getName().getString(), currentDay, random, audience));
+            withheldPrivate += SoulMemoryDigestOps.withheldFor(minds.get(i), player.getUuid(), audience);
             // Phase 3b relation anchors: a typed belief this bot holds, off cooldown. Gated on
             // soulRelationsEnabled (live read) so the default-off build seeds exactly as before.
             if (relationsEnabled()) {
@@ -390,7 +397,9 @@ public final class SoulBanterDirector {
         boolean addressPlayer = decideAddressPlayer(roster.size(), random);
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 kind(lane), playerId, player.getName().getString(),
-                roster, seed, Instant.now(), routingId, addressPlayer);
+                roster, seed, Instant.now(), routingId, addressPlayer, onlineHumans);
+        LOGGER.debug("[souls] banter privacy routingId={} withheldPrivateMemories={} onlineHumans={}",
+                routingId, withheldPrivate, onlineHumans.size());
         long armedUntilMs = now + nextDelay(lane);
         cooldowns(lane).put(playerId, armedUntilMs);
         recordVerdict(playerId, lane, "fired");

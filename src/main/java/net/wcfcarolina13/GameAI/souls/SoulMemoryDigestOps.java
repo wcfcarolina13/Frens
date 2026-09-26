@@ -262,10 +262,13 @@ final class SoulMemoryDigestOps {
      * an existing memory by {@link #DUP_JACCARD} bumps and re-sources that memory in place,
      * anything else is appended at {@link #INITIAL_SALIENCE}. Past {@link #MAX_PER_PLAYER} the
      * lowest-salience then oldest memory of that player is evicted. Other players' memories and
-     * their order are untouched.
+     * their order are untouched. New memories carry {@code visibility}; a dup-merge keeps the
+     * stricter of the old and incoming tags ({@link SoulPrivacyPolicy#stricter}: private wins).
      */
     static List<SoulTypes.PlayerMemory> merge(List<SoulTypes.PlayerMemory> existing, UUID playerId,
-                                              List<String> facts, int day, List<UUID> sources) {
+                                              List<String> facts, int day, List<UUID> sources,
+                                              SoulTypes.MemoryVisibility visibility) {
+        SoulTypes.MemoryVisibility incoming = visibility == null ? SoulTypes.MemoryVisibility.PRIVATE : visibility;
         List<SoulTypes.PlayerMemory> out = new ArrayList<>(existing == null ? List.of() : existing);
         List<UUID> newSources = dedupe(sources);
         for (String fact : facts == null ? List.<String>of() : facts) {
@@ -293,9 +296,11 @@ final class SoulMemoryDigestOps {
                     }
                 }
                 out.set(match, new SoulTypes.PlayerMemory(old.playerId(), old.day(), old.fact(),
-                        Math.min(MAX_SALIENCE, old.salience() + DUP_BUMP), old.lastRecalledDay(), merged));
+                        Math.min(MAX_SALIENCE, old.salience() + DUP_BUMP), old.lastRecalledDay(), merged,
+                        SoulPrivacyPolicy.stricter(old.visibility(), incoming)));
             } else {
-                out.add(new SoulTypes.PlayerMemory(playerId, day, fact, INITIAL_SALIENCE, -1, newSources));
+                out.add(new SoulTypes.PlayerMemory(playerId, day, fact, INITIAL_SALIENCE, -1, newSources,
+                        incoming));
             }
         }
         evict(out, playerId);
@@ -383,7 +388,8 @@ final class SoulMemoryDigestOps {
             int salience = memory.salience() - 1;
             if (salience > 0) {
                 kept.add(new SoulTypes.PlayerMemory(memory.playerId(), memory.day(), memory.fact(),
-                        salience, memory.lastRecalledDay(), memory.sourceCorrelationIds()));
+                        salience, memory.lastRecalledDay(), memory.sourceCorrelationIds(),
+                        memory.visibility()));
             }
         }
         return SoulMindOps.withPlayerMemories(mind, kept);
@@ -405,7 +411,7 @@ final class SoulMemoryDigestOps {
             if (factKey.equals(factKey(memory.fact())) && memory.lastRecalledDay() != day) {
                 out.add(new SoulTypes.PlayerMemory(memory.playerId(), memory.day(), memory.fact(),
                         Math.min(MAX_SALIENCE, memory.salience() + RECALL_BUMP), day,
-                        memory.sourceCorrelationIds()));
+                        memory.sourceCorrelationIds(), memory.visibility()));
                 changed = true;
             } else {
                 out.add(memory);
@@ -417,15 +423,17 @@ final class SoulMemoryDigestOps {
     // === injection ===
 
     /**
-     * At most one banter anchor for the player: the strongest memory not recalled within
-     * {@link SoulMindOps#RECALL_COOLDOWN_DAYS}. {@code random} is accepted for symmetry with the
-     * other seed sources and to leave room for tie-breaking; the choice is deterministic today.
+     * At most one banter anchor for the player: the strongest memory {@code audience} may hear
+     * ({@link SoulPrivacyPolicy}) not recalled within {@link SoulMindOps#RECALL_COOLDOWN_DAYS}.
+     * {@code random} is accepted for symmetry with the other seed sources and to leave room for
+     * tie-breaking; the choice is deterministic today.
      */
     static List<SoulBanterSeed.Anchor> anchors(SoulTypes.SoulMind mind, UUID playerId, String playerName,
-                                               int currentDay, RandomGenerator random) {
+                                               int currentDay, RandomGenerator random,
+                                               SoulPrivacyPolicy.Audience audience) {
         List<SoulTypes.PlayerMemory> eligible = new ArrayList<>();
         for (SoulTypes.PlayerMemory memory : mind.playerMemories()) {
-            if (!memory.playerId().equals(playerId)) {
+            if (!memory.playerId().equals(playerId) || !SoulPrivacyPolicy.admits(memory, audience)) {
                 continue;
             }
             if (memory.lastRecalledDay() < 0
@@ -442,11 +450,14 @@ final class SoulMemoryDigestOps {
                 playerName + " once said: " + pick.fact(), SoulMindOps.MEMORY_ANCHOR_WEIGHT));
     }
 
-    /** The prompt {@code ABOUT} block: the player's strongest, newest memories as {@code - fact}. */
-    static List<String> aboutLines(SoulTypes.SoulMind mind, UUID playerId) {
+    /**
+     * The prompt {@code ABOUT} block: the player's strongest, newest memories that
+     * {@code audience} may hear ({@link SoulPrivacyPolicy}), as {@code - fact}.
+     */
+    static List<String> aboutLines(SoulTypes.SoulMind mind, UUID playerId, SoulPrivacyPolicy.Audience audience) {
         List<SoulTypes.PlayerMemory> mine = new ArrayList<>();
         for (SoulTypes.PlayerMemory memory : mind.playerMemories()) {
-            if (memory.playerId().equals(playerId)) {
+            if (memory.playerId().equals(playerId) && SoulPrivacyPolicy.admits(memory, audience)) {
                 mine.add(memory);
             }
         }
@@ -470,6 +481,20 @@ final class SoulMemoryDigestOps {
             total = projected;
         }
         return List.copyOf(lines);
+    }
+
+    /**
+     * How many of {@code playerId}'s memories {@code audience} may not hear — the count the
+     * group assembler and banter director log (never the content).
+     */
+    static int withheldFor(SoulTypes.SoulMind mind, UUID playerId, SoulPrivacyPolicy.Audience audience) {
+        int withheld = 0;
+        for (SoulTypes.PlayerMemory memory : mind.playerMemories()) {
+            if (memory.playerId().equals(playerId) && !SoulPrivacyPolicy.admits(memory, audience)) {
+                withheld++;
+            }
+        }
+        return withheld;
     }
 
     // === reset ===

@@ -349,13 +349,32 @@ public final class SoulTypes {
         }
     }
 
-    /** One thing the bot remembers a player SAYING (spec 2026-09-04 §3). Claims, never world truth. */
+    /**
+     * Who may hear a digested {@link PlayerMemory} (1.1.224). {@code PRIVATE} is always private to
+     * the memory's own {@code playerId}: it came from that player's DM with the bot. {@code PUBLIC}
+     * came from a party/group transcript others could already hear. See {@link SoulPrivacyPolicy}.
+     */
+    public enum MemoryVisibility { PUBLIC, PRIVATE }
+
+    /**
+     * One thing the bot remembers a player SAYING (spec 2026-09-04 §3). Claims, never world truth.
+     * {@code visibility} is derived from the source transcript's channel; a missing value (legacy
+     * {@code mind.json} written before 1.1.224, or the pre-visibility constructor) is
+     * {@link MemoryVisibility#PRIVATE} — fail closed, never silently public.
+     */
     public record PlayerMemory(UUID playerId, int day, String fact, int salience, int lastRecalledDay,
-                               List<UUID> sourceCorrelationIds) {
+                               List<UUID> sourceCorrelationIds, MemoryVisibility visibility) {
         public PlayerMemory {
             Objects.requireNonNull(playerId, "playerId");
             fact = fact == null ? "" : fact.trim();
             sourceCorrelationIds = sourceCorrelationIds == null ? List.of() : List.copyOf(sourceCorrelationIds);
+            visibility = visibility == null ? MemoryVisibility.PRIVATE : visibility;
+        }
+
+        /** Pre-visibility shape (before 1.1.224); defaults {@code visibility} to PRIVATE. */
+        public PlayerMemory(UUID playerId, int day, String fact, int salience, int lastRecalledDay,
+                            List<UUID> sourceCorrelationIds) {
+            this(playerId, day, fact, salience, lastRecalledDay, sourceCorrelationIds, null);
         }
     }
 

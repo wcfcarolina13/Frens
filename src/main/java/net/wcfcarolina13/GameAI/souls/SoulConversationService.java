@@ -228,8 +228,13 @@ public final class SoulConversationService {
         }
         // What this bot remembers the player saying (digest memories) -- cached read only, so a
         // cold or unloaded mind simply contributes nothing rather than blocking the turn.
+        // 1.1.224: a DIRECT reply goes to the addressed player alone, so their own DM-private
+        // memories are admitted; any other channel reaching here fails closed (unknown audience).
+        SoulPrivacyPolicy.Audience audience = turn.key().channel() == SoulTypes.Channel.DIRECT
+                ? SoulPrivacyPolicy.Audience.directMessage(turn.key().playerId())
+                : SoulPrivacyPolicy.Audience.shared(turn.key().playerId(), java.util.Set.of());
         List<String> aboutPlayer = store.cachedMind(turn.key().botId())
-                .map(mind -> SoulMemoryDigestOps.aboutLines(mind, turn.key().playerId()))
+                .map(mind -> SoulMemoryDigestOps.aboutLines(mind, turn.key().playerId(), audience))
                 .orElse(List.of());
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), profile,
                 turn.grounding(), history, events, relevantKnowledge, aboutPlayer,

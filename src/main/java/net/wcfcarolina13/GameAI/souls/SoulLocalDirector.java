@@ -295,9 +295,12 @@ public final class SoulLocalDirector {
         SoulGroupTypes.SceneParticipant participant = new SoulGroupTypes.SceneParticipant(
                 candidateBot.getUuid(), profileId, candidateBot.getName().getString(), bestSnapshot);
         UUID routingId = UUID.randomUUID();
+        // Online humans captured here, on the server thread: the prompt is assembled off-thread
+        // and a chime-in is heard by anyone in earshot (SoulPrivacyPolicy, 1.1.224).
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 SoulGroupTypes.SceneKind.LOCAL, playerId, player.getName().getString(),
-                List.of(participant), line, Instant.now(), routingId);
+                List.of(participant), line, Instant.now(), routingId, false,
+                SoulSnapshotBuilder.onlineHumanIds(server));
         long armedUntilMs = now + nextDelayMs(random, cadenceMultiplier());
         nextEligibleAtMs.put(playerId, armedUntilMs);
         if (bestIsContinuation) {
