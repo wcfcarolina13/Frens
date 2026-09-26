@@ -16,6 +16,7 @@ import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.ZoneVisualizerService;
 
 import java.util.ArrayList;
@@ -23,11 +24,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Server-side networking for protected zone management. */
 public final class ZoneNetworkManager {
 
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
+    private static final Logger LOGGER = LoggerFactory.getLogger(ZoneNetworkManager.class);
+    private static final Map<String, Long> DENIED_LOG_TIMES = new ConcurrentHashMap<>();
     private static volatile boolean REGISTERED = false;
 
     /** Tracks wand corner state per player: null = no corner set, non-null = corner 1 position. */
@@ -174,7 +179,9 @@ public final class ZoneNetworkManager {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
                     if (payload.enabled()) {
-                        ZoneVisualizerService.startViewing(payload.label(), player.getUuid());
+                        if (!ZoneVisualizerService.startViewing(payload.label(), player)) {
+                            warnDeniedView(player, payload.label());
+                        }
                     } else {
                         ZoneVisualizerService.stopViewing(payload.label(), player.getUuid());
                     }
@@ -194,6 +201,7 @@ public final class ZoneNetworkManager {
         List<ProtectedZoneService.ProtectedZone> zones = ProtectedZoneService.listZones(world);
         List<ZoneDto> dtos = new ArrayList<>();
         for (ProtectedZoneService.ProtectedZone zone : zones) {
+            if (!isZoneVisibleToViewer(world, zone, player)) continue;
             dtos.add(new ZoneDto(
                     zone.getLabel(),
                     zone.getMinCorner().getX(), zone.getMinCorner().getY(), zone.getMinCorner().getZ(),
@@ -204,6 +212,35 @@ public final class ZoneNetworkManager {
         }
         String json = GSON.toJson(dtos);
         ServerPlayNetworking.send(player, new ZoneListPayload(json));
+    }
+
+    public static boolean isZoneVisibleToViewer(ServerWorld world,
+                                                ProtectedZoneService.ProtectedZone zone,
+                                                ServerPlayerEntity viewer) {
+        if (world == null || zone == null || viewer == null || zone.getLabel() == null) return false;
+        String label = zone.getLabel();
+        if (!label.startsWith("base:")) return true;
+        String baseLabel = label.substring("base:".length()).trim().toLowerCase(java.util.Locale.ROOT);
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(viewer.getCommandSource().getServer(), world)) {
+            if (base != null && base.label() != null
+                    && baseLabel.equals(base.label().trim().toLowerCase(java.util.Locale.ROOT))) {
+                return BaseNetworkManager.isBaseVisibleToViewer(base, viewer.getUuid().toString(),
+                        Frens.isOperator(viewer), BotAccessGate.isHost(viewer));
+            }
+        }
+        return false;
+    }
+
+    private static void warnDeniedView(ServerPlayerEntity player, String label) {
+        String target = label == null ? "" : label.replaceAll("[\\r\\n\\t]", " ");
+        if (target.length() > 64) target = target.substring(0, 64);
+        String key = player.getUuid() + ":zone_view:" + target;
+        long now = System.currentTimeMillis();
+        Long prior = DENIED_LOG_TIMES.put(key, now);
+        if (prior != null && now - prior < 5_000L) return;
+        if (DENIED_LOG_TIMES.size() > 1024) DENIED_LOG_TIMES.clear();
+        LOGGER.warn("[bot-access] denied action={} sender={} target={} reason={}",
+                "zone_view", player.getUuid(), target, "missing_invisible_or_limit");
     }
 
     public record ZoneDto(String label, int minX, int minY, int minZ,

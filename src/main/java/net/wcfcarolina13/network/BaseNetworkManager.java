@@ -26,11 +26,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Networking glue for the in-inventory Bases manager screen. */
 public final class BaseNetworkManager {
 
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
+    private static final Logger LOGGER = LoggerFactory.getLogger(BaseNetworkManager.class);
+    private static final Map<String, Long> DENIED_LOG_TIMES = new ConcurrentHashMap<>();
     private static volatile boolean REGISTERED = false;
     private static final Map<UUID, String> PLAYER_BOT_ALIAS_CONTEXT = new ConcurrentHashMap<>();
 
@@ -154,7 +158,7 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
-                    if (!checkBaseEditPermission(player, srv, world, label)) {
+                    if (!checkAnyEntryEditPermission(player, srv, world, label, "base_remove")) {
                         sendBasesList(player, currentBotAliasContext(player));
                         return;
                     }
@@ -181,7 +185,7 @@ public final class BaseNetworkManager {
                         return;
                     }
                     MinecraftServer srv = player.getCommandSource().getServer();
-                    if (!checkBaseEditPermission(player, srv, world, oldLabel)) {
+                    if (!checkAnyEntryEditPermission(player, srv, world, oldLabel, "base_rename")) {
                         sendBasesList(player, currentBotAliasContext(player));
                         return;
                     }
@@ -620,13 +624,14 @@ public final class BaseNetworkManager {
         List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(server, world);
         List<BaseDto> out = new ArrayList<>(bases.size());
         // PvP-style visibility: non-operators see only their own, allied, or server-owned
-        // bases. Legacy/null-owner bases are hidden for non-ops (admin can reassign to
-        // SERVER to expose as a public landmark). Operators see everything.
+        // bases. Legacy/null-owner bases are hidden for other players (admin can reassign to
+        // SERVER to expose as a public landmark). Operators and the integrated host see everything.
         boolean isOp = net.wcfcarolina13.Frens.isOperator(player);
+        boolean isHost = BotAccessGate.isHost(player);
         String viewerUuid = player.getUuid().toString();
         for (BotHomeService.BaseEntry b : bases) {
             if (b == null || b.pos() == null) continue;
-            if (!isOp && !isBaseVisibleToViewer(b, viewerUuid)) continue;
+            if (!isBaseVisibleToViewer(b, viewerUuid, isOp, isHost)) continue;
             String label = b.label() != null ? b.label() : "";
             boolean home = !homeNorm.isBlank() && homeNorm.equals(label.trim().toLowerCase(java.util.Locale.ROOT));
             String displayOwner = b.ownerName() != null && !b.ownerName().isBlank()
@@ -647,7 +652,7 @@ public final class BaseNetworkManager {
             if (fName == null) continue;
             // Skip if already present as a base
             if (baseLabelsLower.contains(fName.trim().toLowerCase(java.util.Locale.ROOT))) continue;
-            if (!isOp && !isWallVisibleToViewer(f, viewerUuid)) continue;
+            if (!isOp && !isHost && !isWallVisibleToViewer(f, viewerUuid)) continue;
             net.minecraft.util.math.BlockPos center = f.getCenter();
             int totalEdges = f.getHullWallPoints().size();
             String status = f.isComplete() ? "complete"
@@ -741,13 +746,65 @@ public final class BaseNetworkManager {
      * (Spawn and admin-claimed public landmarks). Hidden: another player's base, legacy/null-owner
      * bases (admin can reassign to SERVER to expose as a public landmark).
      */
-    private static boolean isBaseVisibleToViewer(BotHomeService.BaseEntry base, String viewerUuid) {
+    static boolean isBaseVisibleToViewer(BotHomeService.BaseEntry base, String viewerUuid,
+                                         boolean isOp, boolean isHost) {
         if (base == null) return false;
         String ownerUuid = base.ownerUuid();
-        if (ownerUuid == null || ownerUuid.isBlank()) return false;
-        if (BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid)) return true;
-        if (viewerUuid != null && viewerUuid.equals(ownerUuid)) return true;
-        return net.wcfcarolina13.GameAI.services.PlayerAllianceService.areAllied(viewerUuid, ownerUuid);
+        boolean allied = !isOp && !isHost && ownerUuid != null && !ownerUuid.isBlank()
+                && !BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid)
+                && viewerUuid != null && !viewerUuid.equals(ownerUuid)
+                && net.wcfcarolina13.GameAI.services.PlayerAllianceService.areAllied(viewerUuid, ownerUuid);
+        return BaseAccessPolicy.baseVisible(isOp, isHost, viewerUuid, ownerUuid,
+                BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid), allied);
+    }
+
+    private static boolean checkAnyEntryEditPermission(ServerPlayerEntity player, MinecraftServer server,
+                                                       ServerWorld world, String label, String action) {
+        String wanted = normalizeLabel(label);
+        BaseAccessPolicy.EntryKind kind = BaseAccessPolicy.EntryKind.MISSING;
+        String owner = null;
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
+            if (base != null && wanted.equals(normalizeLabel(base.label()))) {
+                kind = BaseAccessPolicy.EntryKind.BASE;
+                owner = base.ownerUuid();
+                break;
+            }
+        }
+        if (kind == BaseAccessPolicy.EntryKind.MISSING) {
+            String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+            for (FortificationPersistenceService.SavedFortification wall
+                    : FortificationPersistenceService.listForWorld(server, worldKey)) {
+                if (wall != null && wanted.equals(normalizeLabel(wall.getName()))) {
+                    kind = BaseAccessPolicy.EntryKind.WALL;
+                    owner = wall.getOwnerUuid();
+                    break;
+                }
+            }
+        }
+        if (kind == BaseAccessPolicy.EntryKind.MISSING
+                && MappedVillageService.containsLabel(server, world, label)) {
+            kind = BaseAccessPolicy.EntryKind.VILLAGE;
+        }
+        boolean allowed = BaseAccessPolicy.canEdit(kind, player.getUuid().toString(), owner,
+                Frens.isOperator(player), BotAccessGate.isHost(player));
+        if (!allowed) {
+            warnDenied(player, action, label, kind == BaseAccessPolicy.EntryKind.MISSING
+                    ? "missing_entry" : "not_owner_of_" + kind.name().toLowerCase(java.util.Locale.ROOT));
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "You cannot modify '" + label + "'.");
+        }
+        return allowed;
+    }
+
+    private static void warnDenied(ServerPlayerEntity player, String action, String label, String reason) {
+        String target = label == null ? "" : label.replaceAll("[\\r\\n\\t]", " ");
+        if (target.length() > 64) target = target.substring(0, 64);
+        String key = player.getUuid() + ":" + action + ":" + target;
+        long now = System.currentTimeMillis();
+        Long prior = DENIED_LOG_TIMES.put(key, now);
+        if (prior != null && now - prior < 5_000L) return;
+        if (DENIED_LOG_TIMES.size() > 1024) DENIED_LOG_TIMES.clear();
+        LOGGER.warn("[bot-access] denied action={} sender={} target={} reason={}",
+                action, player.getUuid(), target, reason);
     }
 
     /**

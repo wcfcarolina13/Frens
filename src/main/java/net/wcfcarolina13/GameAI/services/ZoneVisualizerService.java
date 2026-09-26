@@ -5,6 +5,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.network.BaseAccessPolicy;
+import net.wcfcarolina13.network.ZoneNetworkManager;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ZoneVisualizerService {
 
     private static final int TICK_INTERVAL = 20;
+    private static final int MAX_SUBSCRIPTIONS_PER_VIEWER = 16;
     private static final int MAX_PARTICLES_PER_ZONE = 2000;
     private static final int Y_CLAMP_RANGE = 64;
     private static final int XZ_CLAMP_RANGE = 128;
@@ -28,8 +31,21 @@ public final class ZoneVisualizerService {
 
     private ZoneVisualizerService() {}
 
-    public static void startViewing(String label, UUID playerUuid) {
+    public static boolean startViewing(String label, ServerPlayerEntity player) {
+        if (player == null || label == null || label.isBlank()) return false;
+        ServerWorld world = player.getCommandSource().getWorld();
+        ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
+        if (zone == null || !ZoneNetworkManager.isZoneVisibleToViewer(world, zone, player)) return false;
+        UUID playerUuid = player.getUuid();
+        int count = 0;
+        for (Set<UUID> viewers : viewingPlayers.values()) {
+            if (viewers.contains(playerUuid)) count++;
+        }
+        if (!BaseAccessPolicy.canSubscribe(count, isViewing(label, playerUuid), MAX_SUBSCRIPTIONS_PER_VIEWER)) {
+            return false;
+        }
         viewingPlayers.computeIfAbsent(label, k -> ConcurrentHashMap.newKeySet()).add(playerUuid);
+        return true;
     }
 
     public static void stopViewing(String label, UUID playerUuid) {
@@ -75,18 +91,19 @@ public final class ZoneVisualizerService {
             Set<UUID> viewers = entry.getValue();
             if (viewers.isEmpty()) continue;
 
-            for (ServerWorld world : server.getWorlds()) {
-                ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
-                if (zone == null) continue;
-
-                for (UUID viewerUuid : viewers) {
-                    ServerPlayerEntity viewer = server.getPlayerManager().getPlayer(viewerUuid);
-                    if (viewer == null) continue;
-                    ServerWorld viewerWorld = viewer.getCommandSource().getWorld();
-                    if (viewerWorld != world) continue;
-                    spawnEdgeParticles(world, zone, viewer);
+            for (UUID viewerUuid : viewers) {
+                ServerPlayerEntity viewer = server.getPlayerManager().getPlayer(viewerUuid);
+                if (viewer == null || viewer.isRemoved()) {
+                    stopViewing(label, viewerUuid);
+                    continue;
                 }
-                break;
+                ServerWorld world = viewer.getCommandSource().getWorld();
+                ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
+                if (zone == null || !ZoneNetworkManager.isZoneVisibleToViewer(world, zone, viewer)) {
+                    stopViewing(label, viewerUuid);
+                    continue;
+                }
+                spawnEdgeParticles(world, zone, viewer);
             }
         }
     }

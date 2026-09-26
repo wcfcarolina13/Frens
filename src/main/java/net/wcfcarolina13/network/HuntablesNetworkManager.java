@@ -73,6 +73,7 @@ public final class HuntablesNetworkManager {
 
             String botName = parsed.get("botName") instanceof String s ? s : null;
             if (botName == null || botName.isBlank()) return;
+            if (!BotAccessGate.permitsByName(player, botName, "hunt_config_save")) return;
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
@@ -134,12 +135,14 @@ public final class HuntablesNetworkManager {
             if (parsed == null) return;
             boolean active = parsed.get("active") instanceof Boolean b && b;
             String botName = parsed.get("botName") instanceof String s ? s : null;
-            if (active && botName != null && !botName.isBlank()) {
-                TARGET_PICKERS.put(player.getUuid(), botName);
-                LOGGER.info("Target-picking mode ON for {} (bot={})", player.getName().getString(), botName);
-            } else {
+            if (!active) {
                 TARGET_PICKERS.remove(player.getUuid());
+                return;
             }
+            if (botName == null || botName.isBlank()
+                    || !BotAccessGate.permitsByName(player, botName, "hunt_target_mode")) return;
+            TARGET_PICKERS.put(player.getUuid(), botName);
+            LOGGER.info("Target-picking mode ON for {} (bot={})", player.getName().getString(), botName);
         } catch (Exception e) {
             LOGGER.warn("Failed to parse target mode payload: {}", e.getMessage());
         }
@@ -156,6 +159,7 @@ public final class HuntablesNetworkManager {
             String entityUuidStr = parsed.get("entityUuid") instanceof String s ? s : null;
             String entityType = parsed.get("entityType") instanceof String s ? s : null;
             if (botName == null || botName.isBlank() || entityUuidStr == null) return;
+            if (!BotAccessGate.permitsByName(player, botName, "hunt_target")) return;
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
