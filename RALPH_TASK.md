@@ -3,7 +3,40 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.224) — next session starts here
+## Session Handoff 2026-09-26 (1.1.225) — next session starts here
+
+**State:** main = origin/main @ 1.1.225. Suite 1738 green (1662 → 1738). This is the onboarding build: Frens works
+without Ollama, and turning on AI companions takes one checklist. The last public Modrinth release is still 1.1.1.
+Deploy status is in the release commit that follows this handoff (docs commit).
+
+**Shipped in 1.1.225** (details, rulings and cost-if-wrong are in `changelog.md`):
+- **"Set up AI companions" checklist** (`AiSetupChecklistScreen`, from the Guide's AI setup button and Bot Controls'
+  Setup… chip). Six steps: Ollama → model (with RAM guidance) → Soul Chat on → enable each bot → test chat → voice.
+  It is server-authoritative (`AiSetupNetworkManager`): op-or-host for server-wide actions, so a cheats-off
+  singleplayer host no longer needs `/bot`; bot owners can enable their own bots.
+- `/bot soul enable` names what still blocks a reply. The Soul Chat tooltip says it is only the world switch.
+- **Multiplayer:** the model and voice-engine screens act on the server when connected remotely. Soul Chat/Voice
+  saves reload the runtime. A rejected non-op save tells the player.
+- **Model-free first run:** first-run text; no false "Processing your message"; "Ollama is not reachable!" is a
+  status, not a model; a missing configured model can be re-downloaded; "Largest option" label.
+- **1.1.224 leftovers:** scene privacy is carried from what the prompt admitted (the race is closed). Server logs
+  hold no private or DM text.
+
+**Field checks pending:** Phase 6w (new, 9 items; checklist now 238; 2 need a second account). Also still pending:
+6v, 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n. Run `/bot config diagnostics on` first.
+
+**Next (Bradley's order):**
+1. **Clean-install smoke test** of both journeys: no Ollama, then AI setup via the checklist. Standard jar, fresh
+   Prism instance. NEEDS BRADLEY: permission to create the instance. Then update
+   `.superpowers/sdd/modrinth/MODRINTH_CHANGELOG.md` and hand Bradley the jar + changelog. He uploads it himself.
+   NEEDS BRADLEY: the TTS engine and voice names for the dialogue-clip attribution line (still a placeholder).
+2. **1.1.226 = chat action requests.** Scope: `.superpowers/sdd/SCOPE-action-requests-1.1.224/README.md`.
+
+**Deferred:** as listed in the 1.1.225 changelog entry (remote model pulls and voice installs on the server host, a
+voice-preset picker, a persona picker, auto-enable on spawn, dry-run generation), plus the 1.1.224 and 1.1.223
+deferrals below.
+
+## Session Handoff 2026-09-25 (1.1.224) — superseded
 
 **State:** main = origin/main @ 1.1.224, DEPLOYED to all three Prism instances (2026-09-25; 13 new policy classes present, VectorExtensionHelper absent in each mods-dir JAR). Suite 1662 green
 (1551 → 1662). This is the Modrinth publish-hardening build. The last public Modrinth release is still 1.1.1.
@@ -1681,7 +1714,7 @@ New mob-proximity and context-triggered ambient lines. All would extend the exis
 Bradley asked whether the installers cater to the user's machine. They detect **platform**, not specs:
 - [x] **Pocket TTS installer has no Windows support** ✅ 2026-09-04 (`efd13c7`, `7944410`) — Windows uv/py-launcher/python discovery, `Scripts\` venv layout, WindowsApps stub exclusion, py-launcher false-positive fix. **Still to verify on a real Windows box**: `pocket-tts.exe` console-script name, no-shell process start, `Files.isExecutable` on `.exe`. Original: — `PocketInstaller.uvCandidates/pythonCandidates` search Homebrew, python.org framework, `/usr/local` and `PATH` for `uv`/`python3`; no `uv.exe`/`python.exe`/`py` launcher, no `Scripts/` venv layout. A Windows user with Python installed gets "No Python 3.10+ or uv found". Add Windows candidates + venv `Scripts\python.exe` path, and test.
 - [ ] **Piper Windows x64 / Linux x64 paths are pinned (sha256) but untested** — zip extraction on Windows and the `.exe` name, `.so` completeness on Linux. ARM Windows/Linux are explicitly unsupported (screen says so). Needs one run each.
-- [ ] **No RAM/cores/GPU detection anywhere** — the Ollama model manager shows a recommended-RAM guide per model but does not read the machine's RAM; Pocket pins `OMP_NUM_THREADS=1`; Piper spawns one process per voice. A cheap win: read `Runtime.maxMemory` / `OperatingSystemMXBean.getTotalMemorySize()` and warn when a model's recommended RAM exceeds it.
+- [x] ✅ 1.1.225 (RAM half: the model manager reads total RAM and warns; the checklist shows the server host's RAM. Cores/GPU are still undetected.) **No RAM/cores/GPU detection anywhere** — the Ollama model manager shows a recommended-RAM guide per model but does not read the machine's RAM; Pocket pins `OMP_NUM_THREADS=1`; Piper spawns one process per voice. A cheap win: read `Runtime.maxMemory` / `OperatingSystemMXBean.getTotalMemorySize()` and warn when a model's recommended RAM exceeds it.
 - [ ] **Dreamsleeve is Mac-Metal only by construction** — fine, but the engine chooser should grey it out off-macOS instead of letting the user configure a path that can never work.
 - [x] README now states all of the above honestly (2026-09-04).
 

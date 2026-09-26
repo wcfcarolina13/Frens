@@ -2,6 +2,42 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Onboarding: AI companion setup checklist, multiplayer AI settings, model-free first run; 1.1.225 (2026-09-26)
+
+Goal: people can download and use Frens without Ollama, and turning on the AI companions ("souls") is easy. From the Codex onboarding audit (`.superpowers/sdd/modrinth/audit-onboarding.md`, local). Codex (Sol/Astra) did three of the four scopes, the C1/C3, C2, privacy and multiplayer implementations, both batch reviews, the wave-2 fix and the re-reviews. Opus did the checklist scope, the checklist implementation and the wave-1 fix.
+
+- **"Set up AI companions" checklist** (`ab7c08b4`, `30355279`, `0064caec`, `440c7a0c`). Before this, the journey dead-ended: the Bot Controls Soul Chat toggle is only the world switch, a bot also needs `/bot soul enable <bot>` (undiscoverable, and `/bot` needs permission level 2, so a cheats-off singleplayer host could not run it at all), and `enable` reported success while Soul Chat was off.
+  - Six steps, each with a state icon, a one-line explanation and one button: Ollama detected (Get Ollama; "only needed for AI chat — Frens works fully without it") → model pulled (Choose model…, with host RAM and "1B ≈4 GB, 3B ≈6 GB, 8B ≈12 GB plus Minecraft") → Soul Chat on → enable each of your companions → test chat (a pre-filled "<Bot>, can you hear me?" the player sends themselves; never sent on their behalf) → optional voice.
+  - Opened from a Setup… chip on Bot Controls' Soul Chat row and an AI setup button plus a first Basics topic in the Guide. Fits a 320×240 screen (bot rows scroll).
+  - Server-authoritative (`AiSetupNetworkManager`): the client asks the server for its setup status and sends SOULS_ON/OFF, ENABLE_BOT, SELECT_MODEL, SELECT_VOICE_ENGINE. Server-wide actions are op-or-host (the same gate as shared config saves, so the singleplayer host passes without cheats); ENABLE_BOT is owner/op/host of a registered bot. Model tags are length/charset-checked and must be in the catalog or installed on the server; engine ids must be known. Each accepted change saves, broadcasts the shared config, reloads the soul runtime on a worker, replies in chat and pushes a fresh status. An action that finishes after an async step re-finds the player, re-runs the gate and is dropped if they lost the right or a newer action superseded it.
+  - Abuse limits: one Ollama probe cached server-wide for 10 s with one in flight; status requests 1 per 2 s and actions 1 per 1 s per player; non-operators get a redacted status (no Ollama/model/RAM/engine, their own bots only); status is only sent to clients that declared the channel.
+  - The Soul Chat tooltip now says it is the world switch and each bot must also be enabled. Bot Controls saves Soul Chat/Voice from the live config unless flipped in that screen, so an unrelated save no longer writes a stale value over a synced change.
+  - `/bot soul enable` now says what still blocks a reply: Soul Chat off, invalid settings (e.g. no model chosen), or Ollama not answering on the server machine (`AiSetupActionPolicy.enableMessage`).
+- **Multiplayer AI settings reach the server** (`8714d776`, `f23d36aa`). Before, the model and voice-engine pickers probed and saved on the player's own machine, so nothing changed on a dedicated server; the Soul Chat/Voice toggles saved but never reloaded the runtime; a rejected non-op save only WARNed.
+  - On a remote server the model and voice-engine screens render the server's status, an operator/host picks through the server, a missing model says "Pull it on the server machine: ollama pull <tag>", installers are disabled ("Voices are installed on the server machine by its host"), and both screens say "Runs on the server host". An older server jar or a non-operator gets an explicit message instead of a dead screen. Singleplayer and the LAN host are unchanged.
+  - An accepted shared save that changes a field in the runtime's settings snapshot reloads it off the server thread; live-read fields (banter/local rates) no longer force a reload, which would cancel queued replies.
+  - A rejected save tells the player "Only an operator or the host can change this server's Frens settings — your change was not saved." (once per 5 s).
+  - A configured-but-missing model offers Download instead of a disabled "Selected"; the catalog's "Current default" label is now "Largest option" (the real default is no model).
+- **Model-free first run** (`00f17da2`, `bc05ba23`, `e5bdc525`).
+  - The first-run screen says "Choose Frens World Mode" and that Frens works without Ollama or any AI model; the legacy config screen title is "Frens Configuration".
+  - "Processing your message, please wait." is only said right before a real legacy generation, not for every addressed line a model-free player types. Expected non-AI-build library absence logs at DEBUG.
+  - An unreachable Ollama is a status, not a model: no more "Ollama is not reachable!" list entry (which could become the selected model) or ERROR log. The legacy sentinel is stripped from saved configs on load; a genuine selection survives an outage; one fetch at a time, with one follow-up fetch when the provider/key changes mid-fetch.
+- **1.1.224 privacy leftovers** (`0120bc3a`, `440c7a0c`).
+  - Race closed: a scene's privacy now comes from what its prompt actually admitted. The banter anchor carries its private owner (`SoulBanterSeed.Anchor.privateOwner`), prompt assembly returns the private owner of the ABOUT memories and marked history it used, and the service takes the strictest; two different owners reject the scene before generation. Before, a private memory consolidated away between seed and lookup left the scene public.
+  - Server logs: banter seeds, raw scene output, dropped and owner-cut lines log counts/lengths/reasons with correlationId at INFO; public scene text only at DEBUG; private-seeded text and retrieved DM knowledge at no level; exception logs print the class, not the message.
+- **Rulings (Bradley pre-approved the recommended option; cost if wrong):**
+  - Setup buttons use a server payload with the op-or-host gate, not `/bot` commands. Cost: two paths to the same switches (commands stay for ops).
+  - `hasBotCommandPermission` is NOT widened to the host: `/bot` text commands still need level 2 in a cheats-off world. Cost: a cheats-off host must use the screens.
+  - Test chat pre-fills chat for the player to send rather than generating a hidden dry run. Cost: one extra keypress.
+  - Remote model pulls and voice installs on the server host are not offered from a client. Cost: a dedicated-server admin runs `ollama pull` on the server machine.
+  - Precise privacy provenance instead of flagging every alone-on-server scene private. Cost: if a future admission path forgets to report its owner, it is public — the strictest-of-three rule and tests guard the known three.
+  - Non-operators see "AI chat ready yes/no" in the redacted status (they can observe it by chatting anyway).
+  - Accepted setup actions save config on the server thread, as the `/bot soul` commands already do.
+- **Deferred:** ENABLE_BOT's final chat reply after the health check is not re-gated (the bot was already activated under a valid gate); pulling models / installing voices on the server host from a remote client; a per-bot voice-preset picker; a persona picker; auto-enable on spawn; server-side dry-run generation; the local (singleplayer) model select still reloads synchronously on the render thread (pre-existing); ENABLE_BOT dropped by the post-bind re-check leaves the bot bound but inactive (harmless, same as a bind without an enable).
+- **Next:** clean-install smoke test of both journeys (no Ollama; AI setup) in a fresh Prism instance, then Bradley's Modrinth upload. 1.1.226 is chat action requests.
+- Tests 1662 → 1738.
+- **Field checks:** Phase 6w.
+
 ## Modrinth publish-hardening: access control, DM privacy, no native downloads; 1.1.224 (2026-09-25)
 
 The last public Modrinth release is 1.1.1 (2026-04-14, commit 64a78e73). Codex audits (`.superpowers/sdd/modrinth/`, local) found 4 code blockers; three of them (1, 2 and 4 below) were live on Modrinth. Codex (Sol/Astra) did the scoping, the P1b and P4 implementation, and the reviews. Opus did P1a, P2, P3 and the fix waves.
