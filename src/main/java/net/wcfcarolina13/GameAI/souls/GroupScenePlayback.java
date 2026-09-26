@@ -48,7 +48,12 @@ public final class GroupScenePlayback {
 
     /** Commit sink — implemented by {@code SoulGroupConversationService}. */
     public interface LineCommitter {
-        void commitLine(SoulTypes.TurnToken token, int participantIndex, String taggedLine);
+        /**
+         * @param privateTo the scene's {@link PlayableScene#privateSeedOwner()} — non-null marks the
+         *     committed record private to that player (1.1.224); deliberately not defaulted, so no
+         *     implementation can drop the mark silently
+         */
+        void commitLine(SoulTypes.TurnToken token, int participantIndex, String taggedLine, UUID privateTo);
 
         void sceneFinished(SoulTypes.TurnToken token, int deliveredLines, int totalLines);
 
@@ -297,7 +302,7 @@ public final class GroupScenePlayback {
             }
         }
         committer.commitLine(scene.token(), line.participantIndex(),
-                speaker.displayName() + ": " + line.text());
+                speaker.displayName() + ": " + line.text(), scene.privateSeedOwner());
         state.delivered++;
         state.lastDeliveredParticipant = line.participantIndex();
         state.deliveredLines.add(line);

@@ -107,7 +107,7 @@ public final class SoulGroupPromptAssembler {
         aboutBlock(turn).ifPresent(messages::add);
         beliefsBlock(turn).ifPresent(messages::add);
         logWithheld(correlationId, turn);
-        messages.addAll(boundedHistory(partyHistory));
+        messages.addAll(boundedHistory(partyHistory, turn.audience()));
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
             // Three variants (engagement spec §4): solo scenes always speak TO the owner; group
@@ -401,6 +401,25 @@ public final class SoulGroupPromptAssembler {
      * ({@link SoulPrivacyPolicy#mayDeliverPrivatelySeededLine}).
      */
     public boolean admitsPrivateMemory(SoulGroupTypes.GroupSceneTurn turn) {
+        return privateSeedOwner(turn, List.of()) != null;
+    }
+
+    /**
+     * The player this scene's prompt is privately seeded for, or null: the owner when an ABOUT
+     * line or banter anchor admits one of their PRIVATE memories, else the owner of any replayed
+     * {@code partyHistory} record marked private that this turn's audience admits (so a scene
+     * that continues a privately seeded one is itself privately seeded). Both routes pass the
+     * alone-on-server rule, so they can only ever name the single online human.
+     */
+    public UUID privateSeedOwner(SoulGroupTypes.GroupSceneTurn turn,
+                                 List<SoulTypes.ConversationRecord> partyHistory) {
+        if (admitsPrivateMemoryOfRoster(turn)) {
+            return turn.ownerId();
+        }
+        return SoulPrivacyPolicy.admittedPrivateRecordOwner(partyHistory, turn.audience());
+    }
+
+    private boolean admitsPrivateMemoryOfRoster(SoulGroupTypes.GroupSceneTurn turn) {
         for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
             Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
             if (mind.isPresent()
@@ -538,12 +557,21 @@ public final class SoulGroupPromptAssembler {
 
     // === Bounded party history (records already speaker-tagged; replayed verbatim) ===
 
-    private List<SoulTypes.Message> boundedHistory(List<SoulTypes.ConversationRecord> partyHistory) {
+    /**
+     * 1.1.224: a line delivered by a privately seeded scene is marked {@code privateTo} its owner
+     * and replays only where that owner's PRIVATE memories would be admitted
+     * ({@link SoulPrivacyPolicy#admitsRecord}); it is skipped before the turn/char caps apply.
+     */
+    private List<SoulTypes.Message> boundedHistory(List<SoulTypes.ConversationRecord> partyHistory,
+                                                   SoulPrivacyPolicy.Audience audience) {
         List<SoulTypes.ConversationRecord> relevant = new ArrayList<>();
         for (SoulTypes.ConversationRecord record : partyHistory) {
             if (record.kind() == SoulTypes.TurnKind.HEARD
                     && record.content().startsWith(BANTER_HEARD_PREFIX)) {
                 continue; // stale banter seed — never replays as a player utterance
+            }
+            if (!SoulPrivacyPolicy.admitsRecord(record, audience)) {
+                continue; // privately seeded line; this scene's audience may not hear it
             }
             if (record.kind() == SoulTypes.TurnKind.HEARD || record.kind() == SoulTypes.TurnKind.SPOKEN) {
                 relevant.add(record);

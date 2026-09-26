@@ -210,9 +210,20 @@ public final class SoulStore {
 
     public CompletableFuture<Void> appendSpoken(
             SoulTypes.TurnToken token, String content, SoulTypes.ProviderResult metadata) {
+        return appendSpoken(token, content, metadata, null);
+    }
+
+    /**
+     * As {@link #appendSpoken(SoulTypes.TurnToken, String, SoulTypes.ProviderResult)}, marking the
+     * record {@code privateTo} that player (1.1.224): a line delivered by a privately seeded
+     * scene. {@code null} writes an ordinary record.
+     */
+    public CompletableFuture<Void> appendSpoken(
+            SoulTypes.TurnToken token, String content, SoulTypes.ProviderResult metadata, UUID privateTo) {
         return submit(() -> {
             appendTurn(token, SoulTypes.TurnKind.SPOKEN, content,
-                    metadata.provider(), metadata.model(), metadata.elapsedMillis(), metadata.failureCode());
+                    metadata.provider(), metadata.model(), metadata.elapsedMillis(), metadata.failureCode(),
+                    privateTo);
             return null;
         });
     }
@@ -221,7 +232,7 @@ public final class SoulStore {
             SoulTypes.TurnToken token, SoulTypes.FailureCode code, String provider, String model,
             Long elapsedMillis) {
         return submit(() -> {
-            appendTurn(token, SoulTypes.TurnKind.FAILURE, "", provider, model, elapsedMillis, code);
+            appendTurn(token, SoulTypes.TurnKind.FAILURE, "", provider, model, elapsedMillis, code, null);
             return null;
         });
     }
@@ -316,7 +327,8 @@ public final class SoulStore {
     // === Turn append/staleness ===
 
     private void appendTurn(SoulTypes.TurnToken token, SoulTypes.TurnKind kind, String content,
-                             String provider, String model, Long elapsedMillis, SoulTypes.FailureCode code)
+                             String provider, String model, Long elapsedMillis, SoulTypes.FailureCode code,
+                             UUID privateTo)
             throws IOException {
         SoulTypes.ConversationKey key = token.key();
         SoulTypes.SoulState state = loadState(key.botId());
@@ -342,7 +354,7 @@ public final class SoulStore {
         long sequence = reconciledNextSequence(cursorKey, cursor, activeFile(key.botId(), key.playerId()));
         SoulTypes.ConversationRecord record = new SoulTypes.ConversationRecord(
                 token.correlationId(), cursor.epoch(), sequence, kind, content, Instant.now(),
-                provider, model, elapsedMillis, code);
+                provider, model, elapsedMillis, code, null, privateTo);
         appendRecord(activeFile(key.botId(), key.playerId()), record);
         // Same ordering rationale as beginHeardTurn: advance the cache before the cursor persist
         // can fail, so a persistCursor IOException never leaves the cache behind what's already

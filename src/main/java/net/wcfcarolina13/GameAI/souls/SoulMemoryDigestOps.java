@@ -92,6 +92,19 @@ final class SoulMemoryDigestOps {
     static Material gather(List<SoulTypes.ConversationRecord> sinceRecords,
                            SoulTypes.ConversationCursor from, UUID botId, String botName,
                            String playerName, boolean party) {
+        return gather(sinceRecords, from, botId, botName, playerName, party, null);
+    }
+
+    /**
+     * As {@link #gather(List, SoulTypes.ConversationCursor, UUID, String, String, boolean)}, for
+     * the digest of {@code playerId}: a record marked private to anyone else is dropped
+     * ({@link SoulPrivacyPolicy#digestible}); a null {@code playerId} drops every marked record.
+     * Records private to {@code playerId} are kept, and make the resulting memories PRIVATE
+     * ({@link SoulPrivacyPolicy#digestVisibility} over {@link Material#records()}).
+     */
+    static Material gather(List<SoulTypes.ConversationRecord> sinceRecords,
+                           SoulTypes.ConversationCursor from, UUID botId, String botName,
+                           String playerName, boolean party, UUID playerId) {
         List<SoulTypes.ConversationRecord> all = sinceRecords == null ? List.of() : sinceRecords;
         if (all.isEmpty()) {
             return new Material(List.of(), "", 0, from);
@@ -110,6 +123,9 @@ final class SoulMemoryDigestOps {
             }
             if (record.kind() == SoulTypes.TurnKind.HEARD
                     && record.content().startsWith(SoulGroupPromptAssembler.BANTER_HEARD_PREFIX)) {
+                continue;
+            }
+            if (!SoulPrivacyPolicy.digestible(record, playerId)) {
                 continue;
             }
             usable.add(record);

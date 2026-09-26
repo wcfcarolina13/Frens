@@ -142,8 +142,8 @@ class SoulGroupConversationServiceTest {
         service.submit(turn).get(2, SECONDS);
         SoulTypes.TurnToken token = player.enqueued.get(0).token();
 
-        service.commitLine(token, 0, "Jake: Mining tonight.");
-        service.commitLine(token, 1, "Sara: Fishing is safer.");
+        service.commitLine(token, 0, "Jake: Mining tonight.", null);
+        service.commitLine(token, 1, "Sara: Fishing is safer.", null);
         service.sceneFinished(token, 2, 2);
         partyStore.state(OWNER_ID).get(2, SECONDS); // barrier: drain the writer queue
 
@@ -153,6 +153,22 @@ class SoulGroupConversationServiceTest {
         assertEquals("Jake: Mining tonight.", records.get(1).content());
         assertEquals("Sara: Fishing is safer.", records.get(2).content());
         assertTrue(records.get(2).sequence() > records.get(1).sequence());
+    }
+
+    @Test
+    void commitLineMarksAPrivatelySeededLinePrivateToItsOwner() throws Exception {
+        service.submit(turn).get(2, SECONDS);
+        SoulTypes.TurnToken token = player.enqueued.get(0).token();
+
+        service.commitLine(token, 0, "Jake: still scared of the dark?", OWNER_ID);
+        service.commitLine(token, 1, "Sara: Fishing is safer.", null);
+        service.sceneFinished(token, 2, 2);
+        partyStore.state(OWNER_ID).get(2, SECONDS); // barrier: drain the writer queue
+
+        List<SoulTypes.ConversationRecord> records = partyRecords();
+        assertEquals(null, records.get(0).privateTo(), "the owner's own HEARD line is never marked");
+        assertEquals(OWNER_ID, records.get(1).privateTo());
+        assertEquals(null, records.get(2).privateTo());
     }
 
     @Test

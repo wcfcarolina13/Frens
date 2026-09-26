@@ -257,11 +257,11 @@ public final class SoulRuntime {
                     new GroupScenePlayback.LineCommitter() {
                         @Override
                         public void commitLine(SoulTypes.TurnToken token, int participantIndex,
-                                                String taggedLine) {
+                                                String taggedLine, UUID privateTo) {
                             SoulGroupConversationService groupService =
                                     runtime.pipelineRef.get().groupService();
                             if (groupService != null) {
-                                groupService.commitLine(token, participantIndex, taggedLine);
+                                groupService.commitLine(token, participantIndex, taggedLine, privateTo);
                             }
                         }
 

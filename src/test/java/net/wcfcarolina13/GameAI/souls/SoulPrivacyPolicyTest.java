@@ -113,4 +113,65 @@ class SoulPrivacyPolicyTest {
         assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(null, Set.of()));
         assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, null));
     }
+
+    // === 1.1.224 follow-up: transcript records from privately seeded scenes ===
+
+    private static SoulTypes.ConversationRecord spoken(UUID privateTo) {
+        return new SoulTypes.ConversationRecord(UUID.randomUUID(), 0L, 0L, SoulTypes.TurnKind.SPOKEN,
+                "Jake: still scared of the dark?", java.time.Instant.EPOCH, "", "", null, null, List.of(), privateTo);
+    }
+
+    @Test void unmarkedRecordIsAlwaysReplayed() {
+        SoulTypes.ConversationRecord plain = spoken(null);
+        assertTrue(SoulPrivacyPolicy.admitsRecord(plain, SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER, OTHER))));
+        assertTrue(SoulPrivacyPolicy.admitsRecord(plain, SoulPrivacyPolicy.Audience.shared(OWNER, Set.of())));
+        assertTrue(SoulPrivacyPolicy.admitsRecord(plain, null));
+    }
+
+    @Test void markedRecordReplaysWhenItsOwnerIsAlone() {
+        assertTrue(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER))));
+        assertTrue(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), SoulPrivacyPolicy.Audience.directMessage(OWNER)));
+    }
+
+    @Test void markedRecordIsSkippedWhenAnotherHumanIsOnlineOrUnknown() {
+        assertFalse(SoulPrivacyPolicy.admitsRecord(spoken(OWNER),
+                SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER, OTHER))));
+        assertFalse(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), SoulPrivacyPolicy.Audience.shared(OWNER, Set.of())));
+        assertFalse(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), SoulPrivacyPolicy.Audience.shared(OTHER, Set.of(OTHER))));
+        assertFalse(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), SoulPrivacyPolicy.Audience.directMessage(OTHER)));
+        assertFalse(SoulPrivacyPolicy.admitsRecord(spoken(OWNER), null));
+        assertFalse(SoulPrivacyPolicy.admitsRecord(null, SoulPrivacyPolicy.Audience.directMessage(OWNER)));
+    }
+
+    @Test void admittedPrivateRecordOwnerNamesTheSeedOwnerOnlyWhenAdmitted() {
+        List<SoulTypes.ConversationRecord> history = List.of(spoken(null), spoken(OWNER));
+        assertEquals(OWNER, SoulPrivacyPolicy.admittedPrivateRecordOwner(history,
+                SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER))));
+        assertEquals(null, SoulPrivacyPolicy.admittedPrivateRecordOwner(history,
+                SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER, OTHER))));
+        assertEquals(null, SoulPrivacyPolicy.admittedPrivateRecordOwner(List.of(spoken(null)),
+                SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER))));
+        assertEquals(null, SoulPrivacyPolicy.admittedPrivateRecordOwner(null,
+                SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER))));
+    }
+
+    @Test void digestVisibilityStricterTagWinsOverMixedSources() {
+        SoulTypes.MemoryVisibility pub = SoulTypes.MemoryVisibility.PUBLIC;
+        SoulTypes.MemoryVisibility priv = SoulTypes.MemoryVisibility.PRIVATE;
+        assertEquals(pub, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, List.of(spoken(null), spoken(null))));
+        assertEquals(priv, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, List.of(spoken(null), spoken(OWNER))));
+        assertEquals(priv, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, List.of(spoken(OWNER))));
+        assertEquals(pub, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, List.of()));
+        assertEquals(pub, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, null));
+        assertEquals(priv, SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.DIRECT, List.of(spoken(null))));
+    }
+
+    @Test void digestibleWithholdsRecordsPrivateToSomeoneElse() {
+        assertTrue(SoulPrivacyPolicy.digestible(spoken(null), OWNER));
+        assertTrue(SoulPrivacyPolicy.digestible(spoken(OWNER), OWNER));
+        assertFalse(SoulPrivacyPolicy.digestible(spoken(OTHER), OWNER));
+        assertFalse(SoulPrivacyPolicy.digestible(spoken(OWNER), null));
+        assertTrue(SoulPrivacyPolicy.digestible(spoken(null), null));
+        assertFalse(SoulPrivacyPolicy.digestible(null, OWNER));
+    }
 }

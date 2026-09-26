@@ -145,7 +145,7 @@ public final class SoulMemoryDigestService {
                     SoulTypes.ConversationCursor from = SoulMemoryDigestOps.cursorFor(mind, cursorKey);
                     return records.recordsSince(key, from).thenCompose(since -> {
                         SoulMemoryDigestOps.Material material = SoulMemoryDigestOps.gather(
-                                since, from, botId, botName, playerName, party);
+                                since, from, botId, botName, playerName, party, playerId);
                         if (material.playerLines() < SoulMemoryDigestOps.MIN_PLAYER_LINES) {
                             log(botId, playerId, key, "too-few", 0, material.playerLines());
                             return CompletableFuture.completedFuture(null);
@@ -175,8 +175,10 @@ public final class SoulMemoryDigestService {
         SoulTypes.ConversationKey schedulerKey =
                 new SoulTypes.ConversationKey(botId, playerId, SoulTypes.Channel.SYSTEM);
         List<UUID> sources = sources(material);
-        // 1.1.224: a DM digest is private to that player; a party digest was already heard.
-        SoulTypes.MemoryVisibility visibility = SoulPrivacyPolicy.visibilityFor(key.channel());
+        // 1.1.224: a DM digest is private to that player; a party digest was already heard —
+        // unless its material holds a line from a privately seeded scene, which keeps it PRIVATE.
+        SoulTypes.MemoryVisibility visibility =
+                SoulPrivacyPolicy.digestVisibility(key.channel(), material.records());
 
         return scheduler.submit(schedulerKey, 0L, () -> provider.generate(request))
                 .handle((result, error) -> Outcome.of(result, error, playerName))

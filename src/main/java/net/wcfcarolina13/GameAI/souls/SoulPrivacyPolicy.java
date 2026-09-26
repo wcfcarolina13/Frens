@@ -83,15 +83,86 @@ public final class SoulPrivacyPolicy {
         if (memory.visibility() == SoulTypes.MemoryVisibility.PUBLIC) {
             return true;
         }
-        if (audience == null) {
+        return admitsPrivateOf(memory.playerId(), audience);
+    }
+
+    /**
+     * The one PRIVATE rule, shared by memories and transcript records: material private to
+     * {@code owner} may reach {@code audience} only as the addressed DM reply to that owner, or
+     * when that owner is the only human online. A null owner or audience, or an unknown (empty)
+     * online set on a shared audience, withholds.
+     */
+    public static boolean admitsPrivateOf(UUID owner, Audience audience) {
+        if (owner == null || audience == null) {
             return false;
         }
-        UUID owner = memory.playerId();
         if (audience.directToAddressee() && owner.equals(audience.addressee())) {
             return true;
         }
         Set<UUID> online = audience.onlineHumans();
         return online.size() == 1 && online.contains(owner);
+    }
+
+    /**
+     * Whether a transcript record may be replayed into a prompt whose output reaches
+     * {@code audience}. An unmarked record ({@code privateTo == null}) is ordinary party speech
+     * and always admitted; a record marked private to P (a line from a privately seeded scene)
+     * is admitted only where P's PRIVATE memories would be ({@link #admitsPrivateOf}).
+     */
+    public static boolean admitsRecord(SoulTypes.ConversationRecord record, Audience audience) {
+        if (record == null) {
+            return false;
+        }
+        return record.privateTo() == null || admitsPrivateOf(record.privateTo(), audience);
+    }
+
+    /**
+     * Whether {@code records} holds at least one PRIVATE-marked record that {@code audience}
+     * admits — i.e. replaying them makes the prompt privately seeded for that record's owner.
+     * Returns that owner, or null when every admitted record is ordinary.
+     */
+    public static UUID admittedPrivateRecordOwner(List<SoulTypes.ConversationRecord> records, Audience audience) {
+        for (SoulTypes.ConversationRecord record : records == null ? List.<SoulTypes.ConversationRecord>of() : records) {
+            if (record != null && record.privateTo() != null && admitsPrivateOf(record.privateTo(), audience)) {
+                return record.privateTo();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The tag of a memory digested from {@code sources} read off a {@code channel} transcript:
+     * the channel's own tag ({@link #visibilityFor}), made PRIVATE when any source record is
+     * marked {@code privateTo} — the stricter tag wins. A party digest only ever writes memories
+     * about the party owner (the transcript key's player, whom the clerk's validator requires the
+     * facts to name), and a privately seeded scene is always seeded for that same owner, so the
+     * resulting PRIVATE memory is private to exactly the player the marked record was private to.
+     * {@link SoulMemoryDigestOps#gather} additionally drops any record marked private to someone
+     * other than the digested player, so no such memory can be written for anyone else.
+     */
+    public static SoulTypes.MemoryVisibility digestVisibility(SoulTypes.Channel channel,
+                                                             List<SoulTypes.ConversationRecord> sources) {
+        SoulTypes.MemoryVisibility fromSources = SoulTypes.MemoryVisibility.PUBLIC;
+        for (SoulTypes.ConversationRecord record : sources == null ? List.<SoulTypes.ConversationRecord>of() : sources) {
+            if (record != null && record.privateTo() != null) {
+                fromSources = SoulTypes.MemoryVisibility.PRIVATE;
+                break;
+            }
+        }
+        return stricter(visibilityFor(channel), fromSources);
+    }
+
+    /**
+     * Whether {@code record} may be fed to the memory digest of {@code digestedPlayer}: unmarked
+     * records always; a marked record only when it is private to that same player. Records
+     * private to anyone else are withheld from the material entirely (conservative: a memory
+     * about another player is never derived from them).
+     */
+    public static boolean digestible(SoulTypes.ConversationRecord record, UUID digestedPlayer) {
+        if (record == null) {
+            return false;
+        }
+        return record.privateTo() == null || record.privateTo().equals(digestedPlayer);
     }
 
     /**

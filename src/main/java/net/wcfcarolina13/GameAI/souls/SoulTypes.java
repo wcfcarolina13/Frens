@@ -106,10 +106,21 @@ public final class SoulTypes {
         }
     }
 
+    /**
+     * One transcript line. {@code privateTo} (1.1.224) is non-null only on a SPOKEN line from a
+     * privately seeded scene — one whose prompt admitted that player's DM-private material under
+     * the alone-on-server exception. Such a line may be replayed into a later prompt, or digested
+     * into a memory, only as that player's PRIVATE material ({@link SoulPrivacyPolicy#admitsRecord}).
+     * Absent on disk (every record written before 1.1.224, and every ordinary line) means not
+     * private; it is omitted from the JSON when null so ordinary records serialize unchanged.
+     */
     public record ConversationRecord(UUID correlationId, long epoch, long sequence,
                                       TurnKind kind, String content, Instant occurredAt,
                                       String provider, String model, Long elapsedMillis,
-                                      FailureCode failureCode, List<UUID> participants) {
+                                      FailureCode failureCode, List<UUID> participants,
+                                      @com.fasterxml.jackson.annotation.JsonInclude(
+                                              com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                                      UUID privateTo) {
         public ConversationRecord {
             Objects.requireNonNull(correlationId, "correlationId");
             Objects.requireNonNull(kind, "kind");
@@ -119,6 +130,16 @@ public final class SoulTypes {
             model = model == null ? "" : model;
             // elapsedMillis and failureCode are optional provider metadata and may be null.
             participants = participants == null ? List.of() : List.copyOf(participants);
+            // privateTo is optional: null means an ordinary (not privately seeded) record.
+        }
+
+        /** Pre-privacy shape (before 1.1.224); defaults {@code privateTo} to null (not private). */
+        public ConversationRecord(UUID correlationId, long epoch, long sequence,
+                                   TurnKind kind, String content, Instant occurredAt,
+                                   String provider, String model, Long elapsedMillis,
+                                   FailureCode failureCode, List<UUID> participants) {
+            this(correlationId, epoch, sequence, kind, content, occurredAt, provider, model,
+                    elapsedMillis, failureCode, participants, null);
         }
 
         /** Pre-participants shape; defaults {@code participants} to empty. */
@@ -127,7 +148,7 @@ public final class SoulTypes {
                                    String provider, String model, Long elapsedMillis,
                                    FailureCode failureCode) {
             this(correlationId, epoch, sequence, kind, content, occurredAt, provider, model,
-                    elapsedMillis, failureCode, null);
+                    elapsedMillis, failureCode, null, null);
         }
     }
 

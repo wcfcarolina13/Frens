@@ -545,6 +545,82 @@ class SoulGroupPromptAssemblerTest {
                 sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner))));
     }
 
+    // === 1.1.224 follow-up: privately seeded lines in the party transcript ===
+
+    private static SoulTypes.ConversationRecord spokenPrivateTo(long seq, String content, UUID privateTo) {
+        return new SoulTypes.ConversationRecord(UUID.randomUUID(), 0L, seq, SoulTypes.TurnKind.SPOKEN, content,
+                Instant.EPOCH, "", "", null, null, List.of(), privateTo);
+    }
+
+    private static List<String> contents(SoulTypes.ProviderRequest request) {
+        return request.messages().stream().map(SoulTypes.Message::content).toList();
+    }
+
+    @Test
+    void privatelySeededHistoryLineIsSkippedWhenAnotherHumanIsOnline() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> history = List.of(
+                record(0, SoulTypes.TurnKind.HEARD, "Bradley: evening plans?"),
+                spokenPrivateTo(1, "Jake: still scared of the dark, Bradley?", owner),
+                record(2, SoulTypes.TurnKind.SPOKEN, "Sara: fishing is safer."));
+        for (SoulGroupTypes.SceneKind kind : SoulGroupTypes.SceneKind.values()) {
+            SoulGroupTypes.GroupSceneTurn turn =
+                    sceneWithOnline(kind, owner, jake, sara, Set.of(owner, UUID.randomUUID()));
+            List<String> replayed = contents(assembler.assemble(UUID.randomUUID(), "m", turn, twoProfiles(),
+                    history, Duration.ofSeconds(5)));
+            assertFalse(replayed.contains("Jake: still scared of the dark, Bradley?"), kind + " replayed a private line");
+            assertTrue(replayed.contains("Sara: fishing is safer."), kind.toString());
+            assertTrue(replayed.contains("Bradley: evening plans?"), kind.toString());
+            assertEquals(null, assembler.privateSeedOwner(turn, history), kind.toString());
+        }
+    }
+
+    @Test
+    void privatelySeededHistoryLineReplaysWhenOwnerIsAloneAndSeedsTheNewScene() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> history = List.of(
+                spokenPrivateTo(1, "Jake: still scared of the dark, Bradley?", owner));
+        SoulGroupTypes.GroupSceneTurn turn =
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner));
+        assertTrue(contents(assembler.assemble(UUID.randomUUID(), "m", turn, twoProfiles(), history,
+                Duration.ofSeconds(5))).contains("Jake: still scared of the dark, Bradley?"));
+        // Continuing a privately seeded scene keeps the new one privately seeded (per-line gate + mark).
+        assertEquals(owner, assembler.privateSeedOwner(turn, history));
+        assertFalse(assembler.admitsPrivateMemory(turn), "no private memory in the minds — history alone seeds it");
+    }
+
+    @Test
+    void privatelySeededHistoryLineIsSkippedWhenTheOnlineSetIsUnknown() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> history = List.of(
+                spokenPrivateTo(1, "Jake: still scared of the dark, Bradley?", owner),
+                record(2, SoulTypes.TurnKind.SPOKEN, "Sara: fishing is safer."));
+        SoulGroupTypes.GroupSceneTurn turn = playerTurnWithOwner(owner, jake, sara);
+        List<String> replayed = contents(assembler.assemble(UUID.randomUUID(), "m", turn, twoProfiles(),
+                history, Duration.ofSeconds(5)));
+        assertFalse(replayed.contains("Jake: still scared of the dark, Bradley?"));
+        assertTrue(replayed.contains("Sara: fishing is safer."));
+        assertEquals(null, assembler.privateSeedOwner(turn, history));
+    }
+
+    @Test
+    void privateMemoryStillSeedsTheSceneForItsOwner() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind privateMind = mindRemembering(owner, SoulTypes.MemoryVisibility.PRIVATE,
+                "Bradley is scared of the dark");
+        SoulGroupPromptAssembler minds = new SoulGroupPromptAssembler(id -> Optional.of(privateMind));
+        assertEquals(owner, minds.privateSeedOwner(
+                sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner)), List.of()));
+    }
+
     private static SoulTypes.SoulMind mindBelieving(SoulTypes.RelationFact... facts) {
         return SoulMindOps.withRelations(SoulTypes.SoulMind.empty(), List.of(facts));
     }

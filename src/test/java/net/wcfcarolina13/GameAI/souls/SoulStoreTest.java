@@ -174,6 +174,53 @@ class SoulStoreTest {
         assertTrue(ex.getCause() instanceof IOException);
     }
 
+    /** 1.1.224 follow-up: privateTo round-trips, is omitted when null, and a legacy line loads as not private. */
+    @Test
+    void privateToRoundTripsAndLegacyRecordsLoadAsNotPrivate() throws Exception {
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.PARTY);
+
+        // A legacy line exactly as pre-1.1.224 builds wrote it: no privateTo field at all.
+        Path active = activeFile(bot, player);
+        Files.createDirectories(active.getParent());
+        String legacy = "{\"correlationId\":\"" + UUID.randomUUID() + "\",\"epoch\":0,\"sequence\":0,"
+                + "\"kind\":\"SPOKEN\",\"content\":\"Jake: old line\",\"occurredAt\":0.0,"
+                + "\"provider\":\"\",\"model\":\"\",\"elapsedMillis\":null,\"failureCode\":null,"
+                + "\"participants\":[]}";
+        Files.writeString(active, legacy + System.lineSeparator());
+
+        SoulTypes.TurnToken token = store.beginHeardTurn(key, UUID.randomUUID(), "Roti: hi", Instant.EPOCH)
+                .get(2, SECONDS);
+        SoulTypes.ProviderResult meta = new SoulTypes.ProviderResult(
+                true, "", null, "ollama", "m", 5L, null, null, null);
+        store.appendSpoken(token, "Jake: still scared of the dark?", meta, player).get(2, SECONDS);
+        store.appendSpoken(token, "Sara: fishing is safer.", meta).get(2, SECONDS);
+        store.close();
+
+        List<String> raw = Files.readAllLines(active);
+        assertEquals(4, raw.size());
+        assertFalse(raw.get(1).contains("privateTo"), "an ordinary record serializes without the field");
+        assertTrue(raw.get(2).contains("\"privateTo\":\"" + player + "\""), raw.get(2));
+        assertFalse(raw.get(3).contains("privateTo"), raw.get(3));
+
+        ExecutorService executor2 = Executors.newSingleThreadExecutor();
+        SoulStore restarted = new SoulStore(worldRoot, executor2);
+        try {
+            List<SoulTypes.ConversationRecord> records = restarted.recent(key, 10, 10_000).get(2, SECONDS);
+            assertEquals(4, records.size());
+            assertEquals("Jake: old line", records.get(0).content());
+            assertEquals(null, records.get(0).privateTo(), "legacy record is not private");
+            assertEquals(null, records.get(1).privateTo());
+            assertEquals(player, records.get(2).privateTo());
+            assertEquals(null, records.get(3).privateTo());
+        } finally {
+            restarted.close();
+            executor2.shutdownNow();
+        }
+    }
+
     @Test
     void restartRecoversPersistedConversationAndState() throws Exception {
         UUID bot = UUID.randomUUID();

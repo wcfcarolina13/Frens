@@ -30,6 +30,66 @@ class SoulMemoryDigestOpsTest {
         assertEquals(new SoulTypes.ConversationCursor(1L, r.get(3).sequence() + 1), m.next());
     }
 
+    private static SoulTypes.ConversationRecord spokenPrivate(String content, UUID corr, UUID privateTo) {
+        return new SoulTypes.ConversationRecord(corr, 1L, seq++, SoulTypes.TurnKind.SPOKEN, content, Instant.EPOCH,
+                "", "", null, null, List.of(), privateTo);
+    }
+
+    // === 1.1.224 follow-up: a privately seeded party line keeps the digested memory PRIVATE ===
+
+    @Test void partyDigestWithAPrivatelySeededLineIsPrivate() {
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> r = List.of(
+                rec(SoulTypes.TurnKind.HEARD, "Roti: evening all", scene, List.of(BOT)),
+                spokenPrivate("Jake: still scared of the dark, Roti?", scene, PLAYER),
+                rec(SoulTypes.TurnKind.HEARD, "Roti: a little", scene, List.of(BOT)));
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
+        assertTrue(m.text().contains("Jake: still scared of the dark, Roti?"), "kept for the owner's own digest");
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+    }
+
+    @Test void partyDigestWithoutMarkedLinesStaysPublic() {
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> r = List.of(
+                rec(SoulTypes.TurnKind.HEARD, "Roti: evening all", scene, List.of(BOT)),
+                rec(SoulTypes.TurnKind.SPOKEN, "Jake: evening!", scene, null));
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+    }
+
+    @Test void recordPrivateToSomeoneElseIsWithheldFromTheDigest() {
+        UUID scene = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> r = List.of(
+                rec(SoulTypes.TurnKind.HEARD, "Roti: evening all", scene, List.of(BOT)),
+                spokenPrivate("Jake: Sam told me a secret", scene, other));
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
+        assertFalse(m.text().contains("secret"), m.text());
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+        // The cursor still advances past the withheld record, so it is never re-read.
+        assertEquals(new SoulTypes.ConversationCursor(1L, r.get(1).sequence() + 1), m.next());
+        // The pre-1.1.224 gather (no digested player) withholds every marked record.
+        assertFalse(SoulMemoryDigestOps.gather(r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true)
+                .text().contains("secret"));
+    }
+
+    @Test void mergeOfAPrivatelySeededPartyFactIntoAPublicMemoryTurnsItPrivate() {
+        SoulTypes.PlayerMemory old = new SoulTypes.PlayerMemory(PLAYER, 1, "Roti is scared of the dark", 5, -1,
+                List.of(), SoulTypes.MemoryVisibility.PUBLIC);
+        SoulTypes.MemoryVisibility tag = SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY,
+                List.of(spokenPrivate("Jake: still scared of the dark, Roti?", UUID.randomUUID(), PLAYER)));
+        List<SoulTypes.PlayerMemory> merged = SoulMemoryDigestOps.merge(List.of(old), PLAYER,
+                List.of("Roti is scared of the dark"), 2, List.of(), tag);
+        assertEquals(1, merged.size());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE, merged.get(0).visibility());
+    }
+
     @Test void gatherPartyKeepsOnlyScenesTheBotWasIn() {
         UUID in = UUID.randomUUID(), out = UUID.randomUUID(), legacy = UUID.randomUUID();
         List<SoulTypes.ConversationRecord> r = List.of(

@@ -200,7 +200,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                 profiles, history, settings.timeout());
         // 1.1.224 privacy: a prompt that admitted the owner's DM-private memory (alone-on-server)
         // plays back only while nobody else would hear it — GroupScenePlayback re-checks per line.
-        UUID privateSeedOwner = prompts.admitsPrivateMemory(turn) ? turn.ownerId() : null;
+        // A replayed history line from an earlier privately seeded scene seeds this one too.
+        UUID privateSeedOwner = prompts.privateSeedOwner(turn, history);
         int queueDepthAtSubmit = scheduler.queueDepth();
         scheduler.submit(turn.key(), token.epoch(), () -> provider.generate(request))
                 .whenComplete((result, providerError) -> handleProviderResult(turn, token, correlationId,
@@ -435,10 +436,13 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     // === LineCommitter (called by the playback machine strictly after a line's fan-out) ===
 
     @Override
-    public void commitLine(SoulTypes.TurnToken token, int participantIndex, String taggedLine) {
+    public void commitLine(SoulTypes.TurnToken token, int participantIndex, String taggedLine,
+                           UUID privateTo) {
         SoulTypes.ProviderResult metadata = sceneResults.getOrDefault(token.correlationId(),
                 new SoulTypes.ProviderResult(true, "", null, "", "", 0L, null, null, null));
-        partyStore.appendSpoken(token, taggedLine, metadata).exceptionally(appendError -> {
+        // 1.1.224: a privately seeded scene's line is marked private to its owner, so later
+        // shared prompts and the party digest treat it as that owner's PRIVATE material.
+        partyStore.appendSpoken(token, taggedLine, metadata, privateTo).exceptionally(appendError -> {
             // The line was already delivered; a stale/failed append must not surface to chat.
             LOGGER.warn("[souls] scene correlationId={} spoken-append failed: {}",
                     token.correlationId(), appendError.toString());
