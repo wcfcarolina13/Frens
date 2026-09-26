@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.Frens;
 import org.slf4j.Logger;
 
 import java.util.Map;
@@ -21,6 +22,19 @@ public final class FollowDebugService {
     private static final long STATUS_LOG_INTERVAL_MS = 1_800L;
 
     private FollowDebugService() {}
+
+    public static boolean logAtInfo(boolean verbose) {
+        return verbose;
+    }
+
+    private static void logRoutine(Logger logger, String format, Object... arguments) {
+        boolean verbose = Frens.CONFIG != null && Frens.CONFIG.isVerboseDiagnostics();
+        if (logAtInfo(verbose)) {
+            logger.info(format, arguments);
+        } else {
+            logger.debug(format, arguments);
+        }
+    }
 
     public static void clear(UUID botId) {
         if (botId == null) {
@@ -47,7 +61,7 @@ public final class FollowDebugService {
             return;
         }
         LAST_PATH_SKIP_LOG_MS.put(botId, now);
-        logger.info("Follow path planning {}", message);
+        logRoutine(logger, "Follow path planning {}", message);
     }
 
     public static void maybeLogDecision(Logger logger, ServerPlayerEntity bot, String message) {
@@ -61,7 +75,7 @@ public final class FollowDebugService {
             return;
         }
         LAST_DECISION_LOG_MS.put(botId, now);
-        logger.info("Follow decision: bot={} botPos={} msg={}",
+        logRoutine(logger, "Follow decision: bot={} botPos={} msg={}",
                 bot.getName().getString(),
                 bot.getBlockPos().toShortString(),
                 message);
@@ -98,7 +112,7 @@ public final class FollowDebugService {
         }
         LAST_STATUS_LOG_MS.put(botId, now);
 
-        logger.info("Follow status: bot={} botPos={} target={} targetPos={} dist={} horiz={} canSee={} directBlocked={} usingWaypoints={} wp={} navGoal={} sealed={}/{}{}{}{}",
+        logRoutine(logger, "Follow status: bot={} botPos={} target={} targetPos={} dist={} horiz={} canSee={} directBlocked={} usingWaypoints={} wp={} navGoal={} sealed={}/{}{}{}{}",
                 bot.getName().getString(),
                 bot.getBlockPos().toShortString(),
                 target.getName().getString(),
@@ -117,4 +131,3 @@ public final class FollowDebugService {
                 avoidStr != null ? avoidStr : "");
     }
 }
-

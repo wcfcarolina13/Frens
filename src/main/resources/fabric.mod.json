@@ -8,7 +8,9 @@
 		"wcfcarolina13"
 	],
 	"contact": {
-		"sources": "https://github.com/wcfcarolina13/Frens"
+		"sources": "https://github.com/wcfcarolina13/Frens",
+		"issues": "https://github.com/wcfcarolina13/Frens/issues",
+		"homepage": "https://modrinth.com/mod/mcfrens"
 	},
 	"license": "MIT",
 	"icon": "assets/frens/frens_squad_forestgreen.png",
@@ -32,6 +34,9 @@
 		"minecraft": "~1.21.10",
 		"java": ">=21",
 		"fabric-api": "*"
+	},
+	"conflicts": {
+		"ai-player": "*"
 	},
 	"suggests": {
 		"carpet": "1.4.188",

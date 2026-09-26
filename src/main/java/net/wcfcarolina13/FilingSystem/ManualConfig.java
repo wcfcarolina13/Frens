@@ -85,6 +85,7 @@ public class ManualConfig {
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
+    private boolean verboseDiagnostics = false;
     /** Global override for teleportDuringSkills. When non-null, overrides all per-bot settings. */
     private Boolean globalTeleportDuringSkills = null;
     private int fortBufferRadius = 8;
@@ -949,6 +950,9 @@ public class ManualConfig {
 
     public boolean isFortifyForcePlaceEnabled() { return fortifyForcePlaceEnabled; }
     public void setFortifyForcePlaceEnabled(boolean v) { this.fortifyForcePlaceEnabled = v; }
+
+    public boolean isVerboseDiagnostics() { return verboseDiagnostics; }
+    public void setVerboseDiagnostics(boolean v) { this.verboseDiagnostics = v; }
 
     /** Returns the global teleport override, or null if per-bot settings should apply. */
     public Boolean getGlobalTeleportDuringSkills() { return globalTeleportDuringSkills; }

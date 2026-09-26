@@ -549,6 +549,25 @@ public class modCommandRegistry {
 	                        .then(BotCombatCommands.buildStance())
 	                        .then(BotEquipCommands.build())
 	                        .then(literal("config")
+                                .then(literal("diagnostics")
+                                        .requires(Frens::hasBotCommandPermission)
+                                        .then(literal("on")
+                                                .executes(context -> {
+                                                    Frens.CONFIG.setVerboseDiagnostics(true);
+                                                    Frens.CONFIG.save();
+                                                    context.getSource().sendFeedback(
+                                                            () -> Text.literal("Verbose diagnostics: ON"), true);
+                                                    return 1;
+                                                }))
+                                        .then(literal("off")
+                                                .executes(context -> {
+                                                    Frens.CONFIG.setVerboseDiagnostics(false);
+                                                    Frens.CONFIG.save();
+                                                    context.getSource().sendFeedback(
+                                                            () -> Text.literal("Verbose diagnostics: OFF"), true);
+                                                    return 1;
+                                                }))
+                                )
 	                                .then(literal("teleportDuringSkills")
 	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> executeTeleportConfigTargets(
