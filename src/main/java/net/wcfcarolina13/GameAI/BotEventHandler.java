@@ -2807,7 +2807,15 @@ public class BotEventHandler {
         }
 
         double progressDistSq = bot.getBlockPos().getSquaredDistance(navGoalBlock);
-        boolean directBlocked = progressDistSq <= 36.0D && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
+        // Probe the direct route near the goal, and at any range once the bot has stopped making
+        // progress (or is mid door plan). Beyond 6 blocks a forced-false directBlocked let a visible
+        // commander behind a fence suppress all door handling (1.1.223, Jake at an oak fence gate).
+        int priorFollowStagnant = Math.max(
+                FollowStateService.FOLLOW_STAGNANT_TICKS.getOrDefault(botId, 0),
+                FollowStateService.FOLLOW_POS_STAGNANT_TICKS.getOrDefault(botId, 0));
+        boolean directBlocked = net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.shouldProbeDirectBlocked(
+                        progressDistSq, priorFollowStagnant, FollowStateService.FOLLOW_DOOR_PLAN.containsKey(botId))
+                && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
         boolean botSealed = isSealedSpace(bot);
         boolean commanderSealed = target != null && isSealedSpace(target);
         maybeLogFollowStatus(bot, target, distanceSq, horizDistSq, canSee, directBlocked, usingWaypoints, navGoalBlock, waypointCount, botSealed, commanderSealed);
@@ -4586,7 +4594,7 @@ public class BotEventHandler {
             }
         }
 
-        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {
+        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed, effectiveStagnant)) {
             FOLLOW_DOOR_PLAN.remove(id);
             FOLLOW_DOOR_LAST_BLOCK.remove(id);
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -4606,6 +4614,13 @@ public class BotEventHandler {
             maybeLogFollowDecision(bot, "skip-door-magnet: forcing direct follow dist="
                     + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
                     + " sealed=" + botSealed + "/" + commanderSealed);
+            // Keep the stagnation counter current on this early return (mirrors the tail store):
+            // the next tick's direct-route probe and this skip both read it (1.1.223).
+            if (effectiveStagnant == 0) {
+                FOLLOW_STAGNANT_TICKS.remove(id);
+            } else {
+                FOLLOW_STAGNANT_TICKS.put(id, effectiveStagnant);
+            }
             return false;
         }
 
@@ -5009,17 +5024,13 @@ public class BotEventHandler {
                                                               boolean directBlocked,
                                                               double targetDistSq,
                                                               boolean botSealed,
-                                                              boolean commanderSealed) {
+                                                              boolean commanderSealed,
+                                                              int effectiveStagnant) {
         if (bot == null || target == null) {
             return false;
         }
-        if (botSealed || commanderSealed) {
-            return false;
-        }
-        if (!directBlocked && (canSee || targetDistSq >= 900.0D)) {
-            return true;
-        }
-        return false;
+        return net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.shouldSkipDoorMagnet(
+                canSee, directBlocked, targetDistSq, botSealed, commanderSealed, effectiveStagnant);
     }
 
     private static double horizontalDistanceSq(ServerPlayerEntity bot, Vec3d targetPos) {
@@ -6181,11 +6192,12 @@ public class BotEventHandler {
             return false;
         }
         boolean allowIndependentSummit = directBlocked && effectiveStagnant >= 3;
-        double verticalGap = target.getY() - bot.getY();
-        if (allowIndependentSummit && verticalGap < -2.0D) {
+        if (!targetAboveBot && !allowIndependentSummit) {
             return false;
         }
-        if (!targetAboveBot && !allowIndependentSummit) {
+        if (!targetAboveBot
+                && !net.wcfcarolina13.GameAI.services.follow.VerticalLockAcquirePolicy.isCommanderAbove(bot.getY(), target.getY())) {
+            // Independent summit with the commander level or below: a climb cannot help (1.1.223).
             return false;
         }
         UUID botId = bot.getUuid();
@@ -6221,6 +6233,32 @@ public class BotEventHandler {
         }
         if (candidate.topY() <= bot.getY() + 1.5D) {
             return false;
+        }
+        if (!targetAboveBot) {
+            // Independent summit: the scan scores by height and nearness to the bot, not by whether
+            // the climb leads toward the commander. 1.1.223 took a ladder behind Jake and cleared the
+            // gate plan that would have got him through.
+            BlockPos botBlock = bot.getBlockPos();
+            BlockPos targetBlock = target.getBlockPos();
+            BlockPos stand = candidate.standPos();
+            double botDx = botBlock.getX() - targetBlock.getX();
+            double botDz = botBlock.getZ() - targetBlock.getZ();
+            double standDx = stand.getX() - targetBlock.getX();
+            double standDz = stand.getZ() - targetBlock.getZ();
+            if (!net.wcfcarolina13.GameAI.services.follow.VerticalLockAcquirePolicy.acceptSummitCandidate(
+                    bot.getY(),
+                    target.getY(),
+                    botDx * botDx + botDz * botDz,
+                    standDx * standDx + standDz * standDz,
+                    candidate.topY())) {
+                // Same short cooldown as the blocked-stand reject: no climbable rescan every tick while stuck.
+                FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.put(botId, nowMs + 2_500L);
+                maybeLogFollowDecision(bot, "vertical-lock skip: summit not toward commander climbable="
+                        + candidate.climbPos().toShortString()
+                        + " stand=" + stand.toShortString()
+                        + " topY=" + candidate.topY());
+                return false;
+            }
         }
 
         BlockPos forcedDoorBase = null;
