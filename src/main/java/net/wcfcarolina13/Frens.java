@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.loader.api.MappingResolver;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.server.MinecraftServer;
@@ -135,28 +136,38 @@ public class Frens implements ModInitializer {
         return isOperator(player);
     }
 
+    // Intermediary ids (verified in the 1.21.11 Yarn mappings.tiny): LeveledPermissionPredicate is
+    // class_12086 (OWNERS field_63185 ... ALL field_63181); PermissionPredicate is class_12096
+    // (ALL field_63208). Resolved through the MappingResolver so the lookup works in production
+    // (intermediary) and in dev (named) alike, and falls back cleanly where the class is absent.
+    private static final String LEVELED_PERMISSION_INTERMEDIARY = "net.minecraft.class_12086";
+    private static final String[][] LEVELED_PERMISSION_FIELDS = {
+            {"field_63185", "OWNERS"}, {"field_63184", "ADMINS"}, {"field_63183", "GAMEMASTERS"},
+            {"field_63182", "MODERATORS"}, {"field_63181", "ALL"}};
+    private static final String PERMISSION_PREDICATE_INTERMEDIARY = "net.minecraft.class_12096";
+    private static final String PERMISSION_PREDICATE_ALL_FIELD = "field_63208";
+
     private static PermissionResolution resolveOperatorPermissions() {
         ClassLoader loader = Frens.class.getClassLoader();
-        String className = "net.minecraft.command.permission.LeveledPermissionPredicate";
-        String[] preferredFields = {"OWNERS", "ADMINS", "GAMEMASTERS", "MODERATORS", "ALL"};
+        MappingResolver resolver = null;
         try {
-            Class<?> clazz = Class.forName(className, false, loader);
-            for (String fieldName : preferredFields) {
-                PermissionPredicate candidate = readStaticPermissionPredicate(clazz, fieldName);
-                if (candidate != null) {
-                    return new PermissionResolution(candidate, "leveled-field", clazz.getName(), fieldName);
-                }
+            resolver = FabricLoader.getInstance().getMappingResolver();
+        } catch (Throwable ignored) {
+            // No loader (should not happen in game): named-lookup fallbacks below.
+        }
+
+        if (resolver != null) {
+            PermissionResolution leveled = resolveMappedStatic(resolver, loader,
+                    LEVELED_PERMISSION_INTERMEDIARY, LEVELED_PERMISSION_FIELDS, "leveled-mapped");
+            if (leveled != null) {
+                return leveled;
             }
-            PermissionPredicate any = findAnyStaticPermissionPredicate(clazz);
-            if (any != null) {
-                return new PermissionResolution(any, "leveled-any-static", clazz.getName(), "first-static");
+            PermissionResolution all = resolveMappedStatic(resolver, loader,
+                    PERMISSION_PREDICATE_INTERMEDIARY,
+                    new String[][]{{PERMISSION_PREDICATE_ALL_FIELD, "ALL"}}, "permission-all-mapped-fallback");
+            if (all != null) {
+                return all;
             }
-            PermissionPredicate constructed = constructPermissionPredicate(clazz);
-            if (constructed != null) {
-                return new PermissionResolution(constructed, "leveled-constructor", clazz.getName(), "ctor");
-            }
-        } catch (Throwable t) {
-            LOGGER.warn("[PermCheck] leveled permission predicate lookup failed: {}", t.toString());
         }
 
         for (String fieldName : new String[]{"ALL", "NONE"}) {
@@ -178,6 +189,34 @@ public class Frens implements ModInitializer {
 
         PermissionPredicate ctorLastResort = new PermissionPredicate();
         return new PermissionResolution(ctorLastResort, "permission-ctor-last-resort", PermissionPredicate.class.getName(), "ctor-direct");
+    }
+
+    /**
+     * Reads the first present static {@link PermissionPredicate} among {@code fields}
+     * ({intermediary, label} pairs) of the class with intermediary name {@code intermediaryClass},
+     * mapped to the runtime namespace. Null when the class or every field is absent (e.g. on a
+     * Minecraft version without it) -- an expected fallback, so nothing is logged here.
+     */
+    private static PermissionResolution resolveMappedStatic(MappingResolver resolver, ClassLoader loader,
+                                                            String intermediaryClass, String[][] fields,
+                                                            String mode) {
+        try {
+            String runtimeClass = resolver.mapClassName("intermediary", intermediaryClass);
+            Class<?> clazz = Class.forName(runtimeClass, false, loader);
+            String descriptor = "L" + intermediaryClass.replace('.', '/') + ";";
+            for (String[] field : fields) {
+                String runtimeField = resolver.mapFieldName("intermediary", intermediaryClass, field[0], descriptor);
+                PermissionPredicate candidate = readStaticPermissionPredicate(clazz, runtimeField);
+                if (candidate != null) {
+                    return new PermissionResolution(candidate, mode, runtimeClass, field[1] + "/" + runtimeField);
+                }
+            }
+        } catch (ClassNotFoundException | LinkageError expected) {
+            // Class absent on this Minecraft version: caller falls back.
+        } catch (RuntimeException e) {
+            LOGGER.debug("[PermCheck] mapped lookup of {} failed: {}", intermediaryClass, e.toString());
+        }
+        return null;
     }
 
     private static PermissionPredicate readStaticPermissionPredicate(Class<?> clazz, String fieldName) {
