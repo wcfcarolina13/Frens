@@ -64,6 +64,27 @@ class OwnerAddressPolicyTest {
         assertTrue(OwnerAddressPolicy.isVocative("Well, Roti, I think we're lost.", OWNER));
     }
 
+    @Test
+    void openingNameBeforeSecondPersonOrImperativeIsAnAddress() {
+        for (String word : java.util.List.of("you", "you're", "youre", "you'll", "you've", "your", "u", "ya",
+                "look", "come", "check", "open", "get", "go", "help", "listen", "wait", "watch",
+                "stop", "follow", "grab", "bring", "take")) {
+            assertTrue(OwnerAddressPolicy.isVocative("Roti " + word + " over here", OWNER), word);
+            assertTrue(OwnerAddressPolicy.isVocative("Ready. Roti " + word + " over here", OWNER), word);
+        }
+        assertTrue(OwnerAddressPolicy.isVocative("Roti you should open the gate", OWNER));
+        assertTrue(OwnerAddressPolicy.isVocative("RotiWokeman, you there?", OWNER));
+        assertTrue(OwnerAddressPolicy.isVocative("Roti look at this", OWNER));
+    }
+
+    @Test
+    void indirectMentionsAndLongerWordsAreNotBareAddresses() {
+        assertFalse(OwnerAddressPolicy.isVocative("Roti said you should look", OWNER));
+        assertFalse(OwnerAddressPolicy.isVocative("Roti's axe is here", OWNER));
+        assertFalse(OwnerAddressPolicy.isVocative("Roti looks at this", OWNER));
+        assertFalse(OwnerAddressPolicy.isVocative("Ask Roti you should know", OWNER));
+    }
+
     // --- matching rules ---
 
     @Test

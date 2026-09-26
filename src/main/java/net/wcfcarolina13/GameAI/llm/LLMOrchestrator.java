@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -27,6 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class LLMOrchestrator {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("LLMOrchestrator");
+    private static final boolean OLLAMA4J_AVAILABLE = isOllama4jAvailable();
+    private static final AtomicBoolean WARNED_NLP_UNAVAILABLE = new AtomicBoolean(false);
     private static final AtomicInteger CHAT_THREAD_ID = new AtomicInteger(0);
     private static final ExecutorService CHAT_EXECUTOR = Executors.newCachedThreadPool(runnable -> {
         Thread t = new Thread(runnable, "llm-orchestrator-" + CHAT_THREAD_ID.incrementAndGet());
@@ -95,6 +98,12 @@ public final class LLMOrchestrator {
                                     ServerCommandSource botSource,
                                     UUID playerUuid,
                                     String message) {
+        if (!OLLAMA4J_AVAILABLE) {
+            if (WARNED_NLP_UNAVAILABLE.compareAndSet(false, true)) {
+                LOGGER.warn("LLM chat parser disabled: ollama4j is not on the classpath (non-AI build).");
+            }
+            return;
+        }
         try {
             String llmProvider = (Frens.CONFIG != null && Frens.CONFIG.getLlmMode() != null && !Frens.CONFIG.getLlmMode().isBlank())
                     ? Frens.CONFIG.getLlmMode()
@@ -106,7 +115,16 @@ public final class LLMOrchestrator {
             }
             String worldKey = worldKey(server, bot);
             String personaPrompt = MEMORY_STORE.buildPersonaPrompt(worldKey, bot);
-            NLPProcessor.Intent intent = NLPProcessor.getIntention(message);
+            NLPProcessor.Intent intent;
+            try {
+                intent = NLPProcessor.getIntention(message);
+            } catch (LinkageError | RuntimeException e) {
+                if (WARNED_NLP_UNAVAILABLE.compareAndSet(false, true)) {
+                    LOGGER.warn("LLM chat parser unavailable ({}: {}); ignoring chat prompts.",
+                            e.getClass().getSimpleName(), e.getMessage());
+                }
+                return;
+            }
             if (intent == NLPProcessor.Intent.REQUEST_ACTION) {
                 LLMServiceHandler.routeFromOrchestrator(message, botSource, playerUuid, llmClient);
                 MEMORY_STORE.appendMemory(worldKey, bot.getUuid(), "Received command request: \"" + message + "\"");
@@ -119,6 +137,16 @@ public final class LLMOrchestrator {
             }
         } catch (Exception e) {
             LOGGER.error("LLM orchestration failed", e);
+        }
+    }
+
+    private static boolean isOllama4jAvailable() {
+        try {
+            Class.forName("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException",
+                    false, Frens.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError | RuntimeException e) {
+            return false;
         }
     }
 

@@ -390,7 +390,7 @@ final class SoulMindOps {
 
     /**
      * A delivered line becomes an open thread when it ends with {@code ?} and was aimed at the
-     * player — either the whole scene was player-addressed, or the line names the owner.
+     * player — either the whole scene was player-addressed, or the line directly addresses the owner.
      */
     static Optional<String> extractQuestion(String lastLineText, String ownerName, boolean addressPlayer) {
         if (lastLineText == null) {
@@ -401,7 +401,7 @@ final class SoulMindOps {
             return Optional.empty();
         }
         if (!addressPlayer
-                && !SoulGroupResponseValidator.addressesOwner(text, SoulGroupResponseValidator.normalize(ownerName))) {
+                && !OwnerAddressPolicy.isVocative(text, ownerName)) {
             return Optional.empty();
         }
         return Optional.of(truncateQuestion(text));

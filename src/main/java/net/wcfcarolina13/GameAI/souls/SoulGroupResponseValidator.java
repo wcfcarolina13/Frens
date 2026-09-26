@@ -181,9 +181,7 @@ public final class SoulGroupResponseValidator {
         java.util.Optional<String> sideChannelRaw = java.util.Optional.empty();
         String[] rawLines = text.split("\n");
         for (int rawIndex = 0; rawIndex < rawLines.length; rawIndex++) {
-            // A whole line wrapped in quotes ("Bob: Hey.") loses them before the tag split, so
-            // the tag still parses and the trailing quote never reaches the spoken body.
-            String line = stripWrappingQuotes(cleanLine(rawLines[rawIndex]));
+            String line = cleanLine(rawLines[rawIndex]);
             // Checked BEFORE the line cap so a tail that follows a full-length scene is still
             // captured (and, more importantly, still stripped) rather than left unread.
             java.util.Optional<String> sentinelTail = sideChannelTail(line);
@@ -191,6 +189,13 @@ public final class SoulGroupResponseValidator {
                 sideChannelRaw = sentinelTail;
                 break; // end of scene: this line and everything after it are dropped
             }
+            String unquoted = stripWrappingQuotes(line);
+            if (sideChannelTail(line.replaceFirst("^[\"'“”‘’«]+", "")).isPresent()) {
+                // Quoted instructions are model scaffolding, never executable or spoken.
+                dropped.add(new DroppedLine(rawIndex, DropReason.SCAFFOLD, line));
+                continue;
+            }
+            line = unquoted;
             if (lines.size() >= maxSceneLines) {
                 if (!line.isEmpty()) {
                     dropped.add(new DroppedLine(rawIndex, DropReason.SCENE_CAP, line));

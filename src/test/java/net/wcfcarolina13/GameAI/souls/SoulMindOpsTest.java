@@ -31,6 +31,13 @@ class SoulMindOpsTest {
     }
 
     @Test
+    void questionsAboutOwnerDoNotBecomeOwnerThreads() {
+        assertTrue(SoulMindOps.extractQuestion("what was RotiWokeman looking for?", "RotiWokeman", false).isEmpty());
+        assertEquals(Optional.of("Roti you coming?"),
+                SoulMindOps.extractQuestion("Roti you coming?", "RotiWokeman", false));
+    }
+
+    @Test
     void stanceClampsAndBaseline() {
         assertEquals(new SoulTypes.Stance(6, 0, 0), new SoulTypes.Stance(9, -2, 0));
         assertEquals("", SoulMindOps.stanceClause(SoulTypes.Stance.BASELINE, "Roti"));

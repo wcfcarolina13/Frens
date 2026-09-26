@@ -39,6 +39,12 @@ final class OwnerAddressPolicy {
             "good", "morning", "afternoon", "evening", "night", "goodnight", "thanks", "thank",
             "you", "welcome", "back", "bye", "goodbye", "cheers", "sorry");
 
+    private static final Pattern NEXT_WORD = Pattern.compile("\\s+([A-Za-z0-9_'’]+)");
+    private static final Set<String> ADDRESS_WORDS = Set.of(
+            "you", "you're", "youre", "you'll", "you've", "your", "u", "ya",
+            "look", "come", "check", "open", "get", "go", "help", "listen", "wait", "watch",
+            "stop", "follow", "grab", "bring", "take");
+
     private OwnerAddressPolicy() {
     }
 
@@ -66,7 +72,7 @@ final class OwnerAddressPolicy {
             char after = nextSignificant(text, end);
             boolean sentenceStart = before == 0 || isSentenceEnd(before);
             boolean closesClause = after == 0 || isSentenceEnd(after);
-            if (sentenceStart && (after == ',' || closesClause)) {
+            if (sentenceStart && (after == ',' || closesClause || followsAddressWord(text, end))) {
                 return true;
             }
             if (before == ',' && (after == ',' || closesClause)) {
@@ -77,6 +83,12 @@ final class OwnerAddressPolicy {
             }
         }
         return false;
+    }
+
+    private static boolean followsAddressWord(String text, int nameEnd) {
+        Matcher next = NEXT_WORD.matcher(text).region(nameEnd, text.length());
+        return next.lookingAt() && ADDRESS_WORDS.contains(
+                next.group(1).toLowerCase(java.util.Locale.ROOT).replace('’', '\''));
     }
 
     /** Whole normalised name, or a ≥4-char prefix of it; "Rotisserie" is its own word. */

@@ -18,6 +18,30 @@ class SoulGroupResponseValidatorTest {
     private static final List<String> ROSTER = List.of("Jake", "Sara");
 
     @Test
+    void quotedSentinelIsDroppedWithoutApplyingOrEndingScene() {
+        for (String quoted : List.of("\"##FRENS {}\"", "\"##FRENS {\"facts\":[]}\"",
+                "'##FRENS {\"facts\":[]}'")) {
+            for (List<String> roster : List.of(ROSTER, List.of("Jake"))) {
+                var parse = validator.parse("Jake: Morning.\n" + quoted + "\nJake: Still here.", roster);
+                assertTrue(parse.accepted());
+                assertTrue(parse.sideChannelRaw().isEmpty());
+                assertTrue(parse.lines().stream().anyMatch(line -> line.text().contains("Still here.")));
+                assertFalse(parse.lines().stream().anyMatch(line -> line.text().contains("##FRENS")));
+                assertEquals(1, parse.dropped().size());
+                assertEquals(SoulGroupResponseValidator.DropReason.SCAFFOLD, parse.dropped().getFirst().reason());
+            }
+        }
+    }
+
+    @Test
+    void bareOwnerAddressCutsOffReplyOnPlayersBehalf() {
+        var parse = validator.parse("Jake: Roti you should open the gate\nSara: Sure I will.",
+                ROSTER, 4, "RotiWokeman", true);
+        assertEquals(1, parse.lines().size());
+        assertEquals(1, parse.ownerCutDropped());
+    }
+
+    @Test
     void happyParsePreservesSpeakerOrderAndIndices() {
         var parse = validator.parse("Jake: I say we mine tonight.\nSara: Too dangerous.\nJake: Fine, fishing then.", ROSTER);
         assertTrue(parse.accepted());
