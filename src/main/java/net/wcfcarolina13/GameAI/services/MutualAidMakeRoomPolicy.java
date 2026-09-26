@@ -7,14 +7,15 @@ package net.wcfcarolina13.GameAI.services;
  *
  * <p>Make-room runs on the server thread, so it only ever drops one stack; it never walks to a
  * chest, places one or deposits into one. A flower is a cosmetic gift and never makes a full bot
- * drop anything. A drop that finds nothing it may drop holds that bot's make-room off for
- * {@link #RETRY_TICKS}, so a full bot does not retry (and log) every tick.
+ * drop anything. A drop that finds nothing it may drop holds that bot's make-room of that
+ * {@link Kind} off for {@link #RETRY_TICKS}, so a full bot does not retry (and log) every tick; the
+ * other kinds reserve different items, so they keep trying.
  *
  * <p>No Minecraft types, so it is tested without the game.
  */
 public final class MutualAidMakeRoomPolicy {
 
-    /** After a drop that found nothing the bot may drop, no make-room drop for that bot for 10 s. */
+    /** After a drop that found nothing the bot may drop, no make-room drop of that kind for that bot for 10 s. */
     public static final long RETRY_TICKS = 20L * 10L;
 
     /** What the room is for. */

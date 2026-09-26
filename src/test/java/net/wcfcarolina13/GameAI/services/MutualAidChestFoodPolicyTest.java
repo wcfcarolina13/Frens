@@ -316,6 +316,23 @@ class MutualAidChestFoodPolicyTest {
         }
     }
 
+    @Test
+    void aFailedMakeRoomHoldsOffOnlyItsOwnKind() throws IOException {
+        String source = mutualAidSource();
+        // A gear drop reserves more than a food pickup does, so its failure must not block the pickup.
+        assertTrue(source.contains("Map<UUID, Map<MutualAidMakeRoomPolicy.Kind, Long>> NEXT_MAKE_ROOM_TICK"),
+                "the make-room backoff should be keyed by bot and kind");
+        assertTrue(source.contains("pruneMap(NEXT_MAKE_ROOM_TICK, knownBots);"), "the backoff should still be pruned");
+        assertTrue(bodyOf(source, "boolean tryMakeSpaceForNearbyDroppedFood(")
+                        .contains("mayMakeRoom(bot, MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, nowTick)"),
+                "the food pickup should read its own backoff");
+        assertTrue(bodyOf(source, "boolean ensureInventorySpaceForAidRecipient(")
+                        .contains("mayMakeRoom(recipient, roomKind, nowTick)"),
+                "a recipient should read the backoff of the kind it is receiving");
+        assertTrue(bodyOf(source, "void holdOffMakeRoom(").contains(".put(kind, "),
+                "a failure should hold off only its own kind");
+    }
+
     private static String mutualAidSource() throws IOException {
         String relative = "src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java";
         Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();

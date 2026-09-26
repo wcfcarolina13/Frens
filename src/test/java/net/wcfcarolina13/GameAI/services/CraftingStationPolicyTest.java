@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -24,6 +25,8 @@ class CraftingStationPolicyTest {
     private static final double STATION_REACH = 4.5D;
     private static final String DECLINE_LINE =
             "craft-station tick-side: no table in reach for {}, not walking (reason={})";
+    /** ensureCraftingStation's server-thread split, as the source spells it (its first occurrence). */
+    private static final String TICK_GATE = "if (!CraftingStationPolicy.mayWalk(onServerThread))";
 
     // ── walking, nudging and carving ─────────────────────────────────────────────────────────
 
@@ -151,7 +154,6 @@ class CraftingStationPolicyTest {
     @Test
     void ensureCraftingStationAsksThePolicyBeforeWalkingOrArmingTheCooldown() throws IOException {
         String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
-        assertTrue(body.contains("CraftingStationPolicy.mayWalk("), "ensureCraftingStation must ask mayWalk");
         assertTrue(body.contains("CraftingStationPolicy.scanHorizontal(")
                 && body.contains("CraftingStationPolicy.scanVertical("), "the scan box must come from the policy");
         assertEquals(3, count(body, "CraftingStationPolicy.acceptKnownTable("),
@@ -160,6 +162,66 @@ class CraftingStationPolicyTest {
         assertGuarded(body, "retryCraftingTablePlacementAfterLocalReposition(", "CraftingStationPolicy.mayWalk(");
         assertEquals(2, count(body, "usePlacedTableWithoutWalking("),
                 "both placement branches hand the server thread off before the stand walk");
+    }
+
+    @Test
+    void theServerThreadSplitComesBeforeAnyWalkAndEndsTheCall() throws IOException {
+        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        int gate = body.indexOf(TICK_GATE);
+        assertTrue(gate >= 0, "ensureCraftingStation lost its server-thread split");
+        for (String walk : List.of("clearPathObstructions(", "MovementService.")) {
+            int first = body.indexOf(walk);
+            assertTrue(first >= 0, walk + " not found");
+            assertTrue(gate < first, "the server-thread split must come before the first " + walk);
+        }
+        String split = blockAfter(body, gate);
+        assertTrue(split.replaceAll("\\s+", " ").endsWith("return false; }"),
+                "the server-thread split must return, never fall through to the walks below it");
+        for (String walk : List.of("clearPathObstructions(", "MovementService.", "tickAndCheckStuck(")) {
+            assertFalse(split.contains(walk), "the server-thread split reaches " + walk);
+        }
+    }
+
+    @Test
+    void theServerThreadClearsTheChatAndReachCooldownsOnlyForAUsableTable() throws IOException {
+        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        String split = blockAfter(body, body.indexOf(TICK_GATE));
+        String usable = blockAfter(split, split.indexOf("if (ensureStationInteractable("));
+        for (String clear : List.of("CRAFT_TABLE_MSG_COOLDOWN.remove(", "CRAFT_TABLE_REACH_FAILURE.remove(")) {
+            assertTrue(usable.contains(clear), clear + " must run once the in-reach table is usable");
+            assertEquals(1, count(split, clear),
+                    clear + " must not run for a blocked table, or its caller chats every call");
+        }
+        assertTrue(split.indexOf("logTickSideDecline(") > split.indexOf(usable) + usable.length(),
+                "a blocked table is a decline");
+    }
+
+    @Test
+    void theServerThreadForgetsAGoneRememberedTableBeforeItsReachTest() throws IOException {
+        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        int forget = body.indexOf("LAST_KNOWN_CRAFTING_TABLE.remove(");
+        assertTrue(forget >= 0 && forget < body.indexOf("CraftingStationPolicy.acceptKnownTable("),
+                "a gone remembered table must be forgotten before the reach test, or a miss says far-table");
+        String check = body.substring(body.lastIndexOf("if (", forget), forget);
+        assertTrue(check.contains("onServerThread") && check.contains("isChunkLoaded(pos)")
+                        && check.contains("isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)"),
+                "the early check is server-thread only and never loads a chunk: " + check);
+    }
+
+    @Test
+    void aServerThreadPlacementMissLogsItsSummaryAtDebug() throws IOException {
+        String source = craftingHelperSource();
+        String body = bodyOf(source, "static PreparedPlacement prepareNearbyUtilityPlacement(");
+        int failed = body.indexOf("attemptLog.flush(\"failed\"");
+        assertTrue(failed >= 0, "the failed placement summary is gone");
+        assertTrue(body.substring(failed, body.indexOf(';', failed)).contains("!CraftingStationPolicy.logAtInfo(onServerThread)"),
+                "a server-thread miss (retried every second) must not WARN");
+        String flush = bodyOf(source,
+                "private void flush(String outcome, PreparedPlacement prepared, BlockPos botPos, boolean warnOnFailure, boolean atDebug)");
+        int debug = flush.indexOf("if (atDebug)");
+        assertTrue(debug >= 0 && debug < flush.indexOf("LOGGER.warn(") && debug < flush.indexOf("LOGGER.info("),
+                "atDebug must win over both the WARN and the INFO summary");
+        assertTrue(blockAfter(flush, debug).contains("LOGGER.debug("), "atDebug logs at DEBUG");
     }
 
     @Test
@@ -204,6 +266,22 @@ class CraftingStationPolicyTest {
             }
         }
         throw new IOException(relative + " not found above " + dir);
+    }
+
+    /** The block, braces included, that opens at the first brace after {@code from}. */
+    private static String blockAfter(String text, int from) {
+        assertTrue(from >= 0, "block start not found");
+        int open = text.indexOf('{', from);
+        int depth = 0;
+        for (int i = open; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}' && --depth == 0) {
+                return text.substring(open, i + 1);
+            }
+        }
+        throw new AssertionError("unbalanced block at " + from);
     }
 
     /** The body, braces included, of the one declaration starting with {@code signature}. */

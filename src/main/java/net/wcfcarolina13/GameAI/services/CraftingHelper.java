@@ -191,6 +191,14 @@ public final class CraftingHelper {
         }
 
         private void flush(String outcome, PreparedPlacement prepared, BlockPos botPos, boolean warnOnFailure) {
+            flush(outcome, prepared, botPos, warnOnFailure, false);
+        }
+
+        /**
+         * @param atDebug write the summary at DEBUG whatever its usual level: a server-thread miss,
+         *                which a caller may retry every second
+         */
+        private void flush(String outcome, PreparedPlacement prepared, BlockPos botPos, boolean warnOnFailure, boolean atDebug) {
             if (emitted) {
                 return;
             }
@@ -206,6 +214,20 @@ public final class CraftingHelper {
             String stand = prepared != null && prepared.standPos() != null ? prepared.standPos().toShortString() : "none";
             String bot = botPos != null ? botPos.toShortString() : "unknown";
             String relocation = relocationStand != null ? relocationStand.toShortString() : "none";
+            if (atDebug) {
+                LOGGER.debug("Utility placement summary [{}]: outcome={} origin={} bot={} place={} stand={} relocation={} clearedCells={} rejectionCounts={} samples={}",
+                        label,
+                        outcome,
+                        origin == null ? "unknown" : origin.toShortString(),
+                        bot,
+                        place,
+                        stand,
+                        relocation,
+                        clearedCells,
+                        rejectionCounts,
+                        rejectionSamples);
+                return;
+            }
             if (warnOnFailure) {
                 LOGGER.warn("Utility placement summary [{}]: outcome={} origin={} bot={} place={} stand={} relocation={} clearedCells={} rejectionCounts={} samples={}",
                         label,
@@ -1351,7 +1373,12 @@ public final class CraftingHelper {
         if (remembered != null && remembered.worldKey() != null && remembered.worldKey().equals(world.getRegistryKey())) {
             BlockPos pos = remembered.pos();
             if (pos != null && botPos.getSquaredDistance(pos) <= MAX_REMEMBERED_TABLE_DIST_SQ) {
-                if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
+                if (onServerThread && world.isChunkLoaded(pos)
+                        && !world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                    // Gone: forget it before the reach test, as the check below does for a chosen
+                    // table, so the scan still runs and a miss reports no-table, not far-table.
+                    LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
+                } else if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
                     nearest = pos.toImmutable();
                 } else {
                     skippedTableOutOfReach = true;
@@ -1416,10 +1443,11 @@ public final class CraftingHelper {
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), nearest.toImmutable()));
             if (!CraftingStationPolicy.mayWalk(onServerThread)) {
                 // Only a table in reach gets this far on the server thread: use it from here, with
-                // no stand search, approach walk, nudge or leaf clearing.
-                CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                // no stand search, approach walk, nudge or leaf clearing. The cooldowns clear only once
+                // the table is usable: a blocked one keeps the "I need a crafting table" chat throttled.
                 if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
+                    CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
+                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
                     CRAFT_STATION_DECLINE_LOGGED.remove(bot.getUuid());
                     return true;
                 }
@@ -1875,7 +1903,9 @@ public final class CraftingHelper {
                 }
             }
         }
-        attemptLog.flush("failed", null, bot.getBlockPos(), true);
+        // On the server thread a caller may retry every second (RideSync), so the miss stays at DEBUG;
+        // for a crafting table the rate-limited "craft-station tick-side" line reports it.
+        attemptLog.flush("failed", null, bot.getBlockPos(), true, !CraftingStationPolicy.logAtInfo(onServerThread));
         return null;
     }
 

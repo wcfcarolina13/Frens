@@ -96,8 +96,12 @@ public final class BotMutualAidService {
     private static final Map<UUID, Long> NEXT_REGROUP_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_DEFENSE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_FLOWER_TICK = new ConcurrentHashMap<>();
-    /** Per bot that would drop: no make-room drop before this tick (set when a drop found nothing it may drop). Server thread. */
-    private static final Map<UUID, Long> NEXT_MAKE_ROOM_TICK = new ConcurrentHashMap<>();
+    /**
+     * Per bot that would drop, per make-room kind: no make-room drop for that kind before this tick
+     * (set when a drop found nothing it may drop). Keyed by kind because each kind reserves different
+     * items, so a failed gear drop says nothing about a food pickup. Server thread.
+     */
+    private static final Map<UUID, Map<MutualAidMakeRoomPolicy.Kind, Long>> NEXT_MAKE_ROOM_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, PendingHandoff> PENDING_HANDOFFS = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> DONOR_PENDING = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> LAST_INTERACTION_BOT = new ConcurrentHashMap<>();
@@ -1168,7 +1172,7 @@ public final class BotMutualAidService {
      * A starving bot with a full inventory next to dropped food frees a slot by dropping one stack
      * (a cheap one first; never food it carries, never a protected or damageable item) and lets the
      * food be picked up at once. Server tick: it only drops, never walks to, places or fills a chest.
-     * A drop that finds nothing it may drop holds this bot's make-room off for
+     * A drop that finds nothing it may drop holds this bot's food-pickup make-room off for
      * {@link MutualAidMakeRoomPolicy#RETRY_TICKS}; until then this returns false without dropping.
      *
      * @return whether room was made for the food (the tick then skips this bot)
@@ -1180,7 +1184,8 @@ public final class BotMutualAidService {
         MutualAidMakeRoomPolicy.Decision room = MutualAidMakeRoomPolicy.decide(
                 MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, bot.getInventory().getEmptySlot() != -1);
         if (room == MutualAidMakeRoomPolicy.Decision.DECLINE
-                || (room == MutualAidMakeRoomPolicy.Decision.DROP && !mayMakeRoom(bot, nowTick))) {
+                || (room == MutualAidMakeRoomPolicy.Decision.DROP
+                        && !mayMakeRoom(bot, MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, nowTick))) {
             return false;
         }
         ItemEntity nearbyFood = world.getEntitiesByClass(
@@ -1254,8 +1259,8 @@ public final class BotMutualAidService {
      * first; never food, weapons, armor, shields or flowers it carries, never a protected or
      * damageable item), and a flower is declined without dropping anything. Server tick: it only
      * drops, never walks to, places or fills a chest. A drop that finds nothing it may drop holds
-     * this recipient's make-room off for {@link MutualAidMakeRoomPolicy#RETRY_TICKS}; until then
-     * this returns false without dropping.
+     * this recipient's make-room for that kind off for {@link MutualAidMakeRoomPolicy#RETRY_TICKS};
+     * until then this returns false without dropping.
      */
     private static boolean ensureInventorySpaceForAidRecipient(ServerPlayerEntity recipient, AidKind kind, long nowTick) {
         if (recipient == null || recipient.getCommandSource() == null) {
@@ -1271,7 +1276,7 @@ public final class BotMutualAidService {
         if (room != MutualAidMakeRoomPolicy.Decision.DROP) {
             return room == MutualAidMakeRoomPolicy.Decision.NOT_NEEDED;
         }
-        if (!mayMakeRoom(recipient, nowTick)) {
+        if (!mayMakeRoom(recipient, roomKind, nowTick)) {
             return false;
         }
         Map<Item, Integer> reserveItems = collectAidReserveItems(recipient);
@@ -1282,14 +1287,16 @@ public final class BotMutualAidService {
         return false;
     }
 
-    /** Whether {@code bot} may drop a stack for room now, i.e. no failed make-room drop in the last {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
-    private static boolean mayMakeRoom(ServerPlayerEntity bot, long nowTick) {
-        return MutualAidMakeRoomPolicy.mayAttempt(nowTick, NEXT_MAKE_ROOM_TICK.getOrDefault(bot.getUuid(), 0L));
+    /** Whether {@code bot} may drop a stack for {@code kind} now, i.e. no failed {@code kind} make-room drop in the last {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
+    private static boolean mayMakeRoom(ServerPlayerEntity bot, MutualAidMakeRoomPolicy.Kind kind, long nowTick) {
+        Map<MutualAidMakeRoomPolicy.Kind, Long> perKind = NEXT_MAKE_ROOM_TICK.get(bot.getUuid());
+        return MutualAidMakeRoomPolicy.mayAttempt(nowTick, perKind == null ? 0L : perKind.getOrDefault(kind, 0L));
     }
 
-    /** After a make-room drop found nothing {@code bot} may drop: no make-room drop for it for {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
+    /** After a {@code kind} make-room drop found nothing {@code bot} may drop: no {@code kind} make-room drop for it for {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
     private static void holdOffMakeRoom(ServerPlayerEntity bot, MutualAidMakeRoomPolicy.Kind kind, long nowTick) {
-        NEXT_MAKE_ROOM_TICK.put(bot.getUuid(), MutualAidMakeRoomPolicy.nextAllowedAfterFailure(nowTick));
+        NEXT_MAKE_ROOM_TICK.computeIfAbsent(bot.getUuid(), id -> new ConcurrentHashMap<>())
+                .put(kind, MutualAidMakeRoomPolicy.nextAllowedAfterFailure(nowTick));
         LOGGER.info("mutual-aid make-room: {} has nothing it may drop, retry in 10 s (kind={})",
                 bot.getName().getString(), kind);
     }
