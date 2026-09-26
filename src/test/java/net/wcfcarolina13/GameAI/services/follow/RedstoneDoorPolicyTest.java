@@ -37,4 +37,21 @@ class RedstoneDoorPolicyTest {
     void unpoweredControlledWoodenDoorCanBeHandOpened() {
         assertTrue(new RedstoneDoorPolicy(false, false, false, true, false, true, true).mayHandOpen());
     }
+    @Test
+    void alreadyOpenOrdinaryDoorIsClosedBehindTheBotEvenIfItDidNotOpenIt() {
+        // locked, open, powered, opensByHand, openedByBot, plateAdjacent, triggerAdjacent
+        var door = new RedstoneDoorPolicy(false, true, false, true, false, false, false);
+        assertTrue(door.shouldScheduleCloseForAlreadyOpen());
+        assertFalse(door.shouldSetAlreadyOpenCooldown());
+    }
+
+    @Test
+    void alreadyOpenControlledPoweredLockedOrClosedDoorIsNotClosed() {
+        assertFalse(new RedstoneDoorPolicy(false, true, false, true, false, true, false).shouldScheduleCloseForAlreadyOpen());
+        assertFalse(new RedstoneDoorPolicy(false, true, false, true, false, false, true).shouldScheduleCloseForAlreadyOpen());
+        assertFalse(new RedstoneDoorPolicy(false, true, true, true, false, false, false).shouldScheduleCloseForAlreadyOpen());
+        assertFalse(new RedstoneDoorPolicy(true, true, false, true, false, false, false).shouldScheduleCloseForAlreadyOpen());
+        assertFalse(new RedstoneDoorPolicy(false, false, false, true, false, false, false).shouldScheduleCloseForAlreadyOpen());
+        assertFalse(new RedstoneDoorPolicy(false, true, false, false, false, false, false).shouldScheduleCloseForAlreadyOpen());
+    }
 }

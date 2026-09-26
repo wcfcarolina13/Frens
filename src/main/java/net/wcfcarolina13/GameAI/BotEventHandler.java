@@ -2810,7 +2810,8 @@ public class BotEventHandler {
         // Probe the direct route near the goal, and at any range once the bot has stopped making
         // progress (or is mid door plan). Beyond 6 blocks a forced-false directBlocked let a visible
         // commander behind a fence suppress all door handling (1.1.223, Jake at an oak fence gate).
-        int priorFollowStagnant = Math.max(
+        // Movement stagnation only: FOLLOW_STAGNANT_TICKS no longer carries blocked-ray ticks.
+        int priorFollowStagnant = net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.movementStagnant(
                 FollowStateService.FOLLOW_STAGNANT_TICKS.getOrDefault(botId, 0),
                 FollowStateService.FOLLOW_POS_STAGNANT_TICKS.getOrDefault(botId, 0));
         boolean directBlocked = net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.shouldProbeDirectBlocked(
@@ -4466,7 +4467,11 @@ public class BotEventHandler {
             FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
             blockedTicks = 0;
         }
-        int effectiveStagnant = Math.max(Math.max(stagnant, posStagnant), blockedTicks);
+        // Movement stagnation is stored and drives the skip-door-magnet / direct-route probe; blocked-ray
+        // ticks only lift this tick's effectiveStagnant. Storing them made stagnation sticky for a bot
+        // walking a planned route with its direct ray blocked (1.1.223 review).
+        int movementStagnant = net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.movementStagnant(stagnant, posStagnant);
+        int effectiveStagnant = Math.max(movementStagnant, blockedTicks);
         int leafPosThreshold = returningToBase ? 3 : 5;
         int leafStagnantThreshold = returningToBase ? 6 : 10;
         if (directBlocked && posStagnant >= leafPosThreshold && effectiveStagnant >= leafStagnantThreshold) {
@@ -4594,7 +4599,7 @@ public class BotEventHandler {
             }
         }
 
-        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed, effectiveStagnant)) {
+        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed, movementStagnant)) {
             FOLLOW_DOOR_PLAN.remove(id);
             FOLLOW_DOOR_LAST_BLOCK.remove(id);
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -4616,10 +4621,10 @@ public class BotEventHandler {
                     + " sealed=" + botSealed + "/" + commanderSealed);
             // Keep the stagnation counter current on this early return (mirrors the tail store):
             // the next tick's direct-route probe and this skip both read it (1.1.223).
-            if (effectiveStagnant == 0) {
+            if (movementStagnant == 0) {
                 FOLLOW_STAGNANT_TICKS.remove(id);
             } else {
-                FOLLOW_STAGNANT_TICKS.put(id, effectiveStagnant);
+                FOLLOW_STAGNANT_TICKS.put(id, movementStagnant);
             }
             return false;
         }
@@ -5010,10 +5015,10 @@ public class BotEventHandler {
             }
         }
 
-        if (effectiveStagnant == 0) {
+        if (movementStagnant == 0) {
             FOLLOW_STAGNANT_TICKS.remove(id);
         } else {
-            FOLLOW_STAGNANT_TICKS.put(id, effectiveStagnant);
+            FOLLOW_STAGNANT_TICKS.put(id, movementStagnant);
         }
         return false;
     }
@@ -5025,12 +5030,12 @@ public class BotEventHandler {
                                                               double targetDistSq,
                                                               boolean botSealed,
                                                               boolean commanderSealed,
-                                                              int effectiveStagnant) {
+                                                              int movementStagnant) {
         if (bot == null || target == null) {
             return false;
         }
         return net.wcfcarolina13.GameAI.services.follow.FollowDoorPriorityPolicy.shouldSkipDoorMagnet(
-                canSee, directBlocked, targetDistSq, botSealed, commanderSealed, effectiveStagnant);
+                canSee, directBlocked, targetDistSq, botSealed, commanderSealed, movementStagnant);
     }
 
     private static double horizontalDistanceSq(ServerPlayerEntity bot, Vec3d targetPos) {
@@ -6224,41 +6229,43 @@ public class BotEventHandler {
         }
 
         CommanderLadderHint ladderHint = getCommanderLadderHint(botId);
-        ClimbAssistCandidate candidate = candidateFromCommanderLadderHint(world, bot.getBlockPos(), target.getBlockPos(), ladderHint, true);
-        if (candidate == null) {
-            candidate = findBestClimbAssistCandidate(world, bot.getBlockPos(), target.getBlockPos(), 6);
+        // Independent summit: the scan scores by height and nearness to the bot, not by whether the
+        // climb leads toward the commander. 1.1.223 took a ladder behind Jake and cleared the gate plan
+        // that would have got him through, so the summit rule filters candidates DURING the choice:
+        // a better-scored ladder behind the bot must not mask a usable climb (1.1.223 review).
+        BlockPos summitBotBlock = bot.getBlockPos();
+        BlockPos summitTargetBlock = target.getBlockPos();
+        double summitBotY = bot.getY();
+        double summitTargetY = target.getY();
+        double summitBotHorizSq = horizontalDistSq(summitBotBlock, summitTargetBlock);
+        int[] summitRejects = {0};
+        java.util.function.Predicate<ClimbAssistCandidate> accept = targetAboveBot ? c -> true : c -> {
+            boolean ok = net.wcfcarolina13.GameAI.services.follow.VerticalLockAcquirePolicy.isUsableSummitCandidate(
+                    summitBotY, summitTargetY, summitBotHorizSq,
+                    horizontalDistSq(c.standPos(), summitTargetBlock), c.topY());
+            if (!ok) {
+                summitRejects[0]++;
+            }
+            return ok;
+        };
+        ClimbAssistCandidate candidate = candidateFromCommanderLadderHint(world, summitBotBlock, summitTargetBlock, ladderHint, true);
+        if (candidate != null && !accept.test(candidate)) {
+            candidate = null;
         }
         if (candidate == null) {
+            candidate = findBestClimbAssistCandidate(world, summitBotBlock, summitTargetBlock, 6, -3, 10, false, accept);
+        }
+        if (candidate == null) {
+            if (summitRejects[0] > 0) {
+                // Same short cooldown as the blocked-stand reject: no climbable rescan every tick while stuck.
+                FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.put(botId, nowMs + 2_500L);
+                maybeLogFollowDecision(bot, "vertical-lock skip: no summit candidate toward commander rejected="
+                        + summitRejects[0]);
+            }
             return false;
         }
         if (candidate.topY() <= bot.getY() + 1.5D) {
             return false;
-        }
-        if (!targetAboveBot) {
-            // Independent summit: the scan scores by height and nearness to the bot, not by whether
-            // the climb leads toward the commander. 1.1.223 took a ladder behind Jake and cleared the
-            // gate plan that would have got him through.
-            BlockPos botBlock = bot.getBlockPos();
-            BlockPos targetBlock = target.getBlockPos();
-            BlockPos stand = candidate.standPos();
-            double botDx = botBlock.getX() - targetBlock.getX();
-            double botDz = botBlock.getZ() - targetBlock.getZ();
-            double standDx = stand.getX() - targetBlock.getX();
-            double standDz = stand.getZ() - targetBlock.getZ();
-            if (!net.wcfcarolina13.GameAI.services.follow.VerticalLockAcquirePolicy.acceptSummitCandidate(
-                    bot.getY(),
-                    target.getY(),
-                    botDx * botDx + botDz * botDz,
-                    standDx * standDx + standDz * standDz,
-                    candidate.topY())) {
-                // Same short cooldown as the blocked-stand reject: no climbable rescan every tick while stuck.
-                FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.put(botId, nowMs + 2_500L);
-                maybeLogFollowDecision(bot, "vertical-lock skip: summit not toward commander climbable="
-                        + candidate.climbPos().toShortString()
-                        + " stand=" + stand.toShortString()
-                        + " topY=" + candidate.topY());
-                return false;
-            }
         }
 
         BlockPos forcedDoorBase = null;
@@ -6423,7 +6430,21 @@ public class BotEventHandler {
         }
 
         if (currentStandDistSq > 4.0D) {
-            if (updatedLock.forcedDoorBase() != null
+            Vec3d approachAim = Vec3d.ofCenter(updatedLock.entryStandPos());
+            if (updatedLock.forcedDoorBase() != null && world.getServer().isOnThread()) {
+                // The blocking traverse sleeps in nudgeTowardUntilClose; on the tick thread the bot cannot
+                // move while it sleeps, so it froze the server (2.3 s "Can't keep up") and then failed
+                // (1.1.223 review). Tick-safe instead: open the door when in reach and aim this tick's
+                // input at it while it is still ahead of the bot; the lock's replan/hard-fail stays the backstop.
+                BlockPos door = updatedLock.forcedDoorBase();
+                double botDoorDistSq = currentPos.getSquaredDistance(door);
+                if (botDoorDistSq <= 9.0D) {
+                    MovementService.tryOpenDoorAt(bot, door);
+                }
+                if (botDoorDistSq > 1.0D && currentStandDistSq > door.getSquaredDistance(updatedLock.entryStandPos())) {
+                    approachAim = Vec3d.ofCenter(door);
+                }
+            } else if (updatedLock.forcedDoorBase() != null
                     && updatedLock.doorTraverseAttempts() < 2
                     && (updatedLock.doorTraverseAttempts() == 0 || noProgressTicks >= 8)) {
                 boolean traversed = MovementService.tryTraverseOpenableToward(
@@ -6448,14 +6469,15 @@ public class BotEventHandler {
                     return true;
                 }
             }
-            Vec3d standCenter = Vec3d.ofCenter(updatedLock.entryStandPos());
             LookController.faceBlock(bot, updatedLock.entryClimbPos());
             BotActions.sprint(bot, false);
             BotActions.autoJumpIfNeeded(bot);
-            BotActions.applyMovementInput(bot, standCenter, 0.17D);
+            BotActions.applyMovementInput(bot, approachAim, 0.17D);
             FollowStateService.setVerticalClimbLock(botId, updatedLock);
             maybeLogFollowDecision(bot, "vertical-lock tick: approach stand="
                     + updatedLock.entryStandPos().toShortString()
+                    + (updatedLock.forcedDoorBase() != null && approachAim.equals(Vec3d.ofCenter(updatedLock.forcedDoorBase()))
+                            ? " aim=door" : "")
                     + " noProgressTicks=" + noProgressTicks);
             return true;
         }
@@ -6865,16 +6887,24 @@ public class BotEventHandler {
                                                                      BlockPos origin,
                                                                      BlockPos goal,
                                                                      int radius) {
-        return findBestClimbAssistCandidate(world, origin, goal, radius, -3, 10, false);
+        return findBestClimbAssistCandidate(world, origin, goal, radius, -3, 10, false, c -> true);
     }
 
+    private static double horizontalDistSq(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX();
+        double dz = a.getZ() - b.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    /** Best-scored candidate among those {@code accept} allows (tested only when it would beat the current best). */
     private static ClimbAssistCandidate findBestClimbAssistCandidate(ServerWorld world,
                                                                      BlockPos origin,
                                                                      BlockPos goal,
                                                                      int radius,
                                                                      int minDy,
                                                                      int maxDy,
-                                                                     boolean requireTopNearOrigin) {
+                                                                     boolean requireTopNearOrigin,
+                                                                     java.util.function.Predicate<ClimbAssistCandidate> accept) {
         if (world == null || origin == null || goal == null || radius <= 0) {
             return null;
         }
@@ -6925,8 +6955,11 @@ public class BotEventHandler {
                                 botHorizontalDistSq,
                                 goalHorizontalDistSq) + attachPenalty;
                         if (score < bestScore) {
-                            bestScore = score;
-                            best = new ClimbAssistCandidate(climbPos.toImmutable(), standPos.toImmutable(), topY, score);
+                            ClimbAssistCandidate scored = new ClimbAssistCandidate(climbPos.toImmutable(), standPos.toImmutable(), topY, score);
+                            if (accept.test(scored)) {
+                                bestScore = score;
+                                best = scored;
+                            }
                         }
                     }
                 }

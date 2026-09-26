@@ -31,6 +31,18 @@ public final class FollowDoorPriorityPolicy {
     private FollowDoorPriorityPolicy() {
     }
 
+    /**
+     * Movement stagnation: follow ticks without closing on the nav goal or without changing block.
+     * Consecutive blocked-ray ticks are deliberately NOT an input. A bot walking a planned route
+     * keeps its direct ray blocked for many ticks while moving fine; folding that count in kept
+     * door handling forced on for a moving bot (1.1.223 review). The distance counter is kept
+     * beside the block counter because a bot pinned on a block boundary flickers between two
+     * blocks (Jake at z 1284.95/1285.07), which resets the block counter alone.
+     */
+    public static int movementStagnant(int distanceStagnant, int blockStagnant) {
+        return Math.max(Math.max(distanceStagnant, blockStagnant), 0);
+    }
+
     /** {@link #shouldProbeDirectBlocked(double, int, boolean)} with no active door plan. */
     public static boolean shouldProbeDirectBlocked(double progressDistSq, int priorStagnant) {
         return shouldProbeDirectBlocked(progressDistSq, priorStagnant, false);
@@ -40,7 +52,8 @@ public final class FollowDoorPriorityPolicy {
      * Whether to raycast the direct route to the nav goal this tick.
      *
      * @param progressDistSq squared distance from the bot's block to the nav goal block
-     * @param priorStagnant  the previous tick's stagnation (max of distance- and block-stagnant ticks)
+     * @param priorStagnant  the previous tick's movement stagnation ({@link #movementStagnant}); never
+     *                       blocked-ray ticks
      * @param doorPlanActive a follow door plan is in progress; keep probing so the plan is not
      *                       cancelled the moment the bot starts walking toward the door
      */
@@ -55,6 +68,7 @@ public final class FollowDoorPriorityPolicy {
      * Mirrors the pre-1.1.223 rule (never when either side is sealed; yes when the route is not
      * blocked and the commander is visible or 30+ blocks away) and adds: never while the bot has
      * been stagnant for {@link #STAGNANT_KEEP_DOORS_TICKS} or more, so the stuck handling runs.
+     * {@code stagnant} is movement stagnation ({@link #movementStagnant}), never blocked-ray ticks.
      */
     public static boolean shouldSkipDoorMagnet(boolean canSee,
                                                boolean directBlocked,

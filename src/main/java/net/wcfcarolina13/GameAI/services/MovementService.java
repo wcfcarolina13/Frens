@@ -95,6 +95,11 @@ public final class MovementService {
     }
 
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_CLOSE_COOLDOWN = new ConcurrentHashMap<>();
+    /** Dedupes close chains scheduled for an already-open door; separate from DOOR_CLOSE_COOLDOWN so it never throttles opening. */
+    private static final Map<UUID, Map<BlockPos, Long>> ALREADY_OPEN_CLOSE_SCHEDULED_MS = new ConcurrentHashMap<>();
+    private static final long ALREADY_OPEN_CLOSE_DEDUPE_MS = 3_000L;
+    /** Server-thread nudge tripwire: last WARN per call site (log only). */
+    private static final Map<String, Long> NUDGE_ON_TICK_WARNED_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<String, Long>> DOOR_DEBUG_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_IRON_WARN_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_RECENTLY_CLOSED_UNTIL = new ConcurrentHashMap<>();
@@ -2044,6 +2049,12 @@ public final class MovementService {
 
         if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
             // Treat an already-open openable as a success so callers can commit to stepping through.
+            // Close it behind us (base security) unless powered or plate/trigger-controlled. Never arm the
+            // door-attempt cooldown here: that throttled reopening a gate a plate had just shut (1.1.223).
+            if (isAutoCloseOpenable(state) && before.shouldScheduleCloseForAlreadyOpen()
+                    && alreadyOpenCloseNotRecentlyScheduled(player.getUuid(), openablePos)) {
+                scheduleDoorClose(player, world.getRegistryKey(), openablePos.toImmutable(), travelDir);
+            }
             return true;
         }
         if (!before.mayHandOpen()) {
@@ -2322,6 +2333,17 @@ public final class MovementService {
                 player.getName().getString(), doorPos.toShortString(),
                 door != null && door.open(), door != null && door.powered(),
                 door != null && (door.plateAdjacent() || door.triggerAdjacent()), message);
+    }
+
+    private static boolean alreadyOpenCloseNotRecentlyScheduled(UUID botUuid, BlockPos doorPos) {
+        long now = System.currentTimeMillis();
+        Map<BlockPos, Long> perBot = ALREADY_OPEN_CLOSE_SCHEDULED_MS.computeIfAbsent(botUuid, __ -> new ConcurrentHashMap<>());
+        Long last = perBot.get(doorPos);
+        if (last != null && now - last < ALREADY_OPEN_CLOSE_DEDUPE_MS) {
+            return false;
+        }
+        perBot.put(doorPos.toImmutable(), now);
+        return true;
     }
 
     private static boolean doorAttemptAllowed(UUID botUuid, BlockPos doorPos) {
@@ -2788,6 +2810,35 @@ public final class MovementService {
         return false;
     }
 
+    /**
+     * Tripwire, log only: this nudge sleeps between inputs, and on the server thread the bot is not
+     * ticked while it sleeps, so it freezes the server until the deadline and then fails. WARNs once
+     * per call site per minute, naming the first caller outside MovementService.
+     */
+    private static void maybeWarnNudgeOnServerThread(ServerPlayerEntity bot, String label) {
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null || !server.isOnThread()) {
+            return;
+        }
+        String site = "?";
+        for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+            String cls = frame.getClassName();
+            if (cls.startsWith("java.") || cls.startsWith(MovementService.class.getName())) {
+                continue;
+            }
+            site = cls.substring(cls.lastIndexOf('.') + 1) + "." + frame.getMethodName() + ":" + frame.getLineNumber();
+            break;
+        }
+        long now = System.currentTimeMillis();
+        Long last = NUDGE_ON_TICK_WARNED_MS.get(site);
+        if (last != null && now - last < 60_000L) {
+            return;
+        }
+        NUDGE_ON_TICK_WARNED_MS.put(site, now);
+        LOGGER.warn("nudgeTowardUntilClose on the server thread [{}] via {}: the tick is frozen until the nudge deadline",
+                label, site);
+    }
+
     public static boolean nudgeTowardUntilClose(ServerPlayerEntity bot,
                                                 BlockPos target,
                                                 double reachSq,
@@ -2798,6 +2849,9 @@ public final class MovementService {
             return false;
         }
         int depth = NUDGE_DEPTH.get();
+        if (depth == 0) {
+            maybeWarnNudgeOnServerThread(bot, label);
+        }
         NUDGE_DEPTH.set(depth + 1);
         boolean allowAssists = depth == 0;
         long deadline = System.currentTimeMillis() + timeoutMs;

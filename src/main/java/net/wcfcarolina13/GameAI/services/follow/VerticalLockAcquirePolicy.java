@@ -47,4 +47,18 @@ public final class VerticalLockAcquirePolicy {
         // Standing on top of the column puts the bot at about topY + 1.
         return topY + 1.0D >= targetY;
     }
+
+    /**
+     * The full independent-summit filter applied while choosing the best climb candidate, so a
+     * better-scored but useless column (a ladder behind the bot) cannot mask a usable one: the
+     * column must rise more than 1.5 blocks above the bot and pass {@link #acceptSummitCandidate}.
+     */
+    public static boolean isUsableSummitCandidate(double botY,
+                                                  double targetY,
+                                                  double botToTargetHorizSq,
+                                                  double standToTargetHorizSq,
+                                                  int topY) {
+        return topY > botY + 1.5D
+                && acceptSummitCandidate(botY, targetY, botToTargetHorizSq, standToTargetHorizSq, topY);
+    }
 }

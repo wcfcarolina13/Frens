@@ -20,6 +20,15 @@ public record RedstoneDoorPolicy(boolean locked, boolean open, boolean powered,
         return !locked && !open && opensByHand;
     }
 
+    /**
+     * An already-open door the bot is about to walk through: close it behind the bot (base
+     * security) unless redstone holds it open or controls it. Ownership does not matter here.
+     */
+    public boolean shouldScheduleCloseForAlreadyOpen() {
+        return !locked && open && opensByHand && !powered && !controlled();
+    }
+
+    /** Never: the already-open path must not arm the reopen throttle (it blocked reopening a plate-shut gate). */
     public boolean shouldSetAlreadyOpenCooldown() {
         return false;
     }
