@@ -684,6 +684,9 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.BotAnvilNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.ZoneNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.RescueTeleportNetworkManager.registerReceiversOnce();
+        // "Set up AI companions" checklist: status request/response + setup actions (payload
+        // types and server receivers; the client receiver registers lazily from the screen).
+        net.wcfcarolina13.network.AiSetupNetworkManager.registerOnce();
 
         // Lock mode C2S receiver
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(

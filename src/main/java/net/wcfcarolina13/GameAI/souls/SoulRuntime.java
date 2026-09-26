@@ -1539,6 +1539,11 @@ public final class SoulRuntime {
         });
     }
 
+    /** Async health of the currently installed pipeline's model provider (Ollama {@code /api/tags}). */
+    public CompletableFuture<Boolean> providerHealth() {
+        return pipelineRef.get().provider().health();
+    }
+
     /** Whether the currently installed pipeline's TTS engine is alive and usable right now. */
     public boolean voiceEngineAlive() {
         return pipelineRef.get().voice().engineAlive();
