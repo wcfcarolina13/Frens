@@ -1496,7 +1496,6 @@ public class Frens implements ModInitializer {
                         continue;
                     }
                     ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-                    ChatUtils.sendChatMessages(botSource, "Processing your message, please wait.");
                     handled |= LLMOrchestrator.handleChat(
                             bot,
                             botSource,
@@ -1627,14 +1626,14 @@ public class Frens implements ModInitializer {
      * LLM toggles on); when it may, makes sure the model setup has been requested.
      */
     private static boolean prepareLegacyNlp(ServerPlayerEntity bot) {
-        if (!OLLAMA4J_AVAILABLE) {
-            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                LOGGER.warn("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
-            }
-            return false;
-        }
         if (!net.wcfcarolina13.GameAI.llm.LegacyNlpBootstrapPolicy.isLegacyNlpUsable(
                 true, LLMOrchestrator.isWorldEnabled(), LLMOrchestrator.isBotEnabled(bot))) {
+            return false;
+        }
+        if (!OLLAMA4J_AVAILABLE) {
+            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                LOGGER.debug("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
+            }
             return false;
         }
         requestLegacyNlpAssets();

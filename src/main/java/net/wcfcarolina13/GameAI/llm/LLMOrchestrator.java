@@ -109,7 +109,7 @@ public final class LLMOrchestrator {
                                     String message) {
         if (!OLLAMA4J_AVAILABLE) {
             if (WARNED_NLP_UNAVAILABLE.compareAndSet(false, true)) {
-                LOGGER.warn("LLM chat parser disabled: ollama4j is not on the classpath (non-AI build).");
+                LOGGER.debug("LLM chat parser disabled: ollama4j is not on the classpath (non-AI build).");
             }
             return;
         }
@@ -138,6 +138,11 @@ public final class LLMOrchestrator {
                 LLMServiceHandler.routeFromOrchestrator(message, botSource, playerUuid, llmClient);
                 MEMORY_STORE.appendMemory(worldKey, bot.getUuid(), "Received command request: \"" + message + "\"");
             } else {
+                if (!LegacyChatStatusPolicy.shouldAnnounceProcessing(
+                        isWorldEnabled(), isBotEnabled(bot), OLLAMA4J_AVAILABLE, llmClient != null, intent != null)) {
+                    return;
+                }
+                ChatUtils.sendChatMessages(botSource, "Processing your message, please wait.");
                 String reply = llmClient.sendPrompt(personaPrompt, message);
                 if (reply != null && !reply.isBlank()) {
                     ChatUtils.sendChatMessages(botSource, reply);
