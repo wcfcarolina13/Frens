@@ -2342,6 +2342,7 @@ public final class MovementService {
         if (last != null && now - last < ALREADY_OPEN_CLOSE_DEDUPE_MS) {
             return false;
         }
+        perBot.values().removeIf(t -> now - t >= ALREADY_OPEN_CLOSE_DEDUPE_MS);
         perBot.put(doorPos.toImmutable(), now);
         return true;
     }
