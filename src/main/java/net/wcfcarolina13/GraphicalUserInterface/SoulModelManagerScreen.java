@@ -33,12 +33,14 @@ public class SoulModelManagerScreen extends Screen {
     private final Screen parent;
     private final Consumer<AiSetupStatus> listener = fresh -> {
         remoteStatus = fresh;
-        mode = SoulSetupScreenPolicy.mode(false, true, fresh.viewer().canEditServer());
+        updateMode();
         refreshButtons();
     };
     private AiSetupStatus remoteStatus;
     private SoulSetupScreenPolicy.Mode mode;
     private boolean statusRequested;
+    private boolean requestAccepted;
+    private long statusRequestedAtMs;
 
     private volatile OllamaModelInstaller.Status status;
 
@@ -59,13 +61,11 @@ public class SoulModelManagerScreen extends Screen {
 
     @Override
     protected void init() {
-        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
-                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer());
+        updateMode();
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
             AiSetupNetworkManager.Client.setListener(listener);
-            remoteStatus = AiSetupNetworkManager.Client.latestStatus();
             if (!statusRequested) {
-                statusRequested = AiSetupNetworkManager.Client.requestStatus();
+                requestRemoteStatus(false);
             }
         }
         int cx = (this.width - POPUP_WIDTH) / 2;
@@ -94,9 +94,24 @@ public class SoulModelManagerScreen extends Screen {
         refreshButtons();
     }
 
+    private void updateMode() {
+        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
+                AiSetupNetworkManager.Client.isAvailable() && requestAccepted,
+                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer(),
+                net.minecraft.util.Util.getMeasuringTimeMs() - statusRequestedAtMs);
+    }
+
+    private void requestRemoteStatus(boolean refresh) {
+        remoteStatus = refresh ? null : AiSetupNetworkManager.Client.latestStatus();
+        statusRequested = true;
+        statusRequestedAtMs = net.minecraft.util.Util.getMeasuringTimeMs();
+        requestAccepted = AiSetupNetworkManager.Client.requestStatus();
+        updateMode();
+    }
+
     private void startDetect() {
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
-            AiSetupNetworkManager.Client.requestStatus();
+            requestRemoteStatus(true);
             return;
         }
         phase = Phase.DETECTING;
@@ -194,6 +209,7 @@ public class SoulModelManagerScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        updateMode();
         refreshButtons();
         int cx = (this.width - POPUP_WIDTH) / 2;
         int cy = (this.height - POPUP_HEIGHT) / 2;
@@ -282,12 +298,14 @@ public class SoulModelManagerScreen extends Screen {
     private void renderRemote(DrawContext context, int cx, int cy) {
         context.drawTextWithShadow(this.textRenderer, "Runs on the server host", cx + PAD, cy + 24, COL_DIM);
         AiSetupStatus.Ollama ollama = remoteStatus == null ? null : remoteStatus.ollama();
-        if (mode == SoulSetupScreenPolicy.Mode.REMOTE_VIEWER) {
-            context.drawTextWithShadow(this.textRenderer,
-                    "Only the server operator or host can choose the model.", cx + PAD, cy + 38, COL_DIM);
-        } else if (ollama == null) {
-            context.drawTextWithShadow(this.textRenderer, "Waiting for server setup status…", cx + PAD, cy + 38, COL_DIM);
-        } else {
+        String message = SoulSetupScreenPolicy.statusMessage(mode);
+        if (!message.isEmpty()) {
+            int y = cy + 38;
+            for (var line : this.textRenderer.wrapLines(Text.literal(message), POPUP_WIDTH - PAD * 2)) {
+                context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, COL_DIM);
+                y += 11;
+            }
+        } else if (ollama != null) {
             context.drawTextWithShadow(this.textRenderer,
                     ollama.reachable() ? "Ollama " + ollama.version() + " is reachable"
                             : "Ollama is not reachable on the server host", cx + PAD, cy + 38,

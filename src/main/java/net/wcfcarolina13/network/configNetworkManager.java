@@ -1,6 +1,8 @@
 package net.wcfcarolina13.network;
 
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 
@@ -174,6 +176,12 @@ public final class configNetworkManager {
      * global receivers persist for the JVM, so this must not run per server start.
      */
     public static void registerServerReceivers() {
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID playerId = handler.player.getUuid();
+            server.execute(() -> LAST_DENIAL_MS.remove(playerId));
+        });
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> LAST_DENIAL_MS.clear());
+
         ServerPlayNetworking.registerGlobalReceiver(SaveConfigPayload.ID, (payload, context) -> {
             ServerPlayerEntity sender = context.player();
             if (sender == null) {

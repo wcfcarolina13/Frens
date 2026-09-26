@@ -56,6 +56,8 @@ public class SoulVoiceEngineScreen extends Screen {
     private AiSetupStatus remoteStatus;
     private SoulSetupScreenPolicy.Mode mode;
     private boolean statusRequested;
+    private boolean requestAccepted;
+    private long statusRequestedAtMs;
     /** Built in {@link #init()}; {@link #render} draws titles/blurbs from the same list. */
     private List<EngineRow> rows = List.of();
 
@@ -88,7 +90,11 @@ public class SoulVoiceEngineScreen extends Screen {
     }
 
     private int popupHeight() {
-        return 40 + rows.size() * ROW_H + 36;
+        return rowsTop() + rows.size() * ROW_H + 36;
+    }
+
+    private int rowsTop() {
+        return mode == SoulSetupScreenPolicy.Mode.LOCAL ? 40 : 64;
     }
 
     private List<EngineRow> buildRows(ManualConfig cfg) {
@@ -125,13 +131,11 @@ public class SoulVoiceEngineScreen extends Screen {
 
     @Override
     protected void init() {
-        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
-                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer());
+        updateMode();
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
             AiSetupNetworkManager.Client.setListener(listener);
-            remoteStatus = AiSetupNetworkManager.Client.latestStatus();
             if (!statusRequested) {
-                statusRequested = AiSetupNetworkManager.Client.requestStatus();
+                requestRemoteStatus(false);
             }
         }
         ManualConfig cfg = Frens.CONFIG;
@@ -145,7 +149,7 @@ public class SoulVoiceEngineScreen extends Screen {
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
             boolean isCurrent = row.id().equals(current);
-            int y = cy + 40 + i * ROW_H;
+            int y = cy + rowsTop() + i * ROW_H;
             String label = mode != SoulSetupScreenPolicy.Mode.LOCAL
                     ? isCurrent ? "§a" + row.shortName() + " ✔" : "Use " + row.shortName()
                     : !row.supported() ? "macOS only"
@@ -172,8 +176,37 @@ public class SoulVoiceEngineScreen extends Screen {
             addDrawableChild(button);
         }
 
+        if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
+            addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), b -> {
+                requestRemoteStatus(true);
+                clearAndInit();
+            }).dimensions(cx + PAD, cy + popupHeight() - 28, 80, 20).build());
+        }
         addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
                 .dimensions(cx + POPUP_WIDTH - PAD - 80, cy + popupHeight() - 28, 80, 20).build());
+    }
+
+    private void updateMode() {
+        mode = SoulSetupScreenPolicy.mode(this.client != null && this.client.isInSingleplayer(),
+                AiSetupNetworkManager.Client.isAvailable() && requestAccepted,
+                remoteStatus != null, remoteStatus != null && remoteStatus.viewer().canEditServer(),
+                net.minecraft.util.Util.getMeasuringTimeMs() - statusRequestedAtMs);
+    }
+
+    private void requestRemoteStatus(boolean refresh) {
+        remoteStatus = refresh ? null : AiSetupNetworkManager.Client.latestStatus();
+        statusRequested = true;
+        statusRequestedAtMs = net.minecraft.util.Util.getMeasuringTimeMs();
+        requestAccepted = AiSetupNetworkManager.Client.requestStatus();
+        updateMode();
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        SoulSetupScreenPolicy.Mode previous = mode;
+        updateMode();
+        if (previous != mode) clearAndInit();
     }
 
     private List<EngineRow> buildRemoteRows() {
@@ -211,6 +244,12 @@ public class SoulVoiceEngineScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
             context.drawTextWithShadow(this.textRenderer, "Runs on the server host", cx + PAD, cy + 24, 0xFFB0B0B0);
+            int y = cy + 38;
+            for (var line : this.textRenderer.wrapLines(Text.literal(SoulSetupScreenPolicy.statusMessage(mode)),
+                    POPUP_WIDTH - PAD * 2)) {
+                context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, 0xFFB0B0B0);
+                y += 11;
+            }
             context.drawTextWithShadow(this.textRenderer,
                     "Voices are installed on the server machine by its host", cx + PAD,
                     cy + popupHeight() - 39, 0xFFB0B0B0);
@@ -218,7 +257,7 @@ public class SoulVoiceEngineScreen extends Screen {
 
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
-            int y = cy + 40 + i * ROW_H;
+            int y = cy + rowsTop() + i * ROW_H;
             int titleColor = row.supported() ? 0xFFEFEFEF : 0xFF707070;
             int blurbColor = row.supported() ? 0xFFB0B0B0 : 0xFF707070;
             context.drawTextWithShadow(this.textRenderer, row.title(), cx + PAD, y + 2, titleColor);

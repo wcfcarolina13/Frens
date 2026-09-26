@@ -14,21 +14,10 @@ public final class ConfigSaveReloadPolicy {
 
     public static boolean needsSoulReload(SharedConfig a, SharedConfig b) {
         if (a == null || b == null) return false;
+        // SoulRuntime.reloadSettings snapshots SoulSettings.from and SoulVoiceSettings.from.
+        // Only these two SharedConfig fields feed those snapshots; live suppliers need no reload,
+        // which would cancel active and queued generations when replacing the pipeline.
         return !Objects.equals(a.soulsEnabled, b.soulsEnabled)
-                || !Objects.equals(a.soulVoiceEnabled, b.soulVoiceEnabled)
-                || !Objects.equals(a.soulPartyEnabled, b.soulPartyEnabled)
-                || !Objects.equals(a.soulBanterEnabled, b.soulBanterEnabled)
-                || !Objects.equals(a.soulLocalChatEnabled, b.soulLocalChatEnabled)
-                || !Objects.equals(a.soulBanterActiveEnabled, b.soulBanterActiveEnabled)
-                || !Objects.equals(a.soulMemoryDigestEnabled, b.soulMemoryDigestEnabled)
-                || !Objects.equals(a.soulNoveltyRejectionEnabled, b.soulNoveltyRejectionEnabled)
-                || !Objects.equals(a.soulRelationsEnabled, b.soulRelationsEnabled)
-                || !Objects.equals(a.soulStructuredOutputEnabled, b.soulStructuredOutputEnabled)
-                || !Objects.equals(a.soulBanterIdleRate, b.soulBanterIdleRate)
-                || !Objects.equals(a.soulBanterActiveRate, b.soulBanterActiveRate)
-                || !Objects.equals(a.soulLocalRate, b.soulLocalRate)
-                || !Objects.equals(a.dialogueScriptedRate, b.dialogueScriptedRate)
-                || !Objects.equals(a.textDialogueEnabled, b.textDialogueEnabled)
-                || !Objects.equals(a.voicedDialogueEnabled, b.voicedDialogueEnabled);
+                || !Objects.equals(a.soulVoiceEnabled, b.soulVoiceEnabled);
     }
 }
