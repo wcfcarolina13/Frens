@@ -344,7 +344,24 @@ public final class CraftingHelper {
                                             String item,
                                             int amount,
                                             String materialPreference) {
-        String normalized = item == null ? "" : item.toLowerCase(Locale.ROOT).trim().replace(' ', '_');
+        // "stone_axe", "wood pickaxe", "minecraft:golden_hoe" -> generic tool + material family.
+        // A material named in the item wins over the separate preference argument.
+        CraftRequestNamePolicy.Parsed parsed = CraftRequestNamePolicy.parse(item);
+        String normalized = parsed.genericName();
+        boolean strictMaterial = parsed.hasMaterial();
+        String effectiveMaterial = materialPreference;
+        if (strictMaterial) {
+            if (materialPreference != null && !materialPreference.isBlank()
+                    && !materialPreference.equalsIgnoreCase(parsed.material())) {
+                LOGGER.info("Craft '{}': material '{}' in the item name overrides preference '{}'",
+                        item, parsed.material(), materialPreference);
+            }
+            effectiveMaterial = parsed.material();
+            if ("netherite".equals(effectiveMaterial)) {
+                if (source != null) ChatUtils.sendSystemMessage(source, "Netherite tools aren't crafted — they're upgraded from diamond ones at a smithing table.");
+                return 0;
+            }
+        }
         if (normalized.endsWith("_planks")) {
             Item target = Registries.ITEM.get(Identifier.of("minecraft", normalized));
             return craftPlanks(bot, source, commander, amount, target);
@@ -365,11 +382,11 @@ public final class CraftingHelper {
             case "leather_boots" -> craftLeatherArmor(bot, source, commander, amount, Items.LEATHER_BOOTS, 4);
             case "carrot_on_a_stick" -> craftCarrotOnStick(bot, source, commander, amount);
             case "warped_fungus_on_a_stick" -> craftWarpedFungusOnStick(bot, source, commander, amount);
-            case "axe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.AXE, materialPreference);
-            case "shovel" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SHOVEL, materialPreference);
-            case "pickaxe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.PICKAXE, materialPreference);
-            case "hoe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.HOE, materialPreference);
-            case "sword" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SWORD, materialPreference);
+            case "axe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.AXE, effectiveMaterial, strictMaterial);
+            case "shovel" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SHOVEL, effectiveMaterial, strictMaterial);
+            case "pickaxe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.PICKAXE, effectiveMaterial, strictMaterial);
+            case "hoe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.HOE, effectiveMaterial, strictMaterial);
+            case "sword" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SWORD, effectiveMaterial, strictMaterial);
             case "shield" -> craftShield(bot, source, commander, amount);
             case "fishing_rod", "rod" -> craftFishingRod(bot, source, commander, amount);
             case "bucket" -> craftSimple(bot, source, commander, amount, Items.BUCKET, Items.IRON_INGOT, 3);
@@ -1171,12 +1188,23 @@ public final class CraftingHelper {
 
     private record ToolMaterial(net.minecraft.item.Item headItem, int headCount, String name) {}
 
+    /** First reason a name-qualified tool craft failed, told once at the end instead of per variant. */
+    private static final class ToolShortfall {
+        String message;
+    }
+
+    /**
+     * @param strictMaterial the material came from the item name ("stone_axe"): craft only that
+     *                       material and report exactly what is missing. Otherwise
+     *                       {@code materialPreference} only orders the fallback list.
+     */
     private static int craftToolMaterialAware(ServerPlayerEntity bot,
                                               ServerCommandSource source,
                                               ServerPlayerEntity commander,
                                               int amount,
                                               ToolKind kind,
-                                              String materialPreference) {
+                                              String materialPreference,
+                                              boolean strictMaterial) {
         List<ToolMaterial> materials = List.of(
                 new ToolMaterial(Items.DIAMOND, 3, "diamond"),
                 new ToolMaterial(Items.IRON_INGOT, 3, "iron"),
@@ -1186,8 +1214,14 @@ public final class CraftingHelper {
                 new ToolMaterial(Items.OAK_PLANKS, 3, "wood") // plank sentinel, counted via countPlanks
         );
 
-        // Determine preferred material order
-        if (materialPreference != null && !materialPreference.isBlank()) {
+        if (strictMaterial) {
+            // A named material is never swapped for another tier. Gold is offered only when named,
+            // so a bare "axe" never spends gold ingots.
+            materials = "gold".equalsIgnoreCase(materialPreference)
+                    ? List.of(new ToolMaterial(Items.GOLD_INGOT, 3, "gold"))
+                    : materials.stream().filter(m -> m.name().equalsIgnoreCase(materialPreference)).toList();
+        } else if (materialPreference != null && !materialPreference.isBlank()) {
+            // Determine preferred material order
             materials = materials.stream()
                     .sorted((a, b) -> Boolean.compare(
                             b.name().equalsIgnoreCase(materialPreference),
@@ -1200,14 +1234,49 @@ public final class CraftingHelper {
             LOGGER.info("Crafting {} with default material order. Available: {}", kind.name().toLowerCase(Locale.ROOT), avail);
         }
 
+        ToolShortfall shortfall = strictMaterial ? new ToolShortfall() : null;
         for (ToolMaterial mat : materials) {
-            int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat);
+            int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat, shortfall);
             if (crafts > 0) {
                 return crafts;
             }
         }
+        if (shortfall != null) {
+            // An explicit request always gets its answer: not through the table-message throttle,
+            // which an unrelated earlier craft may be holding.
+            if (shortfall.message != null && source != null) {
+                ChatUtils.sendSystemMessage(source, shortfall.message);
+            }
+            return 0;
+        }
         sendCraftTableNeededOnce(bot, source, "Missing materials for " + kind.name().toLowerCase(Locale.ROOT) + ".");
         return 0;
+    }
+
+    /** "stone axe", "wooden pickaxe", "golden hoe". */
+    private static String toolLabel(ToolKind kind, ToolMaterial mat) {
+        String material = switch (mat.name()) {
+            case "wood" -> "wooden";
+            case "gold" -> "golden";
+            default -> mat.name();
+        };
+        return material + " " + kind.name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * What this bot's inventory lacks for {@code amount} tools of one material, as a player line
+     * ("I need 3 cobblestone and 2 sticks for a stone axe — I have 2 sticks."), or "" when the
+     * ingredients are all there.
+     */
+    private static String toolShortfallLine(ServerPlayerEntity bot, ToolKind kind, ToolMaterial mat,
+                                            int amount, int headCount, int stickCount) {
+        boolean headIsPlanks = mat.headItem().equals(Items.OAK_PLANKS);
+        int planks = countPlanks(bot);
+        int heads = headIsPlanks ? planks : countItem(bot, mat.headItem());
+        List<CraftingRequirementsPolicy.Missing> reqs = ToolCraftShortfallPolicy.requirements(
+                headIsPlanks ? "planks" : itemLabel(mat.headItem()),
+                headCount, stickCount, amount, heads, countItem(bot, Items.STICK), planks, headIsPlanks);
+        return ToolCraftShortfallPolicy.message(toolLabel(kind, mat), amount, reqs);
     }
 
     private static int craftToolWithMaterial(ServerPlayerEntity bot,
@@ -1215,13 +1284,8 @@ public final class CraftingHelper {
                                              ServerPlayerEntity commander,
                                              ToolKind kind,
                                              int amount,
-                                             ToolMaterial mat) {
-        // Ensure crafting table nearby for 3x3 recipes
-        if (!ensureCraftingStation(bot, source)) {
-            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
-            return 0;
-        }
-
+                                             ToolMaterial mat,
+                                             ToolShortfall shortfall) {
         int stickCount = switch (kind) {
             case SWORD -> 1;
             case SHOVEL -> 2;
@@ -1234,8 +1298,30 @@ public final class CraftingHelper {
             default -> mat.headCount();
         };
 
+        // Ensure crafting table nearby for 3x3 recipes
+        if (!ensureCraftingStation(bot, source)) {
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
+            if (shortfall != null && shortfall.message == null) {
+                // No chest pull without a table, so this is the inventory alone.
+                String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
+                if (!line.isEmpty()) {
+                    shortfall.message = line + " I'd also need a crafting table nearby.";
+                }
+            }
+            return 0;
+        }
+
         int neededSticks = stickCount * amount;
         if (!ensureSticks(bot, source, neededSticks)) {
+            if (shortfall != null) {
+                if (shortfall.message == null) {
+                    String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
+                    shortfall.message = line.isEmpty()
+                            ? "I couldn't get " + neededSticks + " sticks to craft " + toolLabel(kind, mat) + "."
+                            : line;
+                }
+                return 0;
+            }
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
             sendCraftTableNeededOnce(bot, source, "Missing sticks; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + "). Add planks/logs and retry.");
@@ -1254,16 +1340,25 @@ public final class CraftingHelper {
         int maxByHead = heads / headCount;
         int crafts = Math.min(amount, Math.min(maxBySticks, maxByHead));
         if (crafts <= 0) {
+            if (shortfall != null) {
+                if (shortfall.message == null) {
+                    String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
+                    shortfall.message = line.isEmpty()
+                            ? "I'm missing materials to craft " + toolLabel(kind, mat) + "."
+                            : line;
+                }
+                return 0;
+            }
             sendCraftTableNeededOnce(bot, source, "Missing materials for " + mat.name() + " " + kind.name().toLowerCase(Locale.ROOT) + ".");
             return 0;
         }
 
         net.minecraft.item.Item output = switch (kind) {
-            case AXE -> resolveTiered(mat, Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE, Items.DIAMOND_AXE);
-            case SHOVEL -> resolveTiered(mat, Items.WOODEN_SHOVEL, Items.STONE_SHOVEL, Items.IRON_SHOVEL, Items.DIAMOND_SHOVEL);
-            case PICKAXE -> resolveTiered(mat, Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.DIAMOND_PICKAXE);
-            case HOE -> resolveTiered(mat, Items.WOODEN_HOE, Items.STONE_HOE, Items.IRON_HOE, Items.DIAMOND_HOE);
-            case SWORD -> resolveTiered(mat, Items.WOODEN_SWORD, Items.STONE_SWORD, Items.IRON_SWORD, Items.DIAMOND_SWORD);
+            case AXE -> resolveTiered(mat, Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE, Items.GOLDEN_AXE, Items.DIAMOND_AXE);
+            case SHOVEL -> resolveTiered(mat, Items.WOODEN_SHOVEL, Items.STONE_SHOVEL, Items.IRON_SHOVEL, Items.GOLDEN_SHOVEL, Items.DIAMOND_SHOVEL);
+            case PICKAXE -> resolveTiered(mat, Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.GOLDEN_PICKAXE, Items.DIAMOND_PICKAXE);
+            case HOE -> resolveTiered(mat, Items.WOODEN_HOE, Items.STONE_HOE, Items.IRON_HOE, Items.GOLDEN_HOE, Items.DIAMOND_HOE);
+            case SWORD -> resolveTiered(mat, Items.WOODEN_SWORD, Items.STONE_SWORD, Items.IRON_SWORD, Items.GOLDEN_SWORD, Items.DIAMOND_SWORD);
         };
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STICK, crafts * stickCount);
@@ -1297,9 +1392,11 @@ public final class CraftingHelper {
                                                          net.minecraft.item.Item wood,
                                                          net.minecraft.item.Item stone,
                                                          net.minecraft.item.Item iron,
+                                                         net.minecraft.item.Item gold,
                                                          net.minecraft.item.Item diamond) {
         if (mat.headItem().equals(Items.DIAMOND)) return diamond;
         if (mat.headItem().equals(Items.IRON_INGOT)) return iron;
+        if (mat.headItem().equals(Items.GOLD_INGOT)) return gold;
         if (mat.name().equals("stone")) return stone;
         return wood;
     }

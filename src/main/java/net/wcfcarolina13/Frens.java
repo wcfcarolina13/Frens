@@ -275,6 +275,7 @@ public class Frens implements ModInitializer {
     // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
     private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
     private static final AtomicBoolean WARNED_MISSING_OLLAMA4J = new AtomicBoolean(false);
+    private static final AtomicBoolean WARNED_LEGACY_NLP_FAILURE = new AtomicBoolean(false);
     
     // Track bots that need spawn escape checks
     private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
@@ -1674,14 +1675,26 @@ public class Frens implements ModInitializer {
         if (bot == null || sender == null || userPrompt == null || userPrompt.isBlank()) {
             return;
         }
-        NLPProcessor.Intent intent = NLPProcessor.getIntention(userPrompt);
-        if (intent != NLPProcessor.Intent.REQUEST_ACTION) {
-            return;
-        }
+        // NLPProcessor's static init builds an OllamaAPI (and it imports DJL); both are compileOnly,
+        // so without -PaiEnabled=true the first touch throws NoClassDefFoundError — an Error, which
+        // would escape the CHAT_MESSAGE handler. Gate first, then catch linkage failures anyway.
         if (!OLLAMA4J_AVAILABLE) {
             if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                LOGGER.warn("AI action handling requested but ollama4j is not available; ignoring inline action prompt.");
+                LOGGER.warn("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
             }
+            return;
+        }
+        NLPProcessor.Intent intent;
+        try {
+            intent = NLPProcessor.getIntention(userPrompt);
+        } catch (LinkageError | RuntimeException e) {
+            if (WARNED_LEGACY_NLP_FAILURE.compareAndSet(false, true)) {
+                LOGGER.warn("Legacy inline-action parser unavailable ({}: {}); ignoring inline action prompts.",
+                        e.getClass().getSimpleName(), e.getMessage());
+            }
+            return;
+        }
+        if (intent != NLPProcessor.Intent.REQUEST_ACTION) {
             return;
         }
         try {
