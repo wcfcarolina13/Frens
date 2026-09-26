@@ -299,6 +299,23 @@ class MutualAidChestFoodPolicyTest {
         assertFalse(source.contains("CompletableFuture"), "the private server hop copy should be gone");
     }
 
+    @Test
+    void makingRoomOnTheServerTickOnlyDropsAndGoesThroughTheMakeRoomPolicy() throws IOException {
+        String source = mutualAidSource();
+        // The two tick-side make-room calls were its only uses: nothing in mutual aid offloads to a chest.
+        assertFalse(source.contains("offloadCheapItemsToNearbyChest"), "mutual aid still offloads to a chest");
+        for (String signature : List.of("boolean tryMakeSpaceForNearbyDroppedFood(",
+                "boolean ensureInventorySpaceForAidRecipient(")) {
+            String makeRoom = bodyOf(source, signature);
+            for (String banned : List.of("depositMatchingWalkOnly", "placeChestNearBot", "MovementService",
+                    "ChestStoreService")) {
+                assertFalse(makeRoom.contains(banned), signature + " reaches " + banned);
+            }
+            assertTrue(makeRoom.contains("dropCheapStackForSpace"), signature + " should drop a stack");
+            assertTrue(makeRoom.contains("MutualAidMakeRoomPolicy."), signature + " should decide through the policy");
+        }
+    }
+
     private static String mutualAidSource() throws IOException {
         String relative = "src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java";
         Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();

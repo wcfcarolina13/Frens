@@ -96,6 +96,8 @@ public final class BotMutualAidService {
     private static final Map<UUID, Long> NEXT_REGROUP_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_DEFENSE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_FLOWER_TICK = new ConcurrentHashMap<>();
+    /** Per bot that would drop: no make-room drop before this tick (set when a drop found nothing it may drop). Server thread. */
+    private static final Map<UUID, Long> NEXT_MAKE_ROOM_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, PendingHandoff> PENDING_HANDOFFS = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> DONOR_PENDING = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> LAST_INTERACTION_BOT = new ConcurrentHashMap<>();
@@ -145,7 +147,7 @@ public final class BotMutualAidService {
 
             if (bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD
                     && bot.getInventory().getEmptySlot() == -1
-                    && tryMakeSpaceForNearbyDroppedFood(bot, world)) {
+                    && tryMakeSpaceForNearbyDroppedFood(bot, world, nowTick)) {
                 continue;
             }
 
@@ -312,6 +314,7 @@ public final class BotMutualAidService {
         pruneMap(NEXT_REGROUP_TICK, knownBots);
         pruneMap(NEXT_DEFENSE_TICK, knownBots);
         pruneMap(NEXT_FLOWER_TICK, knownBots);
+        pruneMap(NEXT_MAKE_ROOM_TICK, knownBots);
         pruneMap(DONOR_PENDING, knownBots);
         pruneMap(LAST_INTERACTION_BOT, knownBots);
         pruneMap(LAST_INTERACTION_TICK, knownBots);
@@ -864,10 +867,11 @@ public final class BotMutualAidService {
                 .sorted(Comparator.comparingDouble(donor::squaredDistanceTo))
                 .toList();
         for (ServerPlayerEntity recipient : recipients) {
-            if (!ensureInventorySpaceForAidRecipient(recipient, AidKind.GEAR)) {
+            // The donor must have gear for this recipient before the recipient drops a stack for it.
+            if (pickAidInventorySlot(donor, recipient, AidKind.GEAR) < 0) {
                 continue;
             }
-            if (pickAidInventorySlot(donor, recipient, AidKind.GEAR) < 0) {
+            if (!ensureInventorySpaceForAidRecipient(recipient, AidKind.GEAR, nowTick)) {
                 continue;
             }
             registerPendingHandoff(new PendingHandoff(donor.getUuid(), recipient.getUuid(), nowTick, -1L, AidKind.GEAR, 1));
@@ -894,7 +898,7 @@ public final class BotMutualAidService {
         if (recipient == null) {
             return false;
         }
-        if (!ensureInventorySpaceForAidRecipient(recipient, AidKind.FLOWER)) {
+        if (!ensureInventorySpaceForAidRecipient(recipient, AidKind.FLOWER, nowTick)) {
             return false;
         }
         registerPendingHandoff(new PendingHandoff(donor.getUuid(), recipient.getUuid(), nowTick, -1L, AidKind.FLOWER, 1));
@@ -1160,8 +1164,23 @@ public final class BotMutualAidService {
         return food != null ? food.nutrition() : 0;
     }
 
-    private static boolean tryMakeSpaceForNearbyDroppedFood(ServerPlayerEntity bot, ServerWorld world) {
+    /**
+     * A starving bot with a full inventory next to dropped food frees a slot by dropping one stack
+     * (a cheap one first; never food it carries, never a protected or damageable item) and lets the
+     * food be picked up at once. Server tick: it only drops, never walks to, places or fills a chest.
+     * A drop that finds nothing it may drop holds this bot's make-room off for
+     * {@link MutualAidMakeRoomPolicy#RETRY_TICKS}; until then this returns false without dropping.
+     *
+     * @return whether room was made for the food (the tick then skips this bot)
+     */
+    private static boolean tryMakeSpaceForNearbyDroppedFood(ServerPlayerEntity bot, ServerWorld world, long nowTick) {
         if (bot == null || world == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        MutualAidMakeRoomPolicy.Decision room = MutualAidMakeRoomPolicy.decide(
+                MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, bot.getInventory().getEmptySlot() != -1);
+        if (room == MutualAidMakeRoomPolicy.Decision.DECLINE
+                || (room == MutualAidMakeRoomPolicy.Decision.DROP && !mayMakeRoom(bot, nowTick))) {
             return false;
         }
         ItemEntity nearbyFood = world.getEntitiesByClass(
@@ -1182,13 +1201,12 @@ public final class BotMutualAidService {
             return false;
         }
 
-        Map<Item, Integer> reserveFood = collectReservedFood(bot);
-        CraftingHelper.offloadCheapItemsToNearbyChest(bot, bot.getCommandSource().withSilent(), 0, 0, reserveFood);
-        if (bot.getInventory().getEmptySlot() == -1) {
-            CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet());
-        }
-        if (bot.getInventory().getEmptySlot() == -1) {
-            return false;
+        if (room == MutualAidMakeRoomPolicy.Decision.DROP) {
+            Map<Item, Integer> reserveFood = collectReservedFood(bot);
+            if (!CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet())) {
+                holdOffMakeRoom(bot, MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, nowTick);
+                return false;
+            }
         }
 
         nearbyFood.setPickupDelay(0);
@@ -1230,22 +1248,50 @@ public final class BotMutualAidService {
         return foodScore(stack, allowRotten) != Double.POSITIVE_INFINITY;
     }
 
-    private static boolean ensureInventorySpaceForAidRecipient(ServerPlayerEntity recipient, AidKind kind) {
+    /**
+     * Whether {@code recipient} has room for a {@code kind} handoff, made if it must be. Food needs
+     * none; an empty slot is room. Otherwise gear makes room by dropping one stack (a cheap one
+     * first; never food, weapons, armor, shields or flowers it carries, never a protected or
+     * damageable item), and a flower is declined without dropping anything. Server tick: it only
+     * drops, never walks to, places or fills a chest. A drop that finds nothing it may drop holds
+     * this recipient's make-room off for {@link MutualAidMakeRoomPolicy#RETRY_TICKS}; until then
+     * this returns false without dropping.
+     */
+    private static boolean ensureInventorySpaceForAidRecipient(ServerPlayerEntity recipient, AidKind kind, long nowTick) {
         if (recipient == null || recipient.getCommandSource() == null) {
             return false;
         }
-        if (kind == AidKind.FOOD) {
-            return true;
+        MutualAidMakeRoomPolicy.Kind roomKind = switch (kind) {
+            case FOOD -> MutualAidMakeRoomPolicy.Kind.FOOD_SHARE;
+            case GEAR -> MutualAidMakeRoomPolicy.Kind.GEAR;
+            case FLOWER -> MutualAidMakeRoomPolicy.Kind.FLOWER;
+        };
+        MutualAidMakeRoomPolicy.Decision room = MutualAidMakeRoomPolicy.decide(
+                roomKind, recipient.getInventory().getEmptySlot() != -1);
+        if (room != MutualAidMakeRoomPolicy.Decision.DROP) {
+            return room == MutualAidMakeRoomPolicy.Decision.NOT_NEEDED;
         }
-        if (recipient.getInventory().getEmptySlot() != -1) {
-            return true;
+        if (!mayMakeRoom(recipient, nowTick)) {
+            return false;
         }
         Map<Item, Integer> reserveItems = collectAidReserveItems(recipient);
-        CraftingHelper.offloadCheapItemsToNearbyChest(recipient, recipient.getCommandSource().withSilent(), 0, 0, reserveItems);
-        if (recipient.getInventory().getEmptySlot() != -1) {
+        if (CraftingHelper.dropCheapStackForSpace(recipient, recipient.getCommandSource().withSilent(), reserveItems.keySet())) {
             return true;
         }
-        return CraftingHelper.dropCheapStackForSpace(recipient, recipient.getCommandSource().withSilent(), reserveItems.keySet());
+        holdOffMakeRoom(recipient, roomKind, nowTick);
+        return false;
+    }
+
+    /** Whether {@code bot} may drop a stack for room now, i.e. no failed make-room drop in the last {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
+    private static boolean mayMakeRoom(ServerPlayerEntity bot, long nowTick) {
+        return MutualAidMakeRoomPolicy.mayAttempt(nowTick, NEXT_MAKE_ROOM_TICK.getOrDefault(bot.getUuid(), 0L));
+    }
+
+    /** After a make-room drop found nothing {@code bot} may drop: no make-room drop for it for {@link MutualAidMakeRoomPolicy#RETRY_TICKS}. */
+    private static void holdOffMakeRoom(ServerPlayerEntity bot, MutualAidMakeRoomPolicy.Kind kind, long nowTick) {
+        NEXT_MAKE_ROOM_TICK.put(bot.getUuid(), MutualAidMakeRoomPolicy.nextAllowedAfterFailure(nowTick));
+        LOGGER.info("mutual-aid make-room: {} has nothing it may drop, retry in 10 s (kind={})",
+                bot.getName().getString(), kind);
     }
 
     private static Map<Item, Integer> collectAidReserveItems(ServerPlayerEntity bot) {
