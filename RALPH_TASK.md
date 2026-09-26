@@ -7,7 +7,7 @@ test_command: "./gradlew build -x test"
 
 **State:** main = origin/main @ 1.1.225. Suite 1738 green (1662 → 1738). This is the onboarding build: Frens works
 without Ollama, and turning on AI companions takes one checklist. The last public Modrinth release is still 1.1.1.
-Deploy status is in the release commit that follows this handoff (docs commit).
+DEPLOYED to all three Prism instances (2026-09-26; 27 AiSetup* classes present in each mods-dir JAR).
 
 **Shipped in 1.1.225** (details, rulings and cost-if-wrong are in `changelog.md`):
 - **"Set up AI companions" checklist** (`AiSetupChecklistScreen`, from the Guide's AI setup button and Bot Controls'

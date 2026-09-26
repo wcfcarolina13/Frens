@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.224-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.225-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.224** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.225** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1208,6 +1208,68 @@ Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat]
   - Bradley does: the second account opens the zone list or visualiser.
   - Claude watches for: only its own, allied and server bases listed.
   - Pass when: your private base doesn't appear.
+
+## Phase 6w — AI companion setup, multiplayer AI settings, model-free first run (1.1.225)
+
+1.1.225 makes Frens usable without Ollama and turns AI companions on from one checklist. Run the first two items in a **new world with cheats OFF**, with Ollama **stopped**, then start Ollama for the rest. Items marked **2P** need a second account joined over LAN or to a dedicated server. A LAN guest counts as a remote player; the LAN host counts as local.
+
+Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processing your message`, `Rejected config save`, `reloadSettings failed`.
+
+- [ ] **No-Ollama first run (1.1.225)**
+  - Bradley does:
+    1. Create a new world (cheats off) with Ollama stopped.
+    2. Read the first-run screen.
+    3. Spawn Jake and say "Jake, hello" in chat.
+    4. Open the legacy config screen and press Refresh.
+  - Claude watches for: at most one INFO `Ollama not detected at … optional, only needed for AI chat`. There should be no ERROR and no `Ollama is not reachable` anywhere.
+  - Pass when:
+    - The screen says "Choose Frens World Mode" and that Frens works without Ollama.
+    - No "Processing your message, please wait." appears.
+    - The model list shows "Ollama not detected (optional — only needed for AI chat)" instead of a fake model entry.
+- [ ] **Setup checklist, cheats-off singleplayer (1.1.225)**
+  - Bradley does:
+    1. Start Ollama.
+    2. Open Guide → AI setup; then also try Bot Controls → Soul Chat row → Setup….
+    3. Walk the steps: Choose model… (pick a small one), Turn on, Enable Jake, Say hi, then press Enter in chat.
+  - Claude watches for: `[ai-setup] … set Soul Chat on` and `[ai-setup] enabled bot Jake as …`, then a soul reply correlation id for Jake.
+  - Pass when: every step ticks ✔ without using a `/bot` command, and Jake answers the test line.
+- [ ] **Enable message names the blocker (1.1.225)**
+  - Bradley does: in a world with cheats on, run `/bot soul system off`, then `/bot soul enable Bob`.
+  - Pass when: the reply says Soul Chat is OFF and how to turn it on, rather than an unconditional success.
+- [ ] **Model button and labels (1.1.225)**
+  - Bradley does: with a model selected, remove it in a terminal (`ollama rm <tag>`), then open Choose model….
+  - Pass when: that model offers Download (not a disabled "Selected"), and the 8B row says "Largest option", not "Current default".
+- [ ] **Checklist fits a small window (1.1.225)**
+  - Bradley does: set GUI scale to its largest value (or shrink the window), with 3+ bots, then open the checklist.
+  - Pass when: Refresh and Close are on screen, and bot rows scroll with the mouse wheel.
+- [ ] **Bot Controls keeps a Soul Chat change (1.1.225)**
+  - Bradley does:
+    1. Turn Soul Chat on from the checklist and return to Bot Controls.
+    2. Flip an unrelated toggle, close, and reopen.
+  - Pass when: Soul Chat is still on.
+- [ ] **2P: a non-operator gets told, not ignored (1.1.225)**
+  - Bradley does, from the non-op second account:
+    1. Flip Soul Chat in Bot Controls.
+    2. Open the AI setup checklist and the model screen.
+  - Claude watches for: one `Rejected config save from non-operator <2nd>`; repeats only at DEBUG.
+  - Pass when:
+    - The player sees "Only an operator or the host can change this server's Frens settings — your change was not saved."
+    - Server-changing checklist buttons are disabled with "Ask the server operator / host".
+    - The model screen says only the operator or host can change it.
+- [ ] **2P: a remote operator's picks reach the server (1.1.225)**
+  - Bradley does, from a remote account that is op (a LAN guest after `/op`, or a dedicated server):
+    1. Open Choose model… and pick an installed model.
+    2. Open Voice… and pick an engine.
+    3. Toggle Soul Chat off and on in Bot Controls.
+  - Claude watches for: `[ai-setup] soul model set to <tag>` and `[ai-setup] … set soul voice engine …` in the SERVER log, and no `reloadSettings failed`.
+  - Pass when:
+    - Both screens say "Runs on the server host".
+    - A model not installed on the server shows "Pull it on the server machine: ollama pull <tag>" and no Download button.
+    - The bot's next reply uses the new model, and the Soul Chat toggle takes effect without a restart.
+- [ ] **Scene logs carry no private text (1.1.225)**
+  - Bradley does: let 2–3 group scenes play after a DM to Jake, with diagnostics on.
+  - Claude watches for: `latest.log` banter-seed, scene-output and dropped-line lines. They should show counts, lengths, reasons and `correlationId=`, with no dialogue text at INFO.
+  - Pass when: no DM fact or scene line text appears in the log at INFO.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
