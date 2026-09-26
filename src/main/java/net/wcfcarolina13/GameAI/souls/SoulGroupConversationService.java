@@ -231,11 +231,19 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                 turn.ownerDisplayName(), turn.kind() != SoulGroupTypes.SceneKind.PLAYER);
         // Raw provider output is not persisted anywhere, so a rejected or solo-roster scene logs
         // it (whitespace-collapsed, capped). The 2026-08-29 self-talk diagnosis had to be
-        // inferred from the delivered lines because this was invisible.
-        if (!parse.accepted() || rosterNames.size() == 1) {
+        // inferred from the delivered lines because this was invisible. 1.1.223: a scene that
+        // lost any line (grammar drop, cap, owner-address cut) logs it at INFO too, so every
+        // drop below can be read against what the model actually wrote; clean multi-speaker
+        // scenes log it at DEBUG.
+        boolean lostLines = !parse.dropped().isEmpty() || parse.ownerCutDropped() > 0;
+        if (!parse.accepted() || rosterNames.size() == 1 || lostLines) {
             LOGGER.info("[souls] scene correlationId={} kind={} rosterSize={} accepted={} raw=\"{}\"",
                     correlationId, turn.kind(), rosterNames.size(), parse.accepted(), rawForLog(result.text()));
+        } else {
+            LOGGER.debug("[souls] scene correlationId={} kind={} rosterSize={} accepted={} raw=\"{}\"",
+                    correlationId, turn.kind(), rosterNames.size(), parse.accepted(), rawForLog(result.text()));
         }
+        logDrops(correlationId, turn, parse);
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
                     result.model(), result.elapsedMillis(), outcome);
@@ -366,6 +374,43 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                     logFailure(correlationId, turn, code, providerId, model);
                     outcome.complete(Submission.FAILED);
                 });
+    }
+
+    /**
+     * 1.1.223 diagnostics: every output line the validator discarded, and the owner-address cut,
+     * each on its own INFO line under the scene's correlation id. These used to vanish silently,
+     * so a one-line "conversation" could not be told apart from a model that wrote one line.
+     * Solo-roster scaffolding ("Here is the scene:") and punctuation noise are routine and log at
+     * DEBUG.
+     */
+    private static void logDrops(UUID correlationId, SoulGroupTypes.GroupSceneTurn turn,
+                                 SoulGroupResponseValidator.SceneParse parse) {
+        for (SoulGroupResponseValidator.DroppedLine drop : parse.dropped()) {
+            boolean routine = drop.reason() == SoulGroupResponseValidator.DropReason.SCAFFOLD
+                    || drop.reason() == SoulGroupResponseValidator.DropReason.NOISE;
+            String message = "[souls] scene correlationId={} kind={} dropped rawLine={} reason={} text=\"{}\"";
+            Object[] args = {correlationId, turn.kind(), drop.rawIndex(), drop.reason(),
+                    lineForLog(drop.text())};
+            if (routine) {
+                LOGGER.debug(message, args);
+            } else {
+                LOGGER.info(message, args);
+            }
+        }
+        if (parse.ownerCutIndex() >= 0) {
+            LOGGER.info("[souls] scene correlationId={} kind={} owner-address cut atLine={} dropped={} line=\"{}\"",
+                    correlationId, turn.kind(), parse.ownerCutIndex(), parse.ownerCutDropped(),
+                    lineForLog(parse.lines().get(parse.ownerCutIndex()).text()));
+        }
+    }
+
+    /** One scene line for a log: whitespace collapsed, capped at 160 chars. */
+    static String lineForLog(String line) {
+        if (line == null) {
+            return "";
+        }
+        String flat = line.replaceAll("\\s+", " ").strip();
+        return flat.length() <= 160 ? flat : flat.substring(0, 160) + "…";
     }
 
     /** One log-safe line: newlines shown as " ⏎ ", whitespace collapsed, capped at 600 chars. */

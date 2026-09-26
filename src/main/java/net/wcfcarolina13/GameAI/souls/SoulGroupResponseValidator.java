@@ -41,18 +41,55 @@ public final class SoulGroupResponseValidator {
      */
     static final String SIDE_CHANNEL_SENTINEL = "##FRENS";
 
+    /** Why a raw output line never became a scene line (1.1.223 diagnostics). */
+    public enum DropReason {
+        /** Tagged with a name outside the roster (multi-speaker grammar). */
+        UNKNOWN_SPEAKER,
+        /** Tagged with the owner's name or an abbreviation of it — a line written for the player. */
+        OWNER_TAGGED,
+        /** A solo roster's scaffolding tag ("Note:", "Scene:") or a tag with no body. */
+        SCAFFOLD,
+        /** Untagged narration/prose in a multi-speaker scene — ambiguous, never attributed. */
+        UNTAGGED,
+        /** The speaker already has {@link SoulGroupTypes#MAX_LINES_PER_BOT} turns in this scene. */
+        PER_BOT_CAP,
+        /** The scene reached its line cap; this line and everything after it were not read. */
+        SCENE_CAP,
+        /** Punctuation-only or empty after cleaning. */
+        NOISE
+    }
+
+    /** One dropped output line: its index in the raw output, why, and the cleaned text. */
+    public record DroppedLine(int rawIndex, DropReason reason, String text) {
+        public DroppedLine {
+            text = text == null ? "" : text;
+        }
+    }
+
     /**
      * Outcome of {@link #parse}. {@code lines()} is roster-verified, capped dialogue;
      * {@code sideChannelRaw()} is the trimmed text following a {@code ##FRENS} sentinel, empty
-     * when the model emitted none (the expected common case).
+     * when the model emitted none (the expected common case). {@code dropped()} lists every raw
+     * line discarded by the grammar or the caps; {@code ownerCutIndex()} is the index (in
+     * {@code lines()}) of the line that addressed the owner and ended an ambient scene, or -1,
+     * and {@code ownerCutDropped()} how many parsed lines that cut removed.
      */
     public record SceneParse(boolean accepted, List<SoulGroupTypes.SceneLine> lines,
                               SoulTypes.FailureCode failureCode, String reason,
-                              java.util.Optional<String> sideChannelRaw) {
+                              java.util.Optional<String> sideChannelRaw,
+                              List<DroppedLine> dropped, int ownerCutIndex, int ownerCutDropped) {
         public SceneParse {
             lines = lines == null ? List.of() : List.copyOf(lines);
             reason = reason == null ? "" : reason;
             sideChannelRaw = sideChannelRaw == null ? java.util.Optional.empty() : sideChannelRaw;
+            dropped = dropped == null ? List.of() : List.copyOf(dropped);
+        }
+
+        /** Pre-1.1.223 five-arg shape: no drop or cut metadata. */
+        public SceneParse(boolean accepted, List<SoulGroupTypes.SceneLine> lines,
+                          SoulTypes.FailureCode failureCode, String reason,
+                          java.util.Optional<String> sideChannelRaw) {
+            this(accepted, lines, failureCode, reason, sideChannelRaw, List.of(), -1, 0);
         }
 
         /** Pre-3c four-arg shape; keeps existing callers and tests source-stable. */
@@ -140,9 +177,13 @@ public final class SoulGroupResponseValidator {
 
         int[] perBot = new int[rosterDisplayNames.size()];
         List<SoulGroupTypes.SceneLine> lines = new ArrayList<>();
+        List<DroppedLine> dropped = new ArrayList<>();
         java.util.Optional<String> sideChannelRaw = java.util.Optional.empty();
-        for (String rawLine : text.split("\n")) {
-            String line = cleanLine(rawLine);
+        String[] rawLines = text.split("\n");
+        for (int rawIndex = 0; rawIndex < rawLines.length; rawIndex++) {
+            // A whole line wrapped in quotes ("Bob: Hey.") loses them before the tag split, so
+            // the tag still parses and the trailing quote never reaches the spoken body.
+            String line = stripWrappingQuotes(cleanLine(rawLines[rawIndex]));
             // Checked BEFORE the line cap so a tail that follows a full-length scene is still
             // captured (and, more importantly, still stripped) rather than left unread.
             java.util.Optional<String> sentinelTail = sideChannelTail(line);
@@ -151,6 +192,9 @@ public final class SoulGroupResponseValidator {
                 break; // end of scene: this line and everything after it are dropped
             }
             if (lines.size() >= maxSceneLines) {
+                if (!line.isEmpty()) {
+                    dropped.add(new DroppedLine(rawIndex, DropReason.SCENE_CAP, line));
+                }
                 break;
             }
             if (line.isEmpty()) {
@@ -164,28 +208,38 @@ public final class SoulGroupResponseValidator {
             boolean tagged = tagLike && !line.substring(colon + 1).strip().isEmpty();
             if (tagged) {
                 String speaker = normalize(line.substring(0, colon));
-                body = line.substring(colon + 1).strip();
+                body = stripWrappingQuotes(line.substring(colon + 1).strip());
                 idx = normRoster.indexOf(speaker);
                 if (idx < 0) {
-                    if (soloRoster && !META_TAGS.contains(speaker) && !isOwnerTag(speaker, normOwner)) {
+                    boolean ownerTag = isOwnerTag(speaker, normOwner);
+                    if (soloRoster && !META_TAGS.contains(speaker) && !ownerTag) {
                         idx = 0; // wrong NAME tag, one possible speaker — strip it, keep the line
                     } else {
-                        continue; // unknown speaker or scaffolding tag — dropped, never repaired
+                        // unknown speaker or scaffolding tag — dropped, never repaired
+                        dropped.add(new DroppedLine(rawIndex, ownerTag ? DropReason.OWNER_TAGGED
+                                : soloRoster ? DropReason.SCAFFOLD : DropReason.UNKNOWN_SPEAKER, line));
+                        continue;
                     }
                 }
             } else if (soloRoster) {
                 if (tagLike || line.endsWith(":")) {
-                    continue; // "Here is the scene:" — a tag with no body is scaffolding, not prose
+                    // "Here is the scene:" — a tag with no body is scaffolding, not prose
+                    dropped.add(new DroppedLine(rawIndex, DropReason.SCAFFOLD, line));
+                    continue;
                 }
                 if (line.replaceAll("[\\p{Punct}\\s]", "").isEmpty()) {
+                    dropped.add(new DroppedLine(rawIndex, DropReason.NOISE, line));
                     continue; // punctuation-only noise
                 }
                 idx = 0;
                 body = line;
             } else {
-                continue; // narration or untagged prose is ambiguous with 2+ speakers
+                // narration or untagged prose is ambiguous with 2+ speakers
+                dropped.add(new DroppedLine(rawIndex, DropReason.UNTAGGED, line));
+                continue;
             }
             if (body.isEmpty()) {
+                dropped.add(new DroppedLine(rawIndex, DropReason.NOISE, line));
                 continue;
             }
             // Multi-speaker scenes: a run of lines from one speaker is one turn. The 3B model
@@ -199,15 +253,23 @@ public final class SoulGroupResponseValidator {
                 continue;
             }
             if (perBot[idx] >= SoulGroupTypes.MAX_LINES_PER_BOT) {
+                dropped.add(new DroppedLine(rawIndex, DropReason.PER_BOT_CAP, line));
                 continue;
             }
             perBot[idx]++;
             lines.add(new SoulGroupTypes.SceneLine(idx, truncateLine(body)));
         }
 
+        int ownerCutIndex = -1;
+        int ownerCutDropped = 0;
         if (endAtOwnerAddress && !normOwner.isEmpty()) {
+            // 1.1.223: only a line spoken TO the owner ends the scene. A third-person mention
+            // ("what was RotiWokeman looking for?") used to cut here too, so the other bot never
+            // got to answer.
             for (int i = 0; i < lines.size() - 1; i++) {
-                if (addressesOwner(lines.get(i).text(), normOwner)) {
+                if (OwnerAddressPolicy.isVocative(lines.get(i).text(), normOwner)) {
+                    ownerCutIndex = i;
+                    ownerCutDropped = lines.size() - (i + 1);
                     lines = new ArrayList<>(lines.subList(0, i + 1));
                     break;
                 }
@@ -216,9 +278,64 @@ public final class SoulGroupResponseValidator {
         if (lines.isEmpty()) {
             // Sentinel-first (or an otherwise empty scene): rejected exactly as before, and the
             // side channel is deliberately NOT carried out — no scene, no side-effects.
-            return reject("no roster-tagged dialogue lines");
+            return new SceneParse(false, List.of(), SoulTypes.FailureCode.MALFORMED,
+                    "no roster-tagged dialogue lines", java.util.Optional.empty(), dropped, -1, 0);
         }
-        return new SceneParse(true, lines, null, "", sideChannelRaw);
+        return new SceneParse(true, lines, null, "", sideChannelRaw, dropped, ownerCutIndex, ownerCutDropped);
+    }
+
+    /**
+     * Strips one or more MATCHED wrapping quote pairs — {@code "…"}, {@code “…”}, {@code '…'},
+     * {@code ‘…’}, {@code «…»} — from a line (1.1.223: the model quoted its dialogue, the quotes
+     * were spoken, and replayed in party history so the next scene quoted too). Never strips a
+     * lone leading apostrophe ({@code 'Tis}) or quotes that open and close different spans
+     * ({@code "Hi," he said, "bye"}).
+     */
+    static String stripWrappingQuotes(String line) {
+        if (line == null) {
+            return "";
+        }
+        String s = line.strip();
+        while (s.length() >= 2) {
+            char open = s.charAt(0);
+            char close = s.charAt(s.length() - 1);
+            boolean doubles = (open == '"' || open == '“' || open == '”')
+                    && (close == '"' || close == '”' || close == '“');
+            boolean singles = (open == '\'' || open == '‘' || open == '’')
+                    && (close == '\'' || close == '’' || close == '‘');
+            boolean guillemets = open == '«' && close == '»';
+            if (!doubles && !singles && !guillemets) {
+                break;
+            }
+            String inner = s.substring(1, s.length() - 1);
+            if (doubles && (inner.indexOf('"') >= 0 || inner.indexOf('“') >= 0 || inner.indexOf('”') >= 0)) {
+                break;
+            }
+            if (singles && hasNonApostropheSingleQuote(inner)) {
+                break;
+            }
+            if (guillemets && (inner.indexOf('«') >= 0 || inner.indexOf('»') >= 0)) {
+                break;
+            }
+            s = inner.strip();
+        }
+        return s;
+    }
+
+    /** A single quote inside {@code inner} that is not a letter-flanked apostrophe ("don't"). */
+    private static boolean hasNonApostropheSingleQuote(String inner) {
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+            if (c != '\'' && c != '‘' && c != '’') {
+                continue;
+            }
+            boolean letterBefore = i > 0 && Character.isLetter(inner.charAt(i - 1));
+            boolean letterAfter = i + 1 < inner.length() && Character.isLetter(inner.charAt(i + 1));
+            if (!(letterBefore && letterAfter)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True when a word of the line is the owner's name or a ≥4-char abbreviation of it. */

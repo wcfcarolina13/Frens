@@ -376,4 +376,99 @@ class SoulGroupResponseValidatorTest {
         assertEquals("- Frens are what keep us alive.", parse.lines().get(0).text());
         assertTrue(parse.sideChannelRaw().isEmpty());
     }
+
+    // === 1.1.223 conversation smoothing ===
+
+    @Test
+    void aThirdPersonMentionOfTheOwnerNoLongerEndsTheScene() {
+        // Field 2026-09-25: Bob asked Jake about Roti and the scene was cut before Jake answered.
+        String raw = "Bob: Hey, Jake, what was RotiWokeman looking for the other day?\n"
+                + "Jake: Iron, I think. He kept muttering about buckets.\n"
+                + "Bob: RotiWokeman's not even paying attention to us, is he?\n"
+                + "Jake: Never does.";
+        var parse = validator.parse(raw, List.of("Jake", "Bob"), 4, "RotiWokeman", true);
+        assertEquals(4, parse.lines().size(), "no line is spoken TO the owner");
+        assertEquals(-1, parse.ownerCutIndex());
+        assertEquals(0, parse.ownerCutDropped());
+    }
+
+    @Test
+    void theOwnerAddressCutReportsWhereItCutAndHowMuchItDropped() {
+        String raw = "Bob: Jake, the rain's letting up.\nJake: About time. What do you think, Roti?\n"
+                + "Bob: He thinks it's grand.\nJake: Aye.";
+        var parse = validator.parse(raw, List.of("Jake", "Bob"), 4, "RotiWokeman", true);
+        assertEquals(2, parse.lines().size());
+        assertEquals(1, parse.ownerCutIndex());
+        assertEquals(2, parse.ownerCutDropped());
+        // A PLAYER scene is all addressed to the owner — never cut, nothing reported.
+        var reply = validator.parse(raw, List.of("Jake", "Bob"), 6, "RotiWokeman", false);
+        assertEquals(4, reply.lines().size());
+        assertEquals(-1, reply.ownerCutIndex());
+    }
+
+    @Test
+    void wrappingQuotesAreStrippedFromSceneLines() {
+        String raw = "Jake: \"Rain again.\"\nSara: “Figures.”\n\"Jake: Fish bite in the rain, though.\"\n"
+                + "Sara: 'I don't mind it.'";
+        var parse = validator.parse(raw, ROSTER);
+        assertTrue(parse.accepted());
+        assertEquals(4, parse.lines().size());
+        assertEquals("Rain again.", parse.lines().get(0).text());
+        assertEquals("Figures.", parse.lines().get(1).text());
+        assertEquals("Fish bite in the rain, though.", parse.lines().get(2).text(), "whole-line quotes");
+        assertEquals("I don't mind it.", parse.lines().get(3).text());
+    }
+
+    @Test
+    void quoteStrippingOnlyRemovesAMatchedWrappingPair() {
+        assertEquals("Hi there.", SoulGroupResponseValidator.stripWrappingQuotes("\"Hi there.\""));
+        assertEquals("nested", SoulGroupResponseValidator.stripWrappingQuotes("\"'nested'\""));
+        assertEquals("'Tis a fine day.", SoulGroupResponseValidator.stripWrappingQuotes("'Tis a fine day."));
+        assertEquals("\"Hi,\" he said, \"bye\"",
+                SoulGroupResponseValidator.stripWrappingQuotes("\"Hi,\" he said, \"bye\""));
+        assertEquals("'twas' and 'is'",
+                SoulGroupResponseValidator.stripWrappingQuotes("'twas' and 'is'"));
+        assertEquals("\"", SoulGroupResponseValidator.stripWrappingQuotes("\""));
+        assertEquals("", SoulGroupResponseValidator.stripWrappingQuotes(null));
+    }
+
+    @Test
+    void everyDroppedLineIsReportedWithItsReason() {
+        String raw = "The two look at each other.\n"       // 0 untagged narration
+                + "Villager: hello!\n"                      // 1 unknown speaker
+                + "Jake: Rain again.\n"                     // 2 kept
+                + "Roti: Yes, I noticed.\n"                 // 3 owner-tagged
+                + "Sara: Figures.\n"                        // 4 kept
+                + "Jake: Fish bite in the rain.\n"          // 5 kept (Jake's 2nd turn)
+                + "Sara: True.\n"                           // 6 kept (Sara's 2nd turn)
+                + "Jake: And another thing.";               // 7 Jake's 3rd turn
+        var parse = validator.parse(raw, ROSTER, 6, "RotiWokeman");
+        assertEquals(4, parse.lines().size());
+        List<SoulGroupResponseValidator.DroppedLine> dropped = parse.dropped();
+        assertEquals(4, dropped.size(), dropped.toString());
+        assertEquals(new SoulGroupResponseValidator.DroppedLine(0,
+                SoulGroupResponseValidator.DropReason.UNTAGGED, "The two look at each other."), dropped.get(0));
+        assertEquals(SoulGroupResponseValidator.DropReason.UNKNOWN_SPEAKER, dropped.get(1).reason());
+        assertEquals(1, dropped.get(1).rawIndex());
+        assertEquals(SoulGroupResponseValidator.DropReason.OWNER_TAGGED, dropped.get(2).reason());
+        assertEquals(3, dropped.get(2).rawIndex());
+        assertEquals(SoulGroupResponseValidator.DropReason.PER_BOT_CAP, dropped.get(3).reason());
+        assertEquals(7, dropped.get(3).rawIndex());
+    }
+
+    @Test
+    void theSceneCapIsReportedAsADrop() {
+        var parse = validator.parse("Jake: One.\nSara: Two.\nJake: Three.", ROSTER, 2, "");
+        assertEquals(2, parse.lines().size());
+        assertEquals(1, parse.dropped().size());
+        assertEquals(SoulGroupResponseValidator.DropReason.SCENE_CAP, parse.dropped().get(0).reason());
+        assertEquals(2, parse.dropped().get(0).rawIndex());
+    }
+
+    @Test
+    void aRejectedSceneStillCarriesItsDrops() {
+        var parse = validator.parse("Villager: hi\nNarrator: the end", ROSTER);
+        assertFalse(parse.accepted());
+        assertEquals(2, parse.dropped().size());
+    }
 }
