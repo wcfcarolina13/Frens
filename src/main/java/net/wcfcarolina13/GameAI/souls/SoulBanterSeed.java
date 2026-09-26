@@ -31,8 +31,31 @@ final class SoulBanterSeed {
     /** Supporting facts after the primary anchor. */
     static final int MAX_SUPPORT = 2;
 
-    /** What the seed steered toward; {@code topic} and {@code act} are what the director remembers. */
-    record Seed(String text, String topic, SoulSpeechAct act) {
+    /** Supporting-topic keys an audience remembers so the same background fact doesn't ride
+     *  every seed (two scenes' worth at {@value #MAX_SUPPORT} per seed). */
+    static final int RECENT_SUPPORT_MEMORY = 4;
+
+    /** Opens the cue: the ONE subject the scene is about (1.1.223 seed hierarchy). */
+    static final String PRIMARY_PREFIX = "Stay on one subject: ";
+    /** Frames the support facts as optional colour, not further subjects. */
+    static final String BACKGROUND_PREFIX = "(background only, mention at most once: ";
+    static final String SETTING_PREFIX = "(setting: ";
+    static final String AVOID_PREFIX = "(do not bring up ";
+
+    /**
+     * What the seed steered toward; {@code topic}, {@code act} and {@code supportTopics} are
+     * what the director remembers ({@code supportTopics} in their own ring, see
+     * {@link #RECENT_SUPPORT_MEMORY}).
+     */
+    record Seed(String text, String topic, SoulSpeechAct act, List<String> supportTopics) {
+        Seed {
+            supportTopics = supportTopics == null ? List.of() : List.copyOf(supportTopics);
+        }
+
+        Seed(String text, String topic, SoulSpeechAct act) {
+            this(text, topic, act, List.of());
+        }
+
         Seed(String text, String topic) {
             this(text, topic, null);
         }
@@ -114,7 +137,24 @@ final class SoulBanterSeed {
                           Set<String> recentTopics, List<Anchor> changeAnchors,
                           java.util.Collection<SoulSpeechAct> recentActs,
                           List<Anchor> mindAnchors) {
+        return buildSeed(rosterGroundings, eventsPerBot, playerName, playerActivity, random,
+                recentTopics, changeAnchors, recentActs, mindAnchors, Set.of());
+    }
+
+    /**
+     * @param recentSupport support-topic keys used by this audience's recent seeds
+     *     ({@link Seed#supportTopics}); skipped as support unless HIGH-salience, so a standing
+     *     fact ("the last hobby (woodcut)") no longer rides every seed. It never affects the
+     *     primary pick or the avoid list — those rotate on {@code recentTopics} alone.
+     */
+    static Seed buildSeed(List<SoulTypes.GroundingSnapshot> rosterGroundings,
+                          List<List<SoulTypes.SoulEvent>> eventsPerBot,
+                          String playerName, String playerActivity, RandomGenerator random,
+                          Set<String> recentTopics, List<Anchor> changeAnchors,
+                          java.util.Collection<SoulSpeechAct> recentActs,
+                          List<Anchor> mindAnchors, Set<String> recentSupport) {
         Set<String> recent = recentTopics == null ? Set.of() : recentTopics;
+        Set<String> recentSupported = recentSupport == null ? Set.of() : recentSupport;
         List<Anchor> anchors = new ArrayList<>();
         if (changeAnchors != null) {
             anchors.addAll(changeAnchors);
@@ -164,47 +204,133 @@ final class SoulBanterSeed {
                 primary = firstMatching(pool, anchors, SoulBanterSeed::isWorryTopic, random, primary);
             }
         }
-        List<String> parts = new ArrayList<>();
+        // 1.1.223 seed hierarchy: small models gave every "; "-joined fragment its own line, so
+        // a two-bot scene had competing subjects. Now ONE directive sentence names the subject,
+        // support facts are framed as optional background, and setting / avoid-list sit in
+        // their own parenthesised clauses. The assembler appends ". A few short lines…", so the
+        // seed never ends with a period of its own.
+        String primarySentence = null;
         Set<String> usedTopics = new LinkedHashSet<>();
         if (primary != null) {
             String verb = act == null ? "talk about" : act.directive(rosterGroundings.size() <= 1, playerName);
-            parts.add(verb + " " + primary.phrase());
+            primarySentence = PRIMARY_PREFIX + verb + " " + primary.phrase();
             usedTopics.add(primary.topic());
         }
         // Supporting facts: HIGH-salience events always make it in, then other fresh anchors.
         List<Anchor> support = new ArrayList<>(anchors);
         support.sort(Comparator.comparingInt(Anchor::weight).reversed());
+        List<Anchor> supportPicked = new ArrayList<>();
         for (Anchor anchor : support) {
-            if (usedTopics.size() > MAX_SUPPORT) {
+            if (supportPicked.size() >= MAX_SUPPORT) {
                 break;
             }
             if (anchor == primary || usedTopics.contains(anchor.topic())) {
                 continue;
             }
-            if (recent.contains(anchor.topic()) && anchor.weight() < 6) {
-                continue; // recently discussed and not important enough to force back in
+            if ((recent.contains(anchor.topic()) || recentSupported.contains(anchor.topic()))
+                    && anchor.weight() < 6) {
+                continue; // recently discussed or recently background, and not important enough
             }
-            parts.add(anchor.phrase());
+            supportPicked.add(anchor);
             usedTopics.add(anchor.topic());
         }
-        if (first != null) {
-            parts.add(situationLine(first));
-        }
+        String setting = first == null ? null : SETTING_PREFIX + situationLine(first) + ")";
+        String avoidClause = null;
         if (!recent.isEmpty()) {
             List<String> avoid = new ArrayList<>();
             for (String topic : recent) {
-                if (!usedTopics.contains(topic)) {
+                // Mind anchors (memory:…, relation:REL|…) are machine keys the model can't read,
+                // and the mind's own recall cooldown already keeps them off the next seeds.
+                if (!usedTopics.contains(topic) && isReadableTopic(topic)) {
                     avoid.add(topic);
                 }
             }
             if (!avoid.isEmpty()) {
-                parts.add("do not bring up " + String.join(" or ", avoid) + " again");
+                avoidClause = AVOID_PREFIX + String.join(" or ", avoid) + " again)";
             }
         }
 
-        String seed = String.join("; ", parts);
-        String text = seed.length() <= MAX_SEED_CHARS ? seed : seed.substring(0, MAX_SEED_CHARS);
-        return new Seed(text, primary == null ? "" : primary.topic(), act);
+        // Budget: drop whole clauses, lowest value first — support facts (last first), then the
+        // setting (the prompt's state block repeats it), then the avoid list — and hard-cut
+        // only as a last resort, never leaving an unclosed "(".
+        String text = assemble(primarySentence, supportPicked, setting, avoidClause);
+        while (text.length() > MAX_SEED_CHARS && !supportPicked.isEmpty()) {
+            supportPicked.remove(supportPicked.size() - 1);
+            text = assemble(primarySentence, supportPicked, setting, avoidClause);
+        }
+        if (text.length() > MAX_SEED_CHARS && setting != null) {
+            setting = null;
+            text = assemble(primarySentence, supportPicked, setting, avoidClause);
+        }
+        if (text.length() > MAX_SEED_CHARS && avoidClause != null) {
+            avoidClause = null;
+            text = assemble(primarySentence, supportPicked, setting, avoidClause);
+        }
+        if (text.length() > MAX_SEED_CHARS) {
+            text = text.substring(0, MAX_SEED_CHARS);
+            int open = text.lastIndexOf('(');
+            if (open > 0 && text.indexOf(')', open) < 0) {
+                text = text.substring(0, open).strip();
+            }
+        }
+        List<String> supportTopics = new ArrayList<>(supportPicked.size());
+        for (Anchor anchor : supportPicked) {
+            supportTopics.add(anchor.topic());
+        }
+        return new Seed(text, primary == null ? "" : primary.topic(), act, supportTopics);
+    }
+
+    /**
+     * "Stay on one subject: X. (background only, mention at most once: A; B) (setting: …)
+     * (do not bring up … again)" — any part may be absent.
+     */
+    private static String assemble(String primarySentence, List<Anchor> supports, String setting,
+                                   String avoidClause) {
+        List<String> clauses = new ArrayList<>();
+        if (!supports.isEmpty()) {
+            List<String> phrases = new ArrayList<>(supports.size());
+            for (Anchor anchor : supports) {
+                phrases.add(anchor.phrase());
+            }
+            clauses.add(BACKGROUND_PREFIX + String.join("; ", phrases) + ")");
+        }
+        if (setting != null) {
+            clauses.add(setting);
+        }
+        if (avoidClause != null) {
+            clauses.add(avoidClause);
+        }
+        String tail = String.join(" ", clauses);
+        if (primarySentence == null) {
+            return tail;
+        }
+        return tail.isEmpty() ? primarySentence : primarySentence + ". " + tail;
+    }
+
+    /** A topic key the model can read as words (not a {@code memory:} / {@code relation:} key). */
+    static boolean isReadableTopic(String topic) {
+        return topic != null && !topic.isBlank() && topic.indexOf(':') < 0 && topic.indexOf('|') < 0;
+    }
+
+    /**
+     * Appends {@code topics} to a bounded recent-topic ring, oldest evicted first. A topic
+     * already present moves to the newest end instead of appearing twice, so the ring always
+     * holds up to {@code cap} DISTINCT recent keys. Pure; the caller owns synchronisation.
+     */
+    static void rememberRecent(java.util.Deque<String> ring, java.util.Collection<String> topics, int cap) {
+        if (ring == null || topics == null) {
+            return;
+        }
+        for (String topic : topics) {
+            if (topic == null || topic.isEmpty()) {
+                continue;
+            }
+            ring.remove(topic);
+            ring.addLast(topic);
+        }
+        while (ring.size() > Math.max(0, cap)) {
+            ring.removeFirst();
+        }
     }
 
     /** A weighted pick among anchors whose topic passes {@code test} (fresh pool first), else {@code fallback}. */

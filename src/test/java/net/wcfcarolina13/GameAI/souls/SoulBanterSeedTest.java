@@ -195,7 +195,7 @@ class SoulBanterSeedTest {
             SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(naps),
                     "Bradley", "", new Random(i), recent);
             assertFalse(recent.contains(seed.topic()), "picked a recent topic: " + seed.topic());
-            assertTrue(seed.text().startsWith("talk about "), seed.text());
+            assertTrue(seed.text().startsWith(SoulBanterSeed.PRIMARY_PREFIX + "talk about "), seed.text());
             assertTrue(seed.text().contains("do not bring up"), seed.text());
         }
     }
@@ -230,7 +230,8 @@ class SoulBanterSeedTest {
             SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
                     "Bradley", "", new Random(i), Set.of(), changes, List.of(SoulSpeechAct.OBSERVE));
             assertTrue(seed.act() != null && seed.act() != SoulSpeechAct.OBSERVE, "act rotates: " + seed.act());
-            assertTrue(seed.text().startsWith(seed.act().directive(true, "Bradley") + " "), seed.text());
+            assertTrue(seed.text().startsWith(SoulBanterSeed.PRIMARY_PREFIX
+                    + seed.act().directive(true, "Bradley") + " "), seed.text());
             if (seed.topic().equals("the weather")) {
                 changeLed++;
             }
@@ -332,5 +333,136 @@ class SoulBanterSeedTest {
         SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(grounding()), List.of(List.of()), "Roti", "",
                 new Random(3), Set.of(), List.of(), List.of());
         assertFalse(seed.text().contains("never got an answer"), seed.text());
+    }
+
+    // === 1.1.223 conversation smoothing: one subject, framed background, rotating support ===
+
+    @Test
+    void theSeedNamesOneSubjectAndFramesEverythingElseAsBackground() {
+        List<SoulBanterSeed.Anchor> changes = List.of(
+                new SoulBanterSeed.Anchor("the weather", "the rain just stopped", 10_000));
+        Set<String> recent = new java.util.LinkedHashSet<>(List.of("food", "animals"));
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                "Bradley", "", new Random(1), recent, changes, null);
+        String text = seed.text();
+        assertEquals("the weather", seed.topic());
+        assertTrue(text.startsWith("Stay on one subject: talk about the rain just stopped. "), text);
+        assertEquals(2, seed.supportTopics().size(), text);
+        assertTrue(text.contains(SoulBanterSeed.BACKGROUND_PREFIX), text);
+        assertTrue(text.contains("(setting: it is morning, clear, in taiga)"), text);
+        assertTrue(text.contains("(do not bring up food or animals again)"), text);
+        // Clause order: subject, background, setting, avoid — and no trailing period (the
+        // assembler appends ". A few short lines…").
+        assertTrue(text.indexOf(SoulBanterSeed.BACKGROUND_PREFIX) < text.indexOf("(setting: "), text);
+        assertTrue(text.indexOf("(setting: ") < text.indexOf("(do not bring up"), text);
+        assertTrue(text.endsWith(")"), text);
+        assertFalse(text.contains("; it is"), "the old flat list is gone: " + text);
+    }
+
+    @Test
+    void aSeedWithOnlyASubjectHasNoTrailingPeriod() {
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(), List.of(List.of()),
+                "Bradley", "", new Random(1), Set.of(),
+                List.of(new SoulBanterSeed.Anchor("the weather", "the rain just stopped", 9)), null);
+        assertEquals("Stay on one subject: talk about the rain just stopped", seed.text());
+        assertTrue(seed.supportTopics().isEmpty());
+    }
+
+    @Test
+    void supportTopicsRotateOutOfTheNextSeed() {
+        // 2026-09-25 field: "the last hobby (woodcut)" rode every seed because only the PRIMARY
+        // was remembered. The director feeds each seed's support topics back as recentSupport.
+        java.util.ArrayDeque<String> supportRing = new java.util.ArrayDeque<>();
+        List<SoulBanterSeed.Anchor> changes = List.of(
+                new SoulBanterSeed.Anchor("the weather", "the rain just stopped", 10_000));
+        SoulBanterSeed.Seed first = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                "Bradley", "", new Random(2), Set.of(), changes, null, List.of(), Set.copyOf(supportRing));
+        assertEquals(2, first.supportTopics().size(), first.text());
+        SoulBanterSeed.rememberRecent(supportRing, first.supportTopics(), SoulBanterSeed.RECENT_SUPPORT_MEMORY);
+
+        SoulBanterSeed.Seed second = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                "Bradley", "", new Random(2), Set.of(), changes, null, List.of(), Set.copyOf(supportRing));
+        assertFalse(second.supportTopics().isEmpty(), "other background exists: " + second.text());
+        for (String topic : first.supportTopics()) {
+            assertFalse(second.supportTopics().contains(topic),
+                    "support topic " + topic + " repeated in consecutive seeds: " + second.text());
+        }
+    }
+
+    @Test
+    void highSalienceSupportIsNeverRotatedOut() {
+        List<SoulTypes.SoulEvent> events = List.of(
+                event(SoulTypes.EventType.DEATH, SoulTypes.Salience.HIGH, 100, Map.of()));
+        List<SoulBanterSeed.Anchor> changes = List.of(
+                new SoulBanterSeed.Anchor("the weather", "the rain just stopped", 10_000));
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(events),
+                "Bradley", "", new Random(2), Set.of(), changes, null, List.of(), Set.of("dying"));
+        assertTrue(seed.supportTopics().contains("dying"), seed.text());
+    }
+
+    @Test
+    void recentSupportNeverChangesThePrimaryPickOrTheAvoidList() {
+        for (int i = 0; i < 50; i++) {
+            SoulBanterSeed.Seed plain = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                    "Bradley", "", new Random(i), Set.of("food"), List.of(), List.of(), List.of(), Set.of());
+            SoulBanterSeed.Seed rotated = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                    "Bradley", "", new Random(i), Set.of("food"), List.of(), List.of(), List.of(),
+                    Set.of("hobbies", "loot", "gear", "animals"));
+            assertEquals(plain.topic(), rotated.topic());
+            assertEquals(plain.act(), rotated.act());
+        }
+    }
+
+    @Test
+    void machineTopicKeysNeverReachTheAvoidList() {
+        Set<String> recent = new java.util.LinkedHashSet<>(
+                List.of("memory:fighting", "relation:LIKES|Bob|Jake", "food"));
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                "Bradley", "", new Random(5), recent);
+        assertFalse(seed.text().contains("memory:"), seed.text());
+        assertFalse(seed.text().contains("relation:"), seed.text());
+        if (!seed.topic().equals("food")) {
+            assertTrue(seed.text().contains("(do not bring up food again)"), seed.text());
+        }
+        assertTrue(SoulBanterSeed.isReadableTopic("unanswered question"));
+        assertFalse(SoulBanterSeed.isReadableTopic("memory:said:wall"));
+    }
+
+    @Test
+    void anOverBudgetSeedDropsWholeClausesAndNeverEndsInsideOne() {
+        String longPhrase = "x".repeat(SoulBanterSeed.MAX_PHRASE_CHARS);
+        List<SoulBanterSeed.Anchor> anchors = List.of(
+                new SoulBanterSeed.Anchor("a", longPhrase, 10_000),
+                new SoulBanterSeed.Anchor("b", "b" + longPhrase, 50),
+                new SoulBanterSeed.Anchor("c", "c" + longPhrase, 50));
+        Set<String> recent = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < 20; i++) {
+            recent.add("recent topic number " + i);
+        }
+        SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(richGrounding()), List.of(List.of()),
+                "Bradley", "", new Random(1), recent, anchors, null);
+        String text = seed.text();
+        assertTrue(text.length() <= SoulBanterSeed.MAX_SEED_CHARS, "len=" + text.length());
+        assertTrue(text.startsWith(SoulBanterSeed.PRIMARY_PREFIX), text);
+        int opens = text.length() - text.replace("(", "").length();
+        int closes = text.length() - text.replace(")", "").length();
+        assertEquals(opens, closes, "unbalanced clause: " + text);
+        // Support clauses go first; a support cut for budget is not reported as used, so it is
+        // not rotated out of the next seed for nothing.
+        assertEquals("a", seed.topic());
+        assertTrue(seed.supportTopics().isEmpty(), seed.supportTopics().toString());
+        assertFalse(text.contains(SoulBanterSeed.BACKGROUND_PREFIX), text);
+    }
+
+    @Test
+    void rememberRecentKeepsDistinctNewestTopicsWithinTheCap() {
+        java.util.ArrayDeque<String> ring = new java.util.ArrayDeque<>();
+        SoulBanterSeed.rememberRecent(ring, List.of("hobbies", "loot"), 4);
+        SoulBanterSeed.rememberRecent(ring, List.of("gear", "hobbies"), 4);
+        assertEquals(List.of("loot", "gear", "hobbies"), List.copyOf(ring));
+        SoulBanterSeed.rememberRecent(ring, List.of("animals", "mood", ""), 4);
+        assertEquals(List.of("gear", "hobbies", "animals", "mood"), List.copyOf(ring));
+        SoulBanterSeed.rememberRecent(ring, null, 4);
+        assertEquals(4, ring.size());
     }
 }

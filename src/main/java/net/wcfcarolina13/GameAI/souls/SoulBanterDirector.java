@@ -91,6 +91,8 @@ public final class SoulBanterDirector {
     static final class AudienceMemory {
         SoulTypes.GroundingSnapshot lastGrounding;
         final java.util.ArrayDeque<String> topics = new java.util.ArrayDeque<>();
+        /** Support-topic keys of recent seeds (1.1.223): a background fact rotates like a subject. */
+        final java.util.ArrayDeque<String> supportTopics = new java.util.ArrayDeque<>();
         final java.util.ArrayDeque<SoulSpeechAct> acts = new java.util.ArrayDeque<>();
         long lastFiredMs;
     }
@@ -353,7 +355,9 @@ public final class SoulBanterDirector {
             seeded = SoulBanterSeed.buildSeed(groundings, eventsPerBot,
                     player.getName().getString(), playerActivity, random,
                     new java.util.HashSet<>(memory.topics), changes, new ArrayList<>(memory.acts),
-                    mindAnchors);
+                    mindAnchors, new java.util.HashSet<>(memory.supportTopics));
+            SoulBanterSeed.rememberRecent(memory.supportTopics, seeded.supportTopics(),
+                    SoulBanterSeed.RECENT_SUPPORT_MEMORY);
             if (!seeded.topic().isEmpty()) {
                 memory.topics.addLast(seeded.topic());
                 while (memory.topics.size() > RECENT_TOPIC_MEMORY) {
@@ -392,6 +396,10 @@ public final class SoulBanterDirector {
         recordVerdict(playerId, lane, "fired");
         LOGGER.info("[souls] banter lane={} player={} outcome=fired routingId={} roster={} seedChars={} act={} topic=\"{}\" addressPlayer={}",
                 lane, playerId, routingId, roster.size(), seed.length(), seeded.act(), seeded.topic(), addressPlayer);
+        // 1.1.223: the seed is the scene's whole steering input, so it is logged in full (INFO,
+        // like the fire line above — one line per scene, and DEBUG never reaches latest.log).
+        LOGGER.info("[souls] banter routingId={} support={} seed=\"{}\"",
+                routingId, seeded.supportTopics(), seed);
         // 1.1.217 gap C1: hold the scripted lanes off for the 5–16 s of generation between this
         // fire and the scene's first line, so a scripted line cannot land and then collide with
         // line 1. Scenes speak through the reservation (it never vetoes this scene's own
