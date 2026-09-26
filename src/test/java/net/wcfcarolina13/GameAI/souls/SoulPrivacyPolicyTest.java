@@ -92,4 +92,25 @@ class SoulPrivacyPolicyTest {
         assertEquals(List.of(other, PUBLIC), filtered.admitted());
         assertEquals(1, filtered.withheld());
     }
+
+    // ── mayDeliverPrivatelySeededLine (per-line playback gate) ─────────────
+
+    @Test void privatelySeededLineDeliversToOwnerAlone() {
+        assertTrue(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, Set.of(OWNER)));
+    }
+
+    @Test void privatelySeededLineStopsWhenAnotherHumanWouldReceiveIt() {
+        assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, Set.of(OWNER, OTHER)));
+        // The owner out of earshot does not make someone else a safe audience.
+        assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, Set.of(OTHER)));
+    }
+
+    @Test void privatelySeededLineWithNoRecipientsDeliversNothingHarmful() {
+        assertTrue(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, Set.of()));
+    }
+
+    @Test void privatelySeededLineFailsClosedOnMissingInputs() {
+        assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(null, Set.of()));
+        assertFalse(SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(OWNER, null));
+    }
 }

@@ -94,6 +94,26 @@ public final class SoulPrivacyPolicy {
         return online.size() == 1 && online.contains(owner);
     }
 
+    /**
+     * Per-line delivery gate for a privately seeded scene (a shared scene whose prompt admitted at
+     * least one of {@code owner}'s PRIVATE memories under the alone-on-server exception). The
+     * online set that admitted it was captured at turn creation, so playback re-checks every line
+     * against its actual human recipients: the line may go out only when nobody but the owner
+     * would receive it. No recipients delivers nothing, so it is harmless and allowed. A null
+     * owner or recipient set fails closed.
+     */
+    public static boolean mayDeliverPrivatelySeededLine(UUID owner, Set<UUID> recipientHumans) {
+        if (owner == null || recipientHumans == null) {
+            return false;
+        }
+        for (UUID recipient : recipientHumans) {
+            if (!owner.equals(recipient)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** {@link #admits} as a predicate, for the memory readers in {@link SoulMemoryDigestOps}. */
     public static Predicate<SoulTypes.PlayerMemory> admitting(Audience audience) {
         return memory -> admits(memory, audience);

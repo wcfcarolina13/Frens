@@ -107,4 +107,27 @@ class BotAccessPolicyTest {
     void denyLogFiresWhenClockGoesBackwards() {
         assertTrue(BotAccessPolicy.shouldLogDeny(10_000L, 9_000L));
     }
+
+    // ── canKeepInventoryOpen (screen handler canUse) ───────────────────────
+
+    @Test
+    void operatorAndHostKeepInventoryOpenAnywhere() {
+        assertTrue(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OP, false, false));
+        assertTrue(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_HOST, false, false));
+    }
+
+    @Test
+    void ownerNeedsReachUnlessOpenedRemotely() {
+        assertTrue(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OWNER, false, true));
+        assertFalse(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OWNER, false, false));
+        assertTrue(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OWNER, true, false));
+    }
+
+    @Test
+    void remoteFlagNeverOverridesADeny() {
+        for (Decision deny : new Decision[] {Decision.DENY_NOT_BOT, Decision.DENY_NOT_OWNER, Decision.DENY_UNOWNED}) {
+            assertFalse(BotAccessPolicy.canKeepInventoryOpen(deny, true, true));
+        }
+        assertFalse(BotAccessPolicy.canKeepInventoryOpen(null, true, true));
+    }
 }

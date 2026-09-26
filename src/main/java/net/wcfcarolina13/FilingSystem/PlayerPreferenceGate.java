@@ -29,6 +29,7 @@ public final class PlayerPreferenceGate {
     private final long minChangeIntervalMs;
     private final long saveCoalesceMs;
     private final Map<String, Long> lastAcceptedMs = new HashMap<>();
+    private final Map<String, Long> lastResyncMs = new HashMap<>();
     private boolean dirty;
     private boolean flushedBefore;
     private long lastFlushMs;
@@ -60,6 +61,22 @@ public final class PlayerPreferenceGate {
         return new Admission(Decision.ACCEPTED, !current && requested);
     }
 
+    /**
+     * Whether a RATE_LIMITED request for {@code preference} may send its state resync now: at most
+     * one per (player, preference) per {@code minChangeIntervalMs}, so a burst of forged toggles
+     * cannot turn into one S2C packet each. Entries older than the interval are pruned on insert.
+     */
+    public synchronized boolean resyncDue(UUID player, String preference, long nowMs) {
+        String key = player + "|" + preference;
+        Long last = lastResyncMs.get(key);
+        if (last != null && nowMs - last < minChangeIntervalMs) {
+            return false;
+        }
+        lastResyncMs.values().removeIf(at -> nowMs - at >= minChangeIntervalMs);
+        lastResyncMs.put(key, nowMs);
+        return true;
+    }
+
     /** Server tick: true when a save should run now (clears the dirty mark). */
     public synchronized boolean flushDue(long nowMs) {
         if (!dirty) {
@@ -83,6 +100,7 @@ public final class PlayerPreferenceGate {
         dirty = false;
         flushedBefore = false;
         lastAcceptedMs.clear();
+        lastResyncMs.clear();
         return pending;
     }
 }

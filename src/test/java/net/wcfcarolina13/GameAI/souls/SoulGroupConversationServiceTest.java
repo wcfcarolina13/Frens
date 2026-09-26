@@ -94,6 +94,7 @@ class SoulGroupConversationServiceTest {
         assertEquals(1, player.enqueued.size());
         assertEquals(2, player.enqueued.get(0).lines().size());
         assertEquals(0, player.enqueued.get(0).lines().get(0).participantIndex());
+        assertEquals(null, player.enqueued.get(0).privateSeedOwner(), "no private memory, no playback gate");
 
         List<SoulTypes.ConversationRecord> records = partyRecords();
         assertEquals(1, records.size());
@@ -245,6 +246,26 @@ class SoulGroupConversationServiceTest {
     }
 
     // === Fakes ===
+
+    @Test
+    void sceneWhosePromptAdmittedAPrivateMemoryIsFlaggedForTheOwner() throws Exception {
+        SoulTypes.SoulMind mind = SoulMindOps.withPlayerMemories(SoulTypes.SoulMind.empty(), List.of(
+                new SoulTypes.PlayerMemory(OWNER_ID, 3, "Bradley is scared of the dark", 9, -1, List.of(),
+                        SoulTypes.MemoryVisibility.PRIVATE)));
+        SoulSettings settings = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        SoulGroupConversationService withMind = new SoulGroupConversationService(partyStore,
+                new SoulGroupPromptAssembler(id -> Optional.of(mind)),
+                scheduler, provider, new SoulGroupResponseValidator(), settings, player, status);
+        SoulGroupTypes.GroupSceneTurn alone = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.PLAYER,
+                OWNER_ID, "Bradley", turn.roster(), "what should we do tonight", Instant.EPOCH,
+                UUID.randomUUID(), false, java.util.Set.of(OWNER_ID));
+
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, withMind.submit(alone).get(2, SECONDS));
+        assertEquals(1, player.enqueued.size());
+        assertEquals(OWNER_ID, player.enqueued.get(0).privateSeedOwner());
+        assertTrue(player.enqueued.get(0).privatelySeeded());
+    }
 
     private static final class FakeScenePlayer implements SoulGroupConversationService.ScenePlayer {
         final List<GroupScenePlayback.PlayableScene> enqueued = new CopyOnWriteArrayList<>();

@@ -126,13 +126,18 @@ public final class SoulSnapshotBuilder {
         }
         java.util.Set<java.util.UUID> humans = new java.util.LinkedHashSet<>();
         for (ServerPlayerEntity online : server.getPlayerManager().getPlayerList()) {
-            if (online instanceof net.wcfcarolina13.Entity.createFakePlayer
-                    || net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(online.getUuid())) {
-                continue;
+            if (isHuman(online)) {
+                humans.add(online.getUuid());
             }
-            humans.add(online.getUuid());
         }
         return java.util.Set.copyOf(humans);
+    }
+
+    /** A connected player that is neither a Frens fake bot nor a registered bot id. */
+    public static boolean isHuman(ServerPlayerEntity player) {
+        return player != null
+                && !(player instanceof net.wcfcarolina13.Entity.createFakePlayer)
+                && !net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(player.getUuid());
     }
 
     private static SoulTypes.BotSnapshot captureBot(MinecraftServer server, ServerPlayerEntity bot) {

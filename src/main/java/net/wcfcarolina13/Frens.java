@@ -719,8 +719,11 @@ public class Frens implements ModInitializer {
                 PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
                         senderUuid, "preserveExpensiveGear", current, payload.enabled(), System.currentTimeMillis());
                 if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
-                    // Too soon after the last accepted change: resync the client's optimistic toggle.
-                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
+                    // Too soon after the last accepted change: resync the client's optimistic
+                    // toggle — at most once per player+preference per 500 ms.
+                    if (PREFERENCE_GATE.resyncDue(senderUuid, "preserveExpensiveGear", System.currentTimeMillis())) {
+                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
+                    }
                     return;
                 }
                 if (!admission.accepted()) {
@@ -766,7 +769,9 @@ public class Frens implements ModInitializer {
                 PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
                         senderUuid, "autoAcceptPreciousFoods", current, payload.enabled(), System.currentTimeMillis());
                 if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
-                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
+                    if (PREFERENCE_GATE.resyncDue(senderUuid, "autoAcceptPreciousFoods", System.currentTimeMillis())) {
+                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
+                    }
                     return;
                 }
                 if (admission.accepted()) {

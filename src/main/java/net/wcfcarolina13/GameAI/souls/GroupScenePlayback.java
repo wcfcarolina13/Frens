@@ -73,13 +73,28 @@ public final class GroupScenePlayback {
         }
     }
 
-    /** A validated scene ready to play. */
+    /**
+     * A validated scene ready to play. {@code privateSeedOwner} is non-null when the prompt
+     * admitted at least one of that player's PRIVATE memories (alone-on-server exception): every
+     * line is then delivered only while no other human would receive it
+     * ({@link SoulPrivacyPolicy#mayDeliverPrivatelySeededLine}).
+     */
     public record PlayableScene(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
-                                 List<SoulGroupTypes.SceneLine> lines) {
+                                 List<SoulGroupTypes.SceneLine> lines, UUID privateSeedOwner) {
         public PlayableScene {
             Objects.requireNonNull(turn, "turn");
             Objects.requireNonNull(token, "token");
             lines = lines == null ? List.of() : List.copyOf(lines);
+        }
+
+        /** A scene whose prompt carried no private memory. */
+        public PlayableScene(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
+                              List<SoulGroupTypes.SceneLine> lines) {
+            this(turn, token, lines, null);
+        }
+
+        public boolean privatelySeeded() {
+            return privateSeedOwner != null;
         }
     }
 
@@ -257,6 +272,16 @@ public final class GroupScenePlayback {
         }
 
         List<ServerPlayerEntity> listeners = playersInEarshot(speakerBot);
+        if (scene.privatelySeeded() && !SoulPrivacyPolicy.mayDeliverPrivatelySeededLine(
+                scene.privateSeedOwner(), humanIds(listeners))) {
+            // The prompt admitted the owner's DM-private memory because they were alone when the
+            // turn was created; another human is now in earshot. Drop this and every remaining
+            // line — nothing is sent or committed. Never log the content.
+            LOGGER.info("[souls] scene privacy stop correlationId={} line={}/{}",
+                    scene.turn().routingId(), state.lineIndex + 1, scene.lines().size());
+            finish(state, "privacy-stop");
+            return;
+        }
         if (surfaces.text()) {
             Text chatLine = Text.literal(speaker.displayName() + ": " + line.text());
             for (ServerPlayerEntity listener : listeners) {
@@ -334,6 +359,17 @@ public final class GroupScenePlayback {
             }
         }
         return out;
+    }
+
+    /** The human players among {@code listeners} (fake bots and registered bot ids excluded). */
+    private static java.util.Set<UUID> humanIds(List<ServerPlayerEntity> listeners) {
+        java.util.Set<UUID> humans = new java.util.HashSet<>();
+        for (ServerPlayerEntity listener : listeners) {
+            if (SoulSnapshotBuilder.isHuman(listener)) {
+                humans.add(listener.getUuid());
+            }
+        }
+        return humans;
     }
 
     // === Pure helpers (unit-tested) ===

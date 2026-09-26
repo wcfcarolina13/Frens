@@ -104,4 +104,41 @@ class PlayerPreferenceGateTest {
         // A reloaded world (clock may be anywhere) starts clean.
         assertTrue(gate.admit(ALICE, GEAR, true, false, 10L).accepted());
     }
+
+    @Test
+    void rateLimitedResyncsCoalescePerPlayerAndPreference() {
+        PlayerPreferenceGate gate = new PlayerPreferenceGate();
+        assertTrue(gate.resyncDue(ALICE, GEAR, 1_000L));
+        assertFalse(gate.resyncDue(ALICE, GEAR, 1_001L));
+        assertFalse(gate.resyncDue(ALICE, GEAR, 1_499L));
+        // Independent keys.
+        assertTrue(gate.resyncDue(ALICE, FOOD, 1_001L));
+        assertTrue(gate.resyncDue(BOB, GEAR, 1_001L));
+        // Window elapsed.
+        assertTrue(gate.resyncDue(ALICE, GEAR, 1_500L));
+    }
+
+    @Test
+    void forgedToggleBurstYieldsOneResyncPerWindow() {
+        PlayerPreferenceGate gate = new PlayerPreferenceGate();
+        assertTrue(gate.admit(ALICE, GEAR, false, true, 0L).accepted());
+        int resyncs = 0;
+        boolean value = true;
+        for (long t = 1; t < 500L; t++) {
+            PlayerPreferenceGate.Admission a = gate.admit(ALICE, GEAR, value, !value, t);
+            assertEquals(PlayerPreferenceGate.Decision.RATE_LIMITED, a.decision());
+            if (gate.resyncDue(ALICE, GEAR, t)) {
+                resyncs++;
+            }
+        }
+        assertEquals(1, resyncs);
+    }
+
+    @Test
+    void shutdownDrainResetsResyncHistory() {
+        PlayerPreferenceGate gate = new PlayerPreferenceGate();
+        assertTrue(gate.resyncDue(ALICE, GEAR, 0L));
+        gate.drainForShutdown();
+        assertTrue(gate.resyncDue(ALICE, GEAR, 10L));
+    }
 }

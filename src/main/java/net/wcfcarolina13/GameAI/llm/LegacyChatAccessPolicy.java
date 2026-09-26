@@ -22,4 +22,15 @@ public final class LegacyChatAccessPolicy {
         }
         return host || CompanionCommunicationPolicy.isPrivateSoulAuthorized(operator, actorId, ownerId);
     }
+
+    /**
+     * Whether a pending chat confirmation may be consumed (and its action run with the bot's
+     * elevated source): re-checked when the "yes" arrives, not only when the prompt was raised.
+     * The sender must still be online and still {@link #isAuthorized} for the bot, and the bot
+     * must still be a registered Frens fake player. Anything else drops the pending action.
+     */
+    public static boolean mayConsumeConfirmation(boolean senderOnline, boolean botRegistered,
+                                                 boolean senderAuthorized) {
+        return senderOnline && botRegistered && senderAuthorized;
+    }
 }

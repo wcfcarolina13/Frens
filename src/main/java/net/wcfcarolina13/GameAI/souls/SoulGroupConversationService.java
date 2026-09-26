@@ -198,14 +198,18 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), turn,
                 profiles, history, settings.timeout());
+        // 1.1.224 privacy: a prompt that admitted the owner's DM-private memory (alone-on-server)
+        // plays back only while nobody else would hear it — GroupScenePlayback re-checks per line.
+        UUID privateSeedOwner = prompts.admitsPrivateMemory(turn) ? turn.ownerId() : null;
         int queueDepthAtSubmit = scheduler.queueDepth();
         scheduler.submit(turn.key(), token.epoch(), () -> provider.generate(request))
                 .whenComplete((result, providerError) -> handleProviderResult(turn, token, correlationId,
-                        result, providerError, queueDepthAtSubmit, submitStartNanos, outcome));
+                        privateSeedOwner, result, providerError, queueDepthAtSubmit, submitStartNanos, outcome));
     }
 
     private void handleProviderResult(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
-                                       UUID correlationId, SoulTypes.ProviderResult result,
+                                       UUID correlationId, UUID privateSeedOwner,
+                                       SoulTypes.ProviderResult result,
                                        Throwable providerError, int queueDepthAtSubmit,
                                        long submitStartNanos, CompletableFuture<Submission> outcome) {
         if (providerError != null) {
@@ -254,12 +258,12 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         applySideChannel(turn, correlationId, rosterNames, parse.sideChannelRaw());
 
         sceneResults.put(correlationId, result);
-        player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines));
+        player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner));
         LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
-                        + "provider={} model={} providerMs={} totalMs={} outcome=scene-started",
+                        + "provider={} model={} providerMs={} totalMs={} privateSeed={} outcome=scene-started",
                 correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), lines.size(),
                 queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
-                elapsedMs(submitStartNanos));
+                elapsedMs(submitStartNanos), privateSeedOwner != null);
         outcome.complete(Submission.SCENE_STARTED);
     }
 

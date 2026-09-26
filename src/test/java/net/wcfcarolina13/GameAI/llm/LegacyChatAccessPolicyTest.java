@@ -43,4 +43,26 @@ class LegacyChatAccessPolicyTest {
     void missingActorDeniedEvenForHostOrOperator() {
         assertFalse(LegacyChatAccessPolicy.isAuthorized(true, true, null, OWNER));
     }
+
+    // ── mayConsumeConfirmation (re-check when the "yes" arrives) ───────────
+
+    @Test
+    void confirmationConsumedOnlyWhenStillAuthorizedForARegisteredBot() {
+        assertTrue(LegacyChatAccessPolicy.mayConsumeConfirmation(true, true, true));
+    }
+
+    @Test
+    void confirmationDroppedAfterLosingControlOfTheBot() {
+        assertFalse(LegacyChatAccessPolicy.mayConsumeConfirmation(true, true, false));
+    }
+
+    @Test
+    void confirmationDroppedWhenTheNameNoLongerResolvesToARegisteredBot() {
+        assertFalse(LegacyChatAccessPolicy.mayConsumeConfirmation(true, false, true));
+    }
+
+    @Test
+    void confirmationDroppedWhenTheSenderIsGone() {
+        assertFalse(LegacyChatAccessPolicy.mayConsumeConfirmation(false, true, true));
+    }
 }

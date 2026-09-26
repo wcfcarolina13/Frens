@@ -1826,6 +1826,23 @@ public class FunctionCallerV2 {
             ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
             return true;
         }
+        // Re-authorise at consume time (1.1.224): the prompt may predate a change of owner, a
+        // de-op, or the name now resolving to someone who is not a registered bot. Checked before
+        // the elevated bot source exists; a stale action is dropped and the sender told directly.
+        MinecraftServer server = Frens.serverInstance;
+        ServerPlayerEntity sender = server == null ? null : server.getPlayerManager().getPlayer(commanderId);
+        boolean botRegistered = bot instanceof net.wcfcarolina13.Entity.createFakePlayer
+                && net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(bot.getUuid());
+        boolean senderAuthorized = sender != null && Frens.isLegacyChatAuthorized(sender, bot);
+        if (!net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy.mayConsumeConfirmation(
+                sender != null, botRegistered, senderAuthorized)) {
+            ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
+            if (sender != null) {
+                sender.sendMessage(net.minecraft.text.Text.literal(
+                        "That request to " + state.botName + " has expired."), false);
+            }
+            return true;
+        }
         ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
         Boolean decision = parseDecision(responsePortion);
         if (decision == null) {

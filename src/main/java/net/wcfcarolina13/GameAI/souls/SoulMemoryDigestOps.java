@@ -497,6 +497,23 @@ final class SoulMemoryDigestOps {
         return withheld;
     }
 
+    /**
+     * How many of {@code playerId}'s PRIVATE memories {@code audience} admits — nonzero only
+     * under the alone-on-server exception. Counts policy-admitted memories, not the ones that
+     * survive the ABOUT/anchor budgets, so it errs toward marking a scene privately seeded.
+     */
+    static int admittedPrivateFor(SoulTypes.SoulMind mind, UUID playerId, SoulPrivacyPolicy.Audience audience) {
+        int admitted = 0;
+        for (SoulTypes.PlayerMemory memory : mind.playerMemories()) {
+            if (memory.playerId().equals(playerId)
+                    && memory.visibility() == SoulTypes.MemoryVisibility.PRIVATE
+                    && SoulPrivacyPolicy.admits(memory, audience)) {
+                admitted++;
+            }
+        }
+        return admitted;
+    }
+
     // === reset ===
 
     /**

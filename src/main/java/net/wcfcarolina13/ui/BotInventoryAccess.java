@@ -39,7 +39,9 @@ public final class BotInventoryAccess {
         if (!BotAccessGate.permits(viewer, bot, "inventory-remote")) return false;
         viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
                 (syncId, playerInv, player) ->
-                        new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot),
+                        // remoteAuthorized: canUse keeps re-checking registration + ownership,
+                        // but not the owner's 8-block proximity rule.
+                        new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot, true),
                 net.minecraft.text.Text.literal(EntityUtil.safeDisplayName(bot.getName().getString()) + "'s Inventory")
         ));
         return true;

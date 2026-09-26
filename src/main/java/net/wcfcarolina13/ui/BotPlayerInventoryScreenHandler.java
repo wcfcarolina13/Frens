@@ -63,6 +63,12 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     private final PlayerInventory playerInventory;
     private final ServerPlayerEntity botRef;
     private final PropertyDelegate botStats;
+    /**
+     * Opened through an authorised remote path (the full-access inventory spell): {@link #canUse}
+     * skips the owner's 8-block proximity rule for this handler's viewer, while still re-checking
+     * registration and ownership every tick.
+     */
+    private final boolean remoteAuthorized;
 
     public static BotPlayerInventoryScreenHandler clientFactory(int syncId, PlayerInventory playerInventory) {
         return new BotPlayerInventoryScreenHandler(syncId, playerInventory, new SimpleInventory(BOT_SLOT_COUNT), null);
@@ -72,10 +78,19 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
                                            PlayerInventory playerInventory,
                                            Inventory botInventory,
                                            ServerPlayerEntity botRef) {
+        this(syncId, playerInventory, botInventory, botRef, false);
+    }
+
+    public BotPlayerInventoryScreenHandler(int syncId,
+                                           PlayerInventory playerInventory,
+                                           Inventory botInventory,
+                                           ServerPlayerEntity botRef,
+                                           boolean remoteAuthorized) {
         super(Frens.BOT_PLAYER_INV_HANDLER, syncId);
         this.playerInventory = playerInventory;
         this.botInventory = botInventory;
         this.botRef = botRef;
+        this.remoteAuthorized = remoteAuthorized;
         // Keep this in sync with refreshStats() + getters below.
         this.botStats = new ArrayPropertyDelegate(26);
         this.addProperties(this.botStats);
@@ -131,7 +146,9 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     /**
      * Re-checked every tick while the screen is open, so a bot that leaves the registry, changes
      * owner, or is removed closes the screen. Owners also need the bot within 8 blocks in the same
-     * world; operators and the integrated host do not. Quiet: no deny WARN from here.
+     * world unless the screen was opened through the authorised remote path (and only for the
+     * viewer it was opened for); operators and the integrated host do not. Quiet: no deny WARN
+     * from here.
      */
     @Override
     public boolean canUse(PlayerEntity player) {
@@ -140,13 +157,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         if (botRef.isRemoved()) return false;
         net.wcfcarolina13.GameAI.services.BotAccessPolicy.Decision decision =
                 net.wcfcarolina13.network.BotAccessGate.decide(serverPlayer, botRef);
-        switch (decision) {
-            case ALLOW_OP, ALLOW_HOST -> { return true; }
-            case ALLOW_OWNER -> {
-                return player.getEntityWorld() == botRef.getEntityWorld() && player.squaredDistanceTo(botRef) <= 64.0;
-            }
-            default -> { return false; }
-        }
+        boolean withinReach = player.getEntityWorld() == botRef.getEntityWorld()
+                && player.squaredDistanceTo(botRef) <= 64.0;
+        return net.wcfcarolina13.GameAI.services.BotAccessPolicy.canKeepInventoryOpen(
+                decision, remoteAuthorized && player == playerInventory.player, withinReach);
     }
 
     @Override

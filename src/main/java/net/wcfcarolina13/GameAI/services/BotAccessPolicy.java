@@ -53,6 +53,20 @@ public final class BotAccessPolicy {
         return d == Decision.ALLOW_OWNER || d == Decision.ALLOW_OP || d == Decision.ALLOW_HOST;
     }
 
+    /**
+     * The inventory screen's per-tick {@code canUse}: operators and the host keep it open
+     * anywhere; the owner needs the bot within reach (same world, 8 blocks) unless this screen
+     * was opened through the authorised remote path for that viewer; every deny closes it.
+     */
+    public static boolean canKeepInventoryOpen(Decision decision, boolean remoteAuthorized, boolean withinReach) {
+        if (decision == null) return false;
+        return switch (decision) {
+            case ALLOW_OP, ALLOW_HOST -> true;
+            case ALLOW_OWNER -> remoteAuthorized || withinReach;
+            default -> false;
+        };
+    }
+
     /** Longest client string {@link #logSafe} keeps before cutting. */
     public static final int LOG_SAFE_MAX_CHARS = 32;
 

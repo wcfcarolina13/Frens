@@ -512,6 +512,39 @@ class SoulGroupPromptAssemblerTest {
         assertFalse(req.messages().stream().anyMatch(m -> m.content().startsWith("ABOUT ")));
     }
 
+    // === 1.1.224 fix wave: privately seeded scenes are flagged for per-line playback gating ===
+
+    @Test
+    void sceneIsPrivatelySeededOnlyWhenAPrivateMemoryIsAdmitted() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind privateMind = mindRemembering(owner, SoulTypes.MemoryVisibility.PRIVATE,
+                "Bradley is scared of the dark");
+        SoulGroupPromptAssembler assembler = new SoulGroupPromptAssembler(id -> Optional.of(privateMind));
+        // Alone on the server: admitted, so the scene is privately seeded.
+        assertTrue(assembler.admitsPrivateMemory(
+                sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner))));
+        // Another human online: withheld, so nothing private to guard.
+        assertFalse(assembler.admitsPrivateMemory(
+                sceneWithOnline(SoulGroupTypes.SceneKind.BANTER, owner, jake, sara, Set.of(owner, UUID.randomUUID()))));
+        // Unknown online set: withheld.
+        assertFalse(assembler.admitsPrivateMemory(playerTurnWithOwner(owner, jake, sara)));
+    }
+
+    @Test
+    void publicMemoriesNeverMarkASceneAsPrivatelySeeded() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulTypes.SoulMind publicMind = mindRemembering(owner, "Bradley wants a farm");
+        SoulGroupPromptAssembler assembler = new SoulGroupPromptAssembler(id -> Optional.of(publicMind));
+        assertFalse(assembler.admitsPrivateMemory(
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner))));
+        assertFalse(new SoulGroupPromptAssembler().admitsPrivateMemory(
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner))));
+    }
+
     private static SoulTypes.SoulMind mindBelieving(SoulTypes.RelationFact... facts) {
         return SoulMindOps.withRelations(SoulTypes.SoulMind.empty(), List.of(facts));
     }

@@ -394,6 +394,24 @@ public final class SoulGroupPromptAssembler {
     }
 
     /**
+     * Whether this scene's shared prompt may carry at least one of the owner's PRIVATE memories —
+     * the ABOUT block, or the banter seed's "once said" anchor, both of which read the same roster
+     * minds through {@link SoulPrivacyPolicy#admits} with this turn's audience. True only under the
+     * alone-on-server exception; playback then gates every line on its current human recipients
+     * ({@link SoulPrivacyPolicy#mayDeliverPrivatelySeededLine}).
+     */
+    public boolean admitsPrivateMemory(SoulGroupTypes.GroupSceneTurn turn) {
+        for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+            Optional<SoulTypes.SoulMind> mind = mindLookup.apply(participant.botId());
+            if (mind.isPresent()
+                    && SoulMemoryDigestOps.admittedPrivateFor(mind.get(), turn.ownerId(), turn.audience()) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * One DEBUG line per scene: how many of the owner's DM-private memories the roster held but
      * this scene's audience may not hear. A count only — never the content.
      */
