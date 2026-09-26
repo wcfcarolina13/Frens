@@ -26,6 +26,7 @@ import net.wcfcarolina13.Commands.configCommand;
 import net.wcfcarolina13.Commands.modCommandRegistry;
 import net.wcfcarolina13.Database.SQLiteDB;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.FilingSystem.PlayerPreferenceGate;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.FunctionCaller.FunctionCallerV2;
@@ -342,6 +343,8 @@ public class Frens implements ModInitializer {
     });
     private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
     private static final AtomicBoolean LEGACY_NLP_ASSETS_REQUESTED = new AtomicBoolean(false);
+    /** Per-player preference packets: unchanged/flood admission + coalesced config saves. */
+    private static final PlayerPreferenceGate PREFERENCE_GATE = new PlayerPreferenceGate();
 
     // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
     private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
@@ -709,13 +712,25 @@ public class Frens implements ModInitializer {
                 return;
             }
             context.server().execute(() -> {
-                if (Frens.CONFIG != null) {
-                    Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
-                    Frens.CONFIG.save();
+                if (Frens.CONFIG == null) {
+                    return;
                 }
-                // If the player just flipped OFF → ON, clear any stale cooldowns for their bots
-                // so the next selection call gets a fresh fallback attempt.
-                if (payload.enabled()) {
+                boolean current = Frens.CONFIG.getPreserveExpensiveGear(senderUuid);
+                PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
+                        senderUuid, "preserveExpensiveGear", current, payload.enabled(), System.currentTimeMillis());
+                if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
+                    // Too soon after the last accepted change: resync the client's optimistic toggle.
+                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
+                    return;
+                }
+                if (!admission.accepted()) {
+                    return;
+                }
+                // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
+                Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
+                // Only a real OFF → ON flip clears stale cooldowns for the player's bots, so the
+                // next selection call gets a fresh fallback attempt.
+                if (admission.risingEdge()) {
                     net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldownsForOwner(senderUuid);
                 }
             });
@@ -744,9 +759,19 @@ public class Frens implements ModInitializer {
             java.util.UUID senderUuid = sender.getUuid();
             if (senderUuid == null) return;
             context.server().execute(() -> {
-                if (Frens.CONFIG != null) {
+                if (Frens.CONFIG == null) {
+                    return;
+                }
+                boolean current = Frens.CONFIG.getAutoAcceptPreciousFoods(senderUuid);
+                PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
+                        senderUuid, "autoAcceptPreciousFoods", current, payload.enabled(), System.currentTimeMillis());
+                if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
+                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
+                    return;
+                }
+                if (admission.accepted()) {
+                    // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
                     Frens.CONFIG.setAutoAcceptPreciousFoods(senderUuid, payload.enabled());
-                    Frens.CONFIG.save();
                 }
             });
         });
@@ -876,6 +901,10 @@ public class Frens implements ModInitializer {
             // teardown below -- never blocks the server thread (see SoulRuntime.stop() Javadoc).
             net.wcfcarolina13.GameAI.souls.SoulRuntime.stop();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
+            // Persist any player-preference change still waiting for the coalesced tick flush.
+            if (PREFERENCE_GATE.drainForShutdown() && CONFIG != null) {
+                CONFIG.save();
+            }
             // Shut down all mod executor services BEFORE saving — prevents worker threads
             // from submitting new server.execute() tasks that keep the shutdown loop alive.
             net.wcfcarolina13.PlayerUtils.MiningTool.shutdownExecutors();
@@ -1260,6 +1289,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDrowningRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDurabilityArmorAudit);
         ServerTickEvents.END_SERVER_TICK.register(Frens::processSpawnEscapeChecks);
+        ServerTickEvents.END_SERVER_TICK.register(server -> flushPreferenceSaves());
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAnimalDefenseService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotHazardService::onServerTick);
@@ -1894,6 +1924,13 @@ public class Frens implements ModInitializer {
             if (!net.wcfcarolina13.GameAI.services.EntityVisibilityUtil.canSee(bot, killer)) continue;
             net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
                     bot, net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.CLAP);
+        }
+    }
+
+    /** Server tick: saves the config at most once per coalescing window after accepted preference changes. */
+    private static void flushPreferenceSaves() {
+        if (CONFIG != null && PREFERENCE_GATE.flushDue(System.currentTimeMillis())) {
+            CONFIG.save();
         }
     }
 
