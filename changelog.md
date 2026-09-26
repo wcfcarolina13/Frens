@@ -2,7 +2,53 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## Crafting window: search and sort; unreleased (2026-09-25)
+## Crafting search, gate follow, redstone doors, craft names, scene smoothing; 1.1.223 (2026-09-25)
+
+The field session of 2026-09-25 (21:23–21:33) ran 1.1.221, because 1.1.222 was never deployed; this build ships both. The build came out of four read-only investigations (a Codex/Astra log review, conversation coherence, request→action, and Jake at the gate) plus a redstone-door scope. Codex (Astra/Sol) did the log review, the batch review, the re-review, the redstone implementation and one fix wave.
+
+- **Crafting window: search and sort** (`0b0cfce0`, detailed in the "Crafting window" entry below, which this one supersedes).
+- **Jake stuck about 20 s at a fence gate** (`834dc94a`, `406758c1`). Two follow bugs, plus a tick freeze.
+  - A: `directBlocked` was probed only within 6 blocks. Beyond that, follow chose direct pursuit, cleared its door plan every tick, and walked into the fence 24 times. It is now also probed when the bot is stalled, using movement stagnation only: the max of the distance and block counters (`FollowDoorPriorityPolicy`). Blocked-ray ticks are no longer stored, so a bot moving along a route is never pinned in door mode.
+  - B: the vertical-lock "independent summit" grabbed a ladder behind the bot when the commander was below it, which threw away a correct route through the gate. Candidates are now filtered before the best is chosen: only climbs toward a higher commander, from a closer stand, whose column reaches the commander's height count (`VerticalLockAcquirePolicy`).
+  - The vertical lock's forced-door traverse no longer runs the blocking `nudgeTowardUntilClose` sleep loop on the server thread (the 2.3 s `Can't keep up` at 21:26:15). It opens the door in reach and aims that tick's input at the door instead.
+  - A rate-limited WARN tripwire now names any remaining server-thread caller of `nudgeTowardUntilClose`. Two are known: return-base door and escape, BEH ~3603/~3630.
+- **Redstone doors: the bot stops fighting them** (`b25d1a18`, `406758c1`).
+  - The gate is opened by an adjacent pressure plate, with no dust. This was checked in 1.21.11 bytecode: the plate's weak power ignores direction, and the gate's `neighborUpdate` sets POWERED and OPEN from `isReceivingRedstonePower`.
+  - The bot now never closes a powered door, or one next to a plate or trigger. This is re-checked right before the click.
+  - It never sets the open-attempt cooldown on an already-open door.
+  - It still closes ordinary, uncontrolled open doors behind itself (3 s schedule dedupe).
+  - The admin lock is checked before the iron-door path.
+  - Door log lines carry `open= powered= controlled=`. `tryOpenDoorAt` runs its block reads on the server thread (inline there; up to 750 ms from workers).
+- **Craft names and missing ingredients** (`3acd4465`).
+  - `stone_axe`, `wood pickaxe` and `minecraft:golden_hoe` now reach the tool recipe (`CraftRequestNamePolicy`).
+  - A named material is strict. Gold is used only when named. Netherite is refused with the smithing reason.
+  - When a named-tool craft is short, the bot says what is missing ("I need 3 cobblestone and 2 sticks for a stone axe — I have 3 sticks.", `ToolCraftShortfallPolicy`). This line bypasses the 30 s table cooldown.
+- **Chat can no longer throw an Error** (`3acd4465`, `c04fd368`). In the non-AI JAR (no ollama4j), `NLPProcessor` class init threw `NoClassDefFoundError` out of the CHAT_MESSAGE handler. Both the legacy inline-action path and `LLMOrchestrator.processChat` now check the ollama4j flag and catch `LinkageError`.
+- **Scene smoothing, step 1** (`885f2ae1`, `eca309b0`, `c04fd368`).
+  - A scene now ends only at a line spoken TO the owner (`OwnerAddressPolicy.isVocative`: comma or sentence-edge vocatives, greetings, and "Roti you…" / "Roti look…").
+    - Before, any mention cut the scene. All 5 one-line two-bot scenes in today's logs named the owner.
+    - Open questions also need a vocative now.
+  - The seed names one subject. Support facts are framed as background, and setting and avoid-list are separate clauses. Support topics rotate, and internal topic keys no longer leak into the avoid list.
+  - Wrapping quotes are stripped. A quoted `##FRENS` line is dropped as scaffolding and is not run as the side channel.
+  - Every dropped line, the owner cut, and the full seed are logged with the scene id.
+- **Rulings (Bradley pre-approved the recommendations; cost if wrong):**
+  - Scene smoothing Step 1 only. Scene-boundary history (Step 2) and a cross-scene topic thread are deferred. Cost: "Yeah, …" openers may remain until Step 2.
+  - Pacing unchanged: sliders, with separate idle and active cooldowns. Cost: at high rates the topic still hops every ~40 s.
+  - Redstone: stop fighting only. Using plates and buttons on purpose, and iron doors with triggers, are deferred. Cost: iron doors stay walls.
+  - The legacy LLM action stack is kept (guarded) until action requests land.
+- **Deferred, with reasons:**
+  - Return-base door/escape server-thread traverses (the WARN tripwire will confirm them).
+  - `SoulMindOps` open questions and non-leather armour crafting (no craft path).
+  - The "Crafted 1 stone_axe" raw label (modCommandRegistry).
+  - Sticks the "I have N sticks" count could make from planks may be overstated.
+  - Missing voice clips (`snow_golem_ammo` and 4 others).
+  - The permission reflection `ClassNotFoundException` at startup.
+  - The `FoodConsumptionConfirmationService.tryHandleConfirmation` yes/no, which has no caller. It will ride 1.1.225's yes/no router.
+- **Next:** 1.1.224 is Modrinth hardening (audits in `.superpowers/sdd/modrinth/`). 1.1.225 is chat action requests.
+- Tests 1461 → 1551.
+- **Field checks:** Phase 6u.
+
+## Crafting window: search and sort; 1.1.223 (2026-09-25)
 
 - The Crafting window (`CraftingHistoryScreen`) gets a search box (focused on open) and a sort button cycling A-Z → Z-A → Category → Base type → Learned. Search matches name, item id, category and base type, case-insensitive.
 - **Category** is the item's first vanilla creative tab, in tab order (Building Blocks, Colored, Natural, Functional, Redstone, Tools, Combat, Food, Ingredients); items in no tab fall under Other. The screen builds the creative display context itself (`ItemGroups.updateDisplayContext`), because tabs are empty until something does and the player may never have opened the creative inventory.

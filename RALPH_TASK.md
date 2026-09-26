@@ -3,7 +3,68 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.222) — next session starts here
+## Session Handoff 2026-09-25 (1.1.223) — next session starts here
+
+**State:** main = origin/main @ 1.1.223. Deployed to all three Prism instances if the release commit says so; otherwise
+deploy per CLAUDE.md "JAR Deploy Safety". This also ships the never-deployed 1.1.222. Suite 1551 green (1461 → 1551).
+
+**Shipped in 1.1.223** (details, rulings and cost-if-wrong are in `changelog.md`):
+- Crafting window search and sort (`CraftingListPolicy`).
+- Jake stuck at the pressure-plate fence gate: follow keeps door handling when stalled beyond 6 blocks
+  (`FollowDoorPriorityPolicy`, movement stagnation only). The summit climb lock only goes toward a higher commander,
+  with candidates filtered before the pick (`VerticalLockAcquirePolicy`). The vertical-lock forced-door traverse no
+  longer sleeps on the server thread. A WARN tripwire names remaining `nudgeTowardUntilClose` server-thread callers.
+- Redstone doors: never close a powered or plate/trigger-adjacent door, and no self-cooldown on already-open doors;
+  ordinary doors still get closed behind (`RedstoneDoorPolicy`). Door logs carry `open= powered= controlled=`.
+- Craft accepts `stone_axe` and similar names, and says which ingredients are missing (`CraftRequestNamePolicy`,
+  `ToolCraftShortfallPolicy`).
+- Chat can no longer throw `NoClassDefFoundError` in the non-AI JAR (legacy NLP and `LLMOrchestrator` guarded).
+- Scene smoothing step 1: `OwnerAddressPolicy` vocative cut, seed hierarchy plus support rotation, quote strip,
+  quoted `##FRENS` dropped, drop and seed diagnostics.
+- Codex (Astra/Sol) did the log review, batch review, re-review, redstone implementation and two fix commits.
+  Codex's sandbox cannot run Gradle or write `.git`, so the controller builds and commits their edits.
+
+**Field checks pending:** Phase 6u (new, 7 items), plus 6t (now actually deployable), 6s, 6r, 6q, 6p, 6o and 6b–6n.
+
+**Next builds (Bradley's order, 2026-09-25):**
+1. **1.1.224 = Modrinth publish-hardening.** The last public release is 1.1.1 (2026-04-14, commit 64a78e73).
+   Audits: `.superpowers/sdd/modrinth/audit-readiness.md` and `audit-multiplayer.md` (local, untracked).
+   - Blockers:
+     - `GuideInventoryNetworkManager:50` opens ANY online player's inventory (proximity-only check).
+     - `SpellNavigationNetworkManager:62/:92` has no ownership or pending-offer check and accepts human targets.
+     - DIRECT-conversation digests enter publicly audible group-scene prompts (`SoulMemoryDigestService:87` →
+       `SoulGroupPromptAssembler:378`).
+     - Startup downloads and loads sqlite-vec/vss natives without consent or a hash, and strips macOS quarantine
+       (`Frens:713-716`, `VectorExtensionHelper`).
+   - Cheap should-fixes:
+     - The zone list leaks hidden bases (`ZoneNetworkManager:184`).
+     - Wall delete/rename (`BaseNetworkManager:702`) and foreign hunt config (`HuntablesNetworkManager:77`) are not
+       authorised; zone subscriptions have no cap.
+     - A config save runs on every preference packet (`Frens:684`).
+     - The legacy LLM chat route has no sender ownership check.
+     - Housekeeping: `fabric.mod.json` still accepts ~1.21.10; routine follow INFO logs should move to DEBUG, and
+       the 246 obsolete `ai-player:` sound IDs need handling; add an issues/contact link; replace the
+       "AI-Player 1.0.5.2" config title; remove the startup system-property dump.
+   - Dialogue clips: 1,523 files = 683 lines × takes. Bradley says they are synthetic TTS with redistributable
+     licences, so add an attribution line; ask him for the engine and voice names.
+   - Player release notes are drafted in `.superpowers/sdd/modrinth/notes-part1.md` and `notes-part2.md`; merge
+     them for the Modrinth changelog. Bradley uploads it himself.
+2. **1.1.225 = chat action requests** ("Jake, make an axe" → plan → offer → yes → multi-step run). The
+   implement-ready scope is in `.superpowers/sdd/SCOPE-action-requests-1.1.224/README.md`.
+3. Later: scene smoothing step 2 (scene boundaries in history), redstone step 2 (use plates and buttons, iron doors
+   with triggers), and self-directed goals (proposer-only).
+
+**Deferred, with reasons:**
+- Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first.
+- Defensive-aid tick freeze (`BotMutualAidService:558`): the 1.1.222 deferral 3, still open.
+- Non-leather armour crafting.
+- The raw "Crafted 1 stone_axe" label.
+- `FoodConsumptionConfirmationService.tryHandleConfirmation` has no caller; it rides 1.1.225's yes/no router.
+- The missing `snow_golem_ammo` and other voice clips.
+- The permission reflection `ClassNotFoundException` at startup.
+- The Pocket installer's pre-wait EOF read, which can hang.
+
+## Session Handoff 2026-09-25 (1.1.222) — superseded
 
 **State:** main = origin/main @ 1.1.222 (pushed 2026-09-25; NOT deployed: the game was running at release. Deploy per
 CLAUDE.md "JAR Deploy Safety" once it is closed, then delete this note).
@@ -1339,7 +1400,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [x] **Locked-gate enclosure respect (drop-sweep + pursuit)** — ✅ shipped 1.1.98. New ray-cast helper [DangerousPursuitGate.crossesLockedGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) samples ~1 cell per block along the bot→target line and returns true if any sample is a tracked locked door / fence gate / trapdoor. Wired into both `isLocationSafeForPursuit` (drop-sweep) and `engageHostiles` combat-target filter. Caveat: over-rejects when a wall has BOTH a locked gate AND an unlocked gap (line crosses the locked cell while a legitimate path goes around). Under-rejection was the actual user complaint, so the trade-off is acceptable. Reuses existing LockableBlockService — no new wall semantics.
 - [x] **Bed selection bugs (two related)** — ✅ shipped 1.1.100, user-verified in-game 2026-05-17 (bot now places and uses its own bed from inventory when no nearby bed is available). (a) [SleepService.findNearbyBedFeet](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) now filters beds with `BedBlock.OCCUPIED == true` and sorts the bot's previously-claimed bed (via `BotHomeService.getLastSleep`) first. Defensive late-occupancy guard added to `tryUseBed`. (b) When all nearby beds are filtered (only-occupied case), the existing placement branch fires with an explicit "Nearby bed is taken. Setting up my own." handoff message. Out of scope: bed reservation across mid-night user step-outs; multi-bot claim contention.
 - [~] **Pathfinding cache learning isn't measurably improving** — diagnostic surfacing shipped 1.1.101. [NavHazardCache](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) is the actual learning system (per-cell rejection scoring; pathfinders consult via `penaltyFor`). Wiring is correct — recording fires per `applyMovementInput-reject` (903 today's session), pathfinders read the penalty in both [PathFinder.java:152,187](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java#L152) and [BaritoneStylePathFinder.java:380](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java#L380). Penalty hits now log at INFO (throttled 1/s, ≥1.0 penalty); periodic summary every 5 min lists top scoring cells. Architectural caveat: cache helps when alternative routes exist; tight bottleneck doorways (the user's actual stuck cases) have no alternates, so cache doesn't help there even when working perfectly. Out of scope: chat command for on-demand cache dump (`/bot debug nav-hazard`); promotion-event INFO log; tuning `STREAK_PROMOTION_THRESHOLD` after we have real data.
-- [ ] **Doorway / pressure plate stuck (still recurring)**: User reports persistent stalls at doorways and pressure plates despite the 1.1.5 → 1.1.16 fix series. Re-read the 2026-04-16 session notes at the top of this file before touching this — the Architectural Concern at line 92 (drop the door-plan state machine entirely; emit door tiles as regular pathfinder waypoints with an `InteractWithDoorGoal`-style observer) is the recommended next move. Discuss with user before attempting; this is a multi-day rework.
+- [ ] **Doorway / pressure plate stuck (still recurring)**: 🔧 1.1.223: two follow bugs at a plate-driven fence gate fixed (door handling off beyond 6 blocks; summit climb hijack) and bots no longer close powered/plate-adjacent doors — verify in Phase 6u before closing this. User reports persistent stalls at doorways and pressure plates despite the 1.1.5 → 1.1.16 fix series. Re-read the 2026-04-16 session notes at the top of this file before touching this — the Architectural Concern at line 92 (drop the door-plan state machine entirely; emit door tiles as regular pathfinder waypoints with an `InteractWithDoorGoal`-style observer) is the recommended next move. Discuss with user before attempting; this is a multi-day rework.
 
 ### Pre-existing P1 items
 
