@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.223-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.224-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.223** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.224** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1163,6 +1163,51 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
   - Claude watches for: `bot craft <the selected item>` in the log.
   - Pass when: search filters the list, Category and Base type show headers, and Craft makes the item you
     selected.
+
+## Phase 6v — Access control, DM privacy, no native downloads (1.1.224)
+
+1.1.224 locks down what other players can do to your bots and keeps what you tell a bot in a DM out of scenes other players can hear. It also stops Frens downloading native libraries at startup. Most items need only you; the ones marked **2P** need a second, non-op account (a second client or a friend).
+
+**First, once:** run `/bot config diagnostics on` so follow logs stay at INFO for the rest of the session.
+
+Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat] denied`, `sqlite-vec`, `Downloading`, `NLP model`.
+
+- [ ] **Startup is quiet (1.1.224)**
+  - Bradley does: launch the game and load the world.
+  - Claude watches for: `[PermCheck] operator-permission mode=leveled-mapped … OWNERS`. There should be no `sqlite-vec`, `vss`, `xattr`, `Downloading` or `NLP model` lines.
+  - Pass when: all of that holds, and the memory-backed features still work (bots recall things).
+- [ ] **Your own bot still works everywhere (1.1.224)**
+  - Bradley does:
+    1. Right-click Jake.
+    2. Run `/bot inventory Jake`.
+    3. Open his inventory through the Guide.
+    4. Cast a remote inventory / guidance spell from far away.
+    5. Answer a sunset return prompt.
+  - Claude watches for: no `[bot-access] denied` lines.
+  - Pass when: everything opens, and the remote screen stays open at a distance.
+- [ ] **Diagnostics switch (1.1.224)**
+  - Bradley does: `/bot config diagnostics off`, follow for 30 s, then `/bot config diagnostics on`.
+  - Claude watches for: `Follow status:` lines disappearing, then returning.
+  - Pass when: both switches take effect.
+- [ ] **2P: a stranger can't touch your bot (1.1.224)**
+  - Bradley does, from the non-op second account:
+    1. Right-click Jake.
+    2. Try `/bot inventory Jake` (if permitted).
+    3. Open the Guide on Jake.
+    4. Try to change his hunts.
+  - Claude watches for: `[bot-access] denied action=… sender=<2nd> target=Jake`.
+  - Pass when: every attempt is refused and nothing changes.
+- [ ] **2P: a DM stays private (1.1.224)**
+  - Bradley does:
+    1. Alone on the server, DM Jake a distinctive fact ("my secret base is under the oak tree").
+    2. With Bob nearby, let a group scene play.
+    3. Then have the second account join and stand nearby during a scene.
+  - Claude watches for: the fact may appear while you're alone. Once the second player is in earshot, expect `[souls] scene privacy stop` or no mention of the fact.
+  - Pass when: the second player never hears or sees the fact.
+- [ ] **2P: hidden bases stay hidden (1.1.224)**
+  - Bradley does: the second account opens the zone list or visualiser.
+  - Claude watches for: only its own, allied and server bases listed.
+  - Pass when: your private base doesn't appear.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

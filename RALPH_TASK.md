@@ -5,7 +5,7 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 (1.1.224) — next session starts here
 
-**State:** main = origin/main @ 1.1.224 (deploy status in the docs commit that follows the release). Suite 1662 green
+**State:** main = origin/main @ 1.1.224, DEPLOYED to all three Prism instances (2026-09-25; 13 new policy classes present, VectorExtensionHelper absent in each mods-dir JAR). Suite 1662 green
 (1551 → 1662). This is the Modrinth publish-hardening build. The last public Modrinth release is still 1.1.1.
 
 **Shipped in 1.1.224** (details, rulings and cost-if-wrong are in `changelog.md`):
@@ -29,7 +29,7 @@ test_command: "./gradlew build -x test"
 **Rollback warning:** a jar older than 1.1.224 fails to load party transcripts that contain `privateTo` records.
 Group scenes then return INTERNAL until `/bot soul reset`.
 
-**Field checks pending:** Phase 6v (new, 6 items; 3 need a second non-op account). Run `/bot config diagnostics on`
+**Field checks pending:** Phase 6v (new, 6 items; checklist now 229; 3 need a second non-op account). Run `/bot config diagnostics on`
 first, or the follow-log greps in 6u and earlier won't match. Also still pending: 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n.
 
 **Next builds (PROPOSED 2026-09-25; Bradley to confirm the order):**
