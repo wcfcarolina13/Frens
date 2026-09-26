@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.222-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.223-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.222** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.223** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1110,6 +1110,59 @@ Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`
   - Bradley does: keep Bob's bag full, and give Jake a few flowers.
   - Claude watches for: no `to free inventory space` line for Bob.
   - Pass when: Bob keeps all his stacks; the flower gift simply doesn't happen while he is full.
+
+## Phase 6u — Gate follow, redstone doors, craft names, scene smoothing, crafting search (1.1.223)
+
+This phase comes from the 2026-09-25 session, when Jake sat about 20 s behind the pressure-plate gate outside the underground base. It covers:
+- Follow keeps handling doors when the bot is stuck far from you.
+- A climb helper no longer drags a bot to a ladder behind it.
+- Bots stop closing doors that a plate or button controls.
+- `/bot craft stone_axe` works and says what's missing.
+- Bot-to-bot scenes no longer end at a mere mention of you.
+- The Crafting window has search and sort.
+
+Souls on for the scene item (Jake + Bob). Freeze detector for every item: no `Can't keep up!`.
+Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilClose`, `owner-address cut`,
+`[souls] banter routingId`, `I need`.
+
+- [ ] **Out through the plate gate (1.1.223)**
+  - Bradley does: walk Jake and Bob out of the underground base through the oak fence gate with the pressure plate,
+    as on 2026-09-25, and keep walking 10–15 blocks past it.
+  - Claude watches for: `Door debug: … door=266,66,1285 open=… powered=… controlled=true`. There should be no run
+    of `applyMovementInput-reject` into the fence, and no `vertical-lock acquire` toward a ladder behind the bot.
+  - Pass when: both bots are through within about 5 s of you, and the game never stutters.
+- [ ] **The bot leaves the plate's gate alone (1.1.223)**
+  - Bradley does: the same gate, and watch it as the last bot passes.
+  - Claude watches for: `door-close skip: powered or controlled`, or no close by a bot at all. There should be no
+    `door-closed: marked recently closed` for 266,66,1285.
+  - Pass when: the plate opens and closes the gate by itself, and no bot right-clicks it shut.
+- [ ] **Ordinary doors still get closed behind the bots (1.1.223)**
+  - Bradley does: open a plain wooden door with no plate or button nearby, walk through, and let the bots follow.
+  - Claude watches for: `door-closed: …` for that door after the last bot passes.
+  - Pass when: the door is closed behind them, as before.
+- [ ] **No server-thread walk warning (1.1.223 tripwire)**
+  - Bradley does: nothing extra; this is read at the end of the session.
+  - Claude watches for: any `nudgeTowardUntilClose on the server thread` WARN, and records the caller it names.
+    The expected candidates are return-base door and escape.
+  - Pass when: none appear. If one does, it's a known deferral: log the caller in the handoff.
+- [ ] **`/bot craft stone_axe` names what's missing (1.1.223)**
+  - Bradley does: give Jake 3 sticks and nothing else, then `/bot craft stone_axe 1 Jake`. Then give him 3
+    cobblestone and run it again.
+  - Claude watches for: `I need 3 cobblestone … for a stone axe — I have 3 sticks.`, then a crafted stone axe.
+    There should be no `I don't know how to craft stone axe`.
+  - Pass when: both happen.
+- [ ] **A scene that mentions you plays in full (1.1.223)**
+  - Bradley does: with Bob and Jake near each other and banter on, let a few idle scenes play; a Rate… slider at
+    about 70 speeds this up.
+  - Claude watches for: `[souls] banter routingId=… seed="Stay on one subject:…"`. There should be no
+    `owner-address cut` unless a bot spoke TO you. Scenes that mention RotiWokeman should have 2–3 lines.
+  - Pass when: the bots answer each other on one subject, and a mention of you doesn't end the scene.
+- [ ] **Crafting window search and sort (1.1.223)**
+  - Bradley does: open the Crafting window. Type `diamond`, then clear it. Cycle Sort through A-Z, Z-A, Category,
+    Base type and Learned. Select an item, re-sort, and press Craft.
+  - Claude watches for: `bot craft <the selected item>` in the log.
+  - Pass when: search filters the list, Category and Base type show headers, and Craft makes the item you
+    selected.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

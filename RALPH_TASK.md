@@ -5,8 +5,8 @@ test_command: "./gradlew build -x test"
 
 ## Session Handoff 2026-09-25 (1.1.223) — next session starts here
 
-**State:** main = origin/main @ 1.1.223. Deployed to all three Prism instances if the release commit says so; otherwise
-deploy per CLAUDE.md "JAR Deploy Safety". This also ships the never-deployed 1.1.222. Suite 1551 green (1461 → 1551).
+**State:** main = origin/main @ 1.1.223, DEPLOYED to all three Prism instances (2026-09-25 22:40; javap-free check: 7 new
+policy classes present in each mods-dir JAR). This also ships the never-deployed 1.1.222. Suite 1551 green (1461 → 1551).
 
 **Shipped in 1.1.223** (details, rulings and cost-if-wrong are in `changelog.md`):
 - Crafting window search and sort (`CraftingListPolicy`).
@@ -24,7 +24,7 @@ deploy per CLAUDE.md "JAR Deploy Safety". This also ships the never-deployed 1.1
 - Codex (Astra/Sol) did the log review, batch review, re-review, redstone implementation and two fix commits.
   Codex's sandbox cannot run Gradle or write `.git`, so the controller builds and commits their edits.
 
-**Field checks pending:** Phase 6u (new, 7 items), plus 6t (now actually deployable), 6s, 6r, 6q, 6p, 6o and 6b–6n.
+**Field checks pending:** Phase 6u (new, 7 items; checklist now 223), plus 6t (now actually deployable), 6s, 6r, 6q, 6p, 6o and 6b–6n.
 
 **Next builds (Bradley's order, 2026-09-25):**
 1. **1.1.224 = Modrinth publish-hardening.** The last public release is 1.1.1 (2026-04-14, commit 64a78e73).
