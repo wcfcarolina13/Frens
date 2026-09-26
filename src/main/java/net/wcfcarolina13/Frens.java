@@ -341,6 +341,7 @@ public class Frens implements ModInitializer {
         return t;
     });
     private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
+    private static final AtomicBoolean LEGACY_NLP_ASSETS_REQUESTED = new AtomicBoolean(false);
 
     // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
     private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
@@ -773,23 +774,19 @@ public class Frens implements ModInitializer {
         }
         QTableStorage.setupQTableStorage();
 
-        CompletableFuture.runAsync(() -> {
-            AISearchConfig.setupIfMissing();
-            NLPProcessor.ensureLocalNLPModel();
-            try {
-                Thread.sleep(2000);
-                System.out.println("NLP model deployment task complete");
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        });
+        // Legacy NLP models are NOT fetched here: requestLegacyNlpAssets() starts that on the
+        // first real legacy-LLM demand (ollama4j present + world and bot LLM toggles on).
+        CompletableFuture.runAsync(AISearchConfig::setupIfMissing);
 
         djlAvailable = isClassAvailable("ai.djl.Model");
-        if (djlAvailable) {
+        if (djlAvailable && OLLAMA4J_AVAILABLE) {
             modelManager = BertModelManager.getInstance();
         } else {
+            // BERT only serves the legacy NLP intent stack, which needs ollama4j; never touch it
+            // in a standard (non-AI) build.
             modelManager = null;
-            LOGGER.warn("DJL not found on classpath; BERT intent model disabled.");
+            LOGGER.info("Legacy BERT intent model disabled (DJL present: {}, ollama4j present: {}).",
+                    djlAvailable, OLLAMA4J_AVAILABLE);
         }
 
         // Knowledge graph: project recipes/tags once the data is loaded, and again after /reload
@@ -835,7 +832,6 @@ public class Frens implements ModInitializer {
                 }
             }
 
-            enqueueBertLoad();
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);
             net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE =
                     CONFIG != null && CONFIG.isBaritonePathfinderEnabled();
@@ -1565,9 +1561,50 @@ public class Frens implements ModInitializer {
                 || normalized.startsWith("give us a quest");
     }
 
+    /**
+     * Starts the legacy NLP model setup (download/extract, then the BERT load) on the model worker
+     * the first time a real legacy-LLM demand arrives; later calls only re-queue the BERT load
+     * after a world reload unloaded it. No-op without ollama4j. Callers must already have checked
+     * the world + bot LLM toggles ({@link #prepareLegacyNlp} does both).
+     */
+    public static void requestLegacyNlpAssets() {
+        if (!OLLAMA4J_AVAILABLE) {
+            return;
+        }
+        if (LEGACY_NLP_ASSETS_REQUESTED.compareAndSet(false, true)) {
+            LOGGER.info("Legacy LLM in use: preparing local NLP models on the model worker.");
+            MODEL_EXECUTOR.execute(() -> {
+                try {
+                    NLPProcessor.ensureLocalNLPModel();
+                } catch (Throwable t) {
+                    LOGGER.warn("Legacy NLP model setup failed: {}", t.toString());
+                }
+            });
+        }
+        enqueueBertLoad();
+    }
+
+    /**
+     * Whether the legacy NLP/LLM path may run for {@code bot} (ollama4j present, world and bot
+     * LLM toggles on); when it may, makes sure the model setup has been requested.
+     */
+    private static boolean prepareLegacyNlp(ServerPlayerEntity bot) {
+        if (!OLLAMA4J_AVAILABLE) {
+            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                LOGGER.warn("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
+            }
+            return false;
+        }
+        if (!net.wcfcarolina13.GameAI.llm.LegacyNlpBootstrapPolicy.isLegacyNlpUsable(
+                true, LLMOrchestrator.isWorldEnabled(), LLMOrchestrator.isBotEnabled(bot))) {
+            return false;
+        }
+        requestLegacyNlpAssets();
+        return true;
+    }
+
     private static void enqueueBertLoad() {
         if (modelManager == null) {
-            LOGGER.info("Skipping BERT load (DJL unavailable).");
             return;
         }
         if (!MODEL_LOAD_ENQUEUED.compareAndSet(false, true)) {
@@ -1743,11 +1780,9 @@ public class Frens implements ModInitializer {
         }
         // NLPProcessor's static init builds an OllamaAPI (and it imports DJL); both are compileOnly,
         // so without -PaiEnabled=true the first touch throws NoClassDefFoundError — an Error, which
-        // would escape the CHAT_MESSAGE handler. Gate first, then catch linkage failures anyway.
-        if (!OLLAMA4J_AVAILABLE) {
-            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                LOGGER.warn("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
-            }
+        // would escape the CHAT_MESSAGE handler. Gate first (ollama4j + world/bot LLM toggles:
+        // this parser drives the LLM through FunctionCallerV2), then catch linkage failures anyway.
+        if (!prepareLegacyNlp(bot)) {
             return;
         }
         NLPProcessor.Intent intent;

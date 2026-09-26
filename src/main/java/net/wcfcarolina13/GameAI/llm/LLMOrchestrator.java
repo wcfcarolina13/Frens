@@ -87,6 +87,9 @@ public final class LLMOrchestrator {
         if (!isBotEnabled(bot)) {
             return false;
         }
+        // Real legacy-LLM demand: make sure the local NLP models are being prepared (once, on the
+        // model worker; no-op without ollama4j).
+        Frens.requestLegacyNlpAssets();
         CHAT_EXECUTOR.submit(() -> processChat(server, bot, botSource, playerUuid, message));
         return true;
     }
