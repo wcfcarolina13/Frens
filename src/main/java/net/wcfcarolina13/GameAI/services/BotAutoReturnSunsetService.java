@@ -468,6 +468,8 @@ public final class BotAutoReturnSunsetService {
                         boolean crossDim = false; // Auto-return is same-dimension (Overworld gate above)
                         int seconds = NavigationArtifactService.calculateDelayTicks(dist, crossDim) / 20;
                         ServerPlayNetworking.send(owner, new NavigationRequestPayload(alias, "home", seconds));
+                        // The only prompt the owner's accept/dismiss may answer (single-use, 120 s).
+                        NavigationOfferPolicy.SHARED.offer(bot.getUuid(), owner.getUuid(), System.currentTimeMillis());
                         notifiedOwner = true;
                         LOGGER.info("Sent sunset auto-return notification to {} for bot {}",
                                 owner.getName().getString(), alias);

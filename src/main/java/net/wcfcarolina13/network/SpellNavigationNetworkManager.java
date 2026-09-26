@@ -14,8 +14,10 @@ import net.minecraft.text.Text;
 import net.minecraft.world.World;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.BotAccessPolicy;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
+import net.wcfcarolina13.GameAI.services.NavigationOfferPolicy;
 import net.wcfcarolina13.GameAI.services.TravelMountHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,16 +54,27 @@ public final class SpellNavigationNetworkManager {
 
     private static void handleNavigationResponse(MinecraftServer server, ServerPlayerEntity player,
                                                   NavigationResponsePayload payload) {
-        if (server == null || player == null || player.isRemoved()) return;
-        if (!payload.accepted()) {
-            LOGGER.debug("Player {} dismissed auto-return for bot {}", player.getName().getString(), payload.botAlias());
+        if (server == null || player == null || player.isRemoved() || payload == null) return;
+        String action = payload.accepted() ? "nav-accept" : "nav-dismiss";
+
+        // Accept and dismiss both need the bot's owner, an operator or the host, and must answer
+        // a prompt the server actually sent this player about this bot (single-use, expiring).
+        if (!BotAccessGate.permitsByName(player, payload.botAlias(), action)) return;
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(payload.botAlias());
+        if (bot == null || bot.isRemoved()) {
+            LOGGER.warn("Auto-return response but bot '{}' not found", BotAccessPolicy.logSafe(payload.botAlias()));
+            return;
+        }
+        NavigationOfferPolicy.Result offer = NavigationOfferPolicy.SHARED.consume(
+                bot.getUuid(), player.getUuid(), System.currentTimeMillis());
+        if (offer != NavigationOfferPolicy.Result.CONSUMED) {
+            BotAccessGate.warnDenied(player, bot.getName().getString(), action,
+                    offer == NavigationOfferPolicy.Result.EXPIRED ? "OFFER_EXPIRED" : "NO_OFFER");
             return;
         }
 
-        // Find the bot via player manager
-        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(payload.botAlias());
-        if (bot == null || bot.isRemoved()) {
-            LOGGER.warn("Auto-return accepted but bot '{}' not found", payload.botAlias());
+        if (!payload.accepted()) {
+            LOGGER.debug("Player {} dismissed auto-return for bot {}", player.getName().getString(), bot.getName().getString());
             return;
         }
 
@@ -92,6 +105,12 @@ public final class SpellNavigationNetworkManager {
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botAlias);
         if (bot == null || bot.isRemoved()) {
             sendFeedback(commander, "Companion '" + botAlias + "' is not online.");
+            return;
+        }
+        // Before any reagent is consumed or anyone moves: the bot's owner, an operator or the
+        // host only, and never a real player as the target.
+        if (!BotAccessGate.permits(commander, bot, "spell-" + BotAccessPolicy.logSafe(spellType))) {
+            sendFeedback(commander, "Only " + bot.getName().getString() + "'s owner can cast that.");
             return;
         }
 
