@@ -1,8 +1,7 @@
 package net.wcfcarolina13.GraphicalUserInterface;
 
 
-import net.fabricmc.api.EnvType;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -10,9 +9,8 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.Frens;
-import net.wcfcarolina13.FrensClient;
+import net.wcfcarolina13.FilingSystem.ModelAvailabilityPolicy;
 import net.wcfcarolina13.GraphicalUserInterface.Widgets.DropdownMenuWidget;
-import net.wcfcarolina13.GraphicalUserInterface.BotControlScreen;
 import net.wcfcarolina13.network.configNetworkManager;
 import net.wcfcarolina13.network.ConfigJsonUtil;
 import org.slf4j.Logger;
@@ -32,28 +30,18 @@ public class ConfigManager extends Screen {
     private List<String> allModels;
     private List<String> filteredModels;
     private int footerTopY = 0;
-    private static long lastModelRefreshMs = 0L;
+    private boolean refreshingModels;
 
 
     public ConfigManager(Text title, Screen parent) {
-        super(title);
+        super(Text.of("Frens Configuration"));
         this.parent = parent;
     }
 
     @Override
     protected void init() {
 
-        List<String> cached = Frens.CONFIG.getModelList();
-        if (cached == null || cached.isEmpty()) {
-            refreshModelList();
-            cached = Frens.CONFIG.getModelList();
-        }
-
-        allModels = cached;
-        if (allModels == null) {
-            allModels = new ArrayList<>();
-        }
-        LOGGER.info("Fetched {} models from provider on frontend: {}", allModels.size(), allModels);
+        allModels = ModelAvailabilityPolicy.sanitizeModelList(Frens.CONFIG.getModelList());
         filteredModels = new ArrayList<>(allModels);
 
         // Calculate positions
@@ -61,7 +49,6 @@ public class ConfigManager extends Screen {
         int topMargin = 50;
         int fieldWidth = 300;
         int fieldHeight = 20;
-        int buttonWidth = 100;
         int spacing = 30;
 
         // Search field - centered and properly positioned
@@ -81,19 +68,11 @@ public class ConfigManager extends Screen {
         this.addDrawableChild(dropdownMenuWidget);
         this.addSelectableChild(dropdownMenuWidget);
 
-        // Try to pre-select the currently configured model, or fall back to the first entry.
-        // This value is treated as the "default" model for the active provider until the user changes it.
-        String currentSelected = Frens.CONFIG.getSelectedLanguageModel();
-        if (currentSelected != null && filteredModels.contains(currentSelected)) {
-            // Config already has a valid default for this provider; reflect it in the UI.
+        String currentSelected = ModelAvailabilityPolicy.sanitizeSelection(Frens.CONFIG.getSelectedLanguageModel());
+        if (filteredModels.contains(currentSelected)) {
             dropdownMenuWidget.setSelectedOption(currentSelected);
-        } else if (!filteredModels.isEmpty()) {
-            // No valid selection in config: choose the first model from the provider list
-            // as the temporary default for this session, and update the in-memory config.
-            String newDefault = filteredModels.get(0);
-            dropdownMenuWidget.setSelectedOption(newDefault);
-            Frens.CONFIG.setSelectedLanguageModel(newDefault);
-            LOGGER.info("No valid selectedLanguageModel in config; using first provider model as session default: {}", newDefault);
+        } else if (currentSelected.isEmpty() && !filteredModels.isEmpty()) {
+            dropdownMenuWidget.setSelectedOption(filteredModels.get(0));
         }
 
         java.util.List<ButtonWidget> footerButtons = new java.util.ArrayList<>();
@@ -113,17 +92,15 @@ public class ConfigManager extends Screen {
                 Text.of("Refresh Models"),
                 (btn) -> this.reloadModels()
         ).dimensions(0, 0, 80, fieldHeight).build());
-        footerButtons.add(ButtonWidget.builder(Text.of("Save"), (btn1) -> {
-            this.saveToFile();
-            if (this.client != null) {
-                this.client.getToastManager().add(
-                        SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
-                                Text.of("Settings saved!"), Text.of("Saved settings.")));
-            }
-        }).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(Text.of("Save"), (btn1) -> this.saveToFile())
+                .dimensions(0, 0, 80, fieldHeight).build());
         footerButtons.add(ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
                 .dimensions(0, 0, 80, fieldHeight).build());
         layoutButtons(footerButtons, fieldHeight);
+        if (Frens.CONFIG.getModelListStatus() == ModelAvailabilityPolicy.Status.UNKNOWN
+                || Frens.CONFIG.getModelListStatus() == ModelAvailabilityPolicy.Status.LOADING) {
+            reloadModels();
+        }
     }
 
     private void layoutButtons(java.util.List<ButtonWidget> buttons, int buttonHeight) {
@@ -162,66 +139,46 @@ public class ConfigManager extends Screen {
         }
     }
 
-    private void refreshModelList() {
-        long now = System.currentTimeMillis();
-        if (now - lastModelRefreshMs < 10_000) {
-            LOGGER.info("Skipping model refresh; last refresh was less than 10s ago.");
+    private void reloadModels() {
+        if (refreshingModels) {
             return;
         }
-        lastModelRefreshMs = now;
-        LOGGER.info("Refreshing model list from provider...");
-        Frens.CONFIG.updateModels();
-    }
-
-    private void reloadModels() {
-        refreshModelList();
-        LOGGER.info("Reloading model list from provider...");
-
-        // Remember the currently selected option in the dropdown so we can try to keep it.
-        String previouslySelected = dropdownMenuWidget != null ? dropdownMenuWidget.getSelectedOption() : null;
-
-        Frens.CONFIG.updateModels();
-        allModels = Frens.CONFIG.getModelList();
-        if (allModels == null) {
-            allModels = new ArrayList<>();
-        }
-
-        filteredModels = new ArrayList<>(allModels);
-        dropdownMenuWidget.updateOptions(filteredModels);
-
-        // Try to preserve the previous selection if it still exists in the new list.
-        if (previouslySelected != null && filteredModels.contains(previouslySelected)) {
-            dropdownMenuWidget.setSelectedOption(previouslySelected);
-            Frens.CONFIG.setSelectedLanguageModel(previouslySelected);
-            LOGGER.info("Preserved previously selected model after reload: {}", previouslySelected);
-        } else if (!filteredModels.isEmpty()) {
-            // Fall back to the first model if the previous one no longer exists.
-            String newDefault = filteredModels.get(0);
-            dropdownMenuWidget.setSelectedOption(newDefault);
-            Frens.CONFIG.setSelectedLanguageModel(newDefault);
-            LOGGER.info("Previous selection not available; using first provider model as new default after reload: {}", newDefault);
-        } else {
-            // No models at all; clear the selection in config.
-            Frens.CONFIG.setSelectedLanguageModel("");
-            LOGGER.warn("Model list is empty after reload; cleared selectedLanguageModel in config.");
-        }
-
-        LOGGER.info("Reloaded {} models from provider on frontend: {}", allModels.size(), allModels);
-
-        // Show a toast notification with more context
-        if (this.client != null) {
-            String subtitle;
-            if (allModels.isEmpty()) {
-                subtitle = "No models found – check your API key or provider settings";
-            } else {
-                String current = Frens.CONFIG.getSelectedLanguageModel();
-                subtitle = "Found " + allModels.size() + " models; default is now: " + (current != null ? current : "None");
+        refreshingModels = true;
+        var config = Frens.CONFIG;
+        config.updateModels().whenComplete((ignored, failure) -> MinecraftClient.getInstance().execute(() -> {
+            refreshingModels = false;
+            if (this.client == null || this.client.currentScreen != this || Frens.CONFIG != config) {
+                return;
             }
+            String selected = ModelAvailabilityPolicy.selectionToSave(
+                    dropdownMenuWidget.getSelectedOption(), config.getSelectedLanguageModel());
+            allModels = ModelAvailabilityPolicy.sanitizeModelList(config.getModelList());
+            onSearchChanged(searchField.getText());
+            if (filteredModels.contains(selected)) {
+                dropdownMenuWidget.setSelectedOption(selected);
+            } else if (selected.isEmpty() && !filteredModels.isEmpty()) {
+                dropdownMenuWidget.setSelectedOption(filteredModels.get(0));
+            }
+
+            String subtitle = allModels.isEmpty() ? modelAvailabilityMessage()
+                    : "Found " + allModels.size() + " models";
             this.client.getToastManager().add(
                     SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
-                            Text.of("Models Reloaded"),
+                            Text.of("Models refreshed"),
                             Text.of(subtitle)));
+        }));
+    }
+
+    private String modelAvailabilityMessage() {
+        if (Frens.CONFIG.getModelListStatus() == ModelAvailabilityPolicy.Status.LOADING) {
+            return "Loading optional AI chat models...";
         }
+        if ("ollama".equals(Frens.CONFIG.getLlmMode())) {
+            return Frens.CONFIG.getModelListStatus() == ModelAvailabilityPolicy.Status.UNAVAILABLE
+                    ? "Ollama not detected (optional — only needed for AI chat)"
+                    : "No Ollama models loaded (optional — only needed for AI chat)";
+        }
+        return "No models found — check your API key or provider settings";
     }
 
     @Override
@@ -263,7 +220,7 @@ public class ConfigManager extends Screen {
             context.drawText(this.textRenderer, countText, centerX - 150, infoBaseY + 15, counterColor, true);
 
             if (allModels.isEmpty()) {
-                String warnText = "No models loaded – open API Keys and verify your settings, then click Refresh Models";
+                String warnText = modelAvailabilityMessage();
                 int warnWidth = this.textRenderer.getWidth(warnText);
                 context.drawText(this.textRenderer, warnText, centerX - warnWidth / 2, infoBaseY + 30, 0xFFFF5555, true);
             }
@@ -299,14 +256,14 @@ public class ConfigManager extends Screen {
         }
 
         // Update dropdown with filtered models
-        // You'll need to add this method to your DropdownMenuWidget
         dropdownMenuWidget.updateOptions(filteredModels);
     }
 
     private void saveToFile() {
-        String modelName = this.dropdownMenuWidget.getSelectedOption();
+        String selected = ModelAvailabilityPolicy.sanitizeSelection(this.dropdownMenuWidget.getSelectedOption());
+        String modelName = ModelAvailabilityPolicy.selectionToSave(selected, Frens.CONFIG.getSelectedLanguageModel());
 
-        if (modelName == null || modelName.trim().isEmpty()) {
+        if (modelName.isEmpty()) {
             LOGGER.warn("No model selected or model name is empty. Skipping save.");
 
             if (this.client != null) {
@@ -317,13 +274,19 @@ public class ConfigManager extends Screen {
             return;
         }
 
-        System.out.println("Selected model: " + modelName);
         LOGGER.info("Persisting selected model as default for current provider: {}", modelName);
 
         Frens.CONFIG.setSelectedLanguageModel(modelName);
         Frens.CONFIG.save();
 
         configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
+
+        if (this.client != null) {
+            this.client.getToastManager().add(
+                    SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
+                            Text.of("Settings saved!"),
+                            Text.of(selected.isEmpty() ? "Kept previous model: " + modelName : "Saved settings.")));
+        }
 
         close();
         assert this.client != null;

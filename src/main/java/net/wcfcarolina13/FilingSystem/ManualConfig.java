@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Locale;
 
 /**
@@ -54,7 +55,11 @@ public class ManualConfig {
     }
 
     // --- Configuration fields (same as before) ---
-    private List<String> modelList = new ArrayList<>();
+    private volatile List<String> modelList = new ArrayList<>();
+    private transient volatile ModelAvailabilityPolicy.Status modelListStatus = ModelAvailabilityPolicy.Status.UNKNOWN;
+    private transient final AtomicBoolean modelFetchInFlight = new AtomicBoolean();
+    private transient CompletableFuture<Void> modelFetchCompletion = CompletableFuture.completedFuture(null);
+    private static final AtomicBoolean OLLAMA_UNAVAILABLE_LOGGED = new AtomicBoolean();
     private String selectedLanguageModel;
     private String llmMode = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
     private String openAIKey = "";
@@ -176,7 +181,8 @@ public class ManualConfig {
      */
     private ManualConfig() {
         // Initialize with default values
-        this.selectedLanguageModel = System.getProperty("frens.llmModel", System.getProperty("aiplayer.llmModel", null));
+        this.selectedLanguageModel = ModelAvailabilityPolicy.sanitizeSelection(
+                System.getProperty("frens.llmModel", System.getProperty("aiplayer.llmModel", null)));
     }
 
     /**
@@ -191,28 +197,34 @@ public class ManualConfig {
      * Asynchronously updates the list of available models based on the selected provider.
      * This method fetches the model list and then saves the updated configuration to the file.
      */
-    public void updateModels() {
+    public synchronized CompletableFuture<Void> updateModels() {
+        if (!modelFetchInFlight.compareAndSet(false, true)) {
+            return modelFetchCompletion;
+        }
+        modelListStatus = ModelAvailabilityPolicy.Status.LOADING;
+        String provider = llmMode;
         // Run the network operation on a separate thread to prevent freezing.
-        CompletableFuture.runAsync(() -> {
+        modelFetchCompletion = CompletableFuture.runAsync(() -> {
             try {
                 List<String> fetchedModels = new ArrayList<>();
                 ModelFetcher modelFetcher = null;
                 String apiKey = "";
 
-                switch (llmMode) {
+                switch (provider) {
                     case "ollama":
                         try {
-                            LOGGER.info("Using ollama");
                             fetchedModels = getLanguageModels.get();
-                            this.modelList = fetchedModels;
-                            LOGGER.info("Fetched models: {}", this.modelList);
+                            this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
+                            this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
                             this.save();
                             return;
                         } catch (ollamaNotReachableException e) {
-                            LOGGER.error("Ollama is not reachable: {}", e.getMessage());
-                            fetchedModels.add("Ollama is not reachable!");
+                            this.modelList = List.of();
+                            this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
+                            logOllamaUnavailable(e);
+                            this.save();
+                            return;
                         }
-                        break;
                     case "openai":
                         modelFetcher = new OpenAIModelFetcher();
                         apiKey = this.openAIKey;
@@ -235,53 +247,52 @@ public class ManualConfig {
                             apiKey = this.customApiKey;
                         } else {
                             LOGGER.error("Custom provider selected but no API URL configured");
+                            this.modelList = List.of();
+                            this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
                             return;
                         }
                         break;
                     default:
-                        LOGGER.error("Unsupported provider: {}", llmMode);
+                        LOGGER.error("Unsupported provider: {}", provider);
+                        this.modelList = List.of();
+                        this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
                         return;
                 }
 
-                if (llmMode.equals("ollama")) {
-                    // ollama is handled above, so we just skip API key check.
-                    LOGGER.info("Skipping API key check for ollama");
-                    this.modelList = fetchedModels;
-                    LOGGER.info("ollama modelList: {}", this.modelList);
-                    this.save();
-                }
-                else {
-                    if (modelFetcher != null) {
-                        if(apiKey.isEmpty()) {
-                            // in the event that a user removes their api key but still have a service based provider set.
-                            fetchedModels = new ArrayList<>();
-                            selectedLanguageModel="No models available. Please enter an API key";
-                        }
-                        else {
-                            try {
-                                fetchedModels = modelFetcher.fetchModels(apiKey);
-                                LOGGER.info("Retrieved models {} for provider: {}", fetchedModels , llmMode);
-                                if (selectedLanguageModel != null && selectedLanguageModel.equals("No models available. Please enter an API key")) {
-                                    selectedLanguageModel="";
-                                }
-                            } catch (Exception e) {
-                                LOGGER.error("Error fetching models: {}", e.getMessage(), e);
-                                fetchedModels = new ArrayList<>();
-                            }
-                        }
+                if (modelFetcher != null && !apiKey.isEmpty()) {
+                    fetchedModels = modelFetcher.fetchModels(apiKey);
+                    LOGGER.debug("Retrieved models {} for provider: {}", fetchedModels, provider);
+                    if ("No models available. Please enter an API key".equals(selectedLanguageModel)) {
+                        selectedLanguageModel = "";
                     }
-                    this.modelList = fetchedModels;
-                    LOGGER.debug("this.modelList: {}", this.modelList);
-                    LOGGER.info("modelList: {}", this.modelList);
-                    this.save();
                 }
+                this.modelList = ModelAvailabilityPolicy.sanitizeModelList(fetchedModels);
+                this.modelListStatus = ModelAvailabilityPolicy.statusForResult(this.modelList);
+                this.save();
             } catch (Exception e) {
-                LOGGER.error("Exception in updateModels: {}", e.getMessage(), e);
-                this.modelList = new ArrayList<>();
+                this.modelList = List.of();
+                if ("ollama".equals(provider)) {
+                    this.modelListStatus = ModelAvailabilityPolicy.Status.UNAVAILABLE;
+                    logOllamaUnavailable(e);
+                } else {
+                    this.modelListStatus = ModelAvailabilityPolicy.Status.FAILED;
+                    LOGGER.error("Exception in updateModels: {}", e.getMessage(), e);
+                }
                 this.save();
             }
 
-        });
+        }).whenComplete((ignored, failure) -> modelFetchInFlight.set(false));
+        return modelFetchCompletion;
+    }
+
+    private static void logOllamaUnavailable(Exception failure) {
+        // getLanguageModels.get() currently probes this fixed endpoint.
+        String url = "http://localhost:11434";
+        if (ModelAvailabilityPolicy.shouldLogUnavailableAtInfo(OLLAMA_UNAVAILABLE_LOGGED.getAndSet(true))) {
+            LOGGER.info("Ollama not detected at {} — optional, only needed for AI chat", url);
+        } else {
+            LOGGER.debug("Ollama not detected at {}: {}", url, failure.getMessage());
+        }
     }
 
     /** Lock object for save/load serialization — prevents concurrent writes corrupting the JSON. */
@@ -345,6 +356,8 @@ public class ManualConfig {
             Gson gson = new Gson();
             Type type = new TypeToken<ManualConfig>(){}.getType();
             ManualConfig loadedConfig = gson.fromJson(reader, type);
+            loadedConfig.modelList = ModelAvailabilityPolicy.sanitizeModelList(loadedConfig.modelList);
+            loadedConfig.selectedLanguageModel = ModelAvailabilityPolicy.sanitizeSelection(loadedConfig.selectedLanguageModel);
             // After loading, ensure the model list is updated.
             String currentProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
             loadedConfig.checkAndUpdateProvider(currentProvider);
@@ -467,7 +480,11 @@ public class ManualConfig {
     }
 
     public void setModelList(List<String> modelList) {
-        this.modelList = modelList;
+        this.modelList = ModelAvailabilityPolicy.sanitizeModelList(modelList);
+    }
+
+    public ModelAvailabilityPolicy.Status getModelListStatus() {
+        return modelListStatus;
     }
 
     public String getSelectedLanguageModel() {
@@ -475,10 +492,9 @@ public class ManualConfig {
     }
 
     public void setSelectedLanguageModel(String selectedLanguageModel) {
+        selectedLanguageModel = ModelAvailabilityPolicy.sanitizeSelection(selectedLanguageModel);
         this.selectedLanguageModel = selectedLanguageModel;
-        if (selectedLanguageModel != null) {
-            System.setProperty("frens.llmModel", selectedLanguageModel);
-        }
+        System.setProperty("frens.llmModel", selectedLanguageModel);
     }
 
     public String getLlmMode() {
