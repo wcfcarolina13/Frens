@@ -31,6 +31,7 @@ import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.services.follow.RedstoneDoorPolicy;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.minecraft.item.ItemStack;
@@ -57,6 +58,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 public final class MovementService {
@@ -2000,6 +2002,16 @@ public final class MovementService {
     }
 
     public static boolean tryOpenDoorAt(ServerPlayerEntity player, BlockPos candidate) {
+        if (player == null || candidate == null) {
+            return false;
+        }
+        AtomicBoolean result = new AtomicBoolean();
+        boolean dispatched = runOnServerThread(player,
+                () -> result.set(tryOpenDoorAtOnServer(player, candidate)));
+        return dispatched && result.get();
+    }
+
+    private static boolean tryOpenDoorAtOnServer(ServerPlayerEntity player, BlockPos candidate) {
         ServerWorld world = getWorld(player);
         if (player == null || candidate == null || world == null) {
             return false;
@@ -2012,16 +2024,16 @@ public final class MovementService {
         if (!isOpenableBlock(state)) {
             return false;
         }
+        // Locked blocks cannot be opened by bots
+        if (LockableBlockService.isLocked(world, openablePos)) {
+            LockableBlockService.maybeShowBotReaction(player, openablePos);
+            return false;
+        }
         if (state.getBlock() instanceof DoorBlock && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
             maybeWarnIronDoor(player, openablePos);
             return false;
         }
-        // Locked blocks cannot be opened by bots
-        if (world instanceof net.minecraft.server.world.ServerWorld sw
-                && LockableBlockService.isLocked(sw, openablePos)) {
-            LockableBlockService.maybeShowBotReaction(player, openablePos);
-            return false;
-        }
+        RedstoneDoorPolicy before = classifyDoor(world, openablePos, state, false);
 
         Direction toward = approximateToward(player.getBlockPos(), openablePos);
         if (!toward.getAxis().isHorizontal()) {
@@ -2032,10 +2044,10 @@ public final class MovementService {
 
         if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
             // Treat an already-open openable as a success so callers can commit to stepping through.
-            if (isAutoCloseOpenable(state) && doorAttemptAllowed(player.getUuid(), openablePos)) {
-                scheduleDoorClose(player, world.getRegistryKey(), openablePos.toImmutable(), travelDir);
-            }
             return true;
+        }
+        if (!before.mayHandOpen()) {
+            return false;
         }
         if (!doorAttemptAllowed(player.getUuid(), openablePos)) {
             return false;
@@ -2048,22 +2060,17 @@ public final class MovementService {
             return false;
         }
 
-        boolean opened = runOnServerThread(player, () -> {
-            Vec3d hitVec = Vec3d.ofCenter(openablePos).add(0, 0.35, 0);
-            BlockHitResult hit = new BlockHitResult(hitVec, hitFacing, openablePos, false);
-            ActionResult result = player.interactionManager.interactBlock(player, world, player.getMainHandStack(), Hand.MAIN_HAND, hit);
-            if (result.isAccepted()) {
-                player.swingHand(Hand.MAIN_HAND, true);
-            }
-        });
-        if (!opened) {
-            maybeLogDoor(player, openablePos, "door-open failed: interactBlock dispatch failed");
-            return false;
+        Vec3d hitVec = Vec3d.ofCenter(openablePos).add(0, 0.35, 0);
+        BlockHitResult hit = new BlockHitResult(hitVec, hitFacing, openablePos, false);
+        ActionResult result = player.interactionManager.interactBlock(player, world, player.getMainHandStack(), Hand.MAIN_HAND, hit);
+        if (result.isAccepted()) {
+            player.swingHand(Hand.MAIN_HAND, true);
         }
         // If the interaction did open the door/gate, schedule a close once we've passed through.
         BlockState after = world.getBlockState(openablePos);
         if (after.contains(Properties.OPEN) && Boolean.TRUE.equals(after.get(Properties.OPEN))) {
-            if (isAutoCloseOpenable(after)) {
+            if (result.isAccepted() && isAutoCloseOpenable(after)
+                    && classifyDoor(world, openablePos, after, true).shouldScheduleOwnClose()) {
                 scheduleDoorClose(player, world.getRegistryKey(), openablePos.toImmutable(), travelDir);
             }
             maybeLogDoor(player, openablePos, "door-open success");
@@ -2217,6 +2224,33 @@ public final class MovementService {
                 || state.getBlock() instanceof FenceGateBlock;
     }
 
+    private static RedstoneDoorPolicy classifyDoor(ServerWorld world, BlockPos pos, BlockState state,
+                                                    boolean openedByBot) {
+        boolean plateAdjacent = false;
+        boolean triggerAdjacent = false;
+        BlockPos[] parts = state.getBlock() instanceof DoorBlock
+                ? new BlockPos[]{pos, pos.up()} : new BlockPos[]{pos};
+        for (BlockPos part : parts) {
+            for (Direction direction : Direction.values()) {
+                BlockState neighbor = world.getBlockState(part.offset(direction));
+                if (neighbor.isIn(BlockTags.PRESSURE_PLATES)) {
+                    plateAdjacent = true;
+                }
+                if (ProtectedStructureBlockHelper.isRedstoneComponent(neighbor)) {
+                    triggerAdjacent = true;
+                }
+            }
+        }
+        boolean opensByHand = state.getBlock() instanceof DoorBlock
+                ? DoorBlock.canOpenByHand(state)
+                : state.getBlock() instanceof FenceGateBlock
+                || (state.getBlock() instanceof TrapdoorBlock && !state.isOf(Blocks.IRON_TRAPDOOR));
+        return new RedstoneDoorPolicy(false,
+                state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN)),
+                state.contains(Properties.POWERED) && Boolean.TRUE.equals(state.get(Properties.POWERED)),
+                opensByHand, openedByBot, plateAdjacent, triggerAdjacent);
+    }
+
     private static BlockPos normalizeOpenableBase(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) {
             return null;
@@ -2263,6 +2297,11 @@ public final class MovementService {
         if (player == null || doorPos == null || message == null) {
             return;
         }
+        MinecraftServer server = player.getCommandSource().getServer();
+        if (server != null && !server.isOnThread()) {
+            server.execute(() -> maybeLogDoor(player, doorPos, message));
+            return;
+        }
         UUID id = player.getUuid();
         long now = System.currentTimeMillis();
         // Throttle per (door, message kind). Keyed on the door alone, a "door-open blocked" fired
@@ -2275,7 +2314,14 @@ public final class MovementService {
             return;
         }
         perBot.put(key, now);
-        LOGGER.info("Door debug: bot={} door={} msg={}", player.getName().getString(), doorPos.toShortString(), message);
+        ServerWorld world = getWorld(player);
+        BlockState state = world != null ? world.getBlockState(doorPos) : null;
+        RedstoneDoorPolicy door = state != null && isOpenableBlock(state)
+                ? classifyDoor(world, doorPos, state, false) : null;
+        LOGGER.info("Door debug: bot={} door={} open={} powered={} controlled={} msg={}",
+                player.getName().getString(), doorPos.toShortString(),
+                door != null && door.open(), door != null && door.powered(),
+                door != null && (door.plateAdjacent() || door.triggerAdjacent()), message);
     }
 
     private static boolean doorAttemptAllowed(UUID botUuid, BlockPos doorPos) {
@@ -2367,6 +2413,14 @@ public final class MovementService {
             if (!isAutoCloseOpenable(state) || !state.contains(Properties.OPEN) || !Boolean.TRUE.equals(state.get(Properties.OPEN))) {
                 return;
             }
+            if (LockableBlockService.isLocked(world, doorPos)) {
+                return;
+            }
+            RedstoneDoorPolicy closePolicy = classifyDoor(world, doorPos, state, true);
+            if (!closePolicy.mayCloseNow()) {
+                maybeLogDoor(bot, doorPos, "door-close skip: powered or controlled");
+                return;
+            }
 
             // Close once the bot has actually passed through (wolf-like behavior: open, go through, close behind).
             BlockPos botPos = bot.getBlockPos();
@@ -2411,6 +2465,16 @@ public final class MovementService {
                 scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
                 return;
             }
+            // Re-read immediately before interaction; a plate can switch on during retries.
+            BlockState clickState = world.getBlockState(doorPos);
+            if (LockableBlockService.isLocked(world, doorPos)) {
+                return;
+            }
+            if (!isAutoCloseOpenable(clickState)
+                    || !classifyDoor(world, doorPos, clickState, true).mayCloseNow()) {
+                maybeLogDoor(bot, doorPos, "door-close skip: powered or controlled before click");
+                return;
+            }
             
             Direction toward = bot.getHorizontalFacing();
             Vec3d hitVec = Vec3d.ofCenter(doorPos).add(0, 0.35, 0);
@@ -2421,12 +2485,17 @@ public final class MovementService {
             }
 
             BlockState after = world.getBlockState(doorPos);
-            if (isAutoCloseOpenable(after) && after.contains(Properties.OPEN) && !Boolean.TRUE.equals(after.get(Properties.OPEN))) {
-                markDoorRecentlyClosed(botUuid, doorPos, 8_000L);
+            if (result.isAccepted() && isAutoCloseOpenable(after) && after.contains(Properties.OPEN)
+                    && !Boolean.TRUE.equals(after.get(Properties.OPEN))) {
+                boolean markRecent = classifyDoor(world, doorPos, after, true).shouldMarkRecentlyClosed();
+                if (markRecent) {
+                    markDoorRecentlyClosed(botUuid, doorPos, 8_000L);
+                }
                 // Also throttle re-open attempts after we close a door behind us; reduces follow “door loops”.
                 Map<BlockPos, Long> perBot = DOOR_CLOSE_COOLDOWN.computeIfAbsent(botUuid, __ -> new ConcurrentHashMap<>());
                 perBot.put(doorPos.toImmutable(), System.currentTimeMillis());
-                maybeLogDoor(bot, doorPos, "door-closed: marked recently closed");
+                maybeLogDoor(bot, doorPos, markRecent
+                        ? "door-closed: marked recently closed" : "door-closed: controlled, not marked recent");
             }
         }), 520L, TimeUnit.MILLISECONDS);
     }
