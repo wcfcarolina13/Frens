@@ -75,6 +75,12 @@ public final class LLMOrchestrator {
         if (server == null) {
             return false;
         }
+        // Public entry point: authorise the sender against this bot here too (owner, operator or
+        // host), so no caller can dispatch on someone else's bot.
+        ServerPlayerEntity sender = server.getPlayerManager().getPlayer(playerUuid);
+        if (sender == null || !Frens.isLegacyChatAuthorized(sender, bot)) {
+            return false;
+        }
         if (!isWorldEnabled()) {
             return false;
         }

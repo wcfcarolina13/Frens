@@ -122,6 +122,37 @@ public class Frens implements ModInitializer {
         return true;
     }
 
+    private static final ConcurrentHashMap<UUID, Long> LAST_LEGACY_CHAT_DENY_WARN_MS = new ConcurrentHashMap<>();
+    private static final long LEGACY_CHAT_DENY_WARN_INTERVAL_MS = 10_000L;
+
+    /**
+     * Server thread. Whether {@code sender} may drive {@code bot} through the legacy chat routes
+     * (LLM orchestrator, inline action parser): operator, integrated host, or the bot's recorded
+     * owner ({@link net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy}). A denial logs a WARN at
+     * most once per sender per 10 s.
+     */
+    public static boolean isLegacyChatAuthorized(ServerPlayerEntity sender, ServerPlayerEntity bot) {
+        if (sender == null || bot == null || serverInstance == null) {
+            return false;
+        }
+        boolean host = serverInstance.isHost(new PlayerConfigEntry(sender.getGameProfile()));
+        boolean allowed = net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy.isAuthorized(
+                host,
+                isOperator(sender),
+                sender.getUuid(),
+                net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy.resolveOwnerUuid(bot));
+        if (!allowed) {
+            long now = System.currentTimeMillis();
+            Long last = LAST_LEGACY_CHAT_DENY_WARN_MS.get(sender.getUuid());
+            if (last == null || now - last >= LEGACY_CHAT_DENY_WARN_INTERVAL_MS) {
+                LAST_LEGACY_CHAT_DENY_WARN_MS.put(sender.getUuid(), now);
+                LOGGER.warn("[legacy-chat] denied {} -> {}: not the owner, an operator or the host",
+                        sender.getName().getString(), bot.getName().getString());
+            }
+        }
+        return allowed;
+    }
+
     public static boolean hasBotCommandPermission(ServerCommandSource source) {
         if (source == null) {
             return false;
@@ -1425,6 +1456,11 @@ public class Frens implements ModInitializer {
                     if (target.prompt().isEmpty()) {
                         continue;
                     }
+                    // Only the owner, an operator or the host may drive a bot through the legacy
+                    // route -- checked before any status output or dispatch.
+                    if (!isLegacyChatAuthorized(sender, bot)) {
+                        continue;
+                    }
                     ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
                     ChatUtils.sendChatMessages(botSource, "Processing your message, please wait.");
                     handled |= LLMOrchestrator.handleChat(
@@ -1698,6 +1734,11 @@ public class Frens implements ModInitializer {
 
     private static void handleLegacyInlineActionPrompt(ServerPlayerEntity bot, ServerPlayerEntity sender, String userPrompt) {
         if (bot == null || sender == null || userPrompt == null || userPrompt.isBlank()) {
+            return;
+        }
+        // Authorisation first: both the explicit-target fallback and the raw leading-name lookup
+        // land here, so neither can drive a bot the sender doesn't own.
+        if (!isLegacyChatAuthorized(sender, bot)) {
             return;
         }
         // NLPProcessor's static init builds an OllamaAPI (and it imports DJL); both are compileOnly,
