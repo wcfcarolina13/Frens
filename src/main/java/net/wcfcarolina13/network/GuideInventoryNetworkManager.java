@@ -3,13 +3,15 @@ package net.wcfcarolina13.network;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Commands.modCommandRegistry;
+import net.wcfcarolina13.EntityUtil;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.ui.BotInventoryAccess;
 
 /**
  * Server-side handler for guide-initiated remote bot inventory opens.
- * Both admins and non-admins can access the bot inventory via the guide.
+ * Only the bot's owner, an operator or the integrated host may open it ({@link BotAccessGate}).
  * Full inventory access (Actions/Dialogue/shared inventory) requires proximity,
  * operator status, or appropriate artifacts (Wizard's Tome / Enchanting Table).
  * Without these, only the Admin tab is usable.
@@ -49,6 +51,13 @@ public final class GuideInventoryNetworkManager {
 
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botAlias);
         if (bot == null) {
+            return;
+        }
+        // Only the bot's owner, an operator or the integrated host, and never a real player's
+        // inventory — checked before the screen opens or any access status is sent.
+        if (!BotAccessGate.permits(player, bot, "guide-inventory")) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                    "\u00A7cOnly " + EntityUtil.safeDisplayName(botAlias) + "'s owner can open that inventory.\u00A7r");
             return;
         }
 

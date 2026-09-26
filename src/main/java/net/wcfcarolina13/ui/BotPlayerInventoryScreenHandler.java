@@ -128,13 +128,25 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         }
     }
 
+    /**
+     * Re-checked every tick while the screen is open, so a bot that leaves the registry, changes
+     * owner, or is removed closes the screen. Owners also need the bot within 8 blocks in the same
+     * world; operators and the integrated host do not. Quiet: no deny WARN from here.
+     */
     @Override
     public boolean canUse(PlayerEntity player) {
         if (botRef == null) return true;
-        if (player instanceof ServerPlayerEntity serverPlayer && Frens.isOperator(serverPlayer)) {
-            return true;
+        if (!(player instanceof ServerPlayerEntity serverPlayer)) return false;
+        if (botRef.isRemoved()) return false;
+        net.wcfcarolina13.GameAI.services.BotAccessPolicy.Decision decision =
+                net.wcfcarolina13.network.BotAccessGate.decide(serverPlayer, botRef);
+        switch (decision) {
+            case ALLOW_OP, ALLOW_HOST -> { return true; }
+            case ALLOW_OWNER -> {
+                return player.getEntityWorld() == botRef.getEntityWorld() && player.squaredDistanceTo(botRef) <= 64.0;
+            }
+            default -> { return false; }
         }
-        return player.getEntityWorld() == botRef.getEntityWorld() && player.squaredDistanceTo(botRef) <= 64.0;
     }
 
     @Override
