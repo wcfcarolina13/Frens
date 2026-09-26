@@ -480,20 +480,6 @@ public class Frens implements ModInitializer {
 
         LOGGER.debug("Running on environment type: {}", FabricLoader.getInstance().getEnvironmentType());
 
-
-
-        String llmProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
-        System.out.println("Using provider: " + llmProvider);
-
-        // Debug: Print ALL system properties to see what's available
-        System.out.println("=== ALL SYSTEM PROPERTIES ===");
-        System.getProperties().forEach((key, value) -> {
-            if (key.toString().contains("frens") || key.toString().contains("aiplayer") || key.toString().contains("llm")) {
-                System.out.println(key + " = " + value);
-            }
-        });
-        System.out.println("=== END DEBUG ===");
-
         // registering the packets on the global entrypoint to recognise them
         PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
