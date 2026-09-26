@@ -64,6 +64,7 @@ public final class BotGuideScreen extends Screen {
     private static final int CATEGORY_ROW_H = 16;
     private static final int TOPIC_ROW_H = 18;
     private static final int SCROLL_STEP = 18;
+    private static final int AI_SETUP_BTN_W = 56;
 
     private final Screen parent;
     private final String botAlias;
@@ -103,7 +104,8 @@ public final class BotGuideScreen extends Screen {
             // Content within the Admin tab is filtered by permissions.
             showAdmin = true;
         }
-        int rightPad = showAdmin ? 62 : 8;
+        // "AI setup" always sits left of the optional Admin button (its width + a 4 px gap).
+        int rightPad = (showAdmin ? 62 : 8) + AI_SETUP_BTN_W + 4;
         int searchW = Math.max(100, this.width - searchX - rightPad);
         int searchY = (HEADER_H - 18) / 2;
 
@@ -140,6 +142,13 @@ public final class BotGuideScreen extends Screen {
                 }
             }).dimensions(this.width - 58, searchY, 50, 18).build());
         }
+
+        int aiSetupX = (showAdmin ? this.width - 58 : this.width - 8) - 4 - AI_SETUP_BTN_W;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("AI setup"), b -> {
+            if (this.client != null) {
+                this.client.setScreen(new AiSetupChecklistScreen(this));
+            }
+        }).dimensions(aiSetupX, searchY, AI_SETUP_BTN_W, 18).build());
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(cx - 40, this.height - 24, 80, 20)
@@ -730,6 +739,24 @@ public final class BotGuideScreen extends Screen {
         String target = botTarget();
         String guideKey = FrensClient.getGuideHotkeyDisplayName();
         return List.of(
+                new GuideTopic(
+                        "basics_ai_setup",
+                        "Basics",
+                        "Set up AI companions",
+                        "Optional: let companions talk back in their own words. Frens works fully without it.",
+                        List.of(
+                                "Everything else in Frens (skills, following, building, scripted lines) works with no AI at all.",
+                                "AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Nothing is sent to an online service.",
+                                "Open the checklist with the AI setup button at the top right of this guide, or Setup… on the Soul Chat row in Bot Controls.",
+                                "It walks you through: install Ollama, download a model (1B ≈4 GB RAM, 3B ≈6 GB, 8B ≈12 GB, plus Minecraft's own memory), turn Soul Chat on, enable each companion, then say hi in chat.",
+                                "Soul Chat is the world-wide switch; each companion also has to be enabled. The checklist shows both.",
+                                "In multiplayer only an operator or the host can change the server's AI settings; you can still enable your own companions.",
+                                "Voice is optional and can be added last."
+                        ),
+                        "UI: Guide > AI setup (or /bot soul system on, /bot soul enable <bot>)",
+                        "Guide header: AI setup | Bot Controls: Soul Chat > Setup…",
+                        "ai llm ollama model soul souls chat talk reply persona setup install enable voice optional"
+                ),
                 new GuideTopic(
                         "basics_group_chat",
                         "Basics",

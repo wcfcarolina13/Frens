@@ -45,7 +45,7 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
             new GlobalToggleDef("Scripted Text", "SCRIPTED lane — text of the pre-baked lines (holograms, subtitles, chat fallbacks). Adv… mutes single categories while this is on. Does NOT touch anything the LLM says (see Soul Chat)."),
             new GlobalToggleDef("Scripted Voice", "SCRIPTED lane — audio of the pre-baked voice lines. Adv… mutes single categories while this is on; per-bot Voiced Dialogue can mute one bot. Does NOT touch the soul TTS (see Soul Voice)."),
-            new GlobalToggleDef("Soul Chat", "SOUL lane master — the local-LLM persona: replies when you talk to a soul-bound bot, plus every unprompted scene below. Off = the LLM says nothing at all. Same switch as /bot soul enable."),
+            new GlobalToggleDef("Soul Chat", "SOUL lane master — the local-LLM persona: replies when you talk to a soul-bound bot, plus every unprompted scene below. Off = the LLM says nothing at all. Turns AI chat on for this world (same switch as /bot soul system on). Each bot also has to be enabled — open Set up AI companions (Setup…)."),
             new GlobalToggleDef("Soul Voice", "SOUL lane — text-to-speech for what the LLM says, in each bot's assigned voice (Eng… picks the engine; /bot soul voice list|install|assign picks voices). Independent of Scripted Voice."),
             new GlobalToggleDef("Soul Banter", "SOUL lane — companions chat on their own when things are calm (one nearby bot may speak to you; 2+ chat among themselves and may pull you in). Needs Soul Chat. Rate… tunes how often. /bot soul banter status explains the last verdict; /bot soul banter now skips the wait."),
             new GlobalToggleDef("Soul Active", "SOUL lane — companions also chat while WORKING (a skill running or actively following you). Needs Soul Chat. Own cadence under Rate…; /bot soul banter status shows this lane too."),
@@ -61,6 +61,7 @@ public class BotControlScreen extends Screen {
     private static final int ACTIVE_TOGGLE_INDEX = 9;
     private static final int LOCAL_TOGGLE_INDEX = 10;
     private static final int VOICE_ADV_W = 34;
+    private static final int SOUL_SETUP_W = 44;
 
     // Layout constants
     private static final int BUTTON_H = 20;
@@ -100,6 +101,8 @@ public class BotControlScreen extends Screen {
     // Global toggle state
     private boolean[] globalValues = new boolean[GLOBAL_TOGGLES.size()];
     private boolean globalsLoaded = false;
+    /** Set when the AI setup checklist was opened from here; see init(). */
+    private boolean returningFromAiSetup = false;
     private boolean globalsExpanded = false;
 
     // Bot selector
@@ -163,6 +166,8 @@ public class BotControlScreen extends Screen {
     private Rect soulVoiceEngineRect;
     /** "LLM…" chip on the Soul Chat row — opens the soul model manager (Ollama). */
     private Rect soulChatModelRect;
+    /** "Setup…" chip left of "LLM…" on the Soul Chat row — opens the AI setup checklist. */
+    private Rect soulChatSetupRect;
     /** "Rates…" chip on the Banter row — opens the four dialogue-frequency sliders. */
     private Rect dialogueRatesRect;
     // Bulk-apply action buttons (only populated when panel is expanded).
@@ -252,7 +257,12 @@ public class BotControlScreen extends Screen {
             globalValues[ACTIVE_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterActiveEnabled();
             globalValues[LOCAL_TOGGLE_INDEX] = Frens.CONFIG.isSoulLocalChatEnabled();
             globalsLoaded = true;
+        } else if (returningFromAiSetup) {
+            // The checklist's "Turn on" changes Soul Chat on the server (and the synced config
+            // mirror) — pick that up, or saving this screen would switch it straight back.
+            globalValues[SOUL_CHAT_TOGGLE_INDEX] = Frens.CONFIG.isSoulsEnabled();
         }
+        returningFromAiSetup = false;
 
         recomputeLayout();
 
@@ -580,7 +590,9 @@ public class BotControlScreen extends Screen {
         config.setGlobalTeleportDuringSkills(globalValues[3] ? null : Boolean.FALSE);
         config.setTextDialogueEnabled(globalValues[4]);
         config.setVoicedDialogueEnabled(globalValues[5]);
-        // Soul toggles: same fields as /bot soul enable|disable and /bot soul voice on|off.
+        // Soul toggles: same fields as /bot soul system on|off and /bot soul voice on|off.
+        // Soul Chat turns AI chat on for this world; each bot also has to be enabled (open
+        // Set up AI companions, or /bot soul enable <bot>).
         // The live runtime reads a settings snapshot, so a change must trigger reloadSettings
         // (same pattern as BotSoulCommands.awaitReloadThenReport) or it would sit dormant
         // until the next server start.
@@ -745,6 +757,7 @@ public class BotControlScreen extends Screen {
         textAdvancedRect = null;
         soulVoiceEngineRect = null;
         soulChatModelRect = null;
+        soulChatSetupRect = null;
         dialogueRatesRect = null;
 
         // Panel background
@@ -834,6 +847,7 @@ public class BotControlScreen extends Screen {
                     textAdvancedRect = advRect;
                 } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
                     soulChatModelRect = advRect;
+                    soulChatSetupRect = new Rect(advRect.x - SOUL_SETUP_W - 4, y + 1, SOUL_SETUP_W, rowH - 2);
                 } else if (i == BANTER_TOGGLE_INDEX) {
                     dialogueRatesRect = advRect;
                 } else {
@@ -841,7 +855,8 @@ public class BotControlScreen extends Screen {
                 }
             }
 
-            int labelMaxW = (advRect != null ? advRect.x : chipRect.x) - rowRect.x - 12;
+            int labelMaxW = (i == SOUL_CHAT_TOGGLE_INDEX && soulChatSetupRect != null ? soulChatSetupRect.x
+                    : advRect != null ? advRect.x : chipRect.x) - rowRect.x - 12;
             String label = elideToWidth(def.label(), Math.max(30, labelMaxW));
             int labelY = rowRect.y + (rowRect.h - this.textRenderer.fontHeight) / 2;
             // Soul Voice/Banter/Active/Local are inert while Soul Chat is off — say so visually.
@@ -850,6 +865,20 @@ public class BotControlScreen extends Screen {
                     rowRect.x + 6, labelY, inert ? COL_INFO : COL_LABEL, false);
 
             drawToggleChip(context, chipRect, globalValues[i], mouseX, mouseY);
+
+            if (i == SOUL_CHAT_TOGGLE_INDEX && soulChatSetupRect != null) {
+                boolean setupHover = soulChatSetupRect.contains(mouseX, mouseY);
+                context.fill(soulChatSetupRect.x, soulChatSetupRect.y, soulChatSetupRect.right(),
+                        soulChatSetupRect.bottom(), setupHover ? COL_CHIP_HL : COL_CHIP);
+                context.drawText(this.textRenderer, "Setup…", soulChatSetupRect.x + 5,
+                        soulChatSetupRect.y + (soulChatSetupRect.h - this.textRenderer.fontHeight) / 2,
+                        COL_LABEL, false);
+                if (setupHover && tooltipText == null) {
+                    updateTooltipCandidate("global-soul-chat-setup",
+                            "Set up AI companions: a step-by-step checklist (Ollama, model, Soul Chat, enabling each bot, a test chat, optional voice). AI chat is optional — Frens works fully without it.",
+                            mouseX, mouseY);
+                }
+            }
 
             if (advRect != null) {
                 boolean advHover = advRect.contains(mouseX, mouseY);
@@ -1484,6 +1513,13 @@ public class BotControlScreen extends Screen {
             if (soulVoiceEngineRect != null && soulVoiceEngineRect.contains(mx, my)) {
                 if (this.client != null) {
                     this.client.setScreen(new SoulVoiceEngineScreen(this));
+                }
+                return true;
+            }
+            if (soulChatSetupRect != null && soulChatSetupRect.contains(mx, my)) {
+                if (this.client != null) {
+                    returningFromAiSetup = true;
+                    this.client.setScreen(new AiSetupChecklistScreen(this));
                 }
                 return true;
             }
