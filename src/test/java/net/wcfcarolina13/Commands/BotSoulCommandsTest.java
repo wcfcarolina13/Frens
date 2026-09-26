@@ -120,4 +120,32 @@ class BotSoulCommandsTest {
         config.setSoulLocalChatEnabled(true);
         assertTrue(config.isSoulLocalChatEnabled());
     }
+
+    // === Prerequisite-aware "/bot soul enable" result (first problem wins) ===
+
+    @Test
+    void enableMessageWhenSoulChatIsOff() {
+        assertEquals("Bob will speak as Bob, but Soul Chat is OFF. Turn it on in Set up AI companions or run /bot soul system on.",
+                BotSoulCommands.enableMessage("Bob", "Bob", false, false, "", true));
+    }
+
+    @Test
+    void enableMessageWhenSettingsAreInvalid() {
+        assertEquals("Bob will speak as Bob, but Bob can't reply yet: Configure a local soul model first.",
+                BotSoulCommands.enableMessage("Bob", "Bob", false, true, "Configure a local soul model first.", null));
+    }
+
+    @Test
+    void enableMessageWhenOllamaIsNotAnswering() {
+        assertEquals("Bob will speak as Bob, but Ollama isn't answering on the server machine.",
+                BotSoulCommands.enableMessage("Bob", "Bob", false, true, "", false));
+    }
+
+    @Test
+    void enableMessageWhenEverythingIsReady() {
+        assertEquals("Bob is now speaking as Bob.",
+                BotSoulCommands.enableMessage("Bob", "Bob", false, true, "", true));
+        assertEquals("Steve is now speaking as Jake (no profile of their own is registered yet).",
+                BotSoulCommands.enableMessage("Steve", "Jake", true, true, "", true));
+    }
 }

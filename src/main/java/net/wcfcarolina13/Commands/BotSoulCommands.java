@@ -20,6 +20,7 @@ import net.wcfcarolina13.GameAI.souls.SoulTypes;
 import net.wcfcarolina13.GameAI.souls.voice.PocketVoiceEngine;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
 import net.wcfcarolina13.GameAI.souls.voice.VoiceCatalog;
+import net.wcfcarolina13.network.AiSetupActionPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -252,6 +253,18 @@ final class BotSoulCommands {
             return Optional.empty();
         }
         return validateVoicePaths(binary, model, isFile);
+    }
+
+    /**
+     * Prerequisite-aware result of {@code /bot soul enable}: Soul Chat off, then invalid settings,
+     * then Ollama not answering, else the plain success line. Delegates to
+     * {@link AiSetupActionPolicy#enableMessage}, which the setup checklist's Enable button uses
+     * too, so the two can never word it differently.
+     */
+    static String enableMessage(String botName, String personaName, boolean fallbackPersona,
+                                boolean soulsEnabled, String validationError, Boolean providerHealthy) {
+        return AiSetupActionPolicy.enableMessage(botName, personaName, fallbackPersona,
+                soulsEnabled, validationError, providerHealthy);
     }
 
     private static Optional<Boolean> parseOnOff(String raw) {
@@ -756,9 +769,18 @@ final class BotSoulCommands {
                     ChatUtils.sendSystemMessage(source, "Bound " + botName + " to " + personaName
                             + " but failed to activate.");
                 } else {
-                    ChatUtils.sendSystemMessage(source, botName + " is now speaking as " + personaName
-                            + (boundProfileId.equals(JAKE_PROFILE_ID) && !botName.equalsIgnoreCase("Jake")
-                                    ? " (no profile of their own is registered yet)." : "."));
+                    // Say what still stands between the player and a reply (switch off, no model,
+                    // Ollama down) instead of an unconditional success line.
+                    boolean soulsOn = runtime.isMasterEnabled();
+                    String validation = runtime.safeValidationError();
+                    boolean fallback = AiSetupActionPolicy.isFallbackPersona(botName, boundProfileId, JAKE_PROFILE_ID);
+                    java.util.concurrent.CompletableFuture<Boolean> health =
+                            soulsOn && (validation == null || validation.isBlank())
+                                    ? runtime.providerHealth().exceptionally(ex -> false)
+                                    : java.util.concurrent.CompletableFuture.completedFuture(null);
+                    health.whenComplete((healthy, healthErr) -> server.execute(() ->
+                            ChatUtils.sendSystemMessage(source, enableMessage(botName, personaName, fallback,
+                                    soulsOn, validation, healthErr != null ? Boolean.FALSE : healthy))));
                 }
             }));
         });
