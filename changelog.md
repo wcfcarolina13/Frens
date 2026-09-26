@@ -2,6 +2,151 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Companion supplies Phase 3: every automatic chest withdrawal asks through the supply policy; 1.1.221 (2026-09-25)
+
+Phase 3 of `docs/superpowers/plans/2026-09-08-companion-supplies-and-model-switching.md`. The 1.1.219 adapter was
+dormant; this build wires it. Every AUTOMATIC chest→bot withdrawal now goes through one facade,
+`SupplyWithdrawals.withdraw`: allowlist + tier + component check, the reserve (16 per material, 1 spare per equipment
+type), and the owner's answer (**Allow once / Always: common supplies, this chest / No**) or a standing Always
+permission. Owner-initiated moves stay outside it: `/bot withdraw`, Quick Fetch, and the storage screen's Collect,
+which 1.1.220 made owner-only.
+
+Scoping found the plan's bypass list incomplete. The biggest unlisted site was `CraftingHelper.withdrawFromNearbyChests`,
+reached from ~20 craft methods. Two listed sites were not what the list said: Hunt's weapon pull was dead code, and
+NavigationArtifactService's "withdraw" is the owner's Collect button.
+
+**A fact that changes how to read this build:** in 1.21.11 `World.getBlockEntity` returns null off the server thread
+(javap-verified; `ServerWorld` doesn't override it). Every worker-thread chest read before 1.1.221 therefore saw
+nothing: CraftingHelper pulls from skills and `/bot craft`, MutualAid's worker callers, and all of HuntSkill's
+container code. Those reads now hop to the server thread. **Prompts during skills and `/bot craft` are new behaviour,
+not old behaviour newly gated.** The Hunt deletions change nothing at runtime.
+
+### Foundation (supply package)
+- `9d8e4f03` feat (3a) — decisions made before wiring:
+  - Pre-1.1.219 bot chest records (no owner) now read as unrecorded, PLAYER_STORAGE, so they prompt. A failed
+    registry lookup still denies. A legacy half beside an owned half reads DENY_MIXED.
+  - Ledger sweep every 20 ticks.
+  - A valid empty Always file no longer WARNs.
+  - `/frens supply revoke all`.
+- `b4537dfa` feat (3b) — `SupplyWithdrawals` facade:
+  - thread-adaptive; WaitMode NONE / UNTIL_ANSWERED;
+  - two-phase ask → walk → redeem, so the walk overlaps the owner's decision;
+  - a policy pre-filter, so no prompt and no INFO line for an item the policy never allows;
+  - `transferNow` returns a status;
+  - the entry-point test replaces the dormancy rule.
+- `a0ead21b` fix — READY only when a grant or Always exists; `grantableEstimate` for availability counts.
+
+### Sites
+- `bb654005` + `1948b083` — ToolProvisionService, ChestStoreService, Harvest, idle hobbies:
+  - The TPS raw moves (idle wooden fallback, saddle, lead, fence, leather) collapse into one choke point that uses
+    chests in reach.
+  - Chest tool retrieval (Woodcut, Durability) and Harvest seed restock ask before walking.
+  - Woodcut start and Harvest wait for the answer (UNTIL_ANSWERED). Every other caller asks and redeems on a later
+    call.
+  - The idle fallback holds while a prompt is open and backs off on refusals.
+  - Availability counts use `grantableEstimate` on the server thread.
+- `19aa1325` — CraftingHelper pulls:
+  - On the server thread: chests in reach only, and it never walks. This removes an on-tick walk with `Thread.sleep`.
+  - On workers: ask, walk, then ask again.
+- `088d1f8e` + `b4560d62` — MutualAid chest food through the facade:
+  - chest-only merged reads;
+  - all callers hop to the server thread;
+  - an 8 s throttle on every attempt.
+- `088d1f8e` also deletes HuntSkill's container pulls. The weapon pull was dead: the `:418` gate and the `:1217` early
+  return, plus the off-thread null. The remote food take through walls went too; MutualAid's tick covers chest food.
+- `4e7fbf40` test — `SupplyBypassClosedTest`:
+  - a ratchet on every file that obtains a world container (file → count → reason, strict both ways);
+  - each choke point must name the facade;
+  - the deleted pulls must stay deleted.
+
+### Review wave (three reviewers), fix wave, two re-reviews
+- `f167b65b` fix (facade):
+  - **"Allow once" didn't work in this build's pre-review commits** (never released: 1.1.219 was dormant); only Always
+    worked. Tickets were one per bot, so any unrelated ask (or an earlier item in the same pass) dropped a permitted,
+    unredeemed ticket, and the re-ask hit the 15 s prompt cooldown. Tickets are now keyed by (chest, exact item), and
+    the step checks permission first.
+  - The owner's latest answer wins: No clears an earlier grant.
+  - A typed refusal scope.
+  - A quiet owner-less pre-check.
+  - A stopping guard.
+  - One abandon-safe `SupplyServerHop` that every supply hop uses.
+  - Revoke-all counts grants.
+  - `SupplyDormancyTest` → `SupplyEntryPointTest`, which also pins the facade's public surface.
+- `ee67be61` fix — **MutualAid make-room never walks or places a chest on the server thread.** Critical: it reached
+  `depositMatchingWalkOnly` → `MovementService` and could freeze the tick. It only drops a cheap stack now.
+- `71bf16cb` fix — CraftingHelper:
+  - NOT_PERMITTED stops the pass (before, it prompted at the next chest right after a No);
+  - no walking while a prompt is unanswered;
+  - a chest refusal skips both halves.
+- `3807cf8e` + `1974f493` fix — ToolProvision, ChestStore, Harvest, idle hobbies:
+  - UNTIL_ANSWERED skips the tool-search pause, so Woodcut no longer fails for up to 10 min after Bradley returns;
+  - owner-away never counts as a miss;
+  - pause maps are cleared at stop;
+  - Harvest asks for the remaining plot count;
+  - a quiet re-look while a prompt is open (no registry write);
+  - dead code removed (`ContainerSlot.inv`, `performStoreTransfer`);
+  - a stale abort latch can't cancel a Durability search.
+- `0da16151` + `7741582b` fix — one refusal-scope rule for every site, found wrong in two places by three site agents
+  independently:
+
+  | Scope | Reasons | Site rule |
+  |---|---|---|
+  | ITEM | never allowlisted / tier / components / no need | skip the item |
+  | CHEST | denied / mismatch / out of reach / unreadable | skip the chest (both halves) |
+  | TARGET | reserve reached / no stock / drained during the walk | skip just this stack |
+  | OWNER_ABSENT | owner not nearby | skip the chest (an Always chest further off is still reached); an otherwise empty pass defers a flat 60 s, never a miss |
+  | BOT | No / ignored prompt / prompt or reject cooldown / no owner | stop and pause |
+  | BUSY | another prompt open / server busy / aborted | stop, retry soon, never a miss |
+
+  - PROMPT_COOLDOWN stays BOT on purpose: as BUSY, an ignored prompt led to alternating prompts for two items.
+  - A reserve drained mid-walk drops the ticket, so there is no walk-refuse loop.
+  - The owner-away memo is per bot (30 s) and quiet for chests without an Always: at most 4 `[supply]` lines a minute
+    per bot while you're away, where the pre-review build logged about 15 a minute per chest.
+- `afc29a2f` fix (re-reviews):
+  - A full inventory gets its own scope (INVENTORY_FULL) and no longer holds the idle wooden fallback forever.
+  - `/bot stop` now ends the chest tool search: the task is read once before the loop, because stop removes it at
+    once.
+  - A request that an unspent Allow once already covers takes under that grant, with no second prompt. The ledger
+    decides, after the reserve and access checks.
+- `e7e8430a` test — after rebasing onto 1.1.220, the ratchet counts its chest-only Collect arrival check
+  (NavigationArtifactService 1 → 2, the same owner-initiated take).
+- `30835437` fix (review of `afc29a2f`) — a chest tool search that ends on a full inventory pauses a flat 60 s, never a
+  miss. The facade answers a full bot READY, so before this Woodcut walked to the chest for NO_ROOM before every log.
+
+**Rulings (Bradley pre-approved the recommended options; cost if wrong):**
+- Legacy null-owner chests prompt. Cost: another player's bot can prompt ITS owner for common items above the reserve
+  from your pre-1.1.219 bot chest. Territory still blocks it inside zones and forts. The exposure is the same as for
+  hand-placed chests.
+- Always-covered withdrawals don't need the owner online. Cost: bots draw allowlisted items above the reserve while
+  you're away; `/frens supply revoke` or `revoke all` removes it.
+- The policy is the single source of truth. Saddle, lead, fences, leather, string, iron and better, raw meat, and
+  barrels are never auto-taken. Cost: mount, lead, craft and durability fallbacks need you to hand items over or run
+  `/bot withdraw`.
+- No starvation carve-out. Food keeps the 16 reserve. Cost: a bot beside ≤16 food in a chest can't eat from it; hunt,
+  seek-from-bot and emergency rescue still run.
+- `/bot craft` and `/bot harvest` pulls count as automatic.
+- Only Woodcut start and Harvest wait for an answer. Cost: `/bot craft` opens the prompt and fails that attempt; run it
+  again within a minute of clicking Allow.
+- The owner-within-32 rule now gates autonomous tool retrieval. Cost: an idle woodcut started far from you fails until
+  the supply chest has an Always.
+- A lone axe in a chest is never auto-taken (the equipment spare).
+- Out of scope: vehicle contents and furnaces.
+
+**Deferred:**
+- Worker skills still can't craft from chest materials. There is one prompt per bot, so a plank ask would block the
+  tool ask. Fixing that needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling (Phase 4).
+- `ensureCraftingStation` and MutualAid's other make-room paths (`tryMakeSpaceForNearbyDroppedFood`,
+  `ensureInventorySpaceForAidRecipient`) still walk on the calling thread, including the tick (pre-existing).
+- `grantableEstimate` is per half, so it under-counts double chests.
+- Three "other half of a double chest" helpers.
+- CraftingHelper's pull hints aren't cleared at stop.
+- A double chest whose other half is unloaded reads as unreadable.
+- A grant-covered ask while the owner is away is still refused (only Always skips the range check).
+
+Tests 1280 → 1434 (this build +154). Scope notes and reviews (local): `.superpowers/sdd/SCOPE-supplies-phase3/`.
+
+**Field checks:** Phase 6s in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
 ## Chest registry screen — owner-only Collect / Go / Dismiss / Quick Store-Fetch (security fix); 1.1.220 (2026-09-25)
 
 A read-only scoper found this on 2026-09-25 at 54e876ea. Before this build, any multiplayer player could send the storage

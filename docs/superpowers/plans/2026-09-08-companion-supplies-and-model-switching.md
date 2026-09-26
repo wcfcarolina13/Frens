@@ -37,7 +37,7 @@ Each phase gets its detailed implementation/test plan before code. These are bou
 
 1. [x] Chest request policy and pending state: pure allowlist/reserve rules, exact request fingerprints, owner binding, expiry, rejection cooldown and replay tests. No live withdrawals yet. Done 2026-09-25 (see git log); rulings and scoping corrections below.
 2. [x] Chest adapter and authorization persistence (done 1.1.219, DORMANT — no callers; see "Supplies Phase 2" below): new server request/transfer service, authorization store, dedicated command registrar, initialization hook and changelog. Reuse clickable chat choices rather than adding an unnecessary screen. Verify current Fabric lock APIs before implementation.
-3. Close existing bypasses: ToolProvisionService raw withdrawals, ChestStoreService registered-tool withdrawals, and BotMutualAidService chest-food access route through the shared policy; integration tests cover simultaneous bots and changed stock. Restrict automatic supply discovery to supported chest containers.
+3. [x] (done 1.1.221; see "Supplies Phase 3" below) Close existing bypasses: ToolProvisionService raw withdrawals, ChestStoreService registered-tool withdrawals, and BotMutualAidService chest-food access route through the shared policy; integration tests cover simultaneous bots and changed stock. Restrict automatic supply discovery to supported chest containers.
 4. Storage-room walkthrough: add a need-driven proximity trigger independent of the idle weapon/axe early exit, enabling missing armor requests while following. Confirm following resumes without stealing task control.
 5. Helper request policy: eligibility, exclusive reservation, expiry/cancellation, one outstanding request and no recursive recruitment, with pure tests.
 6. Helper execution and fallback integration: one-tree skill, safe return and atomic transfer; replace the doomed no-axe dispatch and share the capability check with the other resource-woodcut entry. Do not wrap SkillManager.runSkill in TaskService.runAmbient: both acquire task tickets.
@@ -87,7 +87,7 @@ Phase 2 was built in two parts and reviewed once:
 - 2b `e3732272`: `SupplyRequestService` and `SupplyCommands`.
 - Review-wave fix `5c28366f`.
 
-`request(` and `transferNow(` have no production callers. `SupplyDormancyTest` enforces this; it also pins the
+`request(` and `transferNow(` had no production callers. `SupplyDormancyTest` (renamed `SupplyEntryPointTest` in 1.1.221) enforced this; it also pins the
 private bodies to their entry points and rejects reflective name strings. Rulings and deferrals are in the
 1.1.219 changelog entry. Scope notes (local): `.superpowers/sdd/SCOPE-supplies-phase2.md`.
 
@@ -110,3 +110,65 @@ Before wiring:
 - add a tick sweep of the ledger;
 - stop a valid empty Always file from WARNing;
 - add a revoke-all command (revoking from the surviving half of a broken double chest can't see the old key).
+All four were done in 1.1.221 (Phase 3 below).
+
+## Supplies Phase 3: every automatic withdrawal through the policy (done, 1.1.221)
+
+Scoping (four read-only scopers) found the list above incomplete and partly wrong:
+- `CraftingHelper.withdrawFromNearbyChests`, the largest site, was missing. It is reached from about 20 craft methods.
+- Hunt's weapon pull was dead code.
+- NavigationArtifactService's withdraw is the owner's Collect button, so it is exempt.
+
+Also verified: `World.getBlockEntity` returns null off the server thread in 1.21.11 (javap). Every worker-thread chest
+read before 1.1.221 saw nothing, so prompts during skills and `/bot craft` are new behaviour.
+
+**What landed:**
+- `SupplyWithdrawals.withdraw` is the only caller of `request`/`transferNow`. It is thread-adaptive and two-phase (ask →
+  walk → redeem). WaitMode is UNTIL_ANSWERED for Woodcut start and Harvest, NONE for everything else. It pre-filters
+  with the policy, keeps tickets per (bot, chest, exact item), and hops through the one abandon-safe `SupplyServerHop`.
+- Sites routed through it:
+  - ToolProvisionService: the idle wooden fallback, saddle, lead, fence, leather, and chest tool retrieval for Woodcut
+    and Durability.
+  - Harvest seed restock.
+  - CraftingHelper material pulls.
+  - MutualAid chest food.
+- HuntSkill's container pulls are deleted.
+- Discovery is chest-only everywhere.
+- Every refusal carries a scope, and all three site policies apply one rule to it:
+
+  | Scope | Site rule |
+  |---|---|
+  | ITEM | skip the item |
+  | CHEST | skip the chest (both halves) |
+  | TARGET | skip that stack only |
+  | OWNER_ABSENT | skip the chest; an otherwise empty pass defers a flat 60 s, never a miss |
+  | BOT | stop and pause |
+  | BUSY | stop, retry soon, never a miss |
+  | INVENTORY_FULL | stop; never holds the idle fallback |
+
+- The pre-wiring decisions:
+  - legacy null-owner records read as unrecorded, so they prompt;
+  - a ledger tick sweep;
+  - an empty Always file stays quiet;
+  - `/frens supply revoke all`.
+- Enforcement:
+  - `SupplyEntryPointTest`: only the facade calls request/transferNow, and the facade's public surface is pinned.
+  - `SupplyBypassClosedTest`: a ratchet on every file that obtains a world container, the choke points name the facade,
+    and the deleted pulls stay deleted.
+- "Integration tests cover simultaneous bots and changed stock" became pure sequence tests that drive the real ledger,
+  ticket book and policy. The test policy forbids Minecraft types in tests. Simultaneous bots are covered by the
+  per-bot ledger and the ticket keys; changed stock by the transfer-time re-check (INELIGIBLE_NOW drops the ticket).
+
+**Deferred to Phase 4 or later:**
+- Worker skills can't craft from chest materials: one prompt per bot, so a plank ask blocks the tool ask. Needs
+  WaitMode through `ensure*`/`craftGeneric` plus need-bundling, and a ruling.
+- `ensureCraftingStation` walks on the calling thread, including the idle tick.
+- MutualAid's other make-room paths (`tryMakeSpaceForNearbyDroppedFood`, `ensureInventorySpaceForAidRecipient`) walk on
+  the tick.
+- `grantableEstimate` is per half.
+- Three "other half" helpers.
+- CraftingHelper pull hints aren't cleared at stop.
+- A double chest whose other half is unloaded reads as unreadable.
+- A grant-covered ask while the owner is away is refused.
+
+Rulings and costs are in the 1.1.221 changelog entry.

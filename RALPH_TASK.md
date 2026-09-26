@@ -3,7 +3,77 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-25 (1.1.220) — next session starts here
+## Session Handoff 2026-09-25 (1.1.221) — next session starts here
+
+**State:** main = origin/main @ 1.1.221 (pushed; deployed to all three Prism instances 2026-09-25, game closed). Suite 1434
+green (1280 → 1434). One build, one item: supplies Phase 3. Done in a worktree branch and fast-forwarded into main.
+
+**Shipped in 1.1.221: companion supplies Phase 3.** Every AUTOMATIC chest→bot withdrawal goes through
+`SupplyWithdrawals.withdraw`: allowlist, reserve, and the owner's Allow once / Always / No, or an Always permission.
+- Sites:
+  - ToolProvisionService: the idle wooden fallback, saddle, lead, fence and leather, and chest tool retrieval for
+    Woodcut and Durability.
+  - Harvest seed restock.
+  - CraftingHelper material pulls, including `/bot craft`.
+  - MutualAid chest food.
+- HuntSkill's container pulls are deleted (dead or off-thread no-ops).
+- Owner-initiated moves stay outside: `/bot withdraw`, Quick Fetch, storage Collect.
+- `SupplyBypassClosedTest` ratchets every file that obtains a world container. `SupplyEntryPointTest` (formerly
+  `SupplyDormancyTest`) pins the facade as the only caller of request/transferNow.
+- New: `/frens supply revoke all`. Legacy (pre-1.1.219) bot chests now prompt instead of being refused.
+- javap-verified: `World.getBlockEntity` returns null off the server thread. Worker-thread chest reads before 1.1.221
+  saw nothing, so prompts during skills and `/bot craft` are NEW behaviour.
+- Details, rulings, deferrals: `changelog.md`. Scope notes (local): `.superpowers/sdd/SCOPE-supplies-phase3/`.
+
+**Rulings made on Bradley's behalf (cost if wrong in the changelog):**
+- Legacy chests prompt.
+- Always needs no owner online.
+- The policy is the single source of truth: no saddle, lead, iron and better, or raw meat is auto-taken.
+- No starvation carve-out.
+- `/bot craft` and `/bot harvest` pulls count as automatic.
+- Only Woodcut start and Harvest wait for an answer.
+- Owner-within-32 now gates autonomous tool retrieval unless the chest has an Always.
+
+**Field checks pending:** Phase 6s (new, 10 items; do its first item first: mark your supply chest Always), 6r (1.1.220
+Bot Storage screen owner-only), 6q (its legacy-chest line is superseded), 6p, 6o, plus 6b–6n. The checklist is now 209
+items.
+
+**Deferred (Phase 3 leftovers), with reasons:**
+1. Worker skills can't craft from chest materials. There is one prompt per bot, so a plank ask blocks the tool ask.
+   Fixing it needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling, which is Phase 4 and needs a ruling.
+2. `ensureCraftingStation` walks on the calling thread, including the idle tick (pre-existing).
+3. BotMutualAidService `tryMakeSpaceForNearbyDroppedFood` (~:1174) and `ensureInventorySpaceForAidRecipient` (~:1232)
+   make room by walking on the tick (pre-existing).
+4. `grantableEstimate` works per chest half, so it under-counts double chests.
+5. Three "other half of a double chest" helpers could be one.
+6. CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints).
+7. A double chest whose other half is unloaded reads as unreadable (skipped for that pass).
+8. A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check).
+9. The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only;
+   its test pins the pure helper, not the wiring.
+10. Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search
+    still inside a hop can resume. Closing it needs the captured ticket's cancel flag (a TaskService accessor).
+
+**Deferred from 1.1.220 (Bot Storage owner-only):** unchanged, see the 1.1.220 block below.
+
+**Next autonomous candidates:**
+1. Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the
+   WaitMode/need-bundling ruling above.
+2. Egress follow-ups: outside→inside entry routing, and Fortify onto the shared helper.
+3. Addressee deferrals.
+
+**Needs Bradley:**
+- Guided field session (6b–6s).
+- Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread).
+- The WaitMode-through-`ensure*` ruling for Phase 4.
+- Doorway rework decision.
+- ACTION REQUESTS interview.
+- Bob's TTS reference sample.
+- Whether to lower `OLLAMA_NUM_PARALLEL`.
+
+---
+
+## Session Handoff 2026-09-25 (1.1.220) — superseded
 
 **State:** main = origin/main @ 1.1.220. Suite 1280 green (1242 → 1280). One build, one item: a security fix. The work
 was done in a worktree branch and fast-forwarded into main.

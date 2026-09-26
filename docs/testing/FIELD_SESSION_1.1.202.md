@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.220-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.221-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.219** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.221** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -943,7 +943,8 @@ nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, s
     `config/frens/bot_chest_registry.json`.
   - Claude watches for: the new record.
   - Pass when: the new record has `"ownerUuid"` set to Bradley's UUID. Records from before 1.1.219 have no owner;
-    that is expected and they are refused for future supply requests until re-placed.
+    that is expected and they are refused for future supply requests until re-placed. (Superseded by 1.1.221: they
+    prompt like any other chest; see Phase 6s.)
 - [ ] **Supply commands are safe for non-ops (1.1.219)**
   - Bradley does: as a non-op (or just as himself), `/frens supply answer 00000000-0000-0000-0000-000000000000 once` and
     `/frens supply revoke ~ ~ ~` on a chest.
@@ -979,6 +980,77 @@ Before starting, have a bot that has placed at least one supply chest (it shows 
     same line with `collect` / `store` for the others.
   - Pass when: the friend sees "Only <bot>'s owner can do that." and gets no chest list; the bot doesn't move; nothing
     leaves any chest.
+
+## Phase 6s — Companions ask before taking from chests (1.1.221)
+
+Supplies Phase 3: bots take nothing from a chest by themselves any more. They ask ("Jake wants 1 Stone Axe from the
+chest at x y z — [Allow once] [Always: common supplies, this chest] [No]"), or use a chest you marked Always. Only
+common items qualify: dirt, cobblestone, planks, logs, sticks, torches, coal and charcoal, bread and cooked food, seeds,
+carrot and potato, and wooden, stone and copper tools and leather/copper armour. A chest always keeps 16 of each
+material and 1 spare of each tool type. Souls optional. One bot (Jake) is enough; stand within 32 blocks unless an item
+says otherwise.
+Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] withdraw`.
+
+- [ ] **Do this first: mark your supply chest Always (1.1.221)**
+  - Why: an idle bot far from you can no longer fetch a tool unless the chest has an Always.
+  - Bradley does: take Jake's axe (let him keep his sword), then put 2 stone axes in a chest beside him while he
+    idles. Click
+    **[Always: common supplies, this chest]** when the prompt appears.
+  - Claude watches for: `[supply] request … outcome=OPENED id=…`, then `[supply] answer … result=GRANTED_ALWAYS`,
+    then `[supply] withdraw … result=MOVED moved=1`.
+  - Pass when: exactly one prompt appears, Jake takes one axe, and one axe stays in the chest.
+- [ ] **Allow once really lets him take it (1.1.221)**
+  - Bradley does: at a chest with no Always, holding 2 wooden axes and 1 wooden sword, take Jake's axe and sword.
+    Click **[Allow once]** on the first prompt.
+  - Claude watches for: `result=GRANTED_ONCE`, then `[supply] withdraw … result=MOVED` for that item.
+  - Pass when: the approved item moves within ~10 s (he may take an axe as his weapon; the lone sword stays, it is
+    the chest's spare) and the same item is never prompted a second time. In this build's pre-review commits, only
+    Always worked.
+- [ ] **No means no (1.1.221)**
+  - Bradley does: at a chest with no Always, answer **[No]** to a prompt.
+  - Claude watches for: `result=REJECTED`, then no `[supply] withdraw … result=MOVED` for that chest and item.
+  - Pass when: nothing moves, and Jake doesn't ask about that chest again for at least a minute.
+- [ ] **Walking away keeps the log quiet; coming back works at once (1.1.221)**
+  - Bradley does: with a chest that has no Always, walk more than 32 blocks from Jake for 2 minutes while he lacks an
+    axe. Then walk back and run `/bot woodcut`.
+  - Claude watches for: no prompt while you are away, and at most 4 `[supply]` lines a minute for Jake however many
+    chests are near him. On `/bot woodcut`, a prompt within seconds.
+  - Pass when: the woodcut prompts as soon as you are back. It must not fail with "no axe" for minutes after you
+    return.
+- [ ] **A hungry bot asks for food above the reserve (1.1.221)**
+  - Bradley does: `/bot set hunger 10 Jake` beside a chest holding 20 bread. Then repeat with a chest holding only 10
+    bread.
+  - Claude watches for: a food prompt at 20 bread (`item=minecraft:bread`), then `withdraw … MOVED`. No request line
+    for the 10-bread chest.
+  - Pass when: he eats from the 20 and leaves the 10 alone. (Food ≤16 is untouchable by design; Bradley decides
+    whether that cutoff is right for early game.)
+- [ ] **A full inventory never freezes the game (1.1.221)**
+  - Bradley does: fill Jake's inventory with junk, set hunger 10, and stand beside an Always chest with 20+ bread.
+  - Claude watches for: `NO_ROOM` then a dropped cheap stack, then `MOVED`. No "Can't keep up!" line in the log.
+  - Pass when: he drops something cheap, takes the bread, and the game never stutters.
+- [ ] **Old bot chests prompt instead of refusing (1.1.221)**
+  - Bradley does: use a chest a bot placed before 1.1.219 (its registry record has no `ownerUuid`) for any of the
+    checks above.
+  - Claude watches for: `outcome=OPENED`, not `DENIED(DENY_UNKNOWN)`.
+  - Pass when: you get the normal prompt.
+- [ ] **Crafting and seeds from a chest (1.1.221, new behaviour)**
+  - Bradley does: put 20 oak planks in a chest beside Jake, empty his planks and sticks, and run `/bot craft` for
+    sticks. Click [Allow once], then run the same `/bot craft` again within a minute. Then put 20 wheat seeds in a
+    chest and run `/bot harvest` on a field with empty farmland.
+  - Claude watches for: a planks prompt and a failed first craft; on the second run `[supply] withdraw … purpose=…
+    result=MOVED`, then the craft. For the harvest, a seeds prompt while Jake waits at the chest, then `MOVED`.
+  - Pass when: the second `/bot craft` crafts with the chest planks (the first one only asks; crafting doesn't wait for
+    an answer), and the harvest replants after one click. Chest pulls from a worker thread never worked before this
+    build.
+- [ ] **Never-allowed items stay put (1.1.221)**
+  - Bradley does: put a saddle, a lead and an iron axe in a chest beside Jake, then try to mount him or make him fetch
+    an axe.
+  - Claude watches for: no `[supply] request` for those items.
+  - Pass when: nothing is taken and nothing is prompted. Hand him the items yourself.
+- [ ] **Revoke all (1.1.221)**
+  - Bradley does: `/frens supply revoke all`, then repeat the first check.
+  - Claude watches for: `[supply] revoke-all owner=… removed=1`.
+  - Pass when: the reply counts what it removed, and the next take prompts again.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
