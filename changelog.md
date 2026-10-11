@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Housekeeping: deploy targets cut to the Nirn instance only (2026-10-11)
+
+- Disk cleanup at Bradley's request deleted the Prism instances `1.21.10` (shown as "1.21.11") and `1.21.10 TEST` (shown as "testing"); neither had been played since April 2026 / December 2025. The live instance is `1.21.11` (shown as "1.21.11 Nirn").
+- The standard deploy loop in `CLAUDE.md` and `AGENTS.md` now targets only `instances/1.21.11/minecraft/mods`. The `frens-release-loop` skill's `release.md` was updated to match.
+
 ## Onboarding: AI companion setup checklist, multiplayer AI settings, model-free first run; 1.1.225 (2026-09-26)
 
 Goal: people can download and use Frens without Ollama, and turning on the AI companions ("souls") is easy. From the Codex onboarding audit (`.superpowers/sdd/modrinth/audit-onboarding.md`, local). Codex (Sol/Astra) did three of the four scopes, the C1/C3, C2, privacy and multiplayer implementations, both batch reviews, the wave-2 fix and the re-reviews. Opus did the checklist scope, the checklist implementation and the wave-1 fix.
