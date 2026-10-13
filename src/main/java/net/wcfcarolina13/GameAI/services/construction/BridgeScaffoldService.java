@@ -287,7 +287,11 @@ public final class BridgeScaffoldService {
             if (!world.getBlockState(scaffold).isAir()) {
                 LookController.faceBlock(bot, scaffold);
                 try {
-                    MiningTool.mineBlock(bot, scaffold, true, false)
+                    // Pick the tool per block (axe for planks, shovel for dirt, else bare hands):
+                    // preserving the held item mined plank scaffolds by hand (3 s each). Safe for
+                    // placement: retract places nothing, and tryPlaceBlockAt re-resolves its block
+                    // slot from the whole inventory on every call (ScaffoldSlotPolicy).
+                    MiningTool.mineBlock(bot, scaffold, false, false)
                             .get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 } catch (Exception ignored) {}
             }
@@ -393,7 +397,8 @@ public final class BridgeScaffoldService {
                 (b, pos) -> {
                     LookController.faceBlock(b, pos);
                     try {
-                        MiningTool.mineBlock(b, pos, true, false).get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                        // Per-block tool choice: shears if usable, otherwise never an axe on leaves.
+                        MiningTool.mineBlock(b, pos, false, false).get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     } catch (Exception ignored) {}
                 });
     }

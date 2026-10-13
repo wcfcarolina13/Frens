@@ -578,7 +578,9 @@ public final class BotActions {
                 continue;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (normalizedPrefer != null && key.contains(normalizedPrefer) && !isCombatClassItem(stack)) {
+            if (normalizedPrefer != null
+                    && net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.matchesToolKeyword(key, normalizedPrefer)
+                    && !isCombatClassItem(stack)) {
                 selectHotbarSlot(bot, slot);
                 return true;
             }
@@ -595,7 +597,9 @@ public final class BotActions {
                 continue;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (normalizedPrefer != null && key.contains(normalizedPrefer) && !isCombatClassItem(stack)) {
+            if (normalizedPrefer != null
+                    && net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.matchesToolKeyword(key, normalizedPrefer)
+                    && !isCombatClassItem(stack)) {
                 preferredMainSlot = slot;
                 break;
             }
@@ -645,11 +649,19 @@ public final class BotActions {
                 || lower.contains("shield");
     }
 
+    /**
+     * A non-empty stand-in for bare hands: no weapon, no durability, no faster than a hand.
+     * Damageable tools (axe/shovel/hoe/shears) are excluded so a missing shovel never turns into
+     * "dig dirt with the copper axe" (wear for no speed gain). See {@code HarmlessToolPolicy}.
+     */
     private static boolean isHarmlessHarvestFallback(ItemStack stack) {
         return stack != null
                 && !stack.isEmpty()
-                && !isCombatClassItem(stack)
-                && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f;
+                && net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.isHarmlessFallback(
+                        false,
+                        isCombatClassItem(stack),
+                        stack.isDamageable(),
+                        stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()));
     }
 
     public static void jumpForward(ServerPlayerEntity bot) {

@@ -53,7 +53,9 @@ public class ToolSelector {
                 DurabilityFallbackService.requestRefresh(
                         bot, DurabilityFallbackService.GearCategory.SHEARS);
             }
-            return hotBarUtils.getSelectedHotbarItemStack(bot);
+            // No usable shears: keep a held hoe (leaves are #mineable/hoe in 1.21.11), but never an
+            // axe or other damageable item that only loses durability on leaves.
+            return heldOrHarmlessFallback(bot, blockState);
         }
 
         // ── SCAN (read-only; safe off the server thread) ──────────────────
@@ -87,7 +89,9 @@ public class ToolSelector {
 
         // ── MUTATION (one atomic server-thread unit) ─────────────────────
         // If best tool is in main inventory, swap it to an empty hotbar slot or current slot.
-        if (bestMainSlot != -1) {
+        // Only a tool that actually beats hand speed is worth pulling out of the main inventory;
+        // with an empty/weapon-only hotbar any item scores 1.0 and would otherwise be swapped in.
+        if (bestMainSlot != -1 && HarmlessToolPolicy.shouldSwapInFromMainInventory(highestSpeed)) {
             final int sourceSlot = bestMainSlot;
             final ItemStack expected = bestTool;
             final boolean announce = priorWasFiltered;
@@ -158,11 +162,7 @@ public class ToolSelector {
                 }
             }
 
-            ItemStack selected = hotBarUtils.getSelectedHotbarItemStack(bot);
-            if (!selected.isEmpty() && !isWeaponOnlyItem(selected)) {
-                return selected;
-            }
-            return findHarmlessHotbarFallback(bot);
+            return heldOrHarmlessFallback(bot, blockState);
         }
 
         return bestTool;
@@ -265,16 +265,56 @@ public class ToolSelector {
         return BotActions.isCombatClassItem(stack);
     }
 
-    private static ItemStack findHarmlessHotbarFallback(ServerPlayerEntity bot) {
+    /**
+     * Nothing carried beats hand speed on {@code blockState}: keep the held item only when that
+     * costs nothing (empty hand, non-durable item) or the item is effective on the block; never a
+     * weapon or a damageable tool that would wear for no gain. Otherwise pick a harmless hotbar
+     * item, or {@link ItemStack#EMPTY} so {@code MiningTool} falls back to a true empty hand.
+     * Read-only: the caller performs any slot change on the server thread.
+     */
+    private static ItemStack heldOrHarmlessFallback(ServerPlayerEntity bot, BlockState blockState) {
+        ItemStack selected = hotBarUtils.getSelectedHotbarItemStack(bot);
+        if (selected.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        boolean keep = HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(
+                false,
+                selected.isDamageable(),
+                blockState != null && HarmlessToolPolicy.isEffective(selected.getMiningSpeedMultiplier(blockState)),
+                isWeaponOnlyItem(selected));
+        if (keep) {
+            return selected;
+        }
+        ItemStack harmless = findHarmlessHotbarFallback(bot, blockState);
+        if (HarmlessToolPolicy.keepHeldAsLastResort(!harmless.isEmpty(), hasAnyEmptyMainSlot(bot))) {
+            // Packed inventory with nothing harmless: MiningTool could not free a hand either, and
+            // returning EMPTY here would make its 20-tick re-poll swap and reset progress forever.
+            return selected;
+        }
+        return harmless;
+    }
+
+    private static boolean hasAnyEmptyMainSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 36; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ItemStack findHarmlessHotbarFallback(ServerPlayerEntity bot, BlockState blockState) {
         if (bot == null) {
             return ItemStack.EMPTY;
         }
+        BlockState reference = blockState != null ? blockState : Blocks.STONE.getDefaultState();
         for (int i = 0; i < 9; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
                 return ItemStack.EMPTY;
             }
-            if (!isWeaponOnlyItem(stack) && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f) {
+            if (HarmlessToolPolicy.isHarmlessFallback(false, isWeaponOnlyItem(stack), stack.isDamageable(),
+                    stack.getMiningSpeedMultiplier(reference))) {
                 return stack;
             }
         }
