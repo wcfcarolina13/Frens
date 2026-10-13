@@ -1341,22 +1341,7 @@ public class FrensClient implements ClientModInitializer {
         }
         String line1 = "World setup pending: choose Questing or Admin mode.";
         String line2 = "Press [" + openKey + "] to reopen setup, or use /bot spawn <name> admin";
-
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
-        int x = 12;
-        int boxH = client.textRenderer.fontHeight * 2 + 6;
-        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
     public static java.util.List<String> getKnownRestorableBotAliases() {
@@ -1537,32 +1522,16 @@ public class FrensClient implements ClientModInitializer {
         java.util.List<String> lines = net.wcfcarolina13.GraphicalUserInterface.ContextKeyPolicy
                 .noBotsHintLines(keyNameOrNull(KEY_GO_TO_LOOK));
 
-        int textMaxW = 0;
-        for (String line : lines) {
-            textMaxW = Math.max(textMaxW, client.textRenderer.getWidth(line));
-        }
         int closeBtnSize = 10;
         int closeBtnPad = 6; // gap between text and close button
-        int maxW = textMaxW + closeBtnPad + closeBtnSize;
-        int x = (context.getScaledWindowWidth() - maxW) / 2;
-        int lineStep = client.textRenderer.fontHeight + 2;
-        int boxH = lineStep * lines.size() + 2;
-        int y = reserveCenterTipYClearOfToast(context, x + maxW + 7, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        for (int i = 0; i < lines.size(); i++) {
-            context.drawTextWithShadow(client.textRenderer, lines.get(i), x, y + lineStep * i,
-                    i == 0 ? 0xFFE6D7A3 : 0xFFB8A76A);
-        }
+        TopTipStyle base = TopTipStyle.bordered();
+        TopTipBox box = drawTopTip(context, TopTipLane.CENTER, lines, new TopTipStyle(base.bgColor(),
+                base.borderColor(), base.firstColor(), base.restColor(), closeBtnPad + closeBtnSize, false, true));
+        int maxW = box.contentW();
 
         // ── Dismiss [X] button (top-right corner of the hint box) ──
-        noBotsHintCloseX = x + maxW - closeBtnSize + 2;
-        noBotsHintCloseY = y - 2;
+        noBotsHintCloseX = box.x() + maxW - closeBtnSize + 2;
+        noBotsHintCloseY = box.y() - 2;
         noBotsHintCloseW = closeBtnSize;
         noBotsHintCloseH = closeBtnSize;
         context.fill(noBotsHintCloseX, noBotsHintCloseY,
@@ -1599,6 +1568,117 @@ public class FrensClient implements ClientModInitializer {
         return reserveTopTipY(TopTipLane.CENTER, tipHeight);
     }
 
+    /** Gap between a top tip's outer edge and the screen edge. */
+    private static final int TOP_TIP_SCREEN_MARGIN = 8;
+    /** x of LEFT-lane text, and the inset of RIGHT-lane text from the right edge. */
+    private static final int TOP_TIP_SIDE_X = 12;
+    /** A long source line wraps to at most this many rows, the last one elided. */
+    private static final int TOP_TIP_MAX_ROWS_PER_LINE = 3;
+    private static final int TOP_TIP_BG = 0xAA101010;
+    private static final int TOP_TIP_BORDER = 0xFF4A4A4A;
+    private static final int TOP_TIP_TEXT = 0xFFE6D7A3;
+    private static final int TOP_TIP_TEXT_DIM = 0xFFB8A76A;
+
+    /**
+     * How to draw one top tip. {@code borderColor} 0 means no border. {@code reservedRight} is
+     * width kept free at the right of the text (the no-bots close button). {@code centerRows}
+     * centres each row inside the box, otherwise rows are left-aligned.
+     */
+    private record TopTipStyle(int bgColor, int borderColor, int firstColor, int restColor,
+                               int reservedRight, boolean centerRows, boolean clearOfToast) {
+        static TopTipStyle bordered() {
+            return new TopTipStyle(TOP_TIP_BG, TOP_TIP_BORDER, TOP_TIP_TEXT, TOP_TIP_TEXT_DIM, 0, false, false);
+        }
+
+        static TopTipStyle plain(int restColor, boolean centerRows) {
+            return new TopTipStyle(TOP_TIP_BG, 0, TOP_TIP_TEXT, restColor, 0, centerRows, false);
+        }
+
+        int pad() {
+            return borderColor != 0 ? 7 : 6;
+        }
+    }
+
+    /** Where a drawn top tip landed: text origin and the content width (text + reservedRight). */
+    private record TopTipBox(int x, int y, int contentW) {
+    }
+
+    /** Widest a row of text may be in this lane so the tip's outer edge stays on screen. */
+    private static int topTipTextMax(DrawContext context, TopTipLane lane, TopTipStyle style) {
+        int screenW = context.getScaledWindowWidth();
+        int pad = style.pad();
+        int max = switch (lane) {
+            case CENTER -> screenW - 2 * TOP_TIP_SCREEN_MARGIN - 2 * pad;
+            case LEFT, RIGHT -> screenW - TOP_TIP_SIDE_X - pad - TOP_TIP_SCREEN_MARGIN;
+        };
+        return Math.max(24, max - style.reservedRight());
+    }
+
+    /**
+     * Draws a top-of-screen tip whose width is capped to the screen. Each source line wraps
+     * to at most {@link #TOP_TIP_MAX_ROWS_PER_LINE} rows (the last elided) and keeps its colour
+     * (first line bright, the rest dim). The slot comes from the same lane reservation as before,
+     * including toast avoidance when the style asks for it.
+     */
+    private static TopTipBox drawTopTip(DrawContext context, TopTipLane lane, java.util.List<String> lines,
+                                        TopTipStyle style) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        var tr = client.textRenderer;
+        int textMax = topTipTextMax(context, lane, style);
+        java.util.List<String> rows = new java.util.ArrayList<>();
+        java.util.List<Integer> colors = new java.util.ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            int color = i == 0 ? style.firstColor() : style.restColor();
+            for (String row : net.wcfcarolina13.GraphicalUserInterface.UiFitPolicy.wrap(
+                    lines.get(i), textMax, tr::getWidth, TOP_TIP_MAX_ROWS_PER_LINE)) {
+                rows.add(row);
+                colors.add(color);
+            }
+        }
+        int textW = 0;
+        for (String row : rows) {
+            textW = Math.max(textW, tr.getWidth(row));
+        }
+        int contentW = textW + style.reservedRight();
+        int screenW = context.getScaledWindowWidth();
+        int pad = style.pad();
+        int x = switch (lane) {
+            case CENTER -> (screenW - contentW) / 2;
+            case LEFT -> TOP_TIP_SIDE_X;
+            case RIGHT -> Math.max(TOP_TIP_SIDE_X, screenW - TOP_TIP_SIDE_X - contentW);
+        };
+        int lineStep = tr.fontHeight + 2;
+        int textH = lineStep * rows.size() - 2;
+        int reserveH = textH + (style.borderColor() != 0 ? 11 : 9);
+        int y = style.clearOfToast()
+                ? reserveCenterTipYClearOfToast(context, x + contentW + pad, reserveH)
+                : reserveTopTipY(lane, reserveH);
+
+        int bottom = y + textH + 4;
+        context.fill(x - 6, y - 4, x + contentW + 6, bottom, style.bgColor());
+        int border = style.borderColor();
+        if (border != 0) {
+            context.fill(x - 7, y - 5, x + contentW + 7, y - 4, border);
+            context.fill(x - 7, bottom, x + contentW + 7, bottom + 1, border);
+            context.fill(x - 7, y - 5, x - 6, bottom + 1, border);
+            context.fill(x + contentW + 6, y - 5, x + contentW + 7, bottom + 1, border);
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            String row = rows.get(i);
+            int rowX = style.centerRows() ? x + (textW - tr.getWidth(row)) / 2 : x;
+            context.drawTextWithShadow(tr, row, rowX, y + lineStep * i, colors.get(i));
+        }
+        return new TopTipBox(x, y, contentW);
+    }
+
+    /** "[K]" for most keys, bare for a bracket key so "]" doesn't read as "[]]". */
+    private static String keyChip(String key) {
+        if ("[".equals(key) || "]".equals(key)) {
+            return key;
+        }
+        return "[" + key + "]";
+    }
+
     private static void renderBotsPresentHint(DrawContext context) {
         if (botsPresentHintUntilMs <= System.currentTimeMillis()) {
             return;
@@ -1612,24 +1692,9 @@ public class FrensClient implements ClientModInitializer {
         }
         java.util.List<String> lines = net.wcfcarolina13.GraphicalUserInterface.ContextKeyPolicy
                 .botsPresentHintLines(keyNameOrNull(KEY_GO_TO_LOOK), keyNameOrNull(KEY_OPEN_GUIDE));
-        int maxW = 0;
-        for (String line : lines) {
-            maxW = Math.max(maxW, client.textRenderer.getWidth(line));
-        }
-        int x = (context.getScaledWindowWidth() - maxW) / 2;
-        int lineStep = client.textRenderer.fontHeight + 2;
-        int boxH = lineStep * lines.size() + 2;
-        int y = reserveCenterTipYClearOfToast(context, x + maxW + 7, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        for (int i = 0; i < lines.size(); i++) {
-            context.drawTextWithShadow(client.textRenderer, lines.get(i), x, y + lineStep * i,
-                    i == 0 ? 0xFFE6D7A3 : 0xFFB8A76A);
-        }
+        TopTipStyle base = TopTipStyle.bordered();
+        drawTopTip(context, TopTipLane.CENTER, lines, new TopTipStyle(base.bgColor(), base.borderColor(),
+                base.firstColor(), base.restColor(), 0, false, true));
     }
 
     /**
@@ -1696,22 +1761,7 @@ public class FrensClient implements ClientModInitializer {
         String keyName = resolveRecruitmentPromptKeyName();
         String line1 = "You sense someone watching...";
         String line2 = "Press [" + keyName + "] to initiate contact";
-
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
-        int x = 12;
-        int boxH = client.textRenderer.fontHeight * 2 + 6;
-        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
     private static void tickSpellsAcquireHint(MinecraftClient client) {
@@ -1801,24 +1851,7 @@ public class FrensClient implements ClientModInitializer {
 
         String line1 = spellsAcquireHintLine1;
         String line2 = spellsAcquireHintLine2;
-
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
-
-        int margin = 12;
-        int x = Math.max(margin, client.getWindow().getScaledWidth() - margin - maxW);
-        int boxH = client.textRenderer.fontHeight * 2 + 6;
-        int y = reserveTopTipY(TopTipLane.RIGHT, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.RIGHT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
     private static boolean handleSpellsContextKey(MinecraftClient client) {
@@ -1902,22 +1935,7 @@ public class FrensClient implements ClientModInitializer {
         } else {
             line2 = "Switch item or location to restore Go To Look.";
         }
-
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
-        int x = 12;
-        int boxH = client.textRenderer.fontHeight * 2 + 6;
-        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
     private static boolean isTemporaryGoToSpellsOverrideActive(MinecraftClient client) {
@@ -2792,25 +2810,7 @@ public class FrensClient implements ClientModInitializer {
                 ? "Arrows move 1 block • Shift+Up/Down height • Shift+Left/Right rotate"
                 : "Look to place it, then walk around and press [" + lockKey + "] to edit in 3D";
         }
-
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int w3 = client.textRenderer.getWidth(line3);
-        int maxW = Math.max(w1, Math.max(w2, w3));
-        int x = 12;
-        int lineStep = client.textRenderer.fontHeight + 2;
-        int boxH = client.textRenderer.fontHeight * 3 + 10;
-        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
-
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
-        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
-
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + lineStep, 0xFFB8A76A);
-        context.drawTextWithShadow(client.textRenderer, line3, x, y + lineStep * 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2, line3), TopTipStyle.bordered());
     }
 
     private static void renderDirectionalMiningHint(DrawContext context) {
@@ -2836,12 +2836,7 @@ public class FrensClient implements ClientModInitializer {
         }
 
         String line = "Select direction to " + action + ". Press [" + goToKey + "] to confirm or [" + stopKey + "] to cancel.";
-        int w = client.textRenderer.getWidth(line);
-        int x = (context.getScaledWindowWidth() - w) / 2;
-        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
-
-        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
-        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+        drawTopTip(context, TopTipLane.CENTER, java.util.List.of(line), TopTipStyle.plain(TOP_TIP_TEXT, true));
     }
 
     private static void tickDirectionalMiningPreview(MinecraftClient client) {
@@ -2958,23 +2953,10 @@ public class FrensClient implements ClientModInitializer {
                 ? "Hold [" + stopKey + "] for Stand Down (60s pause + auto-resume follow)."
                 : null;
 
-        int fh = client.textRenderer.fontHeight;
-        int w1 = client.textRenderer.getWidth(line);
-        int w2 = secondLine != null ? client.textRenderer.getWidth(secondLine) : 0;
-        int boxW = Math.max(w1, w2);
-        int rowCount = secondLine != null ? 2 : 1;
-        int reserveH = fh * rowCount + (rowCount > 1 ? 2 : 0) + 9;
-        int y = reserveTopTipY(TopTipLane.CENTER, reserveH);
-        int boxLeft = (context.getScaledWindowWidth() - boxW) / 2 - 6;
-        int boxRight = boxLeft + boxW + 12;
-        int boxBottom = y + fh * rowCount + (rowCount > 1 ? 2 : 0) + 4;
-        context.fill(boxLeft, y - 4, boxRight, boxBottom, 0xAA101010);
-        context.drawTextWithShadow(client.textRenderer, line,
-                (context.getScaledWindowWidth() - w1) / 2, y, 0xFFE6D7A3);
-        if (secondLine != null) {
-            context.drawTextWithShadow(client.textRenderer, secondLine,
-                    (context.getScaledWindowWidth() - w2) / 2, y + fh + 2, 0xFFB8A878);
-        }
+        java.util.List<String> lines = secondLine != null
+                ? java.util.List.of(line, secondLine)
+                : java.util.List.of(line);
+        drawTopTip(context, TopTipLane.CENTER, lines, TopTipStyle.plain(0xFFB8A878, true));
     }
 
     private static void renderLookedAtBotInventoryHint(DrawContext context) {
@@ -3003,16 +2985,23 @@ public class FrensClient implements ClientModInitializer {
         if (alias == null || alias.isBlank()) {
             alias = "Bot";
         }
-        String guideKey = getGuideHotkeyDisplayName();
-        String keyLabel = "]".equals(guideKey) ? "Right Bracket (])" : guideKey;
-        String line = "Looking at " + alias + ". Right-click to open menu • Press " + keyLabel + " for Guide";
-
-        int w = client.textRenderer.getWidth(line);
-        int x = (context.getScaledWindowWidth() - w) / 2;
-        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
-
-        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
-        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+        String guide = keyChip(getGuideHotkeyDisplayName());
+        String looking = "Looking at " + alias + ".";
+        String full = looking + " Right-click to open menu • Press " + guide + " for Guide";
+        String brief = looking + " Right-click for menu • " + guide + " for Guide";
+        TopTipStyle style = TopTipStyle.plain(TOP_TIP_TEXT, true);
+        int textMax = topTipTextMax(context, TopTipLane.CENTER, style);
+        var tr = client.textRenderer;
+        java.util.List<String> lines;
+        if (tr.getWidth(full) <= textMax) {
+            lines = java.util.List.of(full);
+        } else if (tr.getWidth(brief) <= textMax) {
+            lines = java.util.List.of(brief);
+        } else {
+            // Narrow window: split at the sentence so the key hint reads as its own row.
+            lines = java.util.List.of(looking, "Right-click for menu • " + guide + " for Guide");
+        }
+        drawTopTip(context, TopTipLane.CENTER, lines, style);
     }
     
     /**
@@ -3306,16 +3295,8 @@ public class FrensClient implements ClientModInitializer {
         String line1 = target + " is paused and waiting for your decision.";
         String line2 = resumeKey + " = Resume last task";
         String line3 = goToKey + " or " + stopKey + " = Stop and clear it";
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int w3 = client.textRenderer.getWidth(line3);
-        int maxWidth = Math.max(w1, Math.max(w2, w3));
-        int x = (context.getScaledWindowWidth() - maxWidth) / 2;
-        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight * 3 + 13);
-        context.fill(x - 6, y - 4, x + maxWidth + 6, y + client.textRenderer.fontHeight * 3 + 8, 0xAA101010);
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
-        context.drawTextWithShadow(client.textRenderer, line3, x, y + (client.textRenderer.fontHeight + 2) * 2, 0xFFB8A76A);
+        drawTopTip(context, TopTipLane.CENTER, java.util.List.of(line1, line2, line3),
+                TopTipStyle.plain(TOP_TIP_TEXT_DIM, false));
     }
 
     // ===== Leash Button Feature =====
@@ -3504,27 +3485,10 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int maxW = Math.max(w1, w2);
-        int x = (context.getScaledWindowWidth() - maxW) / 2;
-        int boxHeight = client.textRenderer.fontHeight * 2 + 6;
-        // Participate in the top-tip lane reservation system so the leash
-        // HUD stacks cleanly below other CENTER hints ("Jake is following",
-        // "Looking at Jake", etc.) instead of overlapping them at y=10.
-        int y = reserveTopTipY(TopTipLane.CENTER, boxHeight + 12);
-
-        // Draw a semi-transparent dark background
-        context.fill(x - 6, y - 4, x + maxW + 6, y + boxHeight, 0xAA2a4a2a);
-        // Border for visibility
-        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4a8a4a);
-        context.fill(x - 7, y + boxHeight, x + maxW + 7, y + boxHeight + 1, 0xFF4a8a4a);
-        context.fill(x - 7, y - 5, x - 6, y + boxHeight + 1, 0xFF4a8a4a);
-        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxHeight + 1, 0xFF4a8a4a);
-
-        // Draw the text
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFB8E6B8);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFF90C890);
+        // Green box in the CENTER lane, so it stacks below "Jake is following",
+        // "Looking at Jake" and the rest instead of overlapping them.
+        drawTopTip(context, TopTipLane.CENTER, java.util.List.of(line1, line2),
+                new TopTipStyle(0xAA2a4a2a, 0xFF4a8a4a, 0xFFB8E6B8, 0xFF90C890, 0, false, false));
     }
 
     // Store the preview box to be rendered
