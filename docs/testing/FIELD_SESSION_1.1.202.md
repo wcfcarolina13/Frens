@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.227-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.228-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.227** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.228** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1304,6 +1304,23 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
   - Bradley does: with Jake out, open the roster (Guide → Admin → Bot Controls → Spawn Bots), then say "Jake, hello" in chat with AI chat off.
   - Claude watches for: roster without Jake (or "All your companions are already here"); one notice "AI chat is off. To let companions talk back, open the Guide (]) → AI setup."
   - Pass when: present bots aren't offered, the notice shows once, and a brand-new bot's first greeting is not "welcome back".
+
+## Phase 6z — Narrow-screen layouts (1.1.228)
+
+1.1.228 makes every Frens screen fit at the smallest Minecraft GUI size. Test three sizes: set Video Settings → GUI Scale and resize the window. 427x240 = 854x480 window at scale 2. 342x328 = Bradley's 1708x1642 window at Auto (scale 5). 320x240 = 640x480 window at scale 2. Take an F2 screenshot of each screen at each size.
+
+- [ ] **Wide unchanged (1.1.228)**
+  - Bradley does: at 427x240 (or wider), open the Guide, the bot inventory (right-click a bot) with its Admin/topics overlay, the roster, and look at a bot.
+  - Claude watches for: screenshots matching 1.1.227 (Guide topics/detail side by side, equal tabs, "Looking at X. Right-click to open menu • Press Right Bracket (]) for Guide").
+  - Pass when: nothing looks different from 1.1.227.
+- [ ] **Narrow fits (1.1.228)**
+  - Bradley does: at 342x328 and 320x240, open the Guide, bot inventory + overlay, roster, Bot Controls popups (Hobbies, Piper, Model manager), and say something long near a bot.
+  - Claude watches for: no text past a panel edge, inventory fully visible (no "ealth"/"unger"), overlay tabs not colliding, overhead line wrapped to at most 3 lines.
+  - Pass when: every screen fits and all buttons are reachable.
+- [ ] **Scaled inventory clicks (1.1.228)**
+  - Bradley does: at 320x240 in the bot inventory: click, shift-click, drag-split items on both sides incl. armour and the last column, hover for tooltips, drop an item outside the panels, use the overlay tabs and scrollbar.
+  - Claude watches for: no wrong-slot moves in `[bot-inv-` lines.
+  - Pass when: every click hits the slot under the cursor and tooltips sit at the cursor.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

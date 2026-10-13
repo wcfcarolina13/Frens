@@ -12,7 +12,7 @@ not published; Bradley publishes). Discord #announcements post for 1.1.226 is up
 from 1.1.227 (`UiFitPolicy`, inventory scale-to-fit, Guide/roster/recruitment/popups, overhead lines wrap). Details and
 rulings in `changelog.md`.
 
-**Field checks pending:** Phase 6z (new), 6y, 6x, 6w … 6b. Fresh-install part 2 (AI setup checklist) still never run.
+**Field checks pending:** Phase 6z (new, 3 items; checklist now 246), 6y, 6x, 6w … 6b. Fresh-install part 2 (AI setup checklist) still never run.
 Test the three sizes by setting Video Settings → GUI Scale with a resized window (see Phase 6z).
 
 **Next (in order):**
