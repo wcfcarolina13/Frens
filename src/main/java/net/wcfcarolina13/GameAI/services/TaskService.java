@@ -611,12 +611,20 @@ public final class TaskService {
     }
 
     public static void forceAbort(UUID botUuid, String reason) {
+        forceAbort(botUuid, reason, true);
+    }
+
+    /**
+     * Same as {@link #forceAbort(UUID, String)}; with {@code announce == false} the reason is not
+     * spoken in chat by the bot. Used by manual stop, whose caller sends its own one-line summary.
+     */
+    public static void forceAbort(UUID botUuid, String reason, boolean announce) {
         // Always latch the abort so survival actions (break-free, surface recovery)
         // see it even when no skill ticket is active.
         ABORT_LATCH.put(key(botUuid), reason == null ? "" : reason);
         TaskTicket ticket = ACTIVE.get(key(botUuid));
         if (ticket != null) {
-            abortTicket(ticket, reason);
+            abortTicket(ticket, reason, announce);
         }
         BotEventHandler.setExternalOverrideActive(false);
     }

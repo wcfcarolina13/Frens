@@ -28,6 +28,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -88,6 +89,7 @@ import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.SleepService;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.StopFeedbackPolicy;
 import net.wcfcarolina13.GameAI.services.WorkDirectionService;
 import net.wcfcarolina13.GameAI.services.WizardTomeGrantService;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
@@ -192,6 +194,36 @@ public class modCommandRegistry {
     private static final Pattern BOT_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_ \\-.']+$");
     /** Minecraft formatting code prefix — disallowed to prevent color/style injection. */
     private static final char SECTION_SIGN = '\u00A7';
+
+    /** Result of {@link #spawnBot}; the command wrappers only report success for {@link #SPAWNED}. */
+    private enum SpawnOutcome { SPAWNED, REFUSED, FAILED }
+
+    /** Quotes a bot name for a suggested command when it contains a space (string arguments accept quotes). */
+    private static String quoteCommandArgument(String name) {
+        if (name == null) {
+            return "";
+        }
+        return name.indexOf(' ') >= 0 ? "\"" + name.replace("\"", "") + "\"" : name;
+    }
+
+    /**
+     * "No bots are following you." plus how to fix it. For a player, the follow key is sent as a
+     * keybind component so their client shows whatever key they bound it to.
+     */
+    private static void sendNoFollowersMessage(ServerCommandSource source) {
+        if (source == null) {
+            return;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null && !(player instanceof createFakePlayer)) {
+            player.sendMessage(Text.literal("No bots are following you. Look at a companion and press [")
+                    .append(Text.keybind("key.frens.follow_toggle_look"))
+                    .append("] to have it follow.")
+                    .formatted(Formatting.GRAY), false);
+            return;
+        }
+        ChatUtils.sendSystemMessage(source, "No bots are following you. Use the follow key while looking at a companion.");
+    }
 
     /**
      * Validates and normalises a bot name. Returns the trimmed name on success,
@@ -309,7 +341,11 @@ public class modCommandRegistry {
                                                     String spawnMode = StringArgumentType.getString(context, "mode");
                                                     try {
                                                         LOGGER.info("Executing /bot spawn {} {}", botName, spawnMode);
-                                                        spawnBot(context, spawnMode, null);
+                                                        SpawnOutcome outcome = spawnBot(context, spawnMode, null);
+                                                        if (outcome != SpawnOutcome.SPAWNED) {
+                                                            LOGGER.info("/bot spawn {} {} did not spawn a bot: {}", botName, spawnMode, outcome);
+                                                            return 0;
+                                                        }
                                                         LOGGER.info("/bot spawn completed successfully for {} {}", botName, spawnMode);
                                                         return 1;
                                                     } catch (Exception e) {
@@ -327,7 +363,11 @@ public class modCommandRegistry {
                                                             String gameMode = StringArgumentType.getString(context, "gamemode");
                                                             try {
                                                                 LOGGER.info("Executing /bot spawn {} {} {}", botName, spawnMode, gameMode);
-                                                                spawnBot(context, spawnMode, gameMode);
+                                                                SpawnOutcome outcome = spawnBot(context, spawnMode, gameMode);
+                                                                if (outcome != SpawnOutcome.SPAWNED) {
+                                                                    LOGGER.info("/bot spawn {} {} {} did not spawn a bot: {}", botName, spawnMode, gameMode, outcome);
+                                                                    return 0;
+                                                                }
                                                                 LOGGER.info("/bot spawn completed successfully for {} {} {}", botName, spawnMode, gameMode);
                                                                 return 1;
                                                             } catch (Exception e) {
@@ -1092,9 +1132,10 @@ public class modCommandRegistry {
 
                                                                             BlockPos targetPos = new BlockPos(x, y, z);
 
-                                                                            ChartPathToBlock.chart(bot, targetPos, blockType);
+                                                                            String chartResult = ChartPathToBlock.chart(bot, targetPos, blockType);
+                                                                            ChatUtils.sendSystemMessage(context.getSource(), chartResult);
 
-                                                                            return 1;
+                                                                            return ChartPathToBlock.CARPET_MISSING_MESSAGE.equals(chartResult) ? 0 : 1;
                                                                         })
                                                                 )
                                                         )
@@ -1154,7 +1195,7 @@ public class modCommandRegistry {
                                                 .executes(context -> {
                                                     MinecraftServer server = context.getSource().getServer();
 
-                                                    ServerCommandSource serverSource = server.getCommandSource();
+                                                    ServerCommandSource serverSource = context.getSource();
                                                     String inputKey = StringArgumentType.getString(context, "key");
 
                                                     switch (inputKey) {
@@ -1199,7 +1240,7 @@ public class modCommandRegistry {
 
                                                             MinecraftServer server = context.getSource().getServer();
 
-                                                            ServerCommandSource serverSource = server.getCommandSource();
+                                                            ServerCommandSource serverSource = context.getSource();
 
                                                             String botName = StringArgumentType.getString(context, "bot_name");
 
@@ -1246,7 +1287,7 @@ public class modCommandRegistry {
                                                 .executes(context -> {
                                                     MinecraftServer server = context.getSource().getServer();
 
-                                                    ServerCommandSource serverSource = server.getCommandSource();
+                                                    ServerCommandSource serverSource = context.getSource();
 
                                                     String botName = StringArgumentType.getString(context, "bot_name");
 
@@ -1490,7 +1531,7 @@ public class modCommandRegistry {
                                 .executes(context -> {
 
                                     MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
-                                    ServerCommandSource serverSource = server.getCommandSource();
+                                    ServerCommandSource serverSource = context.getSource();
 
                                     ChatUtils.sendSystemMessage(serverSource, "Exporting Q-table to JSON. Please wait.... ");
 
@@ -2270,20 +2311,20 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static void spawnBot(CommandContext<ServerCommandSource> context, String spawnMode, String explicitGameMode) {
+    private static SpawnOutcome spawnBot(CommandContext<ServerCommandSource> context, String spawnMode, String explicitGameMode) {
         try {
             MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
             String requestedSpawnMode = spawnMode == null ? "" : spawnMode.trim();
             String normalizedSpawnMode = normalizeSpawnModeOrNull(requestedSpawnMode);
             if (normalizedSpawnMode == null) {
-                ServerCommandSource serverSource = server.getCommandSource();
+                ServerCommandSource serverSource = context.getSource();
                 LOGGER.warn("spawnBot: invalid spawn mode '{}' for requested bot", requestedSpawnMode);
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
                         "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
                 ChatUtils.sendSystemMessage(serverSource,
                         "Legacy aliases: play -> admin, quest -> questing, train -> training");
-                return;
+                return SpawnOutcome.REFUSED;
             }
 
             // Survival recruitment gating: don't let non-ops bypass recruitment or resurrection.
@@ -2296,25 +2337,25 @@ public class modCommandRegistry {
                         ChatUtils.sendSystemMessage(context.getSource(),
                                 "Bots are unavailable until recruited. Find a village and recruit first (or ask an admin)."
                         );
-                        return;
+                        return SpawnOutcome.REFUSED;
                     }
 
                     String requested = StringArgumentType.getString(context, "bot_name");
                     String recruitedAlias = st.getBotAlias();
                     if (requested == null || recruitedAlias == null || !recruitedAlias.equalsIgnoreCase(requested.trim())) {
                         ChatUtils.sendSystemMessage(context.getSource(), "You can only spawn the recruited companion ('" + recruitedAlias + "') in this world.");
-                        return;
+                        return SpawnOutcome.REFUSED;
                     }
 
                     if (!isAdminLikeSpawnMode(normalizedSpawnMode)) {
                         ChatUtils.sendSystemMessage(context.getSource(), "Only admin/questing spawning is allowed for the recruited companion.");
-                        return;
+                        return SpawnOutcome.REFUSED;
                     }
 
                     if (st.isCompanionDead()) {
                         ChatUtils.sendSystemMessage(context.getSource(), recruitedAlias + " is dead.");
                         ChatUtils.sendSystemMessage(context.getSource(), "You must perform the Nether ritual to bring them back.");
-                        return;
+                        return SpawnOutcome.REFUSED;
                     }
                 }
             }
@@ -2365,9 +2406,9 @@ public class modCommandRegistry {
             botName = StringArgumentType.getString(context, "bot_name");
 
             // ── Name validation ─────────────────────────────────────────
-            ServerCommandSource serverSource = server.getCommandSource();
+            ServerCommandSource serverSource = context.getSource();
             String validatedName = validateBotName(botName, serverSource);
-            if (validatedName == null) return;  // error already sent
+            if (validatedName == null) return SpawnOutcome.REFUSED;  // error already sent
             botName = validatedName;
 
             // Manual spawn clears any pending respawn prompt for this bot.
@@ -2398,12 +2439,13 @@ public class modCommandRegistry {
                 if (!(existingBot instanceof createFakePlayer)) {
                     ChatUtils.sendSystemMessage(serverSource,
                             "Error: A real player named '" + botName + "' is online; cannot spawn a bot with that name.");
-                    return;
+                    return SpawnOutcome.REFUSED;
                 }
                 // A bot with this alias is already active — reject the duplicate.
                 ChatUtils.sendSystemMessage(serverSource,
-                        "A bot named '" + botName + "' is already active. Use a different name, or /bot stop " + botName + " first.");
-                return;
+                        "A bot named '" + botName + "' is already active. Use a different name, or /bot despawn "
+                                + quoteCommandArgument(botName) + " first.");
+                return SpawnOutcome.REFUSED;
             }
 
             // Check if the bot is mid-fast-travel. If so, cancel the travel and warn.
@@ -2412,7 +2454,7 @@ public class modCommandRegistry {
             if (pendingTravel != null) {
                 NavigationArtifactService.cancelTravel(pendingTravel.botUuid());
                 ChatUtils.sendSystemMessage(context.getSource(),
-                        "\u00A7e" + botName + " was mid-travel. Trip canceled — spawning here instead.\u00A7r");
+                        "\u00A7e" + botName + " was mid-travel. Trip canceled, spawning here instead.\u00A7r");
             }
 
             // If an admin force-spawns a bot before recruitment, treat the world as recruited.
@@ -2438,6 +2480,7 @@ public class modCommandRegistry {
                 }
             }
 
+            SpawnOutcome outcome = SpawnOutcome.SPAWNED;
             if ("training".equalsIgnoreCase(normalizedSpawnMode)) {
 
                 LOGGER.info("spawnBot: entering training branch for {}", botName);
@@ -2495,6 +2538,7 @@ public class modCommandRegistry {
                 } else {
                     LOGGER.error("spawnBot: training bot {} was not found after createFake", botName);
                     ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                    outcome = SpawnOutcome.FAILED;
                 }
 
                 // don't initialize ollama client for training mode.
@@ -2579,7 +2623,7 @@ public class modCommandRegistry {
                                 LOGGER.error("spawnBot: LLMClientFactory returned null for provider {}", llmProvider);
                                 ChatUtils.sendSystemMessage(serverSource,
                                         "Error: Failed to initialize language model client for provider " + llmProvider + ".");
-                                return;
+                                return SpawnOutcome.FAILED; // bot exists but its LLM client did not start (pre-existing)
                             }
 
                             ChatUtils.sendSystemMessage(serverSource,
@@ -2683,6 +2727,7 @@ public class modCommandRegistry {
                 } else {
                     LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);
                     ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                    outcome = SpawnOutcome.FAILED;
                 }
 
                 // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
@@ -2712,7 +2757,9 @@ public class modCommandRegistry {
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
                     "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
+                outcome = SpawnOutcome.REFUSED;
             }
+            return outcome;
 
         } catch (Exception e) {
             LOGGER.error("❌ Fatal error inside spawnBot for /bot spawn {} {}", botName, spawnMode, e);
@@ -2958,7 +3005,7 @@ public class modCommandRegistry {
         }
         else {
             sprint = false;
-            ChatUtils.sendChatMessages(server.getCommandSource(), "Wrong argument! Command is as follows: /bot go_to <botName> <xyz> <true/false (case insensitive)>");
+            ChatUtils.sendChatMessages(context.getSource(), "Wrong argument! Command is as follows: /bot go_to <botName> <xyz> <true/false (case insensitive)>");
         }
 
         int x_distance = position.getX();
@@ -3010,7 +3057,7 @@ public class modCommandRegistry {
                 PathTracer.tracePath(server, botSource, botName, segments, sprint);
             } catch (Exception e) {
                 LOGGER.error("An unexpected error occurred in /bot go_to command", e);
-                ChatUtils.sendChatMessages(server.getCommandSource(), "An unexpected error occurred trying to execute that command.");
+                ChatUtils.sendChatMessages(context.getSource(), "An unexpected error occurred trying to execute that command.");
             }
         });
     }
@@ -4492,7 +4539,7 @@ public class modCommandRegistry {
         }
 
         if (bots.isEmpty()) {
-            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            sendNoFollowersMessage(source);
             return 0;
         }
 
@@ -4648,7 +4695,7 @@ public class modCommandRegistry {
         }
 
         if (bots.isEmpty()) {
-            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            sendNoFollowersMessage(source);
             return 0;
         }
 
@@ -4788,7 +4835,7 @@ public class modCommandRegistry {
         }
 
         if (bots.isEmpty()) {
-            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            sendNoFollowersMessage(source);
             return 0;
         }
 
@@ -6293,8 +6340,10 @@ public class modCommandRegistry {
         net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
         // Ensure follow state is cleared so the bot truly stops.
         net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot);
-        stopMoving(server, context.getSource(), alias);
-        TaskService.forceAbort(bot.getUuid(), "§cCurrent task aborted via /bot stop.");
+        // No Carpet "/player <bot> stop" here: BotActions.stop(bot) below already halts movement,
+        // and without Carpet the command was a visible red error on every stop.
+        // Silent abort: "<bot> has stopped." from executeStopTargets is the only chat line.
+        TaskService.forceAbort(bot.getUuid(), StopFeedbackPolicy.MANUAL_STOP_REASON, false);
         net.wcfcarolina13.PathFinding.PathTracer.flushAllMovementTasks();
         // Emergency cleanup: clear crouch locks / task flags so the bot isn't left "busy".
         net.wcfcarolina13.GameAI.services.SneakLockService.clear(bot.getUuid());
@@ -6302,7 +6351,6 @@ public class modCommandRegistry {
         net.wcfcarolina13.GameAI.BotActions.sneak(bot, false);
         net.wcfcarolina13.GameAI.BotActions.stop(bot);
         net.wcfcarolina13.GameAI.services.BotAutoCookingService.snoozeFor(bot, 20L * 120L);
-        ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + alias + "...");
         SkillResumeService.clearAndNotify(bot.getUuid());
         return 1;
     }
@@ -8146,7 +8194,9 @@ public class modCommandRegistry {
                             + skillName + " bot=" + bot.getGameProfile().name()
                             + " success=" + (result != null && result.success())
                             + " msg=" + (result != null ? result.message() : "null"));
-                    source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+                    if (StopFeedbackPolicy.shouldEchoSkillResult(result.message())) {
+                        source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+                    }
                 } catch (Exception e) {
                     LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
                     net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill error name="
