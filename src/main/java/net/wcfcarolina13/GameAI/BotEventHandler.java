@@ -39,6 +39,7 @@ import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
 import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
+import net.wcfcarolina13.GameAI.services.DropReachPolicy;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -190,6 +191,7 @@ public class BotEventHandler {
     /** Interrupt all in-flight come-recovery tasks. Called during server shutdown. */
     public static void shutdownExecutors() {
         COME_RECOVERY_EXECUTOR.shutdownNow();
+        IDLE_SWEEP_ENTITY_BLACKLIST.clear();
     }
 
     /** Re-create the come-recovery executor if it was shut down. Called from {@code SERVER_STARTED}. */
@@ -3055,8 +3057,8 @@ public class BotEventHandler {
     private static final long IDLE_SWEEP_DELAY_TICKS = 300L;
     /** Maximum distance the bot will walk for an idle sweep. */
     private static final double IDLE_SWEEP_RADIUS = 20.0D;
-    /** No-progress timeout: abandon a sweep target the bot can't get closer to within 10 s. */
-    private static final long IDLE_SWEEP_NO_PROGRESS_TIMEOUT_TICKS = 200L;
+    // No-progress timeout is height-aware: DropReachPolicy.noProgressTimeoutTicks(dy)
+    // (10 s for a reachable drop, 3 s once it is out of vertical reach).
     /** Squared-distance delta that counts as "made progress" toward the target. */
     private static final double IDLE_SWEEP_PROGRESS_DELTA_SQ = 0.25D;
     /** Cooldown for an unreachable drop position (60 s). */
@@ -3172,6 +3174,27 @@ public class BotEventHandler {
 
             // Walk toward committed target (or find a new one).
             BlockPos target = FollowStateService.IDLE_SWEEP_TARGET.get(botId);
+            ItemEntity targetItem = null;
+            if (target != null && bot.getEntityWorld() instanceof ServerWorld resolveWorld) {
+                // Re-resolve against the real item each tick: a picked-up / despawned item
+                // clears the target, a slid / fallen item moves it (FRESH_INSTALL #10 stare).
+                targetItem = resolveIdleSweepTargetItem(resolveWorld, target);
+                if (targetItem == null) {
+                    FollowStateService.IDLE_SWEEP_TARGET.remove(botId);
+                    FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.remove(botId);
+                    FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.remove(botId);
+                    target = null;
+                } else {
+                    double movedSq = targetItem.squaredDistanceTo(
+                            target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D);
+                    if (DropReachPolicy.shouldRetarget(movedSq)) {
+                        // Progress trackers are kept on purpose: an item that keeps sliding
+                        // away still runs into the no-progress timeout.
+                        target = targetItem.getBlockPos().toImmutable();
+                        FollowStateService.IDLE_SWEEP_TARGET.put(botId, target);
+                    }
+                }
+            }
             if (target != null) {
                 double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
                 if (distSq <= 2.25D) {
@@ -3198,12 +3221,18 @@ public class BotEventHandler {
                     } else if (distSq + IDLE_SWEEP_PROGRESS_DELTA_SQ < lastDistSq) {
                         FollowStateService.IDLE_SWEEP_LAST_PROGRESS_TICK.put(botId, nowTick);
                         FollowStateService.IDLE_SWEEP_LAST_DISTANCE_SQ.put(botId, distSq);
-                    } else if (nowTick - lastProgress > IDLE_SWEEP_NO_PROGRESS_TIMEOUT_TICKS) {
-                        LOGGER.info("[IdleSweep] {} abandoning unreachable drop at {} — no progress for {}s",
+                    } else if (nowTick - lastProgress > DropReachPolicy.noProgressTimeoutTicks(
+                            target.getY() - botBlock.getY())) {
+                        LOGGER.info("[IdleSweep] {} abandoning unreachable drop at {} (dy={}) — no progress for {}s",
                                 bot.getName().getString(), target.toShortString(),
+                                target.getY() - botBlock.getY(),
                                 (nowTick - lastProgress) / 20L);
                         blacklistIdleSweepTarget(botId, target,
                                 nowTick + IDLE_SWEEP_BLACKLIST_DURATION_TICKS);
+                        if (targetItem != null) {
+                            blacklistIdleSweepEntity(botId, targetItem,
+                                    nowTick + IDLE_SWEEP_BLACKLIST_DURATION_TICKS);
+                        }
                         FollowStateService.clearIdleSweep(botId);
                         DropSweepService.requestCancel(bot, "no-progress");
                         net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
@@ -7494,19 +7523,27 @@ public class BotEventHandler {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return null;
         }
-        double verticalRange = Math.max(6.0D, radius);
+        // Height cap (DropReachPolicy): the box only needs to cover the reachable band;
+        // the exact per-item dy check is in the predicate below.
+        double verticalRange = DropReachPolicy.MAX_DY_BELOW + 1.0D;
         Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
         Vec3d eyePos = bot.getEyePos();
+        int feetY = bot.getBlockY();
         long nowTick = world.getServer().getTicks();
         Map<BlockPos, Long> blacklist =
                 BackgroundSweepPolicy.pruneAndGetIdleSweepBlacklist(bot.getUuid(), nowTick);
+        Map<Integer, Long> entityBlacklist = pruneIdleSweepEntityBlacklist(bot.getUuid(), nowTick);
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         searchBox,
-                        drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
+                        drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D
+                                && DropReachPolicy.isVerticallyReachable(drop.getBlockY() - feetY))
                 .stream()
                 // Skip drops the bot has previously failed to reach (per-bot, time-bounded).
                 .filter(drop -> blacklist == null || !blacklist.containsKey(drop.getBlockPos()))
+                // Same item, keyed by entity id, so an abandoned drop that slid or fell to a
+                // new block is not picked again straight away.
+                .filter(drop -> entityBlacklist == null || !entityBlacklist.containsKey(drop.getId()))
                 // Back off from drops near a real player who just broke a block — avoids shoving
                 // the commander while they're mining a tunnel.
                 .filter(drop -> !net.wcfcarolina13.GameAI.services.CommanderActivityService
@@ -7538,6 +7575,56 @@ public class BotEventHandler {
         FollowStateService.IDLE_SWEEP_TARGET_BLACKLIST
                 .computeIfAbsent(botId, k -> new ConcurrentHashMap<>())
                 .put(target.toImmutable(), expiryTick);
+    }
+
+    /**
+     * Per-bot entity-id blacklist for abandoned idle-sweep drops (id -> expiry tick).
+     * Complements the block-pos blacklist: an item that moves after being abandoned keeps
+     * its entity id. Ids are only unique per server session, so this map is cleared with
+     * the tick TTL (and never persisted); a stale id after a restart just expires.
+     */
+    private static final Map<UUID, Map<Integer, Long>> IDLE_SWEEP_ENTITY_BLACKLIST = new ConcurrentHashMap<>();
+
+    private static void blacklistIdleSweepEntity(UUID botId, Entity drop, long expiryTick) {
+        if (botId == null || drop == null) return;
+        IDLE_SWEEP_ENTITY_BLACKLIST
+                .computeIfAbsent(botId, k -> new ConcurrentHashMap<>())
+                .put(drop.getId(), expiryTick);
+    }
+
+    private static Map<Integer, Long> pruneIdleSweepEntityBlacklist(UUID botId, long nowTick) {
+        if (botId == null) return null;
+        Map<Integer, Long> map = IDLE_SWEEP_ENTITY_BLACKLIST.get(botId);
+        if (map == null) return null;
+        map.values().removeIf(expiry -> expiry == null || expiry <= nowTick);
+        if (map.isEmpty()) {
+            IDLE_SWEEP_ENTITY_BLACKLIST.remove(botId, map);
+            return null;
+        }
+        return map;
+    }
+
+    /**
+     * Re-resolves the committed idle-sweep target against the real item: the nearest live
+     * item within 1.5 blocks of the committed cell centre, or null if it is gone (picked up,
+     * despawned, merged or moved further than that in one tick). Small box query only.
+     */
+    private static ItemEntity resolveIdleSweepTargetItem(ServerWorld world, BlockPos target) {
+        if (world == null || target == null) return null;
+        Vec3d center = new Vec3d(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D);
+        Box box = new Box(center.x - 1.5D, center.y - 1.5D, center.z - 1.5D,
+                center.x + 1.5D, center.y + 1.5D, center.z + 1.5D);
+        ItemEntity best = null;
+        double bestSq = 2.25D;
+        for (ItemEntity drop : world.getEntitiesByClass(ItemEntity.class, box,
+                d -> d.isAlive() && !d.isRemoved())) {
+            double sq = drop.squaredDistanceTo(center);
+            if (sq <= bestSq) {
+                bestSq = sq;
+                best = drop;
+            }
+        }
+        return best;
     }
 
     private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {

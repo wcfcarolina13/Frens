@@ -12,12 +12,15 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.DropSweepService;
+import net.wcfcarolina13.GameAI.services.DropReachPolicy;
+import net.wcfcarolina13.GameAI.services.WalkablePartialBlocks;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.BundleService;
 import net.wcfcarolina13.GameAI.services.MovementService;
@@ -215,6 +218,11 @@ public final class DropSweeper {
                 // next sweep tick. The TTL is per-bot, per-item-entity, self-evicting.
                 .filter(drop -> !net.wcfcarolina13.GameAI.services.CraftingHelper
                         .isRecentlySelfDropped(player, drop))
+                // Skip items in a 1-high slot with no 2-high stand at or beside them:
+                // the bot cannot fit there and nudging in suffocates it (FRESH_INSTALL #10).
+                // Leaf-trapped items pass: the sweep breaks the leaf to free them.
+                .filter(drop -> world.getBlockState(drop.getBlockPos()).isIn(BlockTags.LEAVES)
+                        || hasTwoHighStandAtOrBeside(world, drop.getBlockPos()))
                 .filter(drop -> {
                     // Skip items behind solid blocks — raycast from bot eye to item.
                     Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());
@@ -232,6 +240,58 @@ public final class DropSweeper {
                 })
                 .min(Comparator.comparingDouble(player::squaredDistanceTo))
                 .orElse(null);
+    }
+
+    /** Feet cell is enterable (empty collision or a walkable partial such as a carpet). */
+    private static boolean isCellPassable(ServerWorld world, BlockPos pos) {
+        return WalkablePartialBlocks.isPathable(world.getBlockState(pos), world, pos);
+    }
+
+    /** True when a bot fits with its feet in {@code feet}: feet + head passable and solid footing. */
+    private static boolean isTwoHighStand(ServerWorld world, BlockPos feet) {
+        BlockPos below = feet.down();
+        boolean footing = !world.getBlockState(below).getCollisionShape(world, below).isEmpty()
+                || !world.getFluidState(below).isEmpty();
+        return footing && DropReachPolicy.isNudgeCellSafe(isCellPassable(world, feet), isCellPassable(world, feet.up()));
+    }
+
+    /**
+     * An item is collectable when the bot can stand in its cell or in a horizontal
+     * neighbour at the same height (pickup reach is 1 block sideways, 0.5 vertically).
+     * Same world-read discipline as the raycast filter beside it.
+     */
+    private static boolean hasTwoHighStandAtOrBeside(ServerWorld world, BlockPos itemCell) {
+        if (world == null || itemCell == null) {
+            return false;
+        }
+        if (isTwoHighStand(world, itemCell)) {
+            return true;
+        }
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            if (isTwoHighStand(world, itemCell.offset(direction))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Nudge safety: the cell the bot steps into (facing direction; one up for a jump onto a
+     * step) must fit it 2-high, and for a drop below, the landing cell at the item must too.
+     * Called on the server thread, where the nudge itself runs.
+     */
+    private static boolean isNudgeSafe(ServerWorld world, ServerPlayerEntity player, BlockPos current, BlockPos dropPos, int dy) {
+        BlockPos next = current.offset(player.getHorizontalFacing());
+        if (dy > 0) {
+            next = next.up();
+        }
+        if (!DropReachPolicy.isNudgeCellSafe(isCellPassable(world, next), isCellPassable(world, next.up()))) {
+            return false;
+        }
+        if (dy < 0) {
+            return DropReachPolicy.isNudgeCellSafe(isCellPassable(world, dropPos), isCellPassable(world, dropPos.up()));
+        }
+        return true;
     }
 
     private static String describeDrop(ItemEntity entity) {
@@ -453,6 +513,10 @@ public final class DropSweeper {
                 BotActions.sneak(player, false);
                 BlockPos current = player.getBlockPos();
                 int dy = dropPos.getY() - current.getY();
+                if (!isNudgeSafe(world, player, current, dropPos, dy)) {
+                    LOGGER.info("Drop sweep nudge skipped near {}: no 2-high clearance", dropPos.toShortString());
+                    return false;
+                }
                 if (dy > 0) {
                     BotActions.jumpForward(player);
                 } else {
@@ -470,13 +534,18 @@ public final class DropSweeper {
 
         boolean collected = false;
         for (int attempt = 0; attempt < 3 && !collected; attempt++) {
-            CompletableFuture<Void> future = new CompletableFuture<>();
+            CompletableFuture<Boolean> future = new CompletableFuture<>();
             Runnable task = () -> {
                 try {
                     LookController.faceBlock(player, dropPos);
                     BotActions.sneak(player, false);
                     BlockPos current = player.getBlockPos();
                     int dy = dropPos.getY() - current.getY();
+                    // Clearance is read here, on the server thread, right before the step.
+                    if (!isNudgeSafe(world, player, current, dropPos, dy)) {
+                        future.complete(false);
+                        return;
+                    }
                     if (dy > 0) {
                         BotActions.jumpForward(player);
                     } else {
@@ -487,7 +556,7 @@ public final class DropSweeper {
                             BotActions.jumpForward(player);
                         }
                     }
-                    future.complete(null);
+                    future.complete(true);
                 } catch (Throwable t) {
                     future.completeExceptionally(t);
                 }
@@ -496,7 +565,11 @@ public final class DropSweeper {
             server.execute(task);
 
             try {
-                future.get(250, TimeUnit.MILLISECONDS);
+                if (!future.get(250, TimeUnit.MILLISECONDS)) {
+                    // Item left where it is; the calling sweep moves on to the next target.
+                    LOGGER.info("Drop sweep nudge skipped near {}: no 2-high clearance", dropPos.toShortString());
+                    break;
+                }
             } catch (Exception e) {
                 LOGGER.warn("Drop sweep nudge attempt {} near {} errored: {}", attempt + 1, dropPos, e.getMessage());
                 break;
