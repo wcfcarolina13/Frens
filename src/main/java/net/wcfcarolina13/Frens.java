@@ -1031,6 +1031,8 @@ public class Frens implements ModInitializer {
                 configNetworkManager.sendConfigSync(player);
                 // Deliver any travel notifications queued while this player was offline.
                 net.wcfcarolina13.GameAI.services.NavigationArtifactService.drainQueuedNotifications(player);
+                // Integrated servers defer saved-bot auto-spawn until the host is in the player list.
+                net.wcfcarolina13.GameAI.services.BotControlApplier.onRealPlayerJoin(server);
             }
             
             // Check if bot spawned in a wall and needs to dig out

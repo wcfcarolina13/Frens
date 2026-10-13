@@ -22,6 +22,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Applies persisted /configMan toggles to the running server so players do not need to repeat console commands.
@@ -29,12 +31,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BotControlApplier {
 
     private static final Set<String> AUTO_SPAWNED_THIS_SESSION = ConcurrentHashMap.newKeySet();
+    /**
+     * Integrated servers start before the host logs in; auto-spawn waits for the first real player
+     * so bots never fill the player list ahead of the host (see {@link AutoSpawnPolicy}).
+     */
+    private static final AtomicBoolean AUTO_SPAWN_PENDING = new AtomicBoolean(false);
 
     private BotControlApplier() {
     }
 
     public static void resetSession() {
         AUTO_SPAWNED_THIS_SESSION.clear();
+        AUTO_SPAWN_PENDING.set(false);
     }
 
     public static void applyPersistentSettings(MinecraftServer server) {
@@ -42,6 +50,22 @@ public final class BotControlApplier {
             return;
         }
         refreshBotPreferences(server);
+        if (AutoSpawnPolicy.deferUntilHostJoins(server.isDedicated())) {
+            AUTO_SPAWN_PENDING.set(true);
+            Frens.LOGGER.info("Auto-spawn deferred until the first real player joins (integrated server).");
+        } else {
+            scheduleAutoSpawns(server);
+        }
+    }
+
+    /**
+     * Called from the JOIN handler for real (non-fake) players, on the server thread after the
+     * player has been added to the player list. Runs the deferred auto-spawn once per session.
+     */
+    public static void onRealPlayerJoin(MinecraftServer server) {
+        if (server == null || !AUTO_SPAWN_PENDING.compareAndSet(true, false)) {
+            return;
+        }
         scheduleAutoSpawns(server);
     }
 
@@ -115,6 +139,10 @@ public final class BotControlApplier {
             }
         }
 
+        AtomicInteger baseline = new AtomicInteger(-1);
+        AtomicInteger dispatched = new AtomicInteger(0);
+        AtomicInteger skipped = new AtomicInteger(0);
+        boolean queuedAny = false;
         for (String alias : candidates) {
             if (alias == null || alias.equalsIgnoreCase("default")) {
                 continue;
@@ -141,6 +169,17 @@ public final class BotControlApplier {
             ManualConfig.BotSpawn finalSpawn = spawn;
             boolean finalHasWorldState = hasWorldState;
             Runnable task = () -> {
+                int observed = server.getPlayerManager().getCurrentPlayerCount();
+                int max = server.getPlayerManager().getMaxPlayerCount();
+                baseline.compareAndSet(-1, observed);
+                int effective = AutoSpawnPolicy.effectivePlayerCount(observed, baseline.get(), dispatched.get());
+                if (!AutoSpawnPolicy.hasRoomForAutoSpawn(effective, max)) {
+                    skipped.incrementAndGet();
+                    Frens.LOGGER.info("Auto-spawn skipped for {}: {}/{} players and {} slot(s) kept free",
+                            alias, effective, max, AutoSpawnPolicy.RESERVED_SLOTS);
+                    return;
+                }
+                dispatched.incrementAndGet();
                 CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
                 ServerCommandSource source = server.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
                 if (finalSpawn != null) {
@@ -164,6 +203,30 @@ public final class BotControlApplier {
                 }
             };
             server.execute(task);
+            queuedAny = true;
+        }
+        if (queuedAny) {
+            // Runs after every per-alias task above (server.execute is FIFO on the server thread).
+            server.execute(() -> notifySkipped(server, skipped.get()));
+        }
+    }
+
+    private static void notifySkipped(MinecraftServer server, int skipped) {
+        if (skipped <= 0) {
+            return;
+        }
+        int max = server.getPlayerManager().getMaxPlayerCount();
+        String message = "\u00a7e" + skipped + " companion" + (skipped == 1 ? " was" : "s were")
+                + " not auto-spawned: this world allows " + max
+                + " players and one slot is kept free. Use /bot spawn to bring one in.";
+        Frens.LOGGER.info("Auto-spawn skipped {} companion(s); world allows {} players", skipped, max);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (player instanceof net.wcfcarolina13.Entity.createFakePlayer) {
+                continue;
+            }
+            if (Frens.isOperator(player) || net.wcfcarolina13.network.BotAccessGate.isHost(player)) {
+                player.sendMessage(net.minecraft.text.Text.literal(message), false);
+            }
         }
     }
 }
