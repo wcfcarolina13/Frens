@@ -97,8 +97,7 @@ public class WorldModeSelectionScreen extends Screen {
         // can pick saved bots to spawn or create their first one.  Questing mode
         // has its own recruitment dialogue flow — leave it alone.
         if (!questingMode && this.client != null) {
-            java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
-            this.client.setScreen(new BotRestoreScreen(null, aliases));
+            net.wcfcarolina13.FrensClient.openRosterScreen(null);
         }
     }
 

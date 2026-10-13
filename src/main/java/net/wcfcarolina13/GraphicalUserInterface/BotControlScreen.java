@@ -1481,8 +1481,8 @@ public class BotControlScreen extends Screen {
         }
         if (spawnBotsActionRect != null && spawnBotsActionRect.contains(mx, my)) {
             if (this.client != null) {
-                java.util.List<String> aliases = net.wcfcarolina13.FrensClient.getKnownRestorableBotAliases();
-                this.client.setScreen(new BotRestoreScreen(this, aliases));
+                // Only companions not already in the world are offered for restore.
+                net.wcfcarolina13.FrensClient.openRosterScreen(this);
             }
             return true;
         }

@@ -60,7 +60,18 @@ public final class BotPersistenceService {
     private static final ConcurrentMap<UUID, Long> RESTORE_SEQUENCE = new ConcurrentHashMap<>();
     private static final ConcurrentMap<UUID, Long> LAST_APPLIED_RESTORE_SEQUENCE = new ConcurrentHashMap<>();
 
+    /**
+     * Bots that joined this session with no persisted vanilla state (first-ever spawn or wiped).
+     * In-memory on purpose: a bot that was saved rejoins with a .dat next session and is removed.
+     * Read by the ambient greeting so a brand-new bot does not say "welcome back".
+     */
+    private static final java.util.Set<UUID> FIRST_EVER_SPAWN_THIS_SESSION = ConcurrentHashMap.newKeySet();
+
     private BotPersistenceService() {}
+
+    public static boolean isFirstEverSpawnThisSession(UUID botId) {
+        return botId != null && FIRST_EVER_SPAWN_THIS_SESSION.contains(botId);
+    }
 
     public static void onBotJoin(ServerPlayerEntity bot) {
         MinecraftServer server = extractServer(bot);
@@ -87,8 +98,11 @@ public final class BotPersistenceService {
         BotInventoryStorageService.markRestorePending(bot.getUuid());
         boolean managerRestored = restoreViaPlayerManager(server, bot);
         if (managerRestored) {
+            FIRST_EVER_SPAWN_THIS_SESSION.remove(bot.getUuid());
             LOGGER.info("Restored fakeplayer '{}' using PlayerManager.", bot.getName().getString());
         } else {
+            // Marked synchronously: the first ambient greeting can fire one tick after join.
+            FIRST_EVER_SPAWN_THIS_SESSION.add(bot.getUuid());
             LOGGER.info("No persisted state for fakeplayer '{}'; starting fresh.", bot.getName().getString());
         }
         LOGGER.info("[PersistCheck] manager-restore bot={} restored={} tick={} vitals={}",

@@ -891,7 +891,7 @@ public final class BotGuideScreen extends Screen {
                                 "The 'Manage settings → Bot Controls' link at the bottom opens the full Bot Controls panel for per-bot spawning rules."
                         ),
                         "",
-                        "Bot Controls > Spawn Bots… ; also '-' hotkey when no bots exist",
+                        "Bot Controls > Spawn Bots…, also the [-] key when no bots exist",
                         "roster restore multi select spawn multiple checkbox create new bot skin"
                 ),
                 new GuideTopic(
@@ -916,7 +916,8 @@ public final class BotGuideScreen extends Screen {
                         "The on-screen notice that appears when no bots are currently in the world.",
                         List.of(
                                 "Shown after ~2 seconds of no bots being present, in admin mode or when survival recruitment is complete.",
-                                "Press the open-roster hotkey to jump straight to the Bot Roster (same as Bot Controls > Spawn Bots…).",
+                                "Press [-] (the go-to-look key) while no bots are present to jump straight to the Bot Roster. Any time, open Guide (]) > Admin > Bot Controls > Spawn Bots.",
+                                "Once a bot is out, [-] sends it where you look instead.",
                                 "Click the small [x] button on the hint to hide it for the rest of the session.",
                                 "It will reappear the next time bots transition from present → absent (e.g. everyone dies or you /bot despawn them)."
                         ),

@@ -281,6 +281,15 @@ public class FrensClient implements ClientModInitializer {
     /** Session-only HUD dismissal.  Resets when bots reappear in the world so
      *  the hint shows again next time everyone goes missing. */
     private static boolean noBotsHintDismissed = false;
+    /** Set when the roster is opened. The next time a known companion shows up, a one-shot
+     *  notice explains that [-] now means go-to-look and where the roster lives. */
+    private static boolean rosterOpenedAwaitingBot = false;
+    private static boolean botsPresentHintShown = false;
+    private static long botsPresentHintUntilMs = 0L;
+    private static final long BOTS_PRESENT_HINT_DURATION_MS = 10_000L;
+    /** Vanilla toasts (tutorial, advancements) occupy a 160x32 strip at the top right. */
+    private static final int VANILLA_TOAST_W = 160;
+    private static final int VANILLA_TOAST_H = 32;
     /** Click target for the HUD X button (rendered inside renderNoBotsPresentHint). */
     private static int noBotsHintCloseX, noBotsHintCloseY, noBotsHintCloseW, noBotsHintCloseH;
 
@@ -1086,6 +1095,7 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderPendingShelterHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderModeSelectionReminder(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderNoBotsPresentHint(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderBotsPresentHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsAcquireHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
@@ -1380,6 +1390,7 @@ public class FrensClient implements ClientModInitializer {
     }
 
     private static void tickNoBotsRestoreState(MinecraftClient client) {
+        tickBotsPresentHintState(client);
         if (!shouldOfferNoBotsRestore(client)) {
             resetNoBotsRestoreState();
             return;
@@ -1417,38 +1428,84 @@ public class FrensClient implements ClientModInitializer {
         if (knownAliases.isEmpty()) {
             return false;
         }
-        java.util.HashSet<String> normalizedAliases = new java.util.HashSet<>();
-        for (String alias : knownAliases) {
-            normalizedAliases.add(alias.toLowerCase(java.util.Locale.ROOT));
+        java.util.Set<String> present = presentPlayerNamesLower(client);
+        if (present == null) {
+            return false;
         }
-        // Use the TAB player list (all connected players regardless of distance) instead of
-        // client.world.getPlayers() which only returns entities within tracking range (~128 blocks).
+        return !net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.anyPresent(knownAliases, present);
+    }
+
+    /**
+     * Lower-cased names of every connected player, from the TAB list (all connected players
+     * regardless of distance, unlike client.world.getPlayers() which stops at tracking range).
+     * Returns null when the list cannot be read.
+     */
+    private static java.util.Set<String> presentPlayerNamesLower(MinecraftClient client) {
+        java.util.HashSet<String> names = new java.util.HashSet<>();
+        if (client == null) {
+            return names;
+        }
         try {
             if (client.getNetworkHandler() != null) {
                 for (net.minecraft.client.network.PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
                     if (entry.getProfile() != null && entry.getProfile().name() != null) {
-                        String name = entry.getProfile().name().trim().toLowerCase(java.util.Locale.ROOT);
-                        if (normalizedAliases.contains(name)) {
-                            return false;
-                        }
+                        names.add(net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(entry.getProfile().name()));
                     }
                 }
             }
         } catch (Throwable ignored) {
-            return false;
+            return null;
         }
-        return true;
+        return names;
+    }
+
+    /** Known saved companions that are not already in the world. */
+    public static java.util.List<String> getRestorableBotAliasesNotPresent() {
+        java.util.List<String> known = getKnownRestorableBotAliases();
+        java.util.Set<String> present = presentPlayerNamesLower(MinecraftClient.getInstance());
+        return net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
+                known, present == null ? java.util.Set.of() : present);
+    }
+
+    /**
+     * Opens the roster with only the companions that can actually be restored. An empty list
+     * still shows the screen so a new companion can be created.
+     */
+    public static void openRosterScreen(Screen parent) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) {
+            return;
+        }
+        rosterOpenedAwaitingBot = true;
+        client.setScreen(new BotRestoreScreen(parent, getRestorableBotAliasesNotPresent()));
+    }
+
+    private static void tickBotsPresentHintState(MinecraftClient client) {
+        if (!rosterOpenedAwaitingBot || botsPresentHintShown) {
+            return;
+        }
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        java.util.Set<String> present = presentPlayerNamesLower(client);
+        if (present == null) {
+            return;
+        }
+        if (net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.anyPresent(getKnownRestorableBotAliases(), present)) {
+            rosterOpenedAwaitingBot = false;
+            botsPresentHintShown = true;
+            botsPresentHintUntilMs = System.currentTimeMillis() + BOTS_PRESENT_HINT_DURATION_MS;
+        }
     }
 
     private static void openNoBotsRestoreScreen(MinecraftClient client) {
         if (client == null) {
             return;
         }
-        java.util.List<String> aliases = getKnownRestorableBotAliases();
-        if (aliases.isEmpty()) {
+        if (getKnownRestorableBotAliases().isEmpty()) {
             return;
         }
-        client.setScreen(new BotRestoreScreen(null, aliases));
+        openRosterScreen(null);
     }
 
     private static void renderNoBotsPresentHint(DrawContext context) {
@@ -1474,22 +1531,20 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        String openKey = keyNameOrNull(KEY_GO_TO_LOOK);
-        if (openKey == null) {
-            openKey = "-";
-        }
-        String line1 = "No companions are currently present in this world.";
-        String line2 = "Press [" + openKey + "] to open the roster — click [x] to hide this hint";
+        java.util.List<String> lines = net.wcfcarolina13.GraphicalUserInterface.ContextKeyPolicy
+                .noBotsHintLines(keyNameOrNull(KEY_GO_TO_LOOK));
 
-        int w1 = client.textRenderer.getWidth(line1);
-        int w2 = client.textRenderer.getWidth(line2);
-        int textMaxW = Math.max(w1, w2);
+        int textMaxW = 0;
+        for (String line : lines) {
+            textMaxW = Math.max(textMaxW, client.textRenderer.getWidth(line));
+        }
         int closeBtnSize = 10;
         int closeBtnPad = 6; // gap between text and close button
         int maxW = textMaxW + closeBtnPad + closeBtnSize;
         int x = (context.getScaledWindowWidth() - maxW) / 2;
-        int boxH = client.textRenderer.fontHeight * 2 + 6;
-        int y = reserveTopTipY(TopTipLane.CENTER, boxH + 7);
+        int lineStep = client.textRenderer.fontHeight + 2;
+        int boxH = lineStep * lines.size() + 2;
+        int y = reserveCenterTipYClearOfToast(context, x + maxW + 7, boxH + 7);
 
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
         context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
@@ -1497,8 +1552,10 @@ public class FrensClient implements ClientModInitializer {
         context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
         context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
 
-        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
-        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawTextWithShadow(client.textRenderer, lines.get(i), x, y + lineStep * i,
+                    i == 0 ? 0xFFE6D7A3 : 0xFFB8A76A);
+        }
 
         // ── Dismiss [X] button (top-right corner of the hint box) ──
         noBotsHintCloseX = x + maxW - closeBtnSize + 2;
@@ -1520,6 +1577,53 @@ public class FrensClient implements ClientModInitializer {
                 noBotsHintCloseX + (closeBtnSize - client.textRenderer.getWidth("x")) / 2,
                 noBotsHintCloseY + (closeBtnSize - client.textRenderer.fontHeight) / 2 + 1,
                 0xFFEFEFEF, false);
+    }
+
+    /**
+     * Reserves a CENTER-lane slot. When the box's right edge reaches into the top-right strip
+     * that vanilla toasts use, the slot starts below that strip so a tutorial toast cannot
+     * cover the text. At wide windows the box is clear of the strip and nothing moves.
+     */
+    private static int reserveCenterTipYClearOfToast(DrawContext context, int boxRight, int tipHeight) {
+        int toastLeft = context.getScaledWindowWidth() - VANILLA_TOAST_W;
+        int minY = VANILLA_TOAST_H + 6;
+        if (boxRight > toastLeft && topTipCenterY < minY) {
+            topTipCenterY = minY;
+        }
+        return reserveTopTipY(TopTipLane.CENTER, tipHeight);
+    }
+
+    private static void renderBotsPresentHint(DrawContext context) {
+        if (botsPresentHintUntilMs <= System.currentTimeMillis()) {
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
+        java.util.List<String> lines = net.wcfcarolina13.GraphicalUserInterface.ContextKeyPolicy
+                .botsPresentHintLines(keyNameOrNull(KEY_GO_TO_LOOK), keyNameOrNull(KEY_OPEN_GUIDE));
+        int maxW = 0;
+        for (String line : lines) {
+            maxW = Math.max(maxW, client.textRenderer.getWidth(line));
+        }
+        int x = (context.getScaledWindowWidth() - maxW) / 2;
+        int lineStep = client.textRenderer.fontHeight + 2;
+        int boxH = lineStep * lines.size() + 2;
+        int y = reserveCenterTipYClearOfToast(context, x + maxW + 7, boxH + 7);
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawTextWithShadow(client.textRenderer, lines.get(i), x, y + lineStep * i,
+                    i == 0 ? 0xFFE6D7A3 : 0xFFB8A76A);
+        }
     }
 
     /**

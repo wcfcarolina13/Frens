@@ -115,7 +115,11 @@ public final class BotAmbientSocialChatService {
                     boolean firstSeen = lastSeen == 0L;
 
                     if ((firstSeen || longTimeNoSee) && (nowTick - lastChat) > GREET_COOLDOWN_TICKS) {
-                        String msg = pickGreetingLine(player.getName().getString());
+                        GreetingPolicy.Pool pool = GreetingPolicy.pool(
+                                BotPersistenceService.isFirstEverSpawnThisSession(botUuid),
+                                firstSeen,
+                                longTimeNoSee);
+                        String msg = pickGreetingLine(pool, player.getName().getString());
                         say(bot, msg);
                         LAST_CHAT_TICK.put(key, nowTick);
                         continue;
@@ -151,14 +155,8 @@ public final class BotAmbientSocialChatService {
         }
     }
 
-    private static String pickGreetingLine(String playerName) {
-        String name = playerName != null && !playerName.isBlank() ? playerName : "there";
-        return choose(
-                "Hey, " + name + ".",
-                "Oh—" + name + ", there you are.",
-                "Good to see you again, " + name + ".",
-                "Welcome back, " + name + "."
-        );
+    private static String pickGreetingLine(GreetingPolicy.Pool pool, String playerName) {
+        return choose(GreetingPolicy.lines(pool, playerName).toArray(new String[0]));
     }
 
     private static String pickNearbyRemarkLine(ServerPlayerEntity player, ServerPlayerEntity bot) {
