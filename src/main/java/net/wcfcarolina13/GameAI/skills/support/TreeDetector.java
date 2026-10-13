@@ -12,6 +12,7 @@ import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
+import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -757,11 +758,29 @@ public final class TreeDetector {
             return new WoodcutProtectionDecision(true, "beehive");
         }
         return VillageRuntimeProtectionPolicy.decideWoodcutProtection(
-                CompanionSafeZoneService.isInExplicitProtectedZone(world, pos, null),
-                CompanionSafeZoneService.isNearSavedBase(world, pos),
+                isInUserDrawnProtectedZone(world, pos),
                 CompanionSafeZoneService.isInsideFortificationZone(world, pos),
                 MappedVillageService.isInsideMappedVillage(world, pos)
         );
+    }
+
+    /**
+     * Explicit-zone check for woodcut: the zone service must refuse the mutation AND at least
+     * one containing zone must be user-drawn. Base auto-zones (label prefix owned by
+     * {@link BotHomeService}) mirror base radius, which woodcut ignores. Conservative edge: a
+     * public-mode user zone overlapping a base zone still counts as blocking here.
+     */
+    private static boolean isInUserDrawnProtectedZone(ServerWorld world, BlockPos pos) {
+        if (!CompanionSafeZoneService.isInExplicitProtectedZone(world, pos, null)) {
+            return false;
+        }
+        List<String> containing = new ArrayList<>();
+        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
+            if (zone != null && zone.contains(pos)) {
+                containing.add(zone.getLabel());
+            }
+        }
+        return VillageRuntimeProtectionPolicy.anyNonBaseZone(containing, BotHomeService::isBaseAutoZoneLabel);
     }
 
     public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover) {

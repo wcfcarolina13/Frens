@@ -92,6 +92,11 @@ public final class BotHomeService {
      */
     private static final String AUTO_ZONE_LABEL_PREFIX = "base:";
 
+    /** True when {@code zoneLabel} names a base auto-zone (created by this service), not a user-drawn zone. */
+    public static boolean isBaseAutoZoneLabel(String zoneLabel) {
+        return zoneLabel != null && zoneLabel.startsWith(AUTO_ZONE_LABEL_PREFIX);
+    }
+
     private static String autoZoneLabel(String baseLabel) {
         return AUTO_ZONE_LABEL_PREFIX + normalizeLabelKey(baseLabel);
     }

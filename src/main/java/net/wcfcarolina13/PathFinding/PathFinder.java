@@ -111,6 +111,11 @@ public class PathFinder {
 
     /** Original bidirectional A* implementation. */
     private static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
+        if (start.equals(target)) {
+            // Same shape as a merged search result (start..goal inclusive), just one node long.
+            // Without this the two frontiers never overlap and the search burns its full timeout.
+            return tagBlocks(List.of(start), world);
+        }
         LOGGER.info("Starting Bi-directional A* pathfinding with block tagging...");
 
         PriorityQueue<Node> openForward = new PriorityQueue<>();
