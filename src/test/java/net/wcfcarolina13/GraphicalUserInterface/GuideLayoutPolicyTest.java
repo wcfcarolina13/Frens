@@ -35,11 +35,13 @@ class GuideLayoutPolicyTest {
     }
 
     @Test
-    void at427x240BothColumnsFitSideBySide() {
+    void at427x240TheSplitIsExactlyThe1_1_227One() {
+        // Old: topics min(220, max(180, 403 - 200)) = 203, detail max(180, 415 - 223) = 192.
         GuideLayoutPolicy.Layout l = forScreen(427, 240);
         assertFalse(l.stacked());
-        assertEquals(403, l.topics().w() + GAP + l.detail().w());
-        assertTrue(l.detail().w() >= GuideLayoutPolicy.DETAIL_MIN_W);
+        assertEquals(203, l.topics().w());
+        assertEquals(12 + 203 + GAP, l.detail().x());
+        assertEquals(192, l.detail().w());
         assertOnScreen(l, 427, 240);
     }
 
@@ -74,11 +76,25 @@ class GuideLayoutPolicyTest {
     }
 
     @Test
-    void atTheWideThresholdTheDetailCardKeepsItsMinimum() {
+    void atTheWideThresholdTheOldSplitStillFits() {
         GuideLayoutPolicy.Layout l = GuideLayoutPolicy.layout(12, 44, GuideLayoutPolicy.NARROW_BODY_W, 150, GAP);
         assertFalse(l.stacked());
-        assertEquals(GuideLayoutPolicy.DETAIL_MIN_W, l.detail().w());
+        assertEquals(GuideLayoutPolicy.WIDE_TOPICS_MIN_W, l.topics().w());
+        assertEquals(180, l.detail().w());
         assertEquals(GuideLayoutPolicy.NARROW_BODY_W, l.topics().w() + GAP + l.detail().w());
+    }
+
+    @Test
+    void wideBranchMatchesTheOldFormulaAtEveryWidth() {
+        for (int w = GuideLayoutPolicy.NARROW_BODY_W; w <= 1200; w++) {
+            int desired = Math.max(220, Math.min(320, (w * 34) / 100));
+            int oldTopics = Math.min(desired, Math.max(180, w - 200));
+            int oldDetail = Math.max(180, w - oldTopics - GAP);
+            GuideLayoutPolicy.Layout l = GuideLayoutPolicy.layout(12, 44, w, 150, GAP);
+            assertEquals(oldTopics, l.topics().w(), "topics at body " + w);
+            assertEquals(oldDetail, l.detail().w(), "detail at body " + w);
+            assertEquals(w, l.topics().w() + GAP + l.detail().w(), "fits at body " + w);
+        }
     }
 
     @Test

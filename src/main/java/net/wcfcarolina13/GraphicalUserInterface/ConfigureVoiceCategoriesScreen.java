@@ -24,9 +24,9 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
     private static final int POPUP_WIDTH = 380;
     private static final int POPUP_HEIGHT = 210;
 
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
-    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
+    private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int COLS = 2;
     private static final int ROW_HEIGHT = 22;
@@ -42,7 +42,7 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
     @Override
     protected void init() {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
 
         VoiceLineCategory[] categories = VoiceLineCategory.values();
         int gridTop = cy + 42;
@@ -117,14 +117,18 @@ public class ConfigureVoiceCategoriesScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         // Border + interior
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
-        context.drawCenteredTextWithShadow(this.textRenderer,
-                Text.literal("§7Scripted lines only. Unchecked = no audio; text and soul TTS unaffected."),
-                this.width / 2, cy + 24, 0xFFFFFFFF);
+        // One line wherever it fits the popup (as before), two on narrow screens. Gray is the
+        // old §7, passed as a colour so a wrapped second line keeps it.
+        int subtitleY = cy + 24;
+        for (String line : UiFitPolicy.wrapIfNeeded("Scripted lines only. Unchecked = no audio. Text and soul TTS unaffected.", popupW() - 4, this.textRenderer::getWidth)) {
+            context.drawCenteredTextWithShadow(this.textRenderer, line, this.width / 2, subtitleY, 0xFFAAAAAA);
+            subtitleY += 10;
+        }
         super.render(context, mouseX, mouseY, delta);
     }
 

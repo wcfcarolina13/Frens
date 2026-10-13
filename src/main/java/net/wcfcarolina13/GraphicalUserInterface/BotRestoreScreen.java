@@ -80,13 +80,14 @@ public class BotRestoreScreen extends Screen {
         int panelX = (this.width - panelW) / 2;
         int panelY = Math.max(4, (this.height - fit.panelH()) / 2);
         boolean compact = fit.compact();
-        int titleY = panelY + (compact ? 6 : 14);
-        int subtitleY = titleY + 16;
-        int rowsTop = subtitleY + Math.max(1, subtitle.size()) * RosterLayoutPolicy.SUBTITLE_LINE_H + (compact ? 6 : 12);
-        int navY = rowsTop + fit.rows() * ROW_H + (compact ? 4 : 8);
-        int actionsY = navY + (compact ? 22 : 24);
-        int createY = actionsY + (compact ? 30 : 36);
-        int linkY = createY + (compact ? 26 : 30);
+        RosterLayoutPolicy.Spacing sp = RosterLayoutPolicy.spacing(compact);
+        int titleY = panelY + sp.titleTop();
+        int subtitleY = titleY + sp.subtitleGap();
+        int rowsTop = subtitleY + Math.max(1, subtitle.size()) * RosterLayoutPolicy.SUBTITLE_LINE_H + sp.rowsGap();
+        int navY = rowsTop + fit.rows() * ROW_H + sp.navGap();
+        int actionsY = navY + sp.actionsGap();
+        int createY = actionsY + sp.createGap();
+        int linkY = createY + sp.linkGap();
         return new Layout(panelX, panelY, panelW, fit.panelH(), compact, titleY, subtitleY, subtitle,
                 rowsTop, fit.rows(), navY, actionsY, createY, linkY);
     }

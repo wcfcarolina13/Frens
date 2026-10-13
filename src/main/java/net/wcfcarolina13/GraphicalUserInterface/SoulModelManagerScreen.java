@@ -25,9 +25,9 @@ public class SoulModelManagerScreen extends Screen {
     private static final int POPUP_WIDTH = 430;
     private static final int POPUP_HEIGHT = 240;
 
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
-    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
+    private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int PAD = 8;
     private static final int COL_OK = 0xFF7FD97F;
@@ -74,7 +74,7 @@ public class SoulModelManagerScreen extends Screen {
             }
         }
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         modelButtons.clear();
 
         List<OllamaModelInstaller.KnownModel> models = OllamaModelInstaller.KNOWN_MODELS;
@@ -217,7 +217,7 @@ public class SoulModelManagerScreen extends Screen {
         updateMode();
         refreshButtons();
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
@@ -236,35 +236,38 @@ public class SoulModelManagerScreen extends Screen {
             if (s.reachable()) {
                 context.drawTextWithShadow(this.textRenderer, "✔", cx + PAD, y, COL_OK);
                 context.drawTextWithShadow(this.textRenderer,
-                        "Ollama " + s.version() + " running at " + s.baseUrl(), cx + PAD + 12, y, COL_TXT);
+                        fitLine("Ollama " + s.version() + " running at " + s.baseUrl(), textW() - 12), cx + PAD + 12, y, COL_TXT);
             } else {
                 context.drawTextWithShadow(this.textRenderer, "✘", cx + PAD, y, COL_BAD);
                 context.drawTextWithShadow(this.textRenderer,
-                        "Ollama not reachable at " + s.baseUrl() + " — install/start it (ollama.com)",
+                        fitLine("Ollama not reachable at " + s.baseUrl() + ". Install or start it (ollama.com)", textW() - 12),
                         cx + PAD + 12, y, COL_BAD);
             }
             y += 11;
             String ram = s.totalRamBytes() > 0 ? gb(s.totalRamBytes()) : "unknown";
             String disk = s.freeDiskBytes() > 0 ? gb(s.freeDiskBytes()) + " free" : "unknown";
             context.drawTextWithShadow(this.textRenderer,
-                    "System: " + ram + " RAM  ·  disk " + disk
-                            + "  ·  models download from registry.ollama.ai",
+                    fitLine("System: " + ram + " RAM  ·  disk " + disk
+                            + "  ·  models download from registry.ollama.ai", textW()),
                     cx + PAD, y, COL_DIM);
             y += 14;
             context.drawTextWithShadow(this.textRenderer,
-                    "New requests use your selection; the first reply may take longer.",
+                    fitLine("New requests use your selection. The first reply may take longer.", textW()),
                     cx + PAD, y, COL_DIM);
 
             int rowY = cy + 72;
             for (OllamaModelInstaller.KnownModel m : OllamaModelInstaller.KNOWN_MODELS) {
                 boolean installed = s.isInstalled(m.tag());
                 boolean ramOk = OllamaModelInstaller.ramShortfallGb(m, s.totalRamBytes()) <= 0;
+                // The label shares its row with the 96 px button, so it stops 4 px short of it.
                 context.drawTextWithShadow(this.textRenderer,
-                        m.label() + " §7(" + m.tag() + ")"
+                        fitLine(m.label() + " §7(" + m.tag() + ")"
                                 + (installed ? " §a· installed" : String.format(" §7· %.1f GB download", m.downloadGb())),
+                                textW() - 100),
                         cx + PAD, rowY, COL_TXT);
                 context.drawTextWithShadow(this.textRenderer,
-                        "§7" + m.description() + (ramOk ? "" : " §c(recommends ≥" + (int) m.recommendedRamGb() + " GB RAM)"),
+                        fitLine("§7" + m.description() + (ramOk ? "" : " §c(recommends ≥" + (int) m.recommendedRamGb() + " GB RAM)"),
+                                textW()),
                         cx + PAD, rowY + 10, COL_DIM);
                 rowY += 34;
             }
@@ -285,7 +288,7 @@ public class SoulModelManagerScreen extends Screen {
                 String line = job.bytesTotal() > 0
                         ? job.description() + ": " + job.stage() + "  " + gb(job.bytesDone()) + " / " + gb(job.bytesTotal())
                         : job.description() + ": " + job.stage();
-                context.drawTextWithShadow(this.textRenderer, line, cx + PAD, py, COL_TXT);
+                context.drawTextWithShadow(this.textRenderer, fitLine(line, textW()), cx + PAD, py, COL_TXT);
                 int barW = popupW() - PAD * 2;
                 context.fill(cx + PAD, py + 11, cx + PAD + barW, py + 17, 0xFF303030);
                 if (job.bytesTotal() > 0) {
@@ -293,11 +296,21 @@ public class SoulModelManagerScreen extends Screen {
                     context.fill(cx + PAD, py + 11, cx + PAD + fill, py + 17, 0xFF4FA8FF);
                 }
             } else if (lastResult != null) {
-                context.drawTextWithShadow(this.textRenderer, lastResult, cx + PAD, rowY + 2,
+                context.drawTextWithShadow(this.textRenderer, fitLine(lastResult, textW()), cx + PAD, rowY + 2,
                         lastResult.startsWith("§a") ? COL_OK : COL_BAD);
             }
         }
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    /** Text width inside the popup (it shrinks with the popup on narrow screens). */
+    private int textW() {
+        return popupW() - PAD * 2;
+    }
+
+    /** The line unchanged when it fits, else cut with "…" at the measured width. */
+    private String fitLine(String text, int maxWidth) {
+        return UiFitPolicy.elide(text, maxWidth, this.textRenderer::getWidth);
     }
 
     private void renderRemote(DrawContext context, int cx, int cy) {

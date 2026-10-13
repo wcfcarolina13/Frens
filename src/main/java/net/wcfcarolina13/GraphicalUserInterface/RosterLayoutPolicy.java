@@ -10,10 +10,42 @@ public final class RosterLayoutPolicy {
     public static final int ROW_H = 18;
     public static final int MAX_ROWS = 6;
     public static final int SUBTITLE_LINE_H = 10;
-    /** Everything except the bot rows, with one subtitle line, in the roomy layout. */
-    public static final int ROOMY_FIXED_H = 182;
-    /** Everything except the bot rows, with one subtitle line, in the compact layout (4 px bottom margin). */
-    public static final int COMPACT_FIXED_H = 134;
+
+    /**
+     * The roster's vertical offsets, top to bottom. {@link BotRestoreScreen} places everything
+     * from these, and the fit maths sums them, so the two can't drift apart.
+     *
+     * @param titleTop   panel top to title
+     * @param subtitleGap title to the first subtitle line
+     * @param rowsGap    last subtitle line's bottom to the first bot row
+     * @param navGap     last bot row's bottom to Prev/Next
+     * @param actionsGap Prev/Next to Spawn Selected / Cancel
+     * @param createGap  Spawn Selected to the create-bot row
+     * @param linkGap    create-bot row to the bottom link
+     * @param bottom     bottom link to the panel bottom (link height plus margin)
+     */
+    public record Spacing(int titleTop, int subtitleGap, int rowsGap, int navGap, int actionsGap,
+                          int createGap, int linkGap, int bottom) {
+        /** Everything except the bot rows, with one subtitle line. */
+        public int fixedH() {
+            return titleTop + subtitleGap + SUBTITLE_LINE_H + rowsGap + navGap + actionsGap + createGap
+                    + linkGap + bottom;
+        }
+    }
+
+    /** The 1.1.227 320x290 look: rows at panel + 52, link at panel + 150 + rows. */
+    public static final Spacing ROOMY = new Spacing(14, 16, 12, 8, 24, 36, 30, 32);
+    /** Tighter gaps for short screens, 4 px bottom margin under the 10 px link. */
+    public static final Spacing COMPACT = new Spacing(6, 16, 6, 4, 22, 30, 26, 14);
+
+    /** Everything except the bot rows, with one subtitle line, in the roomy layout (182). */
+    public static final int ROOMY_FIXED_H = ROOMY.fixedH();
+    /** Everything except the bot rows, with one subtitle line, in the compact layout (134). */
+    public static final int COMPACT_FIXED_H = COMPACT.fixedH();
+
+    public static Spacing spacing(boolean compact) {
+        return compact ? COMPACT : ROOMY;
+    }
 
     private RosterLayoutPolicy() {
     }

@@ -37,8 +37,8 @@ import java.util.List;
 public class SoulVoiceEngineScreen extends Screen {
 
     private static final int POPUP_WIDTH = 400;
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
 
     private static final int ROW_H = 50;
     private static final int PAD = 8;
@@ -93,7 +93,7 @@ public class SoulVoiceEngineScreen extends Screen {
     }
 
     private int popupHeight() {
-        return Math.min(this.height - 8, rowsTop() + rows.size() * ROW_H + 36);
+        return UiFitPolicy.popupExtent(rowsTop() + rows.size() * ROW_H + 36, this.height, 8);
     }
 
     private int rowsTop() {
@@ -147,7 +147,7 @@ public class SoulVoiceEngineScreen extends Screen {
                 ? cfg != null ? cfg.getSoulVoiceEngine() : ""
                 : remoteStatus != null ? remoteStatus.voice().engine() : "";
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupHeight()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupHeight());
 
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
@@ -241,7 +241,7 @@ public class SoulVoiceEngineScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupHeight()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupHeight());
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupHeight() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupHeight(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);

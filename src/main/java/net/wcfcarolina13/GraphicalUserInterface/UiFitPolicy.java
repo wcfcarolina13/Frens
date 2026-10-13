@@ -22,6 +22,23 @@ public final class UiFitPolicy {
     }
 
     /**
+     * A popup's width or height on a screen of size {@code screen}: the designed size whenever it
+     * fits the screen (so wide screens look exactly as before), otherwise the screen less
+     * {@code margin}.
+     */
+    public static int popupExtent(int desired, int screen, int margin) {
+        if (desired <= screen) {
+            return desired;
+        }
+        return Math.max(0, screen - Math.max(0, margin));
+    }
+
+    /** Centres a popup of size {@code extent}, never above or left of the screen edge. */
+    public static int popupOrigin(int screen, int extent) {
+        return Math.max(0, (screen - extent) / 2);
+    }
+
+    /**
      * Word-wraps {@code text} so every line measures at most {@code maxWidth}. Runs of spaces
      * collapse to one, {@code '\n'} forces a break, and a word wider than {@code maxWidth} is
      * hard-broken by character. Returns an empty list for null text and {@code [""]} for
@@ -57,6 +74,62 @@ public final class UiFitPolicy {
         List<String> out = new ArrayList<>(all.subList(0, cap));
         out.set(cap - 1, withEllipsis(out.get(cap - 1), maxWidth, width));
         return out;
+    }
+
+    /**
+     * Like {@link #elide} but keeps the end of the text ("…/instance/frens/piper"), for paths.
+     * Never splits a surrogate pair. Returns "" when not even "…" fits, and "" for null.
+     */
+    public static String elideStart(String text, int maxWidth, ToIntFunction<String> width) {
+        if (text == null) {
+            return "";
+        }
+        if (width.applyAsInt(text) <= maxWidth) {
+            return text;
+        }
+        if (width.applyAsInt(ELLIPSIS) > maxWidth) {
+            return "";
+        }
+        int start = 0;
+        while (start < text.length()) {
+            start += Character.charCount(text.codePointAt(start));
+            String candidate = ELLIPSIS + text.substring(start);
+            if (width.applyAsInt(candidate) <= maxWidth) {
+                return candidate;
+            }
+        }
+        return ELLIPSIS;
+    }
+
+    /**
+     * {@code [text]} unchanged when it fits {@code maxWidth} (spacing kept exactly), otherwise
+     * {@link #wrap(String, int, ToIntFunction)}. Use it where the one-line look must stay the
+     * same on screens that already had room.
+     */
+    public static List<String> wrapIfNeeded(String text, int maxWidth, ToIntFunction<String> width) {
+        if (text != null && width.applyAsInt(text) <= maxWidth) {
+            List<String> one = new ArrayList<>(1);
+            one.add(text);
+            return one;
+        }
+        return wrap(text, maxWidth, width);
+    }
+
+    /**
+     * Keeps a legacy line split ({@code preferred}) when every line fits {@code maxWidth}, so
+     * screens that had room look exactly as before. Otherwise wraps {@code text} by width.
+     */
+    public static List<String> keepOrWrap(List<String> preferred, String text, int maxWidth, ToIntFunction<String> width) {
+        boolean allFit = preferred != null;
+        if (allFit) {
+            for (String line : preferred) {
+                if (width.applyAsInt(line) > maxWidth) {
+                    allFit = false;
+                    break;
+                }
+            }
+        }
+        return allFit ? preferred : wrap(text, maxWidth, width);
     }
 
     /**

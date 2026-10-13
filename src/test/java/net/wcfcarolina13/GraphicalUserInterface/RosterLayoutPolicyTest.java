@@ -53,4 +53,18 @@ class RosterLayoutPolicyTest {
         assertEquals(2, RosterLayoutPolicy.clampFirstRow(2, 10, 4));
         assertEquals(0, RosterLayoutPolicy.clampFirstRow(5, 3, 4));
     }
+
+    @Test
+    void spacingReproducesThe1_1_227OffsetsAndTheFixedHeights() {
+        RosterLayoutPolicy.Spacing r = RosterLayoutPolicy.ROOMY;
+        int rowsTop = r.titleTop() + r.subtitleGap() + RosterLayoutPolicy.SUBTITLE_LINE_H + r.rowsGap();
+        assertEquals(52, rowsTop);
+        int linkY = rowsTop + 6 * RosterLayoutPolicy.ROW_H + r.navGap() + r.actionsGap() + r.createGap() + r.linkGap();
+        assertEquals(258, linkY);
+        assertEquals(182, RosterLayoutPolicy.ROOMY_FIXED_H);
+        assertEquals(290, RosterLayoutPolicy.ROOMY_FIXED_H + 6 * RosterLayoutPolicy.ROW_H);
+        assertEquals(134, RosterLayoutPolicy.COMPACT_FIXED_H);
+        assertEquals(RosterLayoutPolicy.COMPACT, RosterLayoutPolicy.spacing(true));
+        assertEquals(RosterLayoutPolicy.ROOMY, RosterLayoutPolicy.spacing(false));
+    }
 }

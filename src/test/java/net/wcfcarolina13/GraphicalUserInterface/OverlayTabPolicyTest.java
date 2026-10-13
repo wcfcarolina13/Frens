@@ -48,12 +48,40 @@ class OverlayTabPolicyTest {
     }
 
     @Test
-    void mediumRowSizesTabsByLabel() {
-        // Free 135: equal 45 < Dialogue 46. Natural 41 + 46 + 31 = 118, spare 17.
+    void equalTabsStayWhenEachLabelFitsWithoutPadding() {
+        // Free 135: equal 45. "Dialogue" is 40, fits 45 without its padding, so the old equal row stays.
         OverlayTabPolicy.Plan plan = OverlayTabPolicy.plan(iconRow(), 150, PAD, W5);
         assertEquals(List.of("Actions", "Dialogue", "✦", "Admin"), plan.labels());
-        assertArrayEquals(new int[] {41 + 6, 46 + 6, 15, 31 + 5}, plan.widths());
-        assertEquals(150, sum(plan.widths()));
+        assertArrayEquals(new int[] {45, 45, 15, 45}, plan.widths());
+    }
+
+    @Test
+    void at427TheDialogueRowKeepsTheOldEqualWidths() {
+        // Real glyph widths at 427x240: Actions 36, Dialogue 41, Admin 26, ✦ tab fixed 16.
+        // Old code: (154 - 16) / 3 = 46 each, although "Dialogue" + padding is 47.
+        ToIntFunction<String> glyphs = s -> switch (s) {
+            case "Actions" -> 36;
+            case "Dialogue" -> 41;
+            case "Admin" -> 26;
+            default -> 6 * s.length();
+        };
+        List<OverlayTabPolicy.Tab> row = List.of(
+                OverlayTabPolicy.Tab.flexible("Actions", "Actions", "Do"),
+                OverlayTabPolicy.Tab.flexible("Dialogue", "Dialogue", "Talk"),
+                OverlayTabPolicy.Tab.fixed("✦", "Spells", 16),
+                OverlayTabPolicy.Tab.flexible("Admin", "Admin"));
+        OverlayTabPolicy.Plan plan = OverlayTabPolicy.plan(row, 154, PAD, glyphs);
+        assertEquals(List.of("Actions", "Dialogue", "✦", "Admin"), plan.labels());
+        assertArrayEquals(new int[] {46, 46, 16, 46}, plan.widths());
+    }
+
+    @Test
+    void mediumRowSizesTabsByLabelWhenALabelOverflowsItsEqualShare() {
+        // Free 119: equal 39 < Dialogue 40. Natural 41 + 46 + 31 = 118 fits 119.
+        OverlayTabPolicy.Plan plan = OverlayTabPolicy.plan(iconRow(), 134, PAD, W5);
+        assertEquals(List.of("Actions", "Dialogue", "✦", "Admin"), plan.labels());
+        assertEquals(134, sum(plan.widths()));
+        assertTrue(plan.widths()[1] >= 46, "Dialogue gets its natural width");
         assertFalse(plan.isShortened(0));
         assertTrue(plan.isShortened(2), "icon tab always offers its full name");
     }

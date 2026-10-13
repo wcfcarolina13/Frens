@@ -30,6 +30,9 @@ public class RecruitmentDialogueScreen extends Screen {
     private static final int OPTION_LINE_SPACING = 2;
     private static final int OPTION_ROW_PADDING = 8;
     private static final float DIALOGUE_WIDTH_RATIO = 0.62f;
+    /** The 1.1.227 dialogue column floor, kept wherever the old layout fits. */
+    private static final int CLASSIC_DIALOGUE_MIN_WIDTH = 240;
+    /** Narrow screens only (under about 424 wide): the split the old layout couldn't fit. */
     private static final int DIALOGUE_MIN_WIDTH = 130;
     private static final int TOPICS_MIN_WIDTH = 110;
     private static final int TOPICS_HEADER_OFFSET = 18;
@@ -415,10 +418,20 @@ public class RecruitmentDialogueScreen extends Screen {
         return OPTION_ROW_SPACING;
     }
 
+    /**
+     * True when the 1.1.227 layout (40/60 margins, 240 px dialogue floor) still leaves the topics
+     * column {@link #TOPICS_MIN_WIDTH}. That holds from about 424 wide, so 427x240 and up look
+     * exactly as before. Narrower screens get 8 px margins and a proportional split.
+     */
+    private boolean classicLayoutFits() {
+        int classicAvailable = Math.min(560, this.width - 40) - PADDING * 2 - GAP;
+        return classicAvailable >= CLASSIC_DIALOGUE_MIN_WIDTH + TOPICS_MIN_WIDTH;
+    }
+
     private Rect computePanel() {
-        // Clamp to the screen (320x240 is the smallest scaled GUI) with an 8 px margin.
-        int w = Math.min(560, this.width - 16);
-        int h = Math.min(280, this.height - 16);
+        boolean classic = classicLayoutFits();
+        int w = Math.min(560, this.width - (classic ? 40 : 16));
+        int h = Math.min(280, this.height - (classic ? 60 : 16));
         int x = (this.width - w) / 2;
         int y = (this.height - h) / 2;
         return new Rect(x, y, w, h);
@@ -435,6 +448,12 @@ public class RecruitmentDialogueScreen extends Screen {
 
     /** {dialogue, topics} widths. They always add up to the content width minus the gap. */
     private int[] columnWidths(Rect content) {
+        int available = Math.max(0, content.w - GAP);
+        if (classicLayoutFits()) {
+            // The 1.1.227 split: the dialogue column takes max(240, 62%), the topics the rest.
+            int dialogue = Math.min(available, Math.max(CLASSIC_DIALOGUE_MIN_WIDTH, Math.round(available * DIALOGUE_WIDTH_RATIO)));
+            return new int[] {dialogue, available - dialogue};
+        }
         return UiFitPolicy.splitColumns(content.w, DIALOGUE_WIDTH_RATIO, DIALOGUE_MIN_WIDTH, TOPICS_MIN_WIDTH, GAP);
     }
 

@@ -10,7 +10,9 @@ import java.util.function.ToIntFunction;
  *
  * <p>Order of attempts, first fit wins:
  * <ol>
- *   <li>Full labels in equal-width tabs (the look the overlay always had when there is room).</li>
+ *   <li>Full labels in equal-width tabs, accepted when each label alone fits its equal width (no
+ *       padding check, the tolerance the overlay always had). This keeps the old look wherever
+ *       the old labels fit.</li>
  *   <li>Full labels sized by label width ({@link UiFitPolicy#fitTabWidths}).</li>
  *   <li>Each shorter label set in turn ("Actions" to "Do", "Dialogue" to "Talk"), sized by width.</li>
  *   <li>Equal shares with {@link UiFitPolicy#pickLabel} per tab, which elides the shortest label.</li>
@@ -67,13 +69,14 @@ public final class OverlayTabPolicy {
         }
         int space = Math.max(0, available - fixedSum);
 
-        // 1. Full labels, equal widths.
+        // 1. Full labels, equal widths. Padding is not required here: the old row used equal
+        // widths whenever the label itself fit, and 427 wide must look exactly as it did.
         List<String> full = labelsAtLevel(tabs, 0);
         if (!flexible.isEmpty()) {
             int equal = space / flexible.size();
             boolean allFit = true;
             for (int i : flexible) {
-                if (width.applyAsInt(full.get(i)) + pad * 2 > equal) {
+                if (width.applyAsInt(full.get(i)) > equal) {
                     allFit = false;
                     break;
                 }

@@ -21,9 +21,9 @@ public class PocketInstallerScreen extends Screen {
     private static final int POPUP_WIDTH = 420;
     private static final int POPUP_HEIGHT = 230;
 
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
-    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
+    private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int PAD = 8;
 
@@ -53,7 +53,7 @@ public class PocketInstallerScreen extends Screen {
     @Override
     protected void init() {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         int btnY = cy + popupH() - 28;
         int btnW = 130;
 
@@ -115,7 +115,7 @@ public class PocketInstallerScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         refreshButtons();
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
@@ -125,7 +125,7 @@ public class PocketInstallerScreen extends Screen {
         if (phase == Phase.DETECTING) {
             context.drawTextWithShadow(this.textRenderer, "Checking your system…", cx + PAD, y, COL_DIM);
         } else if (phase == Phase.FAILED) {
-            context.drawTextWithShadow(this.textRenderer, "§c" + detectError, cx + PAD, y, COL_BAD);
+            drawLines(context, fit("§c" + detectError, textW()), cx + PAD, y, COL_BAD);
         } else {
             if (p != null) {
                 y = drawPlan(context, p, cx, y);
@@ -142,7 +142,7 @@ public class PocketInstallerScreen extends Screen {
             }
             y += 4;
             if (job != null) {
-                context.drawTextWithShadow(this.textRenderer, elide(job.stage(), 66), cx + PAD, y, COL_TXT);
+                context.drawTextWithShadow(this.textRenderer, fitTail(job.stage(), 66, textW()), cx + PAD, y, COL_TXT);
                 y += 12;
                 // pip reports no byte totals — an indeterminate bar says "still working".
                 int barW = popupW() - PAD * 2;
@@ -155,7 +155,7 @@ public class PocketInstallerScreen extends Screen {
                     context.fill(left, y, right, y + 6, 0xFF4FA8FF);
                 }
             } else if (lastResult != null) {
-                for (String line : wrap(lastResult, 66)) {
+                for (String line : UiFitPolicy.keepOrWrap(wrap(lastResult, 66), lastResult, textW(), this.textRenderer::getWidth)) {
                     context.drawTextWithShadow(this.textRenderer, line,
                             cx + PAD, y, lastResult.startsWith("§a") ? COL_OK : COL_BAD);
                     y += 10;
@@ -171,44 +171,77 @@ public class PocketInstallerScreen extends Screen {
         if (rt != null) {
             String cmd = rt.args().isEmpty() ? rt.executable().toString()
                     : rt.executable() + " " + String.join(" ", rt.args());
-            drawRow(context, cx, y, true,
-                    elide("Runtime: " + rt.version() + " (" + cmd + ")", 64));
+            drawIcon(context, cx, y, true);
+            context.drawTextWithShadow(this.textRenderer,
+                    fitTail("Runtime: " + rt.version() + " (" + cmd + ")", 64, textW() - 12), cx + PAD + 12, y, COL_TXT);
         } else {
-            drawRow(context, cx, y, false, elide(PocketInstaller.missingRuntimeHint(), 66));
+            drawIcon(context, cx, y, false);
+            context.drawTextWithShadow(this.textRenderer,
+                    fitTail(PocketInstaller.missingRuntimeHint(), 66, textW() - 12), cx + PAD + 12, y, COL_TXT);
         }
         y += 11;
-        drawRow(context, cx, y, diskOk(p), "Disk space: need ~2 GB free — "
-                + (p.freeDiskBytes() < 0 ? "unknown" : mb(p.freeDiskBytes()) + " available"));
-        y += 11;
+        y += 11 + drawRow(context, cx, y, diskOk(p), "Disk space: need ~2 GB free ("
+                + (p.freeDiskBytes() < 0 ? "unknown" : mb(p.freeDiskBytes()) + " available") + ")");
         // Download plan
-        for (String line : wrap("Download: ~850 MB of Python packages (pypi.org) + 228 MB model"
-                + " (huggingface.co) on first run", 66)) {
+        String download = "Download: ~850 MB of Python packages (pypi.org) + 228 MB model"
+                + " (huggingface.co) on first run";
+        for (String line : UiFitPolicy.keepOrWrap(wrap(download, 66), download, textW(), this.textRenderer::getWidth)) {
             context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, COL_TXT);
             y += 10;
         }
         y += 1;
+        y += 11 + drawLines(context,
+                fit("Engine: pocket-tts 3.0.2  ·  CPU only  ·  21 English voices", textW()), cx + PAD, y, COL_DIM);
         context.drawTextWithShadow(this.textRenderer,
-                "Engine: pocket-tts 3.0.2  ·  CPU only  ·  21 English voices", cx + PAD, y, COL_DIM);
-        y += 11;
-        context.drawTextWithShadow(this.textRenderer,
-                elide("Install to: " + p.installDir(), 66), cx + PAD, y, COL_DIM);
+                fitTail("Install to: " + p.installDir(), 66, textW()), cx + PAD, y, COL_DIM);
         y += 13;
         // Voice cloning gate (presets never need it)
         String cloning = p.hfTokenPresent()
                 ? "Voice cloning: Hugging Face token found"
                 : "Voice cloning: needs a Hugging Face login (accept terms at"
                 + " huggingface.co/kyutai/pocket-tts, then hf auth login)";
-        for (String line : wrap(cloning, 66)) {
+        for (String line : UiFitPolicy.keepOrWrap(wrap(cloning, 66), cloning, textW(), this.textRenderer::getWidth)) {
             context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, COL_DIM);
             y += 10;
         }
         return y + 1;
     }
 
-    private void drawRow(DrawContext context, int cx, int y, boolean ok, String text) {
+    private void drawIcon(DrawContext context, int cx, int y, boolean ok) {
         context.drawTextWithShadow(this.textRenderer, ok ? "✔" : "✘", cx + PAD, y,
                 ok ? COL_OK : COL_BAD);
-        context.drawTextWithShadow(this.textRenderer, text, cx + PAD + 12, y, COL_TXT);
+    }
+
+    /** Draws a check row; returns the extra height used when the text had to wrap. */
+    private int drawRow(DrawContext context, int cx, int y, boolean ok, String text) {
+        drawIcon(context, cx, y, ok);
+        return drawLines(context, fit(text, textW() - 12), cx + PAD + 12, y, COL_TXT);
+    }
+
+    /** Text width inside the popup (it shrinks with the popup on narrow screens). */
+    private int textW() {
+        return popupW() - PAD * 2;
+    }
+
+    /** One line, kept exactly as it was when it fits, else wrapped by measured width. */
+    private java.util.List<String> fit(String text, int maxWidth) {
+        return UiFitPolicy.wrapIfNeeded(text, maxWidth, this.textRenderer::getWidth);
+    }
+
+    /** The old character-count elision when it fits, else elided by width (keeps the end). */
+    private String fitTail(String text, int legacyChars, int maxWidth) {
+        String legacy = elide(text, legacyChars);
+        return this.textRenderer.getWidth(legacy) <= maxWidth
+                ? legacy
+                : UiFitPolicy.elideStart(text, maxWidth, this.textRenderer::getWidth);
+    }
+
+    /** Draws lines 10 px apart; returns the extra height beyond the first line. */
+    private int drawLines(DrawContext context, java.util.List<String> lines, int x, int y, int color) {
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawTextWithShadow(this.textRenderer, lines.get(i), x, y + i * 10, color);
+        }
+        return Math.max(0, lines.size() - 1) * 10;
     }
 
     private String elide(String s, int max) {

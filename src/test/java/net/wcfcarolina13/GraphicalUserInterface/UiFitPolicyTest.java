@@ -254,4 +254,48 @@ class UiFitPolicyTest {
         assertEquals(1.0f, UiFitPolicy.fitScale(0, 100, 10, 10, 0));
         assertEquals(UiFitPolicy.MIN_SCALE, UiFitPolicy.fitScale(364, 230, 10, 10, 20));
     }
+
+    // ── popups and legacy-preserving fits ──
+
+    @Test
+    void popupKeepsItsDesignedSizeWheneverItFits() {
+        assertEquals(420, UiFitPolicy.popupExtent(420, 427, 16));
+        assertEquals(240, UiFitPolicy.popupExtent(240, 240, 8));
+        assertEquals(411, UiFitPolicy.popupExtent(430, 427, 16));
+        assertEquals(304, UiFitPolicy.popupExtent(420, 320, 16));
+        assertEquals(0, UiFitPolicy.popupExtent(420, 4, 16));
+    }
+
+    @Test
+    void popupOriginCentresAndNeverGoesOffTheTop() {
+        assertEquals(0, UiFitPolicy.popupOrigin(240, 240));
+        assertEquals(4, UiFitPolicy.popupOrigin(240, 232));
+        assertEquals(0, UiFitPolicy.popupOrigin(200, 250));
+    }
+
+    @Test
+    void elideStartKeepsTheEndOfAPath() {
+        assertEquals("/a/b", UiFitPolicy.elideStart("/a/b", 60, W6));
+        String out = UiFitPolicy.elideStart("/home/user/frens/piper", 60, W6);
+        assertEquals("…ens/piper", out);
+        assertTrue(W6.applyAsInt(out) <= 60);
+        assertEquals("", UiFitPolicy.elideStart("abc", 3, W6));
+        assertEquals("", UiFitPolicy.elideStart(null, 60, W6));
+        // Never starts on the low half of an emoji.
+        String emoji = UiFitPolicy.elideStart("abc\uD83D\uDE00de", 24, W6);
+        assertEquals("…\uD83D\uDE00de", emoji);
+    }
+
+    @Test
+    void wrapIfNeededKeepsAFittingLineExactlyIncludingDoubleSpaces() {
+        assertEquals(List.of("a  b"), UiFitPolicy.wrapIfNeeded("a  b", 60, W6));
+        assertEquals(List.of("aaa bbb", "ccc ddd"), UiFitPolicy.wrapIfNeeded("aaa bbb ccc ddd", 60, W6));
+    }
+
+    @Test
+    void keepOrWrapKeepsTheLegacySplitOnlyWhenEveryLineFits() {
+        List<String> legacy = List.of("aaa bbb ccc", "ddd");
+        assertEquals(legacy, UiFitPolicy.keepOrWrap(legacy, "aaa bbb ccc ddd", 66, W6));
+        assertEquals(List.of("aaa bbb", "ccc ddd"), UiFitPolicy.keepOrWrap(legacy, "aaa bbb ccc ddd", 60, W6));
+    }
 }

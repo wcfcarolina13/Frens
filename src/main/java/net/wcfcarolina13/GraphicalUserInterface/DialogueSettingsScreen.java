@@ -30,9 +30,9 @@ public class DialogueSettingsScreen extends Screen {
     private static final int POPUP_WIDTH = 360;
     private static final int POPUP_HEIGHT = 232;
 
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
-    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
+    private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int PAD = 8;
     private static final int ROW_H = 20;
@@ -49,7 +49,7 @@ public class DialogueSettingsScreen extends Screen {
     @Override
     protected void init() {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         int w = popupW() - PAD * 2;
         int y = cy + 40;
         ManualConfig cfg = Frens.CONFIG;
@@ -152,7 +152,7 @@ public class DialogueSettingsScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);

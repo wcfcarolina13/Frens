@@ -91,4 +91,35 @@ class OverheadLinePolicyTest {
         assertTrue(out.get(0).length() <= 2);
         assertTrue(out.get(0).endsWith(OverheadLinePolicy.ELLIPSIS));
     }
+
+    private static void assertNoLoneSurrogate(String line) {
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (Character.isHighSurrogate(c)) {
+                assertTrue(i + 1 < line.length() && Character.isLowSurrogate(line.charAt(i + 1)), "lone high in " + line);
+                i++;
+            } else {
+                assertTrue(!Character.isLowSurrogate(c), "lone low in " + line);
+            }
+        }
+    }
+
+    @Test
+    void hardBreakNeverSplitsAnEmoji() {
+        // The emoji's two chars sit at indexes 23 and 24, across the 24-char hard break.
+        String word = "a".repeat(23) + "\uD83D\uDE00" + "bbbb";
+        List<String> out = OverheadLinePolicy.wrap(word);
+        assertEquals(List.of("a".repeat(23), "\uD83D\uDE00bbbb"), out);
+        out.forEach(OverheadLinePolicyTest::assertNoLoneSurrogate);
+    }
+
+    @Test
+    void ellipsisCutNeverSplitsAnEmoji() {
+        // Third line is 22 c's plus an emoji (24 chars). Adding "…" cuts at 23, inside the emoji.
+        String text = "a".repeat(24) + " " + "b".repeat(24) + " " + "c".repeat(22) + "\uD83D\uDE00" + " dd";
+        List<String> out = OverheadLinePolicy.wrap(text);
+        assertEquals(3, out.size());
+        assertEquals("c".repeat(22) + OverheadLinePolicy.ELLIPSIS, out.get(2));
+        out.forEach(OverheadLinePolicyTest::assertNoLoneSurrogate);
+    }
 }

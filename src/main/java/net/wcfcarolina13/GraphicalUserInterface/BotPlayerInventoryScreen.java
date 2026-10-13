@@ -953,8 +953,28 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
+    /**
+     * HandledScreen.renderBackground calls this after Screen.renderBackground (world darkening,
+     * blur and the deferred vanilla subtitles). Only this screen's own drawing is scaled, so
+     * the subtitle box stays at its normal size and place. Mouse arrives in screen coordinates.
+     */
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
+        if (!isUiScaled()) {
+            drawBackgroundContent(context, mouseX, mouseY);
+            return;
+        }
+        pushContentScale(context);
+        try {
+            drawBackgroundContent(context,
+                    InventoryScalePolicy.toContent(mouseX, uiScale),
+                    InventoryScalePolicy.toContent(mouseY, uiScale));
+        } finally {
+            popContentScale(context);
+        }
+    }
+
+    private void drawBackgroundContent(DrawContext context, int mouseX, int mouseY) {
         // Guide Admin-only mode: don't draw inventory textures, stats, or topic panel.
         if (guideRemoteOpen && !guideRemoteFullAccess) {
             return;
@@ -6863,7 +6883,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
-        // Scales itself (see renderBackground), so it stays outside the push.
+        // drawBackground scales itself (vanilla's part, subtitles included, stays unscaled),
+        // so this call stays outside the push.
         this.renderBackground(context, mouseX, mouseY, delta);
         pushContentScale(context);
         try {
@@ -6889,27 +6910,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         try {
             drawBotSwitchWarningTooltip(context, cx, cy);
             drawRemoteAccessBanner(context);
-        } finally {
-            popContentScale(context);
-        }
-    }
-
-    /**
-     * Vanilla's renderWithTooltip calls this before render(), and render() calls it again
-     * (pre-existing double call). Both draw the inventory textures through drawBackground, so the
-     * scale is applied here rather than around the call.
-     */
-    @Override
-    public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        if (!isUiScaled()) {
-            super.renderBackground(context, mouseX, mouseY, delta);
-            return;
-        }
-        pushContentScale(context);
-        try {
-            super.renderBackground(context,
-                    InventoryScalePolicy.toContent(mouseX, uiScale),
-                    InventoryScalePolicy.toContent(mouseY, uiScale), delta);
         } finally {
             popContentScale(context);
         }

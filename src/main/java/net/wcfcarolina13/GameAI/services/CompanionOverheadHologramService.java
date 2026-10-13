@@ -106,31 +106,40 @@ public final class CompanionOverheadHologramService {
         ActiveHologram existing = ACTIVE.get(botId);
         List<ArmorStandEntity> old = existing != null ? existing.stands : List.of();
         List<ArmorStandEntity> stands = new ArrayList<>(lines.size());
-        for (int i = 0; i < lines.size(); i++) {
-            ArmorStandEntity stand = i < old.size() ? old.get(i) : null;
-            if (stand == null || stand.isRemoved() || stand.getEntityWorld() != world) {
-                if (stand != null && !stand.isRemoved()) {
-                    stand.discard();
+        try {
+            for (int i = 0; i < lines.size(); i++) {
+                ArmorStandEntity stand = i < old.size() ? old.get(i) : null;
+                if (stand == null || stand.isRemoved() || stand.getEntityWorld() != world) {
+                    if (stand != null && !stand.isRemoved()) {
+                        stand.discard();
+                    }
+                    stand = spawnStand(world, bot, lines.get(i));
+                    if (stand == null) {
+                        discardAll(stands);
+                        discardAll(old.subList(Math.min(i + 1, old.size()), old.size()));
+                        ACTIVE.remove(botId);
+                        return;
+                    }
+                } else {
+                    stand.setCustomName(styled(lines.get(i)));
+                    stand.setCustomNameVisible(true);
                 }
-                stand = spawnStand(world, bot, lines.get(i));
-                if (stand == null) {
-                    discardAll(stands);
-                    discardAll(old.subList(Math.min(i + 1, old.size()), old.size()));
-                    ACTIVE.remove(botId);
-                    return;
-                }
-            } else {
-                stand.setCustomName(styled(lines.get(i)));
-                stand.setCustomNameVisible(true);
+                stands.add(stand);
             }
-            stands.add(stand);
-        }
-        if (old.size() > lines.size()) {
-            discardAll(old.subList(lines.size(), old.size()));
-        }
+            if (old.size() > lines.size()) {
+                discardAll(old.subList(lines.size(), old.size()));
+            }
 
-        // Keep them positioned correctly immediately (not just next tick).
-        positionStands(bot, stands);
+            // Keep them positioned correctly immediately (not just next tick).
+            positionStands(bot, stands);
+        } catch (RuntimeException e) {
+            // A spawn that throws mid-stack would leave the new stands untracked until the
+            // 30 s sweep. Drop the whole stack, old and new, so nothing lingers.
+            discardAll(stands);
+            discardAll(old);
+            ACTIVE.remove(botId);
+            throw e;
+        }
 
         ACTIVE.put(botId, new ActiveHologram(botId, List.copyOf(stands), line, expiresAt));
     }

@@ -22,9 +22,9 @@ public class PiperInstallerScreen extends Screen {
     private static final int POPUP_WIDTH = 420;
     private static final int POPUP_HEIGHT = 250;
 
-    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
-    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
-    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+    // Designed size when it fits the screen, else clamped so 320x240 stays usable.
+    private int popupW() { return UiFitPolicy.popupExtent(POPUP_WIDTH, this.width, 16); }
+    private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int PAD = 8;
 
@@ -55,7 +55,7 @@ public class PiperInstallerScreen extends Screen {
     @Override
     protected void init() {
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         int btnY = cy + popupH() - 28;
         int btnW = (popupW() - PAD * 4) / 3;
 
@@ -126,7 +126,7 @@ public class PiperInstallerScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         refreshButtons();
         int cx = (this.width - popupW()) / 2;
-        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int cy = UiFitPolicy.popupOrigin(this.height, popupH());
         context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
         context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
@@ -136,7 +136,7 @@ public class PiperInstallerScreen extends Screen {
         if (phase == Phase.DETECTING) {
             context.drawTextWithShadow(this.textRenderer, "Checking your system…", cx + PAD, y, COL_DIM);
         } else if (phase == Phase.FAILED) {
-            context.drawTextWithShadow(this.textRenderer, "§c" + detectError, cx + PAD, y, COL_BAD);
+            drawLines(context, fit("§c" + detectError, textW()), cx + PAD, y, COL_BAD);
         } else {
             if (p != null) {
                 y = drawPlan(context, p, cx, y);
@@ -156,8 +156,7 @@ public class PiperInstallerScreen extends Screen {
                 String pct = job.bytesTotal() > 0
                         ? job.stage() + "  " + mb(job.bytesDone()) + " / " + mb(job.bytesTotal())
                         : job.stage();
-                context.drawTextWithShadow(this.textRenderer, pct, cx + PAD, y, COL_TXT);
-                y += 12;
+                y += 12 + drawLines(context, fit(pct, textW()), cx + PAD, y, COL_TXT);
                 int barW = popupW() - PAD * 2;
                 context.fill(cx + PAD, y, cx + PAD + barW, y + 6, 0xFF303030);
                 if (job.bytesTotal() > 0) {
@@ -165,7 +164,7 @@ public class PiperInstallerScreen extends Screen {
                     context.fill(cx + PAD, y, cx + PAD + fill, y + 6, 0xFF4FA8FF);
                 }
             } else if (lastResult != null) {
-                for (String line : wrap(lastResult, 66)) {
+                for (String line : UiFitPolicy.keepOrWrap(wrap(lastResult, 66), lastResult, textW(), this.textRenderer::getWidth)) {
                     context.drawTextWithShadow(this.textRenderer, line,
                             cx + PAD, y, lastResult.startsWith("§a") ? COL_OK : COL_BAD);
                     y += 10;
@@ -177,57 +176,75 @@ public class PiperInstallerScreen extends Screen {
 
     private int drawPlan(DrawContext context, PiperInstaller.Plan p, int cx, int y) {
         // System check
-        drawRow(context, cx, y, p.platformSupported(),
+        y += 11 + drawRow(context, cx, y, p.platformSupported(),
                 "System: " + p.platformName()
-                        + (p.platformSupported() ? "" : " — no prebuilt Piper available"));
-        y += 11;
+                        + (p.platformSupported() ? "" : ". No prebuilt Piper available"));
         boolean diskOk = p.freeDiskBytes() < 0 || p.freeDiskBytes() > 300L * 1024 * 1024;
-        drawRow(context, cx, y, diskOk, "Disk space: need ~300 MB free — "
-                + (p.freeDiskBytes() < 0 ? "unknown" : mb(p.freeDiskBytes()) + " available"));
-        y += 11;
+        y += 11 + drawRow(context, cx, y, diskOk, "Disk space: need ~300 MB free ("
+                + (p.freeDiskBytes() < 0 ? "unknown" : mb(p.freeDiskBytes()) + " available") + ")");
         // Download plan
         long dl = p.downloadBytes();
         String voicePart = p.voiceAlreadyPresent() ? " (voice already present)" : " incl. voice";
-        context.drawTextWithShadow(this.textRenderer,
-                "Download: " + mb(dl) + voicePart + "  —  github.com + huggingface.co",
+        y += 11 + drawLines(context,
+                fit("Download: " + mb(dl) + voicePart + "  from github.com + huggingface.co", textW()),
                 cx + PAD, y, COL_TXT);
-        y += 11;
+        y += 11 + drawLines(context,
+                fit("Engine: piper " + PiperInstaller.RELEASE_TAG + "  ·  Voice: " + PiperInstaller.VOICE_NAME
+                        + "  ·  checksums verified", textW()), cx + PAD, y, COL_DIM);
         context.drawTextWithShadow(this.textRenderer,
-                "Engine: piper " + PiperInstaller.RELEASE_TAG + "  ·  Voice: " + PiperInstaller.VOICE_NAME
-                        + "  ·  checksums verified", cx + PAD, y, COL_DIM);
-        y += 11;
-        context.drawTextWithShadow(this.textRenderer,
-                elide("Install to: " + p.installDir(), 66), cx + PAD, y, COL_DIM);
+                fitTail("Install to: " + p.installDir()), cx + PAD, y, COL_DIM);
         y += 13;
         // Existing installs
         if (p.existingBinaries().isEmpty()) {
-            context.drawTextWithShadow(this.textRenderer,
-                    "Pre-installed Piper: none found", cx + PAD, y, COL_DIM);
-            y += 11;
+            y += 11 + drawLines(context, fit("Pre-installed Piper: none found", textW()), cx + PAD, y, COL_DIM);
         } else {
             PiperInstaller.ExistingBinary first = p.existingBinaries().get(0);
+            y += 11 + drawLines(context,
+                    fit("Pre-installed Piper found (" + first.origin() + "):", textW()), cx + PAD, y, COL_TXT);
             context.drawTextWithShadow(this.textRenderer,
-                    "Pre-installed Piper found (" + first.origin() + "):", cx + PAD, y, COL_TXT);
+                    fitTail("  " + first.path()), cx + PAD, y, COL_DIM);
             y += 11;
-            context.drawTextWithShadow(this.textRenderer,
-                    elide("  " + first.path(), 66), cx + PAD, y, COL_DIM);
-            y += 11;
-            context.drawTextWithShadow(this.textRenderer,
-                    "  \"Use Existing\" runs a synthesis test first — a pip/pipx Piper may be",
+            y += 10 + drawLines(context,
+                    fit("  \"Use Existing\" runs a synthesis test first. A pip/pipx Piper may be", textW()),
                     cx + PAD, y, COL_DIM);
-            y += 10;
-            context.drawTextWithShadow(this.textRenderer,
-                    "  incompatible and will be rejected safely (then use Download).",
+            y += 11 + drawLines(context,
+                    fit("  incompatible and will be rejected safely (then use Download).", textW()),
                     cx + PAD, y, COL_DIM);
-            y += 11;
         }
         return y;
     }
 
-    private void drawRow(DrawContext context, int cx, int y, boolean ok, String text) {
+    /** Draws a check row; returns the extra height used when the text had to wrap. */
+    private int drawRow(DrawContext context, int cx, int y, boolean ok, String text) {
         context.drawTextWithShadow(this.textRenderer, ok ? "✔" : "✘", cx + PAD, y,
                 ok ? COL_OK : COL_BAD);
-        context.drawTextWithShadow(this.textRenderer, text, cx + PAD + 12, y, COL_TXT);
+        return drawLines(context, fit(text, textW() - 12), cx + PAD + 12, y, COL_TXT);
+    }
+
+    /** Text width inside the popup (it shrinks with the popup on narrow screens). */
+    private int textW() {
+        return popupW() - PAD * 2;
+    }
+
+    /** One line, kept exactly as it was when it fits, else wrapped by measured width. */
+    private java.util.List<String> fit(String text, int maxWidth) {
+        return UiFitPolicy.wrapIfNeeded(text, maxWidth, this.textRenderer::getWidth);
+    }
+
+    /** The old 66-character path elision when it fits, else elided by width (keeps the end). */
+    private String fitTail(String text) {
+        String legacy = elide(text, 66);
+        return this.textRenderer.getWidth(legacy) <= textW()
+                ? legacy
+                : UiFitPolicy.elideStart(text, textW(), this.textRenderer::getWidth);
+    }
+
+    /** Draws lines 10 px apart; returns the extra height beyond the first line. */
+    private int drawLines(DrawContext context, java.util.List<String> lines, int x, int y, int color) {
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawTextWithShadow(this.textRenderer, lines.get(i), x, y + i * 10, color);
+        }
+        return Math.max(0, lines.size() - 1) * 10;
     }
 
     private String elide(String s, int max) {

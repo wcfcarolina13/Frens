@@ -52,8 +52,9 @@ public final class OverheadLinePolicy {
             }
             String rest = word;
             while (rest.length() > width) {
-                all.add(rest.substring(0, width));
-                rest = rest.substring(width);
+                int cut = safeCut(rest, width);
+                all.add(rest.substring(0, cut));
+                rest = rest.substring(cut);
             }
             current.append(rest);
         }
@@ -69,10 +70,24 @@ public final class OverheadLinePolicy {
         return out;
     }
 
+    /**
+     * {@code index} moved back one char when it would split a surrogate pair (an emoji), so a
+     * cut never leaves a lone half that shows as a replacement glyph. Never returns below 1
+     * unless {@code index} was already 0, so a hard break always makes progress.
+     */
+    static int safeCut(String s, int index) {
+        int cut = Math.max(0, Math.min(index, s.length()));
+        if (cut > 1 && cut < s.length() && Character.isHighSurrogate(s.charAt(cut - 1))
+                && Character.isLowSurrogate(s.charAt(cut))) {
+            cut--;
+        }
+        return cut;
+    }
+
     private static String withEllipsis(String last, int width) {
         String base = last;
         if (base.length() + ELLIPSIS.length() > width) {
-            base = base.substring(0, width - ELLIPSIS.length());
+            base = base.substring(0, safeCut(base, width - ELLIPSIS.length()));
             int space = base.lastIndexOf(' ');
             if (space >= width / 2) {
                 base = base.substring(0, space);

@@ -1582,10 +1582,23 @@ public class FrensClient implements ClientModInitializer {
     /**
      * How to draw one top tip. {@code borderColor} 0 means no border. {@code reservedRight} is
      * width kept free at the right of the text (the no-bots close button). {@code centerRows}
-     * centres each row inside the box, otherwise rows are left-aligned.
+     * centres each row inside the box, otherwise rows are left-aligned. {@code extraBottom}
+     * lengthens the box (and its reserved slot), {@code extraReserve} adds lane space below the
+     * box only. Both keep a tip pixel-identical to its 1.1.227 hand-drawn geometry.
      */
     private record TopTipStyle(int bgColor, int borderColor, int firstColor, int restColor,
-                               int reservedRight, boolean centerRows, boolean clearOfToast) {
+                               int reservedRight, boolean centerRows, boolean clearOfToast,
+                               int extraBottom, int extraReserve) {
+        TopTipStyle(int bgColor, int borderColor, int firstColor, int restColor,
+                    int reservedRight, boolean centerRows, boolean clearOfToast) {
+            this(bgColor, borderColor, firstColor, restColor, reservedRight, centerRows, clearOfToast, 0, 0);
+        }
+
+        TopTipStyle withExtra(int bottom, int reserve) {
+            return new TopTipStyle(bgColor, borderColor, firstColor, restColor, reservedRight, centerRows,
+                    clearOfToast, bottom, reserve);
+        }
+
         static TopTipStyle bordered() {
             return new TopTipStyle(TOP_TIP_BG, TOP_TIP_BORDER, TOP_TIP_TEXT, TOP_TIP_TEXT_DIM, 0, false, false);
         }
@@ -1649,12 +1662,12 @@ public class FrensClient implements ClientModInitializer {
         };
         int lineStep = tr.fontHeight + 2;
         int textH = lineStep * rows.size() - 2;
-        int reserveH = textH + (style.borderColor() != 0 ? 11 : 9);
+        int reserveH = textH + (style.borderColor() != 0 ? 11 : 9) + style.extraBottom() + style.extraReserve();
         int y = style.clearOfToast()
                 ? reserveCenterTipYClearOfToast(context, x + contentW + pad, reserveH)
                 : reserveTopTipY(lane, reserveH);
 
-        int bottom = y + textH + 4;
+        int bottom = y + textH + 4 + style.extraBottom();
         context.fill(x - 6, y - 4, x + contentW + 6, bottom, style.bgColor());
         int border = style.borderColor();
         if (border != 0) {
@@ -2810,7 +2823,9 @@ public class FrensClient implements ClientModInitializer {
                 ? "Arrows move 1 block • Shift+Up/Down height • Shift+Left/Right rotate"
                 : "Look to place it, then walk around and press [" + lockKey + "] to edit in 3D";
         }
-        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2, line3), TopTipStyle.bordered());
+        // 1.1.227 drew this box 3 * fontHeight + 10 tall with a 44 px slot: 2 px more than the
+        // generic bordered box, kept so the preview sits exactly where it did.
+        drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2, line3), TopTipStyle.bordered().withExtra(2, 0));
     }
 
     private static void renderDirectionalMiningHint(DrawContext context) {
@@ -2985,15 +3000,21 @@ public class FrensClient implements ClientModInitializer {
         if (alias == null || alias.isBlank()) {
             alias = "Bot";
         }
-        String guide = keyChip(getGuideHotkeyDisplayName());
+        String guideKey = getGuideHotkeyDisplayName();
+        String guide = keyChip(guideKey);
         String looking = "Looking at " + alias + ".";
+        // The 1.1.227 line, word for word, wherever it fits. Shorter forms only on narrow screens.
+        String classicKey = "]".equals(guideKey) ? "Right Bracket (])" : guideKey;
+        String classic = looking + " Right-click to open menu • Press " + classicKey + " for Guide";
         String full = looking + " Right-click to open menu • Press " + guide + " for Guide";
         String brief = looking + " Right-click for menu • " + guide + " for Guide";
         TopTipStyle style = TopTipStyle.plain(TOP_TIP_TEXT, true);
         int textMax = topTipTextMax(context, TopTipLane.CENTER, style);
         var tr = client.textRenderer;
         java.util.List<String> lines;
-        if (tr.getWidth(full) <= textMax) {
+        if (tr.getWidth(classic) <= textMax) {
+            lines = java.util.List.of(classic);
+        } else if (tr.getWidth(full) <= textMax) {
             lines = java.util.List.of(full);
         } else if (tr.getWidth(brief) <= textMax) {
             lines = java.util.List.of(brief);
@@ -3488,7 +3509,9 @@ public class FrensClient implements ClientModInitializer {
         // Green box in the CENTER lane, so it stacks below "Jake is following",
         // "Looking at Jake" and the rest instead of overlapping them.
         drawTopTip(context, TopTipLane.CENTER, java.util.List.of(line1, line2),
-                new TopTipStyle(0xAA2a4a2a, 0xFF4a8a4a, 0xFFB8E6B8, 0xFF90C890, 0, false, false));
+                // 1.1.227 reserved boxHeight + 12 = 36 px here, 5 more than the generic box, so
+                // every CENTER tip after it stays where it was.
+                new TopTipStyle(0xAA2a4a2a, 0xFF4a8a4a, 0xFFB8E6B8, 0xFF90C890, 0, false, false).withExtra(0, 5));
     }
 
     // Store the preview box to be rendered
