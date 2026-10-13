@@ -511,34 +511,53 @@ public class MiningTool {
             }
         }
 
+        if (selectFallbackMatching(bot, inventory, MiningTool::isHarmlessMiningFallback)) {
+            return;
+        }
+        // Last tier: a damageable non-weapon (axe, shovel) is not harmless, but at 1 durability per
+        // block it still beats a sword at 2. ToolSelector keeps such an item as its packed-inventory
+        // last resort, so the 20-tick re-poll settles on it instead of resetting progress.
+        selectFallbackMatching(bot, inventory, MiningTool::isNonWeaponMiningFallback);
+    }
+
+    private static boolean selectFallbackMatching(ServerPlayerEntity bot, PlayerInventory inventory,
+                                                  java.util.function.Predicate<ItemStack> accept) {
         for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (isHarmlessMiningFallback(stack)) {
+            if (accept.test(inventory.getStack(i))) {
                 BotActions.selectHotbarSlot(bot, i);
-                return;
+                return true;
             }
         }
         for (int i = 9; i < PlayerInventory.MAIN_SIZE; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (isHarmlessMiningFallback(stack)) {
+            if (accept.test(inventory.getStack(i))) {
                 int selectedSlot = inventory.getSelectedSlot();
                 swapStacks(inventory, i, selectedSlot);
                 BotActions.selectHotbarSlot(bot, selectedSlot);
-                return;
+                return true;
             }
         }
+        return false;
     }
 
     private static boolean isWeaponOnlyItem(ItemStack stack) {
         return BotActions.isCombatClassItem(stack);
     }
 
+    /** Non-food item that costs nothing to swing ({@link HarmlessToolPolicy#isHarmlessFallback}). */
     private static boolean isHarmlessMiningFallback(ItemStack stack) {
         return stack != null
                 && !stack.isEmpty()
-                && !isWeaponOnlyItem(stack)
                 && stack.get(DataComponentTypes.FOOD) == null
-                && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f;
+                && HarmlessToolPolicy.isHarmlessFallback(false, isWeaponOnlyItem(stack), stack.isDamageable(),
+                        stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()));
+    }
+
+    /** Any non-food, non-weapon item (last tier, so a packed inventory never mines with a sword). */
+    private static boolean isNonWeaponMiningFallback(ItemStack stack) {
+        return stack != null
+                && !stack.isEmpty()
+                && !isWeaponOnlyItem(stack)
+                && stack.get(DataComponentTypes.FOOD) == null;
     }
 
     private static int findEmptyHotbarSlot(PlayerInventory inventory) {

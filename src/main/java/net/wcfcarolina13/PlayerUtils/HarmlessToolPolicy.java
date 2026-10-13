@@ -61,10 +61,12 @@ public final class HarmlessToolPolicy {
      * The held item is not worth keeping, but is there anything better to switch to? When no
      * harmless hotbar item exists and the whole inventory has no empty slot, a true empty hand
      * cannot be made, so the held item stays (switching would only trade one wear for another
-     * and make the mining re-poll thrash).
+     * and make the mining re-poll thrash). Never for a weapon: a sword loses 2 durability per
+     * block, so the caller gets EMPTY and {@code MiningTool}'s fallback picks a non-weapon.
      */
-    public static boolean keepHeldAsLastResort(boolean harmlessHotbarItemFound, boolean anyEmptyInventorySlot) {
-        return !harmlessHotbarItemFound && !anyEmptyInventorySlot;
+    public static boolean keepHeldAsLastResort(boolean harmlessHotbarItemFound, boolean anyEmptyInventorySlot,
+                                               boolean heldWeapon) {
+        return !heldWeapon && !harmlessHotbarItemFound && !anyEmptyInventorySlot;
     }
 
     /**

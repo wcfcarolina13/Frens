@@ -758,7 +758,8 @@ public final class TreeDetector {
             return new WoodcutProtectionDecision(true, "beehive");
         }
         return VillageRuntimeProtectionPolicy.decideWoodcutProtection(
-                isInUserDrawnProtectedZone(world, pos),
+                isInNonServerBaseProtectedZone(world, pos),
+                CompanionSafeZoneService.isNearPlayerOwnedBase(world, pos),
                 CompanionSafeZoneService.isInsideFortificationZone(world, pos),
                 MappedVillageService.isInsideMappedVillage(world, pos)
         );
@@ -766,21 +767,22 @@ public final class TreeDetector {
 
     /**
      * Explicit-zone check for woodcut: the zone service must refuse the mutation AND at least
-     * one containing zone must be user-drawn. Base auto-zones (label prefix owned by
-     * {@link BotHomeService}) mirror base radius, which woodcut ignores. Conservative edge: a
-     * public-mode user zone overlapping a base zone still counts as blocking here.
+     * one containing zone must be something other than a SERVER-owned base auto-zone. Player
+     * base auto-zones and user-drawn zones still block. Conservative edge: a public-mode user
+     * zone overlapping a server base zone still counts as blocking here.
      */
-    private static boolean isInUserDrawnProtectedZone(ServerWorld world, BlockPos pos) {
+    private static boolean isInNonServerBaseProtectedZone(ServerWorld world, BlockPos pos) {
         if (!CompanionSafeZoneService.isInExplicitProtectedZone(world, pos, null)) {
             return false;
         }
-        List<String> containing = new ArrayList<>();
+        List<ProtectedZoneService.ProtectedZone> containing = new ArrayList<>();
         for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
             if (zone != null && zone.contains(pos)) {
-                containing.add(zone.getLabel());
+                containing.add(zone);
             }
         }
-        return VillageRuntimeProtectionPolicy.anyNonBaseZone(containing, BotHomeService::isBaseAutoZoneLabel);
+        return VillageRuntimeProtectionPolicy.anyNonExemptZone(containing,
+                zone -> BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()));
     }
 
     public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover) {

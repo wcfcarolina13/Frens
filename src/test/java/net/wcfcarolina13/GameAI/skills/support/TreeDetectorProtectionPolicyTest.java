@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,13 +13,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TreeDetectorProtectionPolicyTest {
 
-    /** Mirrors BotHomeService.isBaseAutoZoneLabel without loading that class under JUnit. */
-    private static final Predicate<String> BASE_AUTO_ZONE = label -> label.startsWith("base:");
+    /** Stand-in for ProtectedZoneService.ProtectedZone (label + owner UUID). */
+    private record Zone(String label, UUID owner) {}
+
+    /**
+     * Mirrors BotHomeService.isServerOwnedBaseZone (base: label AND null zone owner, which is
+     * what parseZoneOwner yields for SERVER_OWNER_UUID) without loading that class under JUnit.
+     */
+    private static final Predicate<Zone> SERVER_BASE_ZONE =
+            z -> z.label() != null && z.label().startsWith("base:") && z.owner() == null;
+
+    private static final UUID PLAYER = UUID.fromString("11111111-2222-3333-4444-555555555555");
+
+    private static Zone server(String label) { return new Zone(label, null); }
+    private static Zone player(String label) { return new Zone(label, PLAYER); }
 
     @Test
     void woodcutAllowsWildernessWhenNoSavedProtectionApplies() {
         TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, false);
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, false, false);
 
         assertFalse(decision.blocked());
         assertEquals("none", decision.reason());
@@ -27,16 +40,25 @@ class TreeDetectorProtectionPolicyTest {
     @Test
     void woodcutBlocksMappedVillageHull() {
         TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, true);
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, false, true);
 
         assertTrue(decision.blocked());
         assertEquals("mapped-village", decision.reason());
     }
 
     @Test
+    void woodcutBlocksSavedBaseRadius() {
+        TreeDetector.WoodcutProtectionDecision decision =
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, true, false, false);
+
+        assertTrue(decision.blocked());
+        assertEquals("base-radius", decision.reason());
+    }
+
+    @Test
     void woodcutBlocksFortificationBuffer() {
         TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, true, false);
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, true, false);
 
         assertTrue(decision.blocked());
         assertEquals("fort-buffer", decision.reason());
@@ -45,17 +67,18 @@ class TreeDetectorProtectionPolicyTest {
     @Test
     void explicitProtectedZonesWinFirst() {
         TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(true, true, true);
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(true, true, true, true);
 
         assertTrue(decision.blocked());
         assertEquals("admin-zone", decision.reason());
     }
 
     @Test
-    void freshWorldSpawnBaseAutoZoneDoesNotBlockWoodcut() {
-        boolean explicit = VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("base:spawn"), BASE_AUTO_ZONE);
+    void freshWorldServerSpawnBaseAllowsWoodcut() {
+        // Server-owned Spawn base: its auto-zone is exempt and isNearPlayerOwnedBase skips it.
+        boolean explicit = VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server("base:spawn")), SERVER_BASE_ZONE);
         TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(explicit, false, false);
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(explicit, false, false, false);
 
         assertFalse(explicit);
         assertFalse(decision.blocked());
@@ -63,35 +86,46 @@ class TreeDetectorProtectionPolicyTest {
     }
 
     @Test
+    void playerBaseAutoZoneStillBlocksWoodcut() {
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(player("base:home")), SERVER_BASE_ZONE));
+    }
+
+    @Test
     void userDrawnZoneStillBlocksWoodcut() {
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("my-garden"), BASE_AUTO_ZONE));
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(player("my-garden")), SERVER_BASE_ZONE));
+        // An owner-less user zone is not a base zone, so it blocks too.
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server("my-garden")), SERVER_BASE_ZONE));
     }
 
     @Test
-    void userDrawnZoneOverlappingBaseZoneStillBlocks() {
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("base:spawn", "orchard"), BASE_AUTO_ZONE));
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("orchard", "base:home"), BASE_AUTO_ZONE));
+    void anyNonExemptZoneOverlappingServerBaseStillBlocks() {
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(
+                List.of(server("base:spawn"), player("orchard")), SERVER_BASE_ZONE));
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(
+                List.of(player("base:home"), server("base:spawn")), SERVER_BASE_ZONE));
     }
 
     @Test
-    void onlyBaseZonesOverlappingDoNotBlock() {
-        assertFalse(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("base:spawn", "base:home"), BASE_AUTO_ZONE));
+    void onlyServerBaseZonesOverlappingDoNotBlock() {
+        assertFalse(VillageRuntimeProtectionPolicy.anyNonExemptZone(
+                List.of(server("base:spawn"), server("base:admin")), SERVER_BASE_ZONE));
     }
 
     @Test
     void noContainingZonesDoNotBlock() {
-        assertFalse(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of(), BASE_AUTO_ZONE));
-        assertFalse(VillageRuntimeProtectionPolicy.anyNonBaseZone(null, BASE_AUTO_ZONE));
+        assertFalse(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.<Zone>of(), SERVER_BASE_ZONE));
+        assertFalse(VillageRuntimeProtectionPolicy.anyNonExemptZone(null, SERVER_BASE_ZONE));
     }
 
     @Test
-    void blankOrNullLabelIsTreatedAsUserDrawn() {
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(Arrays.asList("base:spawn", null), BASE_AUTO_ZONE));
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of(" "), BASE_AUTO_ZONE));
+    void nullOrBlankLabelIsTreatedAsNonExempt() {
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(Arrays.asList(server("base:spawn"), null), SERVER_BASE_ZONE));
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server(" ")), SERVER_BASE_ZONE));
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server(null)), SERVER_BASE_ZONE));
     }
 
     @Test
     void prefixMustLeadTheLabel() {
-        assertTrue(VillageRuntimeProtectionPolicy.anyNonBaseZone(List.of("my base:spawn"), BASE_AUTO_ZONE));
+        assertTrue(VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server("my base:spawn")), SERVER_BASE_ZONE));
     }
 }

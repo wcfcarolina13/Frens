@@ -4523,7 +4523,10 @@ public final class WoodcutSkill implements Skill {
 
         LookController.faceBlock(bot, pos);
         selectAdaptiveToolOrHands(bot, state);
-        CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos, true, false);
+        // preserve=false: ToolSelector now never wears a non-effective tool, so let it pick per
+        // block (and re-poll). Placement after this re-selects its own block, as pillarUp
+        // already does after its own preserve=false overhead mine.
+        CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos, false, false);
         try {
             String result = miningFuture.get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             String lower = result == null ? "" : result.toLowerCase();

@@ -12,7 +12,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
@@ -20,7 +19,7 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.DropSweepService;
 import net.wcfcarolina13.GameAI.services.DropReachPolicy;
-import net.wcfcarolina13.GameAI.services.WalkablePartialBlocks;
+import net.wcfcarolina13.GameAI.services.DropStandHelper;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.BundleService;
 import net.wcfcarolina13.GameAI.services.MovementService;
@@ -222,7 +221,7 @@ public final class DropSweeper {
                 // the bot cannot fit there and nudging in suffocates it (FRESH_INSTALL #10).
                 // Leaf-trapped items pass: the sweep breaks the leaf to free them.
                 .filter(drop -> world.getBlockState(drop.getBlockPos()).isIn(BlockTags.LEAVES)
-                        || hasTwoHighStandAtOrBeside(world, drop.getBlockPos()))
+                        || DropStandHelper.hasTwoHighStandAtOrBeside(world, drop.getBlockPos()))
                 .filter(drop -> {
                     // Skip items behind solid blocks — raycast from bot eye to item.
                     Vec3d dropPos = new Vec3d(drop.getX(), drop.getY(), drop.getZ());
@@ -242,39 +241,6 @@ public final class DropSweeper {
                 .orElse(null);
     }
 
-    /** Feet cell is enterable (empty collision or a walkable partial such as a carpet). */
-    private static boolean isCellPassable(ServerWorld world, BlockPos pos) {
-        return WalkablePartialBlocks.isPathable(world.getBlockState(pos), world, pos);
-    }
-
-    /** True when a bot fits with its feet in {@code feet}: feet + head passable and solid footing. */
-    private static boolean isTwoHighStand(ServerWorld world, BlockPos feet) {
-        BlockPos below = feet.down();
-        boolean footing = !world.getBlockState(below).getCollisionShape(world, below).isEmpty()
-                || !world.getFluidState(below).isEmpty();
-        return footing && DropReachPolicy.isNudgeCellSafe(isCellPassable(world, feet), isCellPassable(world, feet.up()));
-    }
-
-    /**
-     * An item is collectable when the bot can stand in its cell or in a horizontal
-     * neighbour at the same height (pickup reach is 1 block sideways, 0.5 vertically).
-     * Same world-read discipline as the raycast filter beside it.
-     */
-    private static boolean hasTwoHighStandAtOrBeside(ServerWorld world, BlockPos itemCell) {
-        if (world == null || itemCell == null) {
-            return false;
-        }
-        if (isTwoHighStand(world, itemCell)) {
-            return true;
-        }
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            if (isTwoHighStand(world, itemCell.offset(direction))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * Nudge safety: the cell the bot steps into (facing direction; one up for a jump onto a
      * step) must fit it 2-high, and for a drop below, the landing cell at the item must too.
@@ -285,11 +251,11 @@ public final class DropSweeper {
         if (dy > 0) {
             next = next.up();
         }
-        if (!DropReachPolicy.isNudgeCellSafe(isCellPassable(world, next), isCellPassable(world, next.up()))) {
+        if (!DropReachPolicy.isNudgeCellSafe(DropStandHelper.isCellPassable(world, next), DropStandHelper.isCellPassable(world, next.up()))) {
             return false;
         }
         if (dy < 0) {
-            return DropReachPolicy.isNudgeCellSafe(isCellPassable(world, dropPos), isCellPassable(world, dropPos.up()));
+            return DropReachPolicy.isNudgeCellSafe(DropStandHelper.isCellPassable(world, dropPos), DropStandHelper.isCellPassable(world, dropPos.up()));
         }
         return true;
     }

@@ -96,9 +96,14 @@ class HarmlessToolPolicyTest {
 
     @Test
     void heldStaysOnlyWhenNoHarmlessItemAndNoEmptySlot() {
-        assertTrue(HarmlessToolPolicy.keepHeldAsLastResort(false, false));
-        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(true, false));
-        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(false, true));
-        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(true, true));
+        assertTrue(HarmlessToolPolicy.keepHeldAsLastResort(false, false, false));
+        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(true, false, false));
+        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(false, true, false));
+        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(true, true, false));
+    }
+
+    @Test
+    void lastResortNeverKeepsAWeapon() {
+        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(false, false, true));
     }
 }

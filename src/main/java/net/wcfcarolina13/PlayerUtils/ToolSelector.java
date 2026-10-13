@@ -286,9 +286,12 @@ public class ToolSelector {
             return selected;
         }
         ItemStack harmless = findHarmlessHotbarFallback(bot, blockState);
-        if (HarmlessToolPolicy.keepHeldAsLastResort(!harmless.isEmpty(), hasAnyEmptyMainSlot(bot))) {
+        if (HarmlessToolPolicy.keepHeldAsLastResort(!harmless.isEmpty(), hasAnyEmptyMainSlot(bot),
+                isWeaponOnlyItem(selected))) {
             // Packed inventory with nothing harmless: MiningTool could not free a hand either, and
             // returning EMPTY here would make its 20-tick re-poll swap and reset progress forever.
+            // Never a weapon: EMPTY sends MiningTool to its fallback, whose last tier takes any
+            // non-weapon item, which this branch then keeps on the next re-poll.
             return selected;
         }
         return harmless;

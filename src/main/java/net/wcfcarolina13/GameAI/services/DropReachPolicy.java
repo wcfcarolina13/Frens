@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.function.BooleanSupplier;
+
 /**
  * Pure reach rules for ground-item pickup (idle drop sweep and the woodcut
  * {@code DropSweeper} nudge). No Minecraft types so it is unit-testable.
@@ -12,6 +14,11 @@ package net.wcfcarolina13.GameAI.services;
  * Below, 6 matches the old minimum search height of {@code findNearestDrop}, so the
  * small-radius callers keep their downward reach while the 20-block idle sweep no
  * longer targets drops at the bottom of a ravine.</p>
+ *
+ * <p>The vertical band applies to the idle sweep only ({@link #isIdleSweepReachable}):
+ * an item more than 2 above the feet is still worth the walk when the bot can stand at
+ * or beside it (a drop up a hill). The other {@code findNearestDrop} callers (linger,
+ * follow, post-combat, guard, patrol) keep their old {@code max(6, radius)} box.</p>
  */
 public final class DropReachPolicy {
 
@@ -32,6 +39,18 @@ public final class DropReachPolicy {
     /** {@code dyItemMinusFeet} = item block Y minus the bot's feet block Y. */
     public static boolean isVerticallyReachable(int dyItemMinusFeet) {
         return dyItemMinusFeet <= MAX_DY_ABOVE && dyItemMinusFeet >= -MAX_DY_BELOW;
+    }
+
+    /**
+     * Idle-sweep candidate rule: within the downward band, and either low enough to grab
+     * from the feet block or with a 2-high stand at or beside it. The stand check reads the
+     * world, so it is only evaluated for items above {@link #MAX_DY_ABOVE}.
+     */
+    public static boolean isIdleSweepReachable(int dyItemMinusFeet, BooleanSupplier hasStandAtOrBeside) {
+        if (dyItemMinusFeet < -MAX_DY_BELOW) {
+            return false;
+        }
+        return dyItemMinusFeet <= MAX_DY_ABOVE || hasStandAtOrBeside.getAsBoolean();
     }
 
     public static long noProgressTimeoutTicks(int dyItemMinusFeet) {

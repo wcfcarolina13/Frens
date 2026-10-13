@@ -9,17 +9,20 @@ final class VillageRuntimeProtectionPolicy {
     }
 
     /**
-     * Woodcut protection verdict. Saved-base radius is deliberately NOT an input: base
-     * protection exists to stop structure destruction, and trees are resources (see
-     * {@link TreeDetector#isProtectedForWoodcut}). The base auto-zones that mirror each base
-     * into {@code ProtectedZoneService} are filtered out of {@code explicitProtectedZone} by
-     * the caller via {@link #anyNonBaseZone}, so only user-drawn zones block here.
+     * Woodcut protection verdict. {@code explicitProtectedZone} arrives with SERVER-owned base
+     * auto-zones already filtered out by the caller via {@link #anyNonExemptZone}, and
+     * {@code nearSavedBase} counts only player-owned bases, so the fresh-world Spawn base no
+     * longer blocks every tree near spawn while a player's base still does.
      */
     static TreeDetector.WoodcutProtectionDecision decideWoodcutProtection(boolean explicitProtectedZone,
+                                                                          boolean nearSavedBase,
                                                                           boolean insideFortificationZone,
                                                                           boolean insideMappedVillage) {
         if (explicitProtectedZone) {
             return new TreeDetector.WoodcutProtectionDecision(true, "admin-zone");
+        }
+        if (nearSavedBase) {
+            return new TreeDetector.WoodcutProtectionDecision(true, "base-radius");
         }
         if (insideFortificationZone) {
             return new TreeDetector.WoodcutProtectionDecision(true, "fort-buffer");
@@ -31,16 +34,16 @@ final class VillageRuntimeProtectionPolicy {
     }
 
     /**
-     * True when any of the explicit zones containing a position is not a base auto-zone.
-     * Overlapping zones: one user-drawn zone is enough to block, whatever base zones sit
-     * alongside it. A null or blank label is treated as user-drawn (conservative).
+     * True when any of the explicit zones containing a position is not exempt. Overlapping
+     * zones: one non-exempt zone is enough to block, whatever exempt zones sit alongside it.
+     * A null element is treated as non-exempt (conservative).
      */
-    static boolean anyNonBaseZone(Collection<String> containingZoneLabels, Predicate<String> isBaseAutoZoneLabel) {
-        if (containingZoneLabels == null || containingZoneLabels.isEmpty()) {
+    static <T> boolean anyNonExemptZone(Collection<T> containingZones, Predicate<T> exempt) {
+        if (containingZones == null || containingZones.isEmpty()) {
             return false;
         }
-        for (String label : containingZoneLabels) {
-            if (label == null || label.isBlank() || !isBaseAutoZoneLabel.test(label)) {
+        for (T zone : containingZones) {
+            if (zone == null || !exempt.test(zone)) {
                 return true;
             }
         }

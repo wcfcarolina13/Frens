@@ -815,6 +815,9 @@ public final class TaskService {
             if (bot.isRemoved()) return;
             // Abort if the bot started a new task or already reached surface
             if (hasActiveTask(botUuid)) return;
+            // Follow resumed after the task (1.1.229): follow owns movement now, and a
+            // fast-travel to a closer bed/base would just be walked back by follow.
+            if (BotEventHandler.isFollowingPlayer(bot)) return;
             if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world
                     && BotFleeService.isAtSurface(bot, world)) return;
 

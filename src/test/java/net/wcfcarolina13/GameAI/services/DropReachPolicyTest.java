@@ -30,6 +30,30 @@ class DropReachPolicyTest {
     }
 
     @Test
+    void idleSweepTakesLowItemsWithoutReadingTheWorld() {
+        java.util.function.BooleanSupplier mustNotRun = () -> {
+            throw new AssertionError("stand check must not run for dy <= 2");
+        };
+        assertTrue(DropReachPolicy.isIdleSweepReachable(0, mustNotRun));
+        assertTrue(DropReachPolicy.isIdleSweepReachable(2, mustNotRun));
+        assertTrue(DropReachPolicy.isIdleSweepReachable(-6, mustNotRun));
+    }
+
+    @Test
+    void idleSweepTakesHighItemsOnlyWithAStand() {
+        assertTrue(DropReachPolicy.isIdleSweepReachable(3, () -> true));
+        assertTrue(DropReachPolicy.isIdleSweepReachable(10, () -> true));
+        assertFalse(DropReachPolicy.isIdleSweepReachable(3, () -> false));
+        assertFalse(DropReachPolicy.isIdleSweepReachable(10, () -> false));
+    }
+
+    @Test
+    void idleSweepStillDropsDeepRavinesEvenWithAStand() {
+        assertFalse(DropReachPolicy.isIdleSweepReachable(-7, () -> true));
+        assertFalse(DropReachPolicy.isIdleSweepReachable(-20, () -> true));
+    }
+
+    @Test
     void timeoutIsShortOnlyWhenOutOfReach() {
         assertEquals(200L, DropReachPolicy.noProgressTimeoutTicks(0));
         assertEquals(200L, DropReachPolicy.noProgressTimeoutTicks(2));

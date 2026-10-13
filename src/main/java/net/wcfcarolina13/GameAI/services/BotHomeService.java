@@ -97,6 +97,16 @@ public final class BotHomeService {
         return zoneLabel != null && zoneLabel.startsWith(AUTO_ZONE_LABEL_PREFIX);
     }
 
+    /**
+     * True when a zone is the auto-zone of a SERVER-owned base (the fresh-world Spawn base or an
+     * admin-claimed one). Keyed on the zone owner UUID, never on the owner name: a player can be
+     * named "Server". {@link #parseZoneOwner} maps {@link #SERVER_OWNER_UUID} (and legacy blank
+     * owners) to a null zone owner; player bases carry their owner's UUID.
+     */
+    public static boolean isServerOwnedBaseZone(String zoneLabel, UUID zoneOwner) {
+        return isBaseAutoZoneLabel(zoneLabel) && zoneOwner == null;
+    }
+
     private static String autoZoneLabel(String baseLabel) {
         return AUTO_ZONE_LABEL_PREFIX + normalizeLabelKey(baseLabel);
     }

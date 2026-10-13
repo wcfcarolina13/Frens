@@ -40,6 +40,7 @@ import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.DropReachPolicy;
+import net.wcfcarolina13.GameAI.services.DropStandHelper;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -3246,7 +3247,7 @@ public class BotEventHandler {
             }
 
             // No committed target — look for the next drop.
-            Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS);
+            Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS, true);
             if (nearDrop != null) {
                 BlockPos dropBlock = nearDrop.getBlockPos();
                 double distSq = bot.squaredDistanceTo(nearDrop);
@@ -3334,7 +3335,7 @@ public class BotEventHandler {
         }
 
         // Threshold reached — check for nearby drops.
-        Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS);
+        Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS, true);
         if (nearDrop == null) {
             return false;
         }
@@ -7517,27 +7518,35 @@ public class BotEventHandler {
     }
 
     private static Entity findNearestDrop(ServerPlayerEntity bot, double radius) {
+        return findNearestDrop(bot, radius, false);
+    }
+
+    /**
+     * {@code idleCap} applies the idle-sweep reach rule ({@link DropReachPolicy#isIdleSweepReachable})
+     * and the idle-sweep entity blacklist. Without it (linger, follow, post-combat, guard, patrol)
+     * the search keeps the old {@code max(6, radius)} vertical band with no per-item dy rule.
+     */
+    private static Entity findNearestDrop(ServerPlayerEntity bot, double radius, boolean idleCap) {
         if (bot == null) {
             return null;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return null;
         }
-        // Height cap (DropReachPolicy): the box only needs to cover the reachable band;
-        // the exact per-item dy check is in the predicate below.
-        double verticalRange = DropReachPolicy.MAX_DY_BELOW + 1.0D;
+        double verticalRange = Math.max(6.0D, radius);
         Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
         Vec3d eyePos = bot.getEyePos();
         int feetY = bot.getBlockY();
         long nowTick = world.getServer().getTicks();
         Map<BlockPos, Long> blacklist =
                 BackgroundSweepPolicy.pruneAndGetIdleSweepBlacklist(bot.getUuid(), nowTick);
-        Map<Integer, Long> entityBlacklist = pruneIdleSweepEntityBlacklist(bot.getUuid(), nowTick);
+        Map<Integer, Long> entityBlacklist = idleCap ? pruneIdleSweepEntityBlacklist(bot.getUuid(), nowTick) : null;
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         searchBox,
                         drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D
-                                && DropReachPolicy.isVerticallyReachable(drop.getBlockY() - feetY))
+                                && (!idleCap || DropReachPolicy.isIdleSweepReachable(drop.getBlockY() - feetY,
+                                        () -> DropStandHelper.hasTwoHighStandAtOrBeside(world, drop.getBlockPos()))))
                 .stream()
                 // Skip drops the bot has previously failed to reach (per-bot, time-bounded).
                 .filter(drop -> blacklist == null || !blacklist.containsKey(drop.getBlockPos()))

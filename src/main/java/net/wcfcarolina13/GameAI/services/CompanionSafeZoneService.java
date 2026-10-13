@@ -107,6 +107,26 @@ public final class CompanionSafeZoneService {
         return false;
     }
 
+    /**
+     * Like {@link #isNearSavedBase} but ignores SERVER-owned bases (fresh-world Spawn, admin
+     * claims). Woodcut uses this: trees around spawn are fair game, a player's base is not.
+     */
+    public static boolean isNearPlayerOwnedBase(ServerWorld world, BlockPos pos) {
+        MinecraftServer server = world.getServer();
+        if (server == null) return false;
+
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
+            if (base.pos() == null) continue;
+            if (BotHomeService.SERVER_OWNER_UUID.equals(base.ownerUuid())) continue;
+            int radius = base.radius();
+            double rSq = (double) radius * radius;
+            if (base.pos().getSquaredDistance(pos) <= rSq) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static boolean isInsideFortificationZone(ServerWorld world, BlockPos pos) {
         MinecraftServer server = world.getServer();
         if (server == null) return false;
