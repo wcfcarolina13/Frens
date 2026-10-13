@@ -17,7 +17,7 @@ test_command: "./gradlew build -x test"
   `chart_path_to_block` off the server thread, online-mode async spawn handled (PENDING + deferred init + in-flight guard).
 - Roster hides present bots, `-` key hints both meanings, first-meeting greeting, hint below the tutorial toast.
 
-**Field checks pending:** Phase 6y (new). Also 6x, 6w, 6v … 6b. **Fresh-install test part 2** (Ollama on, AI setup
+**Field checks pending:** Phase 6y (new, 3 items; checklist now 243). Also 6x, 6w, 6v … 6b. **Fresh-install test part 2** (Ollama on, AI setup
 checklist) was never run; the `frens-fresh` Prism instance is kept for it. Commands-off walkthrough should be re-run on 1.1.227.
 
 **Next (in order):**

@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.226-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.227-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.226** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.227** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1285,6 +1285,25 @@ Grep: `Auto-spawn deferred until the first real player joins`, `Auto-spawn skipp
   - Bradley does: in a throwaway singleplayer world, `/bot spawn` 7 bots (8 players with Bradley), quit to title, reopen the world.
   - Claude watches for: one `Auto-spawn skipped for <bot>: 7/8 players and 1 slot(s) kept free` line, and `Auto-spawn skipped 1 companion(s); world allows 8 players`.
   - Pass when: Bradley joins without "server is full", 6 bots auto-spawn, and chat shows "1 companion was not auto-spawned … Use /bot spawn to bring one in." `/bot spawn` of the 7th still works.
+
+## Phase 6y — Commands-off first run (1.1.227)
+
+1.1.227 makes Frens usable in a Survival world with Allow Commands OFF. Use a NEW world, commands OFF, no Carpet (the `frens-fresh` instance has no Carpet).
+
+Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the player`, `AI chat is off`, `is pending`.
+
+- [ ] **Spawn and command with commands off (1.1.227)**
+  - Bradley does: in a new commands-off world press `-`, tick Jake, Spawn Selected. Then the follow key, then `\` to stop.
+  - Claude watches for: no `Unknown or incomplete command` anywhere; `Spawned new bot Jake!`; follow ON; a single "Jake has stopped." line.
+  - Pass when: Jake spawns, follows and stops with no red error, and stop shows one chat line.
+- [ ] **World Mode chooser for the host (1.1.227)**
+  - Bradley does: create a new commands-off world.
+  - Claude watches for: the World Mode selection screen opening on join (F2 screenshot).
+  - Pass when: "Choose Frens World Mode" opens without enabling cheats.
+- [ ] **Roster and hints (1.1.227)**
+  - Bradley does: with Jake out, open the roster (Guide → Admin → Bot Controls → Spawn Bots), then say "Jake, hello" in chat with AI chat off.
+  - Claude watches for: roster without Jake (or "All your companions are already here"); one notice "AI chat is off. To let companions talk back, open the Guide (]) → AI setup."
+  - Pass when: present bots aren't offered, the notice shows once, and a brand-new bot's first greeting is not "welcome back".
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
