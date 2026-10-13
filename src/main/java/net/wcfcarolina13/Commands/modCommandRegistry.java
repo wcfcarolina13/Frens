@@ -164,6 +164,7 @@ public class modCommandRegistry {
     public static void shutdownExecutors() {
         scheduler.shutdownNow();
         skillExecutor.shutdownNow();
+        PENDING_SPAWN_NAMES.clear();
     }
 
     /**
@@ -197,6 +198,16 @@ public class modCommandRegistry {
 
     /** Result of {@link #spawnBot}; the command wrappers only report success for {@link #SPAWNED}. */
     private enum SpawnOutcome { SPAWNED, PENDING, REFUSED, FAILED }
+
+    /**
+     * Lowercase names whose spawn is PENDING (online-mode profile fetch in flight). Server thread
+     * only: added in {@link #deferPostSpawnInit}, removed in its completion hop, cleared at stop.
+     */
+    private static final Set<String> PENDING_SPAWN_NAMES = ConcurrentHashMap.newKeySet();
+
+    private static String pendingSpawnKey(String name) {
+        return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
+    }
 
     /** Quotes a bot name for a suggested command when it contains a space (string arguments accept quotes). */
     private static String quoteCommandArgument(String name) {
@@ -2536,8 +2547,12 @@ public class modCommandRegistry {
                                                    java.util.function.Consumer<ServerPlayerEntity> init) {
         LOGGER.info("spawnBot: {} is pending (profile lookup in flight), initialising when it connects", botName);
         ChatUtils.sendSystemMessage(source, net.wcfcarolina13.GameAI.services.SpawnResultPolicy.pendingMessage(botName));
+        PENDING_SPAWN_NAMES.add(pendingSpawnKey(botName));
         spawnFuture.whenComplete((ignored, error) -> server.execute(() -> {
-            ServerPlayerEntity late = error == null ? server.getPlayerManager().getPlayer(botName) : null;
+            PENDING_SPAWN_NAMES.remove(pendingSpawnKey(botName));
+            ServerPlayerEntity found = error == null ? server.getPlayerManager().getPlayer(botName) : null;
+            // A real player who took the name during the fetch is not our bot: never init them.
+            createFakePlayer late = found instanceof createFakePlayer fake ? fake : null;
             if (late == null) {
                 LOGGER.error("spawnBot: deferred spawn of {} did not produce a bot", botName, error);
                 ChatUtils.sendSystemMessage(source, "Error: " + botName + " cannot be spawned");
@@ -2676,6 +2691,13 @@ public class modCommandRegistry {
                     BotPersistenceService.removeBot(existingBot);
                     existingBot = null;
                 }
+            }
+            if (existingBot == null && PENDING_SPAWN_NAMES.contains(pendingSpawnKey(botName))) {
+                // A spawn of this name is still waiting on its profile fetch — reject the duplicate.
+                ChatUtils.sendSystemMessage(serverSource,
+                        "A bot named '" + botName + "' is already active. Use a different name, or /bot despawn "
+                                + quoteCommandArgument(botName) + " first.");
+                return SpawnOutcome.REFUSED;
             }
             if (existingBot != null) {
                 if (!(existingBot instanceof createFakePlayer)) {
