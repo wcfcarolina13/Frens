@@ -620,7 +620,11 @@ public final class BotGuideScreen extends Screen {
     private List<DetailLine> buildDetailLines(GuideTopic topic, int maxWidth) {
         ArrayList<DetailLine> out = new ArrayList<>();
         if (topic == null) {
-            for (OrderedText line : this.textRenderer.wrapLines(Text.literal("Select a topic from the list to read details."), maxWidth)) {
+            // Side by side keeps the 1.1.227 wording. Stacked has no list on the left.
+            String prompt = guideLayout().stacked()
+                    ? "Select a topic from the list to read details."
+                    : "Select a topic from the left list to read details.";
+            for (OrderedText line : this.textRenderer.wrapLines(Text.literal(prompt), maxWidth)) {
                 out.add(new DetailLine(line, 0xFFE6D7A3));
             }
             return out;

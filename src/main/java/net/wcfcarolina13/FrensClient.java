@@ -1570,6 +1570,8 @@ public class FrensClient implements ClientModInitializer {
 
     /** Gap between a top tip's outer edge and the screen edge. */
     private static final int TOP_TIP_SCREEN_MARGIN = 8;
+    /** 1.1.227's "Looking at" row fit when its width plus the 6 px box padding each side fit the screen. */
+    private static final int LOOKING_AT_LEGACY_MARGIN = 12;
     /** x of LEFT-lane text, and the inset of RIGHT-lane text from the right edge. */
     private static final int TOP_TIP_SIDE_X = 12;
     /** A long source line wraps to at most this many rows, the last one elided. */
@@ -1635,9 +1637,14 @@ public class FrensClient implements ClientModInitializer {
      */
     private static TopTipBox drawTopTip(DrawContext context, TopTipLane lane, java.util.List<String> lines,
                                         TopTipStyle style) {
+        return drawTopTip(context, lane, lines, style, topTipTextMax(context, lane, style));
+    }
+
+    /** As above, wrapping at {@code textMax} instead of the lane's own limit. */
+    private static TopTipBox drawTopTip(DrawContext context, TopTipLane lane, java.util.List<String> lines,
+                                        TopTipStyle style, int textMax) {
         MinecraftClient client = MinecraftClient.getInstance();
         var tr = client.textRenderer;
-        int textMax = topTipTextMax(context, lane, style);
         java.util.List<String> rows = new java.util.ArrayList<>();
         java.util.List<Integer> colors = new java.util.ArrayList<>();
         for (int i = 0; i < lines.size(); i++) {
@@ -3011,10 +3018,16 @@ public class FrensClient implements ClientModInitializer {
         TopTipStyle style = TopTipStyle.plain(TOP_TIP_TEXT, true);
         int textMax = topTipTextMax(context, TopTipLane.CENTER, style);
         var tr = client.textRenderer;
+        int classicW = tr.getWidth(classic);
+        if (net.wcfcarolina13.GraphicalUserInterface.UiFitPolicy.fitsLegacyRow(
+                classicW, context.getScaledWindowWidth(), LOOKING_AT_LEGACY_MARGIN)) {
+            // 1.1.227 drew this one row whenever it fit the screen less the box padding, without
+            // the lane margin, so keep that rule and never wrap it.
+            drawTopTip(context, TopTipLane.CENTER, java.util.List.of(classic), style, classicW);
+            return;
+        }
         java.util.List<String> lines;
-        if (tr.getWidth(classic) <= textMax) {
-            lines = java.util.List.of(classic);
-        } else if (tr.getWidth(full) <= textMax) {
+        if (tr.getWidth(full) <= textMax) {
             lines = java.util.List.of(full);
         } else if (tr.getWidth(brief) <= textMax) {
             lines = java.util.List.of(brief);

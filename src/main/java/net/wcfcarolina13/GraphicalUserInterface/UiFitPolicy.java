@@ -116,6 +116,15 @@ public final class UiFitPolicy {
     }
 
     /**
+     * True when a single row of {@code textWidth} fits a screen {@code screenWidth} wide with
+     * {@code margin} in total left over, the rule some 1.1.227 HUD rows used before lanes had
+     * their own margins.
+     */
+    public static boolean fitsLegacyRow(int textWidth, int screenWidth, int margin) {
+        return textWidth + Math.max(0, margin) <= screenWidth;
+    }
+
+    /**
      * Keeps a legacy line split ({@code preferred}) when every line fits {@code maxWidth}, so
      * screens that had room look exactly as before. Otherwise wraps {@code text} by width.
      */

@@ -7,6 +7,7 @@ import java.util.function.ToIntFunction;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -297,5 +298,14 @@ class UiFitPolicyTest {
         List<String> legacy = List.of("aaa bbb ccc", "ddd");
         assertEquals(legacy, UiFitPolicy.keepOrWrap(legacy, "aaa bbb ccc ddd", 66, W6));
         assertEquals(List.of("aaa bbb", "ccc ddd"), UiFitPolicy.keepOrWrap(legacy, "aaa bbb ccc ddd", 60, W6));
+    }
+
+    @Test
+    void fitsLegacyRowUsesTheScreenLessTheMargin() {
+        // 1.1.227 "Looking at Bradley" row: 401 px on a 427 px screen with 12 px of box padding.
+        assertTrue(UiFitPolicy.fitsLegacyRow(401, 427, 12));
+        assertTrue(UiFitPolicy.fitsLegacyRow(415, 427, 12));
+        assertFalse(UiFitPolicy.fitsLegacyRow(416, 427, 12));
+        assertTrue(UiFitPolicy.fitsLegacyRow(427, 427, -5));
     }
 }

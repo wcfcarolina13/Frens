@@ -77,10 +77,10 @@ public class BotPlayerPreferencesScreen extends Screen {
     @Override
     protected void init() {
         // Clamp to the screen so the panel stays usable at the 320x240 minimum GUI size.
-        this.panelW = Math.min(PANEL_WIDTH, this.width - 16);
-        this.panelH = Math.min(PANEL_HEIGHT, this.height - 8);
-        this.panelX = (this.width - panelW) / 2;
-        this.panelY = Math.max(4, (this.height - panelH) / 2);
+        this.panelW = UiFitPolicy.popupExtent(PANEL_WIDTH, this.width, 16);
+        this.panelH = UiFitPolicy.popupExtent(PANEL_HEIGHT, this.height, 8);
+        this.panelX = UiFitPolicy.popupOrigin(this.width, panelW);
+        this.panelY = UiFitPolicy.popupOrigin(this.height, panelH);
 
         // Request the current value from the server exactly once per open.
         if (!requestSent) {
@@ -151,8 +151,14 @@ public class BotPlayerPreferencesScreen extends Screen {
                 + "netherite, or turtle shell once durability drops below 11%, or 3% in combat. "
                 + "They'll swap to a cheaper alternative, check a nearby chest, or craft a new one.";
         int hintW = panelW - PADDING * 2;
+        // The 1.1.227 line breaks wherever they still fit, otherwise wrap to the panel.
+        java.util.List<String> hintLines = UiFitPolicy.keepOrWrap(java.util.List.of(
+                "Bots will refuse to use enchanted gear or items made of gold,",
+                "diamond, netherite, or turtle shell once durability drops below",
+                "11%, or 3% in combat. They'll swap to a cheaper alternative,",
+                "check a nearby chest, or craft a new one."), hint, hintW, this.textRenderer::getWidth);
         int hintCurrentY = hintY;
-        for (var line : this.textRenderer.wrapLines(Text.literal(hint), hintW)) {
+        for (String line : hintLines) {
             context.drawText(this.textRenderer, line, panelX + PADDING, hintCurrentY, 0xFFB0B0B0, false);
             hintCurrentY += 10;
         }

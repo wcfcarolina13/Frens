@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.souls;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /** Unit tests for the RAM-shortfall helper behind the model manager's warning. */
 class OllamaModelInstallerRamTest {
@@ -38,5 +39,13 @@ class OllamaModelInstallerRamTest {
     @Test
     void nullModelIsNotAWarning() {
         assertEquals(0, OllamaModelInstaller.ramShortfallGb(null, 8 * GIB));
+    }
+
+    @Test
+    void catalogDescriptionsHaveNoDashesOrSemicolons() {
+        for (OllamaModelInstaller.KnownModel known : OllamaModelInstaller.KNOWN_MODELS) {
+            String d = known.description();
+            assertFalse(d.contains("\u2014") || d.contains("\u2013") || d.contains(";"), d);
+        }
     }
 }

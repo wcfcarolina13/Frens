@@ -41,11 +41,11 @@ public final class OllamaModelInstaller {
 
     public static final List<KnownModel> KNOWN_MODELS = List.of(
             new KnownModel("llama3.1:8b", "Llama 3.1 8B",
-                    "Largest option — best replies, slowest, heaviest.", 4.6, 12),
+                    "Largest option. Best replies, slowest, heaviest.", 4.6, 12),
             new KnownModel("llama3.2:3b", "Llama 3.2 3B",
-                    "Smaller — noticeably faster, decent replies.", 1.9, 6),
+                    "Smaller. Noticeably faster, decent replies.", 1.9, 6),
             new KnownModel("llama3.2:1b", "Llama 3.2 1B",
-                    "Tiny — fastest, simplest replies.", 1.3, 4));
+                    "Tiny. Fastest, simplest replies.", 1.3, 4));
 
     public record InstalledModel(String tag, long sizeBytes) {
     }
