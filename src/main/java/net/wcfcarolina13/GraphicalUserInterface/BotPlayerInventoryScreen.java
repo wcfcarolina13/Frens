@@ -140,6 +140,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private final String botAlias;
     private float lastMouseX;
     private float lastMouseY;
+    // Scale-to-fit (InventoryScalePolicy). Below 1 the screen lays out in a larger content space
+    // (this.width/this.height hold its size) and draws it scaled; mouse input is divided back.
+    private float uiScale = 1.0f;
     private boolean topicsExpanded;
 
     // Overlay column split (0..1) for Dialogue vs Topics list.
@@ -226,8 +229,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int patrolRadiusPreset = SKILL_COUNT_UNSET;
     private String topicSearchQuery = "";
     private boolean topicSearchFocused = false;
-    private boolean spellsTabHovered = false;
-    private long spellsTabHoverStartMs = 0L;
+    private int overlayTabHoverIndex = -1;
+    private long overlayTabHoverStartMs = 0L;
+    private String overlayTabHoverName = null;
 
     // Hold-repeat state for +/- control buttons.
     private Runnable heldAdjustAction = null;
@@ -263,6 +267,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int TOPICS_OVERLAY_FOOTER_PAD = 6;
     private static final int TOPICS_OVERLAY_COLUMN_GAP = 10;
     private static final int TOPICS_OVERLAY_LIST_HEADER_H = 18; // tab bar height for right column
+    private static final int OVERLAY_MIN_DIALOGUE_W = 160;
+    private static final int OVERLAY_MIN_LIST_W = 140;
+    private static final int OVERLAY_TAB_GAP = 2;
+    private static final int OVERLAY_TAB_LABEL_PAD = 3;
 
     // Palette (Skyrim/Morrowind-ish: warmer parchment, less harsh whites).
     private static final int COLOR_TEXT_PARCHMENT = 0xFFD8C7A0;
@@ -774,6 +782,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     protected void init() {
+        applyFitScale();
         super.init();
         // Restore cursor position after a bot-switch screen transition.
         // setScreen() calls mouse.unlockCursor() (which centres the cursor)
@@ -852,6 +861,43 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 }
             }
         }
+    }
+
+    /**
+     * Picks the scale that fits the 364x230 inventory on the real scaled window and, when it is
+     * below 1, swaps this.width/this.height for the content-space size so HandledScreen centres
+     * x/y there and every width clamp in this screen works in content space. The real size comes
+     * from the window, so a re-entered init() (clearAndInit after a resize) can't compound it.
+     */
+    private void applyFitScale() {
+        if (this.client == null) {
+            return;
+        }
+        boolean wasScaled = InventoryScalePolicy.isScaled(uiScale);
+        int realW = this.client.getWindow().getScaledWidth();
+        int realH = this.client.getWindow().getScaledHeight();
+        uiScale = InventoryScalePolicy.scaleFor(this.backgroundWidth, this.backgroundHeight, realW, realH);
+        if (InventoryScalePolicy.isScaled(uiScale)) {
+            this.width = InventoryScalePolicy.virtualExtent(realW, uiScale);
+            this.height = InventoryScalePolicy.virtualExtent(realH, uiScale);
+        } else if (wasScaled) {
+            this.width = realW;
+            this.height = realH;
+        }
+    }
+
+    private boolean isUiScaled() {
+        return InventoryScalePolicy.isScaled(uiScale);
+    }
+
+    private net.minecraft.client.gui.Click toContentClick(net.minecraft.client.gui.Click click) {
+        if (!isUiScaled() || click == null) {
+            return click;
+        }
+        return new net.minecraft.client.gui.Click(
+                InventoryScalePolicy.toContent(click.x(), uiScale),
+                InventoryScalePolicy.toContent(click.y(), uiScale),
+                click.buttonInfo());
     }
 
     private void captureBotSwitchUiState(String targetAlias) {
@@ -1746,6 +1792,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int desiredW = getTopicPanelWidth() + 260; // room for dialogue + topics columns
         int w = MathHelper.clamp(desiredW, TOPICS_OVERLAY_MIN_WIDTH, TOPICS_OVERLAY_MAX_WIDTH);
         w = Math.min(w, Math.max(TOPICS_OVERLAY_MIN_WIDTH, this.width - 24));
+        // The 320 floor above would overflow a 320-wide screen; never exceed width - 16.
+        w = Math.min(w, Math.max(1, this.width - 16));
         int h = MathHelper.clamp(SECTION_HEIGHT + 14, TOPICS_OVERLAY_MIN_HEIGHT, TOPICS_OVERLAY_MAX_HEIGHT);
         h = Math.min(h, Math.max(TOPICS_OVERLAY_MIN_HEIGHT, this.height - 24));
 
@@ -1757,7 +1805,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int y = anchorBottom - h;
 
         // Clamp within screen.
-        x = MathHelper.clamp(x, 12, Math.max(12, this.width - w - 12));
+        int edgeX = Math.min(12, Math.max(0, (this.width - w) / 2));
+        x = MathHelper.clamp(x, edgeX, Math.max(edgeX, this.width - w - edgeX));
         y = MathHelper.clamp(y, 12, Math.max(12, this.height - h - 12));
         return new Rect(x, y, w, h);
     }
@@ -1776,8 +1825,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Width available for both columns, excluding the divider gap.
         int availableW = Math.max(1, contentW - dividerW);
-        int minDialogueW = 160;
-        int minListW = 140;
+        int minDialogueW = OVERLAY_MIN_DIALOGUE_W;
+        int minListW = OVERLAY_MIN_LIST_W;
+
+        if (availableW < minDialogueW + minListW) {
+            // Too narrow for both minimums: split proportionally so the columns always add up
+            // to the content width (the list used to run past the overlay's right border).
+            int[] split = UiFitPolicy.splitColumns(contentW, overlaySplitRatio, minDialogueW, minListW, dividerW);
+            int narrowDividerX = contentX + split[0];
+            Rect narrowDivider = new Rect(narrowDividerX, contentY, dividerW, Math.max(1, contentH));
+            return new OverlayColumns(contentX, contentY, contentW, contentH, contentX, split[0],
+                    narrowDividerX, dividerW, narrowDividerX + dividerW, split[1], narrowDivider);
+        }
 
         double minRatio = MathHelper.clamp((double) minDialogueW / (double) availableW, 0.0, 1.0);
         double maxRatio = MathHelper.clamp((double) (availableW - minListW) / (double) availableW, 0.0, 1.0);
@@ -2175,6 +2234,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
         int footerY = r.bottom() - footerH;
         context.fill(r.x + 1, footerY, r.right() - 1, r.bottom() - 1, 0xFF161616);
+        hint = elideToWidth(hint, r.w - TOPICS_OVERLAY_PADDING * 2);
         context.drawText(this.textRenderer, hint, r.x + TOPICS_OVERLAY_PADDING, footerY + TOPICS_OVERLAY_FOOTER_PAD, 0xFFB0B0B0, false);
 
         // Content region (two columns).
@@ -2210,43 +2270,33 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int totalRows = skillRows != null ? skillRows.size() : entries.size();
         Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
 
-        // Tabs: when Spells is active, show "Spells" text (4 equal tabs).
+        // Tabs: when Spells is active, show "Spells" text (4 tabs).
         // Otherwise, show ✦ icon (compact) so text tabs get more room.
-        int tabY = listY + 2;
-        int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabGap = 2;
-        boolean spellsActive = overlayCategory == TopicCategory.SPELL;
-        String spellsLabel = spellsActive ? "Spells" : "\u2726";
+        // Draw and click share computeOverlayTabs, so they can't disagree.
         boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
-
-        int spellsTabW, tabW;
-        if (spellsActive) {
-            // 4 equal-width text tabs.
-            tabW = Math.max(30, (listW - 4 - 3 * tabGap) / 4);
-            spellsTabW = tabW;
-        } else {
-            // Compact icon tab; 3 text tabs share the rest.
-            spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
-            int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
-            tabW = Math.max(30, textTabsSpace / 3);
+        OverlayTabRow tabRow = computeOverlayTabs(listX, listY, listW);
+        TopicCategory[] tabCategories = {TopicCategory.SKILL, TopicCategory.DIALOGUE, TopicCategory.SPELL, TopicCategory.ADMIN};
+        boolean[] tabEnabled = {!guideRestricted, !guideRestricted, true, isAdminTabEnabled()};
+        int hoveredTab = -1;
+        for (int i = 0; i < tabCategories.length; i++) {
+            drawOverlayTab(context, tabRow.x(i), tabRow.y(), tabRow.w(i), tabRow.h(), tabRow.plan().labels().get(i),
+                    overlayCategory == tabCategories[i], tabEnabled[i]);
+            if (tabRow.contains(i, mouseX, mouseY)) {
+                hoveredTab = i;
+            }
         }
-        int skillsTabX = listX + 2;
-        int dialogueTabX = skillsTabX + tabW + tabGap;
-        int spellsTabX = dialogueTabX + tabW + tabGap;
-        int adminTabX = spellsTabX + spellsTabW + tabGap;
-        drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
-        drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
-        drawOverlayTab(context, spellsTabX, tabY, spellsTabW, tabH, spellsLabel, spellsActive, true);
-        // Spells tab tooltip on hover (only when showing icon).
-        if (!spellsActive && mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW
-                && mouseY >= tabY && mouseY < tabY + tabH) {
-            spellsTabHovered = true;
-            if (spellsTabHoverStartMs == 0L) spellsTabHoverStartMs = System.currentTimeMillis();
+        // Full-name tooltip on hover for any tab showing a short label or the ✦ icon.
+        if (hoveredTab >= 0 && tabRow.plan().isShortened(hoveredTab)) {
+            if (overlayTabHoverIndex != hoveredTab || overlayTabHoverStartMs == 0L) {
+                overlayTabHoverStartMs = System.currentTimeMillis();
+            }
+            overlayTabHoverIndex = hoveredTab;
+            overlayTabHoverName = tabRow.plan().fullNames().get(hoveredTab);
         } else {
-            spellsTabHovered = false;
-            spellsTabHoverStartMs = 0L;
+            overlayTabHoverIndex = -1;
+            overlayTabHoverStartMs = 0L;
+            overlayTabHoverName = null;
         }
-        drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
         Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
         drawOverlaySearchBox(context, searchRect, mouseX, mouseY);
@@ -2289,11 +2339,54 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Delayed hover tooltip (after scissor, so it can draw over the list cleanly).
         drawOverlayHoverTooltip(context, mouseX, mouseY);
 
-        // Spells tab icon tooltip (after main tooltips so it draws on top).
-        if (spellsTabHovered && spellsTabHoverStartMs > 0L
-                && System.currentTimeMillis() - spellsTabHoverStartMs >= OVERLAY_HOVER_TOOLTIP_DELAY_MS) {
-            drawTooltipBox(context, mouseX, mouseY, java.util.List.of("Spells"));
+        // Short-label and ✦ tab tooltip (after main tooltips so it draws on top).
+        if (overlayTabHoverName != null && overlayTabHoverStartMs > 0L
+                && System.currentTimeMillis() - overlayTabHoverStartMs >= OVERLAY_HOVER_TOOLTIP_DELAY_MS) {
+            drawTooltipBox(context, mouseX, mouseY, java.util.List.of(overlayTabHoverName));
         }
+    }
+
+    /** Tab row of the overlay list: Actions, Dialogue, ✦ or Spells, Admin (indexes 0..3). */
+    private record OverlayTabRow(int y, int h, int[] xs, OverlayTabPolicy.Plan plan) {
+        int x(int index) {
+            return xs[index];
+        }
+
+        int w(int index) {
+            return plan.widths()[index];
+        }
+
+        boolean contains(int index, double mouseX, double mouseY) {
+            return mouseY >= y && mouseY < y + h && mouseX >= xs[index] && mouseX < xs[index] + w(index);
+        }
+    }
+
+    /**
+     * One layout for drawing and clicking the overlay tabs. When Spells is active all four tabs
+     * are text, otherwise the ✦ tab keeps its compact width. Labels shrink to "Do" and "Talk" (full
+     * name on hover) before anything is elided, see OverlayTabPolicy.
+     */
+    private OverlayTabRow computeOverlayTabs(int listX, int listY, int listW) {
+        int tabY = listY + 2;
+        int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
+        boolean spellsActive = overlayCategory == TopicCategory.SPELL;
+        OverlayTabPolicy.Tab spellsTab = spellsActive
+                ? OverlayTabPolicy.Tab.flexible("Spells", "Spells")
+                : OverlayTabPolicy.Tab.fixed("\u2726", "Spells", this.textRenderer.getWidth("\u2726") + 10);
+        List<OverlayTabPolicy.Tab> tabs = List.of(
+                OverlayTabPolicy.Tab.flexible(TOPIC_PANEL_TITLE, TOPIC_PANEL_TITLE, "Do"),
+                OverlayTabPolicy.Tab.flexible("Dialogue", "Dialogue", "Talk"),
+                spellsTab,
+                OverlayTabPolicy.Tab.flexible("Admin", "Admin"));
+        int available = listW - 4 - (tabs.size() - 1) * OVERLAY_TAB_GAP;
+        OverlayTabPolicy.Plan plan = OverlayTabPolicy.plan(tabs, available, OVERLAY_TAB_LABEL_PAD, this.textRenderer::getWidth);
+        int[] xs = new int[tabs.size()];
+        int x = listX + 2;
+        for (int i = 0; i < tabs.size(); i++) {
+            xs[i] = x;
+            x += plan.widths()[i] + OVERLAY_TAB_GAP;
+        }
+        return new OverlayTabRow(tabY, tabH, xs, plan);
     }
 
     private void drawOverlaySearchBox(DrawContext context, Rect searchRect, int mouseX, int mouseY) {
@@ -2677,32 +2770,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int listY = cols.contentY;
         int listW = getOverlayListW(cols);
 
-        int tabY = listY + 2;
-        int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabGap = 2;
-        boolean spellsActive = overlayCategory == TopicCategory.SPELL;
-        int spellsTabW, tabW;
-        if (spellsActive) {
-            tabW = Math.max(30, (listW - 4 - 3 * tabGap) / 4);
-            spellsTabW = tabW;
-        } else {
-            spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
-            int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
-            tabW = Math.max(30, textTabsSpace / 3);
-        }
-        int skillsTabX = listX + 2;
-        int dialogueTabX = skillsTabX + tabW + tabGap;
-        int spellsTabX = dialogueTabX + tabW + tabGap;
-        int adminTabX = spellsTabX + spellsTabW + tabGap;
-
-        if (mouseY >= tabY && mouseY < tabY + tabH) {
-            if (mouseX >= skillsTabX && mouseX < skillsTabX + tabW) {
+        OverlayTabRow tabRow = computeOverlayTabs(listX, listY, listW);
+        if (mouseY >= tabRow.y() && mouseY < tabRow.y() + tabRow.h()) {
+            if (tabRow.contains(0, mouseX, mouseY)) {
                 if (guideRestricted) return true; // Admin-only mode — block Actions tab
                 overlayCategory = TopicCategory.SKILL;
                 overlayDraggingSplit = false;
                 return true;
             }
-            if (mouseX >= dialogueTabX && mouseX < dialogueTabX + tabW) {
+            if (tabRow.contains(1, mouseX, mouseY)) {
                 if (guideRestricted) return true; // Admin-only mode — block Dialogue tab
                 overlayCategory = TopicCategory.DIALOGUE;
                 if (!companionQuestStateRequested) {
@@ -2710,12 +2786,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 }
                 return true;
             }
-            if (mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW) {
+            if (tabRow.contains(2, mouseX, mouseY)) {
                 // Spells tab is always accessible — spells grey out individually.
                 overlayCategory = TopicCategory.SPELL;
                 return true;
             }
-            if (mouseX >= adminTabX && mouseX < adminTabX + tabW) {
+            if (tabRow.contains(3, mouseX, mouseY)) {
                 if (isAdminTabEnabled()) {
                     overlayCategory = TopicCategory.ADMIN;
                     if (isAdminUser()) {
@@ -2871,8 +2947,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int dividerW = cols.dividerW;
         int availableW = Math.max(1, cols.contentW - dividerW);
-        int minDialogueW = 160;
-        int minListW = 140;
+        int minDialogueW = OVERLAY_MIN_DIALOGUE_W;
+        int minListW = OVERLAY_MIN_LIST_W;
+        if (availableW < minDialogueW + minListW) {
+            // computeOverlayColumns splits proportionally here; there is nothing to drag.
+            return;
+        }
         int minDialogue = Math.min(minDialogueW, availableW);
         int maxDialogue = Math.max(minDialogue, availableW - minListW);
 
@@ -4701,6 +4781,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
+        click = toContentClick(click);
         resetInventoryTooltipHoverState();
         if (!topicsExpanded) {
             int rowY = this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5;
@@ -4739,6 +4820,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseDragged(net.minecraft.client.gui.Click click, double deltaX, double deltaY) {
+        if (isUiScaled()) {
+            click = toContentClick(click);
+            deltaX = InventoryScalePolicy.toContent(deltaX, uiScale);
+            deltaY = InventoryScalePolicy.toContent(deltaY, uiScale);
+        }
         if (topicsExpanded && overlayDraggingSplit && click.button() == 0) {
             updateOverlaySplitFromMouse(click.x());
             return true;
@@ -4762,6 +4848,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseReleased(net.minecraft.client.gui.Click click) {
+        click = toContentClick(click);
         clearHeldAdjust();
         if (overlayDraggingSplit) {
             overlayDraggingSplit = false;
@@ -4776,6 +4863,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        mouseX = InventoryScalePolicy.toContent(mouseX, uiScale);
+        mouseY = InventoryScalePolicy.toContent(mouseY, uiScale);
         if (topicsExpanded && isMouseOverTopicsOverlay(mouseX, mouseY)) {
             resetInventoryTooltipHoverState();
             Rect r = computeTopicsOverlayRect();
@@ -6749,6 +6838,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // mouseX/mouseY are screen coordinates; cx/cy are content coordinates (equal at scale 1).
+        // Everything except the entity previews and the vanilla item tooltip is drawn in content
+        // space under pushContentScale. Those two ignore the matrix (picture-in-picture element,
+        // deferred tooltip), so they get screen coordinates outside it.
+        int cx = InventoryScalePolicy.toContent(mouseX, uiScale);
+        int cy = InventoryScalePolicy.toContent(mouseY, uiScale);
         this.lastMouseX = mouseX;
         this.lastMouseY = mouseY;
 
@@ -6758,22 +6853,79 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (guideRemoteOpen && !guideRemoteFullAccess) {
             this.renderBackground(context, mouseX, mouseY, delta);
             if (topicsExpanded) {
-                drawTopicsOverlay(context, mouseX, mouseY);
+                pushContentScale(context);
+                try {
+                    drawTopicsOverlay(context, cx, cy);
+                } finally {
+                    popContentScale(context);
+                }
             }
             return;
         }
 
+        // Scales itself (see renderBackground), so it stays outside the push.
         this.renderBackground(context, mouseX, mouseY, delta);
-        super.render(context, mouseX, mouseY, delta);
-        this.drawEntities(context, mouseX, mouseY);
-        if (topicsExpanded) {
-            drawTopicsOverlay(context, mouseX, mouseY);
+        pushContentScale(context);
+        try {
+            super.render(context, cx, cy, delta);
+        } finally {
+            popContentScale(context);
         }
-        if (!topicsExpanded || !isMouseOverTopicsOverlay(mouseX, mouseY)) {
+        this.drawEntities(context, mouseX, mouseY);
+        pushContentScale(context);
+        try {
+            if (topicsExpanded) {
+                drawTopicsOverlay(context, cx, cy);
+            }
+        } finally {
+            popContentScale(context);
+        }
+        if (!topicsExpanded || !isMouseOverTopicsOverlay(cx, cy)) {
+            // focusedSlot was resolved in content space by super.render; the tooltip itself is
+            // deferred past any matrix, so it takes the screen position.
             this.drawMouseoverTooltip(context, mouseX, mouseY);
         }
-        drawBotSwitchWarningTooltip(context, mouseX, mouseY);
-        drawRemoteAccessBanner(context);
+        pushContentScale(context);
+        try {
+            drawBotSwitchWarningTooltip(context, cx, cy);
+            drawRemoteAccessBanner(context);
+        } finally {
+            popContentScale(context);
+        }
+    }
+
+    /**
+     * Vanilla's renderWithTooltip calls this before render(), and render() calls it again
+     * (pre-existing double call). Both draw the inventory textures through drawBackground, so the
+     * scale is applied here rather than around the call.
+     */
+    @Override
+    public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
+        if (!isUiScaled()) {
+            super.renderBackground(context, mouseX, mouseY, delta);
+            return;
+        }
+        pushContentScale(context);
+        try {
+            super.renderBackground(context,
+                    InventoryScalePolicy.toContent(mouseX, uiScale),
+                    InventoryScalePolicy.toContent(mouseY, uiScale), delta);
+        } finally {
+            popContentScale(context);
+        }
+    }
+
+    private void pushContentScale(DrawContext context) {
+        if (isUiScaled()) {
+            context.getMatrices().pushMatrix();
+            context.getMatrices().scale(uiScale, uiScale);
+        }
+    }
+
+    private void popContentScale(DrawContext context) {
+        if (isUiScaled()) {
+            context.getMatrices().popMatrix();
+        }
     }
 
     /** Draws a centred banner above the inventory when remote inventory is active via artifacts. */
@@ -6829,14 +6981,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int rightY1 = this.y + 8;
         int rightX2 = this.x + SECTION_WIDTH + BLOCK_GAP + 75;
         int rightY2 = this.y + 78;
+        // The entity preview is a picture-in-picture element that ignores the matrix stack, so
+        // its box is mapped to screen coordinates here (identity at scale 1).
+        float s = uiScale;
+        leftX1 = InventoryScalePolicy.toScreen(leftX1, s);
+        leftY1 = InventoryScalePolicy.toScreen(leftY1, s);
+        leftX2 = InventoryScalePolicy.toScreen(leftX2, s);
+        leftY2 = InventoryScalePolicy.toScreen(leftY2, s);
+        rightX1 = InventoryScalePolicy.toScreen(rightX1, s);
+        rightY1 = InventoryScalePolicy.toScreen(rightY1, s);
+        rightX2 = InventoryScalePolicy.toScreen(rightX2, s);
+        rightY2 = InventoryScalePolicy.toScreen(rightY2, s);
+        int entitySize = InventoryScalePolicy.toScreen(30, s);
         LivingEntity botEntity = findBotEntity();
         if (botEntity != null) {
             InventoryScreen.drawEntity(context, leftX1, leftY1, leftX2, leftY2,
-                    30, 0.0625f, this.lastMouseX, this.lastMouseY, botEntity);
+                    entitySize, 0.0625f, this.lastMouseX, this.lastMouseY, botEntity);
         }
         if (this.client != null && this.client.player != null) {
             InventoryScreen.drawEntity(context, rightX1, rightY1, rightX2, rightY2,
-                    30, 0.0625f, this.lastMouseX, this.lastMouseY, this.client.player);
+                    entitySize, 0.0625f, this.lastMouseX, this.lastMouseY, this.client.player);
         }
     }
 
