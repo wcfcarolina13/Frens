@@ -3,7 +3,39 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.226) — next session starts here
+## Session Handoff 2026-10-13 (1.1.227) — next session starts here
+
+**State:** main = origin/main @ 1.1.227. Suite 1792 green (1745 → 1792). Built from the fresh-install test of 1.1.226
+(`docs/testing/FRESH_INSTALL_1.1.226.md`, 15 findings). 1.1.226 is LIVE on Modrinth (version BkS087B5); the seven old
+1.1.0/1.0.6 uploads are archived; project summary, description, Issues link updated; GitHub Issues enabled.
+1.1.227 is NOT on Modrinth yet (Bradley publishes).
+
+**Shipped in 1.1.227** (details, rulings, cost-if-wrong in `changelog.md`):
+- The singleplayer host can use Frens with Allow Commands OFF (`HostPermissionPolicy` in `Frens.hasBotCommandPermission`,
+  World Mode chooser, Admin tab). LAN guests no longer pass two `!isDedicated()` host tests. AI-chat-off one-time notice.
+- Carpet-free `/bot stop` (`CarpetCommandPolicy`), spawn feedback reaches the player (`SpawnOutcome`), one-line stop,
+  `chart_path_to_block` off the server thread, online-mode async spawn handled (PENDING + deferred init + in-flight guard).
+- Roster hides present bots, `-` key hints both meanings, first-meeting greeting, hint below the tutorial toast.
+
+**Field checks pending:** Phase 6y (new). Also 6x, 6w, 6v … 6b. **Fresh-install test part 2** (Ollama on, AI setup
+checklist) was never run; the `frens-fresh` Prism instance is kept for it. Commands-off walkthrough should be re-run on 1.1.227.
+
+**Next (in order):**
+1. **1.1.228 = layouts at the default window width** (~427 scaled px): Guide detail card + search, Admin tabs, bot
+   inventory screen, "Looking at X" hint bar, overhead greeting text (FRESH_INSTALL #8).
+2. **1.1.229 = behaviour from the fresh-install test:** woodcut from an empty inventory (punch tree → planks → axe) and the
+   wrong "Busy with another task" line (#4), scaffold cleanup tool choice (#9), bots hurting themselves in tight spaces and
+   stuck on unreachable drops (#10), slow woodcut start (#14).
+3. **Multiplayer non-op owners:** typed per-action C2S payloads authorized by `BotAccessGate.permitsByName` (scope:
+   `.superpowers/sdd/run-1.1.227/scope-ui-commands.md`, kept), plus the server-side re-dispatches that still need op
+   (`BotFoodGivingService` feedconfirm, `HuntablesNetworkManager:205`, `SkillResumeService:303`).
+4. Host sweep of remaining op-only gates (zones, bases incl. server Spawn base `canEditBase`, skins, lock mode, soul DM lane).
+5. Chat action requests (was 1.1.226 → now after the above). Bot livestream (backlog P2).
+
+**Needs Bradley:** publish 1.1.227 to Modrinth; OK to fix the published 1.1.226 changelog line "Bots can make their own
+wooden axe" (needs planks + sticks).
+
+## Session Handoff 2026-10-13 (1.1.226) — superseded
 
 **State:** main = origin/main @ 1.1.226. Suite 1745 green (1738 → 1745). Fix-only build from a Discord bug report.
 
