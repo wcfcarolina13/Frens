@@ -290,6 +290,8 @@ public class FrensClient implements ClientModInitializer {
     /** Vanilla toasts (tutorial, advancements) occupy a 160x32 strip at the top right. */
     private static final int VANILLA_TOAST_W = 160;
     private static final int VANILLA_TOAST_H = 32;
+    /** Toast rows kept clear of hints. Two stacked toasts are common (tutorial + advancement). */
+    private static final int VANILLA_TOAST_ROWS_RESERVED = 2;
     /** Click target for the HUD X button (rendered inside renderNoBotsPresentHint). */
     private static int noBotsHintCloseX, noBotsHintCloseY, noBotsHintCloseW, noBotsHintCloseH;
 
@@ -1125,6 +1127,10 @@ public class FrensClient implements ClientModInitializer {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             net.wcfcarolina13.ui.SoulVoiceClientPlayer.stopAll();
             leaveRemoteConfig();
+            // Pending roster-hint state belongs to the world just left. botsPresentHintShown stays
+            // set: that notice is once per game launch.
+            rosterOpenedAwaitingBot = false;
+            botsPresentHintUntilMs = 0L;
         });
         // Push this client's personal voice-category mute mask on join so the server can skip
         // muted categories per recipient instead of muting them for everyone.
@@ -1459,14 +1465,6 @@ public class FrensClient implements ClientModInitializer {
         return names;
     }
 
-    /** Known saved companions that are not already in the world. */
-    public static java.util.List<String> getRestorableBotAliasesNotPresent() {
-        java.util.List<String> known = getKnownRestorableBotAliases();
-        java.util.Set<String> present = presentPlayerNamesLower(MinecraftClient.getInstance());
-        return net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
-                known, present == null ? java.util.Set.of() : present);
-    }
-
     /**
      * Opens the roster with only the companions that can actually be restored. An empty list
      * still shows the screen so a new companion can be created.
@@ -1477,7 +1475,12 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         rosterOpenedAwaitingBot = true;
-        client.setScreen(new BotRestoreScreen(parent, getRestorableBotAliasesNotPresent()));
+        java.util.List<String> known = getKnownRestorableBotAliases();
+        java.util.Set<String> present = presentPlayerNamesLower(client);
+        java.util.List<String> restorable = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
+                known, present == null ? java.util.Set.of() : present);
+        boolean allSavedPresent = known != null && !known.isEmpty() && restorable.isEmpty();
+        client.setScreen(new BotRestoreScreen(parent, restorable, allSavedPresent));
     }
 
     private static void tickBotsPresentHintState(MinecraftClient client) {
@@ -1581,12 +1584,15 @@ public class FrensClient implements ClientModInitializer {
 
     /**
      * Reserves a CENTER-lane slot. When the box's right edge reaches into the top-right strip
-     * that vanilla toasts use, the slot starts below that strip so a tutorial toast cannot
-     * cover the text. At wide windows the box is clear of the strip and nothing moves.
+     * that vanilla toasts use, the slot starts below that strip so a toast cannot cover the
+     * text. ToastManager keeps its visible stack private (no public count in 1.21.11), so this
+     * reserves {@link #VANILLA_TOAST_ROWS_RESERVED} rows, which covers the common tutorial plus
+     * advancement/recipe pair. The margin keeps the hint's border clear of the last toast.
+     * At wide windows the box is clear of the strip and nothing moves.
      */
     private static int reserveCenterTipYClearOfToast(DrawContext context, int boxRight, int tipHeight) {
         int toastLeft = context.getScaledWindowWidth() - VANILLA_TOAST_W;
-        int minY = VANILLA_TOAST_H + 6;
+        int minY = VANILLA_TOAST_H * VANILLA_TOAST_ROWS_RESERVED + 6;
         if (boxRight > toastLeft && topTipCenterY < minY) {
             topTipCenterY = minY;
         }

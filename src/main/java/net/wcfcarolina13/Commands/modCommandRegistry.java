@@ -196,7 +196,7 @@ public class modCommandRegistry {
     private static final char SECTION_SIGN = '\u00A7';
 
     /** Result of {@link #spawnBot}; the command wrappers only report success for {@link #SPAWNED}. */
-    private enum SpawnOutcome { SPAWNED, REFUSED, FAILED }
+    private enum SpawnOutcome { SPAWNED, PENDING, REFUSED, FAILED }
 
     /** Quotes a bot name for a suggested command when it contains a space (string arguments accept quotes). */
     private static String quoteCommandArgument(String name) {
@@ -319,11 +319,11 @@ public class modCommandRegistry {
 
         @Override
         public void run() {
-
-            stopMoving(server, botSource, botName);
-            LOGGER.info("{} has stopped walking!", botName);
-
-
+            // Runs on the command scheduler. Dispatching a command must happen on the server thread.
+            server.execute(() -> {
+                stopMoving(server, botSource, botName);
+                LOGGER.info("{} has stopped walking!", botName);
+            });
         }
     }
 
@@ -342,6 +342,10 @@ public class modCommandRegistry {
                                                     try {
                                                         LOGGER.info("Executing /bot spawn {} {}", botName, spawnMode);
                                                         SpawnOutcome outcome = spawnBot(context, spawnMode, null);
+                                                        if (outcome == SpawnOutcome.PENDING) {
+                                                            LOGGER.info("/bot spawn {} {} accepted, the bot arrives when its profile lookup finishes", botName, spawnMode);
+                                                            return 1;
+                                                        }
                                                         if (outcome != SpawnOutcome.SPAWNED) {
                                                             LOGGER.info("/bot spawn {} {} did not spawn a bot: {}", botName, spawnMode, outcome);
                                                             return 0;
@@ -364,6 +368,10 @@ public class modCommandRegistry {
                                                             try {
                                                                 LOGGER.info("Executing /bot spawn {} {} {}", botName, spawnMode, gameMode);
                                                                 SpawnOutcome outcome = spawnBot(context, spawnMode, gameMode);
+                                                                if (outcome == SpawnOutcome.PENDING) {
+                                                                    LOGGER.info("/bot spawn {} {} {} accepted, the bot arrives when its profile lookup finishes", botName, spawnMode, gameMode);
+                                                                    return 1;
+                                                                }
                                                                 if (outcome != SpawnOutcome.SPAWNED) {
                                                                     LOGGER.info("/bot spawn {} {} {} did not spawn a bot: {}", botName, spawnMode, gameMode, outcome);
                                                                     return 0;
@@ -1132,10 +1140,32 @@ public class modCommandRegistry {
 
                                                                             BlockPos targetPos = new BlockPos(x, y, z);
 
-                                                                            String chartResult = ChartPathToBlock.chart(bot, targetPos, blockType);
-                                                                            ChatUtils.sendSystemMessage(context.getSource(), chartResult);
-
-                                                                            return ChartPathToBlock.CARPET_MISSING_MESSAGE.equals(chartResult) ? 0 : 1;
+                                                                            ServerCommandSource invoker = context.getSource();
+                                                                            if (!net.wcfcarolina13.CommandUtils.isCarpetLoaded()) {
+                                                                                ChatUtils.sendSystemMessage(invoker, ChartPathToBlock.CARPET_MISSING_MESSAGE);
+                                                                                return 0;
+                                                                            }
+                                                                            // The walk sleeps between steps so the server can tick, so it runs on a
+                                                                            // worker. chart() hops to the server thread for every world/entity touch.
+                                                                            MinecraftServer chartServer = invoker.getServer();
+                                                                            try {
+                                                                                skillExecutor.submit(() -> {
+                                                                                    String chartResult;
+                                                                                    try {
+                                                                                        chartResult = ChartPathToBlock.chart(bot, targetPos, blockType);
+                                                                                    } catch (Exception e) {
+                                                                                        LOGGER.error("chart_path_to_block failed for {}", bot.getName().getString(), e);
+                                                                                        chartResult = "Chart path failed. Check the server log.";
+                                                                                    }
+                                                                                    String finalResult = chartResult;
+                                                                                    chartServer.execute(() -> ChatUtils.sendSystemMessage(invoker, finalResult));
+                                                                                });
+                                                                            } catch (java.util.concurrent.RejectedExecutionException e) {
+                                                                                LOGGER.warn("chart_path_to_block rejected: command executor is shut down", e);
+                                                                                ChatUtils.sendSystemMessage(invoker, "Chart path could not start. Try again in a moment.");
+                                                                                return 0;
+                                                                            }
+                                                                            return 1;
                                                                         })
                                                                 )
                                                         )
@@ -2311,6 +2341,218 @@ public class modCommandRegistry {
         return 1;
     }
 
+
+    /** Post-spawn setup for a training bot. Runs on the server thread, immediately or when a deferred spawn lands. */
+    private static void initTrainingBot(MinecraftServer server, ServerPlayerEntity bot, String botName, ServerPlayerEntity owner) {
+
+        Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+
+        RespawnHandler.registerRespawnListener(bot);
+        BotEventHandler.registerBot(bot);
+        if (owner != null) {
+            Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+        }
+        // Training bots auto-respawn on death by default, but preserve any
+        // user-customized autoRespawnOnDeath from prior sessions.
+        {
+            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
+            if (ctrl != null) {
+                ctrl.setSpawnMode("training");
+                if (ctrl.getRawAutoRespawnOnDeath() == null) {
+                    ctrl.setAutoRespawnOnDeath(true);
+                }
+                // Manual /bot spawn always clears shelved state (user wants the bot back).
+                ctrl.setAutoSpawnOnLoad(true);
+            }
+        }
+
+        AutoFaceEntity.startAutoFace(bot);
+
+    }
+
+    /** Post-spawn setup for an admin/questing bot, including the optional LLM client. Server thread only. */
+    private static void initAdminLikeBot(MinecraftServer server, ServerPlayerEntity bot, String botName,
+                                         String normalizedSpawnMode, ServerPlayerEntity owner, ServerCommandSource serverSource) {
+
+        Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+
+        DebugToggleService.debug(LOGGER, "Registering respawn listener....");
+
+        RespawnHandler.registerRespawnListener(bot);
+        BotEventHandler.registerBot(bot);
+        if (owner != null) {
+            Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+        }
+        // Admin/questing bots: set spawn mode and auto-respawn default.
+        // Preserve any user-customized autoRespawnOnDeath from prior sessions.
+        {
+            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
+            if (ctrl != null) {
+                ctrl.setSpawnMode(normalizedSpawnMode);
+                if (isAdminLikeSpawnMode(normalizedSpawnMode)
+                        && ctrl.getRawAutoRespawnOnDeath() == null) {
+                    ctrl.setAutoRespawnOnDeath(true);
+                }
+                // Manual /bot spawn always clears shelved state (user wants the bot back).
+                ctrl.setAutoSpawnOnLoad(true);
+            }
+        }
+
+        // ── LLM initialization (only when LLM is enabled AND runtime classes are available) ──
+        boolean llmActive = false;
+        if (Frens.CONFIG != null) {
+            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName, worldKey);
+            llmActive = llmCtrl != null && llmCtrl.isLlmEnabled();
+        }
+
+        if (llmActive) {
+        String llmProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
+
+        DebugToggleService.debug(LOGGER, "Using provider: {}", llmProvider);
+
+        try {
+        switch (llmProvider) {
+            case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
+                LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
+                if (llmClient == null) {
+                    // Usually a missing API key. The bot already exists, so run it without the
+                    // language model (startAutoFace below) instead of leaving it half-initialised.
+                    LOGGER.error("spawnBot: LLMClientFactory returned null for provider {}. {} runs without LLM.", llmProvider, botName);
+                    ChatUtils.sendSystemMessage(serverSource,
+                            net.wcfcarolina13.GameAI.services.SpawnResultPolicy.aiOffMessage(botName, llmProvider));
+                    llmActive = false;
+                    break;
+                }
+
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
+                LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), llmClient);
+
+                new Thread(() -> {
+                    try {
+                        while (!LLMServiceHandler.isInitialized) {
+                            try {
+                                Thread.sleep(500L); // Check every 500ms
+                            } catch (InterruptedException e) {
+                                LOGGER.error("LLM service initialization interrupted.", e);
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                        }
+
+                        // initialization succeeded, continue:
+                        AutoFaceEntity.startAutoFace(bot);
+                    } catch (Exception e) {
+                        LOGGER.error("Error in LLM initialization thread for bot {}", botName, e);
+                    }
+                }, "LLM-Init-" + botName).start();
+            }
+
+            case "ollama" -> {
+                ollamaClient.botName = botName;
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Please wait while " + botName + " connects to the language model.");
+                ollamaClient.initializeOllamaClient();
+
+                new Thread(() -> {
+                    try {
+                        while (!ollamaClient.isInitialized) {
+                            try {
+                                Thread.sleep(500L); // Check every 500ms
+                            } catch (InterruptedException e) {
+                                LOGGER.error("Ollama client initialization interrupted.", e);
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                        }
+
+                        // initialization succeeded, continue:
+                        ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
+                        AutoFaceEntity.startAutoFace(bot);
+                    } catch (Exception e) {
+                        LOGGER.error("Error in Ollama initialization thread for bot {}", botName, e);
+                    }
+                }, "Ollama-Init-" + botName).start();
+            }
+
+            default -> {
+                LOGGER.warn("Unsupported provider detected: {}. Defaulting to Ollama client", llmProvider);
+                ollamaClient.botName = botName;
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Warning! Unsupported provider detected. Defaulting to Ollama client");
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Please wait while " + botName + " connects to the language model.");
+                ollamaClient.initializeOllamaClient();
+
+                new Thread(() -> {
+                    try {
+                        while (!ollamaClient.isInitialized) {
+                            try {
+                                Thread.sleep(500L); // Check every 500ms
+                            } catch (InterruptedException e) {
+                                LOGGER.error("Ollama client initialization interrupted.", e);
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                        }
+
+                        // initialization succeeded, continue:
+                        ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
+                        AutoFaceEntity.startAutoFace(bot);
+                    } catch (Exception e) {
+                        LOGGER.error("Error in Ollama initialization thread (default case) for bot {}", botName, e);
+                    }
+                }, "Ollama-Init-" + botName).start();
+            }
+        }
+        } catch (NoClassDefFoundError | UnsatisfiedLinkError e) {
+            LOGGER.warn("[Frens] LLM runtime not available (build without -PaiEnabled?). Bot {} will run without LLM.", botName);
+            llmActive = false; // runtime missing → treat as non-LLM so fallback starts the behaviour loop
+        }
+        } // end if (llmActive)
+
+        // ── Always start the behaviour loop ──
+        // When LLM is active AND the provider init thread launched successfully,
+        // that thread calls startAutoFace after the provider connects.
+        // When LLM is disabled, classes are missing, or the catch fired,
+        // we must start it here so the bot can follow, fight, etc.
+        // startAutoFace() calls stopAutoFace() internally, so a double-start
+        // from the LLM thread is harmless.
+        if (!llmActive) {
+            AutoFaceEntity.startAutoFace(bot);
+        }
+
+    }
+
+    /**
+     * The spawn is still in flight (online-mode dedicated server fetching the profile from Mojang).
+     * Tell the invoker, then run {@code init} on the server thread once the bot has connected.
+     */
+    private static SpawnOutcome deferPostSpawnInit(MinecraftServer server, ServerCommandSource source,
+                                                   CompletableFuture<Void> spawnFuture, String botName,
+                                                   java.util.function.Consumer<ServerPlayerEntity> init) {
+        LOGGER.info("spawnBot: {} is pending (profile lookup in flight), initialising when it connects", botName);
+        ChatUtils.sendSystemMessage(source, net.wcfcarolina13.GameAI.services.SpawnResultPolicy.pendingMessage(botName));
+        spawnFuture.whenComplete((ignored, error) -> server.execute(() -> {
+            ServerPlayerEntity late = error == null ? server.getPlayerManager().getPlayer(botName) : null;
+            if (late == null) {
+                LOGGER.error("spawnBot: deferred spawn of {} did not produce a bot", botName, error);
+                ChatUtils.sendSystemMessage(source, "Error: " + botName + " cannot be spawned");
+                return;
+            }
+            try {
+                init.accept(late);
+                LOGGER.info("spawnBot: deferred initialisation finished for {}", botName);
+            } catch (Exception e) {
+                LOGGER.error("spawnBot: deferred initialisation failed for {}", botName, e);
+            }
+        }));
+        return SpawnOutcome.PENDING;
+    }
+
     private static SpawnOutcome spawnBot(CommandContext<ServerCommandSource> context, String spawnMode, String explicitGameMode) {
         try {
             MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
@@ -2481,11 +2723,13 @@ public class modCommandRegistry {
             }
 
             SpawnOutcome outcome = SpawnOutcome.SPAWNED;
+            // Captured now: a deferred spawn finishes after this command has returned.
+            final ServerPlayerEntity spawnOwner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
             if ("training".equalsIgnoreCase(normalizedSpawnMode)) {
 
                 LOGGER.info("spawnBot: entering training branch for {}", botName);
 
-                createFakePlayer.createFake(
+                CompletableFuture<Void> spawnFuture = createFakePlayer.createFake(
                         botName,
                         server,
                         pos,
@@ -2508,37 +2752,16 @@ public class modCommandRegistry {
 
                 ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
 
-                if (bot != null) {
-
-                    Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-
-                    RespawnHandler.registerRespawnListener(bot);
-                    BotEventHandler.registerBot(bot);
-                    ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
-                    if (owner != null) {
-                        Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                final String spawnedName = botName;
+                switch (net.wcfcarolina13.GameAI.services.SpawnResultPolicy.classify(bot != null, !spawnFuture.isDone())) {
+                    case READY -> initTrainingBot(server, bot, spawnedName, spawnOwner);
+                    case PENDING -> outcome = deferPostSpawnInit(server, serverSource, spawnFuture, spawnedName,
+                            late -> initTrainingBot(server, late, spawnedName, spawnOwner));
+                    case FAILED -> {
+                        LOGGER.error("spawnBot: training bot {} was not found after createFake", botName);
+                        ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                        outcome = SpawnOutcome.FAILED;
                     }
-                    // Training bots auto-respawn on death by default, but preserve any
-                    // user-customized autoRespawnOnDeath from prior sessions.
-                    {
-                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
-                        if (ctrl != null) {
-                            ctrl.setSpawnMode("training");
-                            if (ctrl.getRawAutoRespawnOnDeath() == null) {
-                                ctrl.setAutoRespawnOnDeath(true);
-                            }
-                            // Manual /bot spawn always clears shelved state (user wants the bot back).
-                            ctrl.setAutoSpawnOnLoad(true);
-                        }
-                    }
-
-                    AutoFaceEntity.startAutoFace(bot);
-
-                } else {
-                    LOGGER.error("spawnBot: training bot {} was not found after createFake", botName);
-                    ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
-                    outcome = SpawnOutcome.FAILED;
                 }
 
                 // don't initialize ollama client for training mode.
@@ -2550,7 +2773,7 @@ public class modCommandRegistry {
                 LOGGER.info("Training mode disabled for {} spawn.", normalizedSpawnMode);
 
                 LOGGER.info("About to call createFakePlayer.createFake for {} bot {}", normalizedSpawnMode, botName);
-                createFakePlayer.createFake(
+                CompletableFuture<Void> spawnFuture = createFakePlayer.createFake(
                         botName,
                         server,
                         pos,
@@ -2574,160 +2797,16 @@ public class modCommandRegistry {
 
                 DebugToggleService.debug(LOGGER, "Preparing for connection to language model....");
 
-                if (bot != null) {
-
-                    Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-
-                    DebugToggleService.debug(LOGGER, "Registering respawn listener....");
-
-                    RespawnHandler.registerRespawnListener(bot);
-                    BotEventHandler.registerBot(bot);
-                    ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
-                    if (owner != null) {
-                        Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                final String spawnedName = botName;
+                switch (net.wcfcarolina13.GameAI.services.SpawnResultPolicy.classify(bot != null, !spawnFuture.isDone())) {
+                    case READY -> initAdminLikeBot(server, bot, spawnedName, normalizedSpawnMode, spawnOwner, serverSource);
+                    case PENDING -> outcome = deferPostSpawnInit(server, serverSource, spawnFuture, spawnedName,
+                            late -> initAdminLikeBot(server, late, spawnedName, normalizedSpawnMode, spawnOwner, serverSource));
+                    case FAILED -> {
+                        LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);
+                        ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                        outcome = SpawnOutcome.FAILED;
                     }
-                    // Admin/questing bots: set spawn mode and auto-respawn default.
-                    // Preserve any user-customized autoRespawnOnDeath from prior sessions.
-                    {
-                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
-                        if (ctrl != null) {
-                            ctrl.setSpawnMode(normalizedSpawnMode);
-                            if (isAdminLikeSpawnMode(normalizedSpawnMode)
-                                    && ctrl.getRawAutoRespawnOnDeath() == null) {
-                                ctrl.setAutoRespawnOnDeath(true);
-                            }
-                            // Manual /bot spawn always clears shelved state (user wants the bot back).
-                            ctrl.setAutoSpawnOnLoad(true);
-                        }
-                    }
-
-                    // ── LLM initialization (only when LLM is enabled AND runtime classes are available) ──
-                    boolean llmActive = false;
-                    if (Frens.CONFIG != null) {
-                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-                        ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName, worldKey);
-                        llmActive = llmCtrl != null && llmCtrl.isLlmEnabled();
-                    }
-
-                    if (llmActive) {
-                    String llmProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
-
-                    DebugToggleService.debug(LOGGER, "Using provider: {}", llmProvider);
-
-                    try {
-                    switch (llmProvider) {
-                        case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
-                            LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
-                            if (llmClient == null) {
-                                LOGGER.error("spawnBot: LLMClientFactory returned null for provider {}", llmProvider);
-                                ChatUtils.sendSystemMessage(serverSource,
-                                        "Error: Failed to initialize language model client for provider " + llmProvider + ".");
-                                return SpawnOutcome.FAILED; // bot exists but its LLM client did not start (pre-existing)
-                            }
-
-                            ChatUtils.sendSystemMessage(serverSource,
-                                    "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
-                            LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), llmClient);
-
-                            new Thread(() -> {
-                                try {
-                                    while (!LLMServiceHandler.isInitialized) {
-                                        try {
-                                            Thread.sleep(500L); // Check every 500ms
-                                        } catch (InterruptedException e) {
-                                            LOGGER.error("LLM service initialization interrupted.", e);
-                                            Thread.currentThread().interrupt();
-                                            return;
-                                        }
-                                    }
-
-                                    // initialization succeeded, continue:
-                                    AutoFaceEntity.startAutoFace(bot);
-                                } catch (Exception e) {
-                                    LOGGER.error("Error in LLM initialization thread for bot {}", botName, e);
-                                }
-                            }, "LLM-Init-" + botName).start();
-                        }
-
-                        case "ollama" -> {
-                            ollamaClient.botName = botName;
-                            ChatUtils.sendSystemMessage(serverSource,
-                                    "Please wait while " + botName + " connects to the language model.");
-                            ollamaClient.initializeOllamaClient();
-
-                            new Thread(() -> {
-                                try {
-                                    while (!ollamaClient.isInitialized) {
-                                        try {
-                                            Thread.sleep(500L); // Check every 500ms
-                                        } catch (InterruptedException e) {
-                                            LOGGER.error("Ollama client initialization interrupted.", e);
-                                            Thread.currentThread().interrupt();
-                                            return;
-                                        }
-                                    }
-
-                                    // initialization succeeded, continue:
-                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
-                                    AutoFaceEntity.startAutoFace(bot);
-                                } catch (Exception e) {
-                                    LOGGER.error("Error in Ollama initialization thread for bot {}", botName, e);
-                                }
-                            }, "Ollama-Init-" + botName).start();
-                        }
-
-                        default -> {
-                            LOGGER.warn("Unsupported provider detected: {}. Defaulting to Ollama client", llmProvider);
-                            ollamaClient.botName = botName;
-                            ChatUtils.sendSystemMessage(serverSource,
-                                    "Warning! Unsupported provider detected. Defaulting to Ollama client");
-                            ChatUtils.sendSystemMessage(serverSource,
-                                    "Please wait while " + botName + " connects to the language model.");
-                            ollamaClient.initializeOllamaClient();
-
-                            new Thread(() -> {
-                                try {
-                                    while (!ollamaClient.isInitialized) {
-                                        try {
-                                            Thread.sleep(500L); // Check every 500ms
-                                        } catch (InterruptedException e) {
-                                            LOGGER.error("Ollama client initialization interrupted.", e);
-                                            Thread.currentThread().interrupt();
-                                            return;
-                                        }
-                                    }
-
-                                    // initialization succeeded, continue:
-                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
-                                    AutoFaceEntity.startAutoFace(bot);
-                                } catch (Exception e) {
-                                    LOGGER.error("Error in Ollama initialization thread (default case) for bot {}", botName, e);
-                                }
-                            }, "Ollama-Init-" + botName).start();
-                        }
-                    }
-                    } catch (NoClassDefFoundError | UnsatisfiedLinkError e) {
-                        LOGGER.warn("[Frens] LLM runtime not available (build without -PaiEnabled?). Bot {} will run without LLM.", botName);
-                        llmActive = false; // runtime missing → treat as non-LLM so fallback starts the behaviour loop
-                    }
-                    } // end if (llmActive)
-
-                    // ── Always start the behaviour loop ──
-                    // When LLM is active AND the provider init thread launched successfully,
-                    // that thread calls startAutoFace after the provider connects.
-                    // When LLM is disabled, classes are missing, or the catch fired,
-                    // we must start it here so the bot can follow, fight, etc.
-                    // startAutoFace() calls stopAutoFace() internally, so a double-start
-                    // from the LLM thread is harmless.
-                    if (!llmActive) {
-                        AutoFaceEntity.startAutoFace(bot);
-                    }
-
-                } else {
-                    LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);
-                    ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
-                    outcome = SpawnOutcome.FAILED;
                 }
 
                 // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
@@ -6340,8 +6419,13 @@ public class modCommandRegistry {
         net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
         // Ensure follow state is cleared so the bot truly stops.
         net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot);
-        // No Carpet "/player <bot> stop" here: BotActions.stop(bot) below already halts movement,
-        // and without Carpet the command was a visible red error on every stop.
+        // With Carpet, /bot walk drives the bot through Carpet's persistent action pack, which
+        // BotActions.stop(bot) below does not reset. Clear it with "/player <bot> stop", sent from
+        // the bot's own silent source (same as BotStopTask) so no error ever reaches the player.
+        // CommandUtils.run skips it entirely when Carpet is absent.
+        if (net.wcfcarolina13.CommandUtils.isCarpetLoaded()) {
+            stopMoving(server, bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), alias);
+        }
         // Silent abort: "<bot> has stopped." from executeStopTargets is the only chat line.
         TaskService.forceAbort(bot.getUuid(), StopFeedbackPolicy.MANUAL_STOP_REASON, false);
         net.wcfcarolina13.PathFinding.PathTracer.flushAllMovementTasks();

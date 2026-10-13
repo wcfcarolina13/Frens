@@ -43,6 +43,13 @@ class GreetingPolicyTest {
     }
 
     @Test
+    void firstMeetingHasNoEmDash() {
+        for (String line : GreetingPolicy.lines(GreetingPolicy.Pool.FIRST_MEETING, "Roti")) {
+            assertFalse(line.contains("\u2014"), line);
+        }
+    }
+
+    @Test
     void stringsStayByteIdenticalForVoiceMapping() {
         // Must match the greeting templates in ChatUtils/DialogueTextMapper (dash normalized there).
         assertEquals(List.of(
@@ -52,8 +59,7 @@ class GreetingPolicyTest {
                 "Welcome back, Roti."
         ), GreetingPolicy.lines(GreetingPolicy.Pool.REUNION, "Roti"));
         assertEquals(List.of(
-                "Hey, Roti.",
-                "Oh—Roti, there you are."
+                "Hey, Roti."
         ), GreetingPolicy.lines(GreetingPolicy.Pool.FIRST_MEETING, "Roti"));
     }
 

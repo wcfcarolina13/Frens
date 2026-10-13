@@ -41,9 +41,9 @@ public final class GreetingPolicy {
             return List.of();
         }
         return switch (pool) {
+            // Only the dash-free line. REUNION keeps its four strings byte-identical to the voice mappings.
             case FIRST_MEETING -> List.of(
-                    "Hey, " + name + ".",
-                    "Oh—" + name + ", there you are."
+                    "Hey, " + name + "."
             );
             case REUNION -> List.of(
                     "Hey, " + name + ".",

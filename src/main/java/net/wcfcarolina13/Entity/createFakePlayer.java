@@ -63,7 +63,13 @@ public class createFakePlayer extends ServerPlayerEntity {
 
     }
 
-    public static void createFake(String username, MinecraftServer server, Vec3d pos, double yaw, double pitch, RegistryKey<World> dimensionId, GameMode gamemode, boolean flying) {
+    /**
+     * Spawns a fake player. The returned future completes on the server thread once the bot has
+     * connected. Offline/integrated servers spawn synchronously, so the future is already done on
+     * return. An online-mode dedicated server first fetches the profile from Mojang off-thread, so
+     * the bot appears a little later and the future completes then.
+     */
+    public static CompletableFuture<Void> createFake(String username, MinecraftServer server, Vec3d pos, double yaw, double pitch, RegistryKey<World> dimensionId, GameMode gamemode, boolean flying) {
 
         ServerWorld worldIn = server.getWorld(dimensionId);
         boolean useMojangAuth = server.isDedicated() && server.isOnlineMode();
@@ -100,17 +106,27 @@ public class createFakePlayer extends ServerPlayerEntity {
         if (useMojangAuth) {
 
             GameProfile finalGP = gameProfile;
-            fetchGameProfile(gameProfile.name()).thenAccept(p -> {
-                GameProfile current = p.orElse(finalGP);
-                spawnFake(server, worldIn, current, pos, yaw, pitch, gamemode, flying, dimensionId);
-            });
+            CompletableFuture<Void> spawned = new CompletableFuture<>();
+            fetchGameProfile(gameProfile.name())
+                    .exceptionally(e -> Optional.empty()) // lookup failed: spawn with the local profile
+                    .thenAccept(p -> {
+                        GameProfile current = p.orElse(finalGP);
+                        // The fetch completes on a pool thread; connecting a player must happen on the server thread.
+                        server.execute(() -> {
+                            try {
+                                spawnFake(server, worldIn, current, pos, yaw, pitch, gamemode, flying, dimensionId);
+                                spawned.complete(null);
+                            } catch (Throwable t) {
+                                LOGGER.error("Deferred spawn of {} failed", current.name(), t);
+                                spawned.completeExceptionally(t);
+                            }
+                        });
+                    });
+            return spawned;
         }
 
-        else {
-
-            spawnFake(server, worldIn, gameProfile, pos, yaw, pitch, gamemode, flying, dimensionId);
-
-        }
+        spawnFake(server, worldIn, gameProfile, pos, yaw, pitch, gamemode, flying, dimensionId);
+        return CompletableFuture.completedFuture(null);
 
     }
 

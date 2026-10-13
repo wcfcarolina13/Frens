@@ -48,10 +48,21 @@ public class BotRestoreScreen extends Screen {
     private final java.util.List<RowHit> rowHits = new java.util.ArrayList<>();
     private int botControlsLinkX, botControlsLinkY, botControlsLinkW, botControlsLinkH;
 
+    private final RosterScreenCopy.State copyState;
+
     public BotRestoreScreen(Screen parent, List<String> aliases) {
+        this(parent, aliases, false);
+    }
+
+    /**
+     * @param allSavedPresent true when the list is empty only because every saved companion is
+     *                        already in the world (the roster hides those)
+     */
+    public BotRestoreScreen(Screen parent, List<String> aliases, boolean allSavedPresent) {
         super(Text.literal("Companions"));
         this.parent = parent;
         this.aliases = aliases == null ? List.of() : List.copyOf(aliases);
+        this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent);
     }
 
     @Override
@@ -173,15 +184,12 @@ public class BotRestoreScreen extends Screen {
         context.fill(panelX, panelY, panelX + PANEL_W, panelY + PANEL_H, 0xDD101010);
 
         // Title + subtitle
-        String title = aliases.isEmpty() ? "Welcome — no saved companions yet"
-                : "Choose Companions to Restore";
+        String title = RosterScreenCopy.title(copyState);
         int titleW = this.textRenderer.getWidth(title);
         context.drawTextWithShadow(this.textRenderer, title,
                 panelX + (PANEL_W - titleW) / 2, panelY + 14, 0xFFE6D7A3);
 
-        String subtitle = aliases.isEmpty()
-                ? "Pick a name below to spawn your first bot."
-                : "Tick one or more saved bots, then click Spawn Selected.";
+        String subtitle = RosterScreenCopy.subtitle(copyState);
         int subW = this.textRenderer.getWidth(subtitle);
         context.drawTextWithShadow(this.textRenderer, subtitle,
                 panelX + (PANEL_W - subW) / 2, panelY + 30, 0xFFB8A76A);
@@ -196,7 +204,7 @@ public class BotRestoreScreen extends Screen {
         int chkX = rowX + 4;
 
         if (aliases.isEmpty()) {
-            String empty = "(No saved bots yet — create one below.)";
+            String empty = RosterScreenCopy.emptyListLine(copyState);
             int eW = this.textRenderer.getWidth(empty);
             context.drawTextWithShadow(this.textRenderer, empty,
                     panelX + (PANEL_W - eW) / 2, rowY + 18, 0xFF7C7C7C);
