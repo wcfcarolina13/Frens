@@ -30,6 +30,11 @@ public class ConfigureHobbiesScreen extends Screen {
 
     private static final int POPUP_WIDTH = 380;
     private static final int POPUP_HEIGHT = 260;
+
+    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
+    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
+    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+
     private static final int COLS = 3;
     private static final int ROW_HEIGHT = 22;
     private static final int CELL_PAD = 6;
@@ -98,13 +103,13 @@ public class ConfigureHobbiesScreen extends Screen {
 
     @Override
     protected void init() {
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
 
         // Per-hobby toggle grid
         List<String> names = BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER;
         int gridTop = cy + 30;
-        int colWidth = (POPUP_WIDTH - CELL_PAD * (COLS + 1)) / COLS;
+        int colWidth = (popupW() - CELL_PAD * (COLS + 1)) / COLS;
         for (int i = 0; i < names.size(); i++) {
             String name = names.get(i);
             String label = i < LABELS.size() ? LABELS.get(i) : name;
@@ -123,8 +128,8 @@ public class ConfigureHobbiesScreen extends Screen {
         }
 
         // Bottom row: Enable All / Disable All / Done
-        int btnY = cy + POPUP_HEIGHT - 28;
-        int btnW = (POPUP_WIDTH - CELL_PAD * 4) / 3;
+        int btnY = cy + popupH() - 28;
+        int btnW = (popupW() - CELL_PAD * 4) / 3;
         addDrawableChild(ButtonWidget.builder(Text.literal("Enable All"),
                         b -> bulkSet(true))
                 .dimensions(cx + CELL_PAD, btnY, btnW, 20).build());
@@ -200,11 +205,11 @@ public class ConfigureHobbiesScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         reconcileOverrides();
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
         // Border + interior
-        context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + POPUP_HEIGHT + 1, 0xFF00CCCC);
-        context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xCC222222);
+        context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
+        context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xCC222222);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 10, 0xFFFFFFFF);
         super.render(context, mouseX, mouseY, delta);
     }

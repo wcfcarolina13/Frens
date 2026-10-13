@@ -30,8 +30,8 @@ public class RecruitmentDialogueScreen extends Screen {
     private static final int OPTION_LINE_SPACING = 2;
     private static final int OPTION_ROW_PADDING = 8;
     private static final float DIALOGUE_WIDTH_RATIO = 0.62f;
-    private static final int DIALOGUE_MIN_WIDTH = 240;
-    private static final int TOPICS_MIN_WIDTH = 180;
+    private static final int DIALOGUE_MIN_WIDTH = 130;
+    private static final int TOPICS_MIN_WIDTH = 110;
     private static final int TOPICS_HEADER_OFFSET = 18;
     private static final int TOPICS_BOTTOM_MARGIN = 12;
 
@@ -416,8 +416,9 @@ public class RecruitmentDialogueScreen extends Screen {
     }
 
     private Rect computePanel() {
-        int w = Math.min(560, this.width - 40);
-        int h = Math.min(280, this.height - 60);
+        // Clamp to the screen (320x240 is the smallest scaled GUI) with an 8 px margin.
+        int w = Math.min(560, this.width - 16);
+        int h = Math.min(280, this.height - 16);
         int x = (this.width - w) / 2;
         int y = (this.height - h) / 2;
         return new Rect(x, y, w, h);
@@ -432,26 +433,18 @@ public class RecruitmentDialogueScreen extends Screen {
         return new Rect(x, y, w, h);
     }
 
+    /** {dialogue, topics} widths. They always add up to the content width minus the gap. */
+    private int[] columnWidths(Rect content) {
+        return UiFitPolicy.splitColumns(content.w, DIALOGUE_WIDTH_RATIO, DIALOGUE_MIN_WIDTH, TOPICS_MIN_WIDTH, GAP);
+    }
+
     private Rect computeDialogueRect(Rect content) {
-        int available = Math.max(0, content.w - GAP);
-        int ratioWidth = Math.round(available * DIALOGUE_WIDTH_RATIO);
-        int desiredWidth = Math.max(DIALOGUE_MIN_WIDTH, ratioWidth);
-        desiredWidth = Math.max(0, Math.min(desiredWidth, available));
-        return new Rect(content.x, content.y, desiredWidth, content.h);
+        return new Rect(content.x, content.y, columnWidths(content)[0], content.h);
     }
 
     private Rect computeTopicsRect(Rect content) {
-        Rect left = computeDialogueRect(content);
-        int x = left.right() + GAP;
-        int available = Math.max(0, content.right() - x);
-        int width = Math.max(TOPICS_MIN_WIDTH, available);
-        if (left.w + width + GAP > content.w) {
-            width = Math.max(0, content.w - GAP - left.w);
-        }
-        if (width > available) {
-            width = available;
-        }
-        return new Rect(x, content.y, width, content.h);
+        int[] cols = columnWidths(content);
+        return new Rect(content.x + cols[0] + GAP, content.y, cols[1], content.h);
     }
 
     private static final class OptionLayout {

@@ -61,6 +61,8 @@ public class BotPlayerPreferencesScreen extends Screen {
     private static final int PADDING = 14;
 
     private int panelX;
+    private int panelW = PANEL_WIDTH;
+    private int panelH = PANEL_HEIGHT;
     private int panelY;
     private int chipX;
     private int chipY;
@@ -74,8 +76,11 @@ public class BotPlayerPreferencesScreen extends Screen {
 
     @Override
     protected void init() {
-        this.panelX = (this.width - PANEL_WIDTH) / 2;
-        this.panelY = (this.height - PANEL_HEIGHT) / 2;
+        // Clamp to the screen so the panel stays usable at the 320x240 minimum GUI size.
+        this.panelW = Math.min(PANEL_WIDTH, this.width - 16);
+        this.panelH = Math.min(PANEL_HEIGHT, this.height - 8);
+        this.panelX = (this.width - panelW) / 2;
+        this.panelY = Math.max(4, (this.height - panelH) / 2);
 
         // Request the current value from the server exactly once per open.
         if (!requestSent) {
@@ -95,27 +100,27 @@ public class BotPlayerPreferencesScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         // Panel background
-        context.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xD0101010);
-        context.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + 1, 0xFF404040);
-        context.fill(panelX, panelY + PANEL_HEIGHT - 1, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xFF404040);
-        context.fill(panelX, panelY, panelX + 1, panelY + PANEL_HEIGHT, 0xFF404040);
-        context.fill(panelX + PANEL_WIDTH - 1, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xFF404040);
+        context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xD0101010);
+        context.fill(panelX, panelY, panelX + panelW, panelY + 1, 0xFF404040);
+        context.fill(panelX, panelY + panelH - 1, panelX + panelW, panelY + panelH, 0xFF404040);
+        context.fill(panelX, panelY, panelX + 1, panelY + panelH, 0xFF404040);
+        context.fill(panelX + panelW - 1, panelY, panelX + panelW, panelY + panelH, 0xFF404040);
 
         // Header
         Text header = Text.literal("Personal Preferences").formatted(Formatting.YELLOW);
-        int headerX = panelX + (PANEL_WIDTH - this.textRenderer.getWidth(header)) / 2;
+        int headerX = panelX + (panelW - this.textRenderer.getWidth(header)) / 2;
         context.drawText(this.textRenderer, header, headerX, panelY + 8, 0xFFFFFFFF, false);
 
         // Separator under header
         int sepY = panelY + 22;
-        context.fill(panelX + PADDING, sepY, panelX + PANEL_WIDTH - PADDING, sepY + 1, 0xFF404040);
+        context.fill(panelX + PADDING, sepY, panelX + panelW - PADDING, sepY + 1, 0xFF404040);
 
         // Row: "Preserve Expensive Gear" label + toggle chip
         int rowY = panelY + 38;
         context.drawText(this.textRenderer, "Preserve Expensive Gear", panelX + PADDING, rowY + 5, 0xFFFFFFFF, false);
 
         // Chip (right-aligned in the row)
-        chipX = panelX + PANEL_WIDTH - PADDING - CHIP_WIDTH;
+        chipX = panelX + panelW - PADDING - CHIP_WIDTH;
         chipY = rowY;
         boolean loaded = SERVER_VALUE != null;
         boolean enabled = loaded && SERVER_VALUE;
@@ -142,24 +147,22 @@ public class BotPlayerPreferencesScreen extends Screen {
 
         // Hint text below the row (wraps)
         int hintY = rowY + ROW_HEIGHT + 8;
-        String[] hintLines = new String[] {
-                "Bots will refuse to use enchanted gear or items made of gold,",
-                "diamond, netherite, or turtle shell once durability drops below",
-                "11% — or 3% in combat. They'll swap to a cheaper alternative,",
-                "check a nearby chest, or craft a new one.",
-                "",
-                "Applies to every bot you own."
-        };
+        String hint = "Bots will refuse to use enchanted gear or items made of gold, diamond, "
+                + "netherite, or turtle shell once durability drops below 11%, or 3% in combat. "
+                + "They'll swap to a cheaper alternative, check a nearby chest, or craft a new one.";
+        int hintW = panelW - PADDING * 2;
         int hintCurrentY = hintY;
-        for (String line : hintLines) {
+        for (var line : this.textRenderer.wrapLines(Text.literal(hint), hintW)) {
             context.drawText(this.textRenderer, line, panelX + PADDING, hintCurrentY, 0xFFB0B0B0, false);
             hintCurrentY += 10;
         }
+        hintCurrentY += 10;
+        context.drawText(this.textRenderer, "Applies to every bot you own.", panelX + PADDING, hintCurrentY, 0xFFB0B0B0, false);
 
         // Close hint at the bottom
         String closeHint = "Press ESC to close";
-        int closeHintX = panelX + (PANEL_WIDTH - this.textRenderer.getWidth(closeHint)) / 2;
-        context.drawText(this.textRenderer, closeHint, closeHintX, panelY + PANEL_HEIGHT - 16, 0xFF808080, false);
+        int closeHintX = panelX + (panelW - this.textRenderer.getWidth(closeHint)) / 2;
+        context.drawText(this.textRenderer, closeHint, closeHintX, panelY + panelH - 16, 0xFF808080, false);
     }
 
     @Override

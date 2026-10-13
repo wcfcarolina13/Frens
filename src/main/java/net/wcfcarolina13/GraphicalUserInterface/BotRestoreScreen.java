@@ -29,10 +29,8 @@ import java.util.regex.Pattern;
 public class BotRestoreScreen extends Screen {
 
     private static final int PANEL_W = 320;
-    private static final int PANEL_H = 290;
-    private static final int ALIASES_PER_PAGE = 6;
     private static final int CHECKBOX_SIZE = 12;
-    private static final int ROW_H = 18;
+    private static final int ROW_H = RosterLayoutPolicy.ROW_H;
     private static final long SPAWN_STAGGER_MS = 220L;
     private static final int MAX_NAME_LEN = 24;
     private static final Pattern NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_ \\-.']+$");
@@ -40,7 +38,10 @@ public class BotRestoreScreen extends Screen {
     private final Screen parent;
     private final List<String> aliases;
     private final Set<String> selected = new LinkedHashSet<>();
-    private int page = 0;
+    /** Index of the first bot row shown; the list scrolls by row. */
+    private int firstRow = 0;
+    private ButtonWidget prevButton;
+    private ButtonWidget nextButton;
 
     private TextFieldWidget createNameField;
     private ButtonWidget spawnSelectedButton;
@@ -65,43 +66,60 @@ public class BotRestoreScreen extends Screen {
         this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent);
     }
 
+    /** One place for every y/x the roster uses, so init, render and clicks agree. */
+    private record Layout(int panelX, int panelY, int panelW, int panelH, boolean compact,
+                          int titleY, int subtitleY, List<String> subtitle, int rowsTop, int rows,
+                          int navY, int actionsY, int createY, int linkY) {
+    }
+
+    private Layout layout() {
+        int panelW = Math.min(PANEL_W, this.width - 16);
+        List<String> subtitle = UiFitPolicy.wrap(RosterScreenCopy.subtitle(copyState), panelW - 16,
+                this.textRenderer::getWidth, 2);
+        RosterLayoutPolicy.Fit fit = RosterLayoutPolicy.fit(this.height, 8, Math.max(1, subtitle.size()));
+        int panelX = (this.width - panelW) / 2;
+        int panelY = Math.max(4, (this.height - fit.panelH()) / 2);
+        boolean compact = fit.compact();
+        int titleY = panelY + (compact ? 6 : 14);
+        int subtitleY = titleY + 16;
+        int rowsTop = subtitleY + Math.max(1, subtitle.size()) * RosterLayoutPolicy.SUBTITLE_LINE_H + (compact ? 6 : 12);
+        int navY = rowsTop + fit.rows() * ROW_H + (compact ? 4 : 8);
+        int actionsY = navY + (compact ? 22 : 24);
+        int createY = actionsY + (compact ? 30 : 36);
+        int linkY = createY + (compact ? 26 : 30);
+        return new Layout(panelX, panelY, panelW, fit.panelH(), compact, titleY, subtitleY, subtitle,
+                rowsTop, fit.rows(), navY, actionsY, createY, linkY);
+    }
+
     @Override
     protected void init() {
         rowHits.clear();
-        int panelX = (this.width - PANEL_W) / 2;
-        int panelY = (this.height - PANEL_H) / 2;
+        Layout l = layout();
+        int panelX = l.panelX();
+        int panelW = l.panelW();
+        int visible = l.rows();
+        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, aliases.size(), visible);
 
-        int pageCount = Math.max(1, (int) Math.ceil((double) aliases.size() / (double) ALIASES_PER_PAGE));
-        page = Math.max(0, Math.min(page, pageCount - 1));
-
-        // ── Pagination buttons (or skipped if 1 page or empty) ──
-        int navY = panelY + 56 + ALIASES_PER_PAGE * ROW_H + 4;
-        if (pageCount > 1) {
-            ButtonWidget prev = ButtonWidget.builder(Text.literal("◀ Prev"),
-                    btn -> {
-                        if (page > 0) {
-                            page--;
-                            this.clearAndInit();
-                        }
-                    })
+        // ── Scroll buttons (skipped when every bot fits) ──
+        int navY = l.navY();
+        if (aliases.size() > visible) {
+            prevButton = ButtonWidget.builder(Text.literal("◀ Prev"),
+                    btn -> scrollRows(-visible))
                     .dimensions(panelX + 12, navY, 60, 18).build();
-            prev.active = page > 0;
-            this.addDrawableChild(prev);
+            this.addDrawableChild(prevButton);
 
-            ButtonWidget next = ButtonWidget.builder(Text.literal("Next ▶"),
-                    btn -> {
-                        if (page + 1 < pageCount) {
-                            page++;
-                            this.clearAndInit();
-                        }
-                    })
-                    .dimensions(panelX + PANEL_W - 72, navY, 60, 18).build();
-            next.active = page + 1 < pageCount;
-            this.addDrawableChild(next);
+            nextButton = ButtonWidget.builder(Text.literal("Next ▶"),
+                    btn -> scrollRows(visible))
+                    .dimensions(panelX + panelW - 72, navY, 60, 18).build();
+            this.addDrawableChild(nextButton);
+            updateScrollButtons(visible);
+        } else {
+            prevButton = null;
+            nextButton = null;
         }
 
         // ── Spawn Selected + Cancel buttons ──
-        int actionsY = navY + 24;
+        int actionsY = l.actionsY();
         spawnSelectedButton = ButtonWidget.builder(Text.literal("Spawn Selected"),
                 btn -> spawnSelected())
                 .dimensions(panelX + 12, actionsY, 160, 20).build();
@@ -110,12 +128,13 @@ public class BotRestoreScreen extends Screen {
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Cancel"),
                 btn -> this.close())
-                .dimensions(panelX + PANEL_W - 92, actionsY, 80, 20).build());
+                .dimensions(panelX + panelW - 92, actionsY, 80, 20).build());
 
         // ── Create new bot section ──
-        int createY = actionsY + 36;
+        int createY = l.createY();
+        int nameFieldW = Math.min(168, panelW - 50 - 92 - 6);
         createNameField = new TextFieldWidget(this.textRenderer,
-                panelX + 50, createY, 168, 20,
+                panelX + 50, createY, nameFieldW, 20,
                 Text.literal("Bot name"));
         createNameField.setMaxLength(MAX_NAME_LEN);
         createNameField.setChangedListener(s -> updateCreateButtonState());
@@ -123,7 +142,7 @@ public class BotRestoreScreen extends Screen {
 
         createButton = ButtonWidget.builder(Text.literal("Create"),
                 btn -> createNewBot())
-                .dimensions(panelX + PANEL_W - 92, createY, 80, 20).build();
+                .dimensions(panelX + panelW - 92, createY, 80, 20).build();
         createButton.active = false;
         this.addDrawableChild(createButton);
 
@@ -131,12 +150,38 @@ public class BotRestoreScreen extends Screen {
         updateSpawnSelectedButtonLabel();
 
         // Bot Controls link rect (laid out for hover + click)
-        int linkY = createY + 30;
         String linkText = "Manage settings → Bot Controls";
         botControlsLinkW = this.textRenderer.getWidth(linkText);
         botControlsLinkH = this.textRenderer.fontHeight + 2;
-        botControlsLinkX = panelX + (PANEL_W - botControlsLinkW) / 2;
-        botControlsLinkY = linkY;
+        botControlsLinkX = panelX + (panelW - botControlsLinkW) / 2;
+        botControlsLinkY = l.linkY();
+    }
+
+    private void scrollRows(int delta) {
+        int visible = layout().rows();
+        int next = RosterLayoutPolicy.clampFirstRow(firstRow + delta, aliases.size(), visible);
+        if (next != firstRow) {
+            firstRow = next;
+            updateScrollButtons(visible);
+        }
+    }
+
+    private void updateScrollButtons(int visible) {
+        if (prevButton != null) {
+            prevButton.active = firstRow > 0;
+        }
+        if (nextButton != null) {
+            nextButton.active = firstRow + visible < aliases.size();
+        }
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (aliases.size() > layout().rows() && verticalAmount != 0) {
+            scrollRows(verticalAmount > 0 ? -1 : 1);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     private void updateCreateButtonState() {
@@ -178,36 +223,45 @@ public class BotRestoreScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         this.renderBackground(context, mouseX, mouseY, delta);
 
-        int panelX = (this.width - PANEL_W) / 2;
-        int panelY = (this.height - PANEL_H) / 2;
-        context.fill(panelX - 1, panelY - 1, panelX + PANEL_W + 1, panelY + PANEL_H + 1, 0xFF2C2C2C);
-        context.fill(panelX, panelY, panelX + PANEL_W, panelY + PANEL_H, 0xDD101010);
+        Layout l = layout();
+        int panelX = l.panelX();
+        int panelY = l.panelY();
+        int panelW = l.panelW();
+        int panelH = l.panelH();
+        context.fill(panelX - 1, panelY - 1, panelX + panelW + 1, panelY + panelH + 1, 0xFF2C2C2C);
+        context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xDD101010);
 
         // Title + subtitle
-        String title = RosterScreenCopy.title(copyState);
+        String title = UiFitPolicy.elide(RosterScreenCopy.title(copyState), panelW - 16, this.textRenderer::getWidth);
         int titleW = this.textRenderer.getWidth(title);
         context.drawTextWithShadow(this.textRenderer, title,
-                panelX + (PANEL_W - titleW) / 2, panelY + 14, 0xFFE6D7A3);
+                panelX + (panelW - titleW) / 2, l.titleY(), 0xFFE6D7A3);
 
-        String subtitle = RosterScreenCopy.subtitle(copyState);
-        int subW = this.textRenderer.getWidth(subtitle);
-        context.drawTextWithShadow(this.textRenderer, subtitle,
-                panelX + (PANEL_W - subW) / 2, panelY + 30, 0xFFB8A76A);
+        int subY = l.subtitleY();
+        for (String subtitle : l.subtitle()) {
+            int subW = this.textRenderer.getWidth(subtitle);
+            context.drawTextWithShadow(this.textRenderer, subtitle,
+                    panelX + (panelW - subW) / 2, subY, 0xFFB8A76A);
+            subY += RosterLayoutPolicy.SUBTITLE_LINE_H;
+        }
 
-        // Roster rows
+        // Roster rows (the list scrolls when it has more bots than rows)
         rowHits.clear();
-        int startIndex = page * ALIASES_PER_PAGE;
-        int endIndex = Math.min(aliases.size(), startIndex + ALIASES_PER_PAGE);
-        int rowY = panelY + 52;
+        int visible = l.rows();
+        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, aliases.size(), visible);
+        int startIndex = firstRow;
+        int endIndex = Math.min(aliases.size(), startIndex + visible);
+        int rowY = l.rowsTop();
         int rowX = panelX + 16;
-        int rowW = PANEL_W - 32;
+        int rowW = panelW - 32;
         int chkX = rowX + 4;
 
         if (aliases.isEmpty()) {
-            String empty = RosterScreenCopy.emptyListLine(copyState);
+            String empty = UiFitPolicy.elide(RosterScreenCopy.emptyListLine(copyState), panelW - 16,
+                    this.textRenderer::getWidth);
             int eW = this.textRenderer.getWidth(empty);
             context.drawTextWithShadow(this.textRenderer, empty,
-                    panelX + (PANEL_W - eW) / 2, rowY + 18, 0xFF7C7C7C);
+                    panelX + (panelW - eW) / 2, rowY + 18, 0xFF7C7C7C);
         } else {
             for (int i = startIndex; i < endIndex; i++) {
                 String alias = aliases.get(i);
@@ -221,7 +275,8 @@ public class BotRestoreScreen extends Screen {
                 int cy = rowY + (ROW_H - CHECKBOX_SIZE) / 2;
                 drawCheckbox(context, chkX, cy, checked);
 
-                context.drawText(this.textRenderer, alias,
+                context.drawText(this.textRenderer,
+                        UiFitPolicy.elide(alias, rowW - CHECKBOX_SIZE - 16, this.textRenderer::getWidth),
                         chkX + CHECKBOX_SIZE + 8,
                         rowY + (ROW_H - this.textRenderer.fontHeight) / 2,
                         0xFFEFEFEF, false);
@@ -231,21 +286,18 @@ public class BotRestoreScreen extends Screen {
             }
         }
 
-        // Pagination caption
-        if (aliases.size() > ALIASES_PER_PAGE) {
-            int pageCount = Math.max(1, (int) Math.ceil((double) aliases.size() / (double) ALIASES_PER_PAGE));
-            String cap = "Page " + (page + 1) + " / " + pageCount;
+        // Scroll caption
+        if (aliases.size() > visible) {
+            String cap = (startIndex + 1) + "-" + endIndex + " of " + aliases.size();
             int cW = this.textRenderer.getWidth(cap);
-            int navY = panelY + 56 + ALIASES_PER_PAGE * ROW_H + 4;
             context.drawText(this.textRenderer, cap,
-                    panelX + (PANEL_W - cW) / 2, navY + 5, 0xFF909090, false);
+                    panelX + (panelW - cW) / 2, l.navY() + 5, 0xFF909090, false);
         }
 
         // Separator + create-new label
-        int actionsY = (panelY + 56 + ALIASES_PER_PAGE * ROW_H + 4) + 24;
-        int createY = actionsY + 36;
+        int createY = l.createY();
         int sepY = createY - 8;
-        context.fill(panelX + 12, sepY, panelX + PANEL_W - 12, sepY + 1, 0xFF3A3A3A);
+        context.fill(panelX + 12, sepY, panelX + panelW - 12, sepY + 1, 0xFF3A3A3A);
         context.drawText(this.textRenderer, "Name:",
                 panelX + 14, createY + (20 - this.textRenderer.fontHeight) / 2,
                 0xFFB8A76A, false);

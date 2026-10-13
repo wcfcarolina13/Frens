@@ -111,7 +111,11 @@ public final class BotGuideScreen extends Screen {
 
         this.searchField = new TextFieldWidget(this.textRenderer, searchX, searchY, searchW, 18, Text.literal("Search"));
         this.searchField.setMaxLength(128);
-        this.searchField.setPlaceholder(Text.literal("Search actions, commands, shortcuts..."));
+        // Short placeholder when the field is narrow (the 320-px minimum GUI width leaves ~130 px).
+        String placeholder = UiFitPolicy.pickLabel(
+                List.of("Search actions, commands, shortcuts...", "Search..."),
+                searchW - 8, this.textRenderer::getWidth);
+        this.searchField.setPlaceholder(Text.literal(placeholder));
         this.searchField.setChangedListener(s -> {
             this.listScrollPx = 0;
             this.detailScrollPx = 0;
@@ -209,7 +213,11 @@ public final class BotGuideScreen extends Screen {
         context.fill(0, 0, this.width, HEADER_H, headerFill);
         context.fill(0, HEADER_H - 1, this.width, HEADER_H, border);
         context.drawText(this.textRenderer, "📘 Guide", 12, 7, 0xFFFFE08A, false);
-        context.drawCenteredTextWithShadow(this.textRenderer, Text.literal("Click a topic on the left to open its detail card"),
+        String hint = guideLayout().stacked()
+                ? "Click a topic above to open its detail card"
+                : "Click a topic on the left to open its detail card";
+        hint = UiFitPolicy.elide(hint, this.width - 16, this.textRenderer::getWidth);
+        context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint),
                 this.width / 2, HEADER_H + 2, 0xFFB0B0B0);
     }
 
@@ -284,8 +292,11 @@ public final class BotGuideScreen extends Screen {
 
         String title = selected == null ? "No topic selected" : selected.title();
         String category = selected == null ? "" : selected.category();
-        context.drawText(this.textRenderer, category, panel.x + 8, panel.y + 6, 0xFFB8A76A, false);
-        context.drawText(this.textRenderer, title, panel.x + 8, panel.y + 18, 0xFFFFE08A, false);
+        int headW = Math.max(0, panel.w - 16);
+        context.drawText(this.textRenderer, UiFitPolicy.elide(category, headW, this.textRenderer::getWidth),
+                panel.x + 8, panel.y + 6, 0xFFB8A76A, false);
+        context.drawText(this.textRenderer, UiFitPolicy.elide(title, headW, this.textRenderer::getWidth),
+                panel.x + 8, panel.y + 18, 0xFFFFE08A, false);
 
         int detailTextW = Math.max(40, viewport.w - DETAIL_SCROLLBAR_W - 6);
         int lineH = this.textRenderer.fontHeight;
@@ -518,18 +529,20 @@ public final class BotGuideScreen extends Screen {
         return new Rect(x, y, w, h);
     }
 
-    private Rect topicsPanelRect() {
+    private GuideLayoutPolicy.Layout guideLayout() {
         Rect body = bodyRect();
-        int desired = MathHelper.clamp((body.w * 34) / 100, 220, 320);
-        int w = Math.min(desired, Math.max(180, body.w - 200));
-        return new Rect(body.x, body.y, w, body.h);
+        return GuideLayoutPolicy.layout(body.x, body.y, body.w, body.h, PANEL_GAP);
     }
 
+    private Rect topicsPanelRect() {
+        GuideLayoutPolicy.Box b = guideLayout().topics();
+        return new Rect(b.x(), b.y(), b.w(), b.h());
+    }
+
+    /** The detail card. Both panels come from one layout, so the topics rect is only kept for call-site shape. */
     private Rect detailPanelRect(Rect topicsPanel) {
-        Rect body = bodyRect();
-        int x = topicsPanel.right() + PANEL_GAP;
-        int w = Math.max(180, body.right() - x);
-        return new Rect(x, body.y, w, body.h);
+        GuideLayoutPolicy.Box b = guideLayout().detail();
+        return new Rect(b.x(), b.y(), b.w(), b.h());
     }
 
     private Rect topicViewport(Rect topicsPanel) {
@@ -607,7 +620,7 @@ public final class BotGuideScreen extends Screen {
     private List<DetailLine> buildDetailLines(GuideTopic topic, int maxWidth) {
         ArrayList<DetailLine> out = new ArrayList<>();
         if (topic == null) {
-            for (OrderedText line : this.textRenderer.wrapLines(Text.literal("Select a topic from the left list to read details."), maxWidth)) {
+            for (OrderedText line : this.textRenderer.wrapLines(Text.literal("Select a topic from the list to read details."), maxWidth)) {
                 out.add(new DetailLine(line, 0xFFE6D7A3));
             }
             return out;

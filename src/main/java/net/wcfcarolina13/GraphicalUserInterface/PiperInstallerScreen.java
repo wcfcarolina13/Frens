@@ -21,6 +21,11 @@ public class PiperInstallerScreen extends Screen {
 
     private static final int POPUP_WIDTH = 420;
     private static final int POPUP_HEIGHT = 250;
+
+    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
+    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
+    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+
     private static final int PAD = 8;
 
     private static final int COL_OK = 0xFF7FD97F;
@@ -49,10 +54,10 @@ public class PiperInstallerScreen extends Screen {
 
     @Override
     protected void init() {
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
-        int btnY = cy + POPUP_HEIGHT - 28;
-        int btnW = (POPUP_WIDTH - PAD * 4) / 3;
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
+        int btnY = cy + popupH() - 28;
+        int btnW = (popupW() - PAD * 4) / 3;
 
         installButton = ButtonWidget.builder(Text.literal("Download & Install"),
                         b -> startInstall(null))
@@ -68,7 +73,7 @@ public class PiperInstallerScreen extends Screen {
         addDrawableChild(installButton);
         addDrawableChild(useExistingButton);
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
-                .dimensions(cx + POPUP_WIDTH - PAD - (btnW - 15), btnY, btnW - 15, 20).build());
+                .dimensions(cx + popupW() - PAD - (btnW - 15), btnY, btnW - 15, 20).build());
         refreshButtons();
 
         if (plan == null && phase == Phase.DETECTING) {
@@ -120,10 +125,10 @@ public class PiperInstallerScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         refreshButtons();
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
-        context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + POPUP_HEIGHT + 1, 0xFF00CCCC);
-        context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xE0181818);
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
+        context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
+        context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
 
         int y = cy + 24;
@@ -153,7 +158,7 @@ public class PiperInstallerScreen extends Screen {
                         : job.stage();
                 context.drawTextWithShadow(this.textRenderer, pct, cx + PAD, y, COL_TXT);
                 y += 12;
-                int barW = POPUP_WIDTH - PAD * 2;
+                int barW = popupW() - PAD * 2;
                 context.fill(cx + PAD, y, cx + PAD + barW, y + 6, 0xFF303030);
                 if (job.bytesTotal() > 0) {
                     int fill = (int) (barW * Math.min(1.0, job.bytesDone() / (double) job.bytesTotal()));

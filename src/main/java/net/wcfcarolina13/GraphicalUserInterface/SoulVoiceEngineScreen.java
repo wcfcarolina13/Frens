@@ -37,6 +37,9 @@ import java.util.List;
 public class SoulVoiceEngineScreen extends Screen {
 
     private static final int POPUP_WIDTH = 400;
+    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
+    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
+
     private static final int ROW_H = 50;
     private static final int PAD = 8;
     private static final int BTN_W = 130;
@@ -90,7 +93,7 @@ public class SoulVoiceEngineScreen extends Screen {
     }
 
     private int popupHeight() {
-        return rowsTop() + rows.size() * ROW_H + 36;
+        return Math.min(this.height - 8, rowsTop() + rows.size() * ROW_H + 36);
     }
 
     private int rowsTop() {
@@ -143,8 +146,8 @@ public class SoulVoiceEngineScreen extends Screen {
         String current = mode == SoulSetupScreenPolicy.Mode.LOCAL
                 ? cfg != null ? cfg.getSoulVoiceEngine() : ""
                 : remoteStatus != null ? remoteStatus.voice().engine() : "";
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - popupHeight()) / 2;
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupHeight()) / 2);
 
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
@@ -167,7 +170,7 @@ public class SoulVoiceEngineScreen extends Screen {
                             row.installer().run();
                         }
                     })
-                    .dimensions(cx + POPUP_WIDTH - PAD - BTN_W, y + 4, BTN_W, 20).build();
+                    .dimensions(cx + popupW() - PAD - BTN_W, y + 4, BTN_W, 20).build();
             button.active = mode != SoulSetupScreenPolicy.Mode.LOCAL
                     ? mode == SoulSetupScreenPolicy.Mode.REMOTE_EDITOR && !isCurrent
                     : row.supported()
@@ -183,7 +186,7 @@ public class SoulVoiceEngineScreen extends Screen {
             }).dimensions(cx + PAD, cy + popupHeight() - 28, 80, 20).build());
         }
         addDrawableChild(ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(cx + POPUP_WIDTH - PAD - 80, cy + popupHeight() - 28, 80, 20).build());
+                .dimensions(cx + popupW() - PAD - 80, cy + popupHeight() - 28, 80, 20).build());
     }
 
     private void updateMode() {
@@ -237,16 +240,16 @@ public class SoulVoiceEngineScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - popupHeight()) / 2;
-        context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + popupHeight() + 1, 0xFF00CCCC);
-        context.fill(cx, cy, cx + POPUP_WIDTH, cy + popupHeight(), 0xE0181818);
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupHeight()) / 2);
+        context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupHeight() + 1, 0xFF00CCCC);
+        context.fill(cx, cy, cx + popupW(), cy + popupHeight(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
             context.drawTextWithShadow(this.textRenderer, "Runs on the server host", cx + PAD, cy + 24, 0xFFB0B0B0);
             int y = cy + 38;
             for (var line : this.textRenderer.wrapLines(Text.literal(SoulSetupScreenPolicy.statusMessage(mode)),
-                    POPUP_WIDTH - PAD * 2)) {
+                    popupW() - PAD * 2)) {
                 context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, 0xFFB0B0B0);
                 y += 11;
             }

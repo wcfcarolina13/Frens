@@ -24,6 +24,11 @@ public class SoulModelManagerScreen extends Screen {
 
     private static final int POPUP_WIDTH = 430;
     private static final int POPUP_HEIGHT = 240;
+
+    // Clamp to the screen so the popup stays usable at the 320x240 minimum GUI size.
+    private int popupW() { return Math.min(POPUP_WIDTH, this.width - 16); }
+    private int popupH() { return Math.min(POPUP_HEIGHT, this.height - 8); }
+
     private static final int PAD = 8;
     private static final int COL_OK = 0xFF7FD97F;
     private static final int COL_BAD = 0xFFE07070;
@@ -68,15 +73,15 @@ public class SoulModelManagerScreen extends Screen {
                 requestRemoteStatus(false);
             }
         }
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
         modelButtons.clear();
 
         List<OllamaModelInstaller.KnownModel> models = OllamaModelInstaller.KNOWN_MODELS;
         int rowY = cy + 78;
         for (OllamaModelInstaller.KnownModel model : models) {
             ButtonWidget btn = ButtonWidget.builder(buttonLabel(model), b -> onModelButton(model))
-                    .dimensions(cx + POPUP_WIDTH - PAD - 96, rowY - 2, 96, 18)
+                    .dimensions(cx + popupW() - PAD - 96, rowY - 2, 96, 18)
                     .build();
             modelButtons.add(btn);
             addDrawableChild(btn);
@@ -84,9 +89,9 @@ public class SoulModelManagerScreen extends Screen {
         }
 
         addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), b -> startDetect())
-                .dimensions(cx + PAD, cy + POPUP_HEIGHT - 28, 80, 20).build());
+                .dimensions(cx + PAD, cy + popupH() - 28, 80, 20).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
-                .dimensions(cx + POPUP_WIDTH - PAD - 80, cy + POPUP_HEIGHT - 28, 80, 20).build());
+                .dimensions(cx + popupW() - PAD - 80, cy + popupH() - 28, 80, 20).build());
 
         if (mode == SoulSetupScreenPolicy.Mode.LOCAL && status == null && phase == Phase.DETECTING) {
             startDetect();
@@ -211,10 +216,10 @@ public class SoulModelManagerScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         updateMode();
         refreshButtons();
-        int cx = (this.width - POPUP_WIDTH) / 2;
-        int cy = (this.height - POPUP_HEIGHT) / 2;
-        context.fill(cx - 1, cy - 1, cx + POPUP_WIDTH + 1, cy + POPUP_HEIGHT + 1, 0xFF00CCCC);
-        context.fill(cx, cy, cx + POPUP_WIDTH, cy + POPUP_HEIGHT, 0xE0181818);
+        int cx = (this.width - popupW()) / 2;
+        int cy = Math.max(4, (this.height - popupH()) / 2);
+        context.fill(cx - 1, cy - 1, cx + popupW() + 1, cy + popupH() + 1, 0xFF00CCCC);
+        context.fill(cx, cy, cx + popupW(), cy + popupH(), 0xE0181818);
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, cy + 8, 0xFFFFFFFF);
 
         if (mode != SoulSetupScreenPolicy.Mode.LOCAL) {
@@ -281,7 +286,7 @@ public class SoulModelManagerScreen extends Screen {
                         ? job.description() + ": " + job.stage() + "  " + gb(job.bytesDone()) + " / " + gb(job.bytesTotal())
                         : job.description() + ": " + job.stage();
                 context.drawTextWithShadow(this.textRenderer, line, cx + PAD, py, COL_TXT);
-                int barW = POPUP_WIDTH - PAD * 2;
+                int barW = popupW() - PAD * 2;
                 context.fill(cx + PAD, py + 11, cx + PAD + barW, py + 17, 0xFF303030);
                 if (job.bytesTotal() > 0) {
                     int fill = (int) (barW * Math.min(1.0, job.bytesDone() / (double) job.bytesTotal()));
@@ -301,7 +306,7 @@ public class SoulModelManagerScreen extends Screen {
         String message = SoulSetupScreenPolicy.statusMessage(mode);
         if (!message.isEmpty()) {
             int y = cy + 38;
-            for (var line : this.textRenderer.wrapLines(Text.literal(message), POPUP_WIDTH - PAD * 2)) {
+            for (var line : this.textRenderer.wrapLines(Text.literal(message), popupW() - PAD * 2)) {
                 context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, COL_DIM);
                 y += 11;
             }
