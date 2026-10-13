@@ -34,18 +34,22 @@ public final class CompanionOverheadHologramService {
 
     // Small vertical nudge so the hologram doesn't overlap the bot nameplate.
     private static final double NAMEPLATE_EXTRA_Y = 0.25D;
+    // Vertical gap between stacked name tags: one name-tag line is ~10 font px at
+    // ~0.025 block/px, so 0.27 leaves a sliver between the dark backgrounds.
+    private static final double LINE_SPACING_Y = 0.27D;
     private static final String HOLOGRAM_TAG = "frens.overhead_hologram";
     private static final long STALE_SWEEP_INTERVAL_MS = 30_000L;
     private static final long LEGACY_SWEEP_WINDOW_MS = 10 * 60_000L;
     private static final TextColor GOLD_TEXT_COLOR = TextColor.fromFormatting(Formatting.GOLD);
 
-    // One hologram per bot.
+    // One hologram per bot (up to OverheadLinePolicy.DEFAULT_MAX_LINES stacked stands).
     private static final ConcurrentHashMap<UUID, ActiveHologram> ACTIVE = new ConcurrentHashMap<>();
     private static volatile boolean startupSweepDone = false;
     private static volatile long lastStaleSweepAtMs = 0L;
     private static volatile long startupSweepStartedAtMs = 0L;
 
-    private record ActiveHologram(UUID botUuid, ArmorStandEntity stand, String line, long expiresAtMs) {
+    /** {@code stands.get(0)} is the top line. */
+    private record ActiveHologram(UUID botUuid, List<ArmorStandEntity> stands, String line, long expiresAtMs) {
     }
 
     private CompanionOverheadHologramService() {
@@ -57,8 +61,8 @@ public final class CompanionOverheadHologramService {
      */
     public static void removeAll() {
         for (var entry : ACTIVE.values()) {
-            if (entry != null && entry.stand != null && !entry.stand.isRemoved()) {
-                entry.stand.discard();
+            if (entry != null) {
+                discardAll(entry.stands);
             }
         }
         ACTIVE.clear();
@@ -93,24 +97,42 @@ public final class CompanionOverheadHologramService {
         long now = System.currentTimeMillis();
         long expiresAt = now + Math.max(250, durationMs);
 
-        // If there is an existing stand, reuse it (cheaper + smoother).
-        ActiveHologram existing = ACTIVE.get(botId);
-        ArmorStandEntity stand = existing != null ? existing.stand : null;
-        if (stand == null || stand.isRemoved() || stand.getEntityWorld() != world) {
-            stand = spawnStand(world, bot, line);
-            if (stand == null) {
-                return;
-            }
-        } else {
-            stand.setCustomName(styled(line));
-            stand.setCustomNameVisible(true);
+        List<String> lines = OverheadLinePolicy.wrap(line);
+        if (lines.isEmpty()) {
+            return;
         }
 
-        // Keep it positioned correctly immediately (not just next tick).
-        double standY = desiredStandY(bot, stand);
-        stand.refreshPositionAndAngles(bot.getX(), standY, bot.getZ(), 0.0f, 0.0f);
+        // Reuse existing stands where possible (cheaper + smoother); discard the extras.
+        ActiveHologram existing = ACTIVE.get(botId);
+        List<ArmorStandEntity> old = existing != null ? existing.stands : List.of();
+        List<ArmorStandEntity> stands = new ArrayList<>(lines.size());
+        for (int i = 0; i < lines.size(); i++) {
+            ArmorStandEntity stand = i < old.size() ? old.get(i) : null;
+            if (stand == null || stand.isRemoved() || stand.getEntityWorld() != world) {
+                if (stand != null && !stand.isRemoved()) {
+                    stand.discard();
+                }
+                stand = spawnStand(world, bot, lines.get(i));
+                if (stand == null) {
+                    discardAll(stands);
+                    discardAll(old.subList(Math.min(i + 1, old.size()), old.size()));
+                    ACTIVE.remove(botId);
+                    return;
+                }
+            } else {
+                stand.setCustomName(styled(lines.get(i)));
+                stand.setCustomNameVisible(true);
+            }
+            stands.add(stand);
+        }
+        if (old.size() > lines.size()) {
+            discardAll(old.subList(lines.size(), old.size()));
+        }
 
-        ACTIVE.put(botId, new ActiveHologram(botId, stand, line, expiresAt));
+        // Keep them positioned correctly immediately (not just next tick).
+        positionStands(bot, stands);
+
+        ACTIVE.put(botId, new ActiveHologram(botId, List.copyOf(stands), line, expiresAt));
     }
 
     public static void onServerTick(MinecraftServer server) {
@@ -137,41 +159,78 @@ public final class CompanionOverheadHologramService {
                 continue;
             }
 
-            ArmorStandEntity stand = holo.stand;
-            if (stand == null || stand.isRemoved()) {
+            List<ArmorStandEntity> stands = holo.stands;
+            if (stands == null || stands.isEmpty() || anyRemoved(stands)) {
+                // A half-gone stack would read as a broken sentence; drop the rest too.
+                if (stands != null) discardAll(stands);
                 ACTIVE.remove(botId);
                 continue;
             }
 
             if (now >= holo.expiresAtMs) {
-                stand.discard();
+                discardAll(stands);
                 ACTIVE.remove(botId);
                 continue;
             }
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
             if (bot == null || bot.isRemoved() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-                stand.discard();
+                discardAll(stands);
                 ACTIVE.remove(botId);
                 continue;
             }
 
             // Keep following the bot.
-            if (stand.getEntityWorld() != world) {
-                stand.discard();
+            if (anyInOtherWorld(stands, world)) {
+                discardAll(stands);
                 ACTIVE.remove(botId);
                 continue;
             }
 
             // Refresh position each tick; marker armor stands are lightweight.
-            double standY = desiredStandY(bot, stand);
-            stand.refreshPositionAndAngles(bot.getX(), standY, bot.getZ(), 0.0f, 0.0f);
+            positionStands(bot, stands);
         }
     }
 
     private static Text styled(String line) {
         // Gold + bold reads well against foliage and bright biomes.
         return Text.literal(line).formatted(Formatting.GOLD, Formatting.BOLD);
+    }
+
+    /** Bottom line keeps the old single-line height; earlier lines stack above it. */
+    private static void positionStands(ServerPlayerEntity bot, List<ArmorStandEntity> stands) {
+        int n = stands.size();
+        for (int i = 0; i < n; i++) {
+            ArmorStandEntity stand = stands.get(i);
+            double standY = desiredStandY(bot, stand) + (n - 1 - i) * LINE_SPACING_Y;
+            stand.refreshPositionAndAngles(bot.getX(), standY, bot.getZ(), 0.0f, 0.0f);
+        }
+    }
+
+    private static void discardAll(List<ArmorStandEntity> stands) {
+        for (ArmorStandEntity stand : stands) {
+            if (stand != null && !stand.isRemoved()) {
+                stand.discard();
+            }
+        }
+    }
+
+    private static boolean anyRemoved(List<ArmorStandEntity> stands) {
+        for (ArmorStandEntity stand : stands) {
+            if (stand == null || stand.isRemoved()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean anyInOtherWorld(List<ArmorStandEntity> stands, ServerWorld world) {
+        for (ArmorStandEntity stand : stands) {
+            if (stand.getEntityWorld() != world) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static double desiredStandY(ServerPlayerEntity bot, ArmorStandEntity stand) {
@@ -207,8 +266,13 @@ public final class CompanionOverheadHologramService {
         }
         Set<UUID> activeStandIds = new HashSet<>();
         for (ActiveHologram holo : ACTIVE.values()) {
-            if (holo != null && holo.stand() != null && !holo.stand().isRemoved()) {
-                activeStandIds.add(holo.stand().getUuid());
+            if (holo == null || holo.stands() == null) {
+                continue;
+            }
+            for (ArmorStandEntity stand : holo.stands()) {
+                if (stand != null && !stand.isRemoved()) {
+                    activeStandIds.add(stand.getUuid());
+                }
             }
         }
 
