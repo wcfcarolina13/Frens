@@ -405,11 +405,16 @@ public final class TaskService {
                         LOGGER.warn("Ambient task '{}' for bot {} failed: {}", name, botUuid, t.toString(), t);
                     } finally {
                         net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
-                        if (!isAbortRequested(botUuid)) {
+                        // Read the abort before complete(): it drops the ticket, after which only
+                        // the latch would still report a cancel.
+                        boolean abortRequested = isAbortRequested(botUuid);
+                        // Complete before resuming follow, as SkillManager.runSkill does:
+                        // setFollowMode refuses while this ticket is still active.
+                        complete(ticket, success);
+                        if (!abortRequested) {
                             net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(
                                     bot, source.getServer(), followResume);
                         }
-                        complete(ticket, success);
                     }
                 } finally {
                     IN_FLIGHT_AMBIENT.remove(botUuid);

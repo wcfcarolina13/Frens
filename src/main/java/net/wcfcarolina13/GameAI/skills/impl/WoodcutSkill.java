@@ -47,6 +47,7 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
@@ -68,6 +69,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -120,6 +123,15 @@ public final class WoodcutSkill implements Skill {
     private static final int WOODCUT_OFFLOAD_LOCAL_CHEST_YSPAN = 8;
     private static final double WOODCUT_NEARBY_REMEMBERED_PROBE_DIST_SQ = 56.0D * 56.0D;
     private RequestedWorkBounds activeRequestedBounds;
+    /** Bots running this woodcut bare-handed until they hold wood for a first axe. Keyed per bot: the registered skill instance is shared. */
+    private final Set<UUID> axeBootstrapBots = ConcurrentHashMap.newKeySet();
+    /** Bootstrap bots whose one craft attempt with enough wood failed; the tree loop ends the run. */
+    private final Set<UUID> axeBootstrapCraftFailedBots = ConcurrentHashMap.newKeySet();
+    /** CraftingHelper.STATION_REACH_SQ (private there): a player's 4.5-block interact range. */
+    private static final double CRAFTING_STATION_REACH_SQ = 4.5D * 4.5D;
+    private static final String AXE_BOOTSTRAP_START_LINE = "No axe yet, so I'll punch a tree first.";
+    private static final String AXE_BOOTSTRAP_CRAFT_FAILED_LINE =
+            "I punched enough wood for an axe but couldn't craft one. Give me an axe or some room for a crafting table and try again.";
     // Per-tree work envelope overlay. While a tree is being felled, positions inside
     // this box are treated as within the requested bounds so the bot may prune
     // canopy/leaves that overhang the caller's bounds (e.g. farm AABB) for the
@@ -696,9 +708,21 @@ public final class WoodcutSkill implements Skill {
             return SkillExecutionResult.failure("I couldn't reach the surface to cut trees.");
         }
 
-        if (!prepareWoodcutTooling(source, bot)) {
-            return SkillExecutionResult.failure(
-                    "I have no axe and can't make or find one. Get me an axe (or planks + sticks) and try again.");
+        Object rawOrigin = context.parameters() != null ? context.parameters().get("_origin") : null;
+        boolean bootstrapAllowed = WoodcutAxeBootstrapPolicy.allowBootstrap(
+                rawOrigin instanceof String s ? s : null);
+        if (!prepareWoodcutTooling(source, bot, bootstrapAllowed)) {
+            if (!bootstrapAllowed) {
+                return SkillExecutionResult.failure(
+                        "I have no axe and can't make or find one. Get me an axe (or planks + sticks) and try again.");
+            }
+            // No axe anywhere: punch logs bare-handed until there is wood for the whole wooden-axe
+            // chain, then craft (ensureAxeOrRetrieve). An idle hobby never gets here, so its
+            // "no axe" stays a repeatable failure for HobbyBackoffPolicy.
+            axeBootstrapBots.add(bot.getUuid());
+            selectHandsOrHarmlessItem(bot);
+            LOGGER.info("Woodcut axe bootstrap: {} has no axe, punching logs bare-handed", bot.getName().getString());
+            ChatUtils.sendSystemMessage(source, AXE_BOOTSTRAP_START_LINE);
         }
 
         Set<BlockPos> visitedBases = new HashSet<>();
@@ -721,6 +745,7 @@ public final class WoodcutSkill implements Skill {
         int strictTreeRejects = 0;
         long lastCollectionMaintenanceAtMs = 0L;
         boolean abortRequested = false;
+        boolean axeBootstrapCraftFailed = false;
         WoodcutFailureReason lastFailureReason = WoodcutFailureReason.NO_TARGET;
         BlockPos startPos = bot.getBlockPos();
         WoodcutWorkAreaState workAreaState = new WoodcutWorkAreaState(startPos);
@@ -736,6 +761,10 @@ public final class WoodcutSkill implements Skill {
             while (openEnded || radiusClearMode || felled < targetTrees) {
                 if (isAbortRequested(bot)) {
                     abortRequested = true;
+                    break;
+                }
+                if (axeBootstrapCraftFailedBots.contains(bot.getUuid())) {
+                    axeBootstrapCraftFailed = true;
                     break;
                 }
                 // Hunger-aware interruption: don't fell trees until starvation kills the bot.
@@ -1055,6 +1084,8 @@ public final class WoodcutSkill implements Skill {
 
             if (abortRequested) {
                 finalResult = SkillExecutionResult.failure("woodcut paused due to nearby threat.");
+            } else if (axeBootstrapCraftFailed) {
+                finalResult = SkillExecutionResult.failure(AXE_BOOTSTRAP_CRAFT_FAILED_LINE);
             } else if (felled == 0 && selectedTargets > 0) {
                 finalResult = switch (lastFailureReason) {
                     case PROTECTED_AT_MINING -> SkillExecutionResult.failure("Found a tree, but couldn’t cut it; protection checks blocked the trunk.");
@@ -1131,6 +1162,8 @@ public final class WoodcutSkill implements Skill {
 
         return finalResult;
         } finally {
+            axeBootstrapBots.remove(bot.getUuid());
+            axeBootstrapCraftFailedBots.remove(bot.getUuid());
             activeRequestedBounds = null;
             activeTreeWorkEnvelopeMin = null;
             activeTreeWorkEnvelopeMax = null;
@@ -4858,15 +4891,22 @@ public final class WoodcutSkill implements Skill {
      *         hotbar slot 0 as a "last resort," which is often a pickaxe and
      *         leads to logs being mined with the wrong tool. (2026-05-06.)
      */
-    private boolean prepareWoodcutTooling(ServerCommandSource source, ServerPlayerEntity bot) {
+    private boolean prepareWoodcutTooling(ServerCommandSource source, ServerPlayerEntity bot, boolean bootstrapAllowed) {
         if (selectAxe(bot)) {
             return true;
         }
+        // A bot that may bootstrap and holds some wood, but not enough for the whole wooden-axe
+        // chain, would spend it on a crafting table and then fail the sticks. Skip the craft and
+        // punch logs first. With no wood in the inventory the craft still runs: it may draw on
+        // nearby chests.
+        boolean skipShortCraft = bootstrapAllowed
+                && ToolProvisionService.hasPlanksOrLogsInInventory(bot)
+                && axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.PUNCH_LOG;
         // Wooden axe is the bootstrap craft — always allow it, regardless of
         // craft-history gating. Commander/bot may have planks-and-sticks but no
         // recorded axe craft yet, and we'd rather the bot make a wooden axe than
         // give up on the task.
-        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer(), true);
+        boolean crafted = !skipShortCraft && ToolProvisionService.ensureAxe(bot, source, source.getPlayer(), true);
         if (crafted && selectAxe(bot)) {
             return true;
         }
@@ -5370,10 +5410,17 @@ public final class WoodcutSkill implements Skill {
     }
 
     private boolean ensureAxeOrRetrieve(ServerPlayerEntity bot) {
-        if (ensureAxeEquipped(bot)) return true;
+        if (ensureAxeEquipped(bot)) {
+            // An axe picked up or handed over mid-bootstrap ends the bare-handed phase.
+            axeBootstrapBots.remove(bot.getUuid());
+            return true;
+        }
         if (isAbortRequested(bot)) return false;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
         ServerCommandSource source = bot.getCommandSource();
+        if (axeBootstrapBots.contains(bot.getUuid())) {
+            return bootstrapAxeOrPunch(bot, source);
+        }
         // Mid-task replenishment: if the last axe broke, try crafting a new one
         // with the wooden fallback enabled (matches prepareWoodcutTooling at task
         // start; without this we'd silently continue with whatever non-axe tool
@@ -5394,6 +5441,96 @@ public final class WoodcutSkill implements Skill {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Bootstrap mode (no axe at the start of a non-hobby run): keep hands until the inventory holds
+     * wood for the whole wooden-axe chain, then try the craft exactly once. Chest retrieval is not
+     * retried here: it already ran at the start, and a per-log chest walk is the same spam as the
+     * premature table craft this avoids.
+     *
+     * @return {@code true} only when an axe is now equipped
+     */
+    private boolean bootstrapAxeOrPunch(ServerPlayerEntity bot, ServerCommandSource source) {
+        UUID botId = bot.getUuid();
+        if (axeBootstrapCraftFailedBots.contains(botId)
+                || axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.PUNCH_LOG) {
+            selectHandsOrHarmlessItem(bot);
+            return false;
+        }
+        LOGGER.info("Woodcut axe bootstrap: {} has enough wood (logs={} planks={} sticks={}), crafting an axe",
+                bot.getName().getString(), countInventoryTagged(bot, ItemTags.LOGS),
+                countInventoryTagged(bot, ItemTags.PLANKS), countInventoryItem(bot, Items.STICK));
+        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer(), true);
+        if (crafted && ensureAxeEquipped(bot)) {
+            axeBootstrapBots.remove(botId);
+            LOGGER.info("Woodcut axe bootstrap: {} crafted an axe, back to normal woodcut", bot.getName().getString());
+            return true;
+        }
+        // One attempt with enough wood. The tree loop sees the marker and ends the run honestly;
+        // until then the remaining logs of this tree are punched by hand.
+        axeBootstrapCraftFailedBots.add(botId);
+        LOGGER.warn("Woodcut axe bootstrap: {} had enough wood but the axe craft failed", bot.getName().getString());
+        selectHandsOrHarmlessItem(bot);
+        return false;
+    }
+
+    private WoodcutAxeBootstrapPolicy.Step axeBootstrapStep(ServerPlayerEntity bot) {
+        return WoodcutAxeBootstrapPolicy.next(
+                countInventoryTagged(bot, ItemTags.LOGS),
+                countInventoryTagged(bot, ItemTags.PLANKS),
+                countInventoryItem(bot, Items.STICK),
+                craftingTableInStationReach(bot));
+    }
+
+    /**
+     * Whether the axe craft will not need to make a table: one is held (CraftingHelper places it) or
+     * one stands within station reach. Same scan box (CraftingStationPolicy's tick-side half-widths,
+     * sized to the 4.5-block reach) and the same feet-to-center 4.5 test as
+     * CraftingHelper.withinStationReach, which is private. Deliberately not the 40-block worker
+     * scan: missing a table just out of reach costs one extra log at most, while counting one
+     * the craft then fails to walk to would trigger the very table-then-sticks failure this mode avoids.
+     */
+    private static boolean craftingTableInStationReach(ServerPlayerEntity bot) {
+        if (countInventoryItem(bot, Items.CRAFTING_TABLE) > 0) {
+            return true;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos botPos = bot.getBlockPos();
+        int h = net.wcfcarolina13.GameAI.services.CraftingStationPolicy.TICK_SCAN_HORIZONTAL;
+        int v = net.wcfcarolina13.GameAI.services.CraftingStationPolicy.TICK_SCAN_VERTICAL;
+        for (BlockPos pos : BlockPos.iterate(botPos.add(-h, -v, -h), botPos.add(h, v, h))) {
+            if (world.isChunkLoaded(pos)
+                    && world.getBlockState(pos).isOf(Blocks.CRAFTING_TABLE)
+                    && bot.squaredDistanceTo(Vec3d.ofCenter(pos)) <= CRAFTING_STATION_REACH_SQ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int countInventoryTagged(ServerPlayerEntity bot, net.minecraft.registry.tag.TagKey<net.minecraft.item.Item> tag) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.isIn(tag)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private static int countInventoryItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.isOf(item)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private boolean hasLineOfSight(ServerPlayerEntity bot, Vec3d targetCenter) {

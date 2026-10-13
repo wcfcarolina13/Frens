@@ -128,7 +128,9 @@ public final class SkillManager {
             stopRange = st.followStopRange;
             allowRecoverySkills = st.comeAllowRecoverySkills;
         }
-        BotEventHandler.stopFollowing(botPlayer);
+        // Silent: the task hands follow back when it ends, so "Stopping follow command." would be
+        // false for every follow-interrupting skill.
+        BotEventHandler.stopFollowing(botPlayer, false);
         return new FollowResumeState(followUuid, fixedGoal, stopRange, allowRecoverySkills);
     }
 
@@ -137,6 +139,17 @@ public final class SkillManager {
                                         net.minecraft.server.MinecraftServer server,
                                         FollowResumeState resume) {
         if (botPlayer == null || resume == null || server == null) {
+            return;
+        }
+        if (resume.fixedGoal() == null && resume.followUuid() == null) {
+            return;
+        }
+        // Callers complete their ticket first. A task that started in the gap owns the bot now:
+        // say nothing (setFollowMode would chat "Busy with another task right now.") and leave
+        // its movement alone (setComeModeWalk has no busy check).
+        if (TaskService.hasActiveTask(botPlayer.getUuid())) {
+            LOGGER.info("[FollowAssert] task-resume skipped bot={} reason=new-task-active",
+                    botPlayer.getName().getString());
             return;
         }
         if (resume.fixedGoal() != null) {
@@ -153,10 +166,17 @@ public final class SkillManager {
         } else if (resume.followUuid() != null) {
             ServerPlayerEntity target = server.getPlayerManager().getPlayer(resume.followUuid());
             if (target != null) {
-                BotEventHandler.setFollowMode(botPlayer, target);
-                LOGGER.info("[FollowAssert] task-resume bot={} mode=follow target={}",
+                // Silent, like the suspend: the follow simply carries on.
+                String outcome = BotEventHandler.setFollowMode(botPlayer, target, false);
+                boolean resumed = outcome != null && outcome.startsWith("Now following");
+                LOGGER.info("[FollowAssert] task-resume bot={} mode=follow target={} resumed={} result='{}'",
                         botPlayer.getName().getString(),
-                        target.getName().getString());
+                        target.getName().getString(),
+                        resumed,
+                        outcome);
+            } else {
+                LOGGER.info("[FollowAssert] task-resume skipped bot={} reason=target-offline",
+                        botPlayer.getName().getString());
             }
         }
     }
@@ -276,11 +296,13 @@ public final class SkillManager {
                 botPlayer.setPitch(0);
             }
             BotEventHandler.setExternalOverrideActive(false);
+            boolean success = result != null && result.success() && !abortRequested;
+            // Complete before resuming follow: setFollowMode refuses while this ticket is still
+            // active, which used to chat "Busy with another task right now." and drop the follow.
+            TaskService.complete(ticket, success);
             if (!abortRequested) {
                 resumeFollowMode(botPlayer, context.botSource().getServer(), followResume);
             }
-            boolean success = result != null && result.success() && !abortRequested;
-            TaskService.complete(ticket, success);
             if (success && botPlayer != null && name != null
                     && CELEBRATORY_SKILLS.contains(name.toLowerCase())) {
                 net.wcfcarolina13.GameAI.services.EmotecraftBridge.playEmote(
