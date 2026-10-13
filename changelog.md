@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Narrow-screen layouts: every Frens screen fits at 320x240, wide screens unchanged; 1.1.228 (2026-10-13)
+
+From the fresh-install test (`docs/testing/FRESH_INSTALL_1.1.226.md` #8). Scope corrected the target: Bradley's 1708x1642 window runs GUI scale 5 → ~342x328, not 427. Target is vanilla's floor 320x240, checked at 427x240, 342x328, 320x240. Rule enforced in review: at 427x240 and wider, every layout is exactly as in 1.1.227 wherever it already fit. One scope, four implementers (Opus), batch review (Codex seat ran out of quota mid-review, rerun on Opus), one fix wave, scoped re-review, one ride-along.
+
+- **Shared fit helpers** (`eb06b28a`). New pure `UiFitPolicy`: `wrap`, `elide`, `pickLabel`, `fitTabWidths`, `splitColumns`, `fitScale`, `keepOrWrap`, `popupExtent/popupOrigin`, `fitsLegacyRow`. All 12 top-of-screen hints in `FrensClient` go through one `drawTopTip` renderer that caps width at the screen and wraps (3 rows per source line). "Looking at X" keeps its 1.1.227 wording wherever it fits.
+- **Overhead lines** (`1a9c7b45`). Bot speech above heads wraps to at most 3 lines of ~24 characters on stacked armor stands (`OverheadLinePolicy`, code-point safe), all cleaned up together.
+- **Guide, roster, recruitment, popups** (`e741ce49`). Guide stacks topics above the detail card on narrow tall screens and splits to fit on short ones (`GuideLayoutPolicy`). Roster gets a compact scrolling layout with its buttons always visible (`RosterLayoutPolicy`). Recruitment topics column ~111 px at 342 instead of 27. Eight popups and Preferences clamp to the screen.
+- **Bot inventory scale-to-fit** (`0dad4888`). The 364x230 screen scales down (0.92 at 342, 0.86 at 320) with every mouse handler, slot lookup, drag, scroll, entity preview and item tooltip mapped (`InventoryScalePolicy`). Admin overlay width capped, columns split to fit, tabs sized by label with "Do"/"Talk" fallbacks (`OverlayTabPolicy`). No scaling at 427x240.
+- **Review wave** (`e0a761fa`) restored 1.1.227 geometry at 427+ (Guide 203/192, equal tabs, Recruitment 387x180, HUD reserves, popup sizes), installers wrap by measured width, inventory scale applied inside `drawBackground` so vanilla subtitles aren't shrunk, overhead stack cleaned up if a spawn throws. **Ride-along** (`181e5348`): old "Looking at" wording for longer names, Preferences hint keeps its old line breaks, "from the left list" when side by side, model list without em dashes.
+- **Rulings:** (1) Old layout kept wherever it fit, adapt only when it doesn't (cost if wrong: none, wide players see no change). (2) Em dashes and semicolons removed from installer and model-manager strings that were touched, so six strings read differently at every size, same meaning (cost if wrong: cosmetic). (3) Toast and Hobbies-label edge cases at 320 accepted.
+- **Compatibility note:** REI, EMI or JEI side panels would be misplaced while the bot inventory is scaled down (scaled width under 372). Not installed on the Nirn instance.
+- **Deferred:** overhead text as `TextDisplayEntity` (native wrap and scale); Hobbies cell labels at 320; SoulVoiceEngine descriptions under the button at 320.
+- Tests 1792 → 1887.
+- **Field checks:** Phase 6z.
+
 ## Commands-off first run: the singleplayer host can use Frens, Carpet-free stop, spawn feedback, roster and hints; 1.1.227 (2026-10-13)
 
 From the fresh-install test of 1.1.226 (`docs/testing/FRESH_INSTALL_1.1.226.md`): in a Survival world with Allow Commands OFF, a new player could not spawn or command a companion at all. Two read-only scopes, three parallel implementers (Opus), one batch review (Codex seat), one fix wave, one scoped re-review.

@@ -3,7 +3,29 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.227) — next session starts here
+## Session Handoff 2026-10-13 (1.1.228) — next session starts here
+
+**State:** main = origin/main @ 1.1.228. Suite 1887 green (1792 → 1887). On Modrinth: 1.1.226 only (1.1.227 and 1.1.228
+not published; Bradley publishes). Discord #announcements post for 1.1.226 is up.
+
+**Shipped in 1.1.228:** every Frens screen and HUD hint fits at 320x240 / 342x328 / 427x240 while 427+ is unchanged
+from 1.1.227 (`UiFitPolicy`, inventory scale-to-fit, Guide/roster/recruitment/popups, overhead lines wrap). Details and
+rulings in `changelog.md`.
+
+**Field checks pending:** Phase 6z (new), 6y, 6x, 6w … 6b. Fresh-install part 2 (AI setup checklist) still never run.
+Test the three sizes by setting Video Settings → GUI Scale with a resized window (see Phase 6z).
+
+**Next (in order):**
+1. **1.1.229 = behaviour from the fresh-install test:** woodcut from an empty inventory (punch tree → planks → axe) and
+   the wrong "Busy with another task" line (FRESH_INSTALL #4), scaffold cleanup tool choice (#9), bots hurting themselves
+   in tight spaces and stuck on unreachable drops (#10), slow woodcut start (#14).
+2. Multiplayer non-op owners: typed per-action payloads (`.superpowers/sdd/scope-ui-commands-1.1.227.md`).
+3. Host sweep of remaining op-only gates. 4. Chat action requests. 5. Bot livestream (backlog).
+
+**Needs Bradley:** publish 1.1.227/1.1.228 to Modrinth (mention the REI/EMI/JEI note); OK to fix the 1.1.226 changelog
+line "Bots can make their own wooden axe".
+
+## Session Handoff 2026-10-13 (1.1.227) — superseded
 
 **State:** main = origin/main @ 1.1.227. Suite 1792 green (1745 → 1792). Built from the fresh-install test of 1.1.226
 (`docs/testing/FRESH_INSTALL_1.1.226.md`, 15 findings). 1.1.226 is LIVE on Modrinth (version BkS087B5); the seven old
