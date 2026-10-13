@@ -3,7 +3,41 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.228) — next session starts here
+## Session Handoff 2026-10-13 (1.1.229) — next session starts here
+
+**State:** main = origin/main @ 1.1.229. Suite 1927 green (1887 → 1927). On Modrinth: 1.1.226 only (1.1.227–1.1.229
+not published; Bradley publishes).
+
+**Shipped in 1.1.229** (fresh-install #4, #9, #10, #14; details, rulings, cost-if-wrong in `changelog.md`):
+- Ordered woodcut with no axe punches logs bare-handed, then crafts table + sticks + wooden axe once there is enough
+  wood (`WoodcutAxeBootstrapPolicy`). Hobby runs keep the old refusal.
+- Follow resumes after every non-aborted skill. The "Busy with another task" line was `resumeFollowMode` running
+  before `TaskService.complete` (follow was never restored after any task). Suspend/resume now silent. Post-task
+  underground return skips a following bot.
+- Fresh-world Spawn base (server-owned) no longer blocks woodcut. Player bases still do. A* start==goal returns at once.
+- `HarmlessToolPolicy`: no durability spent on blocks a tool isn't effective on (axe on dirt/leaves), bridge retract
+  picks a tool per block, "axe" no longer matches "pickaxe".
+- Drop pickups: nudge needs 2-high clearance (Bob's IN_WALL), idle sweep tracks the real item, idle-only height cap,
+  3 s give-up on out-of-reach items, entity-id blacklist (`DropReachPolicy`, `DropStandHelper`).
+
+**Field checks pending:** Phase 6aa (new, 6 items; checklist now 252), 6z, 6y … 6b. Best on a brand-new world.
+Fresh-install part 2 (AI setup checklist) still never run.
+
+**Deferred (reasons in changelog):** `BotActions.moveRelative` same-cell teleport (probable IN_WALL root, shared hot
+file), `ScaffoldService.teardownScaffolds` tool choice, `WoodcutCleanupSkill` pickaxe fallback + `selectBestTool(bot,
+"pickaxe","")` bug, misleading `CraftingHelper:320` "run /bot place crafting_table" line, Baritone finder start==goal,
+weapons+food-only inventory mining thrash (pre-existing), woodcut surface-staging cost.
+
+**Next (in order):**
+1. Multiplayer non-op owners: typed per-action payloads (`.superpowers/sdd/scope-ui-commands-1.1.227.md`).
+2. Host sweep of remaining op-only gates. 3. Chat action requests (woodcut can now be its "get wood" step).
+4. Fresh-install leftovers #5, #11, #12, #13, #15. 5. Bot livestream (backlog).
+
+**Needs Bradley:** publish 1.1.227–1.1.229 to Modrinth; the 1.1.226 changelog line "Bots can make their own wooden
+axe" is now true from 1.1.229 on (ordered woodcut). Should player bases also allow woodcut (TreeDetector's javadoc
+says base radius was meant to allow trees; behaviour since 2026-03-25 blocks them)?
+
+## Session Handoff 2026-10-13 (1.1.228) — superseded
 
 **State:** main = origin/main @ 1.1.228. Suite 1887 green (1792 → 1887). On Modrinth: 1.1.226 only (1.1.227 and 1.1.228
 not published; Bradley publishes). Discord #announcements post for 1.1.226 is up.
@@ -16,9 +50,7 @@ rulings in `changelog.md`.
 Test the three sizes by setting Video Settings → GUI Scale with a resized window (see Phase 6z).
 
 **Next (in order):**
-1. **1.1.229 = behaviour from the fresh-install test:** woodcut from an empty inventory (punch tree → planks → axe) and
-   the wrong "Busy with another task" line (FRESH_INSTALL #4), scaffold cleanup tool choice (#9), bots hurting themselves
-   in tight spaces and stuck on unreachable drops (#10), slow woodcut start (#14).
+1. ✅ 1.1.229 = behaviour from the fresh-install test (#4, #9, #10, #14).
 2. Multiplayer non-op owners: typed per-action payloads (`.superpowers/sdd/scope-ui-commands-1.1.227.md`).
 3. Host sweep of remaining op-only gates. 4. Chat action requests. 5. Bot livestream (backlog).
 
@@ -1117,7 +1149,8 @@ track is validation-bound before anything new starts. Suite 621 green.
       (`HobbyBackoffPolicy`, 60 s to a 10-minute cap) with a throttled availability probe so an axe
       arriving in a reachable chest still wakes it within about five seconds. The product question
       underneath — should the axeless fallback punch one tree instead of refusing? — is still open
-      and is now a design choice, not a bug.
+      and is now a design choice, not a bug. ✅ 1.1.229: ordered woodcut punches a tree for its first
+      axe (`WoodcutAxeBootstrapPolicy`). Hobby runs still refuse (ruling, keeps HobbyBackoffPolicy).
 - [x] **Soul follow-ups deferred in 1.1.178/1.1.179** — all three were already closed and the
       handoff above was stale: word-boundary bot-name match (`SoulLocalSalience.
       mentionsBotNotLeading`, regex `\b`), `vetoed:roster-lost` pushes `nextEligibleAtMs`

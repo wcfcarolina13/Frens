@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.228-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.229-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.228** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.229** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1321,6 +1321,35 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
   - Bradley does: at 320x240 in the bot inventory: click, shift-click, drag-split items on both sides incl. armour and the last column, hover for tooltips, drop an item outside the panels, use the overlay tabs and scrollbar.
   - Claude watches for: no wrong-slot moves in `[bot-inv-` lines.
   - Pass when: every click hits the slot under the cursor and tooltips sit at the cursor.
+
+## Phase 6aa — Fresh-world woodcut, follow after tasks, tool wear, drop pickups (1.1.229)
+
+Best on a brand-new Survival world (the `frens-fresh` instance or a new world on Nirn) with a bot that has an empty inventory.
+
+- [ ] **Woodcut from nothing (1.1.229)**
+  - Bradley does: on a new world, give a fresh bot no items, stand by a tree near spawn and order woodcut.
+  - Claude watches for: `Woodcut axe bootstrap: <bot> has no axe, punching logs bare-handed`, then `has enough wood (logs=… planks=… sticks=…), crafting an axe`, then `crafted an axe, back to normal woodcut`. No `protection=admin-zone` or `protection=base-radius` rejects for trees near the Spawn base. No `A* pathfinding timed out` with the same from and to.
+  - Pass when: the bot says "No axe yet, so I'll punch a tree first.", punches a few logs, places a table, makes a wooden axe and keeps chopping. First chop within ~10 s of the order with trees adjacent.
+- [ ] **Your base's trees still protected (1.1.229)**
+  - Bradley does: on Nirn, order woodcut while standing inside your own base radius with trees around.
+  - Claude watches for: `protection=base-radius` rejects for those trees, same as 1.1.228.
+  - Pass when: the bot does not fell trees inside your base.
+- [ ] **Follow comes back after a task, no "Busy" (1.1.229)**
+  - Bradley does: with a bot following, order a short skill (woodcut one tree, or any task) and let it finish without stopping it.
+  - Claude watches for: `[FollowAssert] task-resume bot=… mode=follow … resumed=true`. No "Busy with another task right now." and no "Stopping follow command." in chat. If the task ended underground, no post-task trip home while it follows.
+  - Pass when: the bot follows you again after the task, with no wrong lines.
+- [ ] **No axe wear on dirt (1.1.229)**
+  - Bradley does: give a bot a copper or stone axe and a hotbar with dirt, let it woodcut a tall tree that needs a dirt pillar, and watch the pillar teardown.
+  - Claude watches for: `MiningTool` lines on dirt with `bare-hands` (or a shovel), never an axe. Plank bridge retracts using the axe (well under 3 s per plank).
+  - Pass when: the axe's durability doesn't drop during teardown.
+- [ ] **No crevice suffocation on pickups (1.1.229)**
+  - Bradley does: woodcut near uneven ground where drops fall into 1-high gaps.
+  - Claude watches for: `Drop sweep nudge skipped near …: no 2-high clearance`. No `nudged away from wall … to escape collision clip`.
+  - Pass when: the bot never takes suffocation damage while picking up and leaves items it can't safely reach.
+- [ ] **Unreachable drop given up fast (1.1.229)**
+  - Bradley does: while bots idle, leave a sapling or item up in leaves 3+ blocks above them (or wait for one to land there).
+  - Claude watches for: either no `[IdleSweep]` target at it, or `[IdleSweep] <bot> abandoning unreachable drop at … (dy=3+) … no progress for 3s`. If the item falls, the bot follows it to the new spot.
+  - Pass when: no bot stares at an unreachable item for more than a few seconds.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
