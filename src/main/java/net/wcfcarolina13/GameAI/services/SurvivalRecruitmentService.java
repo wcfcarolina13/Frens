@@ -160,7 +160,9 @@ public final class SurvivalRecruitmentService {
         if (player == null || player.isRemoved()) {
             return false;
         }
-        if (Frens.hasBotCommandPermission(player.getCommandSource())) {
+        boolean permission = Frens.hasBotCommandPermission(player.getCommandSource());
+        boolean host = net.wcfcarolina13.network.BotAccessGate.isHost(player);
+        if (WorldModeAccessPolicy.canChoose(permission, host, false)) {
             return true;
         }
         MinecraftServer server = player.getCommandSource().getServer();
@@ -168,7 +170,8 @@ public final class SurvivalRecruitmentService {
             return false;
         }
         ManualConfig.SurvivalRecruitmentState st = getState(server);
-        return st != null && st.canDelegateChooseWorldMode(player.getUuidAsString());
+        boolean delegated = st != null && st.canDelegateChooseWorldMode(player.getUuidAsString());
+        return WorldModeAccessPolicy.canChoose(permission, host, delegated);
     }
 
     public static void sendRecruitmentState(ServerPlayerEntity player) {
@@ -271,7 +274,8 @@ public final class SurvivalRecruitmentService {
         if (player == null || player.isRemoved()) {
             return false;
         }
-        if (Frens.isOperator(player)) {
+        // Operator or the integrated host: in singleplayer the host is the admin.
+        if (net.wcfcarolina13.network.BotAccessGate.isServerAdmin(player)) {
             return true;
         }
         MinecraftServer server = player.getCommandSource().getServer();
@@ -1162,8 +1166,8 @@ public final class SurvivalRecruitmentService {
         boolean authorized = false;
         if (Frens.isOperator(player)) {
             authorized = true;
-        } else if (!server.isDedicated()) {
-            // Singleplayer / integrated server convenience.
+        } else if (net.wcfcarolina13.network.BotAccessGate.isHost(player)) {
+            // The integrated-server host (singleplayer or LAN owner). LAN guests are not the host.
             authorized = true;
         } else if (st != null && st.isRecruited()) {
             String recruiter = st.getRecruitedByUuid();
@@ -1174,7 +1178,7 @@ public final class SurvivalRecruitmentService {
 
         if (!authorized) {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "You aren't authorized to reset recruitment in this world.");
-            ChatUtils.sendSystemMessage(player.getCommandSource(), "(Requires operator, or the original recruiter, or singleplayer/integrated server.)");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "(Requires an operator, the world host, or the original recruiter.)");
             return;
         }
 

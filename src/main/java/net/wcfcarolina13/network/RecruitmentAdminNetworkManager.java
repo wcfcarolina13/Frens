@@ -76,7 +76,7 @@ public final class RecruitmentAdminNetworkManager {
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
 
         if (action.equals("permissions_snapshot")) {
-            if (!Frens.isOperator(player)) {
+            if (!BotAccessGate.isServerAdmin(player)) {
                 ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
                 return;
             }
@@ -86,7 +86,7 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         if (action.startsWith("perm_global:")) {
-            if (!Frens.isOperator(player)) {
+            if (!BotAccessGate.isServerAdmin(player)) {
                 ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
                 return;
             }
@@ -103,7 +103,7 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         if (action.startsWith("perm_user:")) {
-            if (!Frens.isOperator(player)) {
+            if (!BotAccessGate.isServerAdmin(player)) {
                 ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
                 return;
             }
@@ -309,7 +309,7 @@ public final class RecruitmentAdminNetworkManager {
                 out.addAll(LearningModeService.handleAdminAction(server, player, action, botAlias));
             }
             case "autonomous_rescues_toggle" -> {
-                if (!Frens.isOperator(player)) {
+                if (!BotAccessGate.isServerAdmin(player)) {
                     out.add("Only server admins can change autonomous rescue policy.");
                     break;
                 }
@@ -414,7 +414,8 @@ public final class RecruitmentAdminNetworkManager {
             return;
         }
         PermissionsSnapshotData data = new PermissionsSnapshotData(
-                Frens.isOperator(player),
+                // Field name kept for the client parser: it means "may use admin controls" (op or host).
+                BotAccessGate.isServerAdmin(player),
                 SurvivalRecruitmentService.getAdminPermissionGlobals(server),
                 SurvivalRecruitmentService.getAdminPermissionUserOverrides(server),
                 SurvivalRecruitmentService.collectKnownPermissionUsers(server),

@@ -8,6 +8,7 @@ import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotAccessPolicy;
 import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
+import net.wcfcarolina13.GameAI.services.HostPermissionPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +75,15 @@ public final class BotAccessGate {
         MinecraftServer server = Frens.serverInstance;
         if (p == null || server == null) return false;
         return server.isHost(new PlayerConfigEntry(p.getGameProfile()));
+    }
+
+    /**
+     * Operator, or the integrated-server host ({@link HostPermissionPolicy#isServerAdmin}). For
+     * world-level and Admin-tab gates; LAN guests and dedicated-server non-ops are refused.
+     */
+    public static boolean isServerAdmin(ServerPlayerEntity p) {
+        if (p == null) return false;
+        return HostPermissionPolicy.isServerAdmin(Frens.isOperator(p), isHost(p));
     }
 
     /**

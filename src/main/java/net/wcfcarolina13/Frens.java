@@ -74,6 +74,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -162,10 +163,15 @@ public class Frens implements ModInitializer {
         if (player == null) {
             return true; // console / command block
         }
-        if (hasPermissionLevelCompat(source, 2) || hasPermissionLevelCompat(player, 2)) {
-            return true;
-        }
-        return isOperator(player);
+        boolean operator = hasPermissionLevelCompat(source, 2) || hasPermissionLevelCompat(player, 2)
+                || isOperator(player);
+        // The integrated-server host (singleplayer or LAN owner, never a LAN guest) passes even with
+        // commands off: vanilla lets them enable commands any time through Open to LAN, and every
+        // Frens button and key sends /bot. A dedicated server's isHost is always false.
+        MinecraftServer server = source.getServer();
+        boolean host = !operator && server != null
+                && server.isHost(new PlayerConfigEntry(player.getGameProfile()));
+        return net.wcfcarolina13.GameAI.services.HostPermissionPolicy.allowsBotCommands(false, operator, host);
     }
 
     // Intermediary ids (verified in the 1.21.11 Yarn mappings.tiny): LeveledPermissionPredicate is
@@ -908,6 +914,7 @@ public class Frens implements ModInitializer {
             // Cancel soul-communication generation and close its executors before general task
             // teardown below -- never blocks the server thread (see SoulRuntime.stop() Javadoc).
             net.wcfcarolina13.GameAI.souls.SoulRuntime.stop();
+            AI_CHAT_OFF_HINTED.clear();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
             // Persist any player-preference change still waiting for the coalesced tick flush.
             if (PREFERENCE_GATE.drainForShutdown() && CONFIG != null) {
@@ -1059,6 +1066,7 @@ public class Frens implements ModInitializer {
             // and chat recency, and local-chat director state (cooldown, last line, reply window)
             // — so nothing lingers for a player who is gone.
             net.wcfcarolina13.GameAI.souls.SoulRuntime.forgetPlayer(player.getUuid());
+            AI_CHAT_OFF_HINTED.remove(player.getUuid());
             // Speech floors are keyed by audience (a real player): drop the departing player's so a
             // quick rejoin does not start behind a stale floor (up to 20 s after a scene end).
             if (!BotEventHandler.isRegisteredBot(player)) {
@@ -1510,9 +1518,11 @@ public class Frens implements ModInitializer {
 
                 // Compatibility fallback for targeted single-bot action prompts.
                 // Keep this inside explicit-target routing so the raw parser doesn't process the same line again.
+                boolean inlineActed = false;
                 if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
-                    handleLegacyInlineActionPrompt(routedBots.get(0), sender, target.prompt());
+                    inlineActed = handleLegacyInlineActionPrompt(routedBots.get(0), sender, target.prompt());
                 }
+                maybeSendAiChatOffHint(routedBots, target, sender, inlineActed);
                 return;
             }
 
@@ -1808,21 +1818,25 @@ public class Frens implements ModInitializer {
         handleLegacyInlineActionPrompt(bot, sender, userPrompt);
     }
 
-    private static void handleLegacyInlineActionPrompt(ServerPlayerEntity bot, ServerPlayerEntity sender, String userPrompt) {
+    /**
+     * Returns true only when the line was recognised as an action request and handed to
+     * FunctionCallerV2 (whatever came of it), false for every early exit.
+     */
+    private static boolean handleLegacyInlineActionPrompt(ServerPlayerEntity bot, ServerPlayerEntity sender, String userPrompt) {
         if (bot == null || sender == null || userPrompt == null || userPrompt.isBlank()) {
-            return;
+            return false;
         }
         // Authorisation first: both the explicit-target fallback and the raw leading-name lookup
         // land here, so neither can drive a bot the sender doesn't own.
         if (!isLegacyChatAuthorized(sender, bot)) {
-            return;
+            return false;
         }
         // NLPProcessor's static init builds an OllamaAPI (and it imports DJL); both are compileOnly,
         // so without -PaiEnabled=true the first touch throws NoClassDefFoundError — an Error, which
         // would escape the CHAT_MESSAGE handler. Gate first (ollama4j + world/bot LLM toggles:
         // this parser drives the LLM through FunctionCallerV2), then catch linkage failures anyway.
         if (!prepareLegacyNlp(bot)) {
-            return;
+            return false;
         }
         NLPProcessor.Intent intent;
         try {
@@ -1832,10 +1846,10 @@ public class Frens implements ModInitializer {
                 LOGGER.warn("Legacy inline-action parser unavailable ({}: {}); ignoring inline action prompts.",
                         e.getClass().getSimpleName(), e.getMessage());
             }
-            return;
+            return false;
         }
         if (intent != NLPProcessor.Intent.REQUEST_ACTION) {
-            return;
+            return false;
         }
         try {
             // Constructor sets thread-local context used by the static run(..) entrypoint.
@@ -1850,6 +1864,36 @@ public class Frens implements ModInitializer {
                 FunctionCallerV2.clearContext();
             } catch (Throwable ignored) {
             }
+        }
+        return true;
+    }
+
+    /** Players who already saw the AI-chat-off notice this session; cleared on disconnect and stop. */
+    private static final Set<UUID> AI_CHAT_OFF_HINTED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Server thread (chat callback). A single bot was addressed by name, nothing answered and the
+     * soul master switch is off: tell the sender once per session how to turn AI chat on. A plain
+     * system notice like SoulChatRouter's, so neither the scripted nor the soul lane gates it.
+     */
+    private static void maybeSendAiChatOffHint(List<ServerPlayerEntity> routedBots, ChatTarget target,
+                                               ServerPlayerEntity sender, boolean inlineActed) {
+        if (sender == null || routedBots == null || routedBots.size() != 1 || routedBots.get(0) == null) {
+            return;
+        }
+        boolean soulMasterEnabled = net.wcfcarolina13.GameAI.souls.SoulRuntime.current()
+                .map(net.wcfcarolina13.GameAI.souls.SoulRuntime::isMasterEnabled)
+                .orElse(false);
+        boolean show = net.wcfcarolina13.GameAI.llm.AiChatOffHintPolicy.shouldHint(
+                !target.broadcast(),
+                !target.prompt().isEmpty(),
+                soulMasterEnabled,
+                false, // the legacy LLM route returns before this point when it handled the line
+                inlineActed,
+                isLegacyChatAuthorized(sender, routedBots.get(0)),
+                AI_CHAT_OFF_HINTED.contains(sender.getUuid()));
+        if (show && AI_CHAT_OFF_HINTED.add(sender.getUuid())) {
+            sender.sendMessage(net.minecraft.text.Text.literal(net.wcfcarolina13.GameAI.llm.AiChatOffHintPolicy.NOTICE), false);
         }
     }
 

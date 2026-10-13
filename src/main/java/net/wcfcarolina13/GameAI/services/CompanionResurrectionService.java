@@ -100,11 +100,12 @@ public final class CompanionResurrectionService {
             return ActionResult.SUCCESS;
         }
 
-        // Authorization: same spirit as recruitment reset (operators always; integrated server convenience; dedicated -> recruiter).
+        // Authorization: same as recruitment reset (operator, the integrated-server host but not a
+        // LAN guest, or the recruiter).
         boolean authorized = false;
         if (Frens.isOperator(player)) {
             authorized = true;
-        } else if (!server.isDedicated()) {
+        } else if (net.wcfcarolina13.network.BotAccessGate.isHost(player)) {
             authorized = true;
         } else {
             String recruiter = st.getRecruitedByUuid();
