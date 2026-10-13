@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Singleplayer "server is full" fix: auto-spawn waits for the host; 1.1.226 (2026-10-13)
+
+Reported by AiwanChu25 in the Frens Discord (#general, 2026-10-09): after spawning ~6–7 bots in singleplayer and leaving, rejoining any world failed with "server is full".
+
+- **Root cause** (verified in 1.21.11 bytecode): `MinecraftServer.getMaxPlayerCount()` is 8 and the integrated server does not override it; `PlayerManager.checkCanJoin` refuses when `players.size() >= max` and the singleplayer host gets no bypass. `BotControlApplier.applyPersistentSettings` auto-spawned every saved bot at `SERVER_STARTED`, i.e. before the host's login was checked. Fake players connect through `onPlayerConnect` directly (never `checkCanJoin`) but still fill the list, so they could take every slot ahead of the host.
+- **Fix** (`151bc342`): new pure `AutoSpawnPolicy`. On integrated servers (singleplayer / LAN host) auto-spawn is deferred until the first real player's JOIN (`BotControlApplier.onRealPlayerJoin`, once per session); dedicated servers still spawn at startup. Every auto-spawn task re-checks room on the server thread and never fills the last free slot (`RESERVED_SLOTS = 1`); `effectivePlayerCount` counts in-flight spawns so the async online-mode profile lookup cannot overfill. Skipped bots log one INFO line each and ops/host get one chat summary ("N companions were not auto-spawned… Use /bot spawn"). Manual `/bot spawn` is uncapped.
+- **Rulings:** keep one slot free (cost if wrong: a world with 7+ saved bots auto-spawns 6 next to the host; the rest need `/bot spawn`). Defer only on integrated servers (cost if wrong: none known — dedicated servers have no host racing the startup spawn). Controller read the full diff instead of a review agent (one finding, small change).
+- **Not explained yet:** the report says brand-new worlds failed too. The per-world key (level name + save-path hash) should prevent that; candidates are the global `config/frens/` sidecars (sleep log-off, pending travels) and legacy level-name-only keys. Waiting on the reporter's `latest.log`, `bot_world_state.json` and `settings.json5`. The deferral makes the lock-out impossible either way.
+- Tests 1738 → 1745.
+- **Field checks:** Phase 6x.
+
 ## Housekeeping: deploy targets cut to the Nirn instance only (2026-10-11)
 
 - Disk cleanup at Bradley's request deleted the Prism instances `1.21.10` (shown as "1.21.11") and `1.21.10 TEST` (shown as "testing"); neither had been played since April 2026 / December 2025. The live instance is `1.21.11` (shown as "1.21.11 Nirn").

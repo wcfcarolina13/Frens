@@ -3,7 +3,29 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-09-26 (1.1.225) — next session starts here
+## Session Handoff 2026-10-13 (1.1.226) — next session starts here
+
+**State:** main = origin/main @ 1.1.226. Suite 1745 green (1738 → 1745). Fix-only build from a Discord bug report.
+
+**Shipped in 1.1.226** (details, rulings and cost-if-wrong are in `changelog.md`):
+- **Singleplayer "server is full" lock-out** (AiwanChu25, Discord #general). Saved bots auto-spawned at SERVER_STARTED
+  filled the integrated server's fixed 8 slots before the host's login was checked. Now `AutoSpawnPolicy`: integrated
+  servers defer auto-spawn to the first real player's JOIN; every auto-spawn keeps one slot free; skipped bots get an
+  ops/host chat summary.
+
+**Open on this report:** the reporter says brand-new worlds failed too, which the per-world key should prevent.
+Suspects: global `config/frens/` sidecars (`sleep_logoff_state.json`, `pending_travels.json`), legacy level-name-only
+keys in `bot_world_state.json`. Asked the reporter for `latest.log`, `bot_world_state.json`, `settings.json5`.
+
+**Field checks pending:** Phase 6x (new). Also 6w, 6v, 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n.
+
+**Next (Bradley's order):**
+1. Modrinth publish of 1.1.226 (Bradley asked 2026-10-13), with an LLM-beta disclaimer and the Discord invite
+   https://discord.gg/eQJbWW4HUJ (never expires). Changelog draft: `.superpowers/sdd/modrinth/MODRINTH_CHANGELOG.md`.
+2. **1.1.227 = chat action requests.** Scope: `.superpowers/sdd/SCOPE-action-requests-1.1.224/README.md`.
+3. **Bot livestream** (backlog, P2 below): scope "how do bots behave with no owner nearby" first.
+
+## Session Handoff 2026-09-26 (1.1.225) — superseded
 
 **State:** main = origin/main @ 1.1.225. Suite 1738 green (1662 → 1738). This is the onboarding build: Frens works
 without Ollama, and turning on AI companions takes one checklist. The last public Modrinth release is still 1.1.1.
@@ -1708,6 +1730,21 @@ New mob-proximity and context-triggered ambient lines. All would extend the exis
 
 - Pool split landed: [PetProximityReactionService.java:79-87](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L79-L87) defines `ANIMAL_WELL_BEHAVED_LINES` (broad tamed-non-wolf trigger, 90s cooldown) and `MOUNT_QUALITY_LINES` ("That's a quality animal", mount-only trigger via `hasNearbyMountAnimal` at [lines 213-232](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L213-L232) covering tamed `AbstractHorseEntity` / any `CamelEntity` / `LlamaEntity` & `TraderLlamaEntity` as `AbstractHorseEntity` subclasses).
 - Cooldown bumped: [line 36](src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java#L36) — `MOUNT_QUALITY_COOLDOWN_MS = 5L * 60_000L`.
+
+## Bot livestream — cinematic Twitch/YouTube feed (Backlogged 2026-10-13)
+
+Bradley wants a live feed of the bots living their lives, with cinematic camera angles. Plan discussed 2026-10-13:
+- [ ] **Scope first: bots with no owner nearby.** Much behaviour orbits a commander. Verify what hobbies, idle/active
+  banter and SpeechFloor (keyed by a real-player audience) do with only a spectator account online. Decides whether a
+  "living world" mode (self-chosen goals: build, farm, fish, explore, go home at sunset) is needed.
+- [ ] **PoC director:** second MC account in spectator mode; client-side director cuts `/spectate <bot>` + third person
+  to whoever is speaking/acting (server already knows scene starts and speakers); OBS → unlisted YouTube.
+- [ ] **Cinematic camera:** free camera with a shot vocabulary (establishing wide, orbit, shot/reverse-shot in
+  dialogue, tracking on travel, event cutaways), smooth interpolation; OBS browser-source overlay fed by a small local
+  endpoint (speaker subtitles, current task, time of day).
+- [ ] **24/7 hardening:** launchd watchdog/restart, memory/log growth, LLM content filter + kill switch (Twitch ToS),
+  probably off-laptop hosting (server + Ollama + TTS + MC render + OBS encode overloads one M2 Pro). Twitch-chat
+  interaction later only, behind prompt-injection safeguards.
 
 ## Installer portability (Backlogged 2026-09-04 — only ever tested on the M2 Pro Mac)
 
