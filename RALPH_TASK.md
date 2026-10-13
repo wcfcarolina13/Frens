@@ -17,7 +17,7 @@ test_command: "./gradlew build -x test"
 Suspects: global `config/frens/` sidecars (`sleep_logoff_state.json`, `pending_travels.json`), legacy level-name-only
 keys in `bot_world_state.json`. Asked the reporter for `latest.log`, `bot_world_state.json`, `settings.json5`.
 
-**Field checks pending:** Phase 6x (new). Also 6w, 6v, 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n.
+**Field checks pending:** Phase 6x (new, 2 items; checklist now 240). Also 6w, 6v, 6u, 6t, 6s, 6r, 6q, 6p, 6o, 6b–6n.
 
 **Next (Bradley's order):**
 1. Modrinth publish of 1.1.226 (Bradley asked 2026-10-13), with an LLM-beta disclaimer and the Discord invite
