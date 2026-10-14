@@ -462,8 +462,8 @@ public final class LearningModeService {
     }
 
     public static int executeList(ServerCommandSource source, Integer countArg) {
-        if (!Frens.isOperator(source)) {
-            ChatUtils.sendSystemMessage(source, "You must be an operator to use /bot learn.");
+        if (!Frens.isServerAdmin(source)) {
+            ChatUtils.sendSystemMessage(source, "You must be an operator or the world host to use /bot learn.");
             return 0;
         }
         int count = Math.max(1, Math.min(countArg != null ? countArg : DEFAULT_LIST_COUNT, MAX_LIST_COUNT));
@@ -475,8 +475,8 @@ public final class LearningModeService {
     }
 
     public static int executeReport(ServerCommandSource source, String sessionRef) {
-        if (!Frens.isOperator(source)) {
-            ChatUtils.sendSystemMessage(source, "You must be an operator to use /bot learn.");
+        if (!Frens.isServerAdmin(source)) {
+            ChatUtils.sendSystemMessage(source, "You must be an operator or the world host to use /bot learn.");
             return 0;
         }
         List<String> lines = reportSession(source, sessionRef);
@@ -1381,8 +1381,8 @@ public final class LearningModeService {
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static List<String> statusLines(ServerCommandSource source) {
-        if (!Frens.isOperator(source)) {
-            return List.of("You must be an operator to use /bot learn.");
+        if (!Frens.isServerAdmin(source)) {
+            return List.of("You must be an operator or the world host to use /bot learn.");
         }
         ServerPlayerEntity player = source.getPlayer();
         if (player == null) {
@@ -1659,8 +1659,8 @@ public final class LearningModeService {
     }
 
     private static ServerPlayerEntity requireOperatorPlayer(ServerCommandSource source, String action) {
-        if (!Frens.isOperator(source)) {
-            ChatUtils.sendSystemMessage(source, "You must be an operator to use /bot learn.");
+        if (!Frens.isServerAdmin(source)) {
+            ChatUtils.sendSystemMessage(source, "You must be an operator or the world host to use /bot learn.");
             return null;
         }
         ServerPlayerEntity player = source.getPlayer();

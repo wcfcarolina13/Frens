@@ -93,7 +93,7 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneWandRequestPayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !Frens.isOperator(player.getCommandSource())) return;
+                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
                     player.getInventory().insertStack(createZoneWand());
                     ChatUtils.sendSystemMessage(player.getCommandSource(),
                             "\u00A7aZone Wand given. Right-click blocks to set corners.");
@@ -103,7 +103,7 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneConfirmPayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !Frens.isOperator(player.getCommandSource())) return;
+                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
 
                     String name = payload.name();
                     if (name == null || name.isBlank()) {
@@ -132,7 +132,7 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneEditPayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !Frens.isOperator(player.getCommandSource())) return;
+                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
 
                     String oldLabel = payload.label();
                     String newName = payload.newName();
@@ -155,7 +155,7 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneDeletePayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !Frens.isOperator(player.getCommandSource())) return;
+                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
 
                     String label = payload.label();
                     if (label == null || label.isBlank()) return;

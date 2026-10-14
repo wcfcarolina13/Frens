@@ -38,7 +38,7 @@ import java.util.function.Predicate;
  * {@code model <model>}, {@code enable <bot>}, {@code disable <bot>}, {@code reset <bot>},
  * {@code memory <bot>}, {@code digest <on|off|status>}.
  *
- * <p>{@code system}/{@code model} require {@link Frens#isOperator(ServerCommandSource)}: they
+ * <p>{@code system}/{@code model} require {@link Frens#isServerAdmin(ServerCommandSource)} (operator or integrated host): they
  * write {@link ManualConfig}, call {@link ManualConfig#save()}, and then AWAIT
  * {@link SoulRuntime#reloadSettings(ManualConfig)} before reporting success, so the live pipeline
  * never drifts from the persisted config. The bot-specific commands ({@code status} with an
@@ -282,8 +282,8 @@ final class BotSoulCommands {
 
     private static int executeSystem(CommandContext<ServerCommandSource> context, String modeArg) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the soul system switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the soul system switch."));
             return 0;
         }
         Optional<Boolean> parsed = parseOnOff(modeArg);
@@ -300,8 +300,8 @@ final class BotSoulCommands {
 
     private static int executeModel(CommandContext<ServerCommandSource> context, String rawModel) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the soul model."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the soul model."));
             return 0;
         }
         Optional<String> validated = validatedModel(rawModel);
@@ -346,8 +346,8 @@ final class BotSoulCommands {
 
     private static int executeVoiceOn(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the soul voice switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the soul voice switch."));
             return 0;
         }
         Optional<String> problem = validateVoiceConfig(
@@ -370,8 +370,8 @@ final class BotSoulCommands {
 
     private static int executeVoiceOff(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the soul voice switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the soul voice switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -513,8 +513,8 @@ final class BotSoulCommands {
     /** {@code /bot soul voice install <name>} — background download of one pinned Piper catalogue voice. */
     private static int executeVoiceInstall(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may install voices."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may install voices."));
             return 0;
         }
         String engine = Frens.CONFIG.getSoulVoiceEngine();
@@ -563,8 +563,8 @@ final class BotSoulCommands {
     /** {@code /bot soul voice assign <bot> <voice[#speaker]>} or {@code … default}. */
     private static int executeVoiceAssign(CommandContext<ServerCommandSource> context, String voiceOrNull) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may assign voices."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may assign voices."));
             return 0;
         }
         ManualConfig cfg = Frens.CONFIG;
@@ -613,8 +613,8 @@ final class BotSoulCommands {
     /** {@code /bot soul voice assign <bot> clone <ref.wav>[ | <transcript>]} — Dreamsleeve anchor. */
     private static int executeVoiceAssignClone(CommandContext<ServerCommandSource> context) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may assign voices."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may assign voices."));
             return 0;
         }
         ManualConfig cfg = Frens.CONFIG;
@@ -964,8 +964,8 @@ final class BotSoulCommands {
      */
     private static int executeRelationsToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the relation facts switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the relation facts switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -987,8 +987,8 @@ final class BotSoulCommands {
      */
     private static int executeStructuredToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the structured output switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the structured output switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -1035,8 +1035,8 @@ final class BotSoulCommands {
      */
     private static int executeDigestToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the memory digest switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the memory digest switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -1067,8 +1067,8 @@ final class BotSoulCommands {
      */
     private static int executeNoveltyToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the novelty rejection switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the novelty rejection switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -1104,8 +1104,8 @@ final class BotSoulCommands {
             source.sendError(Text.literal("This command must be run by a player."));
             return 0;
         }
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may prime a cooldown."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may prime a cooldown."));
             return 0;
         }
         java.util.Optional<SoulRuntime> runtime = SoulRuntime.current();
@@ -1145,8 +1145,8 @@ final class BotSoulCommands {
      */
     private static int executeBanterToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the banter switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the banter switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;
@@ -1185,8 +1185,8 @@ final class BotSoulCommands {
      */
     private static int executeLocalToggle(CommandContext<ServerCommandSource> context, boolean enabled) {
         ServerCommandSource source = context.getSource();
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only an operator may change the local-chat switch."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only an operator or the world host may change the local-chat switch."));
             return 0;
         }
         ManualConfig config = Frens.CONFIG;

@@ -29,6 +29,21 @@ class SoulGroundingTest {
     }
 
     @Test
+    void privateSoulAdmitsIntegratedHostLikeAnOperator() {
+        UUID owner = UUID.randomUUID();
+        UUID host = UUID.randomUUID();
+        // Host passes on someone else's bot and on an unowned (console-spawned) bot.
+        assertTrue(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, true, host, owner));
+        assertTrue(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, true, host, null));
+        // Non-op, non-host stays exact-owner only.
+        assertTrue(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, false, owner, owner));
+        assertFalse(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, false, host, owner));
+        assertFalse(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, false, host, null));
+        // The three-argument form keeps host = false.
+        assertFalse(CompanionCommunicationPolicy.isPrivateSoulAuthorized(false, host, owner));
+    }
+
+    @Test
     void remoteSnapshotOmitsPlayerState() {
         SoulTypes.BotSnapshot bot = mock(SoulTypes.BotSnapshot.class);
         SoulTypes.PlayerSnapshot player = new SoulTypes.PlayerSnapshot(

@@ -191,8 +191,10 @@ public class Frens implements ModInitializer {
         if (player == null) {
             return true; // console / command block
         }
-        boolean operator = hasPermissionLevelCompat(source, 2) || hasPermissionLevelCompat(player, 2)
-                || isOperator(player);
+        // ops.json only. The old hasPermissionLevel(int) reflection was always false on 1.21.11, and
+        // a direct getPermissions().hasPermission(...) call cannot compile here: the project's
+        // compile-time shim declares PermissionPredicate as an empty class, not the real interface.
+        boolean operator = isOperator(player);
         // The integrated-server host (singleplayer or LAN owner, never a LAN guest) passes even with
         // commands off: vanilla lets them enable commands any time through Open to LAN, and every
         // Frens button and key sends /bot. A dedicated server's isHost is always false.
@@ -340,25 +342,6 @@ public class Frens implements ModInitializer {
         } catch (Throwable ignored) {
         }
         return null;
-    }
-
-    private static boolean hasPermissionLevelCompat(Object target, int level) {
-        if (target == null) {
-            return false;
-        }
-        try {
-            var m = target.getClass().getMethod("hasPermissionLevel", int.class);
-            Object out = m.invoke(target, level);
-            return out instanceof Boolean b && b;
-        } catch (Throwable ignored) {
-        }
-        try {
-            var m = target.getClass().getMethod("hasPermission", int.class);
-            Object out = m.invoke(target, level);
-            return out instanceof Boolean b && b;
-        } catch (Throwable ignored) {
-        }
-        return false;
     }
 
     public static ScreenHandlerType<net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler> BOT_PLAYER_INV_HANDLER;
@@ -524,7 +507,7 @@ public class Frens implements ModInitializer {
             }
             // Lock mode: right-click to toggle lock on doors/gates/trapdoors (admin only, main hand only)
             if (hand == net.minecraft.util.Hand.MAIN_HAND
-                    && isOperator(serverPlayer.getCommandSource())
+                    && net.wcfcarolina13.network.BotAccessGate.isServerAdmin(serverPlayer)
                     && net.wcfcarolina13.GameAI.services.LockableBlockService.isLockModeActive(serverPlayer.getUuid())) {
                 var lockPos = hitResult.getBlockPos();
                 var lockState = serverWorld.getBlockState(lockPos);
@@ -537,7 +520,7 @@ public class Frens implements ModInitializer {
             // Zone wand: right-click to set corners (admin only, main hand only)
             if (hand == net.minecraft.util.Hand.MAIN_HAND
                     && net.wcfcarolina13.network.ZoneNetworkManager.isZoneWand(serverPlayer.getStackInHand(hand))
-                    && isOperator(serverPlayer.getCommandSource())) {
+                    && net.wcfcarolina13.network.BotAccessGate.isServerAdmin(serverPlayer)) {
                 net.wcfcarolina13.network.ZoneNetworkManager.handleWandUse(serverPlayer, hitResult.getBlockPos());
                 return net.minecraft.util.ActionResult.SUCCESS;
             }
@@ -728,7 +711,12 @@ public class Frens implements ModInitializer {
                 net.wcfcarolina13.network.LockModeTogglePayload.ID, (payload, context) ->
                         context.server().execute(() -> {
                             ServerPlayerEntity player = context.player();
-                            if (player == null || !isOperator(player.getCommandSource())) return;
+                            if (player == null) return;
+                            if (!net.wcfcarolina13.network.BotAccessGate.isServerAdmin(player)) {
+                                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                        "Lock mode is for operators and the world host.");
+                                return;
+                            }
                             boolean active = payload.active();
                             net.wcfcarolina13.GameAI.services.LockableBlockService.setLockMode(player.getUuid(), active);
                             net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,

@@ -289,26 +289,36 @@ public final class CompanionCommunicationPolicy {
     }
 
     /**
-     * Authorization gate for private (DIRECT) soul communication. Operators always pass;
-     * otherwise the actor must be the exact recorded owner — for that non-operator path, unlike
-     * {@link #isAllowedToControl}, an unowned bot is NOT eligible: a bot display name is not an
-     * identity boundary.
+     * Authorization gate for private (DIRECT) soul communication. Operators and the
+     * integrated-server host always pass; otherwise the actor must be the exact recorded owner.
+     * For that path, unlike {@link #isAllowedToControl}, an unowned bot is NOT eligible: a bot
+     * display name is not an identity boundary.
      */
     public static boolean isPrivateSoulAuthorized(ServerPlayerEntity actor, ServerPlayerEntity bot) {
         if (actor == null || bot == null) {
             return false;
         }
         boolean operator = Frens.isOperator(actor);
+        boolean host = net.wcfcarolina13.network.BotAccessGate.isHost(actor);
         UUID ownerId = resolveOwnerUuid(bot);
-        return isPrivateSoulAuthorized(operator, actor.getUuid(), ownerId);
+        return isPrivateSoulAuthorized(operator, host, actor.getUuid(), ownerId);
     }
 
     /**
-     * Pure projection of {@link #isPrivateSoulAuthorized(ServerPlayerEntity, ServerPlayerEntity)}.
+     * Pure projection of {@link #isPrivateSoulAuthorized(ServerPlayerEntity, ServerPlayerEntity)}
+     * without the host clause (host = false).
      * Public for the same cross-package testing reason as {@link #classifySoulReachability(boolean, double, boolean)}.
      */
     public static boolean isPrivateSoulAuthorized(boolean operator, UUID actorId, UUID ownerId) {
-        if (operator) {
+        return isPrivateSoulAuthorized(operator, false, actorId, ownerId);
+    }
+
+    /**
+     * Pure projection of {@link #isPrivateSoulAuthorized(ServerPlayerEntity, ServerPlayerEntity)}:
+     * operator or integrated host pass, otherwise only the exact recorded owner.
+     */
+    public static boolean isPrivateSoulAuthorized(boolean operator, boolean host, UUID actorId, UUID ownerId) {
+        if (operator || host) {
             return true;
         }
         return ownerId != null && ownerId.equals(actorId);

@@ -1168,7 +1168,7 @@ public final class BotHomeService {
      *
      * <p>Rules:
      * <ul>
-     *   <li>Operators can edit any base.</li>
+     *   <li>Operators and the integrated-server host can edit any base.</li>
      *   <li>Server-owned bases (owner = {@link #SERVER_OWNER_UUID}) are admin-only.</li>
      *   <li>Legacy bases (null/blank owner) are treated the same as server-owned — admin-only —
      *       until an admin explicitly reassigns ownership. Prevents drive-by edits on bases that
@@ -1180,12 +1180,14 @@ public final class BotHomeService {
      */
     public static boolean canEditBase(ServerPlayerEntity player, BaseEntry base) {
         if (player == null) return false;
-        if (isOperatorSafe(player)) return true;
-        if (base == null) return false;
-        String ownerUuid = base.ownerUuid();
-        if (ownerUuid == null || ownerUuid.isBlank()) return false; // legacy → admin-only
-        if (SERVER_OWNER_UUID.equals(ownerUuid)) return false;
-        return ownerUuid.equals(player.getUuid().toString());
+        // Same rule as the base remove/rename gate: operator or integrated host edits any base,
+        // otherwise only the stamped owner; SERVER-owned and legacy (blank owner) are admin-only.
+        return net.wcfcarolina13.network.BaseAccessPolicy.canEdit(
+                net.wcfcarolina13.network.BaseAccessPolicy.EntryKind.BASE,
+                player.getUuid().toString(),
+                base == null ? null : base.ownerUuid(),
+                isOperatorSafe(player),
+                net.wcfcarolina13.network.BotAccessGate.isHost(player));
     }
 
     private static boolean isOperatorSafe(ServerPlayerEntity player) {
