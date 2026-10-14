@@ -3,7 +3,25 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.229) — next session starts here
+## Session Handoff 2026-10-13 (1.1.230) — next session starts here
+
+**State:** main = origin/main @ 1.1.230. Suite 1937 green. **Codex seats paused** until Bradley says otherwise (plan
+downgraded): reviews and scoping go to Opus subagents.
+
+**Shipped in 1.1.230:** one-time woodcut nudge explaining why protected nearby trees are skipped before it walks off
+(`WoodcutProtectionNudgePolicy`, clears on server stop). Ruling confirmed by Bradley: player bases keep protecting
+their trees. 1.1.229 details in the block below.
+
+**Modrinth/Discord:** Bradley OK'd publishing 1.1.230 (covers 1.1.227–1.1.230) and a Discord announcement. Notes:
+`.superpowers/sdd/modrinth/MODRINTH_CHANGELOG_1.1.230.md`. See the changelog / memory for whether it went out.
+
+**Field checks pending:** Phase 6ab (1 item), 6aa (6), 6z … 6b; checklist now 253. Bradley runs them later.
+
+**Next (in order):**
+1. Multiplayer non-op owners: typed per-action payloads (`.superpowers/sdd/scope-ui-commands-1.1.227.md`).
+2. Host sweep of remaining op-only gates. 3. Chat action requests. 4. Fresh-install leftovers. 5. Bot livestream.
+
+## Session Handoff 2026-10-13 (1.1.229) — superseded
 
 **State:** main = origin/main @ 1.1.229. Suite 1927 green (1887 → 1927). On Modrinth: 1.1.226 only (1.1.227–1.1.229
 not published; Bradley publishes).
@@ -34,8 +52,7 @@ weapons+food-only inventory mining thrash (pre-existing), woodcut surface-stagin
 4. Fresh-install leftovers #5, #11, #12, #13, #15. 5. Bot livestream (backlog).
 
 **Needs Bradley:** publish 1.1.227–1.1.229 to Modrinth; the 1.1.226 changelog line "Bots can make their own wooden
-axe" is now true from 1.1.229 on (ordered woodcut). Should player bases also allow woodcut (TreeDetector's javadoc
-says base radius was meant to allow trees; behaviour since 2026-03-25 blocks them)?
+axe" is now true from 1.1.229 on (ordered woodcut). (Answered 2026-10-13: player bases stay protected, nudge added 1.1.230.)
 
 ## Session Handoff 2026-10-13 (1.1.228) — superseded
 

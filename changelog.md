@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Woodcut explains protected trees once; 1.1.230 (2026-10-13)
+
+Bradley's follow-up to 1.1.229: trees inside your own base stay protected, but on a new world it wasn't clear why a bot skipped the trees next to it and walked far away. One implementer (Opus), controller read the full diff (two small commits, no reviewer) and added the Guide text inline. Codex seats paused from here on (Bradley's ChatGPT plan downgraded).
+
+- **One-time protection nudge** (`e1383146`). When two scans in a row find only protected trees and the run is about to relocate (`WoodcutSkill` protected-only streak branch), the bot says once why. New pure `WoodcutProtectionNudgePolicy` picks the dominant reason: base radius "The trees around here are inside your base, so I'm leaving them alone and heading out to find others.", protected area, village (mapped village or fort buffer), beehive. Shared across bots, so only the first bot says each line.
+- **Guide line** (release commit). Guide → Woodcut adds: "Bots won't cut trees inside your base, a protected area or a mapped village. If those are the only trees nearby, the bot walks out to find others." and the no-axe punch-a-tree note. Bradley chose chat line + Guide line over a pop-up hint.
+- **Repeats on a new world** (`13605b71`). The said-set clears on server stop (`Frens` SERVER_STOPPING → `WoodcutSkill.clearProtectionNudges`). Village reasons share one key.
+- **Rulings:** speak at the relocation moment, not the first protected scan (cost if wrong: about two scans of silence first). Relocation after six ordinary failures stays silent (it isn't a protection decision).
+- Tests 1927 → 1937.
+
+**Field checks:** Phase 6ab in `docs/testing/FIELD_SESSION_1.1.202.md`.
+
 ## Fresh-world behaviour: woodcut punches its first axe, follow resumes after tasks, no axe wear on dirt, no crevice suffocation; 1.1.229 (2026-10-13)
 
 From the fresh-install test (`docs/testing/FRESH_INSTALL_1.1.226.md` #4, #9, #10, #14). Three read-only scopes, four implementers (Opus, disjoint files), batch review (Codex seat out of quota, rerun on Opus), one fix wave, scoped re-review.

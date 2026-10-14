@@ -1062,11 +1062,13 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "At the default (Until sunset), the bot cuts trees until dusk then stops.",
                                 "Use +/- to set a minimum tree count instead.",
-                                "Use Cleanup after large runs to gather leftovers quickly."
+                                "Use Cleanup after large runs to gather leftovers quickly.",
+                                "Bots won't cut trees inside your base, a protected area or a mapped village. If those are the only trees nearby, the bot walks out to find others.",
+                                "No axe? The bot punches a tree for wood, then makes a crafting table, sticks and a wooden axe."
                         ),
                         "bot skill woodcut [count] " + target,
                         "Actions menu count controls",
-                        "tree lumber logs"
+                        "tree lumber logs axe protected base walks away far"
                 ),
                 new GuideTopic(
                         "gather_wool",
