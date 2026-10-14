@@ -12,8 +12,8 @@ downgraded): reviews and scoping go to Opus subagents.
 (`WoodcutProtectionNudgePolicy`, clears on server stop). Ruling confirmed by Bradley: player bases keep protecting
 their trees. 1.1.229 details in the block below.
 
-**Modrinth/Discord:** Bradley OK'd publishing 1.1.230 (covers 1.1.227–1.1.230) and a Discord announcement. Notes:
-`.superpowers/sdd/modrinth/MODRINTH_CHANGELOG_1.1.230.md`. See the changelog / memory for whether it went out.
+**Modrinth/Discord:** 1.1.230 PUBLISHED (version ZwsAVkbE, covers 1.1.227–1.1.230) and announced in #announcements. Notes:
+`.superpowers/sdd/modrinth/MODRINTH_CHANGELOG_1.1.230.md`, uploader `publish-1.1.230.sh` (copy + edit for the next version).
 
 **Field checks pending:** Phase 6ab (1 item), 6aa (6), 6z … 6b; checklist now 253. Bradley runs them later.
 
