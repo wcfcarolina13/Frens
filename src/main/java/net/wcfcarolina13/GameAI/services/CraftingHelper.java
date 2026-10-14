@@ -1668,7 +1668,7 @@ public final class CraftingHelper {
             }
             if (distSq > 36.0D) { // >6 blocks away
                 say(source,
-                        "Give me a moment — I'll use the crafting table at "
+                        "Give me a moment. I'll use the crafting table at "
                                 + nearest.getX() + ", " + nearest.getY() + ", " + nearest.getZ() + ".");
             }
 

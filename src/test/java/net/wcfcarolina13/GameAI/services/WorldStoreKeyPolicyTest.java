@@ -206,4 +206,44 @@ class WorldStoreKeyPolicyTest {
         assertEquals(USE_OWN, WorldStoreKeyPolicy.decideZoneStore(true, true, 90_000, null, "x#1", false));
         assertEquals(START_EMPTY_NO_LEGACY, WorldStoreKeyPolicy.decideZoneStore(false, false, 90_000, null, "x#1", false));
     }
+
+    // ── the on-disk 1.1.234 data: a majority of base zones must match ─────────────────────────
+
+    private static final List<WorldStoreKeyPolicy.LegacyZone> DISK_ZONES = List.of(
+            new WorldStoreKeyPolicy.LegacyZone("base:home", 233, 8, 1254, 313, 88, 1334),
+            new WorldStoreKeyPolicy.LegacyZone("base:tower dungeon jungle", 846, 24, 1360, 926, 104, 1440),
+            new WorldStoreKeyPolicy.LegacyZone("base:deep dark 1", 259, -39, 1179, 339, 41, 1259),
+            new WorldStoreKeyPolicy.LegacyZone("base:spawn", -72, 27, -40, 8, 107, 40),
+            new WorldStoreKeyPolicy.LegacyZone("farm", 0, 0, 0, 5, 5, 5));
+
+    @Test
+    void nirnOnDiskMatchesThreeOfFourBaseZonesAndAdopts() {
+        List<WorldStoreKeyPolicy.LegacyBase> nirn = List.of(
+                new WorldStoreKeyPolicy.LegacyBase("home", 273, 48, 1294),
+                new WorldStoreKeyPolicy.LegacyBase("deep dark 1", 299, 1, 1219),
+                new WorldStoreKeyPolicy.LegacyBase("tower dungeon jungle", 886, 64, 1400),
+                new WorldStoreKeyPolicy.LegacyBase("spawn", 304, 74, 1248));
+        boolean belongs = WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, nirn, DISK_ZONES);
+        assertTrue(belongs);
+        assertEquals(ADOPT_LEGACY, WorldStoreKeyPolicy.decideZoneStore(false, true, 500_000, null, "Nirn#aa", belongs));
+    }
+
+    @Test
+    void oldTest1OnDiskMatchesOnlySpawnOneOfFourAndStartsEmpty() {
+        // Its spawn base is inside base:spawn (re-synced from test 1), but that is 1 of 4.
+        List<WorldStoreKeyPolicy.LegacyBase> test1 = List.of(
+                new WorldStoreKeyPolicy.LegacyBase("spawn", -32, 67, 0));
+        boolean belongs = WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, test1, DISK_ZONES);
+        assertFalse(belongs);
+        assertEquals(START_EMPTY_NOT_THIS_SAVE,
+                WorldStoreKeyPolicy.decideZoneStore(false, true, 90_000, null, "test 1#old", belongs));
+    }
+
+    @Test
+    void exactlyHalfOfTheBaseZonesIsNotAMajority() {
+        List<WorldStoreKeyPolicy.LegacyBase> half = List.of(
+                new WorldStoreKeyPolicy.LegacyBase("home", 273, 48, 1294),
+                new WorldStoreKeyPolicy.LegacyBase("spawn", -32, 67, 0));
+        assertFalse(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, half, DISK_ZONES));
+    }
 }

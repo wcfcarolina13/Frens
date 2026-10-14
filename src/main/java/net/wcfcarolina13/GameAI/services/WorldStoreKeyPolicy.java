@@ -134,10 +134,11 @@ public final class WorldStoreKeyPolicy {
      * Whether the legacy dimension-only zone and lock store (shared by every save before 1.1.234)
      * is this save's own. Game time alone let the first old world opened take it (review #5:
      * "test 1" would claim Nirn's zones and locked doors). It is this save's only when the save also
-     * has a legacy bot-home entry, and, if the zone file holds any {@code base:} auto-zones, at
-     * least one of them mirrors a base of that entry: same label and the zone box holds the base.
-     * The label alone is not enough, because every world gets an auto-created "spawn" base, so
-     * "base:spawn" would match any old world.
+     * has a legacy bot-home entry, and, if the zone file holds any {@code base:} auto-zones, more
+     * than half of them mirror a base of that entry: same label and the zone box holds the base.
+     * One match is not enough: every world gets an auto-created "spawn" base, and the legacy
+     * base:spawn zone was last re-synced from whichever save ran most recently (on Bradley's disk
+     * an old "test 1" matches 1 of 4 base zones, Nirn 3 of 4).
      *
      * @param hasLegacyHomeEntry this save's level name has a legacy bot-home entry
      * @param homeBases          the bases in that entry (any dimension of this save)
@@ -149,13 +150,14 @@ public final class WorldStoreKeyPolicy {
         if (!hasLegacyHomeEntry) {
             return false;
         }
-        boolean anyBaseZone = false;
+        int baseZones = 0;
+        int matched = 0;
         if (legacyZones != null) {
             for (LegacyZone zone : legacyZones) {
                 if (zone == null || !StaleAutoZonePolicy.isAutoZoneLabel(zone.label())) {
                     continue;
                 }
-                anyBaseZone = true;
+                baseZones++;
                 if (homeBases == null) {
                     continue;
                 }
@@ -163,12 +165,13 @@ public final class WorldStoreKeyPolicy {
                     if (base != null
                             && StaleAutoZonePolicy.autoZoneLabel(base.label()).equals(zone.label())
                             && zone.contains(base.x(), base.y(), base.z())) {
-                        return true;
+                        matched++;
+                        break;
                     }
                 }
             }
         }
-        return !anyBaseZone;
+        return baseZones == 0 || matched * 2 > baseZones;
     }
 
     /**
