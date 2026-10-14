@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.231-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.232-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.231** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.232** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1383,6 +1383,32 @@ Run the first item single-player BEFORE anything else in this session: every but
 - [ ] **Hunt target pick (1.1.231)**
   - Bradley does: as the guest, open Huntables and pick a target mob for their bot.
   - Pass when: the guest's bot starts hunting that mob.
+
+## Phase 6ad — Host sweep (1.1.232)
+
+Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a dedicated server op client or a LAN guest.
+
+- [ ] **Host with cheats off passes admin gates (1.1.232)**
+  - Bradley does: single-player world with cheats OFF. Resize the Spawn base in the Base screen, use the zone wand and the zone screen, toggle lock mode on a door, run `/bot soul status` and `/bot learn status`, change a bot skin, right-click a bot to open it.
+  - Pass when: each works with no "operator" refusal. The Guide now shows the admin topics (world mode reset, modes).
+- [ ] **Ops see the Admin tab on a server (1.1.232)**
+  - Bradley does: as an op on a dedicated server or as an op LAN guest, open a bot's inventory.
+  - Pass when: the Admin tab is visible and works. A non-op guest does NOT see it.
+- [ ] **Companion owner after a recruitment reset (1.1.232)**
+  - Bradley does: in recruitment mode, as the guest who owns the recruited companion, after a recruitment reset, press Companion come and home.
+  - Pass when: both work. A different non-op player is still refused.
+- [ ] **Wall grantees fortify (1.1.232)**
+  - Bradley does: host grants the guest access to the host's wall, then the guest runs fortify Patch and Resume on it, then Expand, then tries to remove or rename it in the Base screen.
+  - Pass when: Patch and Resume run, Expand gives "You cannot work on that wall.", remove and rename are refused. On a wall with no owner the guest gets "That wall has no owner. Claim it in the Base screen first."
+- [ ] **Skins are owner-checked (1.1.232)**
+  - Bradley does: as the guest, pick a preset skin for their own bot, then try the host's bot (Admin "allow everyone" ON and OFF).
+  - Pass when: own bot changes in both cases, the host's bot gives "You can only change the skin of your own bot." in both cases.
+- [ ] **Throttle notice (1.1.232)**
+  - Bradley does: click one bot button about 30 times fast.
+  - Pass when: one "Slow down, that click was ignored." line, not a flood.
+- [ ] **No bot-slot mismatch warnings (1.1.232)**
+  - Claude watches for: `[bot-access] bot-slot mismatch` across the whole session (every button in 6ac and 6ad).
+  - Pass when: none. Any hit names the action; report it so 1.1.233 can switch the check to refuse.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

@@ -3,7 +3,31 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.231) — next session starts here
+## Session Handoff 2026-10-13 (1.1.232) — next session starts here
+
+**State:** main = origin/main @ 1.1.232. Suite 2007 green (1979 → 2007). Codex seats still paused (Opus reviewers).
+Modrinth: 1.1.230 is the latest published. 1.1.231 and 1.1.232 NOT published (needs Bradley; copy
+`.superpowers/sdd/modrinth/publish-1.1.230.sh`, JAR >10 MB).
+
+**Shipped in 1.1.232 (host sweep, all 8 of Bradley's rulings D1-D8 as recommended):** `Frens.isServerAdmin`, and the integrated host
+passes lock mode, zone wand/UI, base resize (incl. Spawn), /bot soul and /bot learn admin, soul DMs, right-click open of a guest's
+bot. Wall grantees run fortify resume/patch/moat (not expand/remove/rename). Ownerless walls say "claim it first". Companion
+commands for the exact owner and host (`CompanionCommanderPolicy`). Skins owner-checked (`SkinChangePolicy`, closes any-player-reskins-any-bot).
+`ClientAdminCheck` replaces dead reflection (dedicated ops see the Admin tab, Guide admin topics show). Throttle notice.
+WARN-only `[bot-access] bot-slot mismatch`. Scope: `.superpowers/sdd/scope-host-sweep-1.1.232.md`. Details in changelog.
+
+**Field checks pending:** Phase 6ac FIRST (its item 1 single-player: nothing from 1.1.231 or 1.1.232 has run in game), then
+6ad (7 items, now 266), then 6ab, 6aa … 6b. 6ad item 7 decides whether 1.1.233 flips the bot-slot check to refuse.
+
+**Deferred (reasons in changelog):** D7 non-op zone edit/delete, D8 `isAllowedToControl` unowned→anyone (Set Home/Go To),
+anyone can map a village / claim an ownerless wall, typed /bot and SPAWN for owners, resurrection owner clause, D5 refuse
+mode, `allowEveryoneSkinChange` toggle now does nothing (relabel or remove), skin "not online" reply precedes owner check.
+
+**Next (in order):**
+1. After 6ac/6ad field results: 1.1.233 = bot-slot refuse mode (if no mismatches), D8, `allowEveryoneSkinChange` toggle cleanup.
+2. Chat action requests. 3. Fresh-install leftovers. 4. Bot livestream.
+
+## Session Handoff 2026-10-13 (1.1.231) — superseded
 
 **State:** main = origin/main @ 1.1.231. Suite 1979 green (1937 → 1979). Codex seats still paused (Opus reviewers).
 Modrinth: 1.1.230 is the latest published. 1.1.231 NOT published (needs Bradley; copy

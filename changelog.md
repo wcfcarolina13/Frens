@@ -2,6 +2,52 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Host sweep: the world host passes admin gates, wall grantees can fortify, owners command their companion and pick skins; 1.1.232 (2026-10-13)
+
+Follow-up to 1.1.231. A read-only scope (`.superpowers/sdd/scope-host-sweep-1.1.232.md`) listed about 45 real permission gates and classified each one. Bradley accepted all eight recommended rulings (D1-D8). The work ran in four lanes: A and C in parallel, then B and D. One Opus batch review found no Critical issues, then one fix wave. No Codex.
+
+- **`Frens.isServerAdmin(source)`** (`b424545d`): console passes, otherwise op or integrated host. A LAN guest and a dedicated-server non-op never pass, because javap shows `MinecraftDedicatedServer.isHost` is always false.
+- **The host passes world/admin gates** (`910518ea`): lock mode (right-click and toggle, which now replies instead of failing silently), zone wand and zone screen, base resize (`canEditBase` via `BaseAccessPolicy.canEdit(BASE,…,isHost)`, so the host can resize the Spawn base), `/bot learn`, the 14 `/bot soul` admin gates, and the inventory 8-block exemption. D6: the host passes the soul DM lane like an op, so per-bot `/bot soul … <bot>` now admits the host too. The dead `hasPermissionLevelCompat` reflection is removed (always false on 1.21.11).
+- **Bases, walls and skins** (`a63ed603`):
+  - Host clauses on the 8 BaseNetworkManager admin gates.
+  - D1: Grant Wall Access lets a grantee run fortify resume/patch/patch_auto/moat on that wall, but only on a wall that has a player owner, so leftover grants on unclaimed walls are ignored. Expand, remove and rename stay owner, op or host, and `BaseAccessPolicy.canEdit` is unchanged.
+  - D2: an ownerless wall tells non-ops "That wall has no owner. Claim it in the Base screen first."
+  - D4: pure `SkinChangePolicy`. A non-owner who is not an admin is refused even with "allow everyone" on; before, any player could reskin any bot. Owners can always pick presets for their own bot, and custom URLs need allowCustomSkins.
+- **Companion and `/bot` admin** (`10ea9eca`):
+  - D3: pure `CompanionCommanderPolicy` lets the recruiter, the exact config owner, an op or the host through. After a recruitment reset the owner can command their companion again. The quest advance uses the same rule.
+  - `/bot zone` admin and the zone wand use `Frens.isServerAdmin`.
+  - The `/bot open` pre-check uses the shared gate.
+  - The recruitment spawn bypass and the Wizard Tome stay op-only.
+- **Client admin check and dispatch hygiene** (`cca26a50`):
+  - `ui/ClientAdminCheck` replaces three reflective `hasPermissionLevel` checks that could never match on 1.21.11. Before, dedicated-server ops never saw the Admin tab, and the Guide's admin topics were hidden from everyone. The new check reads the real permission interface by reflection through the MappingResolver (the project's `PermissionPredicate` is a compile-only stub) and fails closed.
+  - The skin chooser offers owners presets.
+  - A throttled click says "Slow down, that click was ignored." at most once every 2 s.
+  - D5: a WARN-only post-parse check, `[bot-access] bot-slot mismatch`, catches the 1.1.231 CRAFT class of bug. It never refuses.
+  - Wall refusals give the reason.
+- **Fix wave** (`ffa08cc8`): right-clicking a bot to open it now uses the shared access gate, so the host can open a guest's bot, and `InventoryAccessPolicy` is deleted. The bot-slot warning is wrapped so it can never abort a dispatch. The leash javadoc is corrected.
+
+**Rulings (Bradley, 2026-10-13), cost if wrong:**
+- D1 grantees do fortify work only. If too narrow, grantees are refused expand (fails closed).
+- D2 ownerless walls need a claim first. Cost: one extra click.
+- D3 exact owner. Cost: none (isAllowedToControl would admit anyone on an unowned companion).
+- D4 owner presets. Cost: the server owner can't lock looks (cosmetic).
+- D5 WARN only. Cost: the window for an admin-spawned bot named like a keyword stays open one more build.
+- D6 host gets soul DMs. Cost: the LAN host can DM a guest's soul bot (an op already could).
+
+**Deferred:**
+- D7 non-op zone edit/delete.
+- D8 `isAllowedToControl` lets anyone control an unowned bot (Set Home / Go To).
+- Anyone can map a village, and anyone can claim an ownerless wall.
+- Typed `/bot` for owners, and SPAWN for owners.
+- The resurrection owner clause.
+- D5 refuse mode, after clean field logs.
+- `allowEveryoneSkinChange` no longer changes anything but is still shown in the Admin tab. Relabel or remove it next build.
+- The skin "not online" reply comes before the owner check (names are already in the tab list).
+
+Tests 1979 → 2007.
+
+**Field checks:** Phase 6ad.
+
 ## Multiplayer non-op owners can use the Frens UI for their own bots; 1.1.231 (2026-10-13)
 
 Before this build every Frens button and key sent a `/bot ...` chat command, and `/bot` is op-or-host only, so a non-op owner on a dedicated server or a LAN guest could not command their own bot from the UI. Bradley chose a scoped grant over rewriting each button as a direct service call: the UI sends a typed action, the server checks it and builds the `/bot` command itself, then runs it through the normal handlers with a one-call permission grant. Loop: scope (done 2026-10-13) → A (foundation) → B (FrensClient) → C, D1, D2 in parallel on separate files → two Opus reviewers (security, correctness) → one fix wave → scoped re-review. No Codex.
