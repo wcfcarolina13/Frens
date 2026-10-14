@@ -855,10 +855,6 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             net.wcfcarolina13.GameAI.services.TaskService.clearServerStopping();
-            // Per-save stores (1.1.234): before anything reads bases or recruitment state, let an
-            // old save adopt its pre-fingerprint data; a brand-new save starts empty.
-            net.wcfcarolina13.GameAI.services.BotHomeService.adoptLegacyWorldData(server);
-            net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.adoptLegacyState(server);
             // Re-create any executors that SERVER_STOPPING shut down. Without this,
             // exit-to-title + reload within the same Minecraft session leaves every
             // mod executor permanently dead and breaks /bot skill, mining, hunting,
@@ -881,6 +877,12 @@ public class Frens implements ModInitializer {
             LOGGER.info("Server instance stored!");
 
             System.out.println("Server instance is " + serverInstance);
+
+            // Per-save stores (1.1.234): after the executor restarts (the bot-home
+            // writer) and before anything reads bases or recruitment state, let an
+            // old save adopt its pre-fingerprint data; a brand-new save starts empty.
+            net.wcfcarolina13.GameAI.services.BotHomeService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.adoptLegacyState(server);
 
             // Seed the server-owned "Spawn" base on first start of each world. Idempotent per
             // world — if an admin deletes it later, the sticky flag keeps us from recreating it.
