@@ -1,5 +1,8 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.List;
+import java.util.function.Predicate;
+
 /**
  * Pure decisions behind {@code CraftingHelper.ensureCraftingStation}'s thread split: what a call on
  * the server thread may do to get a crafting table, and how loudly it says so.
@@ -85,12 +88,13 @@ public final class CraftingStationPolicy {
 
     /**
      * Whether a "couldn't place a crafting table" chat goes through the shared crafting-table
-     * message throttle (at most one such line per bot per 30 s) instead of straight to chat. On the
-     * server thread a failed placement no longer takes seconds, so an every-second caller would
-     * otherwise send it every second.
+     * message throttle (at most one such line per bot per 30 s) instead of straight to chat. Always:
+     * on the server thread an every-second caller would send it every second, and on a worker one
+     * tool craft tried a station per material and sent it once each (1.1.234 playthrough #2). The
+     * throttled send also quiets the "I need a crafting table" line its caller sends next.
      */
     public static boolean throttlesFailureChat(boolean onServerThread) {
-        return onServerThread;
+        return true;
     }
 
     /**
@@ -102,11 +106,27 @@ public final class CraftingStationPolicy {
     }
 
     /**
-     * Chat line after crafting tables. The only caller ({@code ensureCraftingStation}) places the
-     * table itself and reports its own placement failures, so the line no longer tells the player
-     * to run a place command.
+     * Which tool materials a craft tries, in order. A named material ({@code strict}) is tried as
+     * given so its shortfall line can be reported. Otherwise only materials the bot holds enough of
+     * for one tool are tried: each try starts with a station check (crafting and placing a table),
+     * so a bot holding only wood used to craft a table for a diamond axe first. When it holds none,
+     * the first in order is still tried once, so a chest pull inside that try can feed the craft.
      */
-    public static String craftedTablesLine(int crafts) {
-        return "Crafted " + crafts + " crafting table(s).";
+    public static <T> List<T> materialsToTry(List<T> ordered,
+                                             Predicate<T> heldEnough,
+                                             boolean strict) {
+        if (ordered == null || ordered.isEmpty()) {
+            return List.of();
+        }
+        if (strict) {
+            return ordered;
+        }
+        List<T> held = ordered.stream().filter(heldEnough).toList();
+        return held.isEmpty() ? List.of(ordered.get(0)) : held;
+    }
+
+    /** Planks on hand for a wooden head: loose planks plus four per log. */
+    public static int plankEquivalent(int planks, int logs) {
+        return Math.max(0, planks) + 4 * Math.max(0, logs);
     }
 }

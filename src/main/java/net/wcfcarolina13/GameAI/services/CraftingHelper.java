@@ -306,6 +306,11 @@ public final class CraftingHelper {
         ChatUtils.sendSystemMessage(source, msg.isEmpty() ? fallback : msg);
     }
 
+    /**
+     * Crafts tables from planks without a chat line. The only caller is ensureCraftingStation, where
+     * the table is a sub-step of another craft: the player asked for the tool, and a placement
+     * failure right after would make two lines for one problem.
+     */
     public static boolean craftCraftingTable(ServerCommandSource source, ServerPlayerEntity bot, ServerPlayerEntity commander, int amountRequested) {
         if (bot == null || source == null) {
             return false;
@@ -317,7 +322,7 @@ public final class CraftingHelper {
 
         int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested);
         if (crafts > 0) {
-            ChatUtils.sendSystemMessage(source, CraftingStationPolicy.craftedTablesLine(crafts));
+            LOGGER.info("Crafted {} crafting table(s) for a station sub-step", crafts);
             return true;
         }
         return false;
@@ -1235,10 +1240,24 @@ public final class CraftingHelper {
         }
 
         ToolShortfall shortfall = strictMaterial ? new ToolShortfall() : null;
-        for (ToolMaterial mat : materials) {
+        List<ToolMaterial> toTry = CraftingStationPolicy.materialsToTry(materials,
+                mat -> headMaterialOnHand(bot, mat) >= headCountFor(kind, mat), strictMaterial);
+        if (toTry.size() < materials.size()) {
+            LOGGER.info("Crafting {}: trying {} of {} materials (others not held)",
+                    kind.name().toLowerCase(Locale.ROOT), toTry.size(), materials.size());
+        }
+        for (ToolMaterial mat : toTry) {
             int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat, shortfall);
             if (crafts > 0) {
                 return crafts;
+            }
+            if (crafts == STATION_UNAVAILABLE) {
+                // No table for one material is no table for any: stop here, the station already
+                // said why (throttled), and "Missing materials" would be the wrong diagnosis.
+                if (shortfall != null && shortfall.message != null && source != null) {
+                    ChatUtils.sendSystemMessage(source, shortfall.message);
+                }
+                return 0;
             }
         }
         if (shortfall != null) {
@@ -1279,6 +1298,33 @@ public final class CraftingHelper {
         return ToolCraftShortfallPolicy.message(toolLabel(kind, mat), amount, reqs);
     }
 
+    /** {@link #craftToolWithMaterial}'s answer when no crafting table could be reached or placed. */
+    private static final int STATION_UNAVAILABLE = -1;
+
+    /** Head items one tool of this kind takes. */
+    private static int headCountFor(ToolKind kind, ToolMaterial mat) {
+        return switch (kind) {
+            case SHOVEL -> 1;
+            case HOE -> 2;
+            case SWORD -> 2;
+            default -> mat.headCount();
+        };
+    }
+
+    /** Head material in the bot's own inventory; for wood, planks plus what its logs would make. */
+    private static int headMaterialOnHand(ServerPlayerEntity bot, ToolMaterial mat) {
+        if (mat.headItem().equals(Items.OAK_PLANKS)) {
+            int logs = InventoryIterator.count(bot,
+                    s -> s != null && !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS));
+            return CraftingStationPolicy.plankEquivalent(countPlanks(bot), logs);
+        }
+        return countItem(bot, mat.headItem());
+    }
+
+    /**
+     * Crafts up to {@code amount} tools of one material. Returns how many were made, or
+     * {@link #STATION_UNAVAILABLE} when no crafting table could be had.
+     */
     private static int craftToolWithMaterial(ServerPlayerEntity bot,
                                              ServerCommandSource source,
                                              ServerPlayerEntity commander,
@@ -1291,12 +1337,7 @@ public final class CraftingHelper {
             case SHOVEL -> 2;
             default -> 2;
         };
-        int headCount = switch (kind) {
-            case SHOVEL -> 1;
-            case HOE -> 2;
-            case SWORD -> 2;
-            default -> mat.headCount();
-        };
+        int headCount = headCountFor(kind, mat);
 
         // Ensure crafting table nearby for 3x3 recipes
         if (!ensureCraftingStation(bot, source)) {
@@ -1308,7 +1349,7 @@ public final class CraftingHelper {
                     shortfall.message = line + " I'd also need a crafting table nearby.";
                 }
             }
-            return 0;
+            return STATION_UNAVAILABLE;
         }
 
         int neededSticks = stickCount * amount;
@@ -1846,7 +1887,11 @@ public final class CraftingHelper {
         }
     }
 
-    /** A placement failure told to the player: as always off the server thread, through the table-message throttle on it. */
+    /**
+     * A placement failure told to the player through the table-message throttle (see
+     * {@link CraftingStationPolicy#throttlesFailureChat}), which also quiets the "I need a crafting
+     * table" line the caller sends right after.
+     */
     private static void tellStationFailure(ServerPlayerEntity bot, ServerCommandSource source, boolean onServerThread, String msg) {
         if (CraftingStationPolicy.throttlesFailureChat(onServerThread)) {
             sendCraftTableNeededOnce(bot, source, msg);

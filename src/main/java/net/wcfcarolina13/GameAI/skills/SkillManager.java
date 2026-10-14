@@ -47,7 +47,7 @@ public final class SkillManager {
     private static final int DROP_SWEEP_MAX_TARGETS = 6;
     private static final long DROP_SWEEP_MAX_DURATION_MS = 10_000L;
 
-    // Ephemeral woodcut state (kept across woodcut/woodcut_cleanup runs, cleared when any other skill starts).
+    // Ephemeral woodcut state (kept across woodcut/woodcut_cleanup/drop_sweep runs, cleared when any other skill starts).
     private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
     private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
     private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
@@ -207,7 +207,10 @@ public final class SkillManager {
             if (context != null && context.sharedState() != null
                     && name != null
                     && !"woodcut".equalsIgnoreCase(name)
-                    && !"woodcut_cleanup".equalsIgnoreCase(name)) {
+                    && !"woodcut_cleanup".equalsIgnoreCase(name)
+                    // drop_sweep only picks up items, and players run it between a woodcut and
+                    // its cleanup; wiping here left the woodcut's scaffold for good.
+                    && !"drop_sweep".equalsIgnoreCase(name)) {
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
                 context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY);

@@ -124,8 +124,9 @@ class CraftingStationPolicyTest {
     }
 
     @Test
-    void placementFailureChatIsThrottledOnlyOnTheServerThread() {
-        assertFalse(CraftingStationPolicy.throttlesFailureChat(WORKER));
+    void placementFailureChatIsThrottledOnEveryThread() {
+        // 1.1.234 #2: a worker tool craft sent "I couldn't place a crafting table here." once per material.
+        assertTrue(CraftingStationPolicy.throttlesFailureChat(WORKER));
         assertTrue(CraftingStationPolicy.throttlesFailureChat(SERVER));
     }
 
@@ -303,11 +304,43 @@ class CraftingStationPolicyTest {
     }
 
     @Test
-    void craftedTablesLineDoesNotSendThePlayerToAPlaceCommand() {
-        String line = CraftingStationPolicy.craftedTablesLine(2);
-        assertEquals("Crafted 2 crafting table(s).", line);
-        assertFalse(line.contains("/bot place"));
-        assertFalse(line.contains(";"));
-        assertFalse(line.contains("\u2014"));
+    void tableCraftedAsAStationSubStepSaysNothingInChat() throws IOException {
+        String body = bodyOf(craftingHelperSource(), "public static boolean craftCraftingTable(");
+        assertFalse(body.contains("ChatUtils.sendSystemMessage("), "the sub-step table craft must not chat");
+    }
+
+    // ── tool material order ──────────────────────────────────────────────────────────────────
+
+    @Test
+    void nonStrictCraftTriesOnlyHeldMaterialsInOrder() {
+        List<String> order = List.of("diamond", "iron", "stone", "wood");
+        List<String> held = List.of("stone", "wood");
+        assertEquals(List.of("stone", "wood"), CraftingStationPolicy.materialsToTry(order, held::contains, false));
+    }
+
+    @Test
+    void nonStrictCraftWithNothingHeldStillTriesTheFirstMaterialOnce() {
+        List<String> order = List.of("wood", "diamond", "iron");
+        assertEquals(List.of("wood"), CraftingStationPolicy.materialsToTry(order, m -> false, false));
+    }
+
+    @Test
+    void strictCraftTriesEveryNamedMaterialHeldOrNot() {
+        List<String> order = List.of("cobblestone", "cobbled_deepslate", "blackstone");
+        assertEquals(order, CraftingStationPolicy.materialsToTry(order, m -> false, true));
+    }
+
+    @Test
+    void emptyMaterialListTriesNothing() {
+        assertTrue(CraftingStationPolicy.materialsToTry(List.<String>of(), m -> true, false).isEmpty());
+        assertTrue(CraftingStationPolicy.materialsToTry((List<String>) null, m -> true, false).isEmpty());
+    }
+
+    @Test
+    void plankEquivalentCountsFourPlanksPerLog() {
+        assertEquals(0, CraftingStationPolicy.plankEquivalent(0, 0));
+        assertEquals(3, CraftingStationPolicy.plankEquivalent(3, 0));
+        assertEquals(6, CraftingStationPolicy.plankEquivalent(2, 1));
+        assertEquals(4, CraftingStationPolicy.plankEquivalent(-1, 1));
     }
 }

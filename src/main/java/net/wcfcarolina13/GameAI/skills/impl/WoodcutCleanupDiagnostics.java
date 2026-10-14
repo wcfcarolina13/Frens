@@ -13,8 +13,12 @@ final class WoodcutCleanupDiagnostics {
                                    int rejectedFullTree,
                                    int rejectedGrounded,
                                    String protectedReasonSummary) {
-        boolean hasBlockedOrRejectedFloaters() {
-            return blockedProtected > 0 || blockedHuman > 0 || rejectedFullTree > 0 || rejectedGrounded > 0;
+        /**
+         * Floaters cleanup wanted but was not allowed to touch (protected zone, next to a player
+         * build). Rejections (a live full tree, a grounded log) are not cleanup targets at all.
+         */
+        boolean hasBlockedFloaters() {
+            return blockedProtected > 0 || blockedHuman > 0;
         }
 
         String formatCounts() {
@@ -57,5 +61,66 @@ final class WoodcutCleanupDiagnostics {
                 stats.formatCounts(),
                 radius,
                 verticalRange);
+    }
+
+    /** Consecutive async scans that merged nothing into an empty list before the sweep stops. */
+    static final int EMPTY_MERGE_STOP_STREAK = 2;
+
+    /**
+     * Whether the target loop should stop: {@code consecutiveEmptyMerges} async full scans in a row
+     * came back with nothing new while the cached list was empty. Without this the loop relaunched
+     * a scan every second until its deadline.
+     */
+    static boolean shouldStopEmpty(int consecutiveEmptyMerges) {
+        return consecutiveEmptyMerges >= EMPTY_MERGE_STOP_STREAK;
+    }
+
+    /**
+     * Whether the run left nothing behind: no remembered, overhead or visible leftover logs, and
+     * when nothing was even attempted, no floater it was blocked from touching. Live full trees and
+     * grounded logs the scan rejected are not leftovers.
+     */
+    static boolean isSuccess(int remainingRemembered,
+                             int remainingOverhead,
+                             int remainingLogs,
+                             int logsMined,
+                             int attemptedTargets,
+                             CleanupScanStats stats) {
+        if (remainingRemembered != 0 || remainingOverhead != 0 || remainingLogs != 0) {
+            return false;
+        }
+        boolean blocked = stats != null && stats.hasBlockedFloaters();
+        return !(logsMined == 0 && attemptedTargets == 0 && blocked);
+    }
+
+    /** A successful run that found nothing to mine and removed nothing. */
+    static boolean isNothingToDo(boolean success, int logsMined, int scaffoldMined) {
+        return success && logsMined == 0 && scaffoldMined == 0;
+    }
+
+    /**
+     * The one sentence the player sees when cleanup finishes. The stat summary
+     * ({@link #buildCompletionSummary}) stays in the log.
+     */
+    static String playerLine(boolean success, int logsMined, int scaffoldMined) {
+        if (!success) {
+            if (logsMined <= 0 && scaffoldMined <= 0) {
+                return "I couldn't reach the blocks left here.";
+            }
+            return "Cleaned up what I could, a few blocks are out of reach.";
+        }
+        if (isNothingToDo(true, logsMined, scaffoldMined)) {
+            return "Nothing left to clean up here.";
+        }
+        String logs = logsMined > 0 ? countPhrase(logsMined, "log", "logs") : null;
+        String scaffold = scaffoldMined > 0 ? countPhrase(scaffoldMined, "scaffold block", "scaffold blocks") : null;
+        if (logs != null && scaffold != null) {
+            return "Cleaned up " + logs + " and " + scaffold + ".";
+        }
+        return "Cleaned up " + (logs != null ? logs : scaffold) + ".";
+    }
+
+    private static String countPhrase(int count, String singular, String plural) {
+        return count + " " + (count == 1 ? singular : plural);
     }
 }

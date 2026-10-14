@@ -292,6 +292,7 @@ public final class WoodcutCleanupSkill implements Skill {
         int failures = 0;
         int attemptedTargets = 0;
         int emptyVisibleLogPasses = 0;
+        int consecutiveEmptyMerges = 0;
         Map<Long, Long> failedLogCooldowns = new HashMap<>();
         // Positions already classified as non-actionable (full tree, grounded, human, etc.).
         // Persists across rescans so we skip expensive BFS/tree-detection on unchanged blocks.
@@ -348,10 +349,18 @@ public final class WoodcutCleanupSkill implements Skill {
                         }
                         LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total",
                                 added, cachedTargets.size());
+                        consecutiveEmptyMerges = (added == 0 && cachedTargets.isEmpty())
+                                ? consecutiveEmptyMerges + 1
+                                : 0;
                     } catch (Exception e) {
                         LOGGER.warn("woodcut_cleanup async scan failed: {}", e.getMessage());
                     }
                     asyncScan = null;
+                    if (WoodcutCleanupDiagnostics.shouldStopEmpty(consecutiveEmptyMerges)) {
+                        LOGGER.info("woodcut_cleanup: {} full scans in a row found nothing to do; finishing",
+                                consecutiveEmptyMerges);
+                        break;
+                    }
                 }
 
                 // ── Rescan when needed ──────────────────────────────────────
@@ -436,6 +445,7 @@ public final class WoodcutCleanupSkill implements Skill {
                     continue;
                 }
                 emptyVisibleLogPasses = 0;
+                consecutiveEmptyMerges = 0;
 
                 // ── Pick next target from cached list ───────────────────────
                 CleanupTarget next = cachedTargets.remove(0);
@@ -732,58 +742,31 @@ public final class WoodcutCleanupSkill implements Skill {
         int remainingOverhead = (int) remainingVisibleLogs.stream()
                 .filter(t -> t.kind() == CleanupTargetKind.OVERHEAD_SUSPENDED)
                 .count();
-        String summary;
-        if (remainingRemembered == 0 && remainingOverhead == 0 && remainingVisibleLogs.isEmpty()) {
-            if (logsMined == 0 && attemptedTargets == 0 && remainingStats.hasBlockedOrRejectedFloaters()) {
-                summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
-                        false,
-                        logsMined,
-                        scaffoldMined,
-                        attemptedTargets,
-                        radius,
-                        verticalRange,
-                        remainingRemembered,
-                        remainingOverhead,
-                        remainingVisibleLogs.size(),
-                        remainingStats
-                );
-            } else {
-                summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
-                        true,
-                        logsMined,
-                        scaffoldMined,
-                        attemptedTargets,
-                        radius,
-                        verticalRange,
-                        remainingRemembered,
-                        remainingOverhead,
-                        remainingVisibleLogs.size(),
-                        remainingStats
-                );
-            }
-        } else {
-            summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
-                    false,
-                    logsMined,
-                    scaffoldMined,
-                    attemptedTargets,
-                    radius,
-                    verticalRange,
-                    remainingRemembered,
-                    remainingOverhead,
-                    remainingVisibleLogs.size(),
-                    remainingStats
-            );
-        }
+        boolean success = WoodcutCleanupDiagnostics.isSuccess(
+                remainingRemembered,
+                remainingOverhead,
+                remainingVisibleLogs.size(),
+                logsMined,
+                attemptedTargets,
+                remainingStats);
+        String summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
+                success,
+                logsMined,
+                scaffoldMined,
+                attemptedTargets,
+                radius,
+                verticalRange,
+                remainingRemembered,
+                remainingOverhead,
+                remainingVisibleLogs.size(),
+                remainingStats
+        );
         LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={}]",
                 summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead);
-        boolean success = remainingRemembered == 0
-                && remainingOverhead == 0
-                && remainingVisibleLogs.isEmpty()
-                && !(logsMined == 0 && attemptedTargets == 0 && remainingStats.hasBlockedOrRejectedFloaters());
+        String playerLine = WoodcutCleanupDiagnostics.playerLine(success, logsMined, scaffoldMined);
         return success
-                ? SkillExecutionResult.success(summary)
-                : SkillExecutionResult.failure(summary);
+                ? SkillExecutionResult.success(playerLine)
+                : SkillExecutionResult.failure(playerLine);
     }
 
     @SuppressWarnings("unchecked")
