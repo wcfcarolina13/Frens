@@ -3,7 +3,30 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.232) — next session starts here
+## Session Handoff 2026-10-13 (1.1.233) — next session starts here
+
+**State:** main = origin/main @ 1.1.233. Suite 2011 green. Codex seats still paused (Opus reviewers). Modrinth: 1.1.230 is
+the latest published; 1.1.231–1.1.233 NOT published (needs Bradley; copy `.superpowers/sdd/modrinth/publish-1.1.230.sh`).
+This session shipped 1.1.231, 1.1.232, 1.1.233 back to back; start the next build in a FRESH session.
+
+**Shipped in 1.1.233:** D8 (Set Home / Go To via BotAccessGate, unowned bots no longer open to anyone, isAllowedToControl
+deleted), dead "allow everyone to change skins" toggle removed (config key + wire field kept), selectBestTool blank-avoid
+no-op fixed, teardown uses a pickaxe only for tool-required drops, leaves never use shears (saplings still drop), woodcut
+cleanup's off-thread tool swap removed, crafting table line no longer says "run /bot place". Details in changelog.
+
+**Field checks pending — order matters:** 6ac item 1 FIRST (single-player buttons; nothing from 1.1.231–1.1.233 has run in
+game), rest of 6ac, 6ad, 6ae (4 items, now 270), then 6ab … 6b.
+
+**Deferred:** ToolSelector shears-for-leaves when not preserving, cleanup hand fallback slot 0, MovementService off-thread
+tool swaps, BotActions.moveRelative same-cell teleport, D7 non-op zone edit/delete, anyone can map a village / claim an
+ownerless wall, typed /bot and SPAWN for owners, resurrection owner clause.
+
+**Next (in order):**
+1. After 6ac/6ad results: bot-slot check refuse mode (6ad item 7 clean), any field fixes.
+2. Chat action requests (design interview with Bradley first; memory note project_action_requests_next).
+3. Fresh-install leftovers. 4. Bot livestream.
+
+## Session Handoff 2026-10-13 (1.1.232) — superseded
 
 **State:** main = origin/main @ 1.1.232. Suite 2007 green (1979 → 2007). Codex seats still paused (Opus reviewers).
 Modrinth: 1.1.230 is the latest published. 1.1.231 and 1.1.232 NOT published (needs Bradley; copy

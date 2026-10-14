@@ -2,6 +2,38 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Cleanup: unowned bots no longer open to anyone, dead skin toggle removed, tool picks fixed; 1.1.233 (2026-10-13)
+
+Third build of the night. These items didn't need field results: D8 (accepted with the 1.1.232 rulings), the skin toggle 1.1.232 made pointless, and the 1.1.229 tool deferrals. A read-only scope corrected two premises: `isAllowedToControl` had ONE caller, and ManualConfig uses Gson, not Jackson. It also dropped the "Baritone start==goal" item, which was already handled (`BaritoneStylePathFinder` tests the goal on the first pop). Three Opus implementers on disjoint files, one Opus review, one fix wave whose diff the controller read. No Codex.
+
+- **D8, Set Home and Go To** (`95d11559`). `BaseNetworkManager.resolveControlledBot` uses `BotAccessGate.permits` (owner, op or host). An unowned bot is no longer controllable by anyone, and a missing config admits only ops and the host. `isAllowedToControl` is deleted.
+- **Dead skin toggle removed** (`e9e66b13`). Since 1.1.232, "allow everyone to change skins" changed nothing. Its Admin tab toggle, per-player permission row, server action, service accessors and client mirror are gone. The ManualConfig field stays `@Deprecated`, so a downgrade keeps the value. The `RecruitmentStatePayload` boolean stays on the wire, always false, so 1.1.232 and 1.1.233 clients and servers still talk. A non-owner now gets the skin refusal before the "not online" reply.
+- **Tool picks** (`94a82b17`):
+  - `selectBestTool(bot, x, "")` was a silent no-op (`key.contains("")` is always true), so the shears and pickaxe picks never ran. A blank avoid is now ignored (`HarmlessToolPolicy.isAvoided`).
+  - Scaffold teardown holds a pickaxe only for blocks that need a tool to drop (stone, cobble, deepslate, netherrack). Otherwise it uses an empty hand or a harmless item (`ScaffoldToolPolicy.teardownKeyword`, server thread). Breaks are instant, so before a tool only added wear.
+  - The crafting table line no longer tells the player to "run /bot place crafting_table". It says "Crafted N crafting table(s)." because the bot places the table itself.
+- **Fix wave** (`f0fcade8`):
+  - Fixing the no-op had brought back an inventory swap off the server thread in woodcut cleanup. The scaffold tool pick there is deleted, because `MiningTool.mineBlock` picks the tool again on the server thread anyway.
+  - Leaves never use shears in woodcut cleanup or `LeafClearService`, so saplings and sticks still drop. The hand fallback loops also skip shears and combat items.
+
+**Rulings (controller, cost if wrong):**
+- J1: keep the payload boolean. Cost: one dead field on the wire.
+- J2: keep the config field. Cost: a dead key in the config.
+- J3: unowned bots refused for non-admins. Cost: a non-admin can't send someone's unowned bot home, which is what we want.
+- J4: teardown uses a pickaxe only for tool-required drops. Cost: none, since breaks are instant.
+- No shears on leaves. Cost: leaf clearing in those two paths isn't faster with shears, but it never was, because the path was a no-op before.
+
+**Deferred:**
+- `ToolSelector` still picks shears for leaves when not preserving the held item (`clearOverheadForPillar`).
+- WoodcutCleanupSkill's hand fallback can still land on slot 0 if every hotbar slot is a tool.
+- The `MovementService` off-thread tool swaps (pre-existing).
+- `BotActions.moveRelative` same-cell teleport (hot file).
+- Old saved `perm_user:…:skin_policy_everyone` keys stay in configs, unread.
+
+Tests 2007 → 2011.
+
+**Field checks:** Phase 6ae.
+
 ## Host sweep: the world host passes admin gates, wall grantees can fortify, owners command their companion and pick skins; 1.1.232 (2026-10-13)
 
 Follow-up to 1.1.231. A read-only scope (`.superpowers/sdd/scope-host-sweep-1.1.232.md`) listed about 45 real permission gates and classified each one. Bradley accepted all eight recommended rulings (D1-D8). The work ran in four lanes: A and C in parallel, then B and D. One Opus batch review found no Critical issues, then one fix wave. No Codex.
