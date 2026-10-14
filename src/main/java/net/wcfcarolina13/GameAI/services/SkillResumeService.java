@@ -308,6 +308,14 @@ public final class SkillResumeService {
                         execSource = refreshed.getCommandSource();
                     }
                 }
+                if (execSource.getEntity() instanceof ServerPlayerEntity requester
+                        && !(requester instanceof net.wcfcarolina13.Entity.createFakePlayer)
+                        && !net.wcfcarolina13.Frens.hasBotCommandPermission(execSource)) {
+                    // A player without /bot (a non-op owner, a LAN guest): authorise them on the
+                    // resolved bot, then run under the per-call grant, synchronously, right here.
+                    resumeUnderGrant(server, requester, pending, commandLine);
+                    return;
+                }
                 server.getCommandManager().getDispatcher().execute(commandLine, execSource);
             } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
                 LOGGER.warn("Failed to resume skill '{}' for {}: {}", pending.skillName(), pending.alias(), e.getMessage());
@@ -317,6 +325,38 @@ public final class SkillResumeService {
         String reason = autoTriggered ? "Hostiles cleared." : null;
         String prefix = "Resuming '" + pending.skillName() + "' for " + pending.alias() + ".";
         ChatUtils.sendSystemMessage(source, reason == null ? prefix : prefix + " " + reason);
+    }
+
+    /**
+     * Resume for a player without {@code /bot}. The bot is resolved by UUID server-side and must
+     * still carry the name the stored command targets; the player must pass
+     * {@link net.wcfcarolina13.network.BotAccessGate#permits} on it (owner, op or host). Server thread
+     * only: the grant lives inside {@link net.wcfcarolina13.network.AuthorizedBotDispatch#run}.
+     */
+    private static void resumeUnderGrant(MinecraftServer server, ServerPlayerEntity requester,
+                                         PendingSkill pending, String commandLine) {
+        if (requester.isRemoved()) {
+            RESUME_INTENT.remove(pending.botUuid());
+            return;
+        }
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(pending.botUuid());
+        if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer) || bot.isRemoved()
+                || !bot.getGameProfile().name().equals(pending.alias())) {
+            LOGGER.warn("Skill resume for {} refused: bot {} is not online under that name",
+                    requester.getName().getString(), pending.alias());
+            RESUME_INTENT.remove(pending.botUuid());
+            return;
+        }
+        if (!net.wcfcarolina13.network.BotAccessGate.permits(requester, bot, "skill_resume")) {
+            requester.sendMessage(net.minecraft.text.Text.literal("You can only do that for your own bot.")
+                    .formatted(net.minecraft.util.Formatting.YELLOW), false);
+            RESUME_INTENT.remove(pending.botUuid());
+            return;
+        }
+        if (net.wcfcarolina13.network.AuthorizedBotDispatch.run(requester, commandLine) <= 0) {
+            LOGGER.warn("Skill resume '{}' for {} was refused by the dispatcher", pending.skillName(), pending.alias());
+            RESUME_INTENT.remove(pending.botUuid());
+        }
     }
 
     private static Object responderKey(ServerCommandSource source) {

@@ -42,6 +42,12 @@ public final class BotActionNetworkManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-access");
 
+    /**
+     * {@link BotActionPolicy#build} returns the command below the {@code /bot} root
+     * ({@code "stop Bob"}); the dispatcher needs the root ({@code "bot stop Bob"}).
+     */
+    private static final String BOT_ROOT = "bot ";
+
     private BotActionNetworkManager() {}
 
     // ── Payload ─────────────────────────────────────────────────────────────
@@ -172,7 +178,7 @@ public final class BotActionNetworkManager {
             tell(player, "That action had a value the server does not accept.");
             return;
         }
-        AuthorizedBotDispatch.run(player, command.get());
+        AuthorizedBotDispatch.run(player, BOT_ROOT + command.get());
     }
 
     // ── Shared path (also used by dispatchFor) ──────────────────────────────
@@ -228,22 +234,25 @@ public final class BotActionNetworkManager {
             return false;
         }
         if (BotActionPolicy.fortifyEditsSavedWall(action, args)
-                && !mayEditWall(player, args.size() > 1 ? args.get(1) : "")) {
+                && !mayEditWall(player, bot, args.size() > 1 ? args.get(1) : "")) {
             BotAccessGate.warnDenied(player, targetName, action.name(), "WALL_NOT_EDITABLE");
             tell(player, "You cannot work on that wall.");
             return false;
         }
-        return AuthorizedBotDispatch.run(player, command.get()) > 0;
+        return AuthorizedBotDispatch.run(player, BOT_ROOT + command.get()) > 0;
     }
 
     /**
-     * Whether {@code player} may edit the saved wall {@code label} ("" = the nearest wall the skill
-     * will auto-detect). Fails closed to server admins until implementer D wires
-     * {@code BaseAccessPolicy.canEdit(WALL)} through BaseNetworkManager's entry edit check here; for
-     * "" the real fix resolves the nearest wall server-side (as FortifyVillageSkill does) and checks it.
+     * Whether {@code player} may have {@code bot} edit the saved wall {@code label} ("" = the
+     * nearest wall to the bot, which the skill auto-picks). Owner of that wall, operator or host;
+     * no wall found is allowed because the skill then refuses or builds a new one (see
+     * {@link FortifyWallEditPolicy}). {@code bot} null is the untargeted form, admins only.
      */
-    private static boolean mayEditWall(ServerPlayerEntity player, String label) {
-        return BotAccessGate.isServerAdmin(player);
+    private static boolean mayEditWall(ServerPlayerEntity player, ServerPlayerEntity bot, String label) {
+        if (bot == null) {
+            return BotAccessGate.isServerAdmin(player);
+        }
+        return BaseNetworkManager.canEditWallForBot(player, bot, label);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

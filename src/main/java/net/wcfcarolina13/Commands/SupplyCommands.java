@@ -11,6 +11,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.GameAI.services.BotFoodGivingService;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Response;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.ResponseStatus;
@@ -23,8 +24,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * {@code /frens supply answer <requestId> once|always|no}, {@code /frens supply revoke <x> <y> <z>}
- * and {@code /frens supply revoke all}.
+ * {@code /frens supply answer <requestId> once|always|no}, {@code /frens supply revoke <x> <y> <z>},
+ * {@code /frens supply revoke all} and {@code /frens feed confirm|cancel <botUuid>}.
  *
  * <p>A root of its own because {@code /bot} is op-only and a bot's owner need not be an operator.
  * Players only; there is no operator requirement. Authority is the request id plus the ledger's
@@ -36,6 +37,10 @@ public final class SupplyCommands {
     private static final String ARG_REQUEST_ID = "requestId";
     private static final String ARG_CHOICE = "choice";
     private static final String ARG_POS = "pos";
+    private static final String ARG_BOT_UUID = "botUuid";
+    public static final String COMMAND_FEED = "feed";
+    public static final String COMMAND_FEED_CONFIRM = "confirm";
+    public static final String COMMAND_FEED_CANCEL = "cancel";
 
     private SupplyCommands() {
     }
@@ -58,7 +63,40 @@ public final class SupplyCommands {
                                         .then(CommandManager.literal(SupplyChestRules.COMMAND_REVOKE_ALL)
                                                 .executes(SupplyCommands::revokeAll))
                                         .then(CommandManager.argument(ARG_POS, BlockPosArgumentType.blockPos())
-                                                .executes(SupplyCommands::revoke))))));
+                                                .executes(SupplyCommands::revoke))))
+                        .then(CommandManager.literal(COMMAND_FEED)
+                                .then(CommandManager.literal(COMMAND_FEED_CONFIRM)
+                                        .then(CommandManager.argument(ARG_BOT_UUID, StringArgumentType.word())
+                                                .executes(context -> feed(context, true))))
+                                .then(CommandManager.literal(COMMAND_FEED_CANCEL)
+                                        .then(CommandManager.argument(ARG_BOT_UUID, StringArgumentType.word())
+                                                .executes(context -> feed(context, false)))))));
+    }
+
+    /**
+     * {@code /frens feed confirm|cancel <botUuid>}: the [Yes]/[No] buttons on a precious-food
+     * prompt. Authority is the clicking player's own UUID: {@link BotFoodGivingService} only acts
+     * on a pending offer that player made, so nobody can answer someone else's prompt.
+     */
+    private static int feed(CommandContext<ServerCommandSource> context, boolean confirm) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getPlayer();
+        if (player == null) {
+            return 0;
+        }
+        UUID botUuid;
+        try {
+            botUuid = UUID.fromString(StringArgumentType.getString(context, ARG_BOT_UUID));
+        } catch (IllegalArgumentException malformed) {
+            source.sendError(Text.literal("That food offer has expired."));
+            return 0;
+        }
+        if (confirm) {
+            BotFoodGivingService.confirmPending(player, botUuid);
+        } else {
+            BotFoodGivingService.cancelPending(player, botUuid);
+        }
+        return 1;
     }
 
     private static int answer(CommandContext<ServerCommandSource> context) {

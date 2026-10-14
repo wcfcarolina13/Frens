@@ -162,7 +162,7 @@ public final class HuntablesNetworkManager {
             if (!BotAccessGate.permitsByName(player, botName, "hunt_target")) return;
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
-            if (bot == null) return;
+            if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer) || bot.isRemoved()) return;
 
             UUID entityUuid;
             try {
@@ -190,19 +190,25 @@ public final class HuntablesNetworkManager {
             // Clear target-picking mode
             TARGET_PICKERS.remove(player.getUuid());
 
-            // Resolve entity type name for the command
+            // Resolve entity type name for the command (registered types only)
             String targetName = "";
             if (entityType != null && !entityType.isBlank()) {
                 net.minecraft.util.Identifier id = net.minecraft.util.Identifier.tryParse(entityType);
-                if (id != null) {
+                if (id != null && net.minecraft.registry.Registries.ENTITY_TYPE.getOptionalValue(id).isPresent()) {
                     targetName = "minecraft".equals(id.getNamespace()) ? id.getPath() : id.toString();
                 }
             }
 
-            // Dispatch hunt command for 1 target
-            String command = "bot skill hunt 1 " + targetName + " " + botName;
-            LOGGER.info("Target dispatch: {} -> {}", player.getName().getString(), command.trim());
-            net.wcfcarolina13.CommandUtils.run(player.getCommandSource(), command.trim());
+            // Dispatch a hunt for 1 target on the server-resolved bot, under the owner grant.
+            // The command is built server-side from the bot's profile name, never the client string.
+            LOGGER.info("Target dispatch: {} -> hunt 1 {} on {}", player.getName().getString(), targetName,
+                    bot.getGameProfile().name());
+            boolean dispatched = BotActionNetworkManager.dispatchFor(player, bot,
+                    BotActionPolicy.Action.SKILL_HUNT, List.of("1", targetName));
+            if (!dispatched) {
+                PENDING_TARGET_ENTITY.remove(bot.getUuid());
+                PENDING_TARGET_TIMESTAMPS.remove(bot.getUuid());
+            }
 
         } catch (Exception e) {
             LOGGER.warn("Failed to handle hunt target: {}", e.getMessage());

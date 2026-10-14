@@ -758,6 +758,49 @@ public final class BaseNetworkManager {
                 BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid), allied);
     }
 
+    /**
+     * Whether {@code player} may have {@code bot} run a fortify sub that edits the saved wall
+     * {@code label} ("" = the nearest wall to the bot, which the skill auto-picks). Quiet: no chat,
+     * the caller tells the player. Resolves the wall in the bot's world the way the skill does and
+     * decides with {@link FortifyWallEditPolicy}. Server thread.
+     */
+    static boolean canEditWallForBot(ServerPlayerEntity player, ServerPlayerEntity bot, String label) {
+        if (player == null || bot == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        String wanted = label == null ? "" : label.trim();
+        boolean found;
+        String owner = null;
+        if (wanted.isEmpty()) {
+            List<FortifyWallEditPolicy.WallRef> walls = new ArrayList<>();
+            for (FortificationPersistenceService.SavedFortification f
+                    : FortificationPersistenceService.listForWorld(server, worldKey)) {
+                if (f != null && f.getCenter() != null) {
+                    walls.add(new FortifyWallEditPolicy.WallRef(f.getName(), f.getOwnerUuid(),
+                            f.getCenter().getX(), f.getCenter().getZ()));
+                }
+            }
+            BlockPos at = bot.getBlockPos();
+            FortifyWallEditPolicy.WallRef nearest = FortifyWallEditPolicy.nearest(walls, at.getX(), at.getZ());
+            found = nearest != null;
+            owner = found ? nearest.ownerUuid() : null;
+        } else {
+            var wall = FortificationPersistenceService.load(server, worldKey, wanted);
+            found = wall.isPresent();
+            owner = found ? wall.get().getOwnerUuid() : null;
+        }
+        return FortifyWallEditPolicy.mayEdit(found, owner, player.getUuid().toString(),
+                Frens.isOperator(player), BotAccessGate.isHost(player));
+    }
+
     private static boolean checkAnyEntryEditPermission(ServerPlayerEntity player, MinecraftServer server,
                                                        ServerWorld world, String label, String action) {
         String wanted = normalizeLabel(label);

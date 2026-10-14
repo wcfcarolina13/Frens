@@ -131,7 +131,10 @@ public final class BotFoodGivingService {
         PendingFeed pending = PENDING_FEEDS.get(botUuid);
         long now = System.currentTimeMillis();
         if (pending == null || pending.isExpired(now) || !pending.playerUuid.equals(player.getUuid())) {
-            PENDING_FEEDS.remove(botUuid);
+            // Only the player who made the offer may clear it; another player's click is a no-op.
+            if (pending != null && pending.playerUuid.equals(player.getUuid())) {
+                PENDING_FEEDS.remove(botUuid);
+            }
             player.sendMessage(Text.literal("That food offer has expired.").formatted(Formatting.GRAY), false);
             return;
         }
@@ -158,10 +161,20 @@ public final class BotFoodGivingService {
     /** Invoked when the player clicks [No] on a precious-food confirmation prompt. */
     public static void cancelPending(ServerPlayerEntity player, UUID botUuid) {
         if (player == null || botUuid == null) return;
-        PendingFeed pending = PENDING_FEEDS.remove(botUuid);
+        PendingFeed pending = PENDING_FEEDS.get(botUuid);
         if (pending != null && pending.playerUuid.equals(player.getUuid())) {
+            PENDING_FEEDS.remove(botUuid);
             player.sendMessage(Text.literal("Kept for later.").formatted(Formatting.GRAY), false);
         }
+    }
+
+    /**
+     * The click command for a precious-food prompt button. Lives under the open {@code /frens}
+     * root so a non-op owner can answer; the old {@code /bot feedconfirm|feedcancel} literals stay
+     * registered for chat lines sent before the update.
+     */
+    static String feedCommand(boolean confirm, UUID botUuid) {
+        return "/frens feed " + (confirm ? "confirm " : "cancel ") + botUuid;
     }
 
     /** Periodic sweep to purge expired pending prompts. Registered as a server tick handler. */
@@ -188,11 +201,11 @@ public final class BotFoodGivingService {
         MutableText yes = Text.literal("[Yes]").styled(s -> s
                 .withColor(Formatting.GREEN)
                 .withBold(true)
-                .withClickEvent(new ClickEvent.RunCommand("/bot feedconfirm " + botUuid)));
+                .withClickEvent(new ClickEvent.RunCommand(feedCommand(true, botUuid))));
         MutableText no = Text.literal("[No]").styled(s -> s
                 .withColor(Formatting.RED)
                 .withBold(true)
-                .withClickEvent(new ClickEvent.RunCommand("/bot feedcancel " + botUuid)));
+                .withClickEvent(new ClickEvent.RunCommand(feedCommand(false, botUuid))));
 
         MutableText prompt = Text.literal("")
                 .append(Text.literal(botName + ": ").formatted(Formatting.AQUA))
