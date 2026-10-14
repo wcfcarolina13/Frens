@@ -496,7 +496,8 @@ public final class BotActions {
             return false;
         }
         preferKeyword = preferKeyword != null ? preferKeyword.toLowerCase(Locale.ROOT) : null;
-        avoidKeyword = avoidKeyword != null ? avoidKeyword.toLowerCase(Locale.ROOT) : null;
+        // A blank avoid keyword avoids nothing ("x".contains("") is always true).
+        avoidKeyword = avoidKeyword != null && !avoidKeyword.isBlank() ? avoidKeyword.toLowerCase(Locale.ROOT) : null;
         PlayerInventory inventory = bot.getInventory();
         int hotbarSize = 9;
         int fallbackSlot = -1;
@@ -507,14 +508,14 @@ public final class BotActions {
                 continue;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (avoidKeyword != null && key.contains(avoidKeyword)) {
+            if (net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.isAvoided(key, avoidKeyword)) {
                 continue;
             }
             if (preferKeyword != null && key.contains(preferKeyword)) {
                 selectHotbarSlot(bot, slot);
                 return true;
             }
-            if (fallbackSlot == -1 && (avoidKeyword == null || !key.contains(avoidKeyword))) {
+            if (fallbackSlot == -1 && !net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.isAvoided(key, avoidKeyword)) {
                 fallbackSlot = slot;
             }
         }
@@ -530,14 +531,14 @@ public final class BotActions {
                 continue;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (avoidKeyword != null && key.contains(avoidKeyword)) {
+            if (net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.isAvoided(key, avoidKeyword)) {
                 continue;
             }
             if (preferKeyword != null && key.contains(preferKeyword)) {
                 preferredSlot = slot;
                 break;
             }
-            if (preferredSlot == -1 && preferKeyword == null && (avoidKeyword == null || !key.contains(avoidKeyword))) {
+            if (preferredSlot == -1 && preferKeyword == null && !net.wcfcarolina13.PlayerUtils.HarmlessToolPolicy.isAvoided(key, avoidKeyword)) {
                 preferredSlot = slot;
             }
         }

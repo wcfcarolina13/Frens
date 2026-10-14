@@ -301,4 +301,13 @@ class CraftingStationPolicyTest {
         }
         throw new AssertionError(signature + ": unbalanced body");
     }
+
+    @Test
+    void craftedTablesLineDoesNotSendThePlayerToAPlaceCommand() {
+        String line = CraftingStationPolicy.craftedTablesLine(2);
+        assertEquals("Crafted 2 crafting table(s).", line);
+        assertFalse(line.contains("/bot place"));
+        assertFalse(line.contains(";"));
+        assertFalse(line.contains("\u2014"));
+    }
 }

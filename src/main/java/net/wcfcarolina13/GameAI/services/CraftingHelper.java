@@ -317,7 +317,7 @@ public final class CraftingHelper {
 
         int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested);
         if (crafts > 0) {
-            ChatUtils.sendSystemMessage(source, "Crafted " + crafts + " crafting table(s). Punch a block and run /bot place crafting_table to set it down.");
+            ChatUtils.sendSystemMessage(source, CraftingStationPolicy.craftedTablesLine(crafts));
             return true;
         }
         return false;

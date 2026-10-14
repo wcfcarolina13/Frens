@@ -1927,28 +1927,7 @@ public final class WoodcutCleanupSkill implements Skill {
     }
 
     private boolean selectLeafTool(ServerPlayerEntity bot) {
-        if (BotActions.selectBestTool(bot, "shears", "")) {
-            return true;
-        }
-        return selectHandsOrHarmlessItem(bot);
-    }
-
-    private boolean hasToolKeyword(ServerPlayerEntity bot, String keyword) {
-        if (bot == null || keyword == null || keyword.isBlank()) {
-            return false;
-        }
-        String needle = keyword.toLowerCase(Locale.ROOT);
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (key.contains(needle)) {
-                return true;
-            }
-        }
-        return false;
+        return BotActions.selectHarvestToolOrHands(bot, "shears") || selectHandsOrHarmlessItem(bot);
     }
 
     private boolean selectHandsOrHarmlessItem(ServerPlayerEntity bot) {
@@ -1973,30 +1952,23 @@ public final class WoodcutCleanupSkill implements Skill {
     }
 
     /**
-     * Select the best tool for mining a scaffold block.
-     * Dirt/gravel/sand → shovel.  Cobblestone/deepslate/netherrack → pickaxe.
-     * Falls back to any available tool rather than mining with dirt in hand.
+     * Select the tool for mining a scaffold block by its mineable tags: the matching pickaxe,
+     * shovel or axe if carried, otherwise an empty hand or a harmless item (never a tool the
+     * block does not need, so dirt and planks no longer cost pickaxe durability).
      */
     private void selectScaffoldTool(ServerPlayerEntity bot, BlockPos pos) {
         if (bot == null) {
             return;
         }
+        String keyword = null;
         if (pos != null && bot.getEntityWorld() instanceof ServerWorld world) {
             BlockState state = world.getBlockState(pos);
-            String blockKey = state.getBlock().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (blockKey.contains("cobble") || blockKey.contains("deepslate") || blockKey.contains("netherrack") || blockKey.contains("stone")) {
-                if (hasToolKeyword(bot, "pickaxe")) {
-                    BotActions.selectBestTool(bot, "pickaxe", "");
-                    return;
-                }
-            }
+            keyword = net.wcfcarolina13.PlayerUtils.ScaffoldToolPolicy.keywordFor(
+                    state.isIn(BlockTags.PICKAXE_MINEABLE),
+                    state.isIn(BlockTags.SHOVEL_MINEABLE),
+                    state.isIn(BlockTags.AXE_MINEABLE));
         }
-        if (hasToolKeyword(bot, "shovel")) {
-            BotActions.selectBestTool(bot, "shovel", "axe");
-            return;
-        }
-        if (hasToolKeyword(bot, "pickaxe")) {
-            BotActions.selectBestTool(bot, "pickaxe", "");
+        if (keyword != null && BotActions.selectHarvestToolOrHands(bot, keyword)) {
             return;
         }
         selectHandsOrHarmlessItem(bot);

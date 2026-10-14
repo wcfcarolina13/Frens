@@ -100,4 +100,13 @@ public final class CraftingStationPolicy {
     public static boolean shouldLogDecline(long nowMs, Long lastLogMs) {
         return lastLogMs == null || nowMs - lastLogMs >= DECLINE_LOG_INTERVAL_MS;
     }
+
+    /**
+     * Chat line after crafting tables. The only caller ({@code ensureCraftingStation}) places the
+     * table itself and reports its own placement failures, so the line no longer tells the player
+     * to run a place command.
+     */
+    public static String craftedTablesLine(int crafts) {
+        return "Crafted " + crafts + " crafting table(s).";
+    }
 }

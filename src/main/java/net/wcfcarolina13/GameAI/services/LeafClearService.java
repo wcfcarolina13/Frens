@@ -201,7 +201,7 @@ public final class LeafClearService {
             return;
         }
         // Prefer shears, otherwise an empty slot or a non-tool/weapon hotbar item.
-        if (BotActions.selectBestTool(player, "shears", "")) {
+        if (BotActions.selectHarvestToolOrHands(player, "shears")) {
             return;
         }
         for (int i = 0; i < 9; i++) {

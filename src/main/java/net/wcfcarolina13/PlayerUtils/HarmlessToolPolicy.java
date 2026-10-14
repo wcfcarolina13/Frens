@@ -97,4 +97,16 @@ public final class HarmlessToolPolicy {
         }
         return true;
     }
+
+    /**
+     * Whether {@code BotActions.selectBestTool} should skip an item because its translation key
+     * contains the avoid keyword. A null or blank avoid keyword avoids nothing: {@code "x".contains("")}
+     * is always true, so a blank avoid used to skip every stack and turn the call into a no-op.
+     */
+    public static boolean isAvoided(String translationKey, String avoidKeyword) {
+        if (translationKey == null || avoidKeyword == null || avoidKeyword.isBlank()) {
+            return false;
+        }
+        return translationKey.toLowerCase(Locale.ROOT).contains(avoidKeyword.toLowerCase(Locale.ROOT));
+    }
 }

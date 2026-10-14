@@ -531,6 +531,10 @@ public final class ScaffoldService {
                             future.complete(false);
                             return;
                         }
+                        // Breaks here are instant, so a tool only adds wear unless the block needs
+                        // one to drop (stone, cobblestone, cobbled deepslate, netherrack).
+                        BotActions.selectHarvestToolOrHands(bot,
+                                net.wcfcarolina13.PlayerUtils.ScaffoldToolPolicy.teardownKeyword(state.isToolRequired()));
                         boolean broke = bot.interactionManager.tryBreakBlock(pos);
                         if (broke) {
                             bot.swingHand(Hand.MAIN_HAND, true);

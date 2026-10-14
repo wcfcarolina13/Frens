@@ -106,4 +106,19 @@ class HarmlessToolPolicyTest {
     void lastResortNeverKeepsAWeapon() {
         assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(false, false, true));
     }
+
+    @Test
+    void blankOrNullAvoidAvoidsNothing() {
+        assertFalse(HarmlessToolPolicy.isAvoided("item.minecraft.shears", ""));
+        assertFalse(HarmlessToolPolicy.isAvoided("item.minecraft.shears", "   "));
+        assertFalse(HarmlessToolPolicy.isAvoided("item.minecraft.shears", null));
+        assertFalse(HarmlessToolPolicy.isAvoided(null, "axe"));
+    }
+
+    @Test
+    void avoidMatchesCaseInsensitively() {
+        assertTrue(HarmlessToolPolicy.isAvoided("item.minecraft.iron_axe", "axe"));
+        assertTrue(HarmlessToolPolicy.isAvoided("item.minecraft.IRON_AXE", "Axe"));
+        assertFalse(HarmlessToolPolicy.isAvoided("item.minecraft.iron_shovel", "axe"));
+    }
 }
