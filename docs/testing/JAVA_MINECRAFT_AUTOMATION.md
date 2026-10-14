@@ -7,7 +7,7 @@ Living doc. Update it every time a session learns something new about testing Fr
 | Capability | Status | Notes |
 |---|---|---|
 | Create a Prism instance | ✅ works | Write the folder directly: `instances/<id>/instance.cfg` + `mmc-pack.json` (copy from `1.21.11`) + `minecraft/mods/`. Prism picks it up on next start. Set `name=` inside `[General]`, or Prism shows "Unnamed Instance". |
-| Launch an instance | ✅ works | `open -a "Prism Launcher" --args --launch <instance-id>`. Uses Bradley's existing Prism account, so no sign-in. |
+| Launch an instance | ✅ works | Call the binary: `"/Applications/Prism Launcher.app/Contents/MacOS/prismlauncher" --launch <instance-id> &`. It forwards to an already-open Prism. `open -a … --args` silently does nothing when Prism is already running. Uses Bradley's existing Prism account, so no sign-in. |
 | Read game state | ✅ works | Tail `instances/<id>/minecraft/logs/latest.log`. Every field-checklist item names its log line. This is the reliable channel. |
 | Stop/start Ollama | ✅ works | `osascript -e 'quit app "Ollama"'` gets cancelled by the app's confirm dialog. SIGTERM works: `pkill -TERM -f "/Applications/Ollama.app/Contents/MacOS/Ollama"` then `pkill -TERM -f "ollama serve"`. Restart with `open -a Ollama`. Check: `curl -s localhost:11434/api/version`. |
 | See the game window | ❌ blocked | The game is a bare `java` process (no bundle ID). Computer use only grants apps by name, and its screenshot filter **blanks out** windows of non-granted apps, on any display. |
@@ -34,10 +34,14 @@ Bradley clicks, Claude watches `latest.log` and calls pass/fail with evidence. G
 
 ## Gotchas
 
+- **Never toggle fullscreen (F11) mid-run on Mac.** With Sodium + Iris + Distant Horizons it wrecked the window (2026-10-14). Fullscreen also renders 1920×1200 (16:10) stretched onto the 1920×1080 TD1655. Fix: quit, set `fullscreen:false` in `options.txt`, relaunch.
+
 - `pbcopy` without `LANG=en_US.UTF-8` mangles emoji and dashes. Not Minecraft-specific, but it bit the same session.
 - Prism's **global** Java args (`prismlauncher.cfg` → `JvmArgs`) apply to every instance unless the instance sets `OverrideJavaArgs=true`. Bradley's global args include `-Daiplayer.llmMode=ollama`, which equals Frens' default, so tests stay representative.
 - 1.21.x renamed "Allow Cheats" to **Allow Commands** (Create World → Game tab). It's OFF by default in Survival.
 
 ## Log
+
+- **2026-10-14:** Research pass on full control, see `MINECRAFT_CONTROL_RESEARCH_2026-10.md`. Quick win: langyo/minecraft-mod-mcp (1.21.11 Fabric, screenshots + clicks + keys + typing via the game itself) but it binds 0.0.0.0 with no auth and open CORS, so throwaway instance only, then fork to 127.0.0.1 + token. Long-term: Fabric client gametests (`fabric-client-gametest-api-v1` already in our fabric-api). Medium: copy Prism's java launcher into a real `.app` to get a grantable bundle ID (untested).
 
 - **2026-10-13:** First attempt at a fully autonomous fresh-install test. Instance creation, launch, Ollama control and log reading all worked. Game window blocked for both per-app and full-screen control (filtered out of screenshots on the external monitor TD1655 too). Fell back to the guided split above.

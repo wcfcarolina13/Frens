@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.233-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.234-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae + 1.1.234 playthrough fixes — Phase 6af). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.233** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.234** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1425,6 +1425,34 @@ Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a 
 - [ ] **Crafting table line (1.1.233)**
   - Bradley does: order a craft that needs a crafting table when the bot has none.
   - Pass when: chat says "Crafted 1 crafting table(s)." with no "run /bot place" hint, and the bot places it.
+
+## Phase 6af — Playthrough fixes: first axe, survival breaks, per-save worlds (1.1.234)
+
+Run FIRST in a session: open **Nirn** first after deploying (item 1), then a brand-new commands-off Survival world for the rest.
+
+- [ ] **Nirn keeps its zones and locked doors (1.1.234)**
+  - Bradley does: open Nirn before any other world. Look at a protected zone and a locked door near home.
+  - Claude watches for: the zone and lock load lines at SERVER_STARTED with Nirn's counts (4 zones incl. home/deep dark 1/tower dungeon jungle, 3 locked blocks), adoption outcome ADOPT_LEGACY.
+  - Pass when: Nirn's zones and locks are all there. A `claimed_by_world.txt` appears in `bot_zones/minecraft_overworld__41d0e9b1/`.
+- [ ] **A new world starts clean (1.1.234)**
+  - Bradley does: create a new Survival world (commands off), named the same as an old save if possible.
+  - Claude watches for: no Nirn zones/locks loaded, its own Spawn base registered at the real spawn, no stale `base:*` auto-zone.
+  - Pass when: the World Mode chooser opens before the first companion.
+- [ ] **First axe on the ground (1.1.234)**
+  - Bradley does: spawn a bot with an empty inventory and start woodcut next to trees.
+  - Claude watches for: `Woodcut axe bootstrap`, a crafting table placed on the ground, a wooden_axe crafted, no `Pillar stock: crafted … planks` before the axe, a few dirt-family blocks gathered.
+  - Pass when: the bot never pillars or crafts on a pillar before it has an axe, and at most one table line shows in chat if placement fails.
+- [ ] **Scaffold breaks at survival speed (1.1.234)**
+  - Bradley does: watch the bot take down a plank or dirt pillar, then stop it mid-teardown and run woodcut cleanup.
+  - Claude watches for: `Mining … (delta=…, ticks=…)` lines for each teardown block (planks ~60 ticks by hand), no `surface-pillar: remove` burst under a second.
+  - Pass when: each block takes visible time, and after the stop the cleanup still finds and removes the leftover scaffold.
+- [ ] **No canopy pillar at cleanup start (1.1.234)**
+  - Pass when: starting woodcut cleanup under leaves logs no `ensureAtSurface: … pillar recovery`.
+- [ ] **Cleanup finishes and says one sentence (1.1.234)**
+  - Pass when: with nothing to clean, woodcut cleanup ends within a few seconds with "Nothing left to clean up here." (no `minedLogs=` stats in chat).
+- [ ] **Drop sweep, return and craft feedback (1.1.234)**
+  - Bradley does: drop a few items, run a drop sweep. Then `/bot craft` an axe with no wood anywhere.
+  - Pass when: the sweep says "Picked up N items." with the right N, no fast-travel error and no return trip after it, and the craft answers with exactly one line.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

@@ -3,7 +3,33 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.233) — next session starts here
+## Session Handoff 2026-10-14 (1.1.234) — next session starts here
+
+**State:** main = origin/main @ 1.1.234. Suite 2112 green. Codex seats still paused (Opus reviewers). Modrinth: 1.1.230 is
+the latest published; 1.1.231–1.1.234 NOT published (Bradley: no Modrinth until live playthroughs settle).
+
+**Shipped in 1.1.234 (live playthrough of 1.1.233, docs/testing/PLAYTHROUGH_1.1.233.md #1–#10):** first axe crafted on the
+ground before any pillaring (no log→plank scaffold without an axe, hand-gathered dirt-family scaffold, sand/gravel out),
+scaffold teardown and doorway clearing at survival speed via MiningTool, forest floor under leaves counts as surface,
+per-save keys for zones/locks/bases/World Mode (legacy adopted only by a played save matching >half the legacy base zones:
+Nirn), woodcut cleanup stops after two empty scans, plain-sentence results, one crafting-table line, short post-task
+returns walk, drop sweep counts right. Details + rulings in changelog.
+
+**Field checks pending — order matters:** Phase 6af FIRST and open **Nirn first** after deploy (its item 1), then the rest of
+6af in a new commands-off world, then 6ac item 1 remainder (Guard, Skills/hobby toggles, come/sleep, Crafting History x1/x2),
+6ad, 6ae, 6ab … 6b. Now 277 items.
+
+**Deferred:** level-name-keyed stores (chest/furnace/beehive registries, hunt + crafting history, fortifications, mapped
+villages, getBotSpawn _legacy), roster lists bots from every world, RL breakBlockAhead + clutter clears + mounted leaf
+clearing still instant, isAtSurface strict under canopy, woodcut cleanup async scan off-thread, long automatic return
+refusals (combat/cooldown/food) still in chat.
+
+**Next (in order):**
+1. Next live playthrough on 1.1.234 (Phase 6af), more findings → 1.1.235.
+2. Chat action requests (design interview first). 3. Fresh-install part 2 (AI setup). 4. Bot livestream.
+5. Control research: docs/testing/MINECRAFT_CONTROL_RESEARCH_2026-10.md (minecraft-mod-mcp fork to 127.0.0.1+token, client gametests).
+
+## Session Handoff 2026-10-13 (1.1.233) — superseded
 
 **State:** main = origin/main @ 1.1.233. Suite 2011 green. Codex seats still paused (Opus reviewers). Modrinth: 1.1.230 is
 the latest published; 1.1.231–1.1.233 NOT published (needs Bradley; copy `.superpowers/sdd/modrinth/publish-1.1.230.sh`).
