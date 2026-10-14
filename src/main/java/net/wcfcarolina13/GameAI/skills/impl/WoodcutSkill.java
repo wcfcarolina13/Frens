@@ -49,6 +49,7 @@ import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutProtectionNudgePolicy;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -129,6 +130,12 @@ public final class WoodcutSkill implements Skill {
     private final Set<UUID> axeBootstrapCraftFailedBots = ConcurrentHashMap.newKeySet();
     /** CraftingHelper.STATION_REACH_SQ (private there): a player's 4.5-block interact range. */
     private static final double CRAFTING_STATION_REACH_SQ = 4.5D * 4.5D;
+    /**
+     * Protection reasons already explained to the player (WoodcutProtectionNudgePolicy). Static so
+     * it is shared across bots: only the first bot says each line. Process lifetime, there is no
+     * woodcut static-clear hook on server stop.
+     */
+    private static final Set<String> PROTECTION_NUDGES_SAID = ConcurrentHashMap.newKeySet();
     private static final String AXE_BOOTSTRAP_START_LINE = "No axe yet, so I'll punch a tree first.";
     private static final String AXE_BOOTSTRAP_CRAFT_FAILED_LINE =
             "I punched enough wood for an axe but couldn't craft one. Give me an axe or some room for a crafting table and try again.";
@@ -864,6 +871,14 @@ public final class WoodcutSkill implements Skill {
                             if (protectedOnlyScanStreak >= PROTECTED_ONLY_SCAN_STREAK_FOR_RELOCATION) {
                                 LOGGER.info("Woodcut: protected-only scans triggered staged relocation after {}ms local-scan time",
                                         detectionDurationMs);
+                                if (requestedBounds == null && relocations < MAX_RELOCATIONS) {
+                                    WoodcutProtectionNudgePolicy.claimNudge(detection.protectedReasonCounts(), PROTECTION_NUDGES_SAID)
+                                            .ifPresent(line -> {
+                                                LOGGER.info("Woodcut protection nudge: {} reasons={}",
+                                                        bot.getName().getString(), detection.protectedReasonCounts());
+                                                ChatUtils.sendSystemMessage(source, line);
+                                            });
+                                }
                                 consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
                                 continue;
                             }
