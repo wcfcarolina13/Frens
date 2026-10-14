@@ -915,6 +915,7 @@ public class Frens implements ModInitializer {
             // teardown below -- never blocks the server thread (see SoulRuntime.stop() Javadoc).
             net.wcfcarolina13.GameAI.souls.SoulRuntime.stop();
             AI_CHAT_OFF_HINTED.clear();
+            net.wcfcarolina13.GameAI.skills.impl.WoodcutSkill.clearProtectionNudges();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
             // Persist any player-preference change still waiting for the coalesced tick flush.
             if (PREFERENCE_GATE.drainForShutdown() && CONFIG != null) {

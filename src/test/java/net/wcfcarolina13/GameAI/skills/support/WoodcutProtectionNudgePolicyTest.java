@@ -95,4 +95,28 @@ class WoodcutProtectionNudgePolicyTest {
         assertTrue(said.isEmpty());
         assertEquals(Optional.empty(), WoodcutProtectionNudgePolicy.claimNudge(Map.of("base-radius", 3), null));
     }
+
+    @Test
+    void villageReasonsShareOneSaidKey() {
+        assertEquals("village", WoodcutProtectionNudgePolicy.saidKeyFor("mapped-village"));
+        assertEquals("village", WoodcutProtectionNudgePolicy.saidKeyFor("fort-buffer"));
+        assertEquals("base-radius", WoodcutProtectionNudgePolicy.saidKeyFor("base-radius"));
+        assertNull(WoodcutProtectionNudgePolicy.saidKeyFor(null));
+
+        Set<String> said = new HashSet<>();
+        assertEquals(Optional.of(WoodcutProtectionNudgePolicy.VILLAGE_LINE),
+                WoodcutProtectionNudgePolicy.claimNudge(Map.of("mapped-village", 4), said));
+        assertEquals(Optional.empty(), WoodcutProtectionNudgePolicy.claimNudge(Map.of("fort-buffer", 4), said));
+        assertEquals(Set.of("village"), said);
+    }
+
+    @Test
+    void clearingTheSetLetsTheNudgeRepeat() {
+        Set<String> said = ConcurrentHashMap.newKeySet();
+        Map<String, Integer> base = Map.of("base-radius", 3);
+        assertTrue(WoodcutProtectionNudgePolicy.claimNudge(base, said).isPresent());
+        assertTrue(WoodcutProtectionNudgePolicy.claimNudge(base, said).isEmpty());
+        said.clear(); // what WoodcutSkill.clearProtectionNudges() does on server stop
+        assertTrue(WoodcutProtectionNudgePolicy.claimNudge(base, said).isPresent());
+    }
 }

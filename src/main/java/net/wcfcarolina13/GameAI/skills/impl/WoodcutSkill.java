@@ -132,10 +132,15 @@ public final class WoodcutSkill implements Skill {
     private static final double CRAFTING_STATION_REACH_SQ = 4.5D * 4.5D;
     /**
      * Protection reasons already explained to the player (WoodcutProtectionNudgePolicy). Static so
-     * it is shared across bots: only the first bot says each line. Process lifetime, there is no
-     * woodcut static-clear hook on server stop.
+     * it is shared across bots: only the first bot says each line. Cleared on server stop
+     * (Frens SERVER_STOPPING) so a new world hears the nudge again.
      */
     private static final Set<String> PROTECTION_NUDGES_SAID = ConcurrentHashMap.newKeySet();
+
+    /** Forget which protection nudges were said, so the next server session says them again. */
+    public static void clearProtectionNudges() {
+        PROTECTION_NUDGES_SAID.clear();
+    }
     private static final String AXE_BOOTSTRAP_START_LINE = "No axe yet, so I'll punch a tree first.";
     private static final String AXE_BOOTSTRAP_CRAFT_FAILED_LINE =
             "I punched enough wood for an axe but couldn't craft one. Give me an axe or some room for a crafting table and try again.";

@@ -64,8 +64,22 @@ public final class WoodcutProtectionNudgePolicy {
     }
 
     /**
-     * Decides whether to say the nudge. Returns the line when the dominant reason has not been
-     * said yet, and records it in {@code alreadySaid}. {@code alreadySaid.add} is the claim, so a
+     * Key recorded in the "already said" set. Reasons that share a line share a key, so the
+     * village line is said once whether it came from a mapped village or a fort buffer.
+     */
+    public static String saidKeyFor(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        return switch (reason) {
+            case "mapped-village", "fort-buffer" -> "village";
+            default -> reason;
+        };
+    }
+
+    /**
+     * Decides whether to say the nudge. Returns the line when the dominant reason's key
+     * ({@link #saidKeyFor}) has not been said yet, and records that key in {@code alreadySaid}. {@code alreadySaid.add} is the claim, so a
      * concurrent set makes the once-only rule hold across bots on different worker threads.
      */
     public static Optional<String> claimNudge(Map<String, Integer> reasonCounts, Set<String> alreadySaid) {
@@ -74,7 +88,7 @@ public final class WoodcutProtectionNudgePolicy {
             return Optional.empty();
         }
         String line = lineFor(reason.get());
-        if (line == null || !alreadySaid.add(reason.get())) {
+        if (line == null || !alreadySaid.add(saidKeyFor(reason.get()))) {
             return Optional.empty();
         }
         return Optional.of(line);
