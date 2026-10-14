@@ -2088,7 +2088,7 @@ public class modCommandRegistry {
             return 0;
         }
 
-        String worldKey = server.getSaveProperties().getLevelName();
+        String worldKey = SurvivalRecruitmentService.stateKey(server);
         ManualConfig.SurvivalRecruitmentState st = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(worldKey);
         boolean enabled = SurvivalRecruitmentService.isEnabled(server);
 
@@ -2281,7 +2281,7 @@ public class modCommandRegistry {
             return 0;
         }
 
-        String worldKey = server.getSaveProperties().getLevelName();
+        String worldKey = SurvivalRecruitmentService.stateKey(server);
         ManualConfig.SurvivalRecruitmentState st = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(worldKey);
         st.setRecruited(false);
         st.setRecruitedByUuid(null);
@@ -2725,7 +2725,7 @@ public class modCommandRegistry {
                     && SurvivalRecruitmentService.isEnabled(server)
                     && !SurvivalRecruitmentService.isWorldRecruited(server)
                     && Frens.CONFIG != null) {
-                ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
+                ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(SurvivalRecruitmentService.stateKey(server));
                 updated.setBotAlias(botName);
                 updated.setRecruited(true);
                 ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
@@ -2834,7 +2834,7 @@ public class modCommandRegistry {
                 if (SurvivalRecruitmentService.isEnabled(server)
                         && !SurvivalRecruitmentService.isWorldRecruited(server)
                         && Frens.CONFIG != null) {
-                    ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
+                    ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(SurvivalRecruitmentService.stateKey(server));
                     updated.setBotAlias(botName);
                     updated.setRecruited(true);
                     ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;

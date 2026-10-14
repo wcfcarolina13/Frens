@@ -855,6 +855,10 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             net.wcfcarolina13.GameAI.services.TaskService.clearServerStopping();
+            // Per-save stores (1.1.234): before anything reads bases or recruitment state, let an
+            // old save adopt its pre-fingerprint data; a brand-new save starts empty.
+            net.wcfcarolina13.GameAI.services.BotHomeService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.adoptLegacyState(server);
             // Re-create any executors that SERVER_STOPPING shut down. Without this,
             // exit-to-title + reload within the same Minecraft session leaves every
             // mod executor permanently dead and breaks /bot skill, mining, hunting,
@@ -955,6 +959,10 @@ public class Frens implements ModInitializer {
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.LockableBlockService.saveAllWorlds(server);
+            // Zone and lock maps are static: clear them so the next world loaded in this JVM
+            // doesn't inherit this one's (and isLoaded() is false until that world's own load).
+            net.wcfcarolina13.GameAI.services.LockableBlockService.clearAll();
+            net.wcfcarolina13.GameAI.services.ProtectedZoneService.clearAll();
             net.wcfcarolina13.GameAI.services.TravelWaitService.clear();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {

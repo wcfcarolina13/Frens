@@ -45,7 +45,8 @@ import java.util.concurrent.ScheduledExecutorService;
  *   <li>Attack-named-mobs toggle per bot (default off — bot ignores name-tagged mobs)</li>
  * </ul>
  *
- * <p>Data is keyed by server save name + dimension key so integrated-server worlds do not collide.
+ * <p>Data is keyed by save fingerprint (level name + save path hash) + dimension key so worlds
+ * that share a level name do not collide.
  */
 public final class BotHomeService {
 
@@ -90,11 +91,11 @@ public final class BotHomeService {
      * label (same key used in {@code basesByLabel}), so each base owns exactly one zone and
      * user-created zones (without this prefix) never collide.
      */
-    private static final String AUTO_ZONE_LABEL_PREFIX = "base:";
+    private static final String AUTO_ZONE_LABEL_PREFIX = StaleAutoZonePolicy.AUTO_ZONE_LABEL_PREFIX;
 
     /** True when {@code zoneLabel} names a base auto-zone (created by this service), not a user-drawn zone. */
     public static boolean isBaseAutoZoneLabel(String zoneLabel) {
-        return zoneLabel != null && zoneLabel.startsWith(AUTO_ZONE_LABEL_PREFIX);
+        return StaleAutoZonePolicy.isAutoZoneLabel(zoneLabel);
     }
 
     /**
@@ -108,7 +109,7 @@ public final class BotHomeService {
     }
 
     private static String autoZoneLabel(String baseLabel) {
-        return AUTO_ZONE_LABEL_PREFIX + normalizeLabelKey(baseLabel);
+        return StaleAutoZonePolicy.autoZoneLabel(baseLabel);
     }
 
     /**
@@ -169,6 +170,30 @@ public final class BotHomeService {
         if (synced > 0) {
             LOGGER.info("Synced {} auto-zones from registered bases for world {}", synced, worldId);
         }
+
+        // Drop base:* auto-zones whose base is gone (deleted, or carried in from another save
+        // before 1.1.234). User-drawn zones never match the prefix and are never removed.
+        List<String> existingZoneLabels = new ArrayList<>();
+        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
+            if (zone != null) existingZoneLabels.add(zone.getLabel());
+        }
+        int removed = 0;
+        for (String stale : StaleAutoZonePolicy.toRemove(existingZoneLabels, baseLabelKeys(server, world))) {
+            if (ProtectedZoneService.removeZoneInternal(world, stale)) {
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            LOGGER.info("Removed {} stale base auto-zones for world {}", removed, worldId);
+        }
+    }
+
+    /** Normalized keys of every base in the world, including any without a position. */
+    private static List<String> baseLabelKeys(MinecraftServer server, ServerWorld world) {
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            return wd.basesByLabel == null ? List.of() : new ArrayList<>(wd.basesByLabel.keySet());
+        }
     }
 
     /** Canonical label used when the server auto-creates a base at world spawn. */
@@ -199,14 +224,71 @@ public final class BotHomeService {
         return configDir.resolve("frens").resolve(FILE_NAME);
     }
 
+    /**
+     * Store key: save fingerprint + dimension ({@code "test 1#b5d170e5:minecraft:overworld"}).
+     * Before 1.1.234 this was level name + dimension, which two saves with the same level name
+     * share; see {@link #legacyServerWorldKey} and {@link #adoptLegacyWorldData}.
+     */
     private static String serverWorldKey(MinecraftServer server, ServerWorld world) {
+        return WorldStoreKeyPolicy.fingerprintKey(BotWorldStateService.currentWorldKey(server), dimensionId(world));
+    }
+
+    private static String legacyServerWorldKey(MinecraftServer server, ServerWorld world) {
         String level = server != null && server.getSaveProperties() != null
                 ? server.getSaveProperties().getLevelName()
-                : "unknown";
-        String dim = world != null && world.getRegistryKey() != null
+                : null;
+        return WorldStoreKeyPolicy.legacyLevelDimensionKey(level, dimensionId(world));
+    }
+
+    private static String dimensionId(ServerWorld world) {
+        return world != null && world.getRegistryKey() != null
                 ? world.getRegistryKey().getValue().toString()
-                : "unknown";
-        return level + ":" + dim;
+                : null;
+    }
+
+    /** identityHashCode of the server whose legacy adoption has run; -1 = none yet. */
+    private static volatile int adoptedServerIdentity = -1;
+
+    /**
+     * Once per server start, before anything reads world data: for each dimension with no
+     * fingerprinted entry, copy the legacy (level-name keyed) entry when
+     * {@link WorldStoreKeyPolicy#decide} allows it, and record the claim in
+     * {@code legacyWorldClaims}. Legacy entries are never removed or modified. A world that
+     * starts empty gets an empty entry so the decision sticks. Call from SERVER_STARTED on the
+     * server thread; {@link #worldData} also runs it lazily as a fallback.
+     */
+    public static void adoptLegacyWorldData(MinecraftServer server) {
+        if (server == null) return;
+        adoptedServerIdentity = System.identityHashCode(server);
+        ensureLoaded();
+        String fingerprint = BotWorldStateService.currentWorldKey(server);
+        long gameTime = WorldZoneStore.overworldGameTime(server);
+        boolean changed = false;
+        synchronized (LOCK) {
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            if (DATA.legacyWorldClaims == null) DATA.legacyWorldClaims = new HashMap<>();
+            for (ServerWorld world : server.getWorlds()) {
+                String key = serverWorldKey(server, world);
+                String legacyKey = legacyServerWorldKey(server, world);
+                WorldData legacy = DATA.worlds.get(legacyKey);
+                WorldStoreKeyPolicy.Adoption adoption = WorldStoreKeyPolicy.decide(
+                        DATA.worlds.containsKey(key), legacy != null, gameTime,
+                        DATA.legacyWorldClaims.get(legacyKey), fingerprint);
+                if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+                    DATA.worlds.put(key, GSON.fromJson(GSON.toJson(legacy), WorldData.class));
+                    DATA.legacyWorldClaims.put(legacyKey, fingerprint);
+                    LOGGER.info("Adopted legacy bot home data '{}' as '{}'", legacyKey, key);
+                    changed = true;
+                } else if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption)) {
+                    DATA.worlds.put(key, new WorldData());
+                    LOGGER.info("Bot home data '{}' starts empty ({}); legacy '{}' left untouched", key, adoption, legacyKey);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            flush();
+        }
     }
 
     private static void ensureLoaded() {
@@ -314,6 +396,9 @@ public final class BotHomeService {
 
     private static WorldData worldData(MinecraftServer server, ServerWorld world) {
         ensureLoaded();
+        if (server != null && adoptedServerIdentity != System.identityHashCode(server)) {
+            adoptLegacyWorldData(server);
+        }
         String key = serverWorldKey(server, world);
         synchronized (LOCK) {
             if (DATA.worlds == null) {
@@ -1828,6 +1913,8 @@ public final class BotHomeService {
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
         Map<String, String> homeCompassNameByBot = new HashMap<>();
+        // Legacy level-name key -> fingerprint of the save that adopted it (1.1.234 migration).
+        Map<String, String> legacyWorldClaims = new HashMap<>();
     }
 
     private static final class WorldData {

@@ -113,6 +113,8 @@ public class ManualConfig {
     private boolean survivalRecruitmentMode = false;
     // Per-world (level-name key) recruitment state.
     private Map<String, SurvivalRecruitmentState> survivalRecruitment = new HashMap<>();
+    // Legacy level-name key -> save fingerprint that adopted it (1.1.234 per-save keying).
+    private Map<String, String> survivalRecruitmentLegacyClaims = new HashMap<>();
 
     // === Soul communication (opt-in, local-Ollama-only conversational pilot) ===
     // Default-off and entirely separate from the legacy defaultLlmWorldEnabled toggle.
@@ -1223,6 +1225,13 @@ public class ManualConfig {
             survivalRecruitment = new HashMap<>();
         }
         return survivalRecruitment;
+    }
+
+    public Map<String, String> getSurvivalRecruitmentLegacyClaims() {
+        if (survivalRecruitmentLegacyClaims == null) {
+            survivalRecruitmentLegacyClaims = new HashMap<>();
+        }
+        return survivalRecruitmentLegacyClaims;
     }
 
     public SurvivalRecruitmentState getOrCreateSurvivalRecruitmentState(String worldKey) {

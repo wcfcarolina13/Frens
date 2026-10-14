@@ -133,12 +133,62 @@ public final class SurvivalRecruitmentService {
         return mode != null && mode.equalsIgnoreCase("questing");
     }
 
+    /**
+     * State key: the save fingerprint ({@code levelName#savePathHash}). Before 1.1.234 this was the
+     * bare level name, which a new save reusing an old name ("test 1 (1)" on disk, level name
+     * "test 1") inherited, World Mode choice included. Runs the one-time legacy adoption first.
+     */
     private static String worldKey(MinecraftServer server) {
         if (server == null) {
             return "default";
         }
-        String key = server.getSaveProperties().getLevelName();
-        return (key == null || key.isBlank()) ? "default" : key;
+        if (adoptedServerIdentity != System.identityHashCode(server)) {
+            adoptLegacyState(server);
+        }
+        return BotWorldStateService.currentWorldKey(server);
+    }
+
+    /** The key {@link #getState} reads; for commands that print or edit recruitment state. */
+    public static String stateKey(MinecraftServer server) {
+        return worldKey(server);
+    }
+
+    /** identityHashCode of the server whose legacy adoption has run; -1 = none yet. */
+    private static volatile int adoptedServerIdentity = -1;
+
+    /**
+     * Once per server start: when this save has no fingerprinted state, copy the legacy
+     * level-name entry if {@link WorldStoreKeyPolicy#decide} allows it (old world, not claimed by
+     * another save) and record the claim; otherwise create a fresh entry so the decision sticks.
+     * The legacy entry is never removed or modified. Call from SERVER_STARTED on the server
+     * thread, before anything reads recruitment state; {@link #worldKey} runs it lazily too.
+     */
+    public static void adoptLegacyState(MinecraftServer server) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        adoptedServerIdentity = System.identityHashCode(server);
+        String key = BotWorldStateService.currentWorldKey(server);
+        String legacyKey = BotWorldStateService.currentLevelName(server);
+        Map<String, ManualConfig.SurvivalRecruitmentState> states = Frens.CONFIG.getSurvivalRecruitment();
+        Map<String, String> claims = Frens.CONFIG.getSurvivalRecruitmentLegacyClaims();
+        ManualConfig.SurvivalRecruitmentState legacy = states.get(legacyKey);
+        WorldStoreKeyPolicy.Adoption adoption = WorldStoreKeyPolicy.decide(
+                states.containsKey(key), legacy != null, WorldZoneStore.overworldGameTime(server),
+                claims.get(legacyKey), key);
+        if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            Frens.CONFIG.setSurvivalRecruitmentState(key,
+                    gson.fromJson(gson.toJson(legacy), ManualConfig.SurvivalRecruitmentState.class));
+            claims.put(legacyKey, key);
+            Frens.LOGGER.info("[recruit] Adopted legacy recruitment state '{}' as '{}'", legacyKey, key);
+            Frens.CONFIG.save();
+        } else if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption)) {
+            Frens.CONFIG.getOrCreateSurvivalRecruitmentState(key);
+            Frens.LOGGER.info("[recruit] Recruitment state '{}' starts fresh ({}); legacy '{}' left untouched",
+                    key, adoption, legacyKey);
+            Frens.CONFIG.save();
+        }
     }
 
     public static ManualConfig.SurvivalRecruitmentState getState(MinecraftServer server) {
@@ -196,7 +246,8 @@ public final class SurvivalRecruitmentService {
                 canChooseMode,
                 false, // allowEveryoneSkinChange: retired, kept on the wire for mixed versions
                 allowCustomSkins,
-                worldKey(server)));
+                // Display label only (the World Mode screen prints it); never a store key.
+                BotWorldStateService.currentLevelName(server)));
     }
 
     public static boolean isAllowCustomSkins(MinecraftServer server) {

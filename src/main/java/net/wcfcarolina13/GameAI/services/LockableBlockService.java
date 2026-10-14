@@ -30,7 +30,6 @@ public final class LockableBlockService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("frens");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final String ZONE_ROOT_DIR = "bot_zones";
     private static final String LOCK_FILE_NAME = "locked_blocks.json";
 
     // Lock registry: dimension -> set of locked block positions
@@ -187,20 +186,50 @@ public final class LockableBlockService {
     // --- Persistence ---
 
     public static void loadForWorld(MinecraftServer server, String worldId) {
+        // Replace, never merge: the map is static and outlives a world when the integrated
+        // server switches saves inside one JVM.
+        LOCKED_BLOCKS.remove(worldId);
         Path file = getLockFile(server, worldId);
-        if (!Files.exists(file)) return;
+        Path legacyFile = WorldZoneStore.legacyDir(server, worldId).resolve(LOCK_FILE_NAME);
+        WorldStoreKeyPolicy.Adoption adoption = WorldZoneStore.decide(server, worldId, file, legacyFile);
+        Path fileToRead;
+        if (adoption == WorldStoreKeyPolicy.Adoption.USE_OWN) {
+            fileToRead = file;
+        } else if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+            fileToRead = legacyFile;
+            LOGGER.info("Adopting legacy locked blocks for world {} from {} into this save ({})",
+                    worldId, legacyFile, WorldZoneStore.fingerprint(server));
+        } else {
+            fileToRead = null;
+            if (Files.exists(legacyFile)) {
+                LOGGER.info("Locked blocks for world {} start empty in this save ({}): {}",
+                        worldId, WorldZoneStore.fingerprint(server), adoption);
+            }
+        }
         try {
-            String json = Files.readString(file);
-            List<int[]> positions = GSON.fromJson(json, new TypeToken<List<int[]>>(){}.getType());
-            if (positions == null || positions.isEmpty()) return;
             Set<BlockPos> locks = ConcurrentHashMap.newKeySet();
-            for (int[] coords : positions) {
-                if (coords.length >= 3) {
-                    locks.add(new BlockPos(coords[0], coords[1], coords[2]));
+            if (fileToRead != null) {
+                String json = Files.readString(fileToRead);
+                List<int[]> positions = GSON.fromJson(json, new TypeToken<List<int[]>>(){}.getType());
+                if (positions != null) {
+                    for (int[] coords : positions) {
+                        if (coords != null && coords.length >= 3) {
+                            locks.add(new BlockPos(coords[0], coords[1], coords[2]));
+                        }
+                    }
                 }
             }
-            LOCKED_BLOCKS.put(worldId, locks);
-            LOGGER.info("Loaded {} locked blocks for world {}", locks.size(), worldId);
+            if (!locks.isEmpty()) {
+                LOCKED_BLOCKS.put(worldId, locks);
+                LOGGER.info("Loaded {} locked blocks for world {}", locks.size(), worldId);
+            }
+            if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption)) {
+                // Adopted locks land in this save's store; a start-empty decision writes [] so it sticks.
+                writeLocks(server, worldId, locks);
+            }
+            if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+                WorldZoneStore.writeClaim(WorldZoneStore.legacyDir(server, worldId), WorldZoneStore.fingerprint(server));
+            }
         } catch (IOException e) {
             LOGGER.error("Failed to load locked blocks for world {}", worldId, e);
         }
@@ -208,21 +237,23 @@ public final class LockableBlockService {
 
     public static void saveForWorld(MinecraftServer server, String worldId) {
         Set<BlockPos> locks = LOCKED_BLOCKS.get(worldId);
-        Path dir = getLockFile(server, worldId).getParent();
         try {
-            Files.createDirectories(dir);
-            if (locks == null || locks.isEmpty()) {
-                Files.deleteIfExists(getLockFile(server, worldId));
-                return;
-            }
-            List<int[]> positions = new ArrayList<>();
-            for (BlockPos pos : locks) {
-                positions.add(new int[]{pos.getX(), pos.getY(), pos.getZ()});
-            }
-            Files.writeString(getLockFile(server, worldId), GSON.toJson(positions));
+            // Empty is written as [] (never deleted) so this save keeps its own store and can't
+            // later adopt another save's legacy locks.
+            writeLocks(server, worldId, locks == null ? Set.of() : locks);
         } catch (IOException e) {
             LOGGER.error("Failed to save locked blocks for world {}", worldId, e);
         }
+    }
+
+    private static void writeLocks(MinecraftServer server, String worldId, Set<BlockPos> locks) throws IOException {
+        Path file = getLockFile(server, worldId);
+        Files.createDirectories(file.getParent());
+        List<int[]> positions = new ArrayList<>();
+        for (BlockPos pos : locks) {
+            positions.add(new int[]{pos.getX(), pos.getY(), pos.getZ()});
+        }
+        Files.writeString(file, GSON.toJson(positions));
     }
 
     public static void saveAllWorlds(MinecraftServer server) {
@@ -233,20 +264,14 @@ public final class LockableBlockService {
         });
     }
 
+    /** This save's lock file for one dimension (see {@link WorldZoneStore}). */
     private static Path getLockFile(MinecraftServer server, String worldId) {
-        return server.getRunDirectory()
-                .resolve(ZONE_ROOT_DIR)
-                .resolve(worldStorageKey(worldId))
-                .resolve(LOCK_FILE_NAME);
+        return WorldZoneStore.ownDir(server, worldId).resolve(LOCK_FILE_NAME);
     }
 
-    private static String worldStorageKey(String worldId) {
-        if (worldId == null || worldId.isBlank()) return "unknown_world__0";
-        String sanitized = worldId
-                .replaceAll("[^A-Za-z0-9._-]", "_")
-                .replaceAll("_+", "_")
-                .replaceAll("^_+|_+$", "");
-        if (sanitized.isBlank()) sanitized = "world";
-        return sanitized + "__" + Integer.toHexString(worldId.hashCode());
+    /** Drop every in-memory lock. SERVER_STOPPING, after {@link #saveAllWorlds}: the next world must not inherit them. */
+    public static void clearAll() {
+        LOCKED_BLOCKS.clear();
+        BOT_REACTION_COOLDOWN.clear();
     }
 }

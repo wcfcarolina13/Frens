@@ -35,30 +35,28 @@ public final class BotWorldStateService {
     private BotWorldStateService() {}
 
     private static String worldKey(MinecraftServer server) {
-        String levelName = legacyWorldKey(server);
-        String rootFingerprint = "unknown";
+        return WorldStoreKeyPolicy.fingerprint(legacyWorldKey(server), savePathHash(server));
+    }
+
+    /** Hash of the save folder path, or "unknown" when it can't be resolved. */
+    private static String savePathHash(MinecraftServer server) {
         if (server != null) {
             try {
                 Path root = server.getSavePath(WorldSavePath.ROOT);
                 if (root != null) {
-                    String normalized = root.toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
-                    rootFingerprint = Integer.toUnsignedString(normalized.hashCode(), 16);
+                    return WorldStoreKeyPolicy.savePathHash(root.toAbsolutePath().normalize().toString());
                 }
             } catch (Exception ignored) {
             }
         }
-        return levelName + "#" + rootFingerprint;
+        return WorldStoreKeyPolicy.UNKNOWN_PATH_HASH;
     }
 
     private static String legacyWorldKey(MinecraftServer server) {
         if (server == null || server.getSaveProperties() == null) {
             return "default";
         }
-        String levelName = server.getSaveProperties().getLevelName();
-        if (levelName == null || levelName.isBlank()) {
-            return "default";
-        }
-        return levelName.trim();
+        return WorldStoreKeyPolicy.levelNameOrDefault(server.getSaveProperties().getLevelName());
     }
 
     private static Path stateFile() {
@@ -194,8 +192,17 @@ public final class BotWorldStateService {
         return alias == null ? "" : alias.trim().toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * The save fingerprint ({@code levelName#savePathHash}): unique per save folder, unlike the
+     * level name. Every per-world store keys on this (see {@link WorldStoreKeyPolicy}).
+     */
     public static String currentWorldKey(MinecraftServer server) {
         return worldKey(server);
+    }
+
+    /** Trimmed level name ("default" when unknown): display only, never a store key. */
+    public static String currentLevelName(MinecraftServer server) {
+        return legacyWorldKey(server);
     }
 
     /**

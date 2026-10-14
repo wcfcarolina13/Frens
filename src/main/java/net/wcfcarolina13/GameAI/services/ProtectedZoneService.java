@@ -36,42 +36,35 @@ public class ProtectedZoneService {
     // and a write would be clobbered when loadZones runs. Migration covers the pre-load case.
     private static final Set<String> LOADED_WORLDS = ConcurrentHashMap.newKeySet();
 
-    private static final String ZONE_ROOT_DIR = "bot_zones";
     private static final String ZONE_FILE_NAME = "protected_zones.json";
 
+    /** This save's zone directory for one dimension (see {@link WorldZoneStore}). */
     private static Path getZoneDirectory(MinecraftServer server, String worldId) {
-        return server.getRunDirectory()
-                .resolve(ZONE_ROOT_DIR)
-                .resolve(worldStorageKey(worldId));
+        return WorldZoneStore.ownDir(server, worldId);
     }
 
     private static Path getZoneFile(MinecraftServer server, String worldId) {
         return getZoneDirectory(server, worldId).resolve(ZONE_FILE_NAME);
     }
 
-    private static String worldStorageKey(String worldId) {
-        if (worldId == null || worldId.isBlank()) {
-            return "unknown_world__0";
-        }
-        String sanitized = worldId
-                .replaceAll("[^A-Za-z0-9._-]", "_")
-                .replaceAll("_+", "_")
-                .replaceAll("^_+|_+$", "");
-        if (sanitized.isBlank()) {
-            sanitized = "world";
-        }
-        return sanitized + "__" + Integer.toHexString(worldId.hashCode());
-    }
-
+    /**
+     * The pre-1.1.234 zone file shared by every save: {@code bot_zones/<safe dim>/}, or the even
+     * older raw {@code bot_zones/<dim>/}. Null when neither exists. Never written.
+     */
     private static Path getLegacyZoneFile(MinecraftServer server, String worldId) {
         if (server == null || worldId == null || worldId.isBlank()) {
             return null;
         }
+        Path dimOnly = WorldZoneStore.legacyDir(server, worldId).resolve(ZONE_FILE_NAME);
+        if (Files.exists(dimOnly)) {
+            return dimOnly;
+        }
         try {
-            return server.getRunDirectory()
-                    .resolve(ZONE_ROOT_DIR)
+            Path raw = server.getRunDirectory()
+                    .resolve(WorldZoneStore.ROOT_DIR)
                     .resolve(worldId)
                     .resolve(ZONE_FILE_NAME);
+            return Files.exists(raw) ? raw : null;
         } catch (InvalidPathException ex) {
             return null;
         }
@@ -444,19 +437,36 @@ public class ProtectedZoneService {
     }
 
     public static void loadZones(MinecraftServer server, String worldId) {
+        // Replace, never merge: the maps are static and outlive a world when the integrated
+        // server switches saves inside one JVM.
+        zones.remove(worldId);
+
         Path zoneFile = getZoneFile(server, worldId);
         Path legacyFile = getLegacyZoneFile(server, worldId);
+        WorldStoreKeyPolicy.Adoption adoption = WorldZoneStore.decide(server, worldId, zoneFile, legacyFile);
 
         // Mark loaded even if the file doesn't exist — empty world is a valid load result,
         // and post-load callers (auto-zone migration) need the green light to write.
         LOADED_WORLDS.add(worldId);
 
         Path fileToRead = null;
-        if (Files.exists(zoneFile)) {
+        boolean adopting = false;
+        if (adoption == WorldStoreKeyPolicy.Adoption.USE_OWN) {
             fileToRead = zoneFile;
-        } else if (legacyFile != null && Files.exists(legacyFile)) {
+        } else if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
             fileToRead = legacyFile;
-            LOGGER.info("Loading protected zones for world {} from legacy path {}", worldId, legacyFile);
+            adopting = true;
+            LOGGER.info("Adopting legacy protected zones for world {} from {} into this save ({})",
+                    worldId, legacyFile, WorldZoneStore.fingerprint(server));
+        } else if (legacyFile != null) {
+            LOGGER.info("Protected zones for world {} start empty in this save ({}): {}",
+                    worldId, WorldZoneStore.fingerprint(server), adoption);
+        }
+
+        if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption) && !adopting) {
+            // Make the start-empty decision stick so a later load can't adopt someone else's zones.
+            zones.put(worldId, new ConcurrentHashMap<>());
+            save(server, worldId);
         }
 
         if (fileToRead == null) return;
@@ -464,8 +474,7 @@ public class ProtectedZoneService {
         try {
             String json = Files.readString(fileToRead);
             List<ZoneData> zoneDataList = GSON.fromJson(json, new TypeToken<List<ZoneData>>(){}.getType());
-
-            if (zoneDataList == null || zoneDataList.isEmpty()) return;
+            if (zoneDataList == null) zoneDataList = List.of();
 
             Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
             for (ZoneData data : zoneDataList) {
@@ -507,7 +516,11 @@ public class ProtectedZoneService {
 
             // Re-save in new format if any legacy zones were migrated
             boolean hadLegacy = zoneDataList.stream().anyMatch(ZoneData::hasLegacyFormat);
-            if (hadLegacy) {
+            if (adopting) {
+                zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
+                save(server, worldId);
+                WorldZoneStore.writeClaim(WorldZoneStore.legacyDir(server, worldId), WorldZoneStore.fingerprint(server));
+            } else if (hadLegacy) {
                 save(server, worldId);
                 LOGGER.info("Re-saved zones for world {} in AABB format after legacy migration", worldId);
             }
@@ -518,7 +531,9 @@ public class ProtectedZoneService {
 
     private static void save(MinecraftServer server, String worldId) {
         Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) return;
+        // An empty map is written as [] so removing the last zone sticks (and so a world that
+        // started empty keeps its own store; see WorldStoreKeyPolicy.mustCreateOwnStore).
+        if (worldZones == null) return;
 
         try {
             Path zoneDir = getZoneDirectory(server, worldId);
@@ -555,6 +570,12 @@ public class ProtectedZoneService {
         String worldId = getWorldId(world);
         zones.remove(worldId);
         LOGGER.info("Cleared all protected zones for world {}", worldId);
+    }
+
+    /** Drop every in-memory zone and load flag. SERVER_STOPPING: the next world must not inherit them. */
+    public static void clearAll() {
+        zones.clear();
+        LOADED_WORLDS.clear();
     }
 
     private static String getWorldId(ServerWorld world) {
