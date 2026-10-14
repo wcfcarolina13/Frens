@@ -18,7 +18,11 @@ their trees. 1.1.229 details in the block below.
 **Field checks pending:** Phase 6ab (1 item), 6aa (6), 6z … 6b; checklist now 253. Bradley runs them later.
 
 **Next (in order):**
-1. Multiplayer non-op owners: typed per-action payloads (`.superpowers/sdd/scope-ui-commands-1.1.227.md`).
+1. **1.1.231 = multiplayer non-op owners.** Fresh scope done (2026-10-13): `.superpowers/sdd/scope-nonop-owners-1.1.231.md`
+   (untracked, gitignored). Design: one `BotActionPayload` + `BotActionPolicy` enum allowlist + a per-call, server-thread
+   `AuthorizedBotDispatch` grant that reuses the `/bot` handlers; 4 implementers (A first). SECURITY-SENSITIVE: needs
+   Bradley's OK on the grant design before implementing; review must check target hijack (`all`/extra bot names in args,
+   global-bot fallback) and the ungated inline catch-all.
 2. Host sweep of remaining op-only gates. 3. Chat action requests. 4. Fresh-install leftovers. 5. Bot livestream.
 
 ## Session Handoff 2026-10-13 (1.1.229) — superseded
