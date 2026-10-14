@@ -643,8 +643,7 @@ public final class BotSkinChooserScreen extends Screen {
     /**
      * This screen opens only from the bot's inventory screen, which the server shows only to the
      * bot's owner, an operator or the host, and SkinChangePolicy lets each of them set presets.
-     * So presets are always offered here. allowEveryoneSkinChange no longer changes the server
-     * decision, so it does not gate the chooser.
+     * So presets are always offered here.
      */
     private boolean canUsePresetChanges() {
         return true;

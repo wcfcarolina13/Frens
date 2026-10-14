@@ -276,17 +276,6 @@ public final class RecruitmentAdminNetworkManager {
                     out.add("Permanent companion unlocked (required for companion spells/commands).");
                 }
             }
-            case "skin_everyone_toggle" -> {
-                boolean updated = !SurvivalRecruitmentService.isAllowEveryoneSkinChange(server);
-                SurvivalRecruitmentService.setAllowEveryoneSkinChange(server, updated);
-                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                    if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
-                        continue;
-                    }
-                    SurvivalRecruitmentService.sendRecruitmentState(p);
-                }
-                out.add("Skin policy: allowEveryoneSkinChange=" + updated);
-            }
             case "skin_custom_toggle" -> {
                 boolean updated = !SurvivalRecruitmentService.isAllowCustomSkins(server);
                 SurvivalRecruitmentService.setAllowCustomSkins(server, updated);
@@ -400,7 +389,6 @@ public final class RecruitmentAdminNetworkManager {
             case "reset", "recruit_reset" -> "recruit_reset";
             case "setanchor_here", "clearanchor", "anchor_set", "anchor_clear" -> "village_anchor";
             case "setstage" -> "stage_debug";
-            case "skin_everyone_toggle" -> "skin_policy_everyone";
             case "skin_custom_toggle" -> "skin_policy_custom";
             case "autonomous_rescues_toggle" -> "rescue_manage";
             case "owned_sunset_ss_on", "owned_sunset_ss_off", "owned_sunset_ss_toggle" -> "recruit_manage";
@@ -503,8 +491,7 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         out.add("Companion quest: stage=" + st.getCompanionQuestStage() + " permanent=" + st.isPermanentCompanion());
-        out.add("Skin policy: allowEveryoneSkinChange=" + st.isAllowEveryoneSkinChange()
-            + " allowCustomSkins=" + st.isAllowCustomSkins());
+        out.add("Skin policy: allowCustomSkins=" + st.isAllowCustomSkins());
         out.add("Autonomous rescues: " + st.isAutonomousRescuesEnabled());
         if (st.isCompanionAnchorSet()) {
             BlockPos anchor = BlockPos.fromLong(st.getCompanionAnchorPos());

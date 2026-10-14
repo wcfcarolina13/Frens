@@ -1920,6 +1920,8 @@ public class ManualConfig {
         private long modeSelectedAtEpochMs;
         private String modeSelectedByName;
         // Skin policy controls (server-authoritative).
+        /** Retired in 1.1.233 (the owner check decides skin changes). Kept so saved configs still load. */
+        @Deprecated
         private boolean allowEveryoneSkinChange;
         private boolean allowCustomSkins;
         private boolean autonomousRescuesEnabled;
@@ -2034,10 +2036,12 @@ public class ManualConfig {
                     : modeSelectedByName.trim();
         }
 
+        @Deprecated
         public boolean isAllowEveryoneSkinChange() {
             return allowEveryoneSkinChange;
         }
 
+        @Deprecated
         public void setAllowEveryoneSkinChange(boolean allowEveryoneSkinChange) {
             this.allowEveryoneSkinChange = allowEveryoneSkinChange;
         }

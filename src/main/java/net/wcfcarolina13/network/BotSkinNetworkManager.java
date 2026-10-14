@@ -4,9 +4,9 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
-import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +43,23 @@ public final class BotSkinNetworkManager {
 
         BotSkinService.SkinSource skinSource = BotSkinService.SkinSource.fromWire(skinSourceRaw);
 
+        // Admins (operator or host) set any skin. Otherwise only the bot's owner, presets always,
+        // custom URLs only with allowCustomSkins. The owner check runs before the online lookup so
+        // a non-owner learns nothing about whether someone else's bot is online.
+        boolean isOp = Frens.isOperator(player);
+        boolean isHost = BotAccessGate.isHost(player);
+        boolean operator = isOp || isHost;
+        UUID ownerUuid = ownerUuidForAlias(alias);
+        boolean isOwner = ownerUuid != null && ownerUuid.equals(player.getUuid());
+        SkinChangePolicy.Decision decision = SkinChangePolicy.decide(isOp, isHost, isOwner,
+                SurvivalRecruitmentService.isAllowCustomSkins(server),
+                skinSource == BotSkinService.SkinSource.CUSTOM_URL);
+        if (decision == SkinChangePolicy.Decision.DENY) {
+            BotAccessGate.warnDenied(player, alias, "skin", "NOT_OWNER");
+            player.sendMessage(net.minecraft.text.Text.literal("§c" + SkinChangePolicy.DENY_MESSAGE), false);
+            return;
+        }
+
         // Find the online bot.
         ServerPlayerEntity bot = null;
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
@@ -54,24 +71,6 @@ public final class BotSkinNetworkManager {
 
         if (bot == null) {
             player.sendMessage(net.minecraft.text.Text.literal("§cBot '" + alias + "' is not online."), true);
-            return;
-        }
-
-        // Admins (operator or host) set any skin. Otherwise only the bot's owner, presets always,
-        // custom URLs only with allowCustomSkins. allowEveryoneSkinChange no longer lets a
-        // non-owner reskin someone else's bot.
-        boolean isOp = Frens.isOperator(player);
-        boolean isHost = BotAccessGate.isHost(player);
-        boolean operator = isOp || isHost;
-        UUID ownerUuid = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
-        boolean isOwner = ownerUuid != null && ownerUuid.equals(player.getUuid());
-        SkinChangePolicy.Decision decision = SkinChangePolicy.decide(isOp, isHost, isOwner,
-                SurvivalRecruitmentService.isAllowEveryoneSkinChange(server),
-                SurvivalRecruitmentService.isAllowCustomSkins(server),
-                skinSource == BotSkinService.SkinSource.CUSTOM_URL);
-        if (decision == SkinChangePolicy.Decision.DENY) {
-            BotAccessGate.warnDenied(player, alias, "skin", "NOT_OWNER");
-            player.sendMessage(net.minecraft.text.Text.literal("§c" + SkinChangePolicy.DENY_MESSAGE), false);
             return;
         }
 
@@ -130,6 +129,26 @@ public final class BotSkinNetworkManager {
             }
         } else {
             player.sendMessage(net.minecraft.text.Text.literal("§cFailed to apply skin."), true);
+        }
+    }
+
+    /** Owner UUID recorded for this alias, or null when unknown (same lookup as CompanionCommunicationPolicy.resolveOwnerUuid). */
+    private static UUID ownerUuidForAlias(String alias) {
+        try {
+            if (Frens.CONFIG == null) {
+                return null;
+            }
+            ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(alias);
+            if (o == null) {
+                return null;
+            }
+            String uuid = o.ownerUuid();
+            if (uuid == null || uuid.isBlank()) {
+                return null;
+            }
+            return UUID.fromString(uuid);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 }

@@ -558,7 +558,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         PRESERVE_EXPENSIVE_GEAR,
         AUTO_ACCEPT_PRECIOUS_FOODS,
         OPEN_SKIN_CHOOSER,
-        SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
         STORAGE,
         QUICK_STORE,
@@ -734,7 +733,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
                 TopicEntry.adminHeader("🧙 Magic & Skins"),
                 new TopicEntry("Change Skin >", TopicCategory.ADMIN, TopicAction.OPEN_SKIN_CHOOSER, false, 0, null),
-                new TopicEntry("Allow Skin Changes for Everyone", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_EVERYONE, true, 0, null),
                 new TopicEntry("Allow Custom URL Skins", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_CUSTOM, true, 0, null),
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
 
@@ -4222,13 +4220,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Current: " + (isLockBlocksModeActive() ? "ON" : "OFF")
                 );
             }
-            if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
-                return java.util.List.of(
-                        "Allow Skin Changes for Everyone",
-                        "When ON, non-admin players may change bot skins.",
-                        "When OFF, skin changes remain admin-only."
-                );
-            }
             if (entry.action == TopicAction.SKIN_POLICY_CUSTOM) {
                 return java.util.List.of(
                         "Allow Custom URL Skins",
@@ -5147,7 +5138,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case PRESERVE_EXPENSIVE_GEAR -> togglePreserveExpensiveGear();
             case AUTO_ACCEPT_PRECIOUS_FOODS -> toggleAutoAcceptPreciousFoods();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
-            case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
             case STOP -> runStop();
             case RESUME -> runResume();
@@ -5629,16 +5619,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case LOCK_BLOCKS_MODE -> isLockBlocksModeActive();
             case PRESERVE_EXPENSIVE_GEAR -> isPreserveExpensiveGearActive();
             case AUTO_ACCEPT_PRECIOUS_FOODS -> isAutoAcceptPreciousFoodsActive();
-            case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
             case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
             default -> false;
         };
-    }
-
-    private boolean isSkinPolicyEveryoneActive() {
-        return FrensClient.isSkinChangeForEveryoneEnabled();
     }
 
     private boolean isSkinPolicyCustomActive() {
@@ -5943,7 +5928,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Map.entry("baritone_pathfinder", true),
             Map.entry("lock_blocks_mode", true),
             Map.entry("preserve_expensive_gear", true),
-            Map.entry("skin_policy_everyone", false),
             Map.entry("skin_policy_custom", false),
             Map.entry("wizard_tome", false),
             Map.entry("learning_manage", false),
@@ -6000,7 +5984,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case LOCK_BLOCKS_MODE -> "lock_blocks_mode";
                 case PRESERVE_EXPENSIVE_GEAR -> "preserve_expensive_gear";
                 case AUTO_ACCEPT_PRECIOUS_FOODS -> "auto_accept_precious_foods";
-                case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
                 case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
                 default -> null;
             };
@@ -6810,13 +6793,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BotSkinChooserScreen(this, botAlias));
-    }
-
-    private void toggleSkinPolicyEveryone() {
-        if (this.client == null || this.client.getNetworkHandler() == null) {
-            return;
-        }
-        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "skin_everyone_toggle", 0, false));
     }
 
     private void toggleSkinPolicyCustom() {

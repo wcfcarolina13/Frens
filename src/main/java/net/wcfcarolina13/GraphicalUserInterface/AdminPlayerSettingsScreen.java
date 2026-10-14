@@ -51,8 +51,6 @@ public class AdminPlayerSettingsScreen extends Screen {
                 "Lets this player enable or disable the wolf-style follow teleport for their companion in the Bot Controls panel."),
             new PermissionDef("post_task_return", "Post-Task Return",
                 "After finishing or being stopped from an assigned task underground, the bot fast-travels to the nearest bed, base, or commander. Hunger cost applies."),
-            new PermissionDef("skin_policy_everyone", "Allow Skin Changes for Everyone",
-                "Lets this player change whether non-admin players may change companion skins."),
             new PermissionDef("skin_policy_custom", "Allow Custom URL Skins",
                 "Lets this player change whether custom URL skins are allowed or restricted to safer preset-based choices."),
             new PermissionDef("wizard_tome", "Give Wizard's Tome",

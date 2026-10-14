@@ -104,7 +104,6 @@ public final class SurvivalRecruitmentService {
             Map.entry("gameplay_tips", true),
             Map.entry("idle_hobbies_anywhere", true),
             Map.entry("baritone_pathfinder", true),
-            Map.entry("skin_policy_everyone", false),
             Map.entry("skin_policy_custom", false),
             Map.entry("wizard_tome", false),
             Map.entry("learning_manage", false),
@@ -188,7 +187,6 @@ public final class SurvivalRecruitmentService {
         String alias = st != null ? st.getBotAlias() : "Jake";
         boolean canChooseMode = canChooseWorldMode(player);
         boolean modeSelectionRequired = canChooseMode && (st == null || !st.isModeSelectionDone() || st.getSelectedWorldMode() == null);
-        boolean allowEveryoneSkinChange = st != null && st.isAllowEveryoneSkinChange();
         boolean allowCustomSkins = st != null && st.isAllowCustomSkins();
         ServerPlayNetworking.send(player, new RecruitmentStatePayload(
                 enabled,
@@ -196,17 +194,9 @@ public final class SurvivalRecruitmentService {
                 alias,
                 modeSelectionRequired,
                 canChooseMode,
-                allowEveryoneSkinChange,
+                false, // allowEveryoneSkinChange: retired, kept on the wire for mixed versions
                 allowCustomSkins,
                 worldKey(server)));
-    }
-
-    public static boolean isAllowEveryoneSkinChange(MinecraftServer server) {
-        if (server == null || Frens.CONFIG == null) {
-            return false;
-        }
-        ManualConfig.SurvivalRecruitmentState st = getState(server);
-        return st != null && st.isAllowEveryoneSkinChange();
     }
 
     public static boolean isAllowCustomSkins(MinecraftServer server) {
@@ -215,18 +205,6 @@ public final class SurvivalRecruitmentService {
         }
         ManualConfig.SurvivalRecruitmentState st = getState(server);
         return st != null && st.isAllowCustomSkins();
-    }
-
-    public static void setAllowEveryoneSkinChange(MinecraftServer server, boolean allow) {
-        if (server == null || Frens.CONFIG == null) {
-            return;
-        }
-        ManualConfig.SurvivalRecruitmentState st = getState(server);
-        if (st == null) {
-            return;
-        }
-        st.setAllowEveryoneSkinChange(allow);
-        Frens.CONFIG.save();
     }
 
     public static void setAllowCustomSkins(MinecraftServer server, boolean allow) {
