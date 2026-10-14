@@ -22,6 +22,8 @@ import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.GraphicalUserInterface.CraftingListPolicy.Entry;
 import net.wcfcarolina13.GraphicalUserInterface.CraftingListPolicy.Row;
 import net.wcfcarolina13.GraphicalUserInterface.CraftingListPolicy.SortMode;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.CraftingHistoryPayload;
 import net.wcfcarolina13.network.RequestCraftingHistoryPayload;
 
@@ -85,6 +87,7 @@ public class CraftingHistoryScreen extends Screen {
     private static List<ItemGroup> categoryGroups = List.of();
 
     private final Screen parent;
+    private final String botAlias;
     private TextFieldWidget amountField;
     private TextFieldWidget searchField;
     private ButtonWidget sortButton;
@@ -107,8 +110,14 @@ public class CraftingHistoryScreen extends Screen {
     private static final int LIST_MIN_H = 60;
 
     public CraftingHistoryScreen(Screen parent) {
+        this(parent, "");
+    }
+
+    /** @param botAlias the bot the Craft button acts on; blank means "my only bot" */
+    public CraftingHistoryScreen(Screen parent, String botAlias) {
         super(Text.literal("Crafting"));
         this.parent = parent;
+        this.botAlias = botAlias == null ? "" : botAlias;
     }
 
     @Override
@@ -369,7 +378,7 @@ public class CraftingHistoryScreen extends Screen {
             item = id.getPath();
         }
         String command = "bot craft " + item + " " + amount;
-        this.client.getNetworkHandler().sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.CRAFT, botAlias, List.of(item, String.valueOf(amount)), command);
     }
 
     private void drawBorder(DrawContext context, Rect list, int color) {

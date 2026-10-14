@@ -13,6 +13,8 @@ import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.CookablesPayload;
 import net.wcfcarolina13.network.RequestCookablesPayload;
 
@@ -329,7 +331,7 @@ public class CookablesScreen extends Screen {
         if (botTarget != null && !botTarget.isBlank()) {
             command = command + " " + botTarget;
         }
-        this.client.getNetworkHandler().sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.COOK, botTarget, List.of(item, fuelItem), command);
     }
 
     private Rect listRect() {

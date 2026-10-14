@@ -27,6 +27,8 @@ import net.wcfcarolina13.network.BaseRevokeWallAccessPayload;
 import net.wcfcarolina13.network.BaseSetHomePayload;
 import net.wcfcarolina13.network.BaseSetPayload;
 import net.wcfcarolina13.network.BaseUnclaimWallPayload;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.RequestBasesPayload;
 
 import java.io.Reader;
@@ -1309,7 +1311,8 @@ public class BaseManagerScreen extends Screen {
         String alias = botAlias.isBlank() ? "this bot" : botAlias;
         // Lodestone: set as home compass (must come BEFORE isBase check)
         if (selected.isLodestone()) {
-            sendChatCommand(this.client, "bot compass home " + botAlias + " " + selected.label);
+            BotActionClientSender.send(BotActionPolicy.Action.COMPASS_HOME, botAlias, List.of(selected.label),
+                    "bot compass home " + botAlias + " " + selected.label);
             showStatus("Setting home compass...", STATUS_OK);
             echoToChat(alias + "'s home compass → " + selected.label);
             requestRefresh();
@@ -1348,7 +1351,8 @@ public class BaseManagerScreen extends Screen {
         }
         // Lodestone: use compass travel (must come BEFORE isBase check)
         if (selected.isLodestone()) {
-            sendChatCommand(this.client, "bot compass travel " + botAlias + " " + selected.label);
+            BotActionClientSender.send(BotActionPolicy.Action.COMPASS_TRAVEL, botAlias, List.of(selected.label),
+                    "bot compass travel " + botAlias + " " + selected.label);
             showStatus("Sending bot via compass...", STATUS_OK);
             requestRefresh();
             return;
@@ -1369,8 +1373,7 @@ public class BaseManagerScreen extends Screen {
     }
 
     private void sendFortifyNew() {
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify");
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("start", ""), "bot fortify");
         close();
     }
 
@@ -1380,8 +1383,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify resume " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("resume", selected.label),
+                "bot fortify resume " + selected.label);
         close();
     }
 
@@ -1391,8 +1394,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify patch " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("patch", selected.label),
+                "bot fortify patch " + selected.label);
         close();
     }
 
@@ -1402,8 +1405,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify patch " + selected.label + " auto");
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("patch_auto", selected.label),
+                "bot fortify patch " + selected.label + " auto");
         close();
     }
 
@@ -1413,8 +1416,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify status " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("status", selected.label),
+                "bot fortify status " + selected.label);
         close();
     }
 
@@ -1424,8 +1427,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify moat " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("moat", selected.label),
+                "bot fortify moat " + selected.label);
         close();
     }
 
@@ -1435,8 +1438,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify drift " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("drift", selected.label),
+                "bot fortify drift " + selected.label);
         close();
     }
 
@@ -1446,8 +1449,8 @@ public class BaseManagerScreen extends Screen {
             showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
-        MinecraftClient mc = this.client;
-        sendChatCommand(mc, "bot fortify expand " + selected.label);
+        BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, botAlias, List.of("expand", selected.label),
+                "bot fortify expand " + selected.label);
         close();
     }
 
@@ -1688,17 +1691,6 @@ public class BaseManagerScreen extends Screen {
         } catch (Exception e) {
             return List.of();
         }
-    }
-
-    private static void sendChatCommand(MinecraftClient client, String command) {
-        if (client == null) {
-            return;
-        }
-        var player = client.player;
-        if (player == null || player.networkHandler == null) {
-            return;
-        }
-        player.networkHandler.sendChatCommand(command);
     }
 
     private void openConstructionScreen() {

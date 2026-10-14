@@ -8,6 +8,8 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -488,7 +490,12 @@ public class ConstructionScreen extends Screen {
         String structureType = entry.structureType();
         if (structureType == null || structureType.isEmpty()) {
             String cmd = "bot " + entry.command() + (target.isEmpty() ? "" : " " + target);
-            player.networkHandler.sendChatCommand(cmd);
+            String fortifySub = fortifySubOf(entry.command());
+            if (fortifySub != null) {
+                BotActionClientSender.send(BotActionPolicy.Action.FORTIFY, target, List.of(fortifySub, ""), cmd);
+            } else {
+                player.networkHandler.sendChatCommand(cmd);
+            }
             closeToGameplay();
             return;
         }
@@ -506,6 +513,17 @@ public class ConstructionScreen extends Screen {
             return trimmed.substring(1, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    /** {@code fortify} -> start, {@code fortify <sub>} -> sub; anything else is not a fortify entry (null). */
+    private static String fortifySubOf(String command) {
+        if ("fortify".equals(command)) {
+            return "start";
+        }
+        if (command != null && command.startsWith("fortify ")) {
+            return command.substring("fortify ".length()).trim();
+        }
+        return null;
     }
 
     private static String formatBotTarget(String target) {

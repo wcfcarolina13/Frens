@@ -14,6 +14,8 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.RequestHuntablesPayload;
 import net.wcfcarolina13.network.SaveHuntConfigPayload;
 
@@ -363,12 +365,15 @@ public class HuntablesScreen extends Screen {
 
         String count = countField != null ? countField.getText() : "";
         StringBuilder command = new StringBuilder("bot skill hunt ");
+        String countArg = "0";
         if (count != null && !count.isBlank()) {
             String cleaned = count.trim();
             if (cleaned.matches("\\d+")) {
                 command.append(cleaned).append(" ");
+                countArg = cleaned;
             }
         }
+        String targetArg = "";
 
         // If specific targets selected, pick the first as the explicit target for the command.
         // The config service stores the full multi-select list, so the skill will respect it.
@@ -379,12 +384,14 @@ public class HuntablesScreen extends Screen {
                 firstTarget = id.getPath();
             }
             command.append(firstTarget);
+            targetArg = firstTarget;
         }
 
         if (botTarget != null && !botTarget.isBlank()) {
             command.append(" ").append(botTarget);
         }
-        this.client.getNetworkHandler().sendChatCommand(command.toString().trim());
+        BotActionClientSender.send(BotActionPolicy.Action.SKILL_HUNT, botTarget, List.of(countArg, targetArg),
+                command.toString().trim());
         this.client.setScreen(null);
     }
 

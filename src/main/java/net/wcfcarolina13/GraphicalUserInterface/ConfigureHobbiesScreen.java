@@ -1,13 +1,13 @@
 package net.wcfcarolina13.GraphicalUserInterface;
 
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler;
 
 import java.util.HashMap;
@@ -156,14 +156,14 @@ public class ConfigureHobbiesScreen extends Screen {
     private void toggleHobby(String name, ButtonWidget button) {
         boolean newState = !isOn(name);
         localOverrides.put(name, newState);
-        sendCommand("bot hobby " + name + " " + (newState ? "on" : "off") + " " + botTarget);
+        sendHobby(name, newState);
         rebuild();
     }
 
     private void bulkSet(boolean enabled) {
         for (String name : BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER) {
             localOverrides.put(name, enabled);
-            sendCommand("bot hobby " + name + " " + (enabled ? "on" : "off") + " " + botTarget);
+            sendHobby(name, enabled);
         }
         rebuild();
     }
@@ -193,13 +193,11 @@ public class ConfigureHobbiesScreen extends Screen {
         }
     }
 
-    private void sendCommand(String command) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null) return;
-        ClientPlayerEntity p = mc.player;
-        if (p == null || p.networkHandler == null) return;
-        String trimmed = command.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        p.networkHandler.sendChatCommand(trimmed);
+    private void sendHobby(String name, boolean on) {
+        String value = on ? "on" : "off";
+        String fallback = ("bot hobby " + name + " " + value + " " + botTarget)
+                .trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        BotActionClientSender.send(BotActionPolicy.Action.HOBBY_SET, botTarget, List.of(name, value), fallback);
     }
 
     @Override

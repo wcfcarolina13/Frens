@@ -6,6 +6,8 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -402,7 +404,8 @@ public class BotRestoreScreen extends Screen {
         if (client == null || index >= aliases.size()) return;
         String alias = aliases.get(index);
         if (client.getNetworkHandler() != null) {
-            client.getNetworkHandler().sendChatCommand("bot spawn " + quoteAlias(alias) + " admin");
+            BotActionClientSender.send(BotActionPolicy.Action.SPAWN, alias, List.of(),
+                    "bot spawn " + quoteAlias(alias) + " admin");
         }
         if (index + 1 < aliases.size()) {
             new Thread(() -> {
@@ -421,7 +424,8 @@ public class BotRestoreScreen extends Screen {
         if (name.isEmpty() || !NAME_PATTERN.matcher(name).matches()) {
             return;
         }
-        client.getNetworkHandler().sendChatCommand("bot spawn " + quoteAlias(name) + " admin");
+        BotActionClientSender.send(BotActionPolicy.Action.SPAWN, name, List.of(),
+                "bot spawn " + quoteAlias(name) + " admin");
         if (client.player != null) {
             client.player.sendMessage(
                     Text.literal("Creating " + name + " (random skin — change later via inventory)."),
