@@ -6,11 +6,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * Server-side handler for {@link BotSkinPayload}.
@@ -34,13 +36,6 @@ public final class BotSkinNetworkManager {
         if (server == null || player == null || player.isRemoved()) return;
         if (player instanceof createFakePlayer) return;
 
-        boolean operator = Frens.isOperator(player);
-        boolean allowEveryoneSkinChange = SurvivalRecruitmentService.isAllowEveryoneSkinChange(server);
-        if (!operator && !allowEveryoneSkinChange) {
-            player.sendMessage(net.minecraft.text.Text.literal("§cNot authorized to change bot skins."), true);
-            return;
-        }
-
         String alias = payload.botAlias() != null ? payload.botAlias().trim() : "";
         String skinSourceRaw = payload.skinSource() != null ? payload.skinSource().trim() : "";
         String skinValueRaw = payload.skinValue() != null ? payload.skinValue().trim() : "";
@@ -62,6 +57,24 @@ public final class BotSkinNetworkManager {
             return;
         }
 
+        // Admins (operator or host) set any skin. Otherwise only the bot's owner, presets always,
+        // custom URLs only with allowCustomSkins. allowEveryoneSkinChange no longer lets a
+        // non-owner reskin someone else's bot.
+        boolean isOp = Frens.isOperator(player);
+        boolean isHost = BotAccessGate.isHost(player);
+        boolean operator = isOp || isHost;
+        UUID ownerUuid = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        boolean isOwner = ownerUuid != null && ownerUuid.equals(player.getUuid());
+        SkinChangePolicy.Decision decision = SkinChangePolicy.decide(isOp, isHost, isOwner,
+                SurvivalRecruitmentService.isAllowEveryoneSkinChange(server),
+                SurvivalRecruitmentService.isAllowCustomSkins(server),
+                skinSource == BotSkinService.SkinSource.CUSTOM_URL);
+        if (decision == SkinChangePolicy.Decision.DENY) {
+            BotAccessGate.warnDenied(player, alias, "skin", "NOT_OWNER");
+            player.sendMessage(net.minecraft.text.Text.literal("§c" + SkinChangePolicy.DENY_MESSAGE), false);
+            return;
+        }
+
         BotSkinService.SkinSelection selection;
         boolean fallbackApplied = false;
 
@@ -71,8 +84,7 @@ public final class BotSkinNetworkManager {
                 return;
             }
 
-            boolean allowCustomSkins = SurvivalRecruitmentService.isAllowCustomSkins(server);
-            if (!operator && !allowCustomSkins) {
+            if (decision == SkinChangePolicy.Decision.PRESET_ONLY) {
                 fallbackApplied = true;
                 selection = new BotSkinService.SkinSelection(
                         BotSkinService.SkinSource.PRESET,
@@ -110,7 +122,7 @@ public final class BotSkinNetworkManager {
         if (ok) {
             if (fallbackApplied) {
                 player.sendMessage(net.minecraft.text.Text.literal(
-                        "§eCustom skins are disabled for non-admins; applied safe skin '" + BotSkinService.SAFE_PRESET_ID + "'."), true);
+                        "§eCustom skins are off for non-admins. Applied safe skin '" + BotSkinService.SAFE_PRESET_ID + "'."), true);
             } else if (selection.isCustomUrl()) {
                 player.sendMessage(net.minecraft.text.Text.literal("Custom URL skin applied."), true);
             } else {

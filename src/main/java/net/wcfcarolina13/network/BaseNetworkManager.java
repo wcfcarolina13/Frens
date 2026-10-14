@@ -85,7 +85,7 @@ public final class BaseNetworkManager {
                     // existing other-owner / non-allied bases before committing so we fail fast
                     // with a clear message instead of silently creating a base that's already
                     // inside someone else's sphere.
-                    if (!Frens.isOperator(player)) {
+                    if (!BotAccessGate.isServerAdmin(player)) {
                         var overlap = BotHomeService.findOverlappingBase(server, world, pos,
                                 BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, ownerUuid, null);
                         if (overlap.isPresent()) {
@@ -229,7 +229,7 @@ public final class BaseNetworkManager {
                     // Check whether growing to `radius` would intrude on another owner's base.
                     // Pass `label` as excludeLabel so the base being resized doesn't conflict
                     // with itself. Operator bypass applies here too.
-                    if (!Frens.isOperator(player)) {
+                    if (!BotAccessGate.isServerAdmin(player)) {
                         BotHomeService.BaseEntry self = null;
                         for (BotHomeService.BaseEntry b : BotHomeService.listBases(srv, world)) {
                             if (b != null && b.label() != null && b.label().equalsIgnoreCase(label)) {
@@ -348,8 +348,8 @@ public final class BaseNetworkManager {
 
                     var fort = opt.get();
                     UUID currentOwner = tryParseUuid(fort.getOwnerUuid());
-                    boolean isOp = Frens.isOperator(player);
-                    if (currentOwner != null && !currentOwner.equals(player.getUuid()) && !isOp) {
+                    boolean isAdmin = BotAccessGate.isServerAdmin(player);
+                    if (currentOwner != null && !currentOwner.equals(player.getUuid()) && !isAdmin) {
                         String ownerName = fort.getOwnerName() == null || fort.getOwnerName().isBlank()
                                 ? "another player"
                                 : fort.getOwnerName();
@@ -395,12 +395,12 @@ public final class BaseNetworkManager {
 
                     var fort = opt.get();
                     UUID currentOwner = tryParseUuid(fort.getOwnerUuid());
-                    boolean isOp = Frens.isOperator(player);
-                    if (currentOwner != null && !currentOwner.equals(player.getUuid()) && !isOp) {
+                    boolean isAdmin = BotAccessGate.isServerAdmin(player);
+                    if (currentOwner != null && !currentOwner.equals(player.getUuid()) && !isAdmin) {
                         String ownerName = fort.getOwnerName() == null || fort.getOwnerName().isBlank()
                                 ? "another player"
                                 : fort.getOwnerName();
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator) can unclaim this wall.");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator or the host) can unclaim this wall.");
                         return;
                     }
 
@@ -444,16 +444,16 @@ public final class BaseNetworkManager {
 
                     var fort = opt.get();
                     UUID currentOwner = tryParseUuid(fort.getOwnerUuid());
-                    boolean isOp = Frens.isOperator(player);
+                    boolean isAdmin = BotAccessGate.isServerAdmin(player);
                     if (currentOwner == null) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Wall '" + label + "' is unclaimed. Claim it first.");
                         return;
                     }
-                    if (!currentOwner.equals(player.getUuid()) && !isOp) {
+                    if (!currentOwner.equals(player.getUuid()) && !isAdmin) {
                         String ownerName = fort.getOwnerName() == null || fort.getOwnerName().isBlank()
                                 ? "another player"
                                 : fort.getOwnerName();
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator) can grant access.");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator or the host) can grant access.");
                         return;
                     }
 
@@ -507,16 +507,16 @@ public final class BaseNetworkManager {
 
                     var fort = opt.get();
                     UUID currentOwner = tryParseUuid(fort.getOwnerUuid());
-                    boolean isOp = Frens.isOperator(player);
+                    boolean isAdmin = BotAccessGate.isServerAdmin(player);
                     if (currentOwner == null) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Wall '" + label + "' is unclaimed.");
                         return;
                     }
-                    if (!currentOwner.equals(player.getUuid()) && !isOp) {
+                    if (!currentOwner.equals(player.getUuid()) && !isAdmin) {
                         String ownerName = fort.getOwnerName() == null || fort.getOwnerName().isBlank()
                                 ? "another player"
                                 : fort.getOwnerName();
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator) can revoke access.");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only " + ownerName + " (or an operator or the host) can revoke access.");
                         return;
                     }
 
@@ -547,9 +547,9 @@ public final class BaseNetworkManager {
                     int requested = payload.value();
                     if (requested >= 0) {
                         // Set request: require operator permission. Non-ops silently fall through to a query.
-                        if (!Frens.isOperator(player)) {
+                        if (!BotAccessGate.isServerAdmin(player)) {
                             ChatUtils.sendSystemMessage(player.getCommandSource(),
-                                    "Only operators can change the world max base radius.");
+                                    "Only operators or the host can change the world max base radius.");
                         } else {
                             int applied = BotHomeService.setMaxBaseRadius(srv, world, requested);
                             ChatUtils.sendSystemMessage(player.getCommandSource(),
@@ -570,8 +570,8 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
                         return;
                     }
-                    if (!Frens.isOperator(player)) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only operators can reassign base ownership.");
+                    if (!BotAccessGate.isServerAdmin(player)) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only operators or the host can reassign base ownership.");
                         return;
                     }
                     String label = payload.label();
@@ -713,7 +713,7 @@ public final class BaseNetworkManager {
         String ownerName = target.ownerName() != null && !target.ownerName().isBlank()
                 ? target.ownerName() : "the server";
         ChatUtils.sendSystemMessage(player.getCommandSource(),
-                "Only " + ownerName + " (or an operator) can modify '" + label + "'.");
+                "Only " + ownerName + " (or an operator or the host) can modify '" + label + "'.");
         return false;
     }
 
@@ -758,12 +758,21 @@ public final class BaseNetworkManager {
                 BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid), allied);
     }
 
-    /** Outcome of {@link #checkWallForBot}: allowed, and the resolved wall's stored name (null when none). */
-    record WallCheck(boolean allowed, String wallName) {}
+    /**
+     * Outcome of {@link #checkWallForBot}: allowed, the resolved wall's stored name (null when
+     * none), and why it refused ({@link FortifyWallEditPolicy.Refusal#NONE} when allowed).
+     */
+    record WallCheck(boolean allowed, String wallName, FortifyWallEditPolicy.Refusal refusal) {
+        /** Player-facing text for a refused check: a legacy ownerless wall asks for a claim first. */
+        String refusalMessage() {
+            return FortifyWallEditPolicy.refusalMessage(refusal);
+        }
+    }
 
     /**
-     * Whether {@code player} may have {@code bot} run a fortify sub that edits ({@code EDIT}) or
-     * reports on ({@code VIEW}) the saved wall {@code label} ("" = the nearest wall to the bot,
+     * Whether {@code player} may have {@code bot} run a fortify sub that changes the hull
+     * ({@code EDIT}), works on the plan ({@code WORK}, wall grantees allowed) or reports on
+     * ({@code VIEW}) the saved wall {@code label} ("" = the nearest wall to the bot,
      * which the skill auto-picks). Quiet: no chat, the caller tells the player. Resolves the wall
      * in the bot's world the way the skill does and decides with {@link FortifyWallEditPolicy};
      * VIEW uses the Base screen's {@link #isWallVisibleToViewer} rule. Server thread.
@@ -771,14 +780,14 @@ public final class BaseNetworkManager {
     static WallCheck checkWallForBot(ServerPlayerEntity player, ServerPlayerEntity bot, String label,
                                      FortifyWallEditPolicy.Use use) {
         if (player == null || bot == null || use == null) {
-            return new WallCheck(false, null);
+            return new WallCheck(false, null, FortifyWallEditPolicy.Refusal.NOT_PERMITTED);
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return new WallCheck(false, null);
+            return new WallCheck(false, null, FortifyWallEditPolicy.Refusal.NOT_PERMITTED);
         }
         MinecraftServer server = world.getServer();
         if (server == null) {
-            return new WallCheck(false, null);
+            return new WallCheck(false, null, FortifyWallEditPolicy.Refusal.NOT_PERMITTED);
         }
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
         String wanted = label == null ? "" : label.trim();
@@ -803,11 +812,14 @@ public final class BaseNetworkManager {
             wall = FortificationPersistenceService.load(server, worldKey, wanted).orElse(null);
         }
         String requester = player.getUuid().toString();
-        boolean allowed = FortifyWallEditPolicy.mayUse(use, wall != null,
+        java.util.Set<String> grantees = wall == null ? null : wall.getAllowedOwnerUuids();
+        FortifyWallEditPolicy.Refusal refusal = FortifyWallEditPolicy.refusal(use, wall != null,
                 wall == null ? null : wall.getOwnerUuid(),
                 wall != null && isWallVisibleToViewer(wall, requester),
+                grantees != null && grantees.contains(requester),
                 requester, Frens.isOperator(player), BotAccessGate.isHost(player));
-        return new WallCheck(allowed, wall == null ? null : wall.getName());
+        return new WallCheck(refusal == FortifyWallEditPolicy.Refusal.NONE,
+                wall == null ? null : wall.getName(), refusal);
     }
 
     private static boolean checkAnyEntryEditPermission(ServerPlayerEntity player, MinecraftServer server,

@@ -6,9 +6,9 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * Minecraft-free decision for a FORTIFY UI action that touches a saved wall: the edit subs
- * (resume, patch, patch_auto, moat, expand; see {@link BotActionPolicy#fortifyEditsSavedWall})
- * and the read subs (status, drift; see {@link BotActionPolicy#fortifyReadsSavedWall}).
+ * Minecraft-free decision for a FORTIFY UI action that touches a saved wall: the hull edit sub
+ * (expand), the work subs (resume, patch, patch_auto, moat) and the read subs (status, drift).
+ * {@link #useForSub} maps a sub to its {@link Use}.
  *
  * <p>The wall checked is the one {@code FortifyVillageSkill} will use: the named wall, looked up
  * with {@code FortificationPersistenceService.load} (the skill's own lookup), or for a blank label
@@ -29,10 +29,63 @@ public final class FortifyWallEditPolicy {
 
     /** What the FORTIFY sub does with the wall it resolves. */
     public enum Use {
-        /** Changes the wall: owner of the wall, operator or host. */
+        /**
+         * Changes the wall's saved hull ({@code expand}): owner of the wall, operator or host.
+         * Grantees are refused, so a grantee cannot grow the owner's protected area.
+         */
         EDIT,
+        /**
+         * Builds or repairs the wall's existing plan ({@code resume}, {@code patch},
+         * {@code patch_auto}, {@code moat}): owner, operator, host, or a player the owner granted
+         * access to (Grant Wall Access). Matches the in-world rule that already lets a grantee's
+         * bot work in the hull.
+         */
+        WORK,
         /** Reports on the wall (coordinates, progress): anyone the Base screen shows it to. */
         VIEW
+    }
+
+    /** Why a wall check refused. */
+    public enum Refusal {
+        /** Allowed. */
+        NONE,
+        /** The wall has no owner (a legacy wall) and the requester is not an operator or host. */
+        LEGACY_OWNERLESS,
+        /** The wall has an owner and the requester is not allowed. */
+        NOT_PERMITTED
+    }
+
+    /** Subs a wall grantee may run: they work on the existing plan without changing the hull. */
+    public static final Set<String> WORK_SUBS = Set.of("resume", "patch", "patch_auto", "moat");
+    /** Subs that change the saved hull: owner, operator or host only. */
+    public static final Set<String> EDIT_SUBS = Set.of("expand");
+    /** Subs that only report on a saved wall. */
+    public static final Set<String> VIEW_SUBS = Set.of("status", "drift");
+
+    /**
+     * The {@link Use} a FORTIFY sub needs, or null when the sub does not touch a saved wall
+     * (start, list, unknown). Callers pick the check with this so expand and the work subs get
+     * different rules.
+     */
+    public static Use useForSub(String sub) {
+        if (sub == null) return null;
+        if (EDIT_SUBS.contains(sub)) return Use.EDIT;
+        if (WORK_SUBS.contains(sub)) return Use.WORK;
+        if (VIEW_SUBS.contains(sub)) return Use.VIEW;
+        return null;
+    }
+
+    /** Player-facing text for a refusal (no em dashes, no semicolons). */
+    public static String refusalMessage(Refusal refusal) {
+        if (refusal == Refusal.LEGACY_OWNERLESS) {
+            return "That wall has no owner. Claim it in the Base screen first.";
+        }
+        return "You cannot work on that wall.";
+    }
+
+    /** Whether {@code ownerUuid} names a real player (not blank, not the SERVER marker). */
+    static boolean hasPlayerOwner(String ownerUuid) {
+        return ownerUuid != null && !ownerUuid.isBlank() && !ownerUuid.equals("SERVER");
     }
 
     /**
@@ -85,24 +138,43 @@ public final class FortifyWallEditPolicy {
     /**
      * Whether a FORTIFY sub may use the wall the skill will pick.
      *
-     * @param wallFound          whether that wall exists; none is allowed for both uses (the
+     * @param wallFound          whether that wall exists; none is allowed for every use (the
      *                           skill then refuses, reports there is none, or builds a new wall)
-     * @param ownerUuid          its owner ("" for legacy walls with no owner)
+     * @param ownerUuid          its owner ("" or null for legacy walls with no owner)
      * @param visibleToRequester the Base screen's visibility rule for the requester (owner, ally
      *                           or explicitly granted)
+     * @param granted            whether the requester is in the wall's granted list; counts only
+     *                           for {@link Use#WORK} and only on a wall with a player owner (an
+     *                           unclaim keeps the granted list, and a legacy wall stays admin-only)
      */
     public static boolean mayUse(Use use, boolean wallFound, String ownerUuid, boolean visibleToRequester,
-                                 String requesterUuid, boolean isOp, boolean isHost) {
+                                 boolean granted, String requesterUuid, boolean isOp, boolean isHost) {
+        return refusal(use, wallFound, ownerUuid, visibleToRequester, granted, requesterUuid, isOp, isHost)
+                == Refusal.NONE;
+    }
+
+    /** Like {@link #mayUse}, with the reason for a refusal. */
+    public static Refusal refusal(Use use, boolean wallFound, String ownerUuid, boolean visibleToRequester,
+                                  boolean granted, String requesterUuid, boolean isOp, boolean isHost) {
         if (!wallFound) {
-            return true;
+            return Refusal.NONE;
         }
+        boolean allowed;
         if (use == Use.VIEW) {
-            return isOp || isHost || visibleToRequester;
+            allowed = isOp || isHost || visibleToRequester;
+        } else {
+            allowed = mayEdit(true, ownerUuid, requesterUuid, isOp, isHost)
+                    || (use == Use.WORK && granted && hasPlayerOwner(ownerUuid));
         }
-        return mayEdit(true, ownerUuid, requesterUuid, isOp, isHost);
+        if (allowed) {
+            return Refusal.NONE;
+        }
+        return ownerUuid == null || ownerUuid.isBlank() ? Refusal.LEGACY_OWNERLESS : Refusal.NOT_PERMITTED;
     }
 
     /**
+     * Owner, operator or host (no grantees). Used directly for {@link Use#EDIT}.
+     *
      * @param wallFound whether the wall the skill will use exists
      * @param ownerUuid that wall's owner ("" for legacy walls with no owner)
      */
