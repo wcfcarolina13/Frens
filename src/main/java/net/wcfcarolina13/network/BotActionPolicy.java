@@ -90,9 +90,12 @@ public final class BotActionPolicy {
         SKILL_SHELTER(Access.BOT_OWNER, true),
         /** [schematic in {@link #BUILD_SCHEMATICS}, rotation 0..3, x, y, z] -> {@code skill build <s> [rotation=r] targetX=x targetY=y targetZ=z <bot>} */
         SKILL_BUILD(Access.BOT_OWNER, true),
-        /** [count 0..999 (0 omits), mob id or "" (omits)] -> {@code skill hunt [n] [mob] <bot>} */
+        /** [count 0..{@value #MAX_HUNT_COUNT} (0 omits), mob id or "" (omits)] -> {@code skill hunt [n] [mob] <bot>} */
         SKILL_HUNT(Access.BOT_OWNER, true),
-        /** [sub in {@link #FORTIFY_SUBS}, wall label or ""] -> {@code fortify [sub] [label] [auto] <bot>} */
+        /**
+         * [sub in {@link #FORTIFY_SUBS}, wall label or ""] -> {@code fortify [sub] [label] [auto] <bot>}.
+         * {@code list} is server admin only ({@link #requiresServerAdmin}).
+         */
         FORTIFY(Access.BOT_OWNER, true),
         /** [key in {@link #TOGGLE_KEYS}, toggle|on|off] -> {@code <key> <value> <bot>} */
         TOGGLE(Access.BOT_OWNER, true),
@@ -104,7 +107,7 @@ public final class BotActionPolicy {
         COMPASS_HOME(Access.BOT_OWNER, false),
         /** [compass name or ""] -> {@code compass travel <bot> [name]} */
         COMPASS_TRAVEL(Access.BOT_OWNER, false),
-        /** [item id, amount 1..64] -> {@code craft <item> <bot>} or {@code craft <item> <n> "" <bot>} */
+        /** [item id, amount 1..64] -> {@code craft <item> <n> "" <bot>} */
         CRAFT(Access.BOT_OWNER, true),
         /** [item id, fuel: none|auto|item id] -> {@code cook <item> <fuel> <bot>} */
         COOK(Access.BOT_OWNER, true),
@@ -157,15 +160,8 @@ public final class BotActionPolicy {
 
     public static final Set<String> TOGGLE_VALUES = Set.of("toggle", "on", "off");
 
-    /**
-     * Mirror of {@code BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER} (that class has Minecraft
-     * imports). {@code BotActionNetworkManager.registerOnce} WARNs if the two ever differ.
-     */
-    public static final List<String> HOBBY_NAMES = List.of(
-            "hunt", "fish", "feed_animals", "flowers", "grass_seeds",
-            "mining", "shadow_companion", "hangout", "cook", "leaf_litter",
-            "mushrooms", "wander", "woodcut", "collect_dirt", "honey_collect",
-            "walk_dogs");
+    /** The hobby names, the same list as {@code BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER}. */
+    public static final List<String> HOBBY_NAMES = net.wcfcarolina13.ui.HobbyBitOrder.NAMES;
 
     public static final Set<String> COMPANION_SUBS = Set.of("come", "summon", "home", "open", "soulofender");
 
@@ -180,6 +176,8 @@ public final class BotActionPolicy {
     public static final int MAX_NEW_BOT_NAME_LEN = 24;
     public static final int COORD_XZ_LIMIT = 30_000_000;
     public static final int COORD_Y_LIMIT = 2048;
+    /** The Hunt screen's count field takes 5 digits. */
+    public static final int MAX_HUNT_COUNT = 99_999;
 
     private static final Pattern ALIAS = Pattern.compile("[A-Za-z0-9_ .'\\-]+");
     private static final Pattern NEW_BOT_NAME = Pattern.compile("[A-Za-z0-9_ .'\\-]+");
@@ -241,6 +239,37 @@ public final class BotActionPolicy {
      * whitespace-separated token that is a target keyword or a current bot name.
      */
     public static boolean isValidLabel(String label, Set<String> knownBotNamesLower) {
+        if (!isValidLabelText(label)) return false;
+        for (String token : label.split(" ")) {
+            if (clashesWithTarget(token, knownBotNamesLower)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * A FORTIFY wall label: {@link #isValidLabel} and no token the skill parser or
+     * {@code handlePatch} would consume ({@link FortifyWallEditPolicy#isRewrittenToken}), so the
+     * wall the server checks is the wall the skill uses. Block-id tokens are refused by the
+     * server, which has the registry.
+     */
+    public static boolean isValidFortifyLabel(String label, Set<String> knownBotNamesLower) {
+        if (!isValidLabel(label, knownBotNamesLower)) return false;
+        for (String token : label.split(" ")) {
+            if (FortifyWallEditPolicy.isRewrittenToken(token)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * A compass name: {@link #isValidLabel}'s character rules only. {@code compass home|travel}
+     * bind the bot in its own {@code string()} slot before the greedy name, so no word of the
+     * name can retarget the command.
+     */
+    public static boolean isValidCompassLabel(String label) {
+        return isValidLabelText(label);
+    }
+
+    private static boolean isValidLabelText(String label) {
         if (label == null || label.isEmpty() || label.length() > MAX_LABEL_LEN) return false;
         if (!label.equals(label.trim())) return false;
         for (int i = 0; i < label.length(); i++) {
@@ -248,11 +277,7 @@ public final class BotActionPolicy {
             if (c < 0x20 || c == 0x7F || c == '§' || c == '"' || c == '\\') return false;
             if (Character.isWhitespace(c) && c != ' ') return false;
         }
-        if (label.contains("  ")) return false;
-        for (String token : label.split(" ")) {
-            if (clashesWithTarget(token, knownBotNamesLower)) return false;
-        }
-        return true;
+        return !label.contains("  ");
     }
 
     private static boolean clashesWithTarget(String token, Set<String> knownBotNamesLower) {
@@ -417,7 +442,7 @@ public final class BotActionPolicy {
             }
             case SKILL_HUNT -> {
                 if (a.size() != 2) yield null;
-                Integer count = intIn(a.get(0), 0, 999);
+                Integer count = intIn(a.get(0), 0, MAX_HUNT_COUNT);
                 if (count == null) yield null;
                 String mob = a.get(1);
                 if (!mob.isEmpty() && (!isValidId(mob, known) || intIn(mob, 0, Integer.MAX_VALUE) != null)) yield null;
@@ -441,13 +466,13 @@ public final class BotActionPolicy {
                 yield withStr("companion " + a.get(0), bot);
             }
             case COMPASS_HOME -> {
-                if (bot.untargeted() || a.size() != 1 || !isValidLabel(a.get(0), known)) yield null;
+                if (bot.untargeted() || a.size() != 1 || !isValidCompassLabel(a.get(0))) yield null;
                 yield "compass home " + bot.str() + " " + a.get(0);
             }
             case COMPASS_TRAVEL -> {
                 if (bot.untargeted() || a.size() != 1) yield null;
                 if (a.get(0).isEmpty()) yield "compass travel " + bot.str();
-                yield isValidLabel(a.get(0), known) ? "compass travel " + bot.str() + " " + a.get(0) : null;
+                yield isValidCompassLabel(a.get(0)) ? "compass travel " + bot.str() + " " + a.get(0) : null;
             }
             case CRAFT -> {
                 if (a.size() != 2 || !isValidId(a.get(0), known)) yield null;
@@ -457,10 +482,12 @@ public final class BotActionPolicy {
                 if (bot.untargeted()) yield "craft " + item + " " + amount;
                 String p = bot.player();
                 if (p == null) yield null;
-                // There is no "craft <item> <amount> <bot>" path: after <amount> the next string is
-                // <material>. A quoted empty material is the same as none (CraftingHelper treats a
-                // blank preference exactly like null), so the bot lands in its own slot.
-                yield amount == 1 ? "craft " + item + " " + p : "craft " + item + " " + amount + " \"\" " + p;
+                // Always the full "<item> <amount> <material> <bot>" path. "craft <item> <bot>"
+                // parses the name as <material> (registered before <bot>) and crafts with the
+                // active bot; after <amount> the next string is <material> too. A quoted empty
+                // material is the same as none (CraftingHelper treats a blank preference like
+                // null), so the bot lands in its own slot.
+                yield "craft " + item + " " + amount + " \"\" " + p;
             }
             case COOK -> {
                 if (a.size() != 2 || !isValidId(a.get(0), known)) yield null;
@@ -521,7 +548,7 @@ public final class BotActionPolicy {
         String sub = a.get(0);
         String label = a.get(1);
         boolean hasLabel = !label.isEmpty();
-        if (hasLabel && !isValidLabel(label, known)) return null;
+        if (hasLabel && !isValidFortifyLabel(label, known)) return null;
         String body;
         switch (sub) {
             case "start", "list" -> {
@@ -548,6 +575,38 @@ public final class BotActionPolicy {
     public static boolean fortifyEditsSavedWall(Action action, List<String> args) {
         return action == Action.FORTIFY && args != null && !args.isEmpty()
                 && FORTIFY_WALL_EDIT_SUBS.contains(args.get(0));
+    }
+
+    /** FORTIFY subcommands that report on a saved wall (named, or the nearest one when unnamed). */
+    public static final Set<String> FORTIFY_WALL_VIEW_SUBS = Set.of("status", "drift");
+
+    /** Whether a FORTIFY call reports on a saved wall and so needs the wall visibility check. */
+    public static boolean fortifyReadsSavedWall(Action action, List<String> args) {
+        return action == Action.FORTIFY && args != null && !args.isEmpty()
+                && FORTIFY_WALL_VIEW_SUBS.contains(args.get(0));
+    }
+
+    /**
+     * Whether this call needs an operator or the host on top of {@link Action#access()}:
+     * {@code fortify list} prints every saved wall in the world, past the Base screen's
+     * visibility rule.
+     */
+    public static boolean requiresServerAdmin(Action action, List<String> args) {
+        if (action == null) return false;
+        if (action.access() == Access.SERVER_ADMIN) return true;
+        return action == Action.FORTIFY && args != null && !args.isEmpty() && "list".equals(args.get(0));
+    }
+
+    /**
+     * {@code args} with the FORTIFY label set to {@code wallName}, for a blank-label wall sub
+     * whose wall the server resolved, so the skill uses exactly the wall that was checked.
+     * Returns {@code args} unchanged for anything else.
+     */
+    public static List<String> withResolvedFortifyLabel(Action action, List<String> args, String wallName) {
+        if (wallName == null || wallName.isBlank()) return args;
+        if (!fortifyEditsSavedWall(action, args) && !fortifyReadsSavedWall(action, args)) return args;
+        if (args.size() != 2 || !args.get(1).isEmpty()) return args;
+        return List.of(args.get(0), wallName);
     }
 
     // ── Dispatch refusal (pure part of AuthorizedBotDispatch) ───────────────

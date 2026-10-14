@@ -210,7 +210,10 @@ class BotActionPolicyTest {
         assertEquals("skill hunt 5 Bob", ok(SKILL_HUNT, "Bob", "5", ""));
         assertEquals("skill hunt 5 cow Bob", ok(SKILL_HUNT, "Bob", "5", "cow"));
         assertEquals("skill hunt mod:deer Bob", ok(SKILL_HUNT, "Bob", "0", "mod:deer"));
-        bad(SKILL_HUNT, "Bob", "1000", "cow");
+        assertEquals("skill hunt 1000 cow Bob", ok(SKILL_HUNT, "Bob", "1000", "cow"));
+        assertEquals("skill hunt 99999 Bob", ok(SKILL_HUNT, "Bob", "99999", ""));
+        bad(SKILL_HUNT, "Bob", "100000", "cow");
+        bad(SKILL_HUNT, "Bob", "-1", "cow");
         bad(SKILL_HUNT, "Bob", "1", "all");
         bad(SKILL_HUNT, "Bob", "1", "each");
         bad(SKILL_HUNT, "Bob", "1", "Jake");
@@ -240,6 +243,17 @@ class BotActionPolicyTest {
         bad(FORTIFY, "Bob", "resume", "wall each");
         bad(FORTIFY, "Bob", "resume", "near jake");
         bad(FORTIFY, "Bob", "resume");
+        // Words the skill parser or handlePatch would drop from the wall name.
+        bad(FORTIFY, "Bob", "patch", "theirwall auto");
+        bad(FORTIFY, "Bob", "patch", "theirwall AUTO");
+        bad(FORTIFY, "Bob", "patch_auto", "theirwall auto");
+        bad(FORTIFY, "Bob", "status", "wall 2");
+        bad(FORTIFY, "Bob", "status", "wall +2");
+        bad(FORTIFY, "Bob", "drift", "wall x=1");
+        bad(FORTIFY, "Bob", "resume", "descent wall");
+        bad(FORTIFY, "Bob", "expand", "wall Ascent-Y");
+        assertEquals("fortify status wall_-12_40 Bob", ok(FORTIFY, "Bob", "status", "wall_-12_40"));
+        assertEquals("fortify status autumn Bob", ok(FORTIFY, "Bob", "status", "autumn"));
         assertTrue(BotActionPolicy.fortifyEditsSavedWall(FORTIFY, List.of("patch", "")));
         assertTrue(BotActionPolicy.fortifyEditsSavedWall(FORTIFY, List.of("resume", "W1")));
         assertTrue(BotActionPolicy.fortifyEditsSavedWall(FORTIFY, List.of("patch_auto", "W1")));
@@ -251,6 +265,42 @@ class BotActionPolicyTest {
         assertFalse(BotActionPolicy.fortifyEditsSavedWall(FORTIFY, List.of("drift", "W1")));
         assertFalse(BotActionPolicy.fortifyEditsSavedWall(SKILL, List.of("patch", "")));
         assertFalse(BotActionPolicy.fortifyEditsSavedWall(FORTIFY, List.of()));
+        assertTrue(BotActionPolicy.fortifyReadsSavedWall(FORTIFY, List.of("status", "")));
+        assertTrue(BotActionPolicy.fortifyReadsSavedWall(FORTIFY, List.of("drift", "W1")));
+        assertFalse(BotActionPolicy.fortifyReadsSavedWall(FORTIFY, List.of("patch", "")));
+        assertFalse(BotActionPolicy.fortifyReadsSavedWall(FORTIFY, List.of("list", "")));
+        assertFalse(BotActionPolicy.fortifyReadsSavedWall(SKILL, List.of("status", "")));
+    }
+
+    @Test
+    void fortifyListIsServerAdminOnly() {
+        assertTrue(BotActionPolicy.requiresServerAdmin(FORTIFY, List.of("list", "")));
+        assertTrue(BotActionPolicy.requiresServerAdmin(SPAWN, List.of()));
+        assertFalse(BotActionPolicy.requiresServerAdmin(FORTIFY, List.of("status", "")));
+        assertFalse(BotActionPolicy.requiresServerAdmin(FORTIFY, List.of("start", "")));
+        assertFalse(BotActionPolicy.requiresServerAdmin(SKILL, List.of("list")));
+        assertFalse(BotActionPolicy.requiresServerAdmin(FORTIFY, List.of()));
+    }
+
+    @Test
+    void blankFortifyWallSubsGetTheResolvedWallName() {
+        for (String sub : List.of("resume", "patch", "moat", "expand", "status", "drift")) {
+            List<String> named = BotActionPolicy.withResolvedFortifyLabel(FORTIFY, List.of(sub, ""), "wall_1_2");
+            assertEquals(List.of(sub, "wall_1_2"), named);
+            assertEquals("fortify " + sub + " wall_1_2 Bob",
+                    BotActionPolicy.build(FORTIFY, named, "Bob", KNOWN).orElseThrow());
+        }
+        List<String> labelled = List.of("patch", "W1");
+        assertSame(labelled, BotActionPolicy.withResolvedFortifyLabel(FORTIFY, labelled, "wall_1_2"));
+        List<String> start = List.of("start", "");
+        assertSame(start, BotActionPolicy.withResolvedFortifyLabel(FORTIFY, start, "wall_1_2"));
+        List<String> list = List.of("list", "");
+        assertSame(list, BotActionPolicy.withResolvedFortifyLabel(FORTIFY, list, "wall_1_2"));
+        List<String> blank = List.of("patch", "");
+        assertSame(blank, BotActionPolicy.withResolvedFortifyLabel(FORTIFY, blank, null));
+        // A stored name the label rules refuse is caught when the named command is built.
+        assertEquals(Optional.empty(), BotActionPolicy.build(FORTIFY,
+                BotActionPolicy.withResolvedFortifyLabel(FORTIFY, blank, "Bob"), "Bob", KNOWN));
     }
 
     @Test
@@ -270,6 +320,11 @@ class BotActionPolicyTest {
         bad(HOBBY_SET, "Bob", "dance", "on");
         bad(HOBBY_SET, "Bob", "fish", "toggle");
         assertEquals(16, BotActionPolicy.HOBBY_NAMES.size());
+        // One source of truth with the screen handler's bit order (BotPlayerInventoryScreenHandler
+        // has Minecraft imports, so both read HobbyBitOrder).
+        assertSame(net.wcfcarolina13.ui.HobbyBitOrder.NAMES, BotActionPolicy.HOBBY_NAMES);
+        assertEquals(BotActionPolicy.HOBBY_NAMES.size(), new java.util.HashSet<>(BotActionPolicy.HOBBY_NAMES).size());
+        assertTrue(BotActionPolicy.HOBBY_NAMES.size() <= 31);
     }
 
     @Test
@@ -295,11 +350,16 @@ class BotActionPolicyTest {
         bad(COMPASS_HOME, "Bob", "x".repeat(65));
         bad(COMPASS_HOME, null, "Mill");
         bad(COMPASS_TRAVEL, null, "");
+        // The bot has its own string() slot before the greedy name, so bot names and the
+        // all/each keywords cannot retarget a compass command.
+        assertEquals("compass home Bob all stars", ok(COMPASS_HOME, "Bob", "all stars"));
+        assertEquals("compass travel Bob Jake each", ok(COMPASS_TRAVEL, "Bob", "Jake each"));
     }
 
     @Test
     void craftAndCookBindTheBotInItsPlayerSlot() {
-        assertEquals("craft stick Bob", ok(CRAFT, "Bob", "stick", "1"));
+        // Amount 1 too: "craft stick Bob" would bind Bob as <material> and craft with the active bot.
+        assertEquals("craft stick 1 \"\" Bob", ok(CRAFT, "Bob", "stick", "1"));
         assertEquals("craft stick 4 \"\" Bob", ok(CRAFT, "Bob", "stick", "4"));
         assertEquals("craft \"mod:gear\" 64 \"\" Bob", ok(CRAFT, "Bob", "mod:gear", "64"));
         bad(CRAFT, "Bob", "stick", "0");

@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+
+import net.wcfcarolina13.network.FortifyWallEditPolicy.Use;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -73,5 +76,55 @@ class FortifyWallEditPolicyTest {
                 new WallRef("theirs", OTHER, 5, 0));
         WallRef picked = FortifyWallEditPolicy.nearest(walls, 0, 0);
         assertFalse(FortifyWallEditPolicy.mayEdit(picked != null, picked.ownerUuid(), ME, false, false));
+    }
+
+    @Test
+    void viewIsAllowedForWallsTheBaseScreenShows() {
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.VIEW, true, OTHER, true, ME, false, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.VIEW, true, ME, true, ME, false, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.VIEW, true, OTHER, false, ME, true, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.VIEW, true, OTHER, false, ME, false, true));
+    }
+
+    @Test
+    void viewIsRefusedForHiddenWalls() {
+        assertFalse(FortifyWallEditPolicy.mayUse(Use.VIEW, true, OTHER, false, ME, false, false));
+        assertFalse(FortifyWallEditPolicy.mayUse(Use.VIEW, true, "", false, ME, false, false));
+    }
+
+    @Test
+    void noWallFoundIsAllowedForBothUses() {
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.VIEW, false, null, false, ME, false, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.EDIT, false, null, false, ME, false, false));
+    }
+
+    @Test
+    void editNeedsOwnershipEvenWhenVisible() {
+        // An ally sees the wall but may not edit it.
+        assertFalse(FortifyWallEditPolicy.mayUse(Use.EDIT, true, OTHER, true, ME, false, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.EDIT, true, ME, true, ME, false, false));
+        assertTrue(FortifyWallEditPolicy.mayUse(Use.EDIT, true, OTHER, false, ME, true, false));
+    }
+
+    @Test
+    void rewrittenTokensMatchTheSkillParser() {
+        for (String t : List.of("auto", "AUTO", "Auto", "ascent", "ascend", "descent", "descend",
+                "ascent-y", "DESCENT-Y", "2", "-7", "+3", "x=1", "a=", "=")) {
+            assertTrue(FortifyWallEditPolicy.isRewrittenToken(t), t);
+        }
+        for (String t : List.of("autumn", "wall_-12_40", "North", "W1", "2a", "9999999999")) {
+            assertFalse(FortifyWallEditPolicy.isRewrittenToken(t), t);
+        }
+    }
+
+    @Test
+    void labelReachesTheSkillOnlyWhenNoTokenIsDroppedOrMoved() {
+        Set<String> blocks = Set.of("stone", "oak_log");
+        assertTrue(FortifyWallEditPolicy.labelReachesSkillIntact("North Wall", blocks::contains));
+        assertFalse(FortifyWallEditPolicy.labelReachesSkillIntact("stone wall", blocks::contains));
+        assertFalse(FortifyWallEditPolicy.labelReachesSkillIntact("theirwall auto", blocks::contains));
+        assertFalse(FortifyWallEditPolicy.labelReachesSkillIntact("wall 2", blocks::contains));
+        assertFalse(FortifyWallEditPolicy.labelReachesSkillIntact("", blocks::contains));
+        assertTrue(FortifyWallEditPolicy.labelReachesSkillIntact("stone wall", null));
     }
 }

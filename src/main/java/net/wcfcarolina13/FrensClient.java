@@ -189,7 +189,6 @@ public class FrensClient implements ClientModInitializer {
     private static boolean previewRightKeyDown = false;
     private static String pendingDirectionalActionLabel = null;
     private static String pendingDirectionalCommand = null;
-    /** Null = legacy chat-only pending command (deprecated setter). */
     private static BotActionPolicy.Action pendingDirectionalAction = null;
     private static String pendingDirectionalAlias = "";
     private static java.util.List<String> pendingDirectionalArgs = java.util.List.of();
@@ -545,16 +544,13 @@ public class FrensClient implements ClientModInitializer {
     }
 
     private static boolean hasPendingDirectionalMining() {
-        return pendingDirectionalAction != null
-                || (pendingDirectionalCommand != null && !pendingDirectionalCommand.isBlank());
+        return pendingDirectionalAction != null;
     }
 
     private static void sendPendingDirectionalMining(MinecraftClient client) {
         if (pendingDirectionalAction != null) {
             BotActionClientSender.send(pendingDirectionalAction, pendingDirectionalAlias,
                     pendingDirectionalArgs, pendingDirectionalCommand);
-        } else {
-            sendChatCommand(client, pendingDirectionalCommand);
         }
     }
 
@@ -3184,14 +3180,6 @@ public class FrensClient implements ClientModInitializer {
         }
         BotActionClientSender.send(BotActionPolicy.Action.FOLLOW_TOGGLE, name, java.util.List.of(),
                 "bot follow toggle " + formatBotTarget(name));
-    }
-
-    private static void sendChatCommand(MinecraftClient client, String command) {
-        if (client == null || client.getNetworkHandler() == null) {
-            return;
-        }
-        String raw = command.startsWith("/") ? command.substring(1) : command;
-        client.getNetworkHandler().sendChatCommand(raw);
     }
 
     private static void handleResumeKey(MinecraftClient client) {

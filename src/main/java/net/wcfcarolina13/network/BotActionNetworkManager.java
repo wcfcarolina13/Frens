@@ -8,6 +8,7 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.codec.PacketCodecs;
 import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -93,10 +94,6 @@ public final class BotActionNetworkManager {
             server.execute(() -> THROTTLES.remove(id));
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> THROTTLES.clear());
-        if (!BotActionPolicy.HOBBY_NAMES.equals(net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler.HOBBY_BIT_ORDER)) {
-            LOGGER.warn("[bot-access] BotActionPolicy.HOBBY_NAMES differs from HOBBY_BIT_ORDER; "
-                    + "hobby buttons for non-op owners may refuse some hobbies");
-        }
     }
 
     // ── State (server thread only) ──────────────────────────────────────────
@@ -178,7 +175,7 @@ public final class BotActionNetworkManager {
             tell(player, "That action had a value the server does not accept.");
             return;
         }
-        AuthorizedBotDispatch.run(player, BOT_ROOT + command.get());
+        runOrTell(player, BOT_ROOT + command.get());
     }
 
     // ── Shared path (also used by dispatchFor) ──────────────────────────────
@@ -210,17 +207,20 @@ public final class BotActionNetworkManager {
     private static boolean authorizeBuildRun(MinecraftServer server, ServerPlayerEntity player, ServerPlayerEntity bot,
                                              BotActionPolicy.Action action, List<String> args) {
         String targetName = bot == null ? "" : bot.getName().getString();
-        boolean allowed = switch (action.access()) {
-            case BOT_OWNER -> bot == null
+        boolean adminOnly = BotActionPolicy.requiresServerAdmin(action, args);
+        boolean allowed;
+        if (adminOnly) {
+            allowed = BotAccessGate.isServerAdmin(player);
+        } else {
+            allowed = bot == null
                     ? BotAccessGate.isServerAdmin(player)
                     : BotAccessGate.permits(player, bot, action.name());
-            case SERVER_ADMIN -> BotAccessGate.isServerAdmin(player);
-        };
+        }
         if (!allowed) {
-            if (action.access() == BotActionPolicy.Access.SERVER_ADMIN || bot == null) {
+            if (adminOnly || bot == null) {
                 BotAccessGate.warnDenied(player, targetName, action.name(), "NOT_SERVER_ADMIN");
             }
-            tell(player, bot == null
+            tell(player, adminOnly || bot == null
                     ? "You are not allowed to do that."
                     : "You can only do that for your own bot.");
             return false;
@@ -228,31 +228,70 @@ public final class BotActionNetworkManager {
         Set<String> known = knownBotNamesLower(server);
         String botName = bot == null ? null : bot.getGameProfile().name();
         Optional<String> command = BotActionPolicy.build(action, args, botName, known);
-        if (command.isEmpty()) {
+        if (command.isEmpty() || !fortifyLabelReachesSkill(action, args)) {
             BotAccessGate.warnDenied(player, targetName, action.name(), "BAD_ARGS");
             tell(player, "That action had a value the server does not accept.");
             return false;
         }
-        if (BotActionPolicy.fortifyEditsSavedWall(action, args)
-                && !mayEditWall(player, bot, args.size() > 1 ? args.get(1) : "")) {
-            BotAccessGate.warnDenied(player, targetName, action.name(), "WALL_NOT_EDITABLE");
-            tell(player, "You cannot work on that wall.");
-            return false;
+        FortifyWallEditPolicy.Use wallUse = BotActionPolicy.fortifyEditsSavedWall(action, args)
+                ? FortifyWallEditPolicy.Use.EDIT
+                : BotActionPolicy.fortifyReadsSavedWall(action, args) ? FortifyWallEditPolicy.Use.VIEW : null;
+        // bot null is the untargeted form, which only a server admin reaches (checked above).
+        if (wallUse != null && bot != null) {
+            String label = args.size() > 1 ? args.get(1) : "";
+            BaseNetworkManager.WallCheck wall = BaseNetworkManager.checkWallForBot(player, bot, label, wallUse);
+            if (!wall.allowed()) {
+                BotAccessGate.warnDenied(player, targetName, action.name(),
+                        wallUse == FortifyWallEditPolicy.Use.EDIT ? "WALL_NOT_EDITABLE" : "WALL_NOT_VISIBLE");
+                tell(player, "You cannot work on that wall.");
+                return false;
+            }
+            // Blank label: name the wall that was checked, so the skill cannot pick another one
+            // between this check and its own nearest-wall lookup on the worker. A stored name the
+            // label rules refuse (a bot name, a number or block id as a word) keeps the blank
+            // form, which the skill resolves the same way moments later.
+            List<String> named = BotActionPolicy.withResolvedFortifyLabel(action, args, wall.wallName());
+            if (named != args) {
+                Optional<String> namedCommand = BotActionPolicy.build(action, named, botName, known);
+                if (namedCommand.isPresent() && fortifyLabelReachesSkill(action, named)) {
+                    command = namedCommand;
+                } else {
+                    LOGGER.debug("[bot-access] fortify wall '{}' kept the nearest-wall form", wall.wallName());
+                }
+            }
         }
-        return AuthorizedBotDispatch.run(player, BOT_ROOT + command.get()) > 0;
+        return runOrTell(player, BOT_ROOT + command.get());
+    }
+
+    /** Runs under the grant; a refusal (parse error, unread input, nested dispatch) is told to the player. */
+    private static boolean runOrTell(ServerPlayerEntity player, String command) {
+        if (AuthorizedBotDispatch.run(player, command) > 0) {
+            return true;
+        }
+        tell(player, "That button could not run. Check the server log.");
+        return false;
     }
 
     /**
-     * Whether {@code player} may have {@code bot} edit the saved wall {@code label} ("" = the
-     * nearest wall to the bot, which the skill auto-picks). Owner of that wall, operator or host;
-     * no wall found is allowed because the skill then refuses or builds a new one (see
-     * {@link FortifyWallEditPolicy}). {@code bot} null is the untargeted form, admins only.
+     * For a FORTIFY call with a label: no label word is a block id, which the skill parser would
+     * move out of the wall name (the registry half of {@link FortifyWallEditPolicy#labelReachesSkillIntact};
+     * {@link BotActionPolicy#build} already refused the other rewritten words). True otherwise.
      */
-    private static boolean mayEditWall(ServerPlayerEntity player, ServerPlayerEntity bot, String label) {
-        if (bot == null) {
-            return BotAccessGate.isServerAdmin(player);
+    private static boolean fortifyLabelReachesSkill(BotActionPolicy.Action action, List<String> args) {
+        if (action != BotActionPolicy.Action.FORTIFY || args.size() < 2 || args.get(1).isEmpty()) {
+            return true;
         }
-        return BaseNetworkManager.canEditWallForBot(player, bot, label);
+        return FortifyWallEditPolicy.labelReachesSkillIntact(args.get(1), BotActionNetworkManager::isBlockIdToken);
+    }
+
+    /** The skill parser's block test ({@code modCommandRegistry.executeSkill}): id as given, then with {@code minecraft:}. */
+    private static boolean isBlockIdToken(String token) {
+        Identifier id = Identifier.tryParse(token);
+        if (id != null && Registries.BLOCK.containsId(id)) {
+            return true;
+        }
+        id = Identifier.tryParse("minecraft:" + token);
+        return id != null && Registries.BLOCK.containsId(id);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

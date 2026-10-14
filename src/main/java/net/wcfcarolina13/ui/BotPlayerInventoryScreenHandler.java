@@ -28,15 +28,9 @@ import net.wcfcarolina13.GameAI.services.TaskService;
 public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     /**
      * Stable bit index per hobby for the disabled-hobbies bitmask synced in botStats slot 25.
-     * Append new hobbies to the END of this list — never reorder, or saved bots will see the
-     * wrong hobbies marked disabled. Up to 31 entries fit in a signed int.
+     * Defined in {@link HobbyBitOrder} (append only, never reorder).
      */
-    public static final java.util.List<String> HOBBY_BIT_ORDER = java.util.List.of(
-            "hunt", "fish", "feed_animals", "flowers", "grass_seeds",
-            "mining", "shadow_companion", "hangout", "cook", "leaf_litter",
-            "mushrooms", "wander", "woodcut", "collect_dirt", "honey_collect",
-            "walk_dogs"
-    );
+    public static final java.util.List<String> HOBBY_BIT_ORDER = HobbyBitOrder.NAMES;
 
     public static int hobbyBitIndex(String hobbyName) {
         if (hobbyName == null) return -1;

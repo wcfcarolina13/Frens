@@ -758,47 +758,56 @@ public final class BaseNetworkManager {
                 BotHomeService.SERVER_OWNER_UUID.equals(ownerUuid), allied);
     }
 
+    /** Outcome of {@link #checkWallForBot}: allowed, and the resolved wall's stored name (null when none). */
+    record WallCheck(boolean allowed, String wallName) {}
+
     /**
-     * Whether {@code player} may have {@code bot} run a fortify sub that edits the saved wall
-     * {@code label} ("" = the nearest wall to the bot, which the skill auto-picks). Quiet: no chat,
-     * the caller tells the player. Resolves the wall in the bot's world the way the skill does and
-     * decides with {@link FortifyWallEditPolicy}. Server thread.
+     * Whether {@code player} may have {@code bot} run a fortify sub that edits ({@code EDIT}) or
+     * reports on ({@code VIEW}) the saved wall {@code label} ("" = the nearest wall to the bot,
+     * which the skill auto-picks). Quiet: no chat, the caller tells the player. Resolves the wall
+     * in the bot's world the way the skill does and decides with {@link FortifyWallEditPolicy};
+     * VIEW uses the Base screen's {@link #isWallVisibleToViewer} rule. Server thread.
      */
-    static boolean canEditWallForBot(ServerPlayerEntity player, ServerPlayerEntity bot, String label) {
-        if (player == null || bot == null) {
-            return false;
+    static WallCheck checkWallForBot(ServerPlayerEntity player, ServerPlayerEntity bot, String label,
+                                     FortifyWallEditPolicy.Use use) {
+        if (player == null || bot == null || use == null) {
+            return new WallCheck(false, null);
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+            return new WallCheck(false, null);
         }
         MinecraftServer server = world.getServer();
         if (server == null) {
-            return false;
+            return new WallCheck(false, null);
         }
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
         String wanted = label == null ? "" : label.trim();
-        boolean found;
-        String owner = null;
+        FortificationPersistenceService.SavedFortification wall = null;
         if (wanted.isEmpty()) {
+            List<FortificationPersistenceService.SavedFortification> forts = new ArrayList<>();
             List<FortifyWallEditPolicy.WallRef> walls = new ArrayList<>();
             for (FortificationPersistenceService.SavedFortification f
                     : FortificationPersistenceService.listForWorld(server, worldKey)) {
                 if (f != null && f.getCenter() != null) {
+                    forts.add(f);
                     walls.add(new FortifyWallEditPolicy.WallRef(f.getName(), f.getOwnerUuid(),
                             f.getCenter().getX(), f.getCenter().getZ()));
                 }
             }
             BlockPos at = bot.getBlockPos();
             FortifyWallEditPolicy.WallRef nearest = FortifyWallEditPolicy.nearest(walls, at.getX(), at.getZ());
-            found = nearest != null;
-            owner = found ? nearest.ownerUuid() : null;
+            if (nearest != null) {
+                wall = forts.get(walls.indexOf(nearest));
+            }
         } else {
-            var wall = FortificationPersistenceService.load(server, worldKey, wanted);
-            found = wall.isPresent();
-            owner = found ? wall.get().getOwnerUuid() : null;
+            wall = FortificationPersistenceService.load(server, worldKey, wanted).orElse(null);
         }
-        return FortifyWallEditPolicy.mayEdit(found, owner, player.getUuid().toString(),
-                Frens.isOperator(player), BotAccessGate.isHost(player));
+        String requester = player.getUuid().toString();
+        boolean allowed = FortifyWallEditPolicy.mayUse(use, wall != null,
+                wall == null ? null : wall.getOwnerUuid(),
+                wall != null && isWallVisibleToViewer(wall, requester),
+                requester, Frens.isOperator(player), BotAccessGate.isHost(player));
+        return new WallCheck(allowed, wall == null ? null : wall.getName());
     }
 
     private static boolean checkAnyEntryEditPermission(ServerPlayerEntity player, MinecraftServer server,
