@@ -155,9 +155,21 @@ public class Frens implements ModInitializer {
         return allowed;
     }
 
+    /**
+     * The {@code requires} gate of the {@code /bot} roots. Also true for a player inside a
+     * {@link net.wcfcarolina13.network.AuthorizedBotDispatch#run} for that player: the grant lasts one
+     * synchronous parse-and-execute of a command built by {@code BotActionPolicy}. The other callers
+     * ({@code modCommandRegistry.hasOperatorPermissions} for the recruit admin commands, and
+     * {@code SurvivalRecruitmentService.canChooseWorldMode}) can see the grant only during such a
+     * dispatch, and the policy can never build a recruit command, so the grant does not reach them
+     * in practice. {@code BotAccessGate}/{@code BotAccessPolicy} use {@link #isOperator}, not this.
+     */
     public static boolean hasBotCommandPermission(ServerCommandSource source) {
         if (source == null) {
             return false;
+        }
+        if (net.wcfcarolina13.network.AuthorizedBotDispatch.isGranted(source)) {
+            return true;
         }
         ServerPlayerEntity player = source.getPlayer();
         if (player == null) {
@@ -693,6 +705,7 @@ public class Frens implements ModInitializer {
         // "Set up AI companions" checklist: status request/response + setup actions (payload
         // types and server receivers; the client receiver is registered at client init by FrensClient).
         net.wcfcarolina13.network.AiSetupNetworkManager.registerOnce();
+        net.wcfcarolina13.network.BotActionNetworkManager.registerOnce();
 
         // Lock mode C2S receiver
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(
