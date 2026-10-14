@@ -40,6 +40,8 @@ import net.wcfcarolina13.GraphicalUserInterface.HuntablesScreen;
 import net.wcfcarolina13.GraphicalUserInterface.RecruitmentDialogueScreen;
 import net.wcfcarolina13.GraphicalUserInterface.SleepCommandHintHud;
 import net.wcfcarolina13.GraphicalUserInterface.WorldModeSelectionScreen;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.CookablesPayload;
 import net.wcfcarolina13.network.CraftingHistoryPayload;
 import net.wcfcarolina13.network.BasesListPayload;
@@ -187,6 +189,10 @@ public class FrensClient implements ClientModInitializer {
     private static boolean previewRightKeyDown = false;
     private static String pendingDirectionalActionLabel = null;
     private static String pendingDirectionalCommand = null;
+    /** Null = legacy chat-only pending command (deprecated setter). */
+    private static BotActionPolicy.Action pendingDirectionalAction = null;
+    private static String pendingDirectionalAlias = "";
+    private static java.util.List<String> pendingDirectionalArgs = java.util.List.of();
     private static int directionalPreviewTick = 0;
 
     // Zone wand selection state
@@ -510,20 +516,55 @@ public class FrensClient implements ClientModInitializer {
         return pendingPlacementPreview != null;
     }
 
-    public static void setPendingDirectionalMining(String actionLabel, String command) {
+    /**
+     * Queue a directional mining run (stripmine, ascent, descent) that fires on the go-to-look key.
+     *
+     * @param actionLabel         HUD label (stripmine, ascent, descent)
+     * @param action              SKILL_STRIPMINE, SKILL_ASCENT or SKILL_DESCENT
+     * @param botAlias            the bot's name (quotes allowed), or blank for "my only bot"
+     * @param args                the action's args ([] or [n], ascent also [surface])
+     * @param fallbackChatCommand the exact {@code bot skill ...} command for a server without the payload
+     */
+    public static void setPendingDirectionalMining(String actionLabel, BotActionPolicy.Action action, String botAlias,
+                                                   java.util.List<String> args, String fallbackChatCommand) {
         pendingDirectionalActionLabel = actionLabel;
-        pendingDirectionalCommand = command;
+        pendingDirectionalAction = action;
+        pendingDirectionalAlias = botAlias == null ? "" : botAlias;
+        pendingDirectionalArgs = args == null ? java.util.List.of() : java.util.List.copyOf(args);
+        pendingDirectionalCommand = fallbackChatCommand;
         directionalPreviewTick = 0;
+    }
+
+    /**
+     * @deprecated chat-only, so a non-op owner is refused. Use
+     * {@link #setPendingDirectionalMining(String, BotActionPolicy.Action, String, java.util.List, String)}.
+     */
+    @Deprecated
+    public static void setPendingDirectionalMining(String actionLabel, String command) {
+        setPendingDirectionalMining(actionLabel, null, "", java.util.List.of(), command);
     }
 
     public static void clearPendingDirectionalMining() {
         pendingDirectionalActionLabel = null;
         pendingDirectionalCommand = null;
+        pendingDirectionalAction = null;
+        pendingDirectionalAlias = "";
+        pendingDirectionalArgs = java.util.List.of();
         directionalPreviewTick = 0;
     }
 
     private static boolean hasPendingDirectionalMining() {
-        return pendingDirectionalCommand != null && !pendingDirectionalCommand.isBlank();
+        return pendingDirectionalAction != null
+                || (pendingDirectionalCommand != null && !pendingDirectionalCommand.isBlank());
+    }
+
+    private static void sendPendingDirectionalMining(MinecraftClient client) {
+        if (pendingDirectionalAction != null) {
+            BotActionClientSender.send(pendingDirectionalAction, pendingDirectionalAlias,
+                    pendingDirectionalArgs, pendingDirectionalCommand);
+        } else {
+            sendChatCommand(client, pendingDirectionalCommand);
+        }
     }
 
     @Override
@@ -1914,7 +1955,8 @@ public class FrensClient implements ClientModInitializer {
         // request first, then ask the server to open the inventory.
         BotPlayerInventoryScreen.requestSpellsTab();
         String target = formatBotTarget(alias);
-        sendChatCommand(client, target.isEmpty() ? "bot open" : ("bot open " + target));
+        BotActionClientSender.send(BotActionPolicy.Action.OPEN, target, java.util.List.of(),
+                target.isEmpty() ? "bot open" : ("bot open " + target));
         return true;
     }
 
@@ -2413,56 +2455,32 @@ public class FrensClient implements ClientModInitializer {
         }
         String target = resolveQuickBotTarget(client);
         String formattedTarget = target != null ? formatBotTarget(target) : null;
+        String alias = formattedTarget != null ? formattedTarget : "";
+        String suffix = formattedTarget != null ? " " + formattedTarget : "";
 
         switch (slot) {
             case 1 -> handleStandDownLook(client);
             case 2 -> {
                 if (resumeDecisionActive) {
                     sendResumeDecision(client, true);
-                } else if (formattedTarget != null) {
-                    sendChatCommand(client, "bot resume " + formattedTarget);
                 } else {
-                    sendChatCommand(client, "bot resume");
+                    BotActionClientSender.send(BotActionPolicy.Action.RESUME, alias, java.util.List.of(),
+                            "bot resume" + suffix);
                 }
             }
             case 3 -> handleSpellsContextKey(client);
             case 4 -> handleReturnHomeLook(client);
             case 5 -> handleSleepLook(client);
-            case 6 -> {
-                if (formattedTarget != null) {
-                    sendChatCommand(client, "bot come " + formattedTarget);
-                } else {
-                    sendChatCommand(client, "bot come");
-                }
-            }
-            case 7 -> {
-                if (formattedTarget != null) {
-                    setPendingDirectionalMining("stripmine", "bot skill stripmine " + formattedTarget);
-                } else {
-                    setPendingDirectionalMining("stripmine", "bot skill stripmine");
-                }
-            }
-            case 8 -> {
-                if (formattedTarget != null) {
-                    setPendingDirectionalMining("ascent", "bot skill mining ascent " + formattedTarget);
-                } else {
-                    setPendingDirectionalMining("ascent", "bot skill mining ascent");
-                }
-            }
-            case 9 -> {
-                if (formattedTarget != null) {
-                    setPendingDirectionalMining("descent", "bot skill mining descent " + formattedTarget);
-                } else {
-                    setPendingDirectionalMining("descent", "bot skill mining descent");
-                }
-            }
-            case 0 -> {
-                if (formattedTarget != null) {
-                    sendChatCommand(client, "bot skill drop_sweep " + formattedTarget);
-                } else {
-                    sendChatCommand(client, "bot skill drop_sweep");
-                }
-            }
+            case 6 -> BotActionClientSender.send(BotActionPolicy.Action.COME, alias, java.util.List.of(),
+                    "bot come" + suffix);
+            case 7 -> setPendingDirectionalMining("stripmine", BotActionPolicy.Action.SKILL_STRIPMINE, alias,
+                    java.util.List.of(), "bot skill stripmine" + suffix);
+            case 8 -> setPendingDirectionalMining("ascent", BotActionPolicy.Action.SKILL_ASCENT, alias,
+                    java.util.List.of(), "bot skill mining ascent" + suffix);
+            case 9 -> setPendingDirectionalMining("descent", BotActionPolicy.Action.SKILL_DESCENT, alias,
+                    java.util.List.of(), "bot skill mining descent" + suffix);
+            case 0 -> BotActionClientSender.send(BotActionPolicy.Action.SKILL, alias, java.util.List.of("drop_sweep"),
+                    "bot skill drop_sweep" + suffix);
             default -> {
             }
         }
@@ -3061,7 +3079,7 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         if (hasPendingDirectionalMining()) {
-            sendChatCommand(client, pendingDirectionalCommand);
+            sendPendingDirectionalMining(client);
             clearPendingDirectionalMining();
             return;
         }
@@ -3115,11 +3133,26 @@ public class FrensClient implements ClientModInitializer {
                     .append(" targetZ=").append(placement.targetPos().getZ());
             }
 
-            sendChatCommand(client, cmd.toString());
+            String alias = formattedTarget != null ? formattedTarget : "";
+            String x = Integer.toString(placement.targetPos().getX());
+            String y = Integer.toString(placement.targetPos().getY());
+            String z = Integer.toString(placement.targetPos().getZ());
+            String type = pendingPlacementPreview.type == null ? "" : pendingPlacementPreview.type.toLowerCase(java.util.Locale.ROOT);
+            if (pendingPlacementPreview.kind == PlacementPreviewKind.FARM) {
+                BotActionClientSender.send(BotActionPolicy.Action.SKILL_FARM, alias,
+                        java.util.List.of(x, y, z), cmd.toString());
+            } else if (isProceduralShelterType(pendingPlacementPreview.type)) {
+                BotActionClientSender.send(BotActionPolicy.Action.SKILL_SHELTER, alias,
+                        java.util.List.of(type, x, y, z), cmd.toString());
+            } else {
+                BotActionClientSender.send(BotActionPolicy.Action.SKILL_BUILD, alias,
+                        java.util.List.of(type, Integer.toString(normalizedPreviewRotationTurns()), x, y, z),
+                        cmd.toString());
+            }
             clearPendingShelter();
         } else {
             // Normal go_to_look behavior
-            sendChatCommand(client, "bot go_to_look");
+            BotActionClientSender.send(BotActionPolicy.Action.GO_TO_LOOK, "", java.util.List.of(), "bot go_to_look");
         }
     }
 
@@ -3128,11 +3161,9 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         String target = resolveQuickBotTarget(client);
-        if (target != null && !target.isBlank()) {
-            sendChatCommand(client, "bot sleep " + formatBotTarget(target));
-        } else {
-            sendChatCommand(client, "bot sleep");
-        }
+        boolean hasTarget = target != null && !target.isBlank();
+        BotActionClientSender.send(BotActionPolicy.Action.SLEEP, hasTarget ? target : "", java.util.List.of(),
+                hasTarget ? "bot sleep " + formatBotTarget(target) : "bot sleep");
     }
 
     private static void handleReturnHomeLook(MinecraftClient client) {
@@ -3140,11 +3171,9 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         String target = resolveQuickBotTarget(client);
-        if (target != null && !target.isBlank()) {
-            sendChatCommand(client, "bot return " + formatBotTarget(target));
-        } else {
-            sendChatCommand(client, "bot return");
-        }
+        boolean hasTarget = target != null && !target.isBlank();
+        BotActionClientSender.send(BotActionPolicy.Action.RETURN_HOME, hasTarget ? target : "", java.util.List.of(),
+                hasTarget ? "bot return " + formatBotTarget(target) : "bot return");
     }
 
     private static void handleFollowToggleLookedAt(MinecraftClient client) {
@@ -3162,7 +3191,8 @@ public class FrensClient implements ClientModInitializer {
             }
             return;
         }
-        sendChatCommand(client, "bot follow toggle " + formatBotTarget(name));
+        BotActionClientSender.send(BotActionPolicy.Action.FOLLOW_TOGGLE, name, java.util.List.of(),
+                "bot follow toggle " + formatBotTarget(name));
     }
 
     private static void sendChatCommand(MinecraftClient client, String command) {
@@ -3195,7 +3225,8 @@ public class FrensClient implements ClientModInitializer {
             }
             return;
         }
-        sendChatCommand(client, "bot standdown " + formatBotTarget(name));
+        BotActionClientSender.send(BotActionPolicy.Action.STAND_DOWN, name, java.util.List.of(),
+                "bot standdown " + formatBotTarget(name));
     }
 
     private static void handleStopLook(MinecraftClient client) {
@@ -3230,7 +3261,8 @@ public class FrensClient implements ClientModInitializer {
             }
             return;
         }
-        sendChatCommand(client, "bot stop " + formatBotTarget(name));
+        BotActionClientSender.send(BotActionPolicy.Action.STOP, name, java.util.List.of(),
+                "bot stop " + formatBotTarget(name));
     }
 
     private static PlayerEntity findLookedAtBotEntity(MinecraftClient client) {
@@ -3285,13 +3317,15 @@ public class FrensClient implements ClientModInitializer {
     private static void sendResumeDecision(MinecraftClient client, boolean resume) {
         String botName = resolveDecisionBotName(client);
         String command;
-        if (botName != null && !botName.isBlank()) {
+        boolean hasBot = botName != null && !botName.isBlank();
+        if (hasBot) {
             String target = formatBotTarget(botName);
             command = resume ? ("bot resume " + target) : ("bot stop " + target);
         } else {
             command = resume ? "bot resume" : "bot stop";
         }
-        sendChatCommand(client, command);
+        BotActionClientSender.send(resume ? BotActionPolicy.Action.RESUME : BotActionPolicy.Action.STOP,
+                hasBot ? botName : "", java.util.List.of(), command);
         resumeDecisionActive = false;
         resumeDecisionBotName = null;
     }
@@ -3425,7 +3459,8 @@ public class FrensClient implements ClientModInitializer {
 
         // Case 1: Looking at a bot with leashed animals.
         if (leashButtonVisible && leashButtonBotName != null) {
-            sendChatCommand(client, "bot leash " + leashButtonBotName);
+            BotActionClientSender.send(BotActionPolicy.Action.LEASH, leashButtonBotName, java.util.List.of(),
+                    "bot leash " + leashButtonBotName);
             return;
         }
 
@@ -3439,8 +3474,8 @@ public class FrensClient implements ClientModInitializer {
             // /bot stop cancels follow (prevents the bot from immediately
             // re-mounting via RideSync), then /bot leash runs the secure
             // fallback chain (lead -> fence -> hold).
-            sendChatCommand(client, "bot stop " + name);
-            sendChatCommand(client, "bot leash " + name);
+            BotActionClientSender.send(BotActionPolicy.Action.STOP, name, java.util.List.of(), "bot stop " + name);
+            BotActionClientSender.send(BotActionPolicy.Action.LEASH, name, java.util.List.of(), "bot leash " + name);
             if (isGameplayTipsEnabled()) {
                 client.player.sendMessage(Text.literal("Telling " + name + " to dismount and tether."), true);
             }
