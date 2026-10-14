@@ -21,6 +21,7 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * Server-authoritative questline that turns "recruited" into "permanent companion" via village improvements.
@@ -293,14 +294,31 @@ public final class SurvivalCompanionQuestService {
     }
 
     private static boolean isAuthorizedAdvancer(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {
+        return isAuthorizedCompanionCommander(player, st);
+    }
+
+    /**
+     * Recruiter, exact config owner of the recruited alias, operator or integrated host
+     * ({@link CompanionCommanderPolicy}). Shared by the quest and the companion commands.
+     */
+    public static boolean isAuthorizedCompanionCommander(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {
         if (player == null || st == null) {
             return false;
         }
-        String recruiterUuid = st.getRecruitedByUuid();
-        if (recruiterUuid != null && !recruiterUuid.isBlank() && recruiterUuid.equals(player.getUuidAsString())) {
-            return true;
+        UUID ownerUuid = null;
+        String alias = st.getBotAlias();
+        if (Frens.CONFIG != null && alias != null && !alias.isBlank()) {
+            ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(alias);
+            if (ownership != null) {
+                ownerUuid = CompanionCommanderPolicy.parseOwnerUuid(ownership.ownerUuid());
+            }
         }
-        return Frens.isOperator(player);
+        return CompanionCommanderPolicy.isAuthorized(
+                player.getUuid(),
+                st.getRecruitedByUuid(),
+                ownerUuid,
+                Frens.isOperator(player),
+                net.wcfcarolina13.network.BotAccessGate.isHost(player));
     }
 
     private static Progress scan(ServerWorld world, BlockPos anchor) {

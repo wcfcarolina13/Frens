@@ -81,7 +81,6 @@ import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.GameAI.services.BotInventoryStorageService;
 import net.wcfcarolina13.GameAI.services.BotTargetingService;
 import net.wcfcarolina13.GameAI.services.HealingService;
-import net.wcfcarolina13.GameAI.services.InventoryAccessPolicy;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
@@ -1683,14 +1682,14 @@ public class modCommandRegistry {
                                     ServerPlayerEntity bot = targets.get(0);
                                     BotTargetingService.remember(source, bot.getGameProfile().name());
 
-                                    if (!InventoryAccessPolicy.canOpen(viewer, bot)) {
+                                    if (!net.wcfcarolina13.GameAI.services.BotAccessPolicy.allowed(net.wcfcarolina13.network.BotAccessGate.decide(viewer, bot))) {
                                         source.sendError(Text.literal("You don't have permission to open this bot's inventory."));
                                         return 0;
                                     }
 
                                     boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
                                     if (!ok) {
-                                        if (Frens.isOperator(viewer)) {
+                                        if (net.wcfcarolina13.network.BotAccessGate.isServerAdmin(viewer)) {
                                             source.sendError(Text.literal("Failed to open bot inventory."));
                                         } else {
                                             source.sendError(Text.literal("Out of range or wrong dimension."));
@@ -1718,14 +1717,14 @@ public class modCommandRegistry {
                                             BotTargetingService.remember(source, bot.getGameProfile().name());
 
                                             // Ownership / op check (see Section 3)
-                                            if (!InventoryAccessPolicy.canOpen(viewer, bot)) {
+                                            if (!net.wcfcarolina13.GameAI.services.BotAccessPolicy.allowed(net.wcfcarolina13.network.BotAccessGate.decide(viewer, bot))) {
                                                 source.sendError(Text.literal("You don't have permission to open this bot's inventory."));
                                                 return 0;
                                             }
 
 	                                            boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
 	                                            if (!ok) {
-	                                                if (Frens.isOperator(viewer)) {
+	                                                if (net.wcfcarolina13.network.BotAccessGate.isServerAdmin(viewer)) {
 	                                                    source.sendError(Text.literal("Failed to open bot inventory."));
 	                                                } else {
 	                                                    source.sendError(Text.literal("Out of range or wrong dimension."));
@@ -5590,14 +5589,7 @@ public class modCommandRegistry {
     }
 
     private static boolean isAuthorizedCompanionCommander(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {
-        if (player == null || st == null) {
-            return false;
-        }
-        String recruiterUuid = st.getRecruitedByUuid();
-        if (recruiterUuid != null && !recruiterUuid.isBlank() && recruiterUuid.equals(player.getUuidAsString())) {
-            return true;
-        }
-        return Frens.isOperator(player);
+        return net.wcfcarolina13.GameAI.services.SurvivalCompanionQuestService.isAuthorizedCompanionCommander(player, st);
     }
 
     private static boolean canUseCompanionCome(MinecraftServer server, ServerPlayerEntity commander, ServerPlayerEntity bot, ManualConfig.SurvivalRecruitmentState st) {
@@ -8695,7 +8687,7 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity player = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
-        boolean isAdmin = Frens.isOperator(source);
+        boolean isAdmin = Frens.isServerAdmin(source);
         
         boolean success = ProtectedZoneService.removeZone(world, label, player, isAdmin);
         if (!success) {
@@ -8713,7 +8705,7 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity actor = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
-        boolean isAdmin = Frens.isOperator(source);
+        boolean isAdmin = Frens.isServerAdmin(source);
 
         if (label == null || label.isBlank()) {
             source.sendError(Text.literal("Provide a zone label."));
@@ -8731,7 +8723,7 @@ public class modCommandRegistry {
         }
 
         if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
-            source.sendError(Text.literal("Only the zone owner (or an operator) can grant access."));
+            source.sendError(Text.literal("Only the zone owner, an operator or the world host can grant access."));
             return 0;
         }
 
@@ -8761,7 +8753,7 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity actor = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
-        boolean isAdmin = Frens.isOperator(source);
+        boolean isAdmin = Frens.isServerAdmin(source);
 
         if (label == null || label.isBlank()) {
             source.sendError(Text.literal("Provide a zone label."));
@@ -8779,7 +8771,7 @@ public class modCommandRegistry {
         }
 
         if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
-            source.sendError(Text.literal("Only the zone owner (or an operator) can revoke access."));
+            source.sendError(Text.literal("Only the zone owner, an operator or the world host can revoke access."));
             return 0;
         }
 
@@ -8809,7 +8801,7 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity actor = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
-        boolean isAdmin = Frens.isOperator(source);
+        boolean isAdmin = Frens.isServerAdmin(source);
 
         if (label == null || label.isBlank()) {
             source.sendError(Text.literal("Provide a zone label."));
@@ -8823,7 +8815,7 @@ public class modCommandRegistry {
         }
 
         if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
-            source.sendError(Text.literal("Only the zone owner (or an operator) can change access mode."));
+            source.sendError(Text.literal("Only the zone owner, an operator or the world host can change access mode."));
             return 0;
         }
 
@@ -8872,8 +8864,8 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity player = source.getPlayerOrThrow();
 
-        if (!Frens.isOperator(source)) {
-            source.sendError(Text.literal("Only server operators can use the zone wand."));
+        if (!Frens.isServerAdmin(source)) {
+            source.sendError(Text.literal("Only operators and the world host can use the zone wand."));
             return 0;
         }
 
