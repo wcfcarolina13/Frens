@@ -124,6 +124,22 @@ public class Frens implements ModInitializer {
         return true;
     }
 
+    /**
+     * Source form of {@link net.wcfcarolina13.network.BotAccessGate#isServerAdmin}: operator or the
+     * integrated-server host. A source with no player (console, command block) passes, the same as
+     * {@link #isOperator(ServerCommandSource)}. For world-level and admin command gates.
+     */
+    public static boolean isServerAdmin(ServerCommandSource source) {
+        if (source == null) {
+            return false;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        if (player == null) {
+            return true;
+        }
+        return net.wcfcarolina13.network.BotAccessGate.isServerAdmin(player);
+    }
+
     private static final ConcurrentHashMap<UUID, Long> LAST_LEGACY_CHAT_DENY_WARN_MS = new ConcurrentHashMap<>();
     private static final long LEGACY_CHAT_DENY_WARN_INTERVAL_MS = 10_000L;
 
