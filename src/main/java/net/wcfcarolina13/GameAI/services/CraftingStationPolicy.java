@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -87,14 +88,34 @@ public final class CraftingStationPolicy {
     }
 
     /**
-     * Whether a "couldn't place a crafting table" chat goes through the shared crafting-table
-     * message throttle (at most one such line per bot per 30 s) instead of straight to chat. Always:
-     * on the server thread an every-second caller would send it every second, and on a worker one
-     * tool craft tried a station per material and sent it once each (1.1.234 playthrough #2). The
-     * throttled send also quiets the "I need a crafting table" line its caller sends next.
+     * Whether a crafting-table line ("I couldn't place a crafting table here.", "I need a crafting
+     * table placed nearby", a materials line) goes out now.
+     *
+     * <p>An automatic craft (a skill sub-step on a worker, an idle hobby or RideSync on the server
+     * thread) sends at most one per bot per 30 s ({@code cooldownActive}): an every-second caller
+     * would otherwise send it every second, and one tool craft once tried a station per material
+     * (1.1.234 playthrough #2). A player's own {@code /bot craft} ({@code explicitRequest}) is never
+     * held back by a cooldown an earlier craft armed, and sends the first such line of the call
+     * only, so a station failure and the "I need a crafting table" after it are one line.
      */
-    public static boolean throttlesFailureChat(boolean onServerThread) {
-        return true;
+    public static boolean shouldSendTableLine(boolean explicitRequest,
+                                              boolean saidTableLineThisCall,
+                                              boolean cooldownActive) {
+        return explicitRequest ? !saidTableLineThisCall : !cooldownActive;
+    }
+
+    /**
+     * Whether a player's own craft ends with {@link #fallbackLine}: it made nothing, nothing was
+     * said during the call, and it was not stopped (a stop already answers for itself).
+     */
+    public static boolean needsFallbackLine(int crafted, boolean saidAnything, boolean aborted) {
+        return crafted <= 0 && !saidAnything && !aborted;
+    }
+
+    /** "I couldn't craft stone axe." for a player's craft that failed without saying why. */
+    public static String fallbackLine(String item) {
+        String label = item == null || item.isBlank() ? "that" : item.replace('_', ' ').trim();
+        return "I couldn't craft " + label + ".";
     }
 
     /**
@@ -107,10 +128,12 @@ public final class CraftingStationPolicy {
 
     /**
      * Which tool materials a craft tries, in order. A named material ({@code strict}) is tried as
-     * given so its shortfall line can be reported. Otherwise only materials the bot holds enough of
-     * for one tool are tried: each try starts with a station check (crafting and placing a table),
-     * so a bot holding only wood used to craft a table for a diamond axe first. When it holds none,
-     * the first in order is still tried once, so a chest pull inside that try can feed the craft.
+     * given so its shortfall line can be reported. Otherwise the materials the bot holds enough of
+     * for one tool come first (a bot holding only wood used to craft a table for a diamond axe
+     * before reaching wood), then the rest in their usual order, because each try also pulls its
+     * material from a chest and a bot with an empty inventory still has to reach the chest wood or
+     * cobble. A station failure stops the whole loop in the caller, so the extra tries never mean
+     * extra table attempts.
      */
     public static <T> List<T> materialsToTry(List<T> ordered,
                                              Predicate<T> heldEnough,
@@ -121,8 +144,18 @@ public final class CraftingStationPolicy {
         if (strict) {
             return ordered;
         }
-        List<T> held = ordered.stream().filter(heldEnough).toList();
-        return held.isEmpty() ? List.of(ordered.get(0)) : held;
+        List<T> out = new ArrayList<>(ordered.size());
+        for (T material : ordered) {
+            if (heldEnough.test(material)) {
+                out.add(material);
+            }
+        }
+        for (T material : ordered) {
+            if (!out.contains(material)) {
+                out.add(material);
+            }
+        }
+        return out;
     }
 
     /** Planks on hand for a wooden head: loose planks plus four per log. */

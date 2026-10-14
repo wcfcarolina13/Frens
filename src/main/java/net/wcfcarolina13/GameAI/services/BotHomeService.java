@@ -291,6 +291,33 @@ public final class BotHomeService {
         }
     }
 
+    /**
+     * The bases in this save's legacy (level-name keyed) bot-home entries, across its dimensions,
+     * or null when it has no legacy entry at all. Read-only; legacy entries are never changed. For
+     * the zone and lock adoption guard ({@link WorldStoreKeyPolicy#legacyZonesBelongToThisSave}).
+     */
+    public static List<WorldStoreKeyPolicy.LegacyBase> legacyBasesForSave(MinecraftServer server) {
+        if (server == null) return null;
+        ensureLoaded();
+        synchronized (LOCK) {
+            if (DATA.worlds == null) return null;
+            List<WorldStoreKeyPolicy.LegacyBase> out = null;
+            for (ServerWorld world : server.getWorlds()) {
+                WorldData legacy = DATA.worlds.get(legacyServerWorldKey(server, world));
+                if (legacy == null) continue;
+                if (out == null) out = new ArrayList<>();
+                if (legacy.basesByLabel == null) continue;
+                for (Map.Entry<String, SavedBase> e : legacy.basesByLabel.entrySet()) {
+                    SavedBase base = e.getValue();
+                    if (base == null || base.pos == null) continue;
+                    String label = base.label != null ? base.label : e.getKey();
+                    out.add(new WorldStoreKeyPolicy.LegacyBase(label, base.pos.x, base.pos.y, base.pos.z));
+                }
+            }
+            return out;
+        }
+    }
+
     private static void ensureLoaded() {
         synchronized (LOCK) {
             if (loaded) {

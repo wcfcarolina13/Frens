@@ -259,30 +259,103 @@ public final class CraftingHelper {
     private CraftingHelper() {
     }
 
-    /** Send a crafting-table-needed message at most once per cooldown period per bot. */
-    private static void sendCraftTableNeededOnce(ServerPlayerEntity bot, ServerCommandSource source, String msg) {
-        if (bot == null || source == null) return;
-        Long last = CRAFT_TABLE_MSG_COOLDOWN.get(bot.getUuid());
-        long now = System.currentTimeMillis();
-        if (last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS) return;
-        CRAFT_TABLE_MSG_COOLDOWN.put(bot.getUuid(), now);
-        ChatUtils.sendSystemMessage(source, msg);
+    /**
+     * A player's own {@code /bot craft} in progress, keyed by bot: its table and materials lines
+     * skip the 30 s throttle (once per call instead), and it ends with "I couldn't craft X." when
+     * it made nothing and said nothing. Skill sub-step and server-thread crafts never register.
+     */
+    private static final class ExplicitCraftCall {
+        final ServerCommandSource source;
+        volatile boolean saidAnything;
+        volatile boolean saidTableLine;
+
+        ExplicitCraftCall(ServerCommandSource source) {
+            this.source = source;
+        }
     }
 
-    /** Send an "I don't know how to craft X" message at most once per cooldown period per bot. */
+    private static final Map<UUID, ExplicitCraftCall> EXPLICIT_CRAFTS = new ConcurrentHashMap<>();
+
+    private static ExplicitCraftCall explicitCall(ServerPlayerEntity bot) {
+        return bot == null ? null : EXPLICIT_CRAFTS.get(bot.getUuid());
+    }
+
+    /** Every craft line to the player goes through here, so an explicit craft knows it answered. */
+    private static void say(ServerCommandSource source, String msg) {
+        if (source == null) return;
+        ChatUtils.sendSystemMessage(source, msg);
+        for (ExplicitCraftCall call : EXPLICIT_CRAFTS.values()) {
+            if (call.source == source) {
+                call.saidAnything = true;
+            }
+        }
+    }
+
+    /**
+     * A player's {@code /bot craft}: {@link #craftGeneric}, but its failure lines are never held
+     * back by the throttle an earlier automatic craft armed, and a craft that made nothing and
+     * said nothing still answers once.
+     */
+    public static int craftGenericForPlayer(ServerCommandSource source,
+                                            ServerPlayerEntity bot,
+                                            ServerPlayerEntity commander,
+                                            String item,
+                                            int amount,
+                                            String materialPreference) {
+        if (bot == null) {
+            return craftGeneric(source, bot, commander, item, amount, materialPreference);
+        }
+        UUID botId = bot.getUuid();
+        ExplicitCraftCall call = new ExplicitCraftCall(source);
+        EXPLICIT_CRAFTS.put(botId, call);
+        int crafted;
+        try {
+            crafted = craftGeneric(source, bot, commander, item, amount, materialPreference);
+        } finally {
+            EXPLICIT_CRAFTS.remove(botId, call);
+        }
+        if (CraftingStationPolicy.needsFallbackLine(crafted, call.saidAnything, TaskService.isAbortRequested(botId))) {
+            say(source, CraftingStationPolicy.fallbackLine(item));
+        }
+        return crafted;
+    }
+
+    /**
+     * Send a crafting-table-needed (or materials) line: for an automatic craft at most once per
+     * cooldown period per bot, for a player's own craft once per call (see
+     * {@link CraftingStationPolicy#shouldSendTableLine}).
+     */
+    private static void sendCraftTableNeededOnce(ServerPlayerEntity bot, ServerCommandSource source, String msg) {
+        if (bot == null || source == null) return;
+        ExplicitCraftCall call = explicitCall(bot);
+        Long last = CRAFT_TABLE_MSG_COOLDOWN.get(bot.getUuid());
+        long now = System.currentTimeMillis();
+        boolean cooldownActive = last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS;
+        if (!CraftingStationPolicy.shouldSendTableLine(call != null, call != null && call.saidTableLine, cooldownActive)) {
+            return;
+        }
+        if (call != null) {
+            call.saidTableLine = true;
+            call.saidAnything = true;
+        }
+        CRAFT_TABLE_MSG_COOLDOWN.put(bot.getUuid(), now);
+        say(source, msg);
+    }
+
+    /** Send an "I don't know how to craft X" message at most once per cooldown period per bot (always for a player's own craft). */
     private static void sendUnknownCraftNameOnce(ServerPlayerEntity bot, ServerCommandSource source, String item) {
         if (source == null) return;
         String label = (item == null || item.isBlank()) ? "that" : item.replace('_', ' ').trim();
         String msg = "I don't know how to craft " + label + ".";
-        if (bot == null) {
-            ChatUtils.sendSystemMessage(source, msg);
+        if (bot == null || explicitCall(bot) != null) {
+            say(source, msg);
             return;
         }
         Long last = UNKNOWN_CRAFT_MSG_COOLDOWN.get(bot.getUuid());
         long now = System.currentTimeMillis();
         if (last != null && (now - last) < UNKNOWN_CRAFT_MSG_COOLDOWN_MS) return;
         UNKNOWN_CRAFT_MSG_COOLDOWN.put(bot.getUuid(), now);
-        ChatUtils.sendSystemMessage(source, msg);
+        say(source, msg);
     }
 
     /** Registry path of an item, e.g. "oak_planks", for use in missing-material messages. */
@@ -303,7 +376,7 @@ public final class CraftingHelper {
                                       String fallback) {
         if (source == null) return;
         String msg = CraftingRequirementsPolicy.format(thing, CraftingRequirementsPolicy.missing(needed, have));
-        ChatUtils.sendSystemMessage(source, msg.isEmpty() ? fallback : msg);
+        say(source, msg.isEmpty() ? fallback : msg);
     }
 
     /**
@@ -363,7 +436,7 @@ public final class CraftingHelper {
             }
             effectiveMaterial = parsed.material();
             if ("netherite".equals(effectiveMaterial)) {
-                if (source != null) ChatUtils.sendSystemMessage(source, "Netherite tools aren't crafted — they're upgraded from diamond ones at a smithing table.");
+                if (source != null) say(source, "Netherite tools aren't crafted — they're upgraded from diamond ones at a smithing table.");
                 return 0;
             }
         }
@@ -447,9 +520,9 @@ public final class CraftingHelper {
 
         if (crafted == 0) {
             if (targetPlank != null && targetPlank != Items.AIR) {
-                ChatUtils.sendSystemMessage(source, "I need matching logs to craft " + targetPlank.getName().getString() + ".");
+                say(source, "I need matching logs to craft " + targetPlank.getName().getString() + ".");
             } else {
-                ChatUtils.sendSystemMessage(source, "I need logs to craft planks.");
+                say(source, "I need logs to craft planks.");
             }
             return 0;
         }
@@ -466,7 +539,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
 
@@ -475,14 +548,14 @@ public final class CraftingHelper {
         if (!ensureSticks(bot, source, neededSticks)) {
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
-            ChatUtils.sendSystemMessage(source, "Missing sticks for ladders; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
+            say(source, "Missing sticks for ladders; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
             return 0;
         }
 
         int sticks = countItem(bot, Items.STICK);
         int crafts = Math.min(craftsNeeded, sticks / 7);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Missing sticks for ladders.");
+            say(source, "Missing sticks for ladders.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -561,7 +634,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
 
@@ -600,7 +673,7 @@ public final class CraftingHelper {
         reserveItems.put(chosen.wool(), crafts * 3);
         ensureInventorySpaceForOutput(bot, source, chosen.bed(), crafts, crafts * 3, 0, reserveItems);
         if (!consumePlanks(bot, crafts * 3)) {
-            ChatUtils.sendSystemMessage(source, "I couldn't reserve planks for beds.");
+            say(source, "I couldn't reserve planks for beds.");
             return 0;
         }
         consumeItem(bot, chosen.wool(), crafts * 3);
@@ -703,7 +776,7 @@ public final class CraftingHelper {
             }
         }
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
@@ -719,7 +792,7 @@ public final class CraftingHelper {
         }
         ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of());
         if (!consumePlanks(bot, crafts * planksPerItem)) {
-            ChatUtils.sendSystemMessage(source, "I couldn't reserve planks for crafting.");
+            say(source, "I couldn't reserve planks for crafting.");
             return 0;
         }
         distributeOutput(bot, output, crafts);
@@ -735,7 +808,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int plankCount = countPlanks(bot);
@@ -747,7 +820,7 @@ public final class CraftingHelper {
         }
         ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of());
         if (!consumePlanks(bot, crafts * 2)) {
-            ChatUtils.sendSystemMessage(source, "I couldn't reserve planks for sticks.");
+            say(source, "I couldn't reserve planks for sticks.");
             return 0;
         }
         distributeOutput(bot, Items.STICK, crafts * 4);
@@ -761,7 +834,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "torch");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int targetTorches = Math.max(1, amountRequested);
@@ -873,7 +946,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
 
@@ -952,7 +1025,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
@@ -997,7 +1070,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "lead");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 2.0);
@@ -1007,7 +1080,7 @@ public final class CraftingHelper {
         int slime = countItem(bot, Items.SLIME_BALL);
         int crafts = Math.min(craftsNeeded, Math.min(string / 4, slime));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Leads need 4 string and 1 slime ball each.");
+            say(source, "Leads need 4 string and 1 slime ball each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1031,7 +1104,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "bundle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1041,7 +1114,7 @@ public final class CraftingHelper {
         int string = countItem(bot, Items.STRING);
         int crafts = Math.min(craftsNeeded, Math.min(leather, string));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Bundles need 1 leather and 1 string each.");
+            say(source, "Bundles need 1 leather and 1 string each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1061,7 +1134,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "leather");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1069,7 +1142,7 @@ public final class CraftingHelper {
         int hides = countItem(bot, Items.RABBIT_HIDE);
         int crafts = Math.min(craftsNeeded, hides / 4);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Leather needs 4 rabbit hide each.");
+            say(source, "Leather needs 4 rabbit hide each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1091,7 +1164,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "saddle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1101,7 +1174,7 @@ public final class CraftingHelper {
         int iron = countItem(bot, Items.IRON_INGOT);
         int crafts = Math.min(craftsNeeded, Math.min(leather / 3, iron));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Saddles need 3 leather and 1 iron ingot each.");
+            say(source, "Saddles need 3 leather and 1 iron ingot each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1125,7 +1198,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "carrot_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1137,7 +1210,7 @@ public final class CraftingHelper {
         int rods = countItem(bot, Items.FISHING_ROD);
         int crafts = Math.min(craftsNeeded, Math.min(carrots, rods));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Carrot on a stick needs a fishing rod and a carrot.");
+            say(source, "Carrot on a stick needs a fishing rod and a carrot.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1161,7 +1234,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "warped_fungus_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            say(source, "I don't know how to craft that yet.");
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1173,7 +1246,7 @@ public final class CraftingHelper {
         int rods = countItem(bot, Items.FISHING_ROD);
         int crafts = Math.min(craftsNeeded, Math.min(fungus, rods));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Warped fungus on a stick needs a fishing rod and warped fungus.");
+            say(source, "Warped fungus on a stick needs a fishing rod and warped fungus.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1240,11 +1313,12 @@ public final class CraftingHelper {
         }
 
         ToolShortfall shortfall = strictMaterial ? new ToolShortfall() : null;
-        List<ToolMaterial> toTry = CraftingStationPolicy.materialsToTry(materials,
-                mat -> headMaterialOnHand(bot, mat) >= headCountFor(kind, mat), strictMaterial);
-        if (toTry.size() < materials.size()) {
-            LOGGER.info("Crafting {}: trying {} of {} materials (others not held)",
-                    kind.name().toLowerCase(Locale.ROOT), toTry.size(), materials.size());
+        java.util.function.Predicate<ToolMaterial> heldEnough =
+                mat -> headMaterialOnHand(bot, mat) >= headCountFor(kind, mat);
+        List<ToolMaterial> toTry = CraftingStationPolicy.materialsToTry(materials, heldEnough, strictMaterial);
+        if (!strictMaterial) {
+            LOGGER.info("Crafting {}: {} of {} materials held, those first",
+                    kind.name().toLowerCase(Locale.ROOT), materials.stream().filter(heldEnough).count(), materials.size());
         }
         for (ToolMaterial mat : toTry) {
             int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat, shortfall);
@@ -1255,7 +1329,7 @@ public final class CraftingHelper {
                 // No table for one material is no table for any: stop here, the station already
                 // said why (throttled), and "Missing materials" would be the wrong diagnosis.
                 if (shortfall != null && shortfall.message != null && source != null) {
-                    ChatUtils.sendSystemMessage(source, shortfall.message);
+                    say(source, shortfall.message);
                 }
                 return 0;
             }
@@ -1264,7 +1338,7 @@ public final class CraftingHelper {
             // An explicit request always gets its answer: not through the table-message throttle,
             // which an unrelated earlier craft may be holding.
             if (shortfall.message != null && source != null) {
-                ChatUtils.sendSystemMessage(source, shortfall.message);
+                say(source, shortfall.message);
             }
             return 0;
         }
@@ -1469,7 +1543,7 @@ public final class CraftingHelper {
         int iron = countItem(bot, Items.IRON_INGOT);
         int crafts = Math.min(amount, Math.min(planks / 6, iron / 1));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Shield needs 6 planks and 1 iron ingot each.");
+            say(source, "Shield needs 6 planks and 1 iron ingot each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -1593,7 +1667,7 @@ public final class CraftingHelper {
                 return false;
             }
             if (distSq > 36.0D) { // >6 blocks away
-                ChatUtils.sendSystemMessage(source,
+                say(source,
                         "Give me a moment — I'll use the crafting table at "
                                 + nearest.getX() + ", " + nearest.getY() + ", " + nearest.getZ() + ".");
             }
@@ -1709,7 +1783,7 @@ public final class CraftingHelper {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
                 warnStationStep(onServerThread, "Failed to place crafting table from inventory near {}", botPos.toShortString());
-                tellStationFailure(bot, source, onServerThread, "I couldn't place a crafting table here.");
+                tellStationFailure(bot, source, "I couldn't place a crafting table here.");
                 declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
@@ -1722,7 +1796,7 @@ public final class CraftingHelper {
             if (!placed) {
                 warnStationStep(onServerThread, "Failed to place crafting table from inventory near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                tellStationFailure(bot, source, onServerThread, "I couldn't place a crafting table here.");
+                tellStationFailure(bot, source, "I couldn't place a crafting table here.");
                 declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
@@ -1783,7 +1857,7 @@ public final class CraftingHelper {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
                 warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {}", botPos.toShortString());
-                tellStationFailure(bot, source, onServerThread, "I crafted a crafting table but couldn't place it here.");
+                tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
                 declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
@@ -1796,7 +1870,7 @@ public final class CraftingHelper {
             if (!placed) {
                 warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                tellStationFailure(bot, source, onServerThread, "I crafted a crafting table but couldn't place it here.");
+                tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
                 declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
@@ -1888,16 +1962,11 @@ public final class CraftingHelper {
     }
 
     /**
-     * A placement failure told to the player through the table-message throttle (see
-     * {@link CraftingStationPolicy#throttlesFailureChat}), which also quiets the "I need a crafting
-     * table" line the caller sends right after.
+     * A placement failure told to the player as a table line (see {@link #sendCraftTableNeededOnce}),
+     * which also quiets the "I need a crafting table" line the caller sends right after.
      */
-    private static void tellStationFailure(ServerPlayerEntity bot, ServerCommandSource source, boolean onServerThread, String msg) {
-        if (CraftingStationPolicy.throttlesFailureChat(onServerThread)) {
-            sendCraftTableNeededOnce(bot, source, msg);
-        } else {
-            ChatUtils.sendSystemMessage(source, msg);
-        }
+    private static void tellStationFailure(ServerPlayerEntity bot, ServerCommandSource source, String msg) {
+        sendCraftTableNeededOnce(bot, source, msg);
     }
 
     /** On the server thread, where the bot may not walk, a failed call is a decline: say so (rate-limited). */
@@ -2445,7 +2514,7 @@ public final class CraftingHelper {
         int have = countItem(bot, input);
         int crafts = Math.min(amount, have / per);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "I need " + per + " " + input.getName().getString() + " per craft.");
+            say(source, "I need " + per + " " + input.getName().getString() + " per craft.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -2497,7 +2566,7 @@ public final class CraftingHelper {
         int cobble = countCobble(bot);
         int crafts = Math.min(amount, cobble / per);
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "I need " + per + " cobblestone (or similar) per craft.");
+            say(source, "I need " + per + " cobblestone (or similar) per craft.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
@@ -2525,7 +2594,7 @@ public final class CraftingHelper {
         int strings = countItem(bot, Items.STRING);
         int crafts = Math.min(amount, Math.min(sticks / 3, strings / 2));
         if (crafts <= 0) {
-            ChatUtils.sendSystemMessage(source, "Fishing rods need 3 sticks and 2 strings each.");
+            say(source, "Fishing rods need 3 sticks and 2 strings each.");
             return 0;
         }
         Map<Item, Integer> reserveItems = new HashMap<>();

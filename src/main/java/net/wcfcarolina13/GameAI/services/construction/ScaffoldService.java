@@ -424,8 +424,10 @@ public final class ScaffoldService {
     }
 
     /**
-     * Tear down scaffold blocks that were tracked.
-     * Removes from top to bottom and clears memory.
+     * Tear down scaffold blocks that were tracked, top to bottom. Only positions that are gone
+     * afterwards (broken, already air, or no longer a scaffold block) leave the memory: a stop
+     * mid-teardown, a block out of reach or refused by protection, and the server-thread refusal
+     * all keep the rest tracked for a later teardown or cleanup.
      *
      * @param bot The bot doing the teardown
      * @return Number of blocks removed
@@ -437,13 +439,15 @@ public final class ScaffoldService {
         }
 
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
-        int removed = teardownScaffolds(bot, world, new ArrayList<>(memory), Collections.emptySet());
-        memory.clear();
-        return removed;
+        TeardownResult result = teardownScaffoldsDetailed(bot, world, new ArrayList<>(memory), Collections.emptySet());
+        memory.removeAll(ScaffoldTeardownPolicy.toForget(memory, result.gone(), Collections.emptySet()));
+        return result.removed();
     }
 
     /**
-     * Tear down only scaffolds tracked in the provided session.
+     * Tear down only scaffolds tracked in the provided session. Positions in {@code keepBlocks}
+     * became part of the structure and are forgotten (so a later teardown never breaks them);
+     * everything else stays tracked unless it is gone.
      */
     public static int teardown(ScaffoldSession session, Set<BlockPos> keepBlocks) {
         if (session == null || session.tracked.isEmpty()) {
@@ -453,16 +457,22 @@ public final class ScaffoldService {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return 0;
         }
-        int removed = teardownScaffolds(bot, world, new ArrayList<>(session.tracked), keepBlocks);
+        TeardownResult result = teardownScaffoldsDetailed(bot, world, new ArrayList<>(session.tracked), keepBlocks);
+        Set<BlockPos> forget = ScaffoldTeardownPolicy.toForget(session.tracked, result.gone(), keepBlocks);
         Set<BlockPos> memory = scaffoldMemory.get(session.botId());
         if (memory != null) {
-            memory.removeAll(session.tracked);
+            memory.removeAll(forget);
             if (memory.isEmpty()) {
                 scaffoldMemory.remove(session.botId());
             }
         }
-        session.tracked.clear();
-        return removed;
+        session.tracked.removeAll(forget);
+        return result.removed();
+    }
+
+    /** What one teardown did: blocks it broke, and every position now known to be gone. */
+    private record TeardownResult(int removed, Set<BlockPos> gone) {
+        static final TeardownResult NONE = new TeardownResult(0, Set.of());
     }
 
     /**
@@ -476,8 +486,13 @@ public final class ScaffoldService {
      */
     public static int teardownScaffolds(ServerPlayerEntity bot, ServerWorld world,
                                          List<BlockPos> scaffolds, Set<BlockPos> keepBlocks) {
+        return teardownScaffoldsDetailed(bot, world, scaffolds, keepBlocks).removed();
+    }
+
+    private static TeardownResult teardownScaffoldsDetailed(ServerPlayerEntity bot, ServerWorld world,
+                                                            List<BlockPos> scaffolds, Set<BlockPos> keepBlocks) {
         if (scaffolds.isEmpty()) {
-            return 0;
+            return TeardownResult.NONE;
         }
 
         // Sort from top to bottom for safe teardown
@@ -486,16 +501,17 @@ public final class ScaffoldService {
 
         var server = world.getServer();
         if (server == null) {
-            return 0;
+            return TeardownResult.NONE;
         }
         if (server.isOnThread()) {
             // Each break is a timed survival mine that ticks through server.execute; blocking on it
             // here would deadlock the server thread.
             LOGGER.warn("Refusing scaffold teardown of {} block(s) for {} on the server thread",
                     sorted.size(), bot.getName().getString());
-            return 0;
+            return TeardownResult.NONE;
         }
         int removed = 0;
+        Set<BlockPos> gone = new HashSet<>();
         for (BlockPos pos : sorted) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 break;
@@ -507,12 +523,18 @@ public final class ScaffoldService {
             }
 
             // Pre-check on the server thread: still a scaffold block, reachable, and allowed.
-            var precheck = new java.util.concurrent.CompletableFuture<Boolean>();
+            var precheck = new java.util.concurrent.CompletableFuture<ScaffoldTeardownPolicy.Precheck>();
             server.execute(() -> {
                 try {
                     var state = world.getBlockState(pos);
                     if (state.isAir()) {
-                        precheck.complete(false);
+                        precheck.complete(ScaffoldTeardownPolicy.Precheck.GONE);
+                        return;
+                    }
+                    boolean isScaffoldType = SCAFFOLD_BLOCKS.stream()
+                            .anyMatch(item -> state.getBlock().asItem().equals(item));
+                    if (!isScaffoldType) {
+                        precheck.complete(ScaffoldTeardownPolicy.Precheck.NOT_SCAFFOLD);
                         return;
                     }
                     boolean standingOnBlock = bot.getBlockPos().equals(pos.up());
@@ -520,30 +542,30 @@ public final class ScaffoldService {
                         LOGGER.info("Skipping remote scaffold teardown at {} for {}",
                                 pos.toShortString(),
                                 bot.getName().getString());
-                        precheck.complete(false);
-                        return;
-                    }
-                    boolean isScaffoldType = SCAFFOLD_BLOCKS.stream()
-                            .anyMatch(item -> state.getBlock().asItem().equals(item));
-                    if (!isScaffoldType) {
-                        precheck.complete(false);
+                        precheck.complete(ScaffoldTeardownPolicy.Precheck.SKIP);
                         return;
                     }
                     var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
-                    precheck.complete(auth.allowed());
+                    precheck.complete(auth.allowed()
+                            ? ScaffoldTeardownPolicy.Precheck.BREAK
+                            : ScaffoldTeardownPolicy.Precheck.SKIP);
                 } catch (Exception e) {
-                    precheck.complete(false);
+                    precheck.complete(ScaffoldTeardownPolicy.Precheck.SKIP);
                 }
             });
 
-            boolean shouldBreak;
+            ScaffoldTeardownPolicy.Precheck verdict;
             try {
-                shouldBreak = precheck.get(2, java.util.concurrent.TimeUnit.SECONDS);
+                verdict = precheck.get(2, java.util.concurrent.TimeUnit.SECONDS);
             } catch (Exception e) {
                 LOGGER.debug("Scaffold teardown pre-check timed out at {}: {}", pos.toShortString(), e.getMessage());
                 continue;
             }
-            if (!shouldBreak) {
+            if (ScaffoldTeardownPolicy.isGoneWithoutBreaking(verdict)) {
+                gone.add(pos);
+                continue;
+            }
+            if (verdict != ScaffoldTeardownPolicy.Precheck.BREAK) {
                 continue;
             }
 
@@ -551,13 +573,14 @@ public final class ScaffoldService {
             // else hands) and only breaks once the vanilla break time has elapsed.
             if (mineScaffoldBlock(bot, pos)) {
                 removed++;
+                gone.add(pos);
                 sleepQuiet(50L);
             } else if (SkillManager.shouldAbortSkill(bot)) {
                 break;
             }
         }
 
-        return removed;
+        return new TeardownResult(removed, gone);
     }
 
     /** Hard ceiling on one teardown break; MiningTool's own timeout normally fires first. */

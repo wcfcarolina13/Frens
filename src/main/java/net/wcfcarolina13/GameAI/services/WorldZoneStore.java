@@ -89,6 +89,29 @@ final class WorldZoneStore {
         boolean hasOwn = Files.exists(ownFile);
         boolean hasLegacy = legacyFile != null && Files.exists(legacyFile);
         String claimant = hasOwn || !hasLegacy ? null : readClaimant(legacyDir(server, dimensionId));
-        return WorldStoreKeyPolicy.decide(hasOwn, hasLegacy, overworldGameTime(server), claimant, fingerprint(server));
+        long gameTime = overworldGameTime(server);
+        String fingerprint = fingerprint(server);
+        WorldStoreKeyPolicy.Adoption adoption = WorldStoreKeyPolicy.decide(hasOwn, hasLegacy, gameTime, claimant, fingerprint);
+        if (adoption != WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+            return adoption;
+        }
+        // Zones and locks of one dimension read the same zone file and home entry, so they agree.
+        boolean belongs = legacyBelongsToThisSave(server, dimensionId);
+        adoption = WorldStoreKeyPolicy.decideZoneStore(hasOwn, hasLegacy, gameTime, claimant, fingerprint, belongs);
+        if (adoption == WorldStoreKeyPolicy.Adoption.START_EMPTY_NOT_THIS_SAVE) {
+            LOGGER.info("Legacy zone/lock store for {} does not match this save ({}): starting empty, legacy left unclaimed",
+                    dimensionId, fingerprint);
+        }
+        return adoption;
+    }
+
+    /**
+     * MC adapter for {@link WorldStoreKeyPolicy#legacyZonesBelongToThisSave}: this save's legacy
+     * bot-home bases against the legacy zone file of the dimension.
+     */
+    static boolean legacyBelongsToThisSave(MinecraftServer server, String dimensionId) {
+        java.util.List<WorldStoreKeyPolicy.LegacyBase> bases = BotHomeService.legacyBasesForSave(server);
+        return WorldStoreKeyPolicy.legacyZonesBelongToThisSave(bases != null, bases,
+                ProtectedZoneService.legacyZones(server, dimensionId));
     }
 }

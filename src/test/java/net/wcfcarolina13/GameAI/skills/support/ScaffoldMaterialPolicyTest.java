@@ -32,4 +32,25 @@ class ScaffoldMaterialPolicyTest {
         assertFalse(ScaffoldMaterialPolicy.isHandScaffold(0.5F, false, true, true), "tagged dirt but needs a tool");
         assertFalse(ScaffoldMaterialPolicy.isHandScaffold(-1.0F, false, true, false), "unbreakable");
     }
+    // ── 1.1.234 fix wave #8: the hand gather never digs the ground the bot stands on ──────────
+
+    @Test
+    void handGatherNeverDigsTheStandingRowOrBelow() {
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                assertFalse(ScaffoldMaterialPolicy.mayHandGather(dx, -1, dz));
+                assertFalse(ScaffoldMaterialPolicy.mayHandGather(dx, -2, dz));
+            }
+        }
+    }
+
+    @Test
+    void handGatherTakesFeetAndHeadLevelBesideTheBotWithinRadiusThree() {
+        assertTrue(ScaffoldMaterialPolicy.mayHandGather(1, 0, 0));
+        assertTrue(ScaffoldMaterialPolicy.mayHandGather(-3, 1, 3));
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 0, 0), "the bot's own cell");
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 1, 0), "the bot's head cell");
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(4, 0, 0));
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 2, 1));
+    }
 }

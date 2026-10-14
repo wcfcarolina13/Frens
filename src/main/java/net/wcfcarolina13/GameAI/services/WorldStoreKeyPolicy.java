@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.Collection;
 import java.util.Locale;
 
 /**
@@ -106,7 +107,83 @@ public final class WorldStoreKeyPolicy {
         /** Brand-new world: start empty and leave the legacy store unclaimed for its real owner. */
         START_EMPTY_NEW_WORLD,
         /** Another save already adopted the legacy store: start empty. */
-        START_EMPTY_CLAIMED
+        START_EMPTY_CLAIMED,
+        /**
+         * The legacy zone and lock store does not look like this save's own (see
+         * {@link #legacyZonesBelongToThisSave}): start empty and leave it unclaimed for its real
+         * owner (no claim marker). This save's own empty store is written so zones and locks stick
+         * the same way (zones would stick anyway: syncZonesFromBases saves this world's own base
+         * zones right after the load).
+         */
+        START_EMPTY_NOT_THIS_SAVE
+    }
+
+    /** A base from this save's legacy (level-name keyed) bot-home entry. */
+    public record LegacyBase(String label, int x, int y, int z) {}
+
+    /** A zone from the legacy dimension-only zone file. */
+    public record LegacyZone(String label, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        boolean contains(int x, int y, int z) {
+            return x >= Math.min(minX, maxX) && x <= Math.max(minX, maxX)
+                    && y >= Math.min(minY, maxY) && y <= Math.max(minY, maxY)
+                    && z >= Math.min(minZ, maxZ) && z <= Math.max(minZ, maxZ);
+        }
+    }
+
+    /**
+     * Whether the legacy dimension-only zone and lock store (shared by every save before 1.1.234)
+     * is this save's own. Game time alone let the first old world opened take it (review #5:
+     * "test 1" would claim Nirn's zones and locked doors). It is this save's only when the save also
+     * has a legacy bot-home entry, and, if the zone file holds any {@code base:} auto-zones, at
+     * least one of them mirrors a base of that entry: same label and the zone box holds the base.
+     * The label alone is not enough, because every world gets an auto-created "spawn" base, so
+     * "base:spawn" would match any old world.
+     *
+     * @param hasLegacyHomeEntry this save's level name has a legacy bot-home entry
+     * @param homeBases          the bases in that entry (any dimension of this save)
+     * @param legacyZones        every zone in the legacy zone file of the dimension
+     */
+    public static boolean legacyZonesBelongToThisSave(boolean hasLegacyHomeEntry,
+                                                      Collection<LegacyBase> homeBases,
+                                                      Collection<LegacyZone> legacyZones) {
+        if (!hasLegacyHomeEntry) {
+            return false;
+        }
+        boolean anyBaseZone = false;
+        if (legacyZones != null) {
+            for (LegacyZone zone : legacyZones) {
+                if (zone == null || !StaleAutoZonePolicy.isAutoZoneLabel(zone.label())) {
+                    continue;
+                }
+                anyBaseZone = true;
+                if (homeBases == null) {
+                    continue;
+                }
+                for (LegacyBase base : homeBases) {
+                    if (base != null
+                            && StaleAutoZonePolicy.autoZoneLabel(base.label()).equals(zone.label())
+                            && zone.contains(base.x(), base.y(), base.z())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return !anyBaseZone;
+    }
+
+    /**
+     * {@link #decide} for the legacy zone and lock store, which every save shared: an adoption
+     * also needs {@link #legacyZonesBelongToThisSave}. The bot-home store keeps plain
+     * {@link #decide}, because its legacy key already carries the level name.
+     */
+    public static Adoption decideZoneStore(boolean hasOwnStore, boolean hasLegacyStore, long overworldGameTimeAtLoad,
+                                           String legacyClaimant, String fingerprint,
+                                           boolean legacyBelongsToThisSave) {
+        Adoption adoption = decide(hasOwnStore, hasLegacyStore, overworldGameTimeAtLoad, legacyClaimant, fingerprint);
+        if (adoption == Adoption.ADOPT_LEGACY && !legacyBelongsToThisSave) {
+            return Adoption.START_EMPTY_NOT_THIS_SAVE;
+        }
+        return adoption;
     }
 
     /**
@@ -143,6 +220,7 @@ public final class WorldStoreKeyPolicy {
     public static boolean mustCreateOwnStore(Adoption adoption) {
         return adoption == Adoption.START_EMPTY_NEW_WORLD
                 || adoption == Adoption.START_EMPTY_CLAIMED
+                || adoption == Adoption.START_EMPTY_NOT_THIS_SAVE
                 || adoption == Adoption.ADOPT_LEGACY;
     }
 

@@ -123,13 +123,76 @@ class WoodcutCleanupSkillTest {
         int[][] cases = {{0, 0}, {1, 0}, {0, 1}, {3, 5}, {12, 40}};
         for (boolean success : new boolean[]{true, false}) {
             for (int[] c : cases) {
-                String line = WoodcutCleanupDiagnostics.playerLine(success, c[0], c[1]);
-                assertFalse(line.contains("\u2014"), line);
-                assertFalse(line.contains("\u2013"), line);
-                assertFalse(line.contains(";"), line);
-                assertFalse(line.contains("="), line);
-                assertFalse(line.startsWith("Cleanup"), line);
+                for (boolean blockedOnly : new boolean[]{false, true}) {
+                    String line = WoodcutCleanupDiagnostics.playerLine(success, c[0], c[1], blockedOnly);
+                    assertFalse(line.contains("\u2014"), line);
+                    assertFalse(line.contains("\u2013"), line);
+                    assertFalse(line.contains(";"), line);
+                    assertFalse(line.contains("="), line);
+                    assertFalse(line.startsWith("Cleanup "), line);
+                }
             }
         }
+    }
+
+    // ── 1.1.234 fix wave #9: a run held back only by protection names protection ────────────
+
+    @Test
+    void protectedOnlyRunSaysTheLogsAreProtectedNotOutOfReach() {
+        WoodcutCleanupDiagnostics.CleanupScanStats blocked =
+                new WoodcutCleanupDiagnostics.CleanupScanStats(0, 2, 0, 0, 0, "protected-zone");
+        boolean success = WoodcutCleanupDiagnostics.isSuccess(0, 0, 0, 0, 0, blocked);
+        assertFalse(success);
+        assertTrue(WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(success, 0, 0, 0, blocked));
+        String line = WoodcutCleanupDiagnostics.playerLine(success, 0, 0, true);
+        assertEquals("Some logs are in a protected area, so I left them.", line);
+        assertFalse(line.contains("couldn't reach"));
+        assertEquals("Cleaned up 2 scaffold blocks. Some logs are in a protected area, so I left them.",
+                WoodcutCleanupDiagnostics.playerLine(false, 0, 2, true));
+    }
+
+    @Test
+    void leftoverLogsAreNotBlamedOnProtection() {
+        WoodcutCleanupDiagnostics.CleanupScanStats blocked =
+                new WoodcutCleanupDiagnostics.CleanupScanStats(0, 2, 0, 0, 0, "protected-zone");
+        assertFalse(WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(false, 0, 0, 3, blocked));
+        assertFalse(WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(false, 1, 0, 0, blocked));
+        assertFalse(WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(true, 0, 0, 0, blocked));
+        WoodcutCleanupDiagnostics.CleanupScanStats clean =
+                new WoodcutCleanupDiagnostics.CleanupScanStats(0, 0, 0, 0, 0, "none");
+        assertFalse(WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(false, 0, 0, 0, clean));
+        assertEquals("I couldn't reach the blocks left here.", WoodcutCleanupDiagnostics.playerLine(false, 0, 0, false));
+    }
+
+    // ── 1.1.234 fix wave #4: scaffold lists ─────────────────────────────────────────────────
+
+    @Test
+    void cleanupHeuristicListHasNoFallingBlocksAndRememberedPassUsesWoodcutsList() throws java.io.IOException {
+        String cleanup = source("WoodcutCleanupSkill.java");
+        String list = cleanup.substring(cleanup.indexOf("private static final List<Item> PILLAR_BLOCKS"));
+        list = list.substring(0, list.indexOf(");"));
+        assertFalse(list.contains("Items.SAND"), list);
+        assertFalse(list.contains("Items.RED_SAND"), list);
+        assertFalse(list.contains("Items.GRAVEL"), list);
+        assertFalse(list.contains("_PLANKS"), "no planks in the heuristic pass");
+        assertTrue(cleanup.contains("!isRememberedScaffoldBlock(state.getBlock().asItem())"),
+                "the remembered pass must accept everything woodcut places");
+        assertTrue(cleanup.contains("WoodcutSkill.PILLAR_BLOCKS.contains(item)"));
+        String woodcut = source("WoodcutSkill.java");
+        String placed = woodcut.substring(woodcut.indexOf("static final List<Item> PILLAR_BLOCKS"));
+        placed = placed.substring(0, placed.indexOf(");"));
+        assertTrue(placed.contains("Items.MOSS_BLOCK") && placed.contains("Items.PALE_MOSS_BLOCK"), placed);
+    }
+
+    private static String source(String file) throws java.io.IOException {
+        String relative = "src/main/java/net/wcfcarolina13/GameAI/skills/impl/" + file;
+        java.nio.file.Path dir = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+        for (java.nio.file.Path at = dir; at != null; at = at.getParent()) {
+            java.nio.file.Path candidate = at.resolve(relative);
+            if (java.nio.file.Files.isRegularFile(candidate)) {
+                return java.nio.file.Files.readString(candidate, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        throw new java.io.IOException(relative + " not found above " + dir);
     }
 }

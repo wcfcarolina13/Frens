@@ -71,6 +71,43 @@ public class ProtectedZoneService {
     }
 
     /**
+     * The zones in this dimension's legacy (shared) zone file, label and box only, for
+     * {@link WorldStoreKeyPolicy#legacyZonesBelongToThisSave}. Empty when there is no file or it
+     * cannot be read. Never writes.
+     */
+    static List<WorldStoreKeyPolicy.LegacyZone> legacyZones(MinecraftServer server, String worldId) {
+        Path legacyFile = getLegacyZoneFile(server, worldId);
+        if (legacyFile == null) {
+            return List.of();
+        }
+        try {
+            List<ZoneData> dataList = GSON.fromJson(Files.readString(legacyFile),
+                    new TypeToken<List<ZoneData>>(){}.getType());
+            if (dataList == null) {
+                return List.of();
+            }
+            List<WorldStoreKeyPolicy.LegacyZone> out = new ArrayList<>();
+            for (ZoneData data : dataList) {
+                if (data == null || data.label == null) {
+                    continue;
+                }
+                if (data.hasLegacyFormat()) {
+                    out.add(new WorldStoreKeyPolicy.LegacyZone(data.label,
+                            data.centerX - data.radius, data.centerY - data.radius, data.centerZ - data.radius,
+                            data.centerX + data.radius, data.centerY + data.radius, data.centerZ + data.radius));
+                } else {
+                    out.add(new WorldStoreKeyPolicy.LegacyZone(data.label,
+                            data.minX, data.minY, data.minZ, data.maxX, data.maxY, data.maxZ));
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            LOGGER.warn("Could not read legacy protected zones {}: {}", legacyFile, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * Represents a protected zone as an axis-aligned bounding box.
      */
     public static class ProtectedZone {

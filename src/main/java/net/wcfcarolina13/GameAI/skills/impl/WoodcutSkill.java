@@ -171,7 +171,11 @@ public final class WoodcutSkill implements Skill {
     private static final int MAPPED_VILLAGE_EXIT_CLEARANCE = 12;
     private static final MovementService.MovementOptions WOODCUT_MOVEMENT_OPTIONS =
             new MovementService.MovementOptions(false, 0, false, 0);
-    private static final List<Item> PILLAR_BLOCKS = List.of(
+    /**
+     * Everything woodcut may place as scaffold. Package-private so {@code WoodcutCleanupSkill}'s
+     * remembered-scaffold pass accepts exactly what this skill placed (one list, not a copy).
+     */
+    static final List<Item> PILLAR_BLOCKS = List.of(
             Items.DIRT,
             Items.COARSE_DIRT,
             Items.ROOTED_DIRT,
@@ -5229,25 +5233,25 @@ public final class WoodcutSkill implements Skill {
         }
         int gathered = 0;
         BlockPos origin = bot.getBlockPos();
-        int radius = 3;
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -1, -radius), origin.add(radius, 1, radius))) {
+        int radius = ScaffoldMaterialPolicy.HAND_GATHER_RADIUS;
+        // Feet level first, then head level; never the row the bot stands on or below it, so
+        // gathering leaves no holes in the lawn and never digs out the bot's own footing.
+        List<BlockPos> candidates = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, 0, -radius), origin.add(radius, 1, radius))) {
+            if (ScaffoldMaterialPolicy.mayHandGather(pos.getX() - origin.getX(), pos.getY() - origin.getY(),
+                    pos.getZ() - origin.getZ())) {
+                candidates.add(pos.toImmutable());
+            }
+        }
+        candidates.sort(Comparator.<BlockPos>comparingInt(p -> p.getY() - origin.getY())
+                .thenComparingDouble(p -> p.getSquaredDistance(origin)));
+        for (BlockPos pos : candidates) {
             if (gathered >= toGather || TaskService.isServerStopping() || isAbortRequested(bot)) {
                 break;
             }
-            if (pos.equals(origin) || pos.equals(origin.down())) {
-                continue;
-            }
             BlockState state = world.getBlockState(pos);
-            if (state.isOf(net.minecraft.block.Blocks.SNOW)) {
-                BlockPos below = pos.down();
-                BlockState belowState = world.getBlockState(below);
-                if (isHandScaffoldSource(world, below, belowState)) {
-                    mineBlock(bot, pos, false);
-                    state = belowState;
-                    pos = below;
-                }
-            }
-            // By block state, not asItem: grass block, podzol and mycelium drop dirt.
+            // By block state, not asItem: grass block, podzol and mycelium drop dirt. Protected
+            // zones and bases are refused by mineBlock's territory check.
             if (!isHandScaffoldSource(world, pos, state)) {
                 continue;
             }
@@ -5670,18 +5674,17 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
-    /** Whether any axe (not a pickaxe) is in the inventory; same match as ensureAxeEquipped, no slot change. */
+    /**
+     * Whether any axe is in the inventory, no slot change. By the item tag, not the translation
+     * key: waxed copper blocks ("waxed_...") contain "axe" too.
+     */
     private static boolean holdsAxe(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
         }
         for (int slot = 0; slot < bot.getInventory().size(); slot++) {
             ItemStack stack = bot.getInventory().getStack(slot);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            String key = stack.getItem().getTranslationKey().toLowerCase();
-            if (key.contains("axe") && !key.contains("pickaxe")) {
+            if (!stack.isEmpty() && stack.isIn(ItemTags.AXES)) {
                 return true;
             }
         }

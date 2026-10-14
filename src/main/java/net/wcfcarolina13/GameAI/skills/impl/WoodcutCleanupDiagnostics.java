@@ -98,12 +98,44 @@ final class WoodcutCleanupDiagnostics {
         return success && logsMined == 0 && scaffoldMined == 0;
     }
 
+    /** What a run held back only by protection says (no "couldn't reach", which names the wrong cause). */
+    static final String PROTECTED_ONLY_LINE = "Some logs are in a protected area, so I left them.";
+
+    /**
+     * Whether a run failed only because the floaters it found were off limits (protected zone,
+     * next to a player build): nothing remembered, overhead or visible is left, and the blocked
+     * floaters are what made {@link #isSuccess} say no.
+     */
+    static boolean isBlockedOnlyByProtection(boolean success,
+                                             int remainingRemembered,
+                                             int remainingOverhead,
+                                             int remainingLogs,
+                                             CleanupScanStats stats) {
+        return !success
+                && remainingRemembered == 0
+                && remainingOverhead == 0
+                && remainingLogs == 0
+                && stats != null
+                && stats.hasBlockedFloaters();
+    }
+
     /**
      * The one sentence the player sees when cleanup finishes. The stat summary
      * ({@link #buildCompletionSummary}) stays in the log.
      */
     static String playerLine(boolean success, int logsMined, int scaffoldMined) {
+        return playerLine(success, logsMined, scaffoldMined, false);
+    }
+
+    static String playerLine(boolean success, int logsMined, int scaffoldMined, boolean blockedOnlyByProtection) {
         if (!success) {
+            if (blockedOnlyByProtection) {
+                if (scaffoldMined > 0) {
+                    return "Cleaned up " + countPhrase(scaffoldMined, "scaffold block", "scaffold blocks") + ". "
+                            + PROTECTED_ONLY_LINE;
+                }
+                return PROTECTED_ONLY_LINE;
+            }
             if (logsMined <= 0 && scaffoldMined <= 0) {
                 return "I couldn't reach the blocks left here.";
             }

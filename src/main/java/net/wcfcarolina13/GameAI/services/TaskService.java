@@ -912,6 +912,20 @@ public final class TaskService {
     }
 
     /**
+     * Whether a delayed body scheduled against {@code server} may still run: not stopping, that
+     * server not stopped, and still the current server (after a same-JVM world switch the next
+     * world's SERVER_STARTED clears {@code SERVER_STOPPING}, and the old instance's execute runs
+     * tasks inline on the caller's thread).
+     */
+    private static boolean delayedBodyMayRun(MinecraftServer server) {
+        if (SERVER_STOPPING || server.isStopped()) {
+            return false;
+        }
+        MinecraftServer current = net.wcfcarolina13.Frens.serverInstance;
+        return current == null || current == server;
+    }
+
+    /**
      * Runs {@code body} on the server thread after roughly {@code ticks} game ticks.
      * {@code server.send(new ServerTask(due, ...))} is not a delay: the tick stamp is only a
      * creation time and the task runs on the next idle moment. This waits on a scheduler thread
@@ -925,12 +939,14 @@ public final class TaskService {
         java.util.concurrent.CompletableFuture
                 .delayedExecutor(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .execute(() -> {
-                    if (SERVER_STOPPING) {
+                    if (!delayedBodyMayRun(server)) {
                         return;
                     }
                     try {
                         server.execute(() -> {
-                            if (!SERVER_STOPPING) {
+                            // A stopped server's execute runs the task inline on this pool
+                            // thread, so the body must also find itself on that server's thread.
+                            if (delayedBodyMayRun(server) && server.isOnThread()) {
                                 body.run();
                             }
                         });

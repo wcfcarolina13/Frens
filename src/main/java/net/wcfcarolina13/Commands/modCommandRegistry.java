@@ -3004,7 +3004,7 @@ public class modCommandRegistry {
             int crafted = 0;
             boolean success = false;
             try {
-                crafted = CraftingHelper.craftGeneric(source, bot, commander, item, amount, material);
+                crafted = CraftingHelper.craftGenericForPlayer(source, bot, commander, item, amount, material);
                 success = crafted > 0 && !TaskService.isAbortRequested(botUuid);
                 if (crafted > 0) {
                     int finalCrafted = crafted;

@@ -124,10 +124,35 @@ class CraftingStationPolicyTest {
     }
 
     @Test
-    void placementFailureChatIsThrottledOnEveryThread() {
+    void automaticCraftTableLinesAreThrottled() {
         // 1.1.234 #2: a worker tool craft sent "I couldn't place a crafting table here." once per material.
-        assertTrue(CraftingStationPolicy.throttlesFailureChat(WORKER));
-        assertTrue(CraftingStationPolicy.throttlesFailureChat(SERVER));
+        assertFalse(CraftingStationPolicy.shouldSendTableLine(false, false, true));
+        assertTrue(CraftingStationPolicy.shouldSendTableLine(false, false, false));
+    }
+
+    @Test
+    void playerCraftIgnoresTheThrottleButSaysOneTableLinePerCall() {
+        // 1.1.234 fix wave #2: an earlier automatic craft's cooldown silenced /bot craft.
+        assertTrue(CraftingStationPolicy.shouldSendTableLine(true, false, true));
+        assertTrue(CraftingStationPolicy.shouldSendTableLine(true, false, false));
+        assertFalse(CraftingStationPolicy.shouldSendTableLine(true, true, false));
+        assertFalse(CraftingStationPolicy.shouldSendTableLine(true, true, true));
+    }
+
+    @Test
+    void playerCraftThatFailedSilentlyStillAnswersOnce() {
+        assertTrue(CraftingStationPolicy.needsFallbackLine(0, false, false));
+        assertFalse(CraftingStationPolicy.needsFallbackLine(0, true, false), "something was already said");
+        assertFalse(CraftingStationPolicy.needsFallbackLine(0, false, true), "stopped by the player");
+        assertFalse(CraftingStationPolicy.needsFallbackLine(1, false, false), "crafted");
+        assertEquals("I couldn't craft stone axe.", CraftingStationPolicy.fallbackLine("stone_axe"));
+        assertEquals("I couldn't craft that.", CraftingStationPolicy.fallbackLine(" "));
+    }
+
+    @Test
+    void craftCommandGoesThroughThePlayerEntry() throws IOException {
+        String registry = mainSource("src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java");
+        assertTrue(registry.contains("CraftingHelper.craftGenericForPlayer("), "/bot craft must use the explicit entry");
     }
 
     @Test
@@ -258,7 +283,10 @@ class CraftingStationPolicyTest {
     }
 
     private static String craftingHelperSource() throws IOException {
-        String relative = "src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java";
+        return mainSource("src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java");
+    }
+
+    private static String mainSource(String relative) throws IOException {
         Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         for (Path at = dir; at != null; at = at.getParent()) {
             Path candidate = at.resolve(relative);
@@ -307,21 +335,30 @@ class CraftingStationPolicyTest {
     void tableCraftedAsAStationSubStepSaysNothingInChat() throws IOException {
         String body = bodyOf(craftingHelperSource(), "public static boolean craftCraftingTable(");
         assertFalse(body.contains("ChatUtils.sendSystemMessage("), "the sub-step table craft must not chat");
+        assertFalse(body.contains("say("), "the sub-step table craft must not chat");
     }
 
     // ── tool material order ──────────────────────────────────────────────────────────────────
 
     @Test
-    void nonStrictCraftTriesOnlyHeldMaterialsInOrder() {
+    void nonStrictCraftTriesHeldMaterialsFirstThenTheRestInOrder() {
         List<String> order = List.of("diamond", "iron", "stone", "wood");
         List<String> held = List.of("stone", "wood");
-        assertEquals(List.of("stone", "wood"), CraftingStationPolicy.materialsToTry(order, held::contains, false));
+        assertEquals(List.of("stone", "wood", "diamond", "iron"),
+                CraftingStationPolicy.materialsToTry(order, held::contains, false));
     }
 
     @Test
-    void nonStrictCraftWithNothingHeldStillTriesTheFirstMaterialOnce() {
-        List<String> order = List.of("wood", "diamond", "iron");
-        assertEquals(List.of("wood"), CraftingStationPolicy.materialsToTry(order, m -> false, false));
+    void nonStrictCraftWithNothingHeldTriesEveryMaterialSoAChestPullCanFeedIt() {
+        // 1.1.234 fix wave #1: an empty inventory with planks in a chest used to try only diamond.
+        List<String> order = List.of("diamond", "iron", "stone", "wood");
+        assertEquals(order, CraftingStationPolicy.materialsToTry(order, m -> false, false));
+    }
+
+    @Test
+    void nonStrictCraftHoldingEverythingKeepsTheUsualOrder() {
+        List<String> order = List.of("diamond", "iron", "stone", "wood");
+        assertEquals(order, CraftingStationPolicy.materialsToTry(order, m -> true, false));
     }
 
     @Test

@@ -95,14 +95,17 @@ public final class WoodcutCleanupSkill implements Skill {
     private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
     private static final int WOODCUT_SCAFFOLD_MEMORY_MAX = 2048;
 
+    /**
+     * Blocks the heuristic passes treat as leftover pillar, and cleanup's own pillar material. No
+     * sand, red sand or gravel: natural columns of them read as pillars, and they fall. No planks
+     * either: an unremembered plank column is more likely a build than scaffold. Remembered
+     * positions (the bot's own placements) are checked against {@link #isRememberedScaffoldBlock}.
+     */
     private static final List<Item> PILLAR_BLOCKS = List.of(
             Items.DIRT,
             Items.COARSE_DIRT,
             Items.ROOTED_DIRT,
             Items.SCAFFOLDING,
-            Items.GRAVEL,
-            Items.SAND,
-            Items.RED_SAND,
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
             Items.NETHERRACK,
@@ -112,6 +115,15 @@ public final class WoodcutCleanupSkill implements Skill {
             Items.STONE,
             Items.TUFF
     );
+
+    /**
+     * Whether a remembered scaffold position still holds something woodcut or cleanup placed:
+     * anything on either list, so moss and plank scaffold from {@code WoodcutSkill} is cleaned up
+     * instead of forgotten.
+     */
+    static boolean isRememberedScaffoldBlock(Item item) {
+        return WoodcutSkill.PILLAR_BLOCKS.contains(item) || PILLAR_BLOCKS.contains(item);
+    }
 
     private static final Set<Item> DIRT_LIKE_SCAFFOLD = Set.of(
             Items.DIRT,
@@ -581,11 +593,15 @@ public final class WoodcutCleanupSkill implements Skill {
                         sweepMinZ = Math.min(sweepMinZ, botPos.getZ());
                         sweepMaxZ = Math.max(sweepMaxZ, botPos.getZ());
                         BlockState state = world.getBlockState(pos);
-                        if (state.isAir() || !PILLAR_BLOCKS.contains(state.getBlock().asItem())) {
+                        if (state.isAir() || !isRememberedScaffoldBlock(state.getBlock().asItem())) {
                             scaffoldMemory.remove(pos.asLong());
                             continue;
                         }
-                        if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
+                        // A plank scaffold block counts as a "human block" to its own scan, so the
+                        // near-build guard would always skip it. Remembered positions are the bot's
+                        // own placements; protection still applies.
+                        boolean plankScaffold = state.isIn(BlockTags.PLANKS);
+                        if ((!plankScaffold && TreeDetector.isNearHumanBlocks(world, pos, 3)) || TreeDetector.isProtected(world, pos)) {
                             continue;
                         }
                         if (trySimpleScaffoldMine(bot, source, world, pos)) {
@@ -763,7 +779,9 @@ public final class WoodcutCleanupSkill implements Skill {
         );
         LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={}]",
                 summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead);
-        String playerLine = WoodcutCleanupDiagnostics.playerLine(success, logsMined, scaffoldMined);
+        boolean blockedOnlyByProtection = WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(
+                success, remainingRemembered, remainingOverhead, remainingVisibleLogs.size(), remainingStats);
+        String playerLine = WoodcutCleanupDiagnostics.playerLine(success, logsMined, scaffoldMined, blockedOnlyByProtection);
         return success
                 ? SkillExecutionResult.success(playerLine)
                 : SkillExecutionResult.failure(playerLine);

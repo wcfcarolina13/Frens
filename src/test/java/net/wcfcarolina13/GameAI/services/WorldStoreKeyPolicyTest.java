@@ -2,12 +2,14 @@ package net.wcfcarolina13.GameAI.services;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Locale;
 
 import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY;
 import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.START_EMPTY_CLAIMED;
 import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.START_EMPTY_NEW_WORLD;
 import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.START_EMPTY_NO_LEGACY;
+import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.START_EMPTY_NOT_THIS_SAVE;
 import static net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy.Adoption.USE_OWN;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -137,5 +139,71 @@ class WorldStoreKeyPolicyTest {
         boolean ownStoreExists = WorldStoreKeyPolicy.mustCreateOwnStore(first);
         // Second load, an hour of play later, legacy still unclaimed.
         assertEquals(USE_OWN, WorldStoreKeyPolicy.decide(ownStoreExists, true, 72_000, null, "test 1#new"));
+    }
+    // ── 1.1.234 fix wave #5: the shared zone/lock store is adopted only by the save it belongs to ──
+
+    private static final WorldStoreKeyPolicy.LegacyBase NIRN_SPAWN = new WorldStoreKeyPolicy.LegacyBase("Spawn", 120, 70, -40);
+    private static final WorldStoreKeyPolicy.LegacyBase TEST1_SPAWN = new WorldStoreKeyPolicy.LegacyBase("Spawn", 8, 64, 8);
+    /** Nirn's legacy zone file: its spawn base mirror plus a drawn zone. */
+    private static final List<WorldStoreKeyPolicy.LegacyZone> NIRN_ZONES = List.of(
+            new WorldStoreKeyPolicy.LegacyZone("base:spawn", 88, 38, -72, 152, 102, -8),
+            new WorldStoreKeyPolicy.LegacyZone("farm", 200, 60, 200, 220, 80, 220));
+
+    private static WorldStoreKeyPolicy.Adoption zoneDecision(boolean hasHomeEntry,
+                                                             List<WorldStoreKeyPolicy.LegacyBase> bases,
+                                                             long gameTime, String claimant, String fingerprint) {
+        boolean belongs = WorldStoreKeyPolicy.legacyZonesBelongToThisSave(hasHomeEntry, bases, NIRN_ZONES);
+        return WorldStoreKeyPolicy.decideZoneStore(false, true, gameTime, claimant, fingerprint, belongs);
+    }
+
+    @Test
+    void nirnWithItsHomeEntryAndMatchingSpawnBaseAdopts() {
+        assertEquals(ADOPT_LEGACY, zoneDecision(true, List.of(NIRN_SPAWN), 500_000, null, "Nirn#aa"));
+    }
+
+    @Test
+    void sameNameBrandNewWorldStartsEmpty() {
+        assertEquals(START_EMPTY_NEW_WORLD, zoneDecision(true, List.of(NIRN_SPAWN), 600, null, "Nirn#bb"));
+    }
+
+    @Test
+    void unrelatedOldWorldWithNoMatchingBaseStartsEmpty() {
+        // "test 1" from the 1.1.233 playthrough, opened first: its own auto "spawn" base has the
+        // same label but sits elsewhere, so the label alone must not match.
+        WorldStoreKeyPolicy.Adoption a = zoneDecision(true, List.of(TEST1_SPAWN), 90_000, null, "test 1#cc");
+        assertEquals(START_EMPTY_NOT_THIS_SAVE, a);
+        assertTrue(WorldStoreKeyPolicy.mustCreateOwnStore(a), "its own empty store sticks, zones and locks alike");
+        assertEquals(START_EMPTY_NOT_THIS_SAVE, zoneDecision(true, List.of(), 90_000, null, "test 1#cc"));
+    }
+
+    @Test
+    void oldWorldWithNoLegacyHomeEntryStartsEmpty() {
+        assertEquals(START_EMPTY_NOT_THIS_SAVE, zoneDecision(false, null, 90_000, null, "other#dd"));
+        assertFalse(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(false, null, List.of()));
+    }
+
+    @Test
+    void alreadyClaimedLegacyStartsEmptyEvenForAMatchingSave() {
+        assertEquals(START_EMPTY_CLAIMED, zoneDecision(true, List.of(NIRN_SPAWN), 500_000, "test 1#cc", "Nirn#aa"));
+    }
+
+    @Test
+    void legacyFileWithoutBaseZonesNeedsOnlyTheHomeEntry() {
+        List<WorldStoreKeyPolicy.LegacyZone> drawnOnly = List.of(
+                new WorldStoreKeyPolicy.LegacyZone("farm", 0, 0, 0, 5, 5, 5));
+        assertTrue(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, List.of(), drawnOnly));
+        assertTrue(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, null, List.of()));
+    }
+
+    @Test
+    void baseLabelMatchIsCaseInsensitiveLikeTheAutoZoneLabel() {
+        WorldStoreKeyPolicy.LegacyBase upper = new WorldStoreKeyPolicy.LegacyBase(" SPAWN ", 120, 70, -40);
+        assertTrue(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, List.of(upper), NIRN_ZONES));
+    }
+
+    @Test
+    void ownStoreAndNoLegacyAreUnchangedByTheGuard() {
+        assertEquals(USE_OWN, WorldStoreKeyPolicy.decideZoneStore(true, true, 90_000, null, "x#1", false));
+        assertEquals(START_EMPTY_NO_LEGACY, WorldStoreKeyPolicy.decideZoneStore(false, false, 90_000, null, "x#1", false));
     }
 }
