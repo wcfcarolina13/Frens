@@ -156,7 +156,8 @@ public final class FallingBlockStabilizer {
         return false;
     }
 
-    private static boolean isFallingBlock(BlockState state) {
+    /** Whether the block falls under gravity (sand, gravel, concrete powder, anvils...). */
+    public static boolean isFallingBlock(BlockState state) {
         if (state == null) {
             return false;
         }

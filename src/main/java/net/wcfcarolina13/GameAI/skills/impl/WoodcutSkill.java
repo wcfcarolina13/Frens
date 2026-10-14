@@ -46,6 +46,8 @@ import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
+import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
@@ -126,8 +128,18 @@ public final class WoodcutSkill implements Skill {
     private RequestedWorkBounds activeRequestedBounds;
     /** Bots running this woodcut bare-handed until they hold wood for a first axe. Keyed per bot: the registered skill instance is shared. */
     private final Set<UUID> axeBootstrapBots = ConcurrentHashMap.newKeySet();
-    /** Bootstrap bots whose one craft attempt with enough wood failed; the tree loop ends the run. */
-    private final Set<UUID> axeBootstrapCraftFailedBots = ConcurrentHashMap.newKeySet();
+    /** Bootstrap bots' Y at their last failed axe craft (WoodcutAxeBootstrapPolicy.mayAttemptCraft). */
+    private final Map<UUID, Integer> axeBootstrapFailedAtY = new ConcurrentHashMap<>();
+    /** Failed axe-craft attempts this run per bootstrap bot (WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS). */
+    private final Map<UUID, Integer> axeBootstrapFailedAttempts = new ConcurrentHashMap<>();
+    /**
+     * The run's sharedState per bootstrap bot. ensureAxeOrRetrieve is reached from mining paths with
+     * no reach session in scope, and needs the run's scaffold memory to tell "standing on my own
+     * pillar" from real ground.
+     */
+    private final Map<UUID, Map<String, Object>> axeBootstrapSharedState = new ConcurrentHashMap<>();
+    /** Dirt-family blocks a bootstrap bot digs by hand at the start, so it never pillars on its axe wood. */
+    private static final int BOOTSTRAP_HAND_SCAFFOLD_TARGET = 4;
     /** CraftingHelper.STATION_REACH_SQ (private there): a player's 4.5-block interact range. */
     private static final double CRAFTING_STATION_REACH_SQ = 4.5D * 4.5D;
     /**
@@ -163,10 +175,9 @@ public final class WoodcutSkill implements Skill {
             Items.DIRT,
             Items.COARSE_DIRT,
             Items.ROOTED_DIRT,
+            Items.MOSS_BLOCK,
+            Items.PALE_MOSS_BLOCK,
             Items.SCAFFOLDING,
-            Items.GRAVEL,
-            Items.SAND,
-            Items.RED_SAND,
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
             Items.NETHERRACK,
@@ -735,6 +746,17 @@ public final class WoodcutSkill implements Skill {
             selectHandsOrHarmlessItem(bot);
             LOGGER.info("Woodcut axe bootstrap: {} has no axe, punching logs bare-handed", bot.getName().getString());
             ChatUtils.sendSystemMessage(source, AXE_BOOTSTRAP_START_LINE);
+            if (sharedState != null) {
+                axeBootstrapSharedState.put(bot.getUuid(), sharedState);
+            }
+            // Primal order: a few soft dirt-family blocks by hand first, so a later pillar never
+            // eats the logs meant for the table, sticks and axe.
+            if (bot.getEntityWorld() instanceof ServerWorld bootstrapWorld && countHandScaffoldItems(bot) <= 0) {
+                int gathered = gatherNearbyPillarBlocks(bot, bootstrapWorld, BOOTSTRAP_HAND_SCAFFOLD_TARGET);
+                LOGGER.info("Woodcut axe bootstrap: {} gathered {} hand scaffold block(s) before punching",
+                        bot.getName().getString(), gathered);
+                selectHandsOrHarmlessItem(bot);
+            }
         }
 
         Set<BlockPos> visitedBases = new HashSet<>();
@@ -775,7 +797,7 @@ public final class WoodcutSkill implements Skill {
                     abortRequested = true;
                     break;
                 }
-                if (axeBootstrapCraftFailedBots.contains(bot.getUuid())) {
+                if (axeBootstrapCraftFailureEndsRun(bot)) {
                     axeBootstrapCraftFailed = true;
                     break;
                 }
@@ -1071,7 +1093,14 @@ public final class WoodcutSkill implements Skill {
             }
 
             // Second-pass cleanup: attempt unreachable logs from partial harvests from a fresh position
-            if (!pendingFloaters.isEmpty() && !abortRequested && bot.getEntityWorld() instanceof ServerWorld floaterWorld) {
+            // Floaters need pillars: not after a failed first-axe craft, and not while still axeless.
+            boolean floaterPassBlockedByBootstrap = axeBootstrapCraftFailed || axeBootstrapBots.contains(bot.getUuid());
+            if (!pendingFloaters.isEmpty() && floaterPassBlockedByBootstrap) {
+                LOGGER.info("Woodcut: skipping cleanup of {} floater log(s): no axe yet (craftFailed={})",
+                        pendingFloaters.size(), axeBootstrapCraftFailed);
+            }
+            if (!pendingFloaters.isEmpty() && !abortRequested && !floaterPassBlockedByBootstrap
+                    && bot.getEntityWorld() instanceof ServerWorld floaterWorld) {
                 LOGGER.info("Woodcut: attempting cleanup of {} floater log(s) from partial harvests", pendingFloaters.size());
                 for (BlockPos floater : new HashSet<>(pendingFloaters)) {
                     if (!floaterWorld.getBlockState(floater).isIn(BlockTags.LOGS)) {
@@ -1183,7 +1212,9 @@ public final class WoodcutSkill implements Skill {
         return finalResult;
         } finally {
             axeBootstrapBots.remove(bot.getUuid());
-            axeBootstrapCraftFailedBots.remove(bot.getUuid());
+            axeBootstrapFailedAtY.remove(bot.getUuid());
+            axeBootstrapFailedAttempts.remove(bot.getUuid());
+            axeBootstrapSharedState.remove(bot.getUuid());
             activeRequestedBounds = null;
             activeTreeWorkEnvelopeMin = null;
             activeTreeWorkEnvelopeMax = null;
@@ -1625,7 +1656,13 @@ public final class WoodcutSkill implements Skill {
                     terminalReason = "all-logs-cleared";
                 }
 
-                if (!success && !isAbortRequested(bot)) {
+                // No axe yet: the logs above stay for later (floaters) instead of a pillar of axe wood.
+                boolean ascentBlockedByBootstrap = !success && !isAbortRequested(bot)
+                        && !bootstrapAllowsPillar(bot, "fell-ascent");
+                if (ascentBlockedByBootstrap) {
+                    terminalReason = "bootstrap-no-pillar";
+                }
+                if (!success && !ascentBlockedByBootstrap && !isAbortRequested(bot)) {
                     // Phase 2: Position at trunk base (walk into cleared column)
                     boolean positioned = false;
                     if (isDryWoodcutStandCell(world, trunkBase)) {
@@ -1783,7 +1820,8 @@ public final class WoodcutSkill implements Skill {
 
             // Fallback: if leftovers remain, pillar up near the tree and bridge outward
             List<BlockPos> leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
-            if (!leftoverClusterLogs.isEmpty() && !isAbortRequested(bot)) {
+            if (!leftoverClusterLogs.isEmpty() && !isAbortRequested(bot)
+                    && bootstrapAllowsPillar(bot, "fell-fallback")) {
                 LOGGER.info("Woodcut fallback bridge: attempting pillar+bridge for {} remaining logs at base {}",
                         leftoverClusterLogs.size(), trunkBase.toShortString());
                 int highestLogY = leftoverClusterLogs.stream().mapToInt(BlockPos::getY).max().orElse(trunkBase.getY());
@@ -3164,6 +3202,10 @@ public final class WoodcutSkill implements Skill {
             }
             return false;
         }
+        // No axe yet: craft it on the ground, or leave this log (and skip the emergency step below).
+        if (!bootstrapAllowsPillar(bot, "prepare-reach")) {
+            return false;
+        }
         LOGGER.info("Woodcut reach: pillaring {} blocks to reach {}", needed, target.toShortString());
         if (pillarUp(bot, needed, reachSession, source, sharedState)) {
             if (isReadyToMineTarget(bot, target)) {
@@ -3697,6 +3739,9 @@ public final class WoodcutSkill implements Skill {
                              Map<String, Object> sharedState) {
         if (steps <= 0) {
             return true;
+        }
+        if (!bootstrapAllowsPillar(bot, "pillar-up")) {
+            return false;
         }
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         if (!ensurePillarStock(bot, steps, source, bot.getBlockY() + steps, reachSession, sharedState)) {
@@ -4405,14 +4450,20 @@ public final class WoodcutSkill implements Skill {
             // try to clear replaceable block
             breakSoftBlock(world, bot, placePos);
         }
-        ensureSupportBlock(bot, placePos, sharedState, reachSession);
-        if (BotActions.placeBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS)) {
+        BlockPos support = ensureSupportBlock(bot, placePos, sharedState, reachSession);
+        BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS);
+        if (result.success()) {
             recordScaffoldPlacement(sharedState, world, placePos);
             if (reachSession != null) {
                 reachSession.recordPlacement(placePos);
             }
             return true;
         }
+        // A support placed just before a failed top placement is still scaffold (recorded above);
+        // say so, or "Failed to place" reads as if nothing was placed.
+        LOGGER.info("Woodcut scaffold: place at {} failed reason={} supportPlaced={}",
+                placePos.toShortString(), result.reason(),
+                support != null ? support.toShortString() : "none");
         // Try nearby offsets ONLY if on solid ground — from a scaffold pillar,
         // horizontal offsets place blocks into thin air or the tree canopy
         boolean onScaffold = reachSession != null && reachSession.hasPlacements()
@@ -4438,8 +4489,14 @@ public final class WoodcutSkill implements Skill {
                 if (!isPlaceableTarget(world, alt)) {
                     breakSoftBlock(world, bot, alt);
                 }
-                ensureSupportBlock(bot, alt, sharedState, reachSession);
-                if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
+                BlockPos altSupport = ensureSupportBlock(bot, alt, sharedState, reachSession);
+                BotActions.PlaceResult altResult = BotActions.tryPlaceBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS);
+                if (!altResult.success()) {
+                    LOGGER.debug("Woodcut scaffold: offset {} at {} failed reason={} supportPlaced={}",
+                            dir, alt.toShortString(), altResult.reason(),
+                            altSupport != null ? altSupport.toShortString() : "none");
+                }
+                if (altResult.success()) {
                     recordScaffoldPlacement(sharedState, world, alt);
                     if (reachSession != null) {
                         reachSession.recordPlacement(alt);
@@ -4452,31 +4509,36 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
-    private void ensureSupportBlock(ServerPlayerEntity bot,
-                                    BlockPos target,
-                                    Map<String, Object> sharedState,
-                                    WoodcutReachSession reachSession) {
+    /** @return the support position placed under {@code target}, or {@code null} when none was placed */
+    private BlockPos ensureSupportBlock(ServerPlayerEntity bot,
+                                        BlockPos target,
+                                        Map<String, Object> sharedState,
+                                        WoodcutReachSession reachSession) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
+            return null;
         }
         BlockPos below = target.down();
         if (!isWithinRequestedBounds(below)) {
-            return;
+            return null;
         }
         BlockState belowState = world.getBlockState(below);
         if (!belowState.getCollisionShape(world, below).isEmpty()) {
-            return;
+            return null;
         }
         if (!isPlaceableTarget(world, below)) {
             breakSoftBlock(world, bot, below);
         }
-        if (BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS)) {
+        BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS);
+        if (result.success()) {
             recordScaffoldPlacement(sharedState, world, below);
             if (reachSession != null) {
                 reachSession.recordPlacement(below);
             }
-            LOGGER.debug("Woodcut pillar: placed support at {}", below.toShortString());
+            LOGGER.info("Woodcut pillar: placed support at {}", below.toShortString());
+            return below;
         }
+        LOGGER.debug("Woodcut pillar: support at {} not placed reason={}", below.toShortString(), result.reason());
+        return null;
     }
 
     private boolean isPlaceableTarget(ServerWorld world, BlockPos pos) {
@@ -5083,7 +5145,13 @@ public final class WoodcutSkill implements Skill {
         int shortfall = needed - current;
         int planksNeeded = shortfall;
         int logsToConvert = (int) Math.ceil(planksNeeded / 4.0);
-        int craftedPlanks = craftPlanksForScaffold(bot, world, logsToConvert);
+        // Never turn logs into plank scaffold without an axe: that wood is the table, sticks and axe.
+        int craftedPlanks = 0;
+        if (WoodcutAxeBootstrapPolicy.mayConvertLogsToScaffold(holdsAxe(bot))) {
+            craftedPlanks = craftPlanksForScaffold(bot, world, logsToConvert);
+        } else {
+            LOGGER.info("Pillar stock: no axe, keeping logs for the axe instead of crafting scaffold planks");
+        }
         if (craftedPlanks > 0) {
             LOGGER.info("Pillar stock: crafted {} planks from logs for scaffold", craftedPlanks);
             current = countPillarBlocks(bot);
@@ -5170,18 +5238,17 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             BlockState state = world.getBlockState(pos);
-            Item blockItem = state.getBlock().asItem();
             if (state.isOf(net.minecraft.block.Blocks.SNOW)) {
                 BlockPos below = pos.down();
                 BlockState belowState = world.getBlockState(below);
-                if (PILLAR_BLOCKS.contains(belowState.getBlock().asItem())) {
+                if (isHandScaffoldSource(world, below, belowState)) {
                     mineBlock(bot, pos, false);
                     state = belowState;
                     pos = below;
-                    blockItem = state.getBlock().asItem();
                 }
             }
-            if (!PILLAR_BLOCKS.contains(blockItem)) {
+            // By block state, not asItem: grass block, podzol and mycelium drop dirt.
+            if (!isHandScaffoldSource(world, pos, state)) {
                 continue;
             }
             LookController.faceBlock(bot, pos);
@@ -5192,6 +5259,36 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return gathered;
+    }
+
+    /**
+     * MC adapter for ScaffoldMaterialPolicy: a soft, non-falling dirt-family block whose hand drop
+     * is placeable scaffold. Mud drops mud (a 14/16 block the pillar code would stand inside), so it
+     * is skipped here even though the policy accepts it.
+     */
+    private static boolean isHandScaffoldSource(ServerWorld world, BlockPos pos, BlockState state) {
+        if (state == null || state.isAir()) {
+            return false;
+        }
+        boolean handScaffold = ScaffoldMaterialPolicy.isHandScaffold(
+                state.getHardness(world, pos),
+                FallingBlockStabilizer.isFallingBlock(state),
+                state.isIn(BlockTags.DIRT),
+                state.isToolRequired());
+        return handScaffold && PILLAR_BLOCKS.contains(handScaffoldDrop(state));
+    }
+
+    /** The item a dirt-family block drops by hand (no silk touch). */
+    private static Item handScaffoldDrop(BlockState state) {
+        if (state.isOf(Blocks.GRASS_BLOCK) || state.isOf(Blocks.PODZOL) || state.isOf(Blocks.MYCELIUM)) {
+            return Items.DIRT;
+        }
+        return state.getBlock().asItem();
+    }
+
+    /** Pillar blocks held that are not planks: planks of a bot with no axe are its axe wood. */
+    private int countHandScaffoldItems(ServerPlayerEntity bot) {
+        return countPillarBlocks(bot) - countInventoryTagged(bot, ItemTags.PLANKS);
     }
 
     private boolean recoverSurfacePosition(ServerPlayerEntity bot,
@@ -5468,16 +5565,30 @@ public final class WoodcutSkill implements Skill {
 
     /**
      * Bootstrap mode (no axe at the start of a non-hobby run): keep hands until the inventory holds
-     * wood for the whole wooden-axe chain, then try the craft exactly once. Chest retrieval is not
-     * retried here: it already ran at the start, and a per-log chest walk is the same spam as the
-     * premature table craft this avoids.
+     * wood for the whole wooden-axe chain, then craft, but only standing on real ground
+     * (WoodcutAxeBootstrapPolicy.mayAttemptCraft): up a pillar the table has nowhere to go. A
+     * failed craft records its Y; a retry needs the ground at another Y, and the attempt budget is
+     * WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS. Chest retrieval is not retried here: it already
+     * ran at the start, and a per-log chest walk is the same spam as the premature table craft this
+     * avoids.
      *
      * @return {@code true} only when an axe is now equipped
      */
     private boolean bootstrapAxeOrPunch(ServerPlayerEntity bot, ServerCommandSource source) {
         UUID botId = bot.getUuid();
-        if (axeBootstrapCraftFailedBots.contains(botId)
-                || axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.PUNCH_LOG) {
+        if (axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.PUNCH_LOG) {
+            selectHandsOrHarmlessItem(bot);
+            return false;
+        }
+        int failedAtY = axeBootstrapFailedAtY.getOrDefault(botId, WoodcutAxeBootstrapPolicy.NO_FAILED_Y);
+        int failedAttempts = axeBootstrapFailedAttempts.getOrDefault(botId, 0);
+        boolean grounded = bot.isOnGround();
+        boolean onOwnScaffold = isOnOwnScaffold(bot);
+        if (failedAttempts >= WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS
+                || !WoodcutAxeBootstrapPolicy.mayAttemptCraft(grounded, onOwnScaffold, failedAtY, bot.getBlockY())) {
+            LOGGER.debug("Woodcut axe bootstrap: {} holds enough wood but may not craft here (grounded={} onOwnScaffold={} y={} failedAtY={} attempts={})",
+                    bot.getName().getString(), grounded, onOwnScaffold, bot.getBlockY(),
+                    failedAtY == WoodcutAxeBootstrapPolicy.NO_FAILED_Y ? "none" : failedAtY, failedAttempts);
             selectHandsOrHarmlessItem(bot);
             return false;
         }
@@ -5490,11 +5601,90 @@ public final class WoodcutSkill implements Skill {
             LOGGER.info("Woodcut axe bootstrap: {} crafted an axe, back to normal woodcut", bot.getName().getString());
             return true;
         }
-        // One attempt with enough wood. The tree loop sees the marker and ends the run honestly;
-        // until then the remaining logs of this tree are punched by hand.
-        axeBootstrapCraftFailedBots.add(botId);
-        LOGGER.warn("Woodcut axe bootstrap: {} had enough wood but the axe craft failed", bot.getName().getString());
+        // Record where it failed. The tree loop ends the run honestly once nothing can change
+        // (WoodcutAxeBootstrapPolicy.craftFailureEndsRun); until then logs are punched by hand.
+        int attempts = axeBootstrapFailedAttempts.merge(botId, 1, Integer::sum);
+        axeBootstrapFailedAtY.put(botId, bot.getBlockY());
+        LOGGER.warn("Woodcut axe bootstrap: {} had enough wood but the axe craft failed at y={} (attempt {}/{})",
+                bot.getName().getString(), bot.getBlockY(), attempts, WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS);
         selectHandsOrHarmlessItem(bot);
+        return false;
+    }
+
+    /** Tree-loop check: a recorded first-axe craft failure that nothing can fix ends the run. */
+    private boolean axeBootstrapCraftFailureEndsRun(ServerPlayerEntity bot) {
+        UUID botId = bot.getUuid();
+        int failedAttempts = axeBootstrapFailedAttempts.getOrDefault(botId, 0);
+        if (failedAttempts <= 0 || !axeBootstrapBots.contains(botId)) {
+            return false;
+        }
+        return WoodcutAxeBootstrapPolicy.craftFailureEndsRun(
+                failedAttempts,
+                bot.isOnGround(),
+                isOnOwnScaffold(bot),
+                axeBootstrapFailedAtY.getOrDefault(botId, WoodcutAxeBootstrapPolicy.NO_FAILED_Y),
+                bot.getBlockY());
+    }
+
+    /**
+     * Whether the block under the bot's feet is scaffold it placed: tracked by ScaffoldService
+     * (fellTree ascent, surface recovery) or in this run's woodcut scaffold memory (tryPlaceScaffold).
+     */
+    private boolean isOnOwnScaffold(ServerPlayerEntity bot) {
+        BlockPos below = bot.getBlockPos().down();
+        if (ScaffoldService.isTrackedScaffold(bot.getUuid(), below)) {
+            return true;
+        }
+        Map<String, Object> runState = axeBootstrapSharedState.get(bot.getUuid());
+        if (runState != null && bot.getEntityWorld() instanceof ServerWorld world) {
+            Set<Long> memory = getScaffoldMemory(runState, world, false);
+            return memory != null && memory.contains(below.asLong());
+        }
+        return false;
+    }
+
+    /**
+     * Gate before any pillar or scaffold climb. Outside bootstrap it always allows. While
+     * bootstrapping with no axe, the first wood goes to the axe on the ground: with enough wood the
+     * craft runs now (it still needs real ground); if the bot is still axeless afterwards it refuses,
+     * and the caller leaves the log for later (fellTree marks it a floater) so the bot moves on to
+     * logs it can punch from the ground.
+     */
+    private boolean bootstrapAllowsPillar(ServerPlayerEntity bot, String site) {
+        UUID botId = bot.getUuid();
+        if (!axeBootstrapBots.contains(botId)) {
+            return true;
+        }
+        boolean hasAxe = holdsAxe(bot);
+        if (!WoodcutAxeBootstrapPolicy.mayPillar(true, hasAxe)
+                && axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.HAVE_ENOUGH_CRAFT) {
+            ensureAxeOrRetrieve(bot);
+            hasAxe = holdsAxe(bot);
+        }
+        if (WoodcutAxeBootstrapPolicy.mayPillar(axeBootstrapBots.contains(botId), hasAxe)) {
+            return true;
+        }
+        LOGGER.info("Woodcut axe bootstrap: {} has no axe, not pillaring ({}) at {}; logs that need a pillar wait for the axe",
+                bot.getName().getString(), site, bot.getBlockPos().toShortString());
+        selectHandsOrHarmlessItem(bot);
+        return false;
+    }
+
+    /** Whether any axe (not a pickaxe) is in the inventory; same match as ensureAxeEquipped, no slot change. */
+    private static boolean holdsAxe(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase();
+            if (key.contains("axe") && !key.contains("pickaxe")) {
+                return true;
+            }
+        }
         return false;
     }
 

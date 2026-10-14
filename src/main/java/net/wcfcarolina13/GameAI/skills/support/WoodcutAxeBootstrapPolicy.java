@@ -25,6 +25,14 @@ public final class WoodcutAxeBootstrapPolicy {
     /** Planks from one log. */
     public static final int PLANKS_PER_LOG = 4;
 
+    /** {@link #mayAttemptCraft} sentinel: no craft attempt has failed this run. */
+    public static final int NO_FAILED_Y = Integer.MIN_VALUE;
+    /**
+     * Failed axe crafts a run allows before it ends. Each attempt can craft a table and arm
+     * CraftingHelper's 60 s table cooldown, so a bot on a slope must not retry at every new Y.
+     */
+    public static final int MAX_CRAFT_ATTEMPTS = 2;
+
     /** The one origin that may not bootstrap: an idle hobby run. */
     public static final String AMBIENT_ORIGIN = "ambient";
 
@@ -54,6 +62,54 @@ public final class WoodcutAxeBootstrapPolicy {
         return planksAvailable(logs, planks) >= planksNeeded(sticks, tableInReach)
                 ? Step.HAVE_ENOUGH_CRAFT
                 : Step.PUNCH_LOG;
+    }
+
+    /**
+     * Whether the bot may try the first-axe craft where it stands. Only on the ground: up a pillar
+     * the crafting table has nowhere to go (1.1.233 playthrough: y127, "couldn't place it here"),
+     * and the failure used to end the whole run. {@code grounded} is the entity's on-ground flag
+     * (false mid-jump); {@code onOwnScaffold} is true when the block underfoot is one this run
+     * placed. After a failure, a retry is allowed only at a different Y ({@code failedAtY} is
+     * {@link #NO_FAILED_Y} when nothing failed yet).
+     */
+    public static boolean mayAttemptCraft(boolean grounded, boolean onOwnScaffold, int failedAtY, int currentY) {
+        if (!grounded || onOwnScaffold) {
+            return false;
+        }
+        return failedAtY == NO_FAILED_Y || currentY != failedAtY;
+    }
+
+    /**
+     * Whether a recorded craft failure ends the run. Nothing failed: never. The attempt budget is
+     * spent: always. Otherwise only when the bot stands on real ground and still may not retry
+     * (same Y as the failure), so a failure that happened off the ground waits for a grounded retry.
+     */
+    public static boolean craftFailureEndsRun(int failedAttempts,
+                                              boolean grounded,
+                                              boolean onOwnScaffold,
+                                              int failedAtY,
+                                              int currentY) {
+        if (failedAttempts <= 0 || failedAtY == NO_FAILED_Y) {
+            return false;
+        }
+        if (failedAttempts >= MAX_CRAFT_ATTEMPTS) {
+            return true;
+        }
+        return grounded && !onOwnScaffold && !mayAttemptCraft(grounded, onOwnScaffold, failedAtY, currentY);
+    }
+
+    /**
+     * Whether the bot may pillar or place scaffold to reach a log. Not while it is bootstrapping
+     * without an axe: the first wood goes to the axe on the ground, and logs that need a pillar
+     * wait until there is one.
+     */
+    public static boolean mayPillar(boolean bootstrapActive, boolean hasAxe) {
+        return !bootstrapActive || hasAxe;
+    }
+
+    /** Whether logs may be turned into plank scaffold. Never without an axe: that wood is the axe. */
+    public static boolean mayConvertLogsToScaffold(boolean hasAxe) {
+        return hasAxe;
     }
 
     /**
