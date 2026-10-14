@@ -40,7 +40,7 @@ class CompanionCommanderPolicyTest {
 
     @Test
     void unownedUnrecruitedBotIsNotOpenToAnyone() {
-        // Unlike isAllowedToControl, no owner does not mean everyone.
+        // No owner does not mean everyone.
         assertFalse(CompanionCommanderPolicy.isAuthorized(ACTOR, null, null, false, false));
         assertFalse(CompanionCommanderPolicy.isAuthorized(ACTOR, "  ", null, false, false));
     }

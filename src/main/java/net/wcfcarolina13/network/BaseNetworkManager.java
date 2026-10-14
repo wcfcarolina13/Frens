@@ -15,7 +15,6 @@ import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
-import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.LodestoneCompassService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
@@ -268,7 +267,7 @@ public final class BaseNetworkManager {
                     }
                     String botAlias = sanitizeBotAlias(payload != null ? payload.botAlias() : null);
                     String label = payload != null ? payload.label() : null;
-                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player);
+                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player, "base_set_home");
                     if (bot == null) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available (or you don't own it).");
                         return;
@@ -299,7 +298,7 @@ public final class BaseNetworkManager {
                     }
                     String botAlias = sanitizeBotAlias(payload != null ? payload.botAlias() : null);
                     String label = payload != null ? payload.label() : null;
-                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player);
+                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player, "base_go_to");
                     if (bot == null) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available (or you don't own it).");
                         return;
@@ -614,7 +613,7 @@ public final class BaseNetworkManager {
         }
 
         String homeLabel = null;
-        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext, null);
+        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext, null, null);
         if (selectedBot != null) {
             homeLabel = BotHomeService.getPreferredHomeBaseLabel(selectedBot).orElse(null);
         }
@@ -919,11 +918,13 @@ public final class BaseNetworkManager {
     }
 
     /**
-     * Resolve a bot by alias.  When {@code requestingPlayer} is non-null,
-     * ownership is enforced: the player must own the bot (or be an operator).
+     * Resolve a bot by alias.  When {@code requestingPlayer} is non-null, access is enforced
+     * through the shared {@link BotAccessGate} for {@code action}: the owner, an operator or the
+     * integrated-server host. An unowned bot is refused to everyone else.
      */
     private static ServerPlayerEntity resolveControlledBot(MinecraftServer server, String alias,
-                                                           ServerPlayerEntity requestingPlayer) {
+                                                           ServerPlayerEntity requestingPlayer,
+                                                           String action) {
         if (server == null || alias == null || alias.isBlank()) {
             return null;
         }
@@ -949,9 +950,9 @@ public final class BaseNetworkManager {
         if (!BotEventHandler.isRegisteredBot(bot)) {
             return null;
         }
-        // Ownership gate: requestingPlayer (when provided) must own or be op
+        // Access gate: requestingPlayer (when provided) must be the owner, an op or the host
         if (requestingPlayer != null
-                && !CompanionCommunicationPolicy.isAllowedToControl(requestingPlayer, bot)) {
+                && !BotAccessGate.permits(requestingPlayer, bot, action)) {
             return null;
         }
         return bot;

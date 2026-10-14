@@ -7,9 +7,8 @@ import java.util.UUID;
  * soulofender, home) and advance its companion quest: the player it pledged to (the recruiter),
  * the bot's exact config owner, an operator, or the integrated-server host.
  *
- * <p>The owner is the exact {@code ManualConfig.getOwner(alias)} entry, never
- * {@code CompanionCommunicationPolicy.isAllowedToControl}, which also lets anyone control an
- * unowned bot. Pure: no Minecraft types.
+ * <p>The owner is the exact {@code ManualConfig.getOwner(alias)} entry. An unowned bot has no
+ * owner, so it does not open to everyone. Pure: no Minecraft types.
  */
 public final class CompanionCommanderPolicy {
     private CompanionCommanderPolicy() {}

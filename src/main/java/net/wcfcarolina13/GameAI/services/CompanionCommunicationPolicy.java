@@ -173,34 +173,6 @@ public final class CompanionCommunicationPolicy {
         }
     }
 
-    // ─────── Ownership gate ───────
-
-    /**
-     * Returns true if {@code actor} is allowed to control the bot identified by
-     * {@code botAlias}.  Operators always pass.  Otherwise the actor's UUID must
-     * match the recorded {@link ManualConfig.BotOwnership} for the alias, or no
-     * owner is recorded yet (first-spawner-wins still applies at spawn time, but
-     * an un-owned bot is controllable by anyone).
-     */
-    public static boolean isAllowedToControl(ServerPlayerEntity actor, String botAlias) {
-        if (actor == null || botAlias == null || botAlias.isBlank()) return false;
-        if (Frens.isOperator(actor)) return true;
-        if (Frens.CONFIG == null) return true;               // no config → can't enforce
-        ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(botAlias);
-        if (o == null || o.ownerUuid() == null || o.ownerUuid().isBlank()) return true; // un-owned
-        try {
-            return actor.getUuid().equals(UUID.fromString(o.ownerUuid()));
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    /** Convenience: resolve alias from the bot entity itself. */
-    public static boolean isAllowedToControl(ServerPlayerEntity actor, ServerPlayerEntity bot) {
-        if (bot == null) return false;
-        return isAllowedToControl(actor, bot.getName().getString());
-    }
-
     public static boolean isNearEnchantingTable(ServerPlayerEntity player, int radius) {
         if (player == null) {
             return false;
@@ -291,7 +263,7 @@ public final class CompanionCommunicationPolicy {
     /**
      * Authorization gate for private (DIRECT) soul communication. Operators and the
      * integrated-server host always pass; otherwise the actor must be the exact recorded owner.
-     * For that path, unlike {@link #isAllowedToControl}, an unowned bot is NOT eligible: a bot
+     * An unowned bot is NOT eligible (same as {@code BotAccessPolicy}): a bot
      * display name is not an identity boundary.
      */
     public static boolean isPrivateSoulAuthorized(ServerPlayerEntity actor, ServerPlayerEntity bot) {
