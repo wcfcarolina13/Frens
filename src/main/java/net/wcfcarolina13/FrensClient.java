@@ -535,15 +535,6 @@ public class FrensClient implements ClientModInitializer {
         directionalPreviewTick = 0;
     }
 
-    /**
-     * @deprecated chat-only, so a non-op owner is refused. Use
-     * {@link #setPendingDirectionalMining(String, BotActionPolicy.Action, String, java.util.List, String)}.
-     */
-    @Deprecated
-    public static void setPendingDirectionalMining(String actionLabel, String command) {
-        setPendingDirectionalMining(actionLabel, null, "", java.util.List.of(), command);
-    }
-
     public static void clearPendingDirectionalMining() {
         pendingDirectionalActionLabel = null;
         pendingDirectionalCommand = null;

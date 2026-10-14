@@ -24,6 +24,8 @@ import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FrensClient;
 import net.wcfcarolina13.items.ModItems;
+import net.wcfcarolina13.network.BotActionClientSender;
+import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.CompanionQuestStateRequestPayload;
 import net.wcfcarolina13.network.CompanionQuestTopicPayload;
 import net.wcfcarolina13.network.RecruitmentAdminActionPayload;
@@ -1425,7 +1427,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         switchBrowseOffset = 0;
         switchBrowsedBlockedAlias = null;
         switchBrowsedBlockReason = null;
-        sendChatCommand("bot open " + formatBotTarget(targetAlias));
+        BotActionClientSender.send(BotActionPolicy.Action.OPEN, targetAlias, List.of(), "bot open " + formatBotTarget(targetAlias));
         return true;
     }
 
@@ -5155,7 +5157,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SPELL_REMOTE_GUIDANCE -> openSpellGuidanceConfirm();
             case SPELL_CHORUS_RECALL -> openSpellRecallConfirm();
             case SPELL_SOUL_OF_ENDER -> castSoulOfEnder();
-            case SPELL_REMOTE_INVENTORY -> sendChatCommand("bot companion open " + formatBotTarget());
+            case SPELL_REMOTE_INVENTORY -> BotActionClientSender.send(BotActionPolicy.Action.COMPANION, botAlias, List.of("open"),
+                    "bot companion open " + formatBotTarget());
             case SPELL_SUMMON -> runCompanionSummon();
             case SPELL_ENCHANT -> openBotEnchant();
             case SPELL_ANVIL -> openBotAnvil();
@@ -5835,29 +5838,38 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void runSkillCommand(String skillName, String action) {
+        runSkillCommand(skillName, action, BotActionPolicy.Action.SKILL, List.of(skillName));
+    }
+
+    private void runSkillCommand(String skillName, String action, BotActionPolicy.Action payloadAction,
+                                 List<String> payloadArgs) {
         String command = buildSkillCommand(skillName, action);
-        sendChatCommand(command);
+        BotActionClientSender.send(payloadAction, botAlias, payloadArgs, command);
         this.close();
     }
 
-    private void queueDirectionalMiningCommand(String actionLabel, String skillName, String action) {
+    private void queueDirectionalMiningCommand(String actionLabel, String skillName, String action,
+                                               BotActionPolicy.Action payloadAction, List<String> payloadArgs) {
         String command = buildSkillCommand(skillName, action);
-        net.wcfcarolina13.FrensClient.setPendingDirectionalMining(actionLabel, command);
+        net.wcfcarolina13.FrensClient.setPendingDirectionalMining(actionLabel, payloadAction, botAlias,
+                payloadArgs, command);
         this.close();
     }
 
     private void runWoodcutSkillCommand() {
         String arg = woodcutTreeCount > 0 ? Integer.toString(woodcutTreeCount) : null;
-        runSkillCommand("woodcut", arg);
+        runSkillCommand("woodcut", arg, BotActionPolicy.Action.SKILL_WOODCUT,
+                arg != null ? List.of(arg) : List.of());
     }
 
     private void runFishSkillCommand() {
         String arg = fishTargetCount > 0 ? Integer.toString(fishTargetCount) : null;
-        runSkillCommand("fish", arg);
+        runSkillCommand("fish", arg, BotActionPolicy.Action.SKILL_FISH,
+                arg != null ? List.of(arg) : List.of());
     }
 
     private void runFishForgetCommand() {
-        sendChatCommand("bot fish forget " + formatBotTarget());
+        BotActionClientSender.send(BotActionPolicy.Action.FISH_FORGET, botAlias, List.of(), "bot fish forget " + formatBotTarget());
         this.close();
     }
 
@@ -5867,29 +5879,34 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             String rangeArg = "range=" + woolSearchRange;
             arg = arg != null ? arg + " " + rangeArg : rangeArg;
         }
-        runSkillCommand("wool", arg);
+        String countArg = woolTargetCount > 0 ? Integer.toString(woolTargetCount) : "0";
+        String rangeValue = woolSearchRange != SKILL_WOOL_RANGE_DEFAULT ? Integer.toString(woolSearchRange) : "0";
+        runSkillCommand("wool", arg, BotActionPolicy.Action.SKILL_WOOL, List.of(countArg, rangeValue));
     }
 
     private void runStripmineSkillCommand() {
         String arg = Integer.toString(stripmineLength > 0 ? stripmineLength : SKILL_STRIPMINE_COUNT_DEFAULT);
-        queueDirectionalMiningCommand("stripmine", "stripmine", arg);
+        queueDirectionalMiningCommand("stripmine", "stripmine", arg,
+                BotActionPolicy.Action.SKILL_STRIPMINE, List.of(arg));
     }
 
     private void runAscentSkillCommand() {
-        String arg;
+        String value;
         if (ascentSurfaceMode) {
-            arg = "ascent surface";
+            value = "surface";
         } else if (ascentBlocks > 0) {
-            arg = "ascent " + ascentBlocks;
+            value = Integer.toString(ascentBlocks);
         } else {
-            arg = "ascent " + SKILL_ASCENT_COUNT_DEFAULT;
+            value = Integer.toString(SKILL_ASCENT_COUNT_DEFAULT);
         }
-        queueDirectionalMiningCommand("ascent", "mining", arg);
+        queueDirectionalMiningCommand("ascent", "mining", "ascent " + value,
+                BotActionPolicy.Action.SKILL_ASCENT, List.of(value));
     }
 
     private void runDescentSkillCommand() {
-        String arg = "descent " + (descentBlocks > 0 ? descentBlocks : SKILL_DESCENT_COUNT_DEFAULT);
-        queueDirectionalMiningCommand("descent", "mining", arg);
+        String value = Integer.toString(descentBlocks > 0 ? descentBlocks : SKILL_DESCENT_COUNT_DEFAULT);
+        queueDirectionalMiningCommand("descent", "mining", "descent " + value,
+                BotActionPolicy.Action.SKILL_DESCENT, List.of(value));
     }
 
     private boolean isMouseOverTopicPanel(double mouseX, double mouseY) {
@@ -6259,8 +6276,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             // For now, just start following the player anyway (interrupts return-to-base)
         }
         String botTarget = formatBotTarget();
-        String command = isFollowActive() ? "bot follow stop " + botTarget : "bot follow " + botTarget;
-        sendChatCommand(command);
+        boolean following = isFollowActive();
+        String command = following ? "bot follow stop " + botTarget : "bot follow " + botTarget;
+        BotActionClientSender.send(following ? BotActionPolicy.Action.FOLLOW_STOP : BotActionPolicy.Action.FOLLOW,
+                botAlias, List.of(), command);
     }
 
     private boolean isReturningToBase() {
@@ -6273,8 +6292,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         double next = base + (FOLLOW_DISTANCE_STEP * direction);
         next = MathHelper.clamp(next, FOLLOW_DISTANCE_MIN, FOLLOW_DISTANCE_MAX);
         String botTarget = formatBotTarget();
-        String command = "bot follow-distance " + String.format(Locale.ROOT, "%.1f", next) + " " + botTarget;
-        sendChatCommand(command);
+        String distance = String.format(Locale.ROOT, "%.1f", next);
+        String command = "bot follow-distance " + distance + " " + botTarget;
+        BotActionClientSender.send(BotActionPolicy.Action.FOLLOW_DISTANCE, botAlias, List.of(distance), command);
     }
 
     private void adjustGuardRadius(int direction) {
@@ -6282,7 +6302,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         guardRadiusPreset = (int) MathHelper.clamp(current + direction, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
         if (isGuardActive()) {
             String botTarget = formatBotTarget();
-            sendChatCommand("bot guard " + botTarget + " " + guardRadiusPreset);
+            BotActionClientSender.send(BotActionPolicy.Action.GUARD, botAlias,
+                    List.of(Integer.toString(guardRadiusPreset)), "bot guard " + botTarget + " " + guardRadiusPreset);
         }
     }
 
@@ -6291,7 +6312,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         patrolRadiusPreset = (int) MathHelper.clamp(current + direction, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
         if (isPatrolActive()) {
             String botTarget = formatBotTarget();
-            sendChatCommand("bot patrol " + botTarget + " " + patrolRadiusPreset);
+            BotActionClientSender.send(BotActionPolicy.Action.PATROL, botAlias,
+                    List.of(Integer.toString(patrolRadiusPreset)), "bot patrol " + botTarget + " " + patrolRadiusPreset);
         }
     }
 
@@ -6411,14 +6433,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 guardRadiusPreset = (int) MathHelper.clamp(value, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
                 if (isGuardActive()) {
                     String botTarget = formatBotTarget();
-                    sendChatCommand("bot guard " + botTarget + " " + guardRadiusPreset);
+                    BotActionClientSender.send(BotActionPolicy.Action.GUARD, botAlias,
+                            List.of(Integer.toString(guardRadiusPreset)), "bot guard " + botTarget + " " + guardRadiusPreset);
                 }
             }
             case PATROL -> {
                 patrolRadiusPreset = (int) MathHelper.clamp(value, GUARD_RADIUS_MIN, GUARD_RADIUS_MAX);
                 if (isPatrolActive()) {
                     String botTarget = formatBotTarget();
-                    sendChatCommand("bot patrol " + botTarget + " " + patrolRadiusPreset);
+                    BotActionClientSender.send(BotActionPolicy.Action.PATROL, botAlias,
+                            List.of(Integer.toString(patrolRadiusPreset)), "bot patrol " + botTarget + " " + patrolRadiusPreset);
                 }
             }
             default -> {}
@@ -6444,27 +6468,29 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void toggleGuard() {
         String botTarget = formatBotTarget();
         if (isGuardActive()) {
-            sendChatCommand("bot stop " + botTarget);
+            BotActionClientSender.send(BotActionPolicy.Action.STOP, botAlias, List.of(), "bot stop " + botTarget);
         } else {
             int radius = getEffectiveGuardRadius();
-            sendChatCommand("bot guard " + botTarget + " " + radius);
+            BotActionClientSender.send(BotActionPolicy.Action.GUARD, botAlias, List.of(Integer.toString(radius)),
+                    "bot guard " + botTarget + " " + radius);
         }
     }
 
     private void togglePatrol() {
         String botTarget = formatBotTarget();
         if (isPatrolActive()) {
-            sendChatCommand("bot stop " + botTarget);
+            BotActionClientSender.send(BotActionPolicy.Action.STOP, botAlias, List.of(), "bot stop " + botTarget);
         } else {
             int radius = getEffectivePatrolRadius();
-            sendChatCommand("bot patrol " + botTarget + " " + radius);
+            BotActionClientSender.send(BotActionPolicy.Action.PATROL, botAlias, List.of(Integer.toString(radius)),
+                    "bot patrol " + botTarget + " " + radius);
         }
     }
 
     private void runStop() {
         String botTarget = formatBotTarget();
         String command = "bot stop " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.STOP, botAlias, List.of(), command);
         
         // Also clear any pending shelter placement
         net.wcfcarolina13.FrensClient.clearPendingShelter();
@@ -6474,81 +6500,83 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void runResume() {
         String botTarget = formatBotTarget();
         String command = "bot resume " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.RESUME, botAlias, List.of(), command);
     }
 
     private void runReturnHome() {
         String botTarget = formatBotTarget();
         // Toggle: if already returning, stop; otherwise start return-to-base
-        String command = isReturningToBase() ? "bot stop " + botTarget : "bot return " + botTarget;
-        sendChatCommand(command);
+        boolean returning = isReturningToBase();
+        String command = returning ? "bot stop " + botTarget : "bot return " + botTarget;
+        BotActionClientSender.send(returning ? BotActionPolicy.Action.STOP : BotActionPolicy.Action.RETURN_HOME,
+                botAlias, List.of(), command);
     }
 
     private void runSleep() {
         String botTarget = formatBotTarget();
         String command = "bot sleep " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.SLEEP, botAlias, List.of(), command);
         this.close();
     }
 
     private void runCompanionCome() {
-        sendChatCommand("bot companion come");
+        BotActionClientSender.send(BotActionPolicy.Action.COMPANION, botAlias, List.of("come"), "bot companion come");
     }
 
     private void runCompanionSummon() {
-        sendChatCommand("bot companion summon");
+        BotActionClientSender.send(BotActionPolicy.Action.COMPANION, botAlias, List.of("summon"), "bot companion summon");
     }
 
     private void runCompanionHome() {
-        sendChatCommand("bot companion home");
+        BotActionClientSender.send(BotActionPolicy.Action.COMPANION, botAlias, List.of("home"), "bot companion home");
     }
 
     private void toggleAutoReturnSunset() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_sunset toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("auto_return_sunset", "toggle"), command);
     }
 
     private void toggleAutoReturnSelfSufficient() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_self_sufficient toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("auto_return_self_sufficient", "toggle"), command);
     }
 
     private void toggleTacticalShelter() {
         String botTarget = formatBotTarget();
         String command = "bot tactical_shelter toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("tactical_shelter", "toggle"), command);
     }
 
     private void toggleAutoReturnSunsetGuardPatrol() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_sunset_guard_patrol toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("auto_return_sunset_guard_patrol", "toggle"), command);
     }
 
     private void toggleAutoReturnSkipPermission() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_skip_permission toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("auto_return_skip_permission", "toggle"), command);
     }
 
     private void toggleAttackNamedMobs() {
         String botTarget = formatBotTarget();
         String command = "bot attack_named_mobs toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("attack_named_mobs", "toggle"), command);
     }
 
     private void toggleIdleHobbies() {
         String botTarget = formatBotTarget();
         String command = "bot idle_hobbies toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("idle_hobbies", "toggle"), command);
     }
 
     private void toggleAutoHuntStarving() {
         String botTarget = formatBotTarget();
         String command = "bot auto_hunt_starving toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("auto_hunt_starving", "toggle"), command);
     }
 
     private boolean isGameplayTipsActive() {
@@ -6629,7 +6657,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void toggleUnleashTethered() {
         String botTarget = formatBotTarget();
         String command = "bot unleash_tethered toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("unleash_tethered", "toggle"), command);
     }
 
     private boolean isLeashOnDismountActive() {
@@ -6639,7 +6667,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void toggleLeashOnDismount() {
         String botTarget = formatBotTarget();
         String command = "bot leash_on_dismount toggle " + botTarget;
-        sendChatCommand(command);
+        BotActionClientSender.send(BotActionPolicy.Action.TOGGLE, botAlias, List.of("leash_on_dismount", "toggle"), command);
     }
 
     private void openBasesManager() {
@@ -6660,7 +6688,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (this.client == null) {
             return;
         }
-        this.client.setScreen(new CraftingHistoryScreen(this));
+        this.client.setScreen(new CraftingHistoryScreen(this, botAlias));
     }
 
     private void openCookingMenu() {
@@ -6745,7 +6773,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void castSoulOfEnder() {
-        sendChatCommand("bot companion soulofender " + formatBotTarget());
+        BotActionClientSender.send(BotActionPolicy.Action.COMPANION, botAlias, List.of("soulofender"),
+                "bot companion soulofender " + formatBotTarget());
     }
 
     private void openGuideMenu() {
@@ -6846,14 +6875,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         net.wcfcarolina13.FrensClient.setPendingFarm(formatBotTarget());
         this.close();
-    }
-
-    private void sendChatCommand(String command) {
-        if (this.client == null || this.client.getNetworkHandler() == null) {
-            return;
-        }
-        String raw = command.startsWith("/") ? command.substring(1) : command;
-        this.client.getNetworkHandler().sendChatCommand(raw);
     }
 
     @Override
