@@ -17,11 +17,11 @@ import java.util.regex.Pattern;
  * is checked against a range, an allowlist or a strict charset, and only checked values are ever
  * echoed into the command. The bot name in the command is the SERVER-resolved profile name.
  *
- * <p>Where the bot goes: {@code /bot skill}, {@code fortify} and {@code leash} take the target as
- * any token of a whitespace-split argument list, scanned from the END, so the resolved name is
- * appended last there and no client token may equal {@code all}, {@code each} or a bot name. The
- * other commands bind the bot at a fixed grammar slot, which is not always last:
- * {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
+ * <p>Where the bot goes: {@code /bot skill} and {@code fortify} take the target as any token of
+ * a whitespace-split argument list, scanned from the END, so the resolved name is appended last
+ * there and no client token may equal {@code all}, {@code each} or a bot name. The other commands
+ * bind the bot at a fixed grammar slot, which is not always last: {@code leash <bot>} (a plain
+ * string slot), {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
  * {@code compass travel <bot> [name]}. Slots typed {@code EntityArgumentType.player()} (return,
  * guard, patrol, craft, cook) need a name of at most 16 chars, quoted when it has other chars.
  */

@@ -459,8 +459,9 @@ public class Frens implements ModInitializer {
             if (now - last < 200) return net.minecraft.util.ActionResult.PASS;
             LAST_OPEN_MS.put(key, now);
 
-            if (!net.wcfcarolina13.GameAI.services.InventoryAccessPolicy
-                    .canOpen((net.minecraft.server.network.ServerPlayerEntity) player, bot)) {
+            if (!net.wcfcarolina13.GameAI.services.BotAccessPolicy.allowed(
+                    net.wcfcarolina13.network.BotAccessGate.decide(
+                            (net.minecraft.server.network.ServerPlayerEntity) player, bot))) {
                 return net.minecraft.util.ActionResult.PASS;
             }
 

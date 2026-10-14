@@ -108,11 +108,16 @@ public final class AuthorizedBotDispatch {
                 return 0;
             }
             if (resolvedBotName != null) {
-                Optional<String> mismatch = BotActionPolicy.botSlotRefusal(
-                        boundArguments(parse, command), BotActionPolicy.BOT_SLOT_ARGS, resolvedBotName);
-                if (mismatch.isPresent()) {
-                    LOGGER.warn("[bot-access] bot-slot mismatch action={} bot={} reason={} cmd={}",
-                            actionName, resolvedBotName, mismatch.get(), command);
+                // Diagnostic only: a failure here must never abort the dispatch.
+                try {
+                    Optional<String> mismatch = BotActionPolicy.botSlotRefusal(
+                            boundArguments(parse, command), BotActionPolicy.BOT_SLOT_ARGS, resolvedBotName);
+                    if (mismatch.isPresent()) {
+                        LOGGER.warn("[bot-access] bot-slot mismatch action={} bot={} reason={} cmd={}",
+                                actionName, resolvedBotName, mismatch.get(), command);
+                    }
+                } catch (RuntimeException e) {
+                    LOGGER.debug("[bot-access] bot-slot check skipped for action={}: {}", actionName, e.toString());
                 }
             }
             manager.execute(parse, command);
