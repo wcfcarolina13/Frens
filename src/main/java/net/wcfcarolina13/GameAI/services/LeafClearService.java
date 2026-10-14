@@ -200,10 +200,8 @@ public final class LeafClearService {
         if (player == null) {
             return;
         }
-        // Prefer shears, otherwise an empty slot or a non-tool/weapon hotbar item.
-        if (BotActions.selectHarvestToolOrHands(player, "shears")) {
-            return;
-        }
+        // Never shears on leaves (saplings and sticks must still drop): an empty slot or a
+        // non-tool, non-weapon hotbar item. Only the selected slot changes, no inventory swap.
         for (int i = 0; i < 9; i++) {
             ItemStack stack = player.getInventory().getStack(i);
             if (stack.isEmpty()) {
@@ -211,7 +209,8 @@ public final class LeafClearService {
                 return;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase();
-            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")) {
+            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")
+                    || key.contains("shears") || BotActions.isCombatClassItem(stack)) {
                 continue;
             }
             BotActions.selectHotbarSlot(player, i);

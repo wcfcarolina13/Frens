@@ -1927,7 +1927,8 @@ public final class WoodcutCleanupSkill implements Skill {
     }
 
     private boolean selectLeafTool(ServerPlayerEntity bot) {
-        return BotActions.selectHarvestToolOrHands(bot, "shears") || selectHandsOrHarmlessItem(bot);
+        // Never shears on leaves, so saplings and sticks still drop.
+        return selectHandsOrHarmlessItem(bot);
     }
 
     private boolean selectHandsOrHarmlessItem(ServerPlayerEntity bot) {
@@ -1941,7 +1942,8 @@ public final class WoodcutCleanupSkill implements Skill {
                 return true;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")) {
+            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")
+                    || key.contains("shears") || BotActions.isCombatClassItem(stack)) {
                 continue;
             }
             BotActions.selectHotbarSlot(bot, i);
@@ -1949,29 +1951,6 @@ public final class WoodcutCleanupSkill implements Skill {
         }
         BotActions.selectHotbarSlot(bot, 0);
         return true;
-    }
-
-    /**
-     * Select the tool for mining a scaffold block by its mineable tags: the matching pickaxe,
-     * shovel or axe if carried, otherwise an empty hand or a harmless item (never a tool the
-     * block does not need, so dirt and planks no longer cost pickaxe durability).
-     */
-    private void selectScaffoldTool(ServerPlayerEntity bot, BlockPos pos) {
-        if (bot == null) {
-            return;
-        }
-        String keyword = null;
-        if (pos != null && bot.getEntityWorld() instanceof ServerWorld world) {
-            BlockState state = world.getBlockState(pos);
-            keyword = net.wcfcarolina13.PlayerUtils.ScaffoldToolPolicy.keywordFor(
-                    state.isIn(BlockTags.PICKAXE_MINEABLE),
-                    state.isIn(BlockTags.SHOVEL_MINEABLE),
-                    state.isIn(BlockTags.AXE_MINEABLE));
-        }
-        if (keyword != null && BotActions.selectHarvestToolOrHands(bot, keyword)) {
-            return;
-        }
-        selectHandsOrHarmlessItem(bot);
     }
 
     private void breakLeaf(ServerPlayerEntity bot, BlockPos pos) {
@@ -2021,10 +2000,8 @@ public final class WoodcutCleanupSkill implements Skill {
         LookController.faceBlock(bot, pos);
         if (preferAxe) {
             ensureAxeEquipped(bot);
-        } else {
-            // For scaffold removal, select tool based on block type.
-            selectScaffoldTool(bot, pos);
         }
+        // Scaffold removal: MiningTool.mineBlock picks the tool on the server thread.
 
         CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos);
         long start = System.currentTimeMillis();
@@ -2134,13 +2111,11 @@ public final class WoodcutCleanupSkill implements Skill {
         }
         // Already within reach? Mine directly.
         if (isReadyToMineTarget(bot, pos)) {
-            selectScaffoldTool(bot, pos);
             return mineBlock(bot, pos, false);
         }
         // Walk to column below the target.
         moveToColumnBelow(source, bot, pos);
         if (isReadyToMineTarget(bot, pos)) {
-            selectScaffoldTool(bot, pos);
             return mineBlock(bot, pos, false);
         }
         // If scaffold is above us, pillar up to reach it.
@@ -2151,8 +2126,7 @@ public final class WoodcutCleanupSkill implements Skill {
             List<BlockPos> tempPillar = new ArrayList<>();
             Set<Long> tempMemory = new HashSet<>();
             if (pillarUp(bot, needed, tempPillar, tempMemory)) {
-                selectScaffoldTool(bot, pos);
-                boolean mined = mineBlock(bot, pos, false);
+                    boolean mined = mineBlock(bot, pos, false);
                 // Mine everything reachable while elevated (other floating scaffold).
                 mineAllReachableFromElevation(bot, source, world, new HashMap<>(), 8, System.currentTimeMillis() + 10_000L);
                 descendAndCleanup(bot, tempPillar);
