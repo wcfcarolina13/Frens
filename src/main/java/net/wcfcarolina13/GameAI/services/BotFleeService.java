@@ -14,6 +14,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Heightmap;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -3066,12 +3067,28 @@ public final class BotFleeService {
         // Use strict operational check (requires openSky + nearSurface) — the lenient
         // isRecoveryReadySurface fallback was returning "ready" for bots in pits with
         // overhead cover, preventing ensureAtSurface from attempting pillar/step-build.
-        boolean ready = SafePositionService.isOperationalSurfaceAssessment(assessment);
-        LOGGER.info("{}: {} pos={} {}",
+        // A forest floor under leaves is surface too: only leaves overhead counts like open sky,
+        // otherwise recovery pillars the bot up into the canopy.
+        BlockPos feet = bot.getBlockPos();
+        boolean canopyOnly = !assessment.openSky()
+                && SurfaceReadinessPolicy.canopyOnly(
+                        world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ()),
+                        feet.getY());
+        boolean ready = SurfaceReadinessPolicy.isOperational(
+                assessment.openSky(),
+                canopyOnly,
+                assessment.standable(),
+                assessment.nearSurface(),
+                assessment.cardinalStandableNeighbors(),
+                assessment.totalStandableNeighbors(),
+                assessment.steepDropNeighbors(),
+                assessment.blockedCardinals());
+        LOGGER.info("{}: {} pos={} {}{}",
                 label,
                 ready ? "ready" : "not-ready",
-                bot.getBlockPos().toShortString(),
-                SafePositionService.summarizeSurfaceAssessment(assessment));
+                feet.toShortString(),
+                SafePositionService.summarizeSurfaceAssessment(assessment),
+                canopyOnly ? " canopyOnly=true" : "");
         return ready;
     }
 

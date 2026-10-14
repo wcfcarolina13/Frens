@@ -33,8 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 public class MiningTool {
 
-    private static final long MINING_TICK_MS = 50;
-    private static final long FAILSAFE_TIMEOUT_SECONDS = 12;
+    private static final long MINING_TICK_MS = BreakTimePolicy.TICK_MS;
     private static final double SURVIVAL_REACH_SQ = 4.5 * 4.5;
     public static final Logger LOGGER = LoggerFactory.getLogger("mining-tool");
 
@@ -203,7 +202,7 @@ public class MiningTool {
                 miningResult.complete("⚠️ Failed to initialize mining: block breaking delta <= 0");
                 return miningResult;
             }
-            int requiredTicks = Math.max(1, (int) Math.ceil(1.0f / delta));
+            int requiredTicks = BreakTimePolicy.requiredTicks(delta);
             requiredTicksHolder.set(requiredTicks);
             String toolName = bot.getMainHandStack().isEmpty() ? "bare-hands" : bot.getMainHandStack().getItem().toString();
             LOGGER.info("Mining {} with {} (delta={}, ticks={}, ~{}ms, creative={})",
@@ -283,7 +282,7 @@ public class MiningTool {
                             // Recalculate required ticks from the new tool
                             float newDelta = currentState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
                             if (newDelta > 0.0f) {
-                                int newRequired = Math.max(1, (int) Math.ceil(1.0f / newDelta));
+                                int newRequired = BreakTimePolicy.requiredTicks(newDelta);
                                 requiredTicksHolder.set(newRequired);
                                 ticksElapsed.set(0);
                                 postThresholdAttempts.set(0);
@@ -328,8 +327,7 @@ public class MiningTool {
         }, 0, MINING_TICK_MS, TimeUnit.MILLISECONDS);
 
         // Timeout: actual mining time + 5 second buffer (was fixed 12s, killed slow blocks)
-        long timeoutMs = Math.max(FAILSAFE_TIMEOUT_SECONDS * 1000,
-                requiredTicksHolder.get() * MINING_TICK_MS + 5000);
+        long timeoutMs = BreakTimePolicy.timeoutMs(requiredTicksHolder.get());
         ScheduledFuture<?> timeoutTask = MINING_EXECUTOR.schedule(() -> {
             if (!miningResult.isDone()) {
                 LOGGER.warn("Mining timeout reached for {} (after {}ms)", targetBlockPos, timeoutMs);

@@ -9,14 +9,17 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Service for ensuring doorways are accessible.
@@ -313,6 +316,9 @@ public final class DoorwayAccessService {
         return false;
     }
 
+    /** Hard ceiling on one doorway clear; MiningTool's own timeout normally fires first. */
+    private static final long CLEAR_BLOCK_CEILING_MS = 30_000L;
+
     /**
      * Clear/break a single block.
      */
@@ -329,26 +335,40 @@ public final class DoorwayAccessService {
             }
         }
 
-        // Face and break
+        // Face and break at survival speed. MiningTool picks the tool, does the reach, line-of-sight
+        // and territory checks, and ticks the break on the server thread (this runs on a worker).
         LookController.faceBlock(bot, pos);
-        sleepQuiet(100L);
-
-        // Use world.breakBlock for server-side breaking
-        BlockState state = world.getBlockState(pos);
-        if (!state.isAir()) {
-            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
-            if (!auth.allowed()) {
+        if (world.getBlockState(pos).isAir()) {
+            return false;
+        }
+        CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos, false, false);
+        long start = System.currentTimeMillis();
+        while (true) {
+            try {
+                String result = mining.get(200, TimeUnit.MILLISECONDS);
+                boolean broke = result != null && !result.startsWith("\u26a0\ufe0f");
+                if (broke) {
+                    LOGGER.debug("Cleared block at {}", pos.toShortString());
+                    sleepQuiet(80L);
+                } else {
+                    LOGGER.debug("Could not clear block at {}: {}", pos.toShortString(), result);
+                }
+                return broke;
+            } catch (TimeoutException te) {
+                if (SkillManager.shouldAbortSkill(bot)
+                        || System.currentTimeMillis() - start > CLEAR_BLOCK_CEILING_MS) {
+                    mining.cancel(true);
+                    return false;
+                }
+            } catch (InterruptedException ie) {
+                mining.cancel(true);
+                Thread.currentThread().interrupt();
+                return false;
+            } catch (Exception e) {
+                mining.cancel(true);
                 return false;
             }
-            boolean broke = world.breakBlock(pos, true, bot);
-            if (broke) {
-                LOGGER.debug("Cleared block at {}", pos.toShortString());
-                sleepQuiet(80L);
-                return true;
-            }
         }
-        
-        return false;
     }
 
     /**

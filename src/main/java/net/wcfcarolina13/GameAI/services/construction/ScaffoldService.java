@@ -6,7 +6,6 @@ import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -486,6 +485,16 @@ public final class ScaffoldService {
         sorted.sort((a, b) -> Integer.compare(b.getY(), a.getY()));
 
         var server = world.getServer();
+        if (server == null) {
+            return 0;
+        }
+        if (server.isOnThread()) {
+            // Each break is a timed survival mine that ticks through server.execute; blocking on it
+            // here would deadlock the server thread.
+            LOGGER.warn("Refusing scaffold teardown of {} block(s) for {} on the server thread",
+                    sorted.size(), bot.getName().getString());
+            return 0;
+        }
         int removed = 0;
         for (BlockPos pos : sorted) {
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -497,22 +506,13 @@ public final class ScaffoldService {
                 continue;
             }
 
-            // Check if we're standing on this block
-            BlockPos botPos = bot.getBlockPos();
-            if (botPos.equals(pos.up())) {
-                // We're standing on it - let gravity work
-                sleepQuiet(100L);
-            }
-
-            // Schedule block breaking on the server thread via the bot's
-            // interaction manager so the break is vanilla-compliant (physical,
-            // not remote world mutation).
-            var future = new java.util.concurrent.CompletableFuture<Boolean>();
+            // Pre-check on the server thread: still a scaffold block, reachable, and allowed.
+            var precheck = new java.util.concurrent.CompletableFuture<Boolean>();
             server.execute(() -> {
                 try {
                     var state = world.getBlockState(pos);
                     if (state.isAir()) {
-                        future.complete(false);
+                        precheck.complete(false);
                         return;
                     }
                     boolean standingOnBlock = bot.getBlockPos().equals(pos.up());
@@ -520,46 +520,85 @@ public final class ScaffoldService {
                         LOGGER.info("Skipping remote scaffold teardown at {} for {}",
                                 pos.toShortString(),
                                 bot.getName().getString());
-                        future.complete(false);
+                        precheck.complete(false);
                         return;
                     }
                     boolean isScaffoldType = SCAFFOLD_BLOCKS.stream()
                             .anyMatch(item -> state.getBlock().asItem().equals(item));
-                    if (isScaffoldType) {
-                        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
-                        if (!auth.allowed()) {
-                            future.complete(false);
-                            return;
-                        }
-                        // Breaks here are instant, so a tool only adds wear unless the block needs
-                        // one to drop (stone, cobblestone, cobbled deepslate, netherrack).
-                        BotActions.selectHarvestToolOrHands(bot,
-                                net.wcfcarolina13.PlayerUtils.ScaffoldToolPolicy.teardownKeyword(state.isToolRequired()));
-                        boolean broke = bot.interactionManager.tryBreakBlock(pos);
-                        if (broke) {
-                            bot.swingHand(Hand.MAIN_HAND, true);
-                        }
-                        future.complete(broke);
-                    } else {
-                        future.complete(false);
+                    if (!isScaffoldType) {
+                        precheck.complete(false);
+                        return;
                     }
+                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+                    precheck.complete(auth.allowed());
                 } catch (Exception e) {
-                    future.complete(false);
+                    precheck.complete(false);
                 }
             });
 
+            boolean shouldBreak;
             try {
-                boolean broke = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
-                if (broke) {
-                    removed++;
-                    sleepQuiet(50L);
-                }
+                shouldBreak = precheck.get(2, java.util.concurrent.TimeUnit.SECONDS);
             } catch (Exception e) {
-                LOGGER.debug("Scaffold teardown timed out at {}: {}", pos.toShortString(), e.getMessage());
+                LOGGER.debug("Scaffold teardown pre-check timed out at {}: {}", pos.toShortString(), e.getMessage());
+                continue;
+            }
+            if (!shouldBreak) {
+                continue;
+            }
+
+            // Survival-timed break: MiningTool picks the tool (axe for planks, pickaxe for stone,
+            // else hands) and only breaks once the vanilla break time has elapsed.
+            if (mineScaffoldBlock(bot, pos)) {
+                removed++;
+                sleepQuiet(50L);
+            } else if (SkillManager.shouldAbortSkill(bot)) {
+                break;
             }
         }
 
         return removed;
+    }
+
+    /** Hard ceiling on one teardown break; MiningTool's own timeout normally fires first. */
+    private static final long TEARDOWN_BREAK_CEILING_MS = 30_000L;
+
+    /**
+     * Mine one scaffold block at survival speed from a worker thread, polling so a skill abort
+     * stops the swing. Returns true when MiningTool reports the block gone.
+     */
+    private static boolean mineScaffoldBlock(ServerPlayerEntity bot, BlockPos pos) {
+        java.util.concurrent.CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos, false, false);
+        long start = System.currentTimeMillis();
+        while (true) {
+            try {
+                String result = mining.get(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+                boolean ok = result != null && !result.startsWith("\u26a0\ufe0f");
+                if (!ok) {
+                    LOGGER.info("Scaffold teardown at {} for {} not completed: {}",
+                            pos.toShortString(), bot.getName().getString(), result);
+                }
+                return ok;
+            } catch (java.util.concurrent.TimeoutException te) {
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    mining.cancel(true);
+                    return false;
+                }
+                if (System.currentTimeMillis() - start > TEARDOWN_BREAK_CEILING_MS) {
+                    LOGGER.warn("Scaffold teardown at {} exceeded {}ms; giving up",
+                            pos.toShortString(), TEARDOWN_BREAK_CEILING_MS);
+                    mining.cancel(true);
+                    return false;
+                }
+            } catch (InterruptedException ie) {
+                mining.cancel(true);
+                Thread.currentThread().interrupt();
+                return false;
+            } catch (Exception e) {
+                mining.cancel(true);
+                return false;
+            }
+        }
     }
 
     /**
