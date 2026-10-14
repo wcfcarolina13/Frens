@@ -2,6 +2,7 @@ package net.wcfcarolina13.network;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -629,6 +630,64 @@ public final class BotActionPolicy {
         return Optional.empty();
     }
 
+    // ── Bot-slot check (pure part of AuthorizedBotDispatch, WARN-only) ─────
+
+    /**
+     * Argument names that bind the bot in the grammar of every {@link Action}'s target node:
+     * {@code bot} (return, guard, patrol, craft, cook, companion), {@code bots} (come, go_to_look,
+     * follow, follow toggle, follow-distance), {@code target} (stop, resume, standdown, sleep,
+     * follow stop, leash, fish forget, the toggles, hobby), {@code alias} (open) and
+     * {@code bot_name} (compass home/travel, spawn). Not {@code player} (follow's target player)
+     * and not {@code name} (a compass label or hobby name).
+     */
+    public static final Set<String> BOT_SLOT_ARGS = Set.of("bot", "bots", "target", "alias", "bot_name");
+
+    /**
+     * Greedy arguments that carry the bot as one token of a whitespace-split list ({@code skill},
+     * {@code fish}, {@code fortify}). The skill parser finds the bot there, so a parse that bound
+     * one of these is skipped, never reported.
+     */
+    public static final Set<String> BOT_SLOT_SKIP_ARGS = Set.of("arguments", "options");
+
+    /**
+     * Why the parsed command does not bind {@code resolvedName} in a bot slot, or empty when it
+     * does (or the check does not apply). Codes: {@code NO_BOT_SLOT} (no bot-slot argument was
+     * bound), {@code BOT_SLOT_OTHER_NAME:<arg>} (a bot slot holds another name), each followed by
+     * {@code ;IN:<arg>} when a non-bot argument holds the resolved name (the 1.1.231 CRAFT bug).
+     * A non-bot argument equal to the name is only reported when the bot slot is wrong, so
+     * {@code compass home Bob Bob} (a compass named after its bot) is fine.
+     *
+     * @param boundStringArgs argument name to bound text (unquoted) across the context chain
+     * @param botSlotNames    names that bind a bot ({@link #BOT_SLOT_ARGS})
+     * @param resolvedName    the server-resolved bot name; null or blank skips (untargeted form)
+     */
+    public static Optional<String> botSlotRefusal(Map<String, String> boundStringArgs,
+                                                  Set<String> botSlotNames, String resolvedName) {
+        if (resolvedName == null || resolvedName.isBlank()) return Optional.empty();
+        Map<String, String> bound = boundStringArgs == null ? Map.of() : boundStringArgs;
+        Set<String> slots = botSlotNames == null ? Set.of() : botSlotNames;
+        for (String name : bound.keySet()) {
+            if (BOT_SLOT_SKIP_ARGS.contains(name)) return Optional.empty();
+        }
+        String slotHolder = null;
+        String otherName = null;
+        for (Map.Entry<String, String> e : bound.entrySet()) {
+            if (!slots.contains(e.getKey())) continue;
+            if (resolvedName.equalsIgnoreCase(e.getValue())) {
+                return Optional.empty();
+            }
+            if (otherName == null) otherName = e.getKey();
+        }
+        for (Map.Entry<String, String> e : bound.entrySet()) {
+            if (!slots.contains(e.getKey()) && resolvedName.equalsIgnoreCase(e.getValue())) {
+                slotHolder = e.getKey();
+                break;
+            }
+        }
+        String code = otherName == null ? "NO_BOT_SLOT" : "BOT_SLOT_OTHER_NAME:" + otherName;
+        return Optional.of(slotHolder == null ? code : code + ";IN:" + slotHolder);
+    }
+
     // ── Throttle ────────────────────────────────────────────────────────────
 
     /**
@@ -639,10 +698,26 @@ public final class BotActionPolicy {
     /** One token back every this many ms, i.e. a steady 10 actions per second. */
     public static final long THROTTLE_REFILL_MS = 100L;
 
+    /** At most one "Slow down" notice per player this often. */
+    public static final long THROTTLE_NOTICE_MS = 2000L;
+
     /** Per-player token bucket; not thread-safe (server thread only). */
     public static final class Throttle {
         private double tokens = THROTTLE_CAPACITY;
         private long lastMs = Long.MIN_VALUE;
+        private long lastNoticeMs = Long.MIN_VALUE;
+
+        /**
+         * Whether a dropped click at {@code nowMs} should tell the player: the first time, then
+         * at most once per {@value #THROTTLE_NOTICE_MS} ms. Records the notice when true.
+         */
+        public boolean shouldNotify(long nowMs) {
+            if (lastNoticeMs != Long.MIN_VALUE && nowMs - lastNoticeMs < THROTTLE_NOTICE_MS) {
+                return false;
+            }
+            lastNoticeMs = nowMs;
+            return true;
+        }
 
         /** Takes one token if available at {@code nowMs}. */
         public boolean tryAcquire(long nowMs) {

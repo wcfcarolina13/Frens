@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -495,5 +497,70 @@ class BotActionPolicyTest {
         assertTrue(t.tryAcquire(1_150L));
         assertFalse(t.tryAcquire(1_150L));
         assertTrue(t.tryAcquire(10_000L));
+    }
+
+    @Test
+    void throttleNoticeAtMostOncePerTwoSeconds() {
+        BotActionPolicy.Throttle t = new BotActionPolicy.Throttle();
+        assertTrue(t.shouldNotify(0L));
+        assertFalse(t.shouldNotify(1_999L));
+        assertTrue(t.shouldNotify(2_000L));
+        assertFalse(t.shouldNotify(3_000L));
+        assertTrue(t.shouldNotify(10_000L));
+    }
+
+    // ── Bot-slot check (WARN-only in 1.1.232) ───────────────────────────────
+
+    private static Map<String, String> bound(String... kv) {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (int i = 0; i < kv.length; i += 2) m.put(kv[i], kv[i + 1]);
+        return m;
+    }
+
+    private static Optional<String> slot(Map<String, String> bound, String resolved) {
+        return BotActionPolicy.botSlotRefusal(bound, BotActionPolicy.BOT_SLOT_ARGS, resolved);
+    }
+
+    @Test
+    void botSlotBoundToTheResolvedBotPasses() {
+        assertEquals(Optional.empty(), slot(bound("target", "Bob"), "Bob"));
+        assertEquals(Optional.empty(), slot(bound("bots", "bob"), "Bob"));
+        assertEquals(Optional.empty(), slot(bound("alias", "Big Bob"), "Big Bob"));
+        assertEquals(Optional.empty(), slot(bound("item", "oak_planks", "material", "", "bot", "Bob"), "Bob"));
+        assertEquals(Optional.empty(), slot(bound("name", "fishing", "target", "Bob"), "Bob"));
+    }
+
+    @Test
+    void craftWithTheBotBoundToMaterialIsAMismatch() {
+        // 1.1.231: "craft <item> <amount> <bot>" parsed the bot name as <material>.
+        assertEquals(Optional.of("NO_BOT_SLOT;IN:material"),
+                slot(bound("item", "oak_planks", "material", "Bob"), "Bob"));
+    }
+
+    @Test
+    void botSlotHoldingAnotherNameIsAMismatch() {
+        assertEquals(Optional.of("BOT_SLOT_OTHER_NAME:target"), slot(bound("target", "Jake"), "Bob"));
+        assertEquals(Optional.of("NO_BOT_SLOT"), slot(bound("item", "bread"), "Bob"));
+        assertEquals(Optional.of("NO_BOT_SLOT"), slot(bound(), "Bob"));
+    }
+
+    @Test
+    void compassNamedAfterItsBotIsFine() {
+        assertEquals(Optional.empty(), slot(bound("bot_name", "Bob", "name", "Bob"), "Bob"));
+    }
+
+    @Test
+    void greedySkillFormsAndUntargetedAreSkipped() {
+        assertEquals(Optional.empty(), slot(bound("skill_name", "woodcut", "arguments", "3 Bob"), "Bob"));
+        assertEquals(Optional.empty(), slot(bound("options", "patch W1 Bob"), "Bob"));
+        assertEquals(Optional.empty(), slot(bound("item", "Bob"), null));
+        assertEquals(Optional.empty(), slot(bound("item", "Bob"), " "));
+    }
+
+    @Test
+    void playerAndNameAreNotBotSlots() {
+        assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("player"));
+        assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("name"));
+        assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("material"));
     }
 }

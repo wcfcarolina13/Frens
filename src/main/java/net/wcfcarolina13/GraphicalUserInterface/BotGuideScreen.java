@@ -694,25 +694,9 @@ public final class BotGuideScreen extends Screen {
         return botAlias;
     }
 
+    /** Operator or integrated-server host (UI hint only, the server re-checks). */
     private boolean isAdminUser() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null) {
-            return false;
-        }
-        var player = client.player;
-        if (player == null) {
-            return false;
-        }
-        try {
-            java.lang.reflect.Method m = player.getClass().getMethod("hasPermissionLevel", int.class);
-            Object r = m.invoke(player, 2);
-            if (r instanceof Boolean b) {
-                return b;
-            }
-        } catch (Throwable ignored) {
-            // Fail closed when permission APIs are unavailable.
-        }
-        return false;
+        return net.wcfcarolina13.ui.ClientAdminCheck.isLikelyAdmin();
     }
 
     private boolean isAdminOnlyGuideTopic(GuideTopic topic) {

@@ -107,8 +107,12 @@ public final class BotActionNetworkManager {
             return;
         }
         long now = System.currentTimeMillis();
-        if (!THROTTLES.computeIfAbsent(player.getUuid(), id -> new BotActionPolicy.Throttle()).tryAcquire(now)) {
+        BotActionPolicy.Throttle throttle = THROTTLES.computeIfAbsent(player.getUuid(), id -> new BotActionPolicy.Throttle());
+        if (!throttle.tryAcquire(now)) {
             LOGGER.debug("[bot-access] throttled bot action from {}", player.getName().getString());
+            if (throttle.shouldNotify(now)) {
+                tell(player, "Slow down, that click was ignored.");
+            }
             return;
         }
         Optional<BotActionPolicy.Action> parsed = BotActionPolicy.parseAction(payload.action());
@@ -175,7 +179,8 @@ public final class BotActionNetworkManager {
             tell(player, "That action had a value the server does not accept.");
             return;
         }
-        runOrTell(player, BOT_ROOT + command.get());
+        // SPAWN binds the new name in its bot_name slot, so the same check applies.
+        runOrTell(player, BOT_ROOT + command.get(), name, "SPAWN");
     }
 
     // ── Shared path (also used by dispatchFor) ──────────────────────────────
@@ -233,17 +238,18 @@ public final class BotActionNetworkManager {
             tell(player, "That action had a value the server does not accept.");
             return false;
         }
-        FortifyWallEditPolicy.Use wallUse = BotActionPolicy.fortifyEditsSavedWall(action, args)
-                ? FortifyWallEditPolicy.Use.EDIT
-                : BotActionPolicy.fortifyReadsSavedWall(action, args) ? FortifyWallEditPolicy.Use.VIEW : null;
+        // expand changes the hull (EDIT), resume/patch/patch_auto/moat work on the plan (WORK, wall
+        // grantees allowed), status/drift report (VIEW), start/list touch no saved wall (null).
+        FortifyWallEditPolicy.Use wallUse = action == BotActionPolicy.Action.FORTIFY && !args.isEmpty()
+                ? FortifyWallEditPolicy.useForSub(args.get(0)) : null;
         // bot null is the untargeted form, which only a server admin reaches (checked above).
         if (wallUse != null && bot != null) {
             String label = args.size() > 1 ? args.get(1) : "";
             BaseNetworkManager.WallCheck wall = BaseNetworkManager.checkWallForBot(player, bot, label, wallUse);
             if (!wall.allowed()) {
                 BotAccessGate.warnDenied(player, targetName, action.name(),
-                        wallUse == FortifyWallEditPolicy.Use.EDIT ? "WALL_NOT_EDITABLE" : "WALL_NOT_VISIBLE");
-                tell(player, "You cannot work on that wall.");
+                        wallUse == FortifyWallEditPolicy.Use.VIEW ? "WALL_NOT_VISIBLE" : "WALL_NOT_EDITABLE");
+                tell(player, wall.refusalMessage());
                 return false;
             }
             // Blank label: name the wall that was checked, so the skill cannot pick another one
@@ -260,12 +266,15 @@ public final class BotActionNetworkManager {
                 }
             }
         }
-        return runOrTell(player, BOT_ROOT + command.get());
+        return runOrTell(player, BOT_ROOT + command.get(), botName, action.name());
     }
 
-    /** Runs under the grant; a refusal (parse error, unread input, nested dispatch) is told to the player. */
-    private static boolean runOrTell(ServerPlayerEntity player, String command) {
-        if (AuthorizedBotDispatch.run(player, command) > 0) {
+    /**
+     * Runs under the grant; a refusal (parse error, unread input, nested dispatch) is told to the
+     * player. {@code botName} null (untargeted form) skips the WARN-only bot-slot check.
+     */
+    private static boolean runOrTell(ServerPlayerEntity player, String command, String botName, String actionName) {
+        if (AuthorizedBotDispatch.run(player, command, botName, actionName) > 0) {
             return true;
         }
         tell(player, "That button could not run. Check the server log.");

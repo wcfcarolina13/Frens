@@ -2,6 +2,7 @@ package net.wcfcarolina13.network;
 
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.context.CommandContextBuilder;
+import com.mojang.brigadier.context.ParsedArgument;
 import com.mojang.brigadier.context.ParsedCommandNode;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
@@ -11,7 +12,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -55,6 +58,18 @@ public final class AuthorizedBotDispatch {
      * @throws IllegalStateException when called off the server thread
      */
     public static int run(ServerPlayerEntity player, String command) {
+        return run(player, command, null, null);
+    }
+
+    /**
+     * {@link #run(ServerPlayerEntity, String)} plus a WARN-only check that the parse bound
+     * {@code resolvedBotName} in a bot slot ({@link BotActionPolicy#botSlotRefusal}). A mismatch
+     * logs {@code [bot-access] bot-slot mismatch} and the command still runs (1.1.232).
+     *
+     * @param resolvedBotName the server-resolved bot name, or null for the untargeted form (skipped)
+     * @param actionName      the UI action, for the log line only (may be null)
+     */
+    public static int run(ServerPlayerEntity player, String command, String resolvedBotName, String actionName) {
         if (player == null || command == null || command.isBlank()) {
             return 0;
         }
@@ -92,11 +107,55 @@ public final class AuthorizedBotDispatch {
                         logName(player), refusal.get(), command);
                 return 0;
             }
+            if (resolvedBotName != null) {
+                Optional<String> mismatch = BotActionPolicy.botSlotRefusal(
+                        boundArguments(parse, command), BotActionPolicy.BOT_SLOT_ARGS, resolvedBotName);
+                if (mismatch.isPresent()) {
+                    LOGGER.warn("[bot-access] bot-slot mismatch action={} bot={} reason={} cmd={}",
+                            actionName, resolvedBotName, mismatch.get(), command);
+                }
+            }
             manager.execute(parse, command);
             return 1;
         } finally {
             grantedPlayer = previous;
         }
+    }
+
+    /**
+     * Every bound argument across the context chain, by node name: a String result as parsed,
+     * anything else (an entity selector, a position) as its input text, unquoted. Numbers are
+     * left out, so a radius cannot look like a bot called "8".
+     */
+    private static Map<String, String> boundArguments(ParseResults<ServerCommandSource> parse, String command) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (CommandContextBuilder<ServerCommandSource> b = parse.getContext(); b != null; b = b.getChild()) {
+            for (Map.Entry<String, ParsedArgument<ServerCommandSource, ?>> e : b.getArguments().entrySet()) {
+                Object result = e.getValue().getResult();
+                if (result instanceof Number || result instanceof Boolean) {
+                    continue;
+                }
+                String text;
+                if (result instanceof String str) {
+                    text = str;
+                } else {
+                    try {
+                        text = unquote(e.getValue().getRange().get(command));
+                    } catch (RuntimeException ex) {
+                        continue;
+                    }
+                }
+                out.put(e.getKey(), text);
+            }
+        }
+        return out;
+    }
+
+    private static String unquote(String raw) {
+        if (raw.length() >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
+            return raw.substring(1, raw.length() - 1).replace("\\\"", "\"").replace("\\\\", "\\");
+        }
+        return raw;
     }
 
     /**

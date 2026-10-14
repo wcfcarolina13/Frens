@@ -635,39 +635,29 @@ public final class BotSkinChooserScreen extends Screen {
         return null;
     }
 
+    /** Operator or integrated-server host (UI hint only, the server re-checks). */
     private boolean isCurrentPlayerAdmin() {
-        if (this.client == null) {
-            return false;
-        }
-        if (this.client.isInSingleplayer()) {
-            return true;
-        }
-        if (this.client.player == null) {
-            return false;
-        }
-        try {
-            java.lang.reflect.Method m = this.client.player.getClass().getMethod("hasPermissionLevel", int.class);
-            Object out = m.invoke(this.client.player, 2);
-            return out instanceof Boolean b && b;
-        } catch (Throwable ignored) {
-            return false;
-        }
+        return net.wcfcarolina13.ui.ClientAdminCheck.isLikelyAdmin();
     }
 
+    /**
+     * This screen opens only from the bot's inventory screen, which the server shows only to the
+     * bot's owner, an operator or the host, and SkinChangePolicy lets each of them set presets.
+     * So presets are always offered here. allowEveryoneSkinChange no longer changes the server
+     * decision, so it does not gate the chooser.
+     */
     private boolean canUsePresetChanges() {
-        return isCurrentPlayerAdmin() || FrensClient.isSkinChangeForEveryoneEnabled();
+        return true;
     }
 
+    /** Custom URLs: admins, or the owner when allowCustomSkins is on. */
     private boolean canUseCustomUrl() {
         return isCurrentPlayerAdmin() || FrensClient.isCustomSkinsEnabled();
     }
 
     private String buildPolicyNotice() {
-        if (!canUsePresetChanges()) {
-            return "Skin changes are currently restricted to server admins.";
-        }
         if (!isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
-            return "Custom URL skins are disabled for non-admins; existing custom skins were reset to Steve.";
+            return "Custom URL skins are disabled for non-admins. Existing custom skins were reset to Steve.";
         }
         if (isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
             return "Custom URL skins are disabled for non-admin players.";

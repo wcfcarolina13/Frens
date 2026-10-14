@@ -2461,35 +2461,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, label, textX, y + 2, color, false);
     }
 
+    /** Operator or integrated-server host (UI hint only, the server re-checks). */
     private boolean isAdminUser() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null) {
-            return false;
-        }
-
-        // Singleplayer host is always admin — they own the world.
-        if (client.isInSingleplayer()) {
-            return true;
-        }
-
-        var player = client.player;
-        if (player == null) {
-            return false;
-        }
-
-        // Match server-side command permission gates (/bot ... requires level 2/op equivalent).
-        try {
-            java.lang.reflect.Method m = player.getClass().getMethod("hasPermissionLevel", int.class);
-            Object r = m.invoke(player, 2);
-            if (r instanceof Boolean b) {
-                return b;
-            }
-        } catch (Throwable ignored) {
-            // Fall through to stricter fallback below.
-        }
-
-        // When permission-level APIs are unavailable in current mappings, fail closed.
-        return false;
+        return net.wcfcarolina13.ui.ClientAdminCheck.isLikelyAdmin();
     }
 
     private void drawDialogueColumn(DrawContext context, int x, int y, int w, int h) {
