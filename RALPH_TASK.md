@@ -3,7 +3,33 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-13 (1.1.230) — next session starts here
+## Session Handoff 2026-10-13 (1.1.231) — next session starts here
+
+**State:** main = origin/main @ 1.1.231. Suite 1979 green (1937 → 1979). Codex seats still paused (Opus reviewers).
+Modrinth: 1.1.230 is the latest published. 1.1.231 NOT published (needs Bradley; copy
+`.superpowers/sdd/modrinth/publish-1.1.230.sh`, JAR >10 MB).
+
+**Shipped in 1.1.231:** multiplayer non-op owners can use every Frens button and key for their own bot. Typed
+`BotActionPayload` → pure `BotActionPolicy` 36-action allowlist (server-resolved bot name, closed arg shapes) →
+`AuthorizedBotDispatch` per-call server-thread grant around a synchronous parse+execute. Chat fallback when the server
+lacks the payload. Feed [Yes]/[No] moved to `/frens feed confirm|cancel`, hunt target and skill resume dispatch under
+the grant, fortify wall edits/status/drift checked against wall ownership and visibility, `fortify list` admin only.
+Details, rulings, cost-if-wrong in `changelog.md`.
+
+**Field checks pending:** Phase 6ac (6 items, now 259). Run its FIRST item single-player before anything else: ops and
+the host go through the new payload too, nothing has run in game yet. The rest need a LAN guest / second account.
+Then 6ab, 6aa … 6b.
+
+**Deferred (reasons in changelog):** companion buttons for non-op owners (`isAuthorizedCompanionCommander` recruiter
+or op only), Grant Wall Access (`allowedOwnerUuids`) not honoured by `BaseAccessPolicy.canEdit(WALL)`, post-parse
+bot-slot assertion, throttle message, SPAWN for owners, typed `/bot` for owners, BPIS `isAdminUser` reflective check,
+legacy ownerless walls refused for non-ops.
+
+**Next (in order):**
+1. Host sweep of remaining op-only gates (now includes the companion and wall-access items above).
+2. Chat action requests. 3. Fresh-install leftovers. 4. Bot livestream.
+
+## Session Handoff 2026-10-13 (1.1.230) — superseded
 
 **State:** main = origin/main @ 1.1.230. Suite 1937 green. **Codex seats paused** until Bradley says otherwise (plan
 downgraded): reviews and scoping go to Opus subagents.

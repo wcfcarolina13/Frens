@@ -2,6 +2,41 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Multiplayer non-op owners can use the Frens UI for their own bots; 1.1.231 (2026-10-13)
+
+Before this build every Frens button and key sent a `/bot ...` chat command, and `/bot` is op-or-host only, so a non-op owner on a dedicated server or a LAN guest could not command their own bot from the UI. Bradley chose a scoped grant over rewriting each button as a direct service call: the UI sends a typed action, the server checks it and builds the `/bot` command itself, then runs it through the normal handlers with a one-call permission grant. Loop: scope (done 2026-10-13) → A (foundation) → B (FrensClient) → C, D1, D2 in parallel on separate files → two Opus reviewers (security, correctness) → one fix wave → scoped re-review. No Codex.
+
+- **Foundation** (`0f52c9f6`). `BotActionPayload(action, botAlias, args)` (`frens:bot_action`) and `BotActionNetworkManager`. The pure `BotActionPolicy` is a 36-action allowlist: each action is BOT_OWNER (owner, op or host via `BotAccessPolicy.authorize`) or SERVER_ADMIN (SPAWN, fortify list). Every argument has a closed shape (int ranges, fixed name lists, a strict id charset). `all`, `each` and any bot name are refused as words. The canonical builder uses the server-resolved bot profile name and never a client string. `AuthorizedBotDispatch.run(player, cmd)` is server-thread only. It sets a per-player grant before `dispatcher.parse` (Brigadier checks `requires` at parse time), runs the same ParseResults, and restores the previous grant in `finally`. It refuses on parse errors, unread input, the ungated `inline` catch-all, or a command context that is already running: `CommandManager.execute` would queue the command after our `finally` (javap 1.21.11). `Frens.hasBotCommandPermission` honours the grant. Its only inner-admin callers, recruit admin and `SurvivalRecruitmentService`, are not buildable. `BotAccessGate` uses `Frens.isOperator`, so the grant never reaches it. A blank alias resolves only to the sender's single owned bot. Ops and the host keep the untargeted form. There is a per-player token bucket (burst 20, then one per 100 ms). `BotActionClientSender.send` sends the payload when the server can receive it, else the old chat command.
+- **Client sites** (`3bb9d2a1` FrensClient 21, `bf9219b4` BotPlayerInventoryScreen 32, `fa63b34f` Base/Restore/Hobbies/Construction/Crafting/Cookables/Huntables 18). One `send` call each, with the old string kept as the fallback. Pending directional mining now carries (Action, alias, args). Crafting History receives the open bot's name. Inventory-screen Companion buttons now name the open bot.
+- **Server re-dispatches** (`d711d701`):
+  - Feed [Yes]/[No] buttons run `/frens feed confirm|cancel <uuid>` under the open root. Only the player who made the offer can confirm or cancel it, where before any clicker could clear it.
+  - The hunt target re-dispatch resolves the bot on the server and uses the registry mob id.
+  - Skill resume after death runs under the grant for non-op players (bot looked up by UUID, `BotAccessGate.permits`). Ops and console keep the direct path.
+  - Fortify edits on a saved wall pass `BaseAccessPolicy.canEdit(WALL)` (`FortifyWallEditPolicy`, `BaseNetworkManager.checkWallForBot`).
+  - D1 also found that A's builder left out the `bot ` root, which would have refused every button. Fixed here.
+- **Fix wave** (`0bfca5bc`), from the security and correctness reviews:
+  - CRAFT x1 built `craft <item> <bot>`, and Brigadier bound the bot name to the `material` slot, so another bot crafted. It is now always `craft <item> <n> "" <bot>`.
+  - Fortify labels can't contain words the skill parser strips (`auto`, numbers, `key=value`, ascent/descent, block ids). This closes `patch theirwall auto` checking a non-existent wall and then patching "theirwall".
+  - `fortify list` is admin only, because it printed every wall's coordinates. `status`/`drift` follow the Base screen's wall visibility rule.
+  - A blank fortify label now carries the server-checked nearest wall name, so the wall that was checked is the one used.
+  - A refused dispatch tells the player "That button could not run. Check the server log."
+  - The hunt count cap is 99999, matching the 5-digit field.
+  - Compass names no longer ban bot-name words, since the bot sits in its own slot.
+  - The legacy chat-only directional path in FrensClient is gone.
+  - The hobby list has one source (`ui/HobbyBitOrder`), with a test.
+
+**Rulings (made for Bradley, cost if wrong):**
+- Ops and the host also go through the payload, so there is one code path. If wrong, a dispatch bug breaks every button for everyone, which is why the field phase starts single-player.
+- Fortify `list` is admin only. If wrong, owners lose a chat list they can already see in the Base screen.
+- The hunt cap was raised to 99999 rather than refusing large counts. Cost: none.
+- Grant Wall Access (`allowedOwnerUuids`) is still not honoured for fortify edits. If wrong, granted players are refused (fails closed).
+
+**Deferred:** a post-parse check that the bot slot bound the resolved name (only an admin can spawn a bot named like a keyword); `allowedOwnerUuids` enforcement; a throttle message; companion host clause and `isAuthorizedCompanionCommander` (recruiter or op only, so non-op owners' companion buttons are still refused); SPAWN for owners; typed `/bot` for owners; the BPIS `isAdminUser` reflective check (ops may not see the Admin tab on dedicated); legacy walls with no owner are refused for non-ops (fails closed).
+
+Tests 1937 → 1979.
+
+**Field checks:** Phase 6ac. Most items need a second account or a LAN guest.
+
 ## Woodcut explains protected trees once; 1.1.230 (2026-10-13)
 
 Bradley's follow-up to 1.1.229: trees inside your own base stay protected, but on a new world it wasn't clear why a bot skipped the trees next to it and walked far away. One implementer (Opus), controller read the full diff (two small commits, no reviewer) and added the Guide text inline. Codex seats paused from here on (Bradley's ChatGPT plan downgraded).
