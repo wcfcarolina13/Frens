@@ -67,11 +67,7 @@ public SkillExecutionResult execute(SkillContext context) {
         ServerWorld world = source.getWorld();
         int pass = 0;
         int collectedCount = 0;
-        int remaining = world.getEntitiesByClass(
-                ItemEntity.class,
-                bot.getBoundingBox().expand(effectiveRadius, effectiveVertical, effectiveRadius),
-                item -> !item.isRemoved()
-        ).size();
+        int remaining = countItemsInRange(world, bot, effectiveRadius, effectiveVertical);
 
         try {
             while (pass < passes) {
@@ -82,10 +78,9 @@ public SkillExecutionResult execute(SkillContext context) {
                 
                 // Check if inventory is full - ALWAYS terminate drop_sweep if full
                 if (!DropSweeper.ensureSpaceForDropSweep(source, bot)) {
-                    String invFullMsg = String.format(Locale.ROOT,
-                            "Inventory is full! No space could be freed. Collected %d items across %d pass(es). Terminating drop_sweep.",
-                            collectedCount, pass);
-                    LOGGER.info("drop_sweep terminated due to full inventory: {}", invFullMsg);
+                    String invFullMsg = DropSweepMessages.inventoryFull(collectedCount);
+                    LOGGER.info("drop_sweep terminated due to full inventory after {} pass(es), collected {} item(s)",
+                            pass, collectedCount);
                     bot.sendMessage(Text.literal(invFullMsg), false);
                     return SkillExecutionResult.success(invFullMsg);
                 }
@@ -95,7 +90,7 @@ public SkillExecutionResult execute(SkillContext context) {
                 }
 
                 try {
-                    DropSweeper.sweep(
+                    collectedCount += DropSweeper.sweepCounted(
                             source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
                             effectiveRadius,
                             effectiveVertical,
@@ -123,27 +118,22 @@ public SkillExecutionResult execute(SkillContext context) {
                     
                     // Check inventory before attempting each item pickup
                     if (!DropSweeper.ensureSpaceForDropSweep(source, bot)) {
-                        String invFullMsg = String.format(Locale.ROOT,
-                                "Inventory is full! No space could be freed. Collected %d items. Terminating drop_sweep.",
+                        String invFullMsg = DropSweepMessages.inventoryFull(collectedCount);
+                        LOGGER.info("drop_sweep terminated during pickup due to full inventory, collected {} item(s)",
                                 collectedCount);
-                        LOGGER.info("drop_sweep terminated during pickup due to full inventory: {}", invFullMsg);
                         bot.sendMessage(Text.literal(invFullMsg), false);
                         return SkillExecutionResult.success(invFullMsg);
                     }
                     
-                    boolean collected = collectSingleDrop(source, bot, item);
-                    if (collected) {
-                        collectedCount++;
+                    int collected = collectSingleDrop(source, bot, item);
+                    if (collected > 0) {
+                        collectedCount += collected;
                         collectedThisPass = true;
                     }
                     BotEventHandler.collectNearbyDrops(bot, 2.0D);
                 }
 
-                remaining = world.getEntitiesByClass(
-                        ItemEntity.class,
-                        bot.getBoundingBox().expand(effectiveRadius, effectiveVertical, effectiveRadius),
-                        item -> !item.isRemoved()
-                ).size();
+                remaining = countItemsInRange(world, bot, effectiveRadius, effectiveVertical);
 
                 if (remaining == 0) {
                     break;
@@ -161,17 +151,31 @@ public SkillExecutionResult execute(SkillContext context) {
             BotActions.sneak(bot, false);
         }
 
-        String summary = String.format(Locale.ROOT,
+        String detail = String.format(Locale.ROOT,
                 "Swept drops within radius %.1f (%.1f vertical) across %d pass(es). Remaining items: %d, collected: %d",
                 effectiveRadius, effectiveVertical, pass + 1, Math.max(remaining, 0), collectedCount);
-        LOGGER.info("drop_sweep completed: {}", summary);
-        return SkillExecutionResult.success(summary);
+        LOGGER.info("drop_sweep completed: {}", detail);
+        return SkillExecutionResult.success(DropSweepMessages.summary(collectedCount, remaining));
 }
 
-private boolean collectSingleDrop(ServerCommandSource source, ServerPlayerEntity bot, ItemEntity drop) {
-    if (drop == null || drop.isRemoved()) {
-        return false;
+/** Items (stack counts) still lying within the sweep range. */
+private static int countItemsInRange(ServerWorld world, ServerPlayerEntity bot, double radius, double vertical) {
+    int total = 0;
+    for (ItemEntity item : world.getEntitiesByClass(
+            ItemEntity.class,
+            bot.getBoundingBox().expand(radius, vertical, radius),
+            item -> !item.isRemoved())) {
+        total += item.getStack().getCount();
     }
+    return total;
+}
+
+/** @return items actually picked up from {@code drop} (0 if it is still lying there untouched). */
+private int collectSingleDrop(ServerCommandSource source, ServerPlayerEntity bot, ItemEntity drop) {
+    if (drop == null || drop.isRemoved()) {
+        return 0;
+    }
+    int countBefore = drop.getStack().getCount();
     BlockPos dropPos = drop.getBlockPos().toImmutable();
     MovementService.MovementOptions options = MovementService.MovementOptions.lootCollection();
     boolean moved = false;
@@ -200,7 +204,7 @@ private boolean collectSingleDrop(ServerCommandSource source, ServerPlayerEntity
             BotActions.sneak(bot, false);
         }
     }
-    return drop.isRemoved();
+    return DropSweeper.pickedUpFrom(drop, countBefore);
 }
 
 private boolean attemptEdgeApproach(ServerPlayerEntity bot, BlockPos dropPos) {

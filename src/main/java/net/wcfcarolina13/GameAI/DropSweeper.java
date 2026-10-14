@@ -52,6 +52,19 @@ public final class DropSweeper {
                              double verticalRange,
                              int maxTargets,
                              long maxDurationMillis) {
+        sweepCounted(source, horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
+    }
+
+    /**
+     * Same as {@link #sweep} but returns how many items (stack counts, not entities) the bot
+     * actually picked up from the drops it targeted. Standing within pickup distance of a drop
+     * does not count; only a drop that shrank or vanished does.
+     */
+    public static int sweepCounted(ServerCommandSource source,
+                                   double horizontalRadius,
+                                   double verticalRange,
+                                   int maxTargets,
+                                   long maxDurationMillis) {
         LOGGER.debug("Drop sweep initiated with radius={}, vRange={}, maxTargets={}, duration={}ms",
                 horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
         ServerPlayerEntity player = source.getPlayer();
@@ -60,12 +73,12 @@ public final class DropSweeper {
         }
         if (player == null) {
             LOGGER.debug("Drop sweep skipped: no bot player available.");
-            return;
+            return 0;
         }
         ServerWorld world = source.getWorld();
         if (world == null) {
             LOGGER.debug("Drop sweep skipped: no server world on source.");
-            return;
+            return 0;
         }
 
         // Store original teleport preference and set drop sweep preference
@@ -74,14 +87,14 @@ public final class DropSweeper {
         SkillPreferences.setTeleportDuringSkills(player.getUuid(), dropSweepTeleport);
         
         try {
-            performSweep(source, player, world, horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
+            return performSweep(source, player, world, horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
         } finally {
             // Restore original teleport preference
             SkillPreferences.setTeleportDuringSkills(player.getUuid(), originalTeleport);
         }
     }
 
-    private static void performSweep(ServerCommandSource source,
+    private static int performSweep(ServerCommandSource source,
                                      ServerPlayerEntity player,
                                      ServerWorld world,
                                      double horizontalRadius,
@@ -95,6 +108,7 @@ public final class DropSweeper {
         ServerPlayerEntity commander = resolveCommanderForBundle(player, source);
 
         Set<ItemEntity> excludedDrops = new HashSet<>();
+        int pickedUp = 0;
 
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
             if (isInventoryFull(player)) {
@@ -127,6 +141,7 @@ public final class DropSweeper {
             }
 
             BlockPos dropPos = dropBlock;
+            int countBefore = targetDrop.getStack().getCount();
             MovementService.MovementOptions options = MovementService.MovementOptions.lootCollection();
             Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(player, dropPos, options);
             if (planOpt.isEmpty()) {
@@ -192,11 +207,27 @@ public final class DropSweeper {
             } else {
                 LOGGER.info("Drop sweep failed to approach {}: {}", dropPos, movement.detail());
             }
+            pickedUp += pickedUpFrom(targetDrop, countBefore);
         }
 
         Vec3d finalPos = currentPosition(player);
         double movedDistance = finalPos.distanceTo(origin);
-        LOGGER.debug("Drop sweep completed after {} attempt(s), total displacement {}m.", attempts, String.format("%.2f", movedDistance));
+        LOGGER.debug("Drop sweep completed after {} attempt(s), total displacement {}m, picked up {} item(s).",
+                attempts, String.format("%.2f", movedDistance), pickedUp);
+        return pickedUp;
+    }
+
+    /**
+     * Items taken from {@code drop} since its count was {@code countBefore}: the whole stack if the
+     * entity is gone, otherwise how much it shrank (a partial pickup into a nearly full inventory).
+     * A drop that merged into a neighbouring stack also reads as gone.
+     */
+    public static int pickedUpFrom(ItemEntity drop, int countBefore) {
+        if (drop == null || countBefore <= 0) {
+            return 0;
+        }
+        int after = drop.isRemoved() ? 0 : drop.getStack().getCount();
+        return Math.max(0, countBefore - after);
     }
 
     private static ItemEntity findClosestDrop(ServerPlayerEntity player, ServerWorld world, double radius, double verticalRange, Set<ItemEntity> excludedDrops) {

@@ -1,7 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTask;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
@@ -40,10 +39,10 @@ public final class BotIdleResumeService {
         if (server == null || bot == null || bot.isRemoved()) {
             return;
         }
-        long now = server.getTicks();
-        long due = now + Math.max(1L, delayTicks);
-
-        server.send(new ServerTask((int) due, () -> {
+        // A real delay: ServerTask's tick stamp is only a creation time, so the old
+        // server.send(new ServerTask(due, ...)) ran at the next idle moment and the sleep
+        // retries fired almost back to back instead of 5 s apart.
+        TaskService.runOnServerAfterTicks(server, Math.max(1L, delayTicks), () -> {
             if (bot.isRemoved() || !bot.isAlive()) {
                 return;
             }
@@ -79,6 +78,6 @@ public final class BotIdleResumeService {
                 BotIdleHobbiesService.requestDecisionNow(bot);
                 LOGGER.info("Auto-resumed idle for {} (reason={})", bot.getName().getString(), reason);
             }
-        }));
+        });
     }
 }

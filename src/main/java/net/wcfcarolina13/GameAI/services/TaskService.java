@@ -1,7 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
@@ -577,8 +576,7 @@ public final class TaskService {
                             LOGGER.info("Scheduling post-task safety check for bot {} after task '{}'", 
                                        bot.getName().getString(), ticket.name());
                             // Run a few ticks later to let vanilla position updates settle.
-                            long due = server.getTicks() + 5L;
-                            server.send(new ServerTask((int) due, () -> {
+                            runOnServerAfterTicks(server, 5L, () -> {
                                 if (!bot.isRemoved()) {
                                     LOGGER.info("Running post-task safety check for bot {} at position {}", 
                                                bot.getName().getString(), bot.getBlockPos().toShortString());
@@ -586,7 +584,7 @@ public final class TaskService {
                                 } else {
                                     LOGGER.warn("Bot was removed before post-task safety check could run");
                                 }
-                            }));
+                            });
                         }
                     }
 
@@ -784,6 +782,9 @@ public final class TaskService {
         if (lower.equals("skill:wool") || lower.equals("skill:shear")) return true;
         if (lower.equals("skill:fortifyvillage") || lower.equals("skill:fortify")
                 || lower.equals("skill:fortify_village")) return true;
+        // Drop sweep ends where the drops were, a few blocks from the player; a return
+        // after it only produced a fast-travel gear refusal in chat.
+        if (lower.equals("skill:drop_sweep")) return true;
         return false;
     }
 
@@ -811,15 +812,15 @@ public final class TaskService {
         LOGGER.info("Post-task return: scheduling for {} in {} ticks",
                 bot.getName().getString(), POST_TASK_RETURN_DELAY_TICKS);
 
-        srv.send(new ServerTask((int) (srv.getTicks() + POST_TASK_RETURN_DELAY_TICKS), () -> {
+        runOnServerAfterTicks(srv, POST_TASK_RETURN_DELAY_TICKS, () -> {
             if (bot.isRemoved()) return;
             // Abort if the bot started a new task or already reached surface
             if (hasActiveTask(botUuid)) return;
             // Follow resumed after the task (1.1.229): follow owns movement now, and a
             // fast-travel to a closer bed/base would just be walked back by follow.
             if (BotEventHandler.isFollowingPlayer(bot)) return;
-            if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world
-                    && BotFleeService.isAtSurface(bot, world)) return;
+            if (!(bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world)) return;
+            if (BotFleeService.isAtSurface(bot, world)) return;
 
             net.minecraft.util.math.BlockPos destination = resolvePostTaskDestination(bot, srv);
             if (destination == null) {
@@ -827,13 +828,116 @@ public final class TaskService {
                 return;
             }
 
-            UUID ownerUuid = commander.getUuid();
             String alias = bot.getName().getString();
-            LOGGER.info("Post-task return: {} fast-traveling to {}", alias, destination.toShortString());
-            NavigationArtifactService.beginDelayedTravel(
-                    srv, bot, alias, destination,
-                    bot.getEntityWorld().getRegistryKey(), 40, ownerUuid);
-        }));
+            double distSq = bot.squaredDistanceTo(net.minecraft.util.math.Vec3d.ofBottomCenter(destination));
+            PostTaskReturnPolicy.Action action = PostTaskReturnPolicy.decide(distSq);
+            switch (action) {
+                case NONE -> LOGGER.info("Post-task return: {} already near {}, staying put",
+                        alias, destination.toShortString());
+                case WALK -> startPostTaskWalk(bot, destination, Math.sqrt(distSq));
+                case FAST_TRAVEL -> {
+                    // Automatic return: a missing-gear refusal is logged, never posted to chat.
+                    net.minecraft.registry.RegistryKey<net.minecraft.world.World> dimension =
+                            world.getRegistryKey();
+                    NavigationArtifactService.TravelTierResult tier =
+                            resolveTravelTierQuietly(srv, bot,
+                                    srv.getPlayerManager().getPlayer(commander.getUuid()),
+                                    destination, dimension, world);
+                    if (tier != null && !tier.allowed()) {
+                        LOGGER.info("Post-task return: {} cannot fast-travel to {} ({}); not returning",
+                                alias, destination.toShortString(), tier.reason());
+                        return;
+                    }
+                    LOGGER.info("Post-task return: {} fast-traveling to {}", alias, destination.toShortString());
+                    NavigationArtifactService.beginDelayedTravel(
+                            srv, bot, alias, destination, dimension, 40, commander.getUuid());
+                }
+            }
+        });
+    }
+
+    /**
+     * Same surface/underground tier choice beginDelayedTravel makes (its own gate at the
+     * travel-tier resolver), evaluated up front so an automatic return can stay quiet instead of
+     * posting the "needs a Map + Compass" refusal. Server thread only (the artifact scan reads
+     * inventories and the ender chest).
+     */
+    private static NavigationArtifactService.TravelTierResult resolveTravelTierQuietly(
+            MinecraftServer srv, ServerPlayerEntity bot, ServerPlayerEntity owner,
+            net.minecraft.util.math.BlockPos destination,
+            net.minecraft.registry.RegistryKey<net.minecraft.world.World> dimension,
+            net.minecraft.server.world.ServerWorld world) {
+        try {
+            boolean underground = false;
+            if (!world.isSkyVisible(bot.getBlockPos().up())) {
+                int surfaceY = SafePositionService.getWalkableGroundY(world, bot.getBlockX(), bot.getBlockZ());
+                underground = bot.getBlockPos().getY() < surfaceY - 4;
+            }
+            return underground
+                    ? NavigationArtifactService.resolveUndergroundTier(srv, bot, owner, destination, dimension)
+                    : NavigationArtifactService.resolveSurfaceTier(srv, bot, owner, destination, dimension);
+        } catch (RuntimeException e) {
+            LOGGER.warn("Post-task return: travel tier pre-check failed for {}: {}",
+                    bot.getName().getString(), e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * Short automatic return on foot. Runs as an ambient task on a worker thread: a walk on the
+     * server thread never moves the bot, and the ambient ticket makes it stoppable with /bot stop.
+     * No snap or teleport, and no chat.
+     */
+    private static void startPostTaskWalk(ServerPlayerEntity bot,
+                                          net.minecraft.util.math.BlockPos destination,
+                                          double distance) {
+        String alias = bot.getName().getString();
+        ServerCommandSource source = bot.getCommandSource().withSilent();
+        boolean started = runAmbient(source, bot, "post_task_return", () -> {
+            Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+                    bot, destination, MovementService.MovementOptions.lootCollection());
+            if (plan.isEmpty()) {
+                LOGGER.info("Post-task return: no walkable approach to {} for {}",
+                        destination.toShortString(), alias);
+                return;
+            }
+            MovementService.MovementResult result =
+                    MovementService.execute(source, bot, plan.get(), Boolean.FALSE, false, true, false);
+            LOGGER.info("Post-task return: {} walk to {} {} ({})", alias, destination.toShortString(),
+                    result.success() ? "arrived" : "failed", result.detail());
+        });
+        LOGGER.info("Post-task return: {} walking {} blocks to {}{}", alias,
+                String.format(java.util.Locale.ROOT, "%.1f", distance), destination.toShortString(),
+                started ? "" : " (not started, task slot busy)");
+    }
+
+    /**
+     * Runs {@code body} on the server thread after roughly {@code ticks} game ticks.
+     * {@code server.send(new ServerTask(due, ...))} is not a delay: the tick stamp is only a
+     * creation time and the task runs on the next idle moment. This waits on a scheduler thread
+     * instead, then hops to the server, so nothing ever sleeps on the server thread.
+     */
+    public static void runOnServerAfterTicks(MinecraftServer server, long ticks, Runnable body) {
+        if (server == null || body == null) {
+            return;
+        }
+        long delayMs = Math.max(1L, ticks) * 50L;
+        java.util.concurrent.CompletableFuture
+                .delayedExecutor(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .execute(() -> {
+                    if (SERVER_STOPPING) {
+                        return;
+                    }
+                    try {
+                        server.execute(() -> {
+                            if (!SERVER_STOPPING) {
+                                body.run();
+                            }
+                        });
+                    } catch (RuntimeException e) {
+                        LOGGER.debug("Delayed server task dropped: {}", e.toString());
+                    }
+                });
     }
 
     /**
