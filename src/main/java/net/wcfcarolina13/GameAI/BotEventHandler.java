@@ -35,7 +35,6 @@ import net.minecraft.world.World;
 import net.minecraft.world.GameMode;
 import net.minecraft.entity.EntityType;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
-import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
 import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.DropReachPolicy;
 import net.wcfcarolina13.GameAI.services.DropStandHelper;
@@ -71,8 +70,6 @@ import net.wcfcarolina13.Entity.FaceClosestEntity;
 
 import java.util.ArrayList;
 import net.wcfcarolina13.PlayerUtils.*;
-import net.wcfcarolina13.WorldUitls.GetTime;
-import net.wcfcarolina13.Entity.EntityDetails;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.TaskService;
@@ -94,7 +91,6 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.Entity.createFakePlayer;
-import net.wcfcarolina13.WorldUitls.isBlockItem;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,7 +113,6 @@ public class BotEventHandler {
     public static ServerPlayerEntity bot = null;
     // Stage-2 refactor: primary bot selection moved to BotLifecycleService.
     private static final Object monitorLock = new Object();
-    private static final double DEFAULT_RISK_APPETITE = 0.5; // Default value upon respawn
     public static int botSpawnCount = 0;
     // Stage-2 refactor: last spawn state moved to BotLifecycleService.
     private static final Random RANDOM = new Random();
@@ -7222,73 +7217,6 @@ public class BotEventHandler {
         } else {
             BotActions.lowerShield(bot);
         }
-    }
-
-
-    public static State createInitialState(ServerPlayerEntity bot) {
-        List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
-        ItemStack selectedItemStack = hotBarUtils.getSelectedHotbarItemStack(bot);
-
-        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
-
-        List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
-
-	        BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
-	        boolean confinedNoEscape = environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute() && !environmentSnapshot.hasHeadroom();
-	        if (!confinedNoEscape) {
-	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
-	        }
-
-        SelectedItemDetails selectedItem = new SelectedItemDetails(
-                selectedItemStack.getItem().getName().getString(),
-                selectedItemStack.getComponents().contains(DataComponentTypes.FOOD),
-                isBlockItem.checkBlockItem(selectedItemStack)
-        );
-
-        List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10);
-        List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
-                .map(entity -> EntityDetails.from(bot, entity))
-                .toList();
-
-        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
-        int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
-        int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
-        int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
-        Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
-        ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
-        String time = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
-        String dimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
-        Map<StateActions.Action, Double> riskMap = new HashMap<>();
-
-        Map<StateActions.Action, Double> podMap = new HashMap<>(); // blank pod map for now.
-
-        return new State(
-                (int) bot.getX(),
-                (int) bot.getY(),
-                (int) bot.getZ(),
-                nearbyEntitiesList,
-                nearbyBlocks,
-                0.0, // Distance to hostile can be updated dynamically elsewhere
-                (int) bot.getHealth(),
-                dangerDistance,
-                hotBarItems,
-                selectedItem,
-                time,
-                dimension,
-                botHungerLevel,
-                botOxygenLevel,
-                botFrostLevel,
-                offhandItem,
-                armorItems,
-                environmentSnapshot.enclosed(),
-                environmentSnapshot.solidNeighborCount(),
-                environmentSnapshot.hasHeadroom(),
-                environmentSnapshot.hasEscapeRoute(),
-                StateActions.Action.STAY,
-                riskMap,
-                DEFAULT_RISK_APPETITE,
-                podMap
-        );
     }
 
 
