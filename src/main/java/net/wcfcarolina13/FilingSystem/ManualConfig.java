@@ -503,7 +503,9 @@ public class ManualConfig {
             return loadedConfig;
         } catch (IOException e) {
             LOGGER.error("Failed to load config file. Using default config.", e);
-            return new ManualConfig();
+            ManualConfig fallback = new ManualConfig();
+            fallback.baritoneDefaultMigrated = true; // already on the new default; never flip a later classic pick
+            return fallback;
         }
     }
 
