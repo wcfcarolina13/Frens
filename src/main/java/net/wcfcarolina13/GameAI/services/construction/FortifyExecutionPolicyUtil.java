@@ -25,17 +25,6 @@ public final class FortifyExecutionPolicyUtil {
         return Math.max(raw, referenceSurfaceY - 1);
     }
 
-    public static int segmentBucketForLine(int startX, int startZ, int endX, int endZ, int x, int z, double segSize) {
-        double eDx = endX - startX;
-        double eDz = endZ - startZ;
-        double eLen = Math.sqrt(eDx * eDx + eDz * eDz);
-        double dX = eLen > 0.001 ? eDx / eLen : 1;
-        double dZ = eLen > 0.001 ? eDz / eLen : 0;
-        double px = x - startX;
-        double pz = z - startZ;
-        return (int) Math.floor((px * dX + pz * dZ) / segSize);
-    }
-
     public static boolean shouldStopAfterNoProgressSegments(int noProgressSegments, int threshold) {
         return threshold > 0 && noProgressSegments >= threshold;
     }

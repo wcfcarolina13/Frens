@@ -605,7 +605,7 @@ public final class BotFleeService {
                             String.format("%.1f", bot.getHealth()));
                 }
                 if (isStaleShelter(bot, gen)) return;
-                runEmergencyTacticChain(bot, gen, false, true);
+                runEmergencyTacticChain(bot, gen);
             } finally {
                 endSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.PROACTIVE_SHELTER, owner);
                 lock.set(false);
@@ -886,18 +886,16 @@ public final class BotFleeService {
         float healthRatio = bot.getHealth() / bot.getMaxHealth();
         if (healthRatio > 0.50f) return false;
 
-        boolean phantomsPresent = hostiles.stream()
-                .anyMatch(e -> e.getType() == EntityType.PHANTOM);
         boolean hasBlocks = hasPlaceableBlocks(bot, 6);
 
-        LOGGER.info("Bot {} evaluating emergency tactics (hostiles={}, hp={}/{}, phantoms={}, blocks={})",
+        LOGGER.info("Bot {} evaluating emergency tactics (hostiles={}, hp={}/{}, blocks={})",
                 bot.getName().getString(), hostiles.size(),
                 String.format("%.1f", bot.getHealth()),
                 String.format("%.1f", bot.getMaxHealth()),
-                phantomsPresent, hasBlocks);
+                hasBlocks);
 
         final long gen = getGeneration(bot.getUuid());
-        Thread t = new Thread(() -> runEmergencyTacticChain(bot, gen, phantomsPresent, hasBlocks),
+        Thread t = new Thread(() -> runEmergencyTacticChain(bot, gen),
                 "emergency-tactics-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
@@ -909,11 +907,7 @@ public final class BotFleeService {
      * attempted and verified — if it doesn't actually change the bot's situation,
      * the next tactic in the chain is tried.
      */
-    private static void runEmergencyTacticChain(ServerPlayerEntity bot, long gen,
-                                                 boolean phantomsPresent, boolean hasBlocks) {
-        // 1. Pillar up — DISABLED: ScaffoldService placement consistently fails
-        //    during emergency context (bot moving/being hit). Needs investigation.
-
+    private static void runEmergencyTacticChain(ServerPlayerEntity bot, long gen) {
         if (isStaleShelter(bot, gen)) return;
 
         if (bot.getEntityWorld() instanceof ServerWorld dryWorld
@@ -947,36 +941,6 @@ public final class BotFleeService {
         // 4. Wall-off — DISABLED: detection finds false positives (bot's own placed blocks,
         //    partial shelters) and reports success without actually protecting the bot.
         //    Needs stricter shelter detection before re-enabling.
-    }
-
-    /**
-     * Emergency pillar up 10 blocks using ScaffoldService, then wait on top
-     * to eat and heal while hostiles lose interest below.
-     */
-    private static void emergencyPillarUp(ServerPlayerEntity bot) {
-        try {
-            // Must fully stop movement before pillaring — the scaffold placement
-            // needs the bot to be stationary and centered on a block.
-            bot.getCommandSource().getServer().execute(() -> {
-                bot.setSprinting(false);
-                bot.setVelocity(0, bot.getVelocity().y, 0);
-                bot.velocityDirty = true;
-            });
-            Thread.sleep(500); // longer pause to fully stabilize position
-
-            ScaffoldService.pillarUp(bot, 10, true);
-
-            // On top — eat food and wait for threats to thin.
-            Thread.sleep(2000);
-            // Try to eat if we have food (the HealingService/HungerService will handle this
-            // once the bot returns to the normal tick loop and is no longer in combat).
-            LOGGER.info("Bot {} reached pillar top, waiting for safety",
-                    bot.getName().getString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Exception e) {
-            LOGGER.warn("Emergency pillar failed for {}: {}", bot.getName().getString(), e.getMessage());
-        }
     }
 
     /**
@@ -1135,28 +1099,6 @@ public final class BotFleeService {
             }
         }
         return false;
-    }
-
-    /** Find the nearest log block (tree trunk) within searchRadius. */
-    private static BlockPos findNearbyTree(ServerWorld world, BlockPos center, int searchRadius) {
-        BlockPos best = null;
-        double bestDistSq = Double.MAX_VALUE;
-        for (int dx = -searchRadius; dx <= searchRadius; dx++) {
-            for (int dz = -searchRadius; dz <= searchRadius; dz++) {
-                for (int dy = -1; dy <= 3; dy++) {
-                    BlockPos check = center.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(check);
-                    if (state.isIn(BlockTags.LOGS)) {
-                        double distSq = center.getSquaredDistance(check);
-                        if (distSq < bestDistSq) {
-                            bestDistSq = distSq;
-                            best = check.toImmutable();
-                        }
-                    }
-                }
-            }
-        }
-        return best;
     }
 
     /**
