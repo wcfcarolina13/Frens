@@ -44,22 +44,6 @@ final class HovelBlueprint {
         return blueprint;
     }
 
-    static List<BlockPos> buildOuterRingSeeds(BlockPos center, int ringRadius) {
-        LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
-        int cx = center.getX();
-        int cz = center.getZ();
-
-        for (int dz = -ringRadius; dz <= ringRadius; dz++) {
-            out.add(new BlockPos(cx + ringRadius, center.getY(), cz + dz));
-            out.add(new BlockPos(cx - ringRadius, center.getY(), cz + dz));
-        }
-        for (int dx = -ringRadius; dx <= ringRadius; dx++) {
-            out.add(new BlockPos(cx + dx, center.getY(), cz + ringRadius));
-            out.add(new BlockPos(cx + dx, center.getY(), cz - ringRadius));
-        }
-        return new ArrayList<>(out);
-    }
-
     /**
      * Ordered ground-level loop around a square ring (same pattern as roof perimeter, but at a given Y).
      * Useful for "walk the exterior" patch passes.
@@ -86,37 +70,6 @@ final class HovelBlueprint {
             out.add(new BlockPos(cx + dx, y, cz - ringRadius));
         }
 
-        LinkedHashSet<BlockPos> uniq = new LinkedHashSet<>(out);
-        return new ArrayList<>(uniq);
-    }
-
-    /**
-     * Returns roof block positions (not stand positions) in a single loop around the perimeter.
-     * The caller can use {@code pos.up()} as the walk/stand cell.
-     */
-    static List<BlockPos> buildRoofPerimeter(BlockPos center, int radius, int roofY) {
-        List<BlockPos> out = new ArrayList<>();
-        int cx = center.getX();
-        int cz = center.getZ();
-
-        // East edge (north -> south)
-        for (int dz = -radius; dz <= radius; dz++) {
-            out.add(new BlockPos(cx + radius, roofY, cz + dz));
-        }
-        // South edge (east-1 -> west)
-        for (int dx = radius - 1; dx >= -radius; dx--) {
-            out.add(new BlockPos(cx + dx, roofY, cz + radius));
-        }
-        // West edge (south-1 -> north)
-        for (int dz = radius - 1; dz >= -radius; dz--) {
-            out.add(new BlockPos(cx - radius, roofY, cz + dz));
-        }
-        // North edge (west+1 -> east-1)
-        for (int dx = -radius + 1; dx <= radius - 1; dx++) {
-            out.add(new BlockPos(cx + dx, roofY, cz - radius));
-        }
-
-        // Remove any accidental duplicates while preserving order.
         LinkedHashSet<BlockPos> uniq = new LinkedHashSet<>(out);
         return new ArrayList<>(uniq);
     }

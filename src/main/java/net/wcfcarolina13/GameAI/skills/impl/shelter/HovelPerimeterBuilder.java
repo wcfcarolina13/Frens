@@ -41,9 +41,6 @@ import java.util.concurrent.TimeUnit;
 public final class HovelPerimeterBuilder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
-    private static final boolean USE_OPTIMIZED_LEVELING_ROUTE = true;
-    private static final boolean USE_TARGETED_FOUNDATION_REPAIR = true;
-    private static final boolean USE_CACHED_FLOOR_SCAN = true;
     private static final double REACH_DISTANCE_SQ = 20.25D; 
     private static final long PLACEMENT_DELAY_MS = 20L;
     private static final long REACH_STALL_PERIMETER_WALK_MS = 2000L;
@@ -734,9 +731,7 @@ public final class HovelPerimeterBuilder {
         int noProgressStreak = 0;
         int lastMissing = missing0;
         while (attempts++ < 3 && !SkillManager.shouldAbortSkill(bot)) {
-            List<BlockPos> repairCorners = USE_TARGETED_FOUNDATION_REPAIR
-                    ? findCornersNeedingBeamRepair(world, corners, baseY, roofY)
-                    : new ArrayList<>(corners);
+            List<BlockPos> repairCorners = findCornersNeedingBeamRepair(world, corners, baseY, roofY);
             if (repairCorners.isEmpty()) {
                 repairCorners = new ArrayList<>(corners);
             }
@@ -750,8 +745,7 @@ public final class HovelPerimeterBuilder {
             }
 
             buildCornerBeamsEarly(world, source, bot, center, radius, wallHeight, counters,
-                    USE_TARGETED_FOUNDATION_REPAIR ? new LinkedHashSet<>(repairCorners) : null,
-                    USE_TARGETED_FOUNDATION_REPAIR);
+                    new LinkedHashSet<>(repairCorners), true);
             int missing = countMissingFoundationBeams(world, required);
             LOGGER.info("Foundation beams: attempt {} missing {}", attempts, missing);
             if (missing == 0) {
@@ -1701,21 +1695,6 @@ public final class HovelPerimeterBuilder {
         return state.getCollisionShape(world, pos).isEmpty();
     }
 
-    @SuppressWarnings("unused")
-    private boolean isSupportHole(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null) {
-            return false;
-        }
-        BlockState state = world.getBlockState(pos);
-        if (state.isAir() || state.isIn(BlockTags.LEAVES)) {
-            return true;
-        }
-        if (state.isOf(Blocks.SNOW) || state.isIn(BlockTags.WOOL_CARPETS)) {
-            return false;
-        }
-        return state.isReplaceable();
-    }
-
     /**
      * Roof completion that prefers real-world-style scaffolding: build a short-lived tower,
      * work from the top to place many roof blocks, then dismantle the tower.
@@ -1859,13 +1838,6 @@ public final class HovelPerimeterBuilder {
             scaffoldPlaceRoofWalkAndTeardown(world, source, bot, center, radius, roofY,
                     roofBlueprint, roofY + 2, counters, keepIfRoof, true);
         }
-    }
-
-    @SuppressWarnings("unused")
-    private int roofWalkMissingThreshold(int radius) {
-        // Allow roof-walking only when the roof is mostly complete. This reduces the odds of stepping into holes.
-        int r = Math.max(2, radius);
-        return Math.min(32, Math.max(10, (2 * r + 1) * 2));
     }
 
     private record RoofPatchStep(BlockPos stand, BlockPos target) {
@@ -2823,9 +2795,7 @@ public final class HovelPerimeterBuilder {
             }
         }
 
-        List<BlockPos> orderedStationSeeds = USE_OPTIMIZED_LEVELING_ROUTE
-                ? sortByDistanceToBot(bot, stationSeeds)
-                : new ArrayList<>(stationSeeds);
+        List<BlockPos> orderedStationSeeds = sortByDistanceToBot(bot, stationSeeds);
 
         for (BlockPos seed : orderedStationSeeds) {
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -2935,20 +2905,12 @@ public final class HovelPerimeterBuilder {
         }
     }
 
-    @SuppressWarnings("unused")
-    private boolean isCornerOfRing(BlockPos pos, BlockPos center, int radius) {
-        if (pos == null || center == null) return false;
-        int dx = pos.getX() - center.getX();
-        int dz = pos.getZ() - center.getZ();
-        return Math.abs(dx) == radius && Math.abs(dz) == radius;
-    }
-
     /**
      * Try to detect the actual floor block Y under the build center.
      * This helps us patch holes even if the chosen Y represents the player's standing cell.
      */
     private int detectFloorBlockY(ServerWorld world, BlockPos center) {
-        if (!USE_CACHED_FLOOR_SCAN || center == null) {
+        if (center == null) {
             return HovelTerrainService.detectFloorBlockY(world, center);
         }
         if (cachedFloorBlockY != null && center.equals(cachedFloorScanCenter)) {
@@ -2958,16 +2920,6 @@ public final class HovelPerimeterBuilder {
         cachedFloorScanCenter = center.toImmutable();
         cachedFloorBlockY = resolved;
         return resolved;
-    }
-
-    @SuppressWarnings("unused")
-    private void clearIfObstructed(ServerWorld world, ServerPlayerEntity bot, BlockPos pos) {
-        if (world == null || bot == null || pos == null) return;
-        BlockState s = world.getBlockState(pos);
-        if (s.isAir()) return;
-        if (s.isReplaceable() || s.isIn(BlockTags.LEAVES) || !s.getCollisionShape(world, pos).isEmpty()) {
-            mineSoft(bot, pos);
-        }
     }
 
     /**

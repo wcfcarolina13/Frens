@@ -540,18 +540,6 @@ public final class ShelterSkill implements Skill {
         }
     }
 
-    private int countBuildBlocks(ServerPlayerEntity bot) {
-        int total = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            if (BUILD_BLOCKS.contains(stack.getItem())) {
-                total += stack.getCount();
-            }
-        }
-        return total;
-    }
-
     private String getOption(SkillContext context, String fallback) {
         if (context == null) {
             return fallback;
@@ -614,43 +602,6 @@ public final class ShelterSkill implements Skill {
         } catch (Exception e) {
             LOGGER.warn("Shelter drop-sweep failed: {}", e.getMessage());
         }
-    }
-
-    private boolean hasOption(SkillContext context, String... names) {
-        Object opts = context.parameters().get("options");
-        if (!(opts instanceof List<?> list) || list.isEmpty()) {
-            return false;
-        }
-        for (Object val : list) {
-            if (val == null) continue;
-            String opt = val.toString().toLowerCase(Locale.ROOT);
-            for (String name : names) {
-                if (opt.equals(name.toLowerCase(Locale.ROOT))) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean placeBlock(ServerPlayerEntity bot, BlockPos pos) {
-        if (bot == null || pos == null) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        BlockState state = world.getBlockState(pos);
-        if (isFarmBlock(state)) {
-            return false;
-        }
-        if (!state.isAir() && !state.isReplaceable() && !state.isOf(Blocks.SNOW) && !state.isOf(Blocks.SNOW_BLOCK)) {
-            return false;
-        }
-        if (!BlockInteractionService.canInteract(bot, pos, REACH_DISTANCE_SQ)) {
-            return false;
-        }
-        return BotActions.placeBlockAt(bot, pos, Direction.UP, BUILD_BLOCKS);
     }
 
     private void mineSoft(ServerPlayerEntity bot, BlockPos pos) {

@@ -2497,26 +2497,4 @@ bot.getName().getString());
             FAILED_TARGET_BLACKLIST.remove(botUuid);
         }
     }
-
-    /**
-     * Checks if a position is currently blacklisted.
-     */
-    private static boolean isBlacklisted(UUID botUuid, BlockPos pos) {
-        if (botUuid == null || pos == null) {
-            return false;
-        }
-        Map<BlockPos, Long> perBot = FAILED_TARGET_BLACKLIST.get(botUuid);
-        if (perBot == null) {
-            return false;
-        }
-        Long until = perBot.get(pos.toImmutable());
-        if (until == null) {
-            return false;
-        }
-        if (System.currentTimeMillis() >= until) {
-            perBot.remove(pos.toImmutable());
-            return false;
-        }
-        return true;
-    }
 }

@@ -303,8 +303,4 @@ public final class BurrowBuilder {
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
     }
-
-    private void sleepQuiet(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    }
 }
