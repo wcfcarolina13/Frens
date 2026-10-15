@@ -28,7 +28,6 @@ public final class TorchPlacer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("torch-placer");
     private static final int LIGHT_THRESHOLD = 7;
-    private static final int TORCH_SPACING = 8; // Place torches every 8 blocks
     
     // Track recently broken torch positions to avoid re-breaking
     private static final Map<UUID, Set<BlockPos>> RECENTLY_PLACED_TORCHES = new ConcurrentHashMap<>();
@@ -49,17 +48,6 @@ public final class TorchPlacer {
         BlockPos pos = bot.getBlockPos();
         int lightLevel = world.getLightLevel(LightType.BLOCK, pos);
         return lightLevel < LIGHT_THRESHOLD;
-    }
-    
-    /**
-     * Checks if a block position has a recently placed torch that should be protected.
-     * @param botId The bot's UUID
-     * @param pos The position to check
-     * @return true if this position has a protected torch
-     */
-    public static boolean hasProtectedTorch(UUID botId, BlockPos pos) {
-        Set<BlockPos> protectedTorches = RECENTLY_PLACED_TORCHES.get(botId);
-        return protectedTorches != null && protectedTorches.contains(pos);
     }
     
     /**
@@ -283,16 +271,6 @@ public final class TorchPlacer {
             case WEST -> new Direction[]{Direction.SOUTH, Direction.NORTH};
             default -> new Direction[]{Direction.NORTH, Direction.SOUTH};
         };
-    }
-
-    private static boolean isSuitableForTorch(ServerWorld world, BlockPos pos) {
-        // This method is no longer used - keeping for compatibility
-        BlockState state = world.getBlockState(pos);
-        if (state.isAir() || !state.isSolidBlock(world, pos)) {
-            return false;
-        }
-        BlockPos airSpace = pos.offset(Direction.UP);
-        return world.getBlockState(airSpace).isAir();
     }
 
     private static boolean placeTorchAt(ServerPlayerEntity bot, ServerWorld world, BlockPos torchPos) {

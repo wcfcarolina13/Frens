@@ -76,8 +76,6 @@ import java.util.UUID;
 public final class HuntSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-hunt");
-    private static final int DEFAULT_HUNT_RADIUS = 48;
-    private static final int DEFAULT_HUNT_Y_SPAN = 8;
     private static final int MAX_RELOCATION_SEGMENTS_PER_SEARCH = 3;
     private static final int MIN_PEACEFUL_COUNT = 3;
     private static final double ATTACK_RANGE_SQ = 9.0D;
@@ -1223,17 +1221,6 @@ public final class HuntSkill implements Skill {
                                                 ServerCommandSource source,
                                                 ServerPlayerEntity commander) {
         return ToolProvisionService.ensureSword(bot, source, commander);
-    }
-
-    private static int countInInventory(ServerPlayerEntity bot, Item item) {
-        int total = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.isOf(item)) {
-                total += stack.getCount();
-            }
-        }
-        return total;
     }
 
     private static boolean canHuntZombie(ServerPlayerEntity bot) {

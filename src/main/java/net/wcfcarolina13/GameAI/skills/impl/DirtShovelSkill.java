@@ -672,27 +672,6 @@ public final class DirtShovelSkill implements Skill {
         return new ObstructionStep(block, head, stand, clearance);
     }
 
-    private Direction chooseHorizontalDirection(BlockPos from, BlockPos to) {
-        int dx = Integer.compare(to.getX(), from.getX());
-        int dz = Integer.compare(to.getZ(), from.getZ());
-        if (dx == 0 && dz == 0) {
-            return null;
-        }
-        if (Math.abs(dx) >= Math.abs(dz)) {
-            return dx >= 0 ? Direction.EAST : Direction.WEST;
-        }
-        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
-    }
-
-    private Direction chooseSpiralDirection(BlockPos from, BlockPos target, int rotation) {
-        Direction primary = chooseHorizontalDirection(from, target);
-        if (primary == null) {
-            primary = Direction.NORTH;
-        }
-        Direction[] order = new Direction[]{primary, primary.rotateYClockwise(), primary.rotateYCounterclockwise(), primary.getOpposite()};
-        return order[Math.floorMod(rotation, order.length)];
-    }
-
     private boolean prepareApproach(ServerCommandSource source,
                                     ServerPlayerEntity player,
                                     ApproachPlan plan) {

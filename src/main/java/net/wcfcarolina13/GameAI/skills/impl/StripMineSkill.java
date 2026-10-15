@@ -46,7 +46,6 @@ public final class StripMineSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-stripmine");
     private static final int DEFAULT_LENGTH = 8;
-    private static final int TORCH_CHECK_INTERVAL = 8; // Check for torch placement every 8 blocks
 
     @Override
     public String name() {

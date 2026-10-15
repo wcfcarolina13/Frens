@@ -350,19 +350,4 @@ public final class LeashToFenceSkill implements Skill {
         }
         return false;
     }
-
-    /**
-     * Check if the bot is currently holding any animal on a lead.
-     * This can be called externally to determine if the leash button should be shown.
-     */
-    public static boolean isHoldingLeashedAnimal(ServerPlayerEntity bot) {
-        if (bot == null) return false;
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
-        
-        Box searchBox = new Box(bot.getBlockPos()).expand(16.0);
-        List<MobEntity> leashed = world.getEntitiesByClass(MobEntity.class, searchBox,
-                mob -> mob != null && mob.isAlive() && mob.isLeashed() && mob.getLeashHolder() == bot);
-        
-        return !leashed.isEmpty();
-    }
 }
