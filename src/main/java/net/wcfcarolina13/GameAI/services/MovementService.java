@@ -3037,7 +3037,9 @@ public final class MovementService {
             breakOk &= hasCollision(world, front.down());
             breakStep = front;
         }
-        breakOk &= !isRememberedFailedRoute(botId, origin, breakStep);
+        for (BlockPos cell : breakCells) {
+            breakOk &= !isRememberedFailedRoute(botId, origin, cell);
+        }
         long breakTicksSum = 0L;
         int maxCellTicks = 0;
         for (BlockPos cell : breakCells) {
@@ -3114,6 +3116,8 @@ public final class MovementService {
                         continue;
                     }
                     if (!tryMinePlannedStepTrim(bot, world, cell, label + "-terrain-break") && hasCollision(world, cell)) {
+                        // Keyed on the cell that failed, so a half-mined stair's step stays open to step-up.
+                        recordFailedRoute(bot, origin, cell, label + "-terrain-break");
                         mined = false;
                         break;
                     }
@@ -3124,8 +3128,6 @@ public final class MovementService {
                             ? nudgeTowardUntilClose(bot, breakStep, 2.25D, 1400L, 0.18D, label + "-terrain-step")
                                     && groundedOrigin(bot).getY() >= breakStep.getY()
                             : nudgeTowardExactBlock(bot, breakStep, false, label + "-terrain-step");
-                } else {
-                    recordFailedRoute(bot, origin, breakStep, label + "-terrain-break");
                 }
                 // The rise is gone once mined; the walk loop can take the step even if this nudge did not.
                 ok = mined;
@@ -3761,11 +3763,15 @@ public final class MovementService {
 
             // nudgeToward will jump automatically for dy>0.6. Its reach (1.5 blocks to the step's
             // centre) is met at a jump apex, so success is checked again once the bot has landed.
-            if (nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup")
-                    && groundedOrigin(bot).getY() >= step.getY()) {
+            boolean nudged = nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup");
+            if (nudged && groundedOrigin(bot).getY() >= step.getY()) {
                 return true;
             }
-            recordFailedRoute(bot, start, step, label + "-stepup");
+            // Remember only an unreachable step. An apex "success" that lands back at the origin
+            // is not counted as success, but the walk loop often makes that step on momentum.
+            if (!nudged) {
+                recordFailedRoute(bot, start, step, label + "-stepup");
+            }
         }
 
         if (rememberedSkips > 0 && bot.getUuid() != null) {
