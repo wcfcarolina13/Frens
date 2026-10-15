@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Dead-code removal 1: legacy RAG and SQLite chain, misc dead files, block knowledge chain; 1.1.243 (2026-10-15)
+
+First removal build of the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 3, Phases 1 to 3), with Bradley's 2026-10-15 answers in section 5a. Every symbol was re-checked as zero-caller at HEAD before deletion (the audit's line numbers are from 1.1.241). About 1,560 lines removed, no behaviour change.
+
+- **Phase 1, legacy RAG and SQLite chain** (`a7207e9d`). Deleted `OldRAGImplementation`, `helperMethods`, `OldSQLiteDB`, `OutputVerifier` (no implementor), and from `FunctionCallerV2` the never-called `getFunctionResultAndSave` with `ExecutionRecord` (the only writer of the old `memory_agent.db`), `generatePromptContext` (its only caller was that method, found during scoping), `getSharedState` (superseded by `SharedStateService` in 1.1.200), and the imports and `DB_URL` that died with them. `RAG2` is the live retrieval path. `functionOutput` and `sharedState` stay.
+- **Phase 2, misc dead files** (`3c4c8a25`). Deleted `ServerConfigUtil` (wrote `selectedLanguageModel`, now owned by `ManualConfig`), the empty `KeyboardMixin` (never registered), the template `ExampleMixin` together with its `frens.mixins.json` entry, and the `ui/BotInventoryScreen` stub (`BotPlayerInventoryScreen` is the live screen).
+- **Phase 3, block knowledge chain** (`9bf65447`). Deleted `BlockKnowledgeRetriever`, `BlockKnowledgeBase`, `BlockMetadata`, `OreYLevelKnowledge` and `block_metadata.json`. `GameKnowledgeGraph` and its builder stay.
+- **Unmerged value check (Bradley's standing rule):** nothing in the removed code is used by a live path. The one piece with any content is the `OreYLevelKnowledge` ore Y-band table. Ruling: not moved into live code, because nothing reads it and its values were already wrong (emerald best Y 230 above its max 32, lapis max 0). Cost if wrong: a future mining feature recovers it from `9bf65447^`.
+- **Docs:** no Guide, README or docs mentions of the removed names (grepped `src/main/resources`, `docs/`, `README.md`, `BotGuideScreen`). One code comment in `modCommandRegistry` reworded. The audit doc marks Phases 1 to 3 done.
+- **Tests:** 2464 → 2464 (none of the removed files had tests). Sandbox smoke on `mcp-sandbox`: boots with no mixin or class errors, `/bot spawn` works.
+- **Field checks:** none new (no behaviour change).
+
 ## Unified pathfinder (opt-in), audit bug fixes, per-bot dig gate; 1.1.242 (2026-10-15)
 
 Overnight run (Bradley asked before sleeping to pick up the merged pathfinder and the dead-code audit). Design: `docs/testing/NAV_1.1.242_MERGED_FINDER_DESIGN.md` (Fable), research: `docs/research/PATHFINDING_RESEARCH_2026-10.md`, audit: `docs/testing/DEAD_CODE_AUDIT_2026-10.md`.

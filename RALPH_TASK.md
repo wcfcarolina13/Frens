@@ -3,7 +3,18 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.242) — next session starts here
+## Session Handoff 2026-10-15 (1.1.243) — next session starts here
+
+**State:** main = origin/main @ 1.1.243. Suite 2464 green. Dead-code audit phase 2 (removals) in progress, run from a
+side session; build ledger in the session notes folder and below. 1.1.243 = audit Phases 1-3 (legacy RAG/SQLite chain, misc
+dead files + ExampleMixin entry, block knowledge chain), ~1,560 lines, no behaviour change.
+**Planned removal builds (Bradley's answers, audit section 5a):** 1.1.244 Q1 RL/training + Q4 debug subcommands + Phase 11;
+1.1.245 Q2/Q3 legacy LLM chat retirement + both toggles; 1.1.246 Phases 4-8; 1.1.247 Phases 9-10 + Q6 nav_mode, Q7
+nav tier payload, Q11, Q13, Q15, Q16; 1.1.248 Phases 13-16 + Q17 + Q5 deletions; 1.1.249 Q8 combat hooks, Q9 /bot base
+owner, Q14 leash clearing; 1.1.250 Q5 wall-off shelter rebuild. Do not touch PathFinding/* or MovementService unified walk
+code (separate field A/B). Everything else in the 1.1.242 block below still applies.
+
+## Session Handoff 2026-10-15 (1.1.242) — superseded
 
 **State:** main = origin/main @ 1.1.242 (overnight run, Bradley asleep). Suite 2464 green. 1.1.242 = the unified
 pathfinder (`PathFinding/unified/`, design `docs/testing/NAV_1.1.242_MERGED_FINDER_DESIGN.md`) shipped OPT-IN: default stays

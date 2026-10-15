@@ -117,6 +117,8 @@ Not bugs, listed because an auditor flagged them: `ChatUtils.java:80` drops bot 
 
 ## 3. SAFE-DELETE, in removal phases
 
+**Progress:** Phases 1, 2, 3 done in 1.1.243 (`a7207e9d`, `3c4c8a25`, `9bf65447`; `generatePromptContext` in FunctionCallerV2 also went, its only caller was the dead save path).
+
 Each phase is at most 5 files and one commit. Evidence column: W = whole-word grep found only the declaration (and internal callers that die with it), T = no test references it, R = no reflection or string-literal reference. Every item below passed all three unless noted. Line counts are approximate and include javadoc.
 
 Recommended order: fix B1, B2, B7 first in their own commits, then phases 1 to 16 in order. Phases 1 to 3 are whole-file deletes with no behaviour surface and make the best first checkpoint.
