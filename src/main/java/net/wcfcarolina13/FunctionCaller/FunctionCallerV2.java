@@ -8,8 +8,6 @@ import com.google.gson.stream.JsonReader;
 
 import io.github.amithkoujalgi.ollama4j.core.OllamaAPI;
 
-import io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException;
-
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatMessageRole;
 
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestBuilder;
@@ -18,13 +16,7 @@ import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestModel;
 
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
 
-import io.github.amithkoujalgi.ollama4j.core.types.OllamaModelType;
-
-import java.io.IOException;
-
 import java.io.StringReader;
-
-import java.sql.SQLException;
 
 import java.util.*;
 import java.util.LinkedHashSet;
@@ -76,7 +68,6 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
-import net.wcfcarolina13.Database.OldSQLiteDB;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.Overlay.ThinkingStateManager;
@@ -101,7 +92,6 @@ public class FunctionCallerV2 {
 
     private static final ThreadLocal<ServerCommandSource> ACTIVE_BOT_SOURCE = ThreadLocal.withInitial(() -> null);
     private static final ThreadLocal<UUID> ACTIVE_PLAYER_UUID = ThreadLocal.withInitial(() -> null);
-    private static final String DB_URL = "jdbc:sqlite:" + "./sqlite_databases/" + "memory_agent.db";
 
     private static final String host = "http://localhost:11434/";
 
@@ -195,39 +185,6 @@ public class FunctionCallerV2 {
         ACTIVE_BOT_SOURCE.set(botSource);
         ACTIVE_PLAYER_UUID.set(playerUUID);
         ollamaAPI.setRequestTimeoutSeconds(90);
-    }
-
-    public static Map<String, Object> getSharedState() {
-        return sharedState;
-    }
-
-    private static class ExecutionRecord {
-        String timestamp;
-        String command;
-        List<Double> eventEmbedding;
-        List<Double> eventContextEmbedding;
-        List<Double> eventResultEmbedding;
-        String result;
-        String context;
-
-        private ExecutionRecord(String Timestamp, String command, String context, String result, List<Double> eventEmbedding, List<Double> eventContextEmbedding, List<Double> eventResultEmbedding) {
-            this.context = context;
-            this.timestamp = Timestamp;
-            this.command = command;
-            this.eventEmbedding = eventEmbedding;
-            this.eventContextEmbedding = eventContextEmbedding;
-            this.eventResultEmbedding = eventResultEmbedding;
-            this.result = result;
-        }
-
-        private void updateRecords() {
-            try {
-                OldSQLiteDB.storeEventWithEmbedding(DB_URL, this.command, this.context, this.result, this.eventEmbedding, this.eventContextEmbedding, this.eventResultEmbedding);
-            } catch (SQLException e) {
-                logger.error("Caught exception: {} ", (Object) e.getStackTrace());
-                throw new RuntimeException(e);
-            }
-        }
     }
 
     private record ResourceSkillMapping(String skillName, String blockIds) {
@@ -997,51 +954,6 @@ public class FunctionCallerV2 {
             return DEFAULT_PERSONA;
         }
         return BOT_PERSONALITIES.getOrDefault(name.toLowerCase(Locale.ROOT), DEFAULT_PERSONA);
-    }
-
-    private static String generatePromptContext(String userPrompt) {
-        String contextOutput = "";
-        String sysPrompt = """
-        You are a context generation AI agent in terms of minecraft. \n
-        This means that you will have a prompt from a user, who is the player and you need to analyze the context of the player's prompts, i.e what the player means by the prompt. \n
-        This context information will then be used by a minecraft bot to understand what the user is trying to say. \n
-        \n
-        Here are some example player prompts you may receive: \n
-        1. Could you check if there is a block in front of you? \n
-        2. Look around for any hostile mobs, and report to me if you find any. \n
-                3. Could you mine some stone and bring them to me? \n\n        5. Please go to coordinates 10 -60 20. \n\n
-        \n
-        A few more variations of the prompts may be: \n
-        "Could you search for blocks in front of you?"
-        "Do you see if there is a block in front of you?"
-        "Can you mine some stone and bring them to me?
-        "Please move to 10 -60 20." or "Please go to the coords 10 -60 20" or "Please go to 10 -60 20" and so on... \n
-        \n
-        Here are some examples of the format in which you MUST answer.
-        \n
-        1. The player asked you to check whether there is a block in front of you or not. \n
-        2. The player asked you to search for hostile mobs around you, and to report to the player if you find any such hostile mob. \n
-                3. The player asked you to mine some stone and then bring the stone to the player. \n\n        4. The player asked you to go to coordinates 10 -60 20. You followed the instructions and began movement to the coordinates. \n\n
-        Remember that all the context you generate should be in the past tense, sense it is being recorded after the deed has been done.
-        \n
-        "Remember that when dealing with prompts that ask the bot to go to a specific set of x y z coordinates, you MUST NOT alter the coordinates, they SHOULD BE the exact same as in the prompt given by the player.
-        \n
-        Now,remember that you must only generate the context as stated in the examples, nothing more, nothing less. DO NOT add your own opinions/statements/thinking to the context you generate. \n
-        Remember that if you generate incorrect context then the bot will not be able to understand what the user has asked of it.
-        \s
-        \s""";
-        OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(selectedLM);
-        try {
-            OllamaChatRequestModel requestModel = builder
-                    .withMessage(OllamaChatMessageRole.SYSTEM, sysPrompt)
-                    .withMessage(OllamaChatMessageRole.USER, "Player prompt: " + userPrompt)
-                    .build();
-            OllamaChatResult chatResult = ollamaAPI.chat(requestModel);
-            contextOutput = chatResult.getResponse();
-        } catch (OllamaBaseException | IOException | InterruptedException | JsonSyntaxException e) {
-            logger.error("Error generating prompt context: {}", e.getMessage(), e);
-        }
-        return contextOutput;
     }
 
     public static String buildLLMBotContext(State state, Map<String, Object> sharedState, Map<String, Object> surroundingsSummary) {
@@ -2385,39 +2297,6 @@ public class FunctionCallerV2 {
             updateState(keys, values);
         } else {
             logger.warn("❌ Mismatch in keys/values for {} → keys: {}, values: {}", functionName, keys, values);
-        }
-    }
-
-    private static void getFunctionResultAndSave(String userInput, String executionDateTime) {
-        try {
-            // Generate context synchronously
-            String eventContext = generatePromptContext(userInput);
-            // Generate event embedding synchronously
-            List<Double> eventEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, userInput);
-            // Generate event context embedding synchronously
-            List<Double> eventContextEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, eventContext);
-            // Wait until functionOutput is a valid string
-            while (functionOutput == null || !(functionOutput instanceof String)) {
-                try {
-                    Thread.sleep(500L); // Check every 500ms
-                } catch (InterruptedException e) {
-                    logger.error("Couldn't get function call output");
-                    throw new RuntimeException(e);
-                }
-            }
-            System.out.println("Received output: " + functionOutput);
-            // Generate result embedding based on the function output
-            List<Double> resultEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, functionOutput);
-            // Create execution record and save it
-            ExecutionRecord executionRecord = new ExecutionRecord(executionDateTime, userInput, eventContext, functionOutput, eventEmbedding, eventContextEmbedding, resultEmbedding);
-            executionRecord.updateRecords();
-            // Clear the functionOutput to reset state
-            functionOutput = null;
-            System.out.println("Event data saved successfully.");
-        } catch (IOException | OllamaBaseException | InterruptedException e) {
-            // Log or handle the exception
-            logger.error("Error occurred while processing the function result: ", e);
-            throw new RuntimeException(e);
         }
     }
 
