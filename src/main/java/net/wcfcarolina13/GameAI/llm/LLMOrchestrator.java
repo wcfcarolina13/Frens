@@ -42,26 +42,16 @@ public final class LLMOrchestrator {
     }
 
     /**
-     * Enablement is read lazily from {@link ManualConfig} — the single source of truth.
-     * (Previously push-populated in-memory maps: they made the GUI toggles write-only
-     * until restart, keyed the world toggle to the overworld only, and let /bot llm
-     * commands diverge from settings.json5.)
+     * Always off: the legacy chat path is retired and its world/bot toggles are gone. This class
+     * has no live caller and is deleted in the follow-up build.
      */
     public static boolean isWorldEnabled() {
-        return Frens.CONFIG != null && Frens.CONFIG.isDefaultLlmWorldEnabled();
+        return false;
     }
 
+    /** Always off, see {@link #isWorldEnabled()}. */
     public static boolean isBotEnabled(ServerPlayerEntity bot) {
-        if (bot == null || Frens.CONFIG == null) {
-            return false;
-        }
-        MinecraftServer server = bot.getCommandSource().getServer();
-        String worldKey = server != null
-                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server)
-                : null;
-        ManualConfig.BotControlSettings settings =
-                Frens.CONFIG.getEffectiveBotControl(bot.getName().getString(), worldKey);
-        return settings != null && settings.isLlmEnabled();
+        return false;
     }
 
     public static boolean handleChat(ServerPlayerEntity bot,

@@ -77,7 +77,6 @@ public class ManualConfig {
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     // Per-world bot spawn points: alias → worldKey → BotSpawn.
     private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
-    private boolean defaultLlmWorldEnabled = true;
     private boolean textDialogueEnabled = true;
     private boolean voicedDialogueEnabled = true;
     // Muted voiced-dialogue categories (VoiceLineCategory ids). Empty = nothing muted.
@@ -124,7 +123,7 @@ public class ManualConfig {
     private Map<String, String> survivalRecruitmentLegacyClaims = new HashMap<>();
 
     // === Soul communication (opt-in, local-Ollama-only conversational pilot) ===
-    // Default-off and entirely separate from the legacy defaultLlmWorldEnabled toggle.
+    // Default-off.
     // Non-secret fields only — no API keys belong here.
     private boolean soulsEnabled = false;
     private String soulProvider = "ollama";
@@ -920,14 +919,6 @@ public class ManualConfig {
         return aliases;
     }
 
-    public boolean isDefaultLlmWorldEnabled() {
-        return defaultLlmWorldEnabled;
-    }
-
-    public void setDefaultLlmWorldEnabled(boolean defaultLlmWorldEnabled) {
-        this.defaultLlmWorldEnabled = defaultLlmWorldEnabled;
-    }
-
     public boolean isTextDialogueEnabled() {
         return textDialogueEnabled;
     }
@@ -1063,7 +1054,7 @@ public class ManualConfig {
     public void setUndergroundProximityBlocks(int b) { this.undergroundProximityBlocks = b; }
 
     // === Soul communication accessors ===
-    // Default-off, non-secret, local-Ollama-only. Kept separate from defaultLlmWorldEnabled.
+    // Default-off, non-secret, local-Ollama-only.
 
     public boolean isSoulsEnabled() { return soulsEnabled; }
     public void setSoulsEnabled(boolean soulsEnabled) { this.soulsEnabled = soulsEnabled; }
@@ -1653,7 +1644,6 @@ public class ManualConfig {
         private boolean followTeleport = false;
         private boolean pauseOnFullInventory;
         private boolean teleportDuringDropSweep = false;
-        private boolean llmEnabled = false;
         private boolean voicedDialogue = true;
         private String failsafeSpawnMode = "world_spawn";  // owner_bed | world_spawn | saved_base
         private boolean autoRegroupOnLost = false;  // auto-regroup when bot loses contact at a drop-off
@@ -1749,14 +1739,6 @@ public class ManualConfig {
 
         public void setTeleportDuringDropSweep(boolean teleportDuringDropSweep) {
             this.teleportDuringDropSweep = teleportDuringDropSweep;
-        }
-
-        public boolean isLlmEnabled() {
-            return llmEnabled;
-        }
-
-        public void setLlmEnabled(boolean llmEnabled) {
-            this.llmEnabled = llmEnabled;
         }
 
         public boolean isVoicedDialogue() {

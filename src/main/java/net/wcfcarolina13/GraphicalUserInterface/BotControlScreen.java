@@ -24,7 +24,7 @@ import java.util.Map;
  *
  * Global toggles live in a collapsible panel at the top (starts collapsed to
  * maximise space for per-bot settings).  Per-bot settings scroll below in
- * sections (Spawning, Behavior, LLM).  The Permissions editor is reachable
+ * sections (Spawning, Behavior, Dialogue & AI).  The Permissions editor is reachable
  * via a footer button.
  */
 public class BotControlScreen extends Screen {
@@ -39,7 +39,6 @@ public class BotControlScreen extends Screen {
     //              Soul Banter / Active / Local = when it speaks unprompted)
     // Neither lane's switches affect the other, so "LLM only" or "scripted only" is two clicks.
     private static final List<GlobalToggleDef> GLOBAL_TOGGLES = List.of(
-            new GlobalToggleDef("LLM World (legacy)", "The pre-souls LLM chat path (per-bot LLM Chat must also be ON). Soul-bound bots ignore this — they talk through Soul Chat below. Leave off unless you use non-soul bots with the classic path."),
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
@@ -53,13 +52,16 @@ public class BotControlScreen extends Screen {
     );
 
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
-    private static final int TEXT_TOGGLE_INDEX = 4;
-    private static final int VOICE_TOGGLE_INDEX = 5;
-    private static final int SOUL_CHAT_TOGGLE_INDEX = 6;
-    private static final int SOUL_VOICE_TOGGLE_INDEX = 7;
-    private static final int BANTER_TOGGLE_INDEX = 8;
-    private static final int ACTIVE_TOGGLE_INDEX = 9;
-    private static final int LOCAL_TOGGLE_INDEX = 10;
+    private static final int RECRUITMENT_TOGGLE_INDEX = 0;
+    private static final int FORCE_PLACE_TOGGLE_INDEX = 1;
+    private static final int TELEPORT_TOGGLE_INDEX = 2;
+    private static final int TEXT_TOGGLE_INDEX = 3;
+    private static final int VOICE_TOGGLE_INDEX = 4;
+    private static final int SOUL_CHAT_TOGGLE_INDEX = 5;
+    private static final int SOUL_VOICE_TOGGLE_INDEX = 6;
+    private static final int BANTER_TOGGLE_INDEX = 7;
+    private static final int ACTIVE_TOGGLE_INDEX = 8;
+    private static final int LOCAL_TOGGLE_INDEX = 9;
     private static final int VOICE_ADV_W = 34;
     private static final int SOUL_SETUP_W = 44;
 
@@ -252,15 +254,14 @@ public class BotControlScreen extends Screen {
         // resize and on returning from child screens (Adv…, Permissions); reloading there
         // silently discarded unsaved chip flips.
         if (!globalsLoaded) {
-            globalValues[0] = Frens.CONFIG.isDefaultLlmWorldEnabled();
-            globalValues[1] = Frens.CONFIG.isSurvivalRecruitmentMode();
-            globalValues[2] = Frens.CONFIG.isFortifyForcePlaceEnabled();
+            globalValues[RECRUITMENT_TOGGLE_INDEX] = Frens.CONFIG.isSurvivalRecruitmentMode();
+            globalValues[FORCE_PLACE_TOGGLE_INDEX] = Frens.CONFIG.isFortifyForcePlaceEnabled();
             // Teleport toggle: ON = per-bot settings apply (null), OFF = globally disabled (false)
-            globalValues[3] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
-            globalValues[4] = Frens.CONFIG.isTextDialogueEnabled();
-            globalValues[5] = Frens.CONFIG.isVoicedDialogueEnabled();
-            globalValues[6] = Frens.CONFIG.isSoulsEnabled();
-            globalValues[7] = Frens.CONFIG.isSoulVoiceEnabled();
+            globalValues[TELEPORT_TOGGLE_INDEX] = Frens.CONFIG.getGlobalTeleportDuringSkills() == null;
+            globalValues[TEXT_TOGGLE_INDEX] = Frens.CONFIG.isTextDialogueEnabled();
+            globalValues[VOICE_TOGGLE_INDEX] = Frens.CONFIG.isVoicedDialogueEnabled();
+            globalValues[SOUL_CHAT_TOGGLE_INDEX] = Frens.CONFIG.isSoulsEnabled();
+            globalValues[SOUL_VOICE_TOGGLE_INDEX] = Frens.CONFIG.isSoulVoiceEnabled();
             globalValues[BANTER_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterEnabled();
             globalValues[ACTIVE_TOGGLE_INDEX] = Frens.CONFIG.isSoulBanterActiveEnabled();
             globalValues[LOCAL_TOGGLE_INDEX] = Frens.CONFIG.isSoulLocalChatEnabled();
@@ -428,7 +429,7 @@ public class BotControlScreen extends Screen {
             boolean teleportDuringSkills, boolean followTeleport,
             boolean pauseOnFullInventory,
             boolean teleportDuringDropSweep, boolean autoRegroupOnLost,
-            boolean llmEnabled, boolean voicedDialogue) {}
+            boolean voicedDialogue) {}
 
     private record SettingEntry(String label, String desc,
                                 CyclingButtonWidget<?> widget, int widgetW) {}
@@ -439,7 +440,7 @@ public class BotControlScreen extends Screen {
     private void captureCurrentWidgets() {
         if (settingGroups.isEmpty() || selectedAlias == null) return;
         List<CyclingButtonWidget<?>> ws = settingWidgets;
-        if (ws.size() < 12) return;
+        if (ws.size() < 11) return;
 
         boolean autoRespawn = Boolean.TRUE.equals(ws.get(0).getValue());
         boolean autoSpawnOnLoad = Boolean.TRUE.equals(ws.get(1).getValue());
@@ -451,8 +452,7 @@ public class BotControlScreen extends Screen {
         boolean pauseInventory = Boolean.TRUE.equals(ws.get(7).getValue());
         boolean teleportSweep = Boolean.TRUE.equals(ws.get(8).getValue());
         boolean autoRegroup = Boolean.TRUE.equals(ws.get(9).getValue());
-        boolean llmEnabled = Boolean.TRUE.equals(ws.get(10).getValue());
-        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(11).getValue());
+        boolean voicedDialogue = Boolean.TRUE.equals(ws.get(10).getValue());
 
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 autoRespawn,
@@ -465,7 +465,6 @@ public class BotControlScreen extends Screen {
                 pauseInventory,
                 teleportSweep,
                 autoRegroup,
-                llmEnabled,
                 voicedDialogue
         ));
     }
@@ -497,7 +496,6 @@ public class BotControlScreen extends Screen {
         boolean pauseInv = snap != null ? snap.pauseOnFullInventory : cfg.isPauseOnFullInventory();
         boolean teleDrop = snap != null ? snap.teleportDuringDropSweep : cfg.isTeleportDuringDropSweep();
         boolean autoRegroup = snap != null ? snap.autoRegroupOnLost : cfg.isAutoRegroupOnLost();
-        boolean llmEnabled = snap != null ? snap.llmEnabled : cfg.isLlmEnabled();
         boolean voiced = snap != null ? snap.voicedDialogue : cfg.isVoicedDialogue();
 
         List<SettingEntry> spawning = new ArrayList<>();
@@ -528,10 +526,9 @@ public class BotControlScreen extends Screen {
         behavior.add(makeOnOff("Auto-Regroup on Lost", "When the bot loses you at a drop-off, it will automatically regroup after a delay instead of waiting indefinitely. Risky but keeps the bot moving.", autoRegroup, TOGGLE_W));
         settingGroups.add(new SettingGroup("Behavior", behavior));
 
-        List<SettingEntry> llm = new ArrayList<>();
-        llm.add(makeOnOff("LLM Chat (this bot)", "Per-bot override under the global LLM World (legacy) master: both must be ON for this bot to use the classic LLM chat path. Soul-bound bots ignore this and talk through Soul Chat instead.", llmEnabled, TOGGLE_W));
-        llm.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Scripted Voice master: both must be ON for this bot's pre-baked voice lines to play. Category muting lives under the Scripted Voice row's Adv… button. Soul TTS is separate (Soul Voice).", voiced, TOGGLE_W));
-        settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", llm));
+        List<SettingEntry> dialogue = new ArrayList<>();
+        dialogue.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Scripted Voice master: both must be ON for this bot's pre-baked voice lines to play. Category muting lives under the Scripted Voice row's Adv… button. Soul TTS is separate (Soul Voice).", voiced, TOGGLE_W));
+        settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", dialogue));
     }
 
     private String canonicalSpawnModeForUi(String raw) {
@@ -582,13 +579,12 @@ public class BotControlScreen extends Screen {
         ManualConfig config = Frens.CONFIG;
 
         // Save global toggles
-        config.setDefaultLlmWorldEnabled(globalValues[0]);
-        config.setSurvivalRecruitmentMode(globalValues[1]);
-        config.setFortifyForcePlaceEnabled(globalValues[2]);
+        config.setSurvivalRecruitmentMode(globalValues[RECRUITMENT_TOGGLE_INDEX]);
+        config.setFortifyForcePlaceEnabled(globalValues[FORCE_PLACE_TOGGLE_INDEX]);
         // Teleport toggle: ON (true) = clear global override (null), OFF (false) = globally disabled
-        config.setGlobalTeleportDuringSkills(globalValues[3] ? null : Boolean.FALSE);
-        config.setTextDialogueEnabled(globalValues[4]);
-        config.setVoicedDialogueEnabled(globalValues[5]);
+        config.setGlobalTeleportDuringSkills(globalValues[TELEPORT_TOGGLE_INDEX] ? null : Boolean.FALSE);
+        config.setTextDialogueEnabled(globalValues[TEXT_TOGGLE_INDEX]);
+        config.setVoicedDialogueEnabled(globalValues[VOICE_TOGGLE_INDEX]);
         // Soul toggles: same fields as /bot soul system on|off and /bot soul voice on|off.
         // Soul Chat turns AI chat on for this world; each bot also has to be enabled (open
         // Set up AI companions, or /bot soul enable <bot>).
@@ -601,10 +597,10 @@ public class BotControlScreen extends Screen {
         if (!soulVoiceTouched) {
             globalValues[SOUL_VOICE_TOGGLE_INDEX] = config.isSoulVoiceEnabled();
         }
-        boolean soulTogglesChanged = config.isSoulsEnabled() != globalValues[6]
-                || config.isSoulVoiceEnabled() != globalValues[7];
-        config.setSoulsEnabled(globalValues[6]);
-        config.setSoulVoiceEnabled(globalValues[7]);
+        boolean soulTogglesChanged = config.isSoulsEnabled() != globalValues[SOUL_CHAT_TOGGLE_INDEX]
+                || config.isSoulVoiceEnabled() != globalValues[SOUL_VOICE_TOGGLE_INDEX];
+        config.setSoulsEnabled(globalValues[SOUL_CHAT_TOGGLE_INDEX]);
+        config.setSoulVoiceEnabled(globalValues[SOUL_VOICE_TOGGLE_INDEX]);
         // Banter needs no pipeline reload: the director reads this through a live supplier.
         config.setSoulBanterEnabled(globalValues[BANTER_TOGGLE_INDEX]);
         config.setSoulBanterActiveEnabled(globalValues[ACTIVE_TOGGLE_INDEX]);
@@ -638,7 +634,6 @@ public class BotControlScreen extends Screen {
             s.setPauseOnFullInventory(v.pauseOnFullInventory);
             s.setTeleportDuringDropSweep(v.teleportDuringDropSweep);
             s.setAutoRegroupOnLost(v.autoRegroupOnLost);
-            s.setLlmEnabled(v.llmEnabled);
             s.setVoicedDialogue(v.voicedDialogue);
             if (!wasAutoRespawn && v.autoRespawnOnDeath) {
                 autoRespawnJustEnabled.add(entry.getKey());

@@ -17,7 +17,6 @@ import java.util.Map;
  */
 public class SharedConfig {
 
-    public Boolean defaultLlmWorldEnabled;
     public Boolean textDialogueEnabled;
     public Boolean voicedDialogueEnabled;
     public List<String> mutedTextCategories;
@@ -57,7 +56,6 @@ public class SharedConfig {
         if (config == null) {
             return snapshot;
         }
-        snapshot.defaultLlmWorldEnabled = config.isDefaultLlmWorldEnabled();
         snapshot.textDialogueEnabled = config.isTextDialogueEnabled();
         snapshot.voicedDialogueEnabled = config.isVoicedDialogueEnabled();
         snapshot.mutedTextCategories = new ArrayList<>(config.getMutedTextCategories());
@@ -94,7 +92,6 @@ public class SharedConfig {
         if (config == null) {
             return;
         }
-        if (defaultLlmWorldEnabled != null) config.setDefaultLlmWorldEnabled(defaultLlmWorldEnabled);
         if (textDialogueEnabled != null) config.setTextDialogueEnabled(textDialogueEnabled);
         if (voicedDialogueEnabled != null) config.setVoicedDialogueEnabled(voicedDialogueEnabled);
         if (mutedTextCategories != null) {

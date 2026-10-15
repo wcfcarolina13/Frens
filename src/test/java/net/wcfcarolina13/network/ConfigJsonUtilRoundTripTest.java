@@ -29,7 +29,6 @@ class ConfigJsonUtilRoundTripTest {
     /** Sets every shared field to a value distinct from the constructor default. */
     private static ManualConfig populated() throws Exception {
         ManualConfig cfg = newRealConfig();
-        cfg.setDefaultLlmWorldEnabled(true);
         cfg.setTextDialogueEnabled(false);
         cfg.setVoicedDialogueEnabled(false);
         cfg.setTextCategoryMuted("banter", true);
@@ -61,7 +60,6 @@ class ConfigJsonUtilRoundTripTest {
     }
 
     private static void assertSharedFieldsEqual(ManualConfig expected, ManualConfig actual) {
-        assertEquals(expected.isDefaultLlmWorldEnabled(), actual.isDefaultLlmWorldEnabled());
         assertEquals(expected.isTextDialogueEnabled(), actual.isTextDialogueEnabled());
         assertEquals(expected.isVoicedDialogueEnabled(), actual.isVoicedDialogueEnabled());
         assertEquals(expected.getMutedTextCategories(), actual.getMutedTextCategories());
@@ -123,6 +121,17 @@ class ConfigJsonUtilRoundTripTest {
         assertFalse(ConfigJsonUtil.applyConfigJson("{}", null));
 
         assertSharedFieldsEqual(pristine, target);
+    }
+
+    @Test
+    void retiredLegacyLlmKeyFromAnOlderPeerIsIgnored() throws Exception {
+        ManualConfig target = newRealConfig();
+
+        assertTrue(ConfigJsonUtil.applyConfigJson(
+                "{\"defaultLlmWorldEnabled\":true,\"textDialogueEnabled\":false}", target));
+
+        assertFalse(target.isTextDialogueEnabled());
+        assertFalse(ConfigJsonUtil.configToJson(target).contains("defaultLlmWorldEnabled"));
     }
 
     @Test
