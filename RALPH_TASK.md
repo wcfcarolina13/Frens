@@ -12,6 +12,11 @@ Field items now 288. Sandbox findings #9 fixed, #10 (5 missing voice-line sounds
 (`hardened` branch) gained health, pause_menu fix, screen_buttons/click_button, type_text/press_key, players, bot_view HUD
 hiding, pack metadata fix; command reference in docs/testing/JAVA_MINECRAFT_AUTOMATION.md. Everything in the 1.1.236 block
 below still applies (next items, deferrals).
+**Unreleased on main:** `ae4cb5fb` (spawn nudge also fires at a protection-driven failure relocation, sandbox #12), tests 2208.
+**Next build (1.1.239) candidates, from the 1.1.238 sandbox run (PLAYTHROUGH_1.1.234_SANDBOX.md #13-#16):** woodcut approach
+punches stone bare-handed (37 s a block, no drop) and digs the bot into a covered pocket (#14, high); approach planning in
+dense forest gets 0 logs in 10 min (#16, high); a fresh bot starves during a long run with no food plan (#15); slow A* in
+leafy forest (#13, watch). Also open: #10 missing voice-line sounds, #11 roster empty state said twice.
 
 ## Session Handoff 2026-10-14 (1.1.237) — superseded
 
