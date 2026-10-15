@@ -142,6 +142,12 @@ class PlannedMoveExecPolicyTest {
         assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:woodcut", "RUNNING", true));
         assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:drop_sweep", "RUNNING", false));
         assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, null, "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:sleep", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:quick-store", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:quick-fetch", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:craft", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "SKILL:Sleep", "RUNNING", false));
+        assertTrue(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:mining", "RUNNING", false));
     }
 
     @Test

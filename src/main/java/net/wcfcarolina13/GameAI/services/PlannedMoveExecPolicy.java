@@ -95,15 +95,21 @@ public final class PlannedMoveExecPolicy {
     /**
      * Per-bot half of the mutation gate (review I1): this bot holds a running task ticket of its own.
      * The ticket name and state are {@code TaskService.ActiveTaskInfo}'s, as strings. A cancelled or
-     * paused ticket does not count, and neither does a drop sweep (it only picks items up).
+     * paused ticket does not count, and neither do tickets whose walks must never dig or build: a drop
+     * sweep (it only picks items up), sleep (sunset return, Zzz, wake-up), quick-store/quick-fetch chest
+     * trips and craft. None of those ever set the old global flag.
      */
     public static boolean botTaskAllowsMutation(boolean hasTicket, String ticketName, String state,
                                                 boolean cancelRequested) {
-        if (!hasTicket || cancelRequested || !"RUNNING".equals(state)) {
+        if (!hasTicket || cancelRequested || !"RUNNING".equals(state) || ticketName == null) {
             return false;
         }
-        return ticketName != null && !"skill:drop_sweep".equalsIgnoreCase(ticketName);
+        return !NON_MUTATING_TICKETS.contains(ticketName.toLowerCase(java.util.Locale.ROOT));
     }
+
+    /** Ticket names (lower case) whose walks never break or place (review I1 ruling). */
+    private static final java.util.Set<String> NON_MUTATING_TICKETS = java.util.Set.of(
+            "skill:drop_sweep", "skill:sleep", "skill:quick-store", "skill:quick-fetch", "skill:craft");
 
     /**
      * Whether to zero the bot's input after a move. Consecutive SWIM cells keep their momentum (a stop
