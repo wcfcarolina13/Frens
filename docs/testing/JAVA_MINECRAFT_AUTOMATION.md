@@ -44,6 +44,7 @@ Fork: `~/dev/minecraft-mod-mcp-hardened`, branch `hardened`. Build `cd packages/
 | `bot_view` name, perspective first/back/front, hud | no | Screenshot from an entity's camera, viewer HUD hidden unless `hud=true`. |
 | `players` | no | Visible players and bots: position, health, held item, distance, time of day. |
 | `bot_state` name | no | Server-side state of one player or bot (singleplayer): exact pos, onGround, sky above head, health, food, saturation, air, held item, full inventory. |
+| `blocks` name or x,y,z, r, dy | no | Server-side block grid around a bot or position (r and dy up to 4), one level per y, `.` air, `~` water, `!` lava, `@` centre. Reads terrain around a stuck bot without screenshots. |
 | `screen_buttons` | no | Visible widgets: index, label, type, active, centre in screenshot px, text field values. |
 | `click_button` label or i | yes | Clicks a widget through the screen (refuses inactive/ambiguous). |
 | `click_px` x, y | yes | Click at screenshot pixels. |

@@ -42,6 +42,8 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 - **DONE in the fork (2026-10-14): `bot_view` hides the viewer's HUD** (the hotbar/hearts in bot shots were the player's, not the bot's); `hud=true` keeps it.
 - **DONE in the fork (2026-10-14): `players`.** Lists player entities the client sees (bots are fake players): position, health, held item, distance, plus time of day. Read-only.
 
+- **DONE in the fork (2026-10-14/15): `bot_state`, `blocks`, server time in `players`** (`5750ab3`, `dbbb980`, `55e4eb8`). Read-only singleplayer inspection: a bot's food/inventory/onGround and the block grid around it, which explained a boxed-in bot (2-deep pond, 2-high sand) in one call. Upstream candidate as a generic `world_inspect` group.
+
 ## Upstream PR plan (langyo/minecraft-mod-mcp, prepared 2026-10-14, nothing sent)
 
 Order: security first, then fixes that make production builds work, then new commands. Each PR is one fork commit (branch `hardened` in `~/dev/minecraft-mod-mcp-hardened`), rebased onto upstream main and split per loader where needed (our commits touch only the 1.21.11 Fabric module plus `packages/common`). Bradley approves each PR's text before anything is opened (outbound action).

@@ -3,7 +3,27 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.239) — next session starts here
+## Session Handoff 2026-10-15 (1.1.240) — next session starts here
+
+**State:** main = origin/main @ 1.1.240. Suite 2337 green. Not on Modrinth. 1.1.240 = multi-step navigation (Bradley's ask
+with screenshots, 2026-10-14): both finders plan only executable moves (`PathMovePolicy`), Baritone is the default (one-time
+migration), wading through 1-deep water, stuck-cell walk around / break soft blocks / place one dirt step
+(`TerrainMovePolicy`, protection strict), failed-route memory, woodcut skips unreachable targets fast, gather radius 6, and
+the 1.1.239 survival-latch regression fixed (`SurvivalLatchPolicy`). Field items now 297 (Phase 6ak). Sandbox: Carl 29 logs
+from 11 trees in 6 min on the dev build, Baritone p90 109 ms, 0 A* timeouts.
+**Tools:** `tools/logs/frens_log_report.py` (run it on any session log first), `frens_log_prune.py` (dry-run only; installing
+its LaunchAgent and the first `--apply` on Nirn (archives 239 logs) need Bradley's OK). A/B: `/bot config pathfinder
+<baritone|classic|default> <bot>`, `/bot config pathcompare on`. MCP fork: `bot_state`, `blocks`, server time in `players`.
+**Next build (1.1.241): the merged pathfinder (Bradley 2026-10-15: "a single pathfinding method that's a combination of the
+best of both").** Research in `docs/research/PATHFINDING_RESEARCH_2026-10.md` (Fable): one unidirectional anytime A* in tick
+costs (Baritone ActionCosts), break/place/swim as costed moves inside the search, partial-path legs with splicing, per-search
+caches behind a `BlockAccess` interface, synthetic voxel benchmark harness with a move simulator. Remove the finder toggle,
+GUI option and per-bot override when it ships; keep PathCompare as a regression check. Run a multi-bot A/B session with a
+log-analyst agent before and after (creeper-free daylight, bots outside the Spawn base).
+**Also open:** sandbox #18 (creeper abort sends `creeper-fuse` to chat), #19 (per-bot tree claims), #21 (2-deep water needs
+swimming), torch-hold log spam (133/min), PathCompare reached-goal flag. Everything in the 1.1.239 block below still applies.
+
+## Session Handoff 2026-10-14 (1.1.239) — superseded
 
 **State:** main = origin/main @ 1.1.239. Suite 2262 green. Not on Modrinth (Bradley: not until playthroughs settle). 1.1.239 is
 from the 1.1.238 sandbox run (PLAYTHROUGH_1.1.234_SANDBOX.md #12-#17): movement obstruction mining refuses slow blocks
