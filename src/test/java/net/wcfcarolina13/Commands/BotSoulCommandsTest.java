@@ -103,7 +103,7 @@ class BotSoulCommandsTest {
 
     /**
      * Builds a real (non-mocked) ManualConfig instance via its private constructor.
-     * ManualConfig() only assigns selectedLanguageModel from a system property — no file I/O,
+     * ManualConfig() is empty — no file I/O,
      * no FILE_PATH resolution — so this is safe to call from a plain unit test JVM (mirrors
      * SoulFoundationTest#newRealConfig).
      */

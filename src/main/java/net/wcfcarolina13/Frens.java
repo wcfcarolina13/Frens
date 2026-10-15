@@ -17,14 +17,11 @@ import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.command.permission.PermissionPredicate;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.wcfcarolina13.ChatUtils.BERTModel.BertModelManager;
 import net.wcfcarolina13.ChatUtils.BotAmbientChatter;
 import net.wcfcarolina13.ChatUtils.BotMoodManager;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
-import net.wcfcarolina13.ChatUtils.NLPProcessor;
 import net.wcfcarolina13.Commands.configCommand;
 import net.wcfcarolina13.Commands.modCommandRegistry;
-import net.wcfcarolina13.Database.SQLiteDB;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.FilingSystem.PlayerPreferenceGate;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -56,11 +53,9 @@ import net.wcfcarolina13.network.RecruitmentPromptPayload;
 import net.wcfcarolina13.network.RecruitmentStatePayload;
 import net.wcfcarolina13.network.RequestRecruitmentDialoguePayload;
 import net.wcfcarolina13.network.SurvivalRecruitmentNetworkManager;
-import net.wcfcarolina13.WebSearch.AISearchConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -71,11 +66,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
@@ -139,10 +130,11 @@ public class Frens implements ModInitializer {
     private static final long LEGACY_CHAT_DENY_WARN_INTERVAL_MS = 10_000L;
 
     /**
-     * Server thread. Whether {@code sender} may drive {@code bot} through the legacy chat routes
-     * (LLM orchestrator, inline action parser): operator, integrated host, or the bot's recorded
-     * owner ({@link net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy}). A denial logs a WARN at
-     * most once per sender per 10 s.
+     * Server thread. Whether {@code sender} counts as allowed to direct {@code bot} by chat:
+     * operator, integrated host, or the bot's recorded owner
+     * ({@link net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy}). Feeds the one-time "AI chat
+     * is off" notice now that the legacy chat routes are retired. A denial logs a WARN at most
+     * once per sender per 10 s.
      */
     public static boolean isLegacyChatAuthorized(ServerPlayerEntity sender, ServerPlayerEntity bot) {
         if (sender == null || bot == null || serverInstance == null) {
@@ -344,23 +336,10 @@ public class Frens implements ModInitializer {
     public static ScreenHandlerType<net.wcfcarolina13.ui.BotAnvilScreenHandler> BOT_ANVIL_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
-    public static BertModelManager modelManager;
-    public static boolean loadedBERTModelIntoMemory = false;
-    private static boolean djlAvailable = false;
     private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> LAST_OPEN_MS = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final ExecutorService MODEL_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "bert-loader");
-        t.setDaemon(true);
-        return t;
-    });
-    private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
-    private static final AtomicBoolean LEGACY_NLP_ASSETS_REQUESTED = new AtomicBoolean(false);
     /** Per-player preference packets: unchanged/flood admission + coalesced config saves. */
     private static final PlayerPreferenceGate PREFERENCE_GATE = new PlayerPreferenceGate();
 
-    // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
-    private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
-    
     // Track bots that need spawn escape checks
     private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
     
@@ -817,26 +796,6 @@ public class Frens implements ModInitializer {
         configCommand.register();
         net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.register();
         net.wcfcarolina13.Commands.SupplyCommands.register();
-        try {
-            SQLiteDB.createDB();
-        } catch (Exception e) {
-            Frens.LOGGER.error("Failed to initialize Frens database; running without DB-backed memory.", e);
-        }
-
-        // Legacy NLP models are NOT fetched here (the legacy chat path is retired).
-        CompletableFuture.runAsync(AISearchConfig::setupIfMissing);
-
-        djlAvailable = isClassAvailable("ai.djl.Model");
-        if (djlAvailable && OLLAMA4J_AVAILABLE) {
-            modelManager = BertModelManager.getInstance();
-        } else {
-            // BERT only serves the legacy NLP intent stack, which needs ollama4j; never touch it
-            // in a standard (non-AI) build.
-            modelManager = null;
-            LOGGER.info("Legacy BERT intent model disabled (DJL present: {}, ollama4j present: {}).",
-                    djlAvailable, OLLAMA4J_AVAILABLE);
-        }
-
         // Knowledge graph: project recipes/tags once the data is loaded, and again after /reload
         // swaps datapacks. Build failure installs an empty graph (souls degrade gracefully).
         ServerLifecycleEvents.SERVER_STARTED.register(
@@ -1022,19 +981,6 @@ public class Frens implements ModInitializer {
             BotMoodManager.resetSession();
             // Clear quest runtime session state (quest memory persists in config).
             BotQuestService.resetSession();
-            if (modelManager != null) {
-                try {
-                    if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
-                        modelManager.unloadModel();
-                        System.out.println("Unloaded BERT Model from memory");
-                    } else {
-                        System.out.println("BERT Model was not loaded, skipping unloading...");
-                    }
-                } catch (IOException e) {
-                    LOGGER.error("BERT Model unloading failed!", e);
-                }
-            }
-            MODEL_LOAD_ENQUEUED.set(false);
             net.wcfcarolina13.GameAI.services.BotControlApplier.resetSession();
             // Flush pending bot travels to disk, then clear in-memory state.
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.resetSession();
@@ -1602,55 +1548,6 @@ public class Frens implements ModInitializer {
                 || normalized.startsWith("give us a quest");
     }
 
-    /**
-     * Starts the legacy NLP model setup (download/extract, then the BERT load) on the model worker.
-     * Unreachable now that the legacy chat path is retired: its only caller is the dead
-     * LLMOrchestrator, deleted together with this and the BERT wiring in the follow-up build.
-     */
-    public static void requestLegacyNlpAssets() {
-        if (!OLLAMA4J_AVAILABLE) {
-            return;
-        }
-        if (LEGACY_NLP_ASSETS_REQUESTED.compareAndSet(false, true)) {
-            LOGGER.info("Legacy LLM in use: preparing local NLP models on the model worker.");
-            MODEL_EXECUTOR.execute(() -> {
-                try {
-                    NLPProcessor.ensureLocalNLPModel();
-                } catch (Throwable t) {
-                    LOGGER.warn("Legacy NLP model setup failed: {}", t.toString());
-                }
-            });
-        }
-        enqueueBertLoad();
-    }
-
-    private static void enqueueBertLoad() {
-        if (modelManager == null) {
-            return;
-        }
-        if (!MODEL_LOAD_ENQUEUED.compareAndSet(false, true)) {
-            return;
-        }
-        LOGGER.info("Queueing asynchronous BERT model load...");
-        CompletableFuture.runAsync(() -> {
-            LOGGER.info("Proceeding to load BERT model into memory");
-            try {
-                modelManager.loadModel();
-                loadedBERTModelIntoMemory = true;
-                LOGGER.info("BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.");
-            } catch (Throwable t) {
-                loadedBERTModelIntoMemory = false;
-                LOGGER.warn("⚠️ BERT unavailable (continuing without it): {}", t.toString());
-            }
-        }, MODEL_EXECUTOR).whenComplete((ignored, error) -> {
-            if (error != null) {
-                LOGGER.warn("Asynchronous BERT load failed: {}", error.getMessage());
-                loadedBERTModelIntoMemory = false;
-                MODEL_LOAD_ENQUEUED.set(false);
-            }
-        });
-    }
-
     private static ChatTarget resolveChatTargets(String raw, ServerPlayerEntity sender) {
         if (serverInstance == null || raw == null) {
             return ChatTarget.NONE;
@@ -1797,19 +1694,6 @@ public class Frens implements ModInitializer {
                 AI_CHAT_OFF_HINTED.contains(sender.getUuid()));
         if (show && AI_CHAT_OFF_HINTED.add(sender.getUuid())) {
             sender.sendMessage(net.minecraft.text.Text.literal(net.wcfcarolina13.GameAI.llm.AiChatOffHintPolicy.NOTICE), false);
-        }
-    }
-
-    public static boolean isDjlAvailable() {
-        return djlAvailable;
-    }
-
-    private static boolean isClassAvailable(String className) {
-        try {
-            Class.forName(className, false, Frens.class.getClassLoader());
-            return true;
-        } catch (Throwable t) {
-            return false;
         }
     }
 

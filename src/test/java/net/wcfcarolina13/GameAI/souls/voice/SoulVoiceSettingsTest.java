@@ -13,7 +13,7 @@ class SoulVoiceSettingsTest {
 
     /**
      * Constructs a real ManualConfig via reflection on its private no-arg constructor.
-     * ManualConfig() only assigns selectedLanguageModel from a system property — no file I/O.
+     * ManualConfig() is empty — no file I/O.
      */
     private static ManualConfig newRealConfig() throws Exception {
         Constructor<ManualConfig> constructor = ManualConfig.class.getDeclaredConstructor();
