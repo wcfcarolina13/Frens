@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 public class PathFinder {
 
@@ -155,7 +156,7 @@ public class PathFinder {
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world,
                                                UUID botUuid, String botName) {
         return dispatch(start, target, world, botUuid, botName, PlanRequest.legacyWalk(),
-                WorldTerrainView.BotSnapshot.NONE).nodes();
+                LazySnapshot.none()).nodes();
     }
 
     /**
@@ -192,7 +193,9 @@ public class PathFinder {
 
     /**
      * The 1.1.242 entry for a bot walk: tool speeds, dirt count, sprint and territory are snapshotted
-     * from {@code bot} now, on the calling thread, and never read live during the search.
+     * from {@code bot} on the calling thread, and never read live during the search. The snapshot is
+     * taken only when something reads it (a unified plan, or the PathCompare shadow), so Baritone and
+     * classic walks never touch the bot's inventory here.
      */
     public static PlanResult plan(BlockPos start, BlockPos goal, ServerWorld world, ServerPlayerEntity bot,
                                   PlanRequest req) {
@@ -200,18 +203,53 @@ public class PathFinder {
                 bot != null ? bot.getUuid() : null,
                 bot != null ? bot.getName().getString() : null,
                 req != null ? req : PlanRequest.legacyWalk(),
-                WorldTerrainView.BotSnapshot.of(bot));
+                new LazySnapshot(() -> WorldTerrainView.BotSnapshot.of(bot)));
     }
 
     /** As above for a bot known only by ID (hand-only tools, no dirt, no territory claim check). */
     public static PlanResult plan(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid, String botName,
                                   PlanRequest req) {
         return dispatch(start, goal, world, botUuid, botName, req != null ? req : PlanRequest.legacyWalk(),
-                WorldTerrainView.BotSnapshot.NONE);
+                LazySnapshot.none());
+    }
+
+    /**
+     * Reads the bot snapshot at most once, on first use. A failed read is remembered and rethrown,
+     * so the unified run and the PathCompare shadow see the same outcome.
+     */
+    private static final class LazySnapshot {
+        /** The no-bot snapshot. A fresh holder per plan: the holder is mutable and plans run on many threads. */
+        static LazySnapshot none() {
+            return new LazySnapshot(() -> WorldTerrainView.BotSnapshot.NONE);
+        }
+
+        private final Supplier<WorldTerrainView.BotSnapshot> source;
+        private WorldTerrainView.BotSnapshot value;
+        private RuntimeException failure;
+        private boolean read;
+
+        LazySnapshot(Supplier<WorldTerrainView.BotSnapshot> source) {
+            this.source = source;
+        }
+
+        WorldTerrainView.BotSnapshot get() {
+            if (!read) {
+                read = true;
+                try {
+                    value = source.get();
+                } catch (RuntimeException e) {
+                    failure = e;
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+            return value;
+        }
     }
 
     private static PlanResult dispatch(BlockPos start, BlockPos target, ServerWorld world, UUID botUuid,
-                                       String botName, PlanRequest req, WorldTerrainView.BotSnapshot snapshot) {
+                                       String botName, PlanRequest req, LazySnapshot snapshot) {
         PathFinderChoice choice = PathFinderOverrides.resolveFor(botUuid, ACTIVE);
         noteSearchBoxedIn(false);
         long planId = PathPlanIds.next();
@@ -241,7 +279,16 @@ public class PathFinder {
         if (botName != null) {
             noteLastPlan(planId, target);
             if (PathCompareService.isEnabled()) {
-                PathCompareService.submit(botName, start, target, world, result, req, snapshot);
+                WorldTerrainView.BotSnapshot shadowSnapshot = null;
+                try {
+                    shadowSnapshot = snapshot.get();
+                } catch (RuntimeException e) {
+                    LOGGER.warn("[PathFinder] bot snapshot failed plan={}: {}; skipping PathCompare",
+                            PathPlanIds.format(planId), e.toString());
+                }
+                if (shadowSnapshot != null) {
+                    PathCompareService.submit(botName, start, target, world, result, req, shadowSnapshot);
+                }
             }
         }
         return result;
@@ -254,12 +301,13 @@ public class PathFinder {
 
     /**
      * The unified finder, guarded for the field window: an exception (a world read the view did not
-     * expect) logs one WARN and falls back to the Baritone-style finder, so a walk never dies on it.
+     * expect, or a failed bot snapshot read) logs one WARN and falls back to the Baritone-style finder,
+     * so a walk never dies on it.
      */
     private static PlanResult runUnifiedSafely(BlockPos start, BlockPos target, ServerWorld world, PlanRequest req,
-                                               WorldTerrainView.BotSnapshot snapshot, long planId) {
+                                               LazySnapshot snapshot, long planId) {
         try {
-            return runUnified(start, target, world, req, snapshot, planId);
+            return runUnified(start, target, world, req, snapshot.get(), planId);
         } catch (RuntimeException e) {
             LOGGER.warn("[PathFinder] unified search failed plan={} from={} to={}: {}; using baritone",
                     PathPlanIds.format(planId), start.toShortString(), target.toShortString(), e.toString());
