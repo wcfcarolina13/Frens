@@ -260,7 +260,13 @@ public final class BotFleeService {
                     info.type(),
                     info.capPos(),
                     info.entryDir());
-            if (!assessment.valid()) {
+            boolean keptSealed = !assessment.valid()
+                    && info.type() == ShelterType.WALL_OFF
+                    && WallOffPolicy.keepOnRevalidate(
+                            assessment.reason().name().toLowerCase(),
+                            isShelterEntranceSecured(world, assessment.standPos(), ShelterType.WALL_OFF,
+                                    info.capPos(), info.entryDir()));
+            if (!assessment.valid() && !keptSealed) {
                 SHELTER_ACTIVE.remove(bot.getUuid());
                 LOGGER.info("Bot {} shelter invalidated reason={} type={} pos={}",
                         bot.getName().getString(),
@@ -1150,7 +1156,7 @@ public final class BotFleeService {
     /** The server-thread snapshot and the absolute block its offsets are relative to (the bot's feet). */
     private record WallOffScan(BlockPos origin, WallOffPolicy.Snapshot snapshot) {}
 
-    private record WallOffTeardown(int removed, int skipped) {}
+    private record WallOffTeardown(int removed, int skipped, List<BlockPos> skippedCells) {}
 
     /**
      * Step 3 of the tactic chain: walk to a natural overhang cell with one or two open faces, seal
@@ -1252,6 +1258,7 @@ public final class BotFleeService {
         List<BlockPos> ledger = new ArrayList<>();
         for (int i = 0; i < plan.size(); i++) {
             if (isStaleShelter(bot, gen)) {
+                abandonStaleWallOff(bot, server, ledger);
                 return false;
             }
             BlockPos cell = plan.get(i);
@@ -1288,6 +1295,7 @@ public final class BotFleeService {
         LOGGER.info("Bot {} wall-off: sealed at {} placed={}", name, feet.toShortString(), placed.size());
 
         if (isStaleShelter(bot, gen)) {
+            abandonStaleWallOff(bot, server, placed);
             return false;
         }
         BlockPos firstFeet = placed.get(0);
@@ -1335,6 +1343,20 @@ public final class BotFleeService {
                     name, shelterBites, String.format("%.1f", bot.getHealth()));
         }
         return true;
+    }
+
+    /**
+     * A stale generation mid-seal (respawn, reset) must not leave a half wall behind. A dead or
+     * removed bot cannot mine, so its blocks stay.
+     */
+    private static void abandonStaleWallOff(ServerPlayerEntity bot,
+                                            MinecraftServer server,
+                                            List<BlockPos> ledger) throws InterruptedException {
+        if (ledger.isEmpty() || !bot.isAlive() || bot.isRemoved()) {
+            return;
+        }
+        WallOffTeardown torn = tearDownWallOffLedger(bot, server, List.copyOf(ledger));
+        LOGGER.info("Bot {} wall-off: stale mid-seal — tore down {}", bot.getName().getString(), torn.removed());
     }
 
     /** Null when the walk may continue, else the reason to fall through. */
@@ -1397,8 +1419,9 @@ public final class BotFleeService {
                                                          List<BlockPos> ledger) throws InterruptedException {
         int removed = 0;
         int skipped = 0;
+        List<BlockPos> skippedCells = new ArrayList<>();
         if (ledger == null || ledger.isEmpty() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return new WallOffTeardown(0, 0);
+            return new WallOffTeardown(0, 0, List.of());
         }
         String name = bot.getName().getString();
         for (int i = ledger.size() - 1; i >= 0; i--) {
@@ -1409,6 +1432,7 @@ public final class BotFleeService {
             }, WALL_OFF_HOP_TIMEOUT_MS, null);
             if (id == null) {
                 skipped++;
+                skippedCells.add(cell);
                 LOGGER.info("Bot {} wall-off teardown: skipped {} (read timeout)", name, cell.toShortString());
                 continue;
             }
@@ -1418,11 +1442,14 @@ public final class BotFleeService {
             }
             if (!WallOffPolicy.teardownAllowed(id, SEAL_IDS)) {
                 skipped++;
+                skippedCells.add(cell);
                 LOGGER.info("Bot {} wall-off teardown: skipped {} ({} is not a seal block)",
                         name, cell.toShortString(), id);
                 continue;
             }
-            MiningTool.mineBlock(bot, cell, false).join();
+            // enforceVillageProtection=false: ledger cells are the bot's own blocks. With the 3-arg
+            // overload a wall inside a mapped village is refused at dawn and the bot is entombed.
+            MiningTool.mineBlock(bot, cell, false, false).join();
             Thread.sleep(200L);
             Boolean open = callOnServer(server, () -> !world.getBlockState(cell).blocksMovement(),
                     WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE);
@@ -1430,10 +1457,11 @@ public final class BotFleeService {
                 removed++;
             } else {
                 skipped++;
+                skippedCells.add(cell);
                 LOGGER.info("Bot {} wall-off teardown: {} still blocks after mining", name, cell.toShortString());
             }
         }
-        return new WallOffTeardown(removed, skipped);
+        return new WallOffTeardown(removed, skipped, List.copyOf(skippedCells));
     }
 
     /** Server thread only: one bounded read of the box around the bot's feet plus its seal blocks. */
@@ -1457,7 +1485,7 @@ public final class BotFleeService {
             }
         }
 
-        // Claims: ask the real authorization only for clear cells a candidate could seal
+        // Claims and mapped villages: ask only for clear cells a candidate could seal
         // (feet/head beside a possible stand cell). Marks are applied after the pass so a mark
         // never changes another cell's stand test.
         Set<Integer> refused = new java.util.HashSet<>();
@@ -1478,7 +1506,8 @@ public final class BotFleeService {
                                 continue;
                             }
                             BlockPos pos = origin.add(dx + face.dx, dy + k, dz + face.dz);
-                            if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
+                            if (MappedVillageService.isInsideMappedVillage(world, pos)
+                                    || !BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
                                 refused.add(idx);
                             }
                         }
@@ -2442,6 +2471,16 @@ public final class BotFleeService {
             return;
         }
         BlockPos stand = info.interiorPos() != null ? info.interiorPos() : bot.getBlockPos();
+        // A skipped cell (glass, chest) still walls the primary face: leave by another sealed face
+        // whose cells all came down, if there is one.
+        if (faceHasCell(stand, exitDir, torn.skippedCells())) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                if (dir != exitDir && faceHasCell(stand, dir, ledger) && !faceHasCell(stand, dir, torn.skippedCells())) {
+                    exitDir = dir;
+                    break;
+                }
+            }
+        }
         BlockPos far = stand.offset(exitDir, 2).toImmutable();
         boolean farStandable = Boolean.TRUE.equals(callOnServer(server,
                 () -> VoxelJunctionService.isStandable(world, far), WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE));
@@ -2451,6 +2490,17 @@ public final class BotFleeService {
         MovementService.execute(bot.getCommandSource(), bot, exitPlan, Boolean.FALSE, true);
         Thread.sleep(600L);
         LOGGER.info("Bot {} broke free from wall-off shelter via {}", name, exitDir.asString());
+    }
+
+    /** Whether any of {@code cells} sits in the face column of {@code stand} toward {@code dir}. */
+    private static boolean faceHasCell(BlockPos stand, Direction dir, List<BlockPos> cells) {
+        BlockPos side = stand.offset(dir);
+        for (BlockPos cell : cells) {
+            if (cell.getX() == side.getX() && cell.getZ() == side.getZ()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void breakFreeVillageHouse(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)

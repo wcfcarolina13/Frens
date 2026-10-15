@@ -332,4 +332,13 @@ class WallOffPolicyTest {
         assertTrue(WallOffPolicy.teardownOnReject("something_new"));
         assertTrue(WallOffPolicy.teardownOnReject(null));
     }
+
+    @Test
+    void revalidationKeepsASealedWallWithAMobOutside() {
+        assertTrue(WallOffPolicy.keepOnRevalidate("hostile_exposed", true));
+        assertFalse(WallOffPolicy.keepOnRevalidate("hostile_exposed", false));
+        assertFalse(WallOffPolicy.keepOnRevalidate("entrance_unsealed", true));
+        assertFalse(WallOffPolicy.keepOnRevalidate("open_sky", true));
+        assertFalse(WallOffPolicy.keepOnRevalidate(null, true));
+    }
 }

@@ -340,4 +340,14 @@ public final class WallOffPolicy {
     public static boolean teardownOnReject(String reason) {
         return reason == null || !"hostile_exposed".equals(reason.toLowerCase(Locale.ROOT));
     }
+
+    /**
+     * The server-tick revalidation of a registered wall-off shelter: keep the entry (and its
+     * ledger) when the only complaint is a hostile nearby and all eight side cells still block
+     * movement. Dropping it there would leave a sealed wall with no record, so dawn break-free
+     * would never run. Any other reason, or a breached wall, drops it as before.
+     */
+    public static boolean keepOnRevalidate(String reason, boolean entranceSecured) {
+        return entranceSecured && !teardownOnReject(reason);
+    }
 }
