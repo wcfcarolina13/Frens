@@ -43,4 +43,34 @@ class StopFeedbackPolicyTest {
         assertTrue(StopFeedbackPolicy.shouldEchoSkillResult("Collected 12 logs."));
         assertTrue(StopFeedbackPolicy.shouldEchoSkillResult(null));
     }
+
+    @Test
+    void creeperAbortReasonIsAPlainChatLineNotAKey() {
+        String reason = CreeperEvasionPolicy.ABORT_REASON;
+        assertFalse(reason.isBlank());
+        assertFalse(reason.contains("-"));
+        assertFalse(reason.contains("—"));
+        assertFalse(reason.contains(";"));
+        assertFalse(reason.matches("^[a-z]+(-[a-z]+)+$"));
+        assertFalse(StopFeedbackPolicy.isManualStop(reason));
+    }
+
+    @Test
+    void creeperAbortReasonStaysOutOfTheSoulBuckets() {
+        // Mirrors SoulEventObserver.sanitizeReasonCategory: the old "creeper-fuse" key bucketed as "other".
+        String lower = CreeperEvasionPolicy.ABORT_REASON.toLowerCase(Locale.ROOT);
+        for (String word : List.of("respawn", "stopping", "preempt", "interrupted by new command",
+                "threat", "danger", "halt", "stop")) {
+            assertFalse(lower.contains(word), "reason must not contain '" + word + "'");
+        }
+    }
+
+    @Test
+    void skillEchoIsSuppressedForTheCreeperAbort() {
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult(CreeperEvasionPolicy.ABORT_REASON));
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult("§c" + CreeperEvasionPolicy.ABORT_REASON + " "));
+        assertTrue(StopFeedbackPolicy.isCreeperBackoff(CreeperEvasionPolicy.ABORT_REASON));
+        assertFalse(StopFeedbackPolicy.isCreeperBackoff("creeper-fuse"));
+        assertFalse(StopFeedbackPolicy.isCreeperBackoff(null));
+    }
 }

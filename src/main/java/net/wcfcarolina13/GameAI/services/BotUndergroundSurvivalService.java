@@ -150,7 +150,7 @@ public final class BotUndergroundSurvivalService {
             if (BotFleeService.isSurfaceRecoveryActive(botId)) continue;
             if (BotFleeService.isBreakingFree(botId)) continue;
             if (BotFleeService.isInShelter(botId)) continue;
-            // Creeper backoff owns the bot's movement and its own "creeper-fuse" latch.
+            // Creeper backoff owns the bot's movement and its own abort latch.
             if (BotCreeperDefenseService.isBackingOff(botId)) continue;
 
             // Stuck with nothing to build with: back off instead of relaunching every 10 s.

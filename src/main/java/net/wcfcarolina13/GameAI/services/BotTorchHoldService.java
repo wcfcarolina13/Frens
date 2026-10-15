@@ -154,7 +154,8 @@ public final class BotTorchHoldService {
 
     /**
      * Emits one INFO diagnostic line, but only when the verdict for this bot has
-     * actually changed since the last evaluation. Format:
+     * actually changed since the last evaluation (verdict, gate, mob and action, via
+     * {@link TorchHoldPolicy#verdictKey}). Light and distance are printed, not compared. Format:
      * {@code [torch-hold] Jake verdict=reject gate=audible-hostile-8 dist=5.2 light=4}
      */
     private static void logVerdictIfChanged(ServerPlayerEntity bot, UUID id, Verdict verdict, String suffix) {
@@ -166,9 +167,9 @@ public final class BotTorchHoldService {
                 verdict.light,
                 verdict.detail == null ? "" : " mob=" + verdict.detail,
                 suffix);
-        String prev = LAST_VERDICT.get(id);
-        if (!line.equals(prev)) {
-            LAST_VERDICT.put(id, line);
+        String key = TorchHoldPolicy.verdictKey(verdict.gate, verdict.detail, suffix);
+        String prev = LAST_VERDICT.put(id, key);
+        if (!key.equals(prev)) {
             LOGGER.info(line);
         }
     }

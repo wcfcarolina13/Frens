@@ -74,6 +74,15 @@ public final class CreeperEvasionPolicy {
      */
     public static final double LOW_HEALTH_FRACTION = 0.5D;
 
+    /**
+     * The task-abort reason for a creeper backoff. {@code TaskService} says the abort reason
+     * aloud as the bot's chat line, so it is plain speech, not a log key. It avoids every
+     * substring {@code SoulEventObserver.sanitizeReasonCategory} buckets on ("stop", "halt",
+     * "threat", "danger" and so on) so it stays in the {@code other} bucket the old
+     * {@code creeper-fuse} key fell into. The {@code /bot skill} echo is suppressed for it.
+     */
+    public static final String ABORT_REASON = "A creeper! I dropped what I was doing to get clear.";
+
     private CreeperEvasionPolicy() {}
 
     /**

@@ -195,10 +195,10 @@ public final class BotCreeperDefenseService {
         }
         boolean ownedLatch = false;
         if (!TaskService.isAbortRequested(botId)) {
-            TaskService.forceAbort(botId, "creeper-fuse");
+            TaskService.forceAbort(botId, CreeperEvasionPolicy.ABORT_REASON);
             ownedLatch = true;
         }
-        DropSweepService.requestCancel(bot, "creeper-fuse");
+        DropSweepService.requestCancel(bot, "creeper-fuse"); // internal key, never shown
         DropSweepService.suppressFor(botId, DROP_SWEEP_SUPPRESS_MS);
         BotActions.lowerShield(bot);
         double dist = horizontalDistance(bot, threat);

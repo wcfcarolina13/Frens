@@ -99,4 +99,21 @@ class TorchHoldPolicyTest {
         assertEquals(6, TorchHoldPolicy.slotToPersist(2, -1, 6));
         assertEquals(6, TorchHoldPolicy.slotToPersist(-1, 6, 6));
     }
+
+    @Test
+    void verdictKeyIgnoresLightAndDistanceButNotGateMobOrAction() {
+        // Light and distance are not inputs at all: the same gate always gives the same key.
+        assertEquals(TorchHoldPolicy.verdictKey("active-task", null, ""),
+                TorchHoldPolicy.verdictKey("active-task", null, ""));
+        assertFalse(TorchHoldPolicy.verdictKey("active-task", null, "")
+                .equals(TorchHoldPolicy.verdictKey("using-item", null, "")));
+        assertFalse(TorchHoldPolicy.verdictKey(null, null, "")
+                .equals(TorchHoldPolicy.verdictKey("active-task", null, "")));
+        assertFalse(TorchHoldPolicy.verdictKey("audible-hostile-8", "entity.minecraft.zombie", "")
+                .equals(TorchHoldPolicy.verdictKey("audible-hostile-8", "entity.minecraft.skeleton", "")));
+        assertFalse(TorchHoldPolicy.verdictKey(null, null, " action=held slot=2 savedSlot=0")
+                .equals(TorchHoldPolicy.verdictKey(null, null, " action=yield slot=0")));
+        assertEquals(TorchHoldPolicy.verdictKey("mounted", null, null),
+                TorchHoldPolicy.verdictKey("mounted", null, ""));
+    }
 }

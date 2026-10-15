@@ -62,4 +62,19 @@ public final class TorchHoldPolicy {
         boolean holding = savedSlot >= 0 && heldTorchSlot >= 0 && currentSelected == heldTorchSlot;
         return holding ? savedSlot : currentSelected;
     }
+
+    /**
+     * Dedup key for the {@code [torch-hold]} INFO line: the verdict, the gate, the mob identity
+     * (when a hostile gate carries one) and the action suffix. Distance and light level are left
+     * out on purpose, so a canopy flickering the light under one gate logs once, not every tick.
+     *
+     * @param gate   rejecting gate, or null for a hold
+     * @param mob    hostile entity type for the hostile gates, else null
+     * @param suffix action suffix ({@code " action=held slot=..."}), may be empty or null
+     */
+    public static String verdictKey(String gate, String mob, String suffix) {
+        return (gate == null ? "hold|none" : "reject|" + gate)
+                + "|" + (mob == null ? "" : mob)
+                + "|" + (suffix == null ? "" : suffix);
+    }
 }
