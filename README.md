@@ -81,10 +81,9 @@ generation is in flight; without it, expect frame dips on lighter machines durin
 
 - **Learning Mode v1** - operator-only demonstration capture for recording traces used to tune
   movement/build behavior offline. No LLM involved.
-- The repository still carries an older, separate LLM/tool-calling stack (ollama4j + DJL). It is
-  compile-only and **not** what souls use. Building with `./gradlew build -PaiEnabled=true`
-  bundles those native runtimes (large JAR, slow build); the normal `./gradlew build` does not,
-  and the default JAR never touches them at runtime.
+- The older pre-souls LLM chat path (cloud providers, `/bot llm`, the "LLM World" and per-bot
+  "LLM Chat" toggles) is **retired**. Nothing in the mod calls it any more, and its leftover code
+  is due for removal. Talking to companions is Soul Chat only (see above).
 
 ### 📦 Persistence
 - **Inventory** - saved/loaded automatically between sessions
@@ -215,7 +214,7 @@ Mode behavior:
 |---------|-------------|
 | `/bot config teleportDuringSkills on&#124;off` | Toggle teleport shortcuts |
 | `/bot config inventoryFullPause on&#124;off` | Pause when inventory full |
-| `/configMan` | Open GUI for persistent settings |
+| `/configMan` | Open Bot Controls (per-bot and global settings) |
 
 ---
 
@@ -249,12 +248,14 @@ Add `each` to have every bot chase the full amount individually:
 
 ## Configuration GUI
 
-Run `/configMan` to open the settings panel:
+Run `/configMan` to open Bot Controls (also reachable from a bot's inventory screen):
 
-- **Auto Spawn** - Automatically spawn bots when world loads
+- **Global toggles** - Recruitment, Force-Place, Teleport, Scripted Text and Voice, and the Soul
+  Chat, Voice, Banter, Active and Local switches
+- **Auto Spawn on Load** - Automatically spawn a bot when the world loads
 - **Teleport During Skills** - Allow teleport shortcuts
-- **Inventory Pause** - Pause when inventory fills
-- **Defend Nearby Bots** - Auto-defend allies under attack
+- **Pause on Full Inventory** - Pause when inventory fills
+- **Voiced Dialogue** - Mute one bot's pre-baked voice lines
 
 Settings persist in `settings.json5`.
 

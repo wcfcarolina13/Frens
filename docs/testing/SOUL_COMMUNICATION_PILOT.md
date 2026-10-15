@@ -12,6 +12,12 @@ Two sections below:
 - **Manual — to be executed in-game** — requires a running Minecraft 1.21.11 client/server and a
   human at the keyboard. Every box starts unchecked; the user runs these and checks them off.
 
+> **Legacy fallback retired (after 1.1.248).** The pre-souls LLM chat path is gone: no
+> `LLMOrchestrator` loop, no inline action parser, no `/bot llm`, and no "LLM World" or per-bot
+> "LLM Chat" toggles. Where this document says a line "falls back to legacy routing", read it as
+> "is not answered by a soul" (a single named bot with Soul Chat off gets the one-time "AI chat is
+> off" notice). The historical checks below are kept as written.
+
 ## Record-keeping rule for every manual case
 
 Record **timestamps and correlation IDs** from the `frens.souls` logger (e.g.
