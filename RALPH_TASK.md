@@ -3,7 +3,17 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.249) — next session starts here
+## Session Handoff 2026-10-15 (1.1.250) — next session starts here
+
+**State:** main = origin/main @ 1.1.250. Suite 2527 green. 1.1.250 = legacy LLM chat retired, part 1 (routes, `/bot llm`,
+`/bot send_message_to`, both toggles, the /configMan hub and its screens and payloads). Field items: Phase 6ar.
+**Next:** part 2 as 1.1.251: delete the dead legacy classes (scope `.superpowers/sdd/run-1.1.245/scope.md` in the
+suspicious-shamir worktree, keep list there), the io/github/amithkoujalgi and ai/djl stub trees, the provider/model config
+fields and startup probe, then build.gradle: ollama4j, DJL, OpenNLP, sqlite-jdbc, jsoup, commons-compress, commons-math3,
+`-PaiEnabled`. Keep Jackson, AiChatOffHintPolicy, LegacyChatAccessPolicy.isAuthorized, ollamaBaseUrl, SharedStateUtils.
+Everything in the 1.1.249 block below still applies.
+
+## Session Handoff 2026-10-15 (1.1.249) — superseded
 
 **State:** main = origin/main @ 1.1.249. Suite 2531 green. 1.1.249 = the Q5 wall-off night shelter (design
 `docs/testing/WALL_OFF_SHELTER_DESIGN.md`, pure `WallOffPolicy`), sandbox dusk and dawn passed. Field items: Phase 6aq.

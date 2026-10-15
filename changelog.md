@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Legacy LLM chat retired, part 1: routes, commands, toggles and screens gone (audit Q2, Q3); 1.1.250 (2026-10-15)
+
+Bradley's answers 2 and 3 to the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a): retire the pre-souls LLM chat path and its two toggles. Souls, Soul Chat, voices, the Ollama installer and the AI setup checklist are untouched. Part 1 makes the old path unreachable and removes everything players see; part 2 (next build) deletes the dead classes and the libraries only they used (ollama4j, DJL, OpenNLP, sqlite-jdbc and three unused ones, each verified to have no live user).
+
+- **Chat routing** (`04032600`). The legacy confirmation hook, the legacy LLM loop and the two legacy inline parsers are gone from the chat handler. Everything else runs in the same order: zzz, quest asks, respawn and skill-resume answers, soul group and single routing, the one-time "AI chat is off" notice, DM follow-ups, overheard chat. The inline parsers needed ollama4j, which the shipped jar never had, so no player lost a working feature (review checked). `/bot llm world|bot` and `/bot send_message_to` are gone. Spawning always starts the behaviour loop (it used to wait for a provider when the legacy toggles were on).
+- **`/configMan` opens Bot Controls** (`7e25ac47`). The old hub's only live button was Bot Controls. The hub, the API Keys and Reasoning Log screens and their two save payloads are deleted (an older client skips the sends).
+- **Toggles removed** (`c614fdc5`). "LLM World (legacy)" and the per-bot "LLM Chat (this bot)" leave Bot Controls, and every other toggle keeps its setting (the reviewer checked each index old against new). Old config keys are ignored on load and drop on the next save, also when an older peer syncs them (new test).
+- **Docs** (`7010779b`). README (legacy runtime marked retired, `/configMan` row), Guide roadmap lines, a retirement note in `docs/testing/SOUL_COMMUNICATION_PILOT.md`, `CUSTOM_PROVIDERS.md` deleted.
+- **Players will notice:** the two toggles are gone, `/configMan` opens Bot Controls, no "connects to the language model" line on spawn, with Soul Chat off a line naming one bot gets the "AI chat is off" notice (even where a legacy model used to answer) and multi-bot lines get no "Processing your message" reply.
+- **Left for part 2:** the provider/model/key config fields and the startup model-list probe (their only readers are the legacy classes), the BERT startup and unload, `SQLiteDB.createDB`, the web search config file written at startup, the thinking overlay.
+- **Tests:** 2531 → 2527 (−5 tests of removed methods: the hint's legacy parameters and `mayConsumeConfirmation`, +1 old-key sync test). Sandbox smoke: `/bot llm` no longer parses, "Smokey, follow me" with Soul Chat off gets the notice, `/bot follow` works, no ERROR lines.
+- **Field checks:** Phase 6ar.
+
 ## Wall-off night shelter rebuilt (audit Q5); 1.1.249 (2026-10-15)
 
 Bradley's answer 5 to the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a): rebuild the disabled wall-off tactic as a real feature instead of deleting it. Design by Fable (`docs/testing/WALL_OFF_SHELTER_DESIGN.md`), reviewed twice, sandbox-tested at dusk and dawn.
