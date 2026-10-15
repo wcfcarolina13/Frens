@@ -32,6 +32,29 @@ Bradley clicks, Claude watches `latest.log` and calls pass/fail with evidence. G
 - **In-game chat is a notes channel:** anything Bradley types shows in `latest.log` as `<Name> …`. Type a note, then fn+F2, and both arrive together.
 - **Filter the log:** a grep that drops `RideSyncTick|PersistCheck|FollowAssert|planner|ensureAtSurface|movement local|Missing sound|Saving chunks|UBO` makes the rest readable.
 
+## Hardened MCP fork command reference (2026-10-14)
+
+Fork: `~/dev/minecraft-mod-mcp-hardened`, branch `hardened`. Build `cd packages/mods/1.21.11/fabric && ./gradlew build`, copy `build/libs/minecraft-moddev-mcp-fabric-1.21.11-0.4.6.jar` to the sandbox `mods/` as `minecraft-mcp-hardened-1.21.11-0.4.6.jar` (game closed). API: `POST http://127.0.0.1:9876/api/cmd` body `{"cmd":...}`. Input commands need `enter_control_mode` first and `exit_control_mode` after (control mode takes the player's camera).
+
+| Command | Control mode | What it does |
+|---|---|---|
+| `health` | no | Answers without the render thread. Verdict `ok`, `saving`, `stuck_save`, `render_idle`, `unknown`; screen, server state, render-thread frames. Every `render thread timeout` error carries it. |
+| `screen_info` | no | Screen class/title, framebuffer size, GUI scale. |
+| `screenshot` | no | Raw `data:image/png;base64,...` (vanilla ScreenshotRecorder). |
+| `bot_view` name, perspective first/back/front, hud | no | Screenshot from an entity's camera, viewer HUD hidden unless `hud=true`. |
+| `players` | no | Visible players and bots: position, health, held item, distance, time of day. |
+| `screen_buttons` | no | Visible widgets: index, label, type, active, centre in screenshot px, text field values. |
+| `click_button` label or i | yes | Clicks a widget through the screen (refuses inactive/ambiguous). |
+| `click_px` x, y | yes | Click at screenshot pixels. |
+| `type_text` text, i, replace | yes | Types into a text field through `charTyped`. |
+| `press_key` key | yes | enter, escape, backspace, tab, arrows, delete, home, end. |
+| `send_chat` text | yes | Chat or a `/command`. |
+| `pause_menu` | yes | Opens the game menu (reports if it did not open). |
+| `save_and_quit` | yes | Pause-menu disconnect path, replies first. |
+| `set_time` time | yes | Singleplayer overworld time. |
+
+Scratch helpers (session scratchpad, not in the repo): `mc.sh shot|click|cmd|buttons|press|type|key|health`, `logscan.sh [HH:MM:SS]` (WARN/ERROR grouped, numbers masked, most frequent first).
+
 ## Gotchas
 
 - **Never toggle fullscreen (F11) mid-run on Mac.** With Sodium + Iris + Distant Horizons it wrecked the window (2026-10-14). Fullscreen also renders 1920×1200 (16:10) stretched onto the 1920×1080 TD1655. Fix: quit, set `fullscreen:false` in `options.txt`, relaunch.

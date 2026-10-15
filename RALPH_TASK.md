@@ -3,7 +3,17 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.237) — next session starts here
+## Session Handoff 2026-10-14 (1.1.238) — next session starts here
+
+**State:** main = origin/main @ 1.1.238. Suite 2204 green. Not on Modrinth. 1.1.238: Spawn-base trees protected from woodcut
+by default (Bradley's ruling 2026-10-14, reversing 1.1.229), admin toggle in Admin, World Settings; spawn nudge line; refused
+blocks tried and logged once; claim check asks every zone (ZoneOverlapPolicy, Spawn base yields to a granting player zone).
+Field items now 288. Sandbox findings #9 fixed, #10 (5 missing voice-line sounds) and #11 (roster empty state says it twice) open. MCP fork
+(`hardened` branch) gained health, pause_menu fix, screen_buttons/click_button, type_text/press_key, players, bot_view HUD
+hiding, pack metadata fix; command reference in docs/testing/JAVA_MINECRAFT_AUTOMATION.md. Everything in the 1.1.236 block
+below still applies (next items, deferrals).
+
+## Session Handoff 2026-10-14 (1.1.237) — superseded
 
 **State:** main = origin/main @ 1.1.237. Suite 2174 green. Not on Modrinth. 1.1.237 = one fix on top of 1.1.236: the low-roof
 branch of `isRecoveryReadySurface` requires the wide near-surface check (`SurfaceReadinessPolicy.lowRoofReady`), so a capped

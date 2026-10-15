@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Spawn-base trees protected by default with an admin toggle, no protected-claim spam; 1.1.238 (2026-10-14)
+
+From sandbox finding #9 (PLAYTHROUGH_1.1.234_SANDBOX.md): on a brand-new default world Jake walked to trees around spawn, every mine call returned `Cannot mine: protected claim` (67 WARN lines in under two minutes, 5 per refused leaf), and he got no logs from three trees.
+
+- **Bradley's ruling (2026-10-14), reversing 1.1.229's.** 1.1.229 (`d910e8bf`, `01072078`) ruled, as a recommended option on Bradley's behalf, that the automatic Spawn base stops blocking woodcut. That exemption was only ever wired into tree detection: `MiningTool`'s claim check (`BotTerritoryAuthorizationService`, unchanged since `56b33fba`) always refused, so since 1.1.229 detection approved trees mining refused, and the 1.1.230 protection nudge never fired (detect saw `protected=0`). New rule: Spawn-base trees are protected by default like any base. An admin toggle (Admin, World Settings, "Cut trees in the Spawn base", per save, operator or host, default off) lets bots cut logs and leaves there.
+- **7f89c502 — detection, mining and the nudge agree.** Pure `WoodcutBaseAccessPolicy` (detection exempt and mining exempt only with the toggle on, logs/leaves only). `TreeDetector` and `CompanionSafeZoneService` go through it. `MiningTool` passes a tree-block flag at both claim checks. New nudge reason `spawn-base`: "The trees around spawn are protected, so I'm heading out to find others." Guide → Woodcut mentions the Spawn area and the toggle. Payloads `AdminSpawnWoodcutPayload` / `AdminSpawnWoodcutStatePayload`.
+- **7b57e57b — a refused block is tried and logged once.** `clearPathToTarget` stops on a failed mine. A per-run, per-bot refused-target set makes the refusal terminal for that block. The trunk trace says the calls were refused instead of the false "selected but no trunk mining call was ever issued".
+- **Review fix wave** (`6c455b0f`, `ba9b96ed`, `01e115cc`, `a0268105`). The claim check now asks every zone at a position (pure `ZoneOverlapPolicy`): any refusing zone refuses, except the Spawn base yields where a player zone explicitly grants the bot's owner (owner or allowlist, public mode is not a grant), so a host's base drawn over spawn keeps working for the host's bots. Before, the first zone in hash-map order decided. The toggle and the spawn-base reason apply only to bases owned literally by SERVER (`BotHomeService.baseZoneKind` by label), not legacy blank-owner bases such as Nirn's home, which behave exactly as in 1.1.237. The payload accepts only -1/0/1. The refused-block cache is keyed by block and target tree (`WoodcutRefusedTargets`). The toggle sits above Done.
+- **Rulings (cost if wrong):** keep "any zone refuses" for every caller, not just tree blocks (cost: an overlap that a lucky hash order used to allow, e.g. two allies' bases, now refuses; alliances still grant nothing on zones). Toggle opens logs and leaves only, never dirt or scaffold in the Spawn base (cost: a bot still can't gather dirt there with the toggle on).
+- **Deferred:** `isNearPlayerOwnedBase` radius-0 edge; legacy bases keep the 1.1.237 corner mismatch (trees in the cube corners outside the radius sphere pass detection and are refused at mining, now one log line each); mounted leaf clearing and `BotActions` don't take the tree-block flag; `VillageRuntimeProtectionPolicy.anyNonExemptZone` now test-only.
+- **Tests:** 2174 → 2204.
+- **Field checks:** Phase 6ai.
+
 ## Capped pit no longer counts as the surface; 1.1.237 (2026-10-14)
 
 From sandbox finding #8 (PLAYTHROUGH_1.1.234_SANDBOX.md), found minutes after 1.1.236 went into the sandbox.
