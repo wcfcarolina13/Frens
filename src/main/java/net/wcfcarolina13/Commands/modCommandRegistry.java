@@ -1893,14 +1893,6 @@ public class modCommandRegistry {
         return "admin".equalsIgnoreCase(normalizedMode) || "questing".equalsIgnoreCase(normalizedMode);
     }
 
-    private static ServerPlayerEntity getIssuerOrNull(CommandContext<ServerCommandSource> context) {
-        if (context == null || context.getSource() == null) {
-            return null;
-        }
-        // In this MC/Fabric version, getPlayer() returns null for console/command blocks.
-        return context.getSource().getPlayer();
-    }
-
     private static boolean hasOperatorPermissions(CommandContext<ServerCommandSource> context) {
         return Frens.hasBotCommandPermission(context.getSource());
     }
@@ -6108,16 +6100,6 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeInventorySummaryTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
-        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
-        LOGGER.info("Resolved " + bots.size() + " bots for inventory summary with targetArg: " + (targetArg != null ? targetArg : "null"));
-        int successes = 0;
-        for (ServerPlayerEntity bot : bots) {
-            successes += executeInventorySummary(context, bot);
-        }
-        return successes;
-    }
-
     static int executeInventoryCountTargets(CommandContext<ServerCommandSource> context, String targetArg, String itemId) throws CommandSyntaxException {
         Identifier id = Identifier.tryParse(itemId);
         if (id == null || !Registries.ITEM.containsId(id)) {
@@ -6167,32 +6149,6 @@ public class modCommandRegistry {
             }
         }
         return successes;
-    }
-
-    private static int executeInventorySummary(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
-        PlayerInventory inventory = bot.getInventory();
-        Map<Item, Integer> totals = new LinkedHashMap<>();
-        for (int i = 0; i < inventory.size(); i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            totals.merge(stack.getItem(), stack.getCount(), Integer::sum);
-        }
-        LOGGER.info("Found " + totals.size() + " unique items in " + bot.getName().getString() + "'s inventory.");
-        if (totals.isEmpty()) {
-            ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " has an empty inventory.");
-            return 1;
-        }
-        String summary = totals.entrySet()
-                .stream()
-                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-                .limit(15)
-                .map(entry -> entry.getValue() + "x " + entry.getKey().getName().getString())
-                .reduce((a, b) -> a + ", " + b)
-                .orElse("(no items)");
-        ChatUtils.sendSystemMessage(context.getSource(), "Inventory summary for " + bot.getName().getString() + ": " + summary);
-        return 1;
     }
 
     private static int emitInventoryCount(ServerCommandSource source, ServerPlayerEntity bot, Item item) {

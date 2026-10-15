@@ -120,7 +120,7 @@ After the workflow completes, the jar is attached to the matching release page.
 ## Quick Start
 
 ```bash
-/bot spawn Jake training    # Spawn a bot named Jake
+/bot spawn Jake admin       # Spawn a bot named Jake
 /bot follow Jake            # Make Jake follow you
 /bot regroup Jake           # Safely call Jake back to you (/bot come still works)
 /bot open Jake              # Open Jake's inventory/actions screen
@@ -160,7 +160,7 @@ The Base Manager now supports **Map Village** in the `Villages` section.
 
 | Command | Description |
 |---------|-------------|
-| `/bot spawn <alias> training` | Spawn a new bot |
+| `/bot spawn <alias> admin` | Spawn a new bot |
 | `/bot stop [alias&#124;all]` | Stop current task and movement |
 | `/bot resume [alias&#124;all]` | Resume a paused skill |
 | `/bot follow [alias&#124;all]` | Follow the commander |

@@ -79,18 +79,6 @@ public class BlockDistanceLimitedSearch {
     }
 
     /**
-     * Asynchronously compute and return the list of reachable block names.
-     *
-     * @return A CompletableFuture that will complete with the list of reachable block names.
-     */
-    public CompletableFuture<List<String>> detectNearbyBlocksAsync() {
-        return CompletableFuture.supplyAsync(() -> {
-            preCompute();
-            return getReachableBlockNames();
-        });
-    }
-
-    /**
      * Synchronously compute and return the list of reachable block names.
      *
      * @return List of reachable block names.
