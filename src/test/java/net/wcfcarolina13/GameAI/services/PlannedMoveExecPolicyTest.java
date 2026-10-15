@@ -116,4 +116,47 @@ class PlannedMoveExecPolicyTest {
         CostVerifier.Verdict forbidden = new CostVerifier.Verdict(true, 0, "move 0 SWIM now forbidden", 9, 1_000_000);
         assertTrue(PlannedMoveExecPolicy.cancelLeg(forbidden));
     }
+
+    @Test
+    void walkRunEndingShortSettlesOntoOriginInsteadOfFailing() {
+        // On the origin: run.
+        assertEquals(PlannedMoveExecPolicy.OriginStep.AT_ORIGIN, PlannedMoveExecPolicy.originStep(true, 3.0, 3.0, 2));
+        // walkSegment's close-enough: 1.5 blocks short on flat ground, and a diagonal neighbour cell.
+        assertEquals(PlannedMoveExecPolicy.OriginStep.SETTLE, PlannedMoveExecPolicy.originStep(false, 1.5, 0.0, 0));
+        assertEquals(PlannedMoveExecPolicy.OriginStep.SETTLE, PlannedMoveExecPolicy.originStep(false, -1.0, 1.0, 0));
+        // One block up or down (a step before the action).
+        assertEquals(PlannedMoveExecPolicy.OriginStep.SETTLE, PlannedMoveExecPolicy.originStep(false, 0.9, 0.2, -1));
+        assertEquals(PlannedMoveExecPolicy.OriginStep.SETTLE, PlannedMoveExecPolicy.originStep(false, 0.0, 1.6, 1));
+        // Too far or too far off in y: fail.
+        assertEquals(PlannedMoveExecPolicy.OriginStep.FAIL, PlannedMoveExecPolicy.originStep(false, 1.7, 0.0, 0));
+        assertEquals(PlannedMoveExecPolicy.OriginStep.FAIL, PlannedMoveExecPolicy.originStep(false, 1.2, 1.2, 0));
+        assertEquals(PlannedMoveExecPolicy.OriginStep.FAIL, PlannedMoveExecPolicy.originStep(false, 0.3, 0.0, 2));
+    }
+
+    @Test
+    void mutationTaskGateIsThisBotsRunningTicket() {
+        assertTrue(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:woodcut", "RUNNING", false));
+        assertTrue(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "system:surface_recovery", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(false, null, null, false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:woodcut", "PAUSED", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:woodcut", "RUNNING", true));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, "skill:drop_sweep", "RUNNING", false));
+        assertFalse(PlannedMoveExecPolicy.botTaskAllowsMutation(true, null, "RUNNING", false));
+    }
+
+    @Test
+    void consecutiveSwimCellsKeepMomentum() {
+        assertFalse(PlannedMoveExecPolicy.stopAfterMove(MoveKind.SWIM, MoveKind.SWIM));
+        assertTrue(PlannedMoveExecPolicy.stopAfterMove(MoveKind.SWIM, null));
+        assertTrue(PlannedMoveExecPolicy.stopAfterMove(MoveKind.SWIM, MoveKind.FALL));
+        assertTrue(PlannedMoveExecPolicy.stopAfterMove(MoveKind.FALL, MoveKind.SWIM));
+        assertTrue(PlannedMoveExecPolicy.stopAfterMove(MoveKind.ASCEND, null));
+    }
+
+    @Test
+    void deadlinePassedIsStrict() {
+        assertFalse(PlannedMoveExecPolicy.deadlinePassed(1000L, 1000L));
+        assertTrue(PlannedMoveExecPolicy.deadlinePassed(1001L, 1000L));
+        assertFalse(PlannedMoveExecPolicy.deadlinePassed(5L, Long.MAX_VALUE));
+    }
 }

@@ -32,6 +32,7 @@ import net.wcfcarolina13.PathFinding.Segment;
 import net.wcfcarolina13.PathFinding.unified.CellPos;
 import net.wcfcarolina13.PathFinding.unified.CostVerifier;
 import net.wcfcarolina13.PathFinding.unified.ExecUnit;
+import net.wcfcarolina13.PathFinding.unified.MoveKind;
 import net.wcfcarolina13.PathFinding.unified.NoPathReason;
 import net.wcfcarolina13.PathFinding.unified.PathPlan;
 import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
@@ -1047,15 +1048,31 @@ public final class MovementService {
 
     /**
      * walkTo's request (1.1.242): break and place only under the same gate as a terrain BREAK/PLACE
-     * ({@code mutationOk}: a running skill task, no obstruction-mine opt-out, no construction
+     * ({@code mutationOk}: this bot's own running task, no obstruction-mine opt-out, no construction
      * protection). Swim and falls up to 3 always: they change nothing in the world.
      */
     private static PlanRequest walkPlanRequest(ServerPlayerEntity player) {
         boolean mutation = PlannedMoveExecPolicy.mutationAllowed(
                 Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get()),
-                AutoFaceEntity.isBotExecutingTask(),
+                botHasOwnTask(player),
                 ConstructionProtectionService.hasActiveProtection(player.getUuid()));
         return PlanRequest.walkTo(mutation, mutation);
+    }
+
+    /**
+     * Per-bot task gate for world mutation while moving (1.1.242 review I1): this bot holds a running
+     * {@link TaskService} ticket (skill, ambient hobby or system recovery). Replaces the global
+     * {@code AutoFaceEntity.isBotExecutingTask()}, which any bot's skill or a follow drop pickup sets.
+     */
+    private static boolean botHasOwnTask(ServerPlayerEntity bot) {
+        if (bot == null || bot.getUuid() == null) {
+            return false;
+        }
+        Optional<TaskService.ActiveTaskInfo> info = TaskService.getActiveTaskInfo(bot.getUuid());
+        return PlannedMoveExecPolicy.botTaskAllowsMutation(info.isPresent(),
+                info.map(TaskService.ActiveTaskInfo::name).orElse(null),
+                info.map(i -> i.state() == null ? null : i.state().name()).orElse(null),
+                info.map(TaskService.ActiveTaskInfo::cancelRequested).orElse(false));
     }
 
     /**
@@ -1100,7 +1117,8 @@ public final class MovementService {
                             destination.toShortString(), label, bot, legStart.toShortString(), planTag);
                     tryTerrainMoveToward(player, destination, label + "-boxed-in", true);
                     BlockPos now = walkPlanStart(player);
-                    if (!now.equals(legStart)) {
+                    if (!now.equals(legStart)
+                            && !PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadline)) {
                         legStart = now;
                         result = PathFinder.plan(now, destination, world, player, request);
                         if (result.isUnified()) {
@@ -1126,20 +1144,33 @@ public final class MovementService {
             }
 
             List<ExecUnit> units = result.units();
+            List<Long> unitOrigins = new ArrayList<>(units.size());
+            for (ExecUnit u : units) {
+                unitOrigins.add(u instanceof ExecUnit.ActionUnit a ? a.move().fromPacked()
+                        : ((ExecUnit.WalkRun) u).nodes().get(0).packed());
+            }
             LOGGER.info("walkTo unified [{}]: bot={} plan={} status={} reason={} moves={} units={} leg={} replans={}",
                     label, bot, planTag, plan.status(), plan.reason(), plan.moves().size(), units.size(), legs + 1,
                     failureReplans);
             String failure = null;
             Set<Long> forbidden = new HashSet<>();
-            for (ExecUnit unit : units) {
+            for (int ui = 0; ui < units.size(); ui++) {
                 if (abortRequested(player)) {
                     BotActions.stop(player);
                     return new WalkResult(false, player.getBlockPos(), label + ": aborted");
                 }
-                if (System.currentTimeMillis() > deadline) {
+                if (PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadline)) {
                     failure = "deadline";
                     break;
                 }
+                // Skip forward when the bot already stands on a later unit's origin (review C1).
+                int skipTo = UnifiedWalkPolicy.skipForwardIndex(unitOrigins, ui, walkPlanStart(player).asLong());
+                if (skipTo != ui) {
+                    LOGGER.debug("walkTo unified skip-forward [{}]: bot={} plan={} unit {} -> {}",
+                            label, bot, planTag, ui, skipTo);
+                    ui = skipTo;
+                }
+                ExecUnit unit = units.get(ui);
                 CostVerifier.Verdict verdict = CostVerifier.check(ctx, plan, unit.firstMoveIndex(),
                         PathFinder.rebindToFreshView(ctx).terrain());
                 if (PlannedMoveExecPolicy.cancelLeg(verdict)) {
@@ -1153,8 +1184,12 @@ public final class MovementService {
                 if (unit instanceof ExecUnit.WalkRun run) {
                     Queue<Segment> segments = PlanAdapter.toSegments(run, ctx.terrain(), sprint);
                     for (Segment segment : segments) {
-                        SegmentResult seg = walkSegment(player, segment, deadline, allowSnap);
+                        SegmentResult seg = walkSegment(player, segment, deadline, allowSnap, false);
                         if (!seg.success()) {
+                            if (PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadline)) {
+                                failure = "deadline";
+                                break;
+                            }
                             failure = "walk blocked near " + segment.end().toShortString();
                             BlockPos now = walkPlanStart(player);
                             int at = UnifiedWalkPolicy.failedHopOrigin(run.nodes(), now.getX(), now.getY(), now.getZ());
@@ -1172,8 +1207,15 @@ public final class MovementService {
                     if (walkPlanStart(player).equals(to)) {
                         continue;   // already there (Baritone PathExecutor skip-forward)
                     }
-                    PlannedMoveResult done = executePlannedMove(player, move, label + "-" + planTag);
+                    MoveKind nextKind = ui + 1 < units.size() && units.get(ui + 1) instanceof ExecUnit.ActionUnit na
+                            ? na.move().kind() : null;
+                    PlannedMoveResult done = executePlannedMove(player, move, label + "-" + planTag, deadline,
+                            PlannedMoveExecPolicy.stopAfterMove(move.kind(), nextKind));
                     if (!done.ok()) {
+                        if (PlannedMoveExecPolicy.REASON_DEADLINE.equals(done.reason())) {
+                            failure = "deadline";
+                            break;
+                        }
                         failure = "walk blocked: planned " + move.kind() + " failed: " + done.reason();
                         BlockPos from = new BlockPos(move.fromX(), move.fromY(), move.fromZ());
                         if (walkPlanStart(player).equals(from)) {
@@ -1189,6 +1231,12 @@ public final class MovementService {
 
             BlockPos now = walkPlanStart(player);
             if (failure != null) {
+                if (PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadline)) {
+                    // No replan after the walk's budget is gone (A/B 1.1.242: replans fired past it).
+                    BotActions.stop(player);
+                    String why = "deadline".equals(failure) ? failure : "deadline after " + failure;
+                    return new WalkResult(false, player.getBlockPos(), label + ": " + why + " plan=" + planTag);
+                }
                 if ("deadline".equals(failure) || !UnifiedWalkPolicy.replanAfterFailure(failureReplans)) {
                     return new WalkResult(false, player.getBlockPos(), label + ": " + failure + " plan=" + planTag);
                 }
@@ -1215,7 +1263,10 @@ public final class MovementService {
                     return new WalkResult(true, player.getBlockPos(), label + ": walked to destination");
                 }
                 case STOP -> {
-                    String why = plan.status() == PlanStatus.PARTIAL
+                    boolean overdue = PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadline);
+                    String why = plan.status() == PlanStatus.PARTIAL && overdue
+                            ? "deadline after " + legs + " legs"
+                            : plan.status() == PlanStatus.PARTIAL
                             ? "partial plan stopped after " + legs + " legs reason=" + plan.reason()
                             : "walk ended " + String.format(Locale.ROOT, "%.2f", Math.sqrt(distSq)) + " blocks away";
                     return new WalkResult(false, player.getBlockPos(), label + ": " + why + " plan=" + planTag);
@@ -1224,7 +1275,8 @@ public final class MovementService {
                     LOGGER.info("walkTo unified leg [{}]: bot={} legs={} progress={} from={}",
                             label, bot, legs, String.format(Locale.ROOT, "%.1f", progress), now.toShortString());
                     legStart = now;
-                    result = PathFinder.plan(now, destination, world, player, request);
+                    // Design 5.2: legs after the first search on the replan budgets (300/1200 ms).
+                    result = PathFinder.plan(now, destination, world, player, request.asReplan());
                     if (!result.isUnified()) {
                         return new WalkResult(false, player.getBlockPos(), label + ": finder changed mid-walk");
                     }
@@ -2194,6 +2246,17 @@ public final class MovementService {
     }
 
     private static SegmentResult walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs, boolean allowSnap) {
+        return walkSegment(player, segment, deadlineMs, allowSnap, true);
+    }
+
+    /**
+     * @param entryEscape run the local-escape pre-step before the first input. The legacy pipeline keeps
+     *                    it; a unified walk run passes false (its cells are planned clear, and the pre-step
+     *                    fired on open ground and crawled at ~1 block/s, A/B 1.1.242). The stagnation
+     *                    branch's local escape still runs for both.
+     */
+    private static SegmentResult walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs, boolean allowSnap,
+                                             boolean entryEscape) {
         if (player == null || segment == null) {
             return new SegmentResult(false, false);
         }
@@ -2215,7 +2278,7 @@ public final class MovementService {
                 String.format("%.2f", segmentDistance),
                 maxSteps,
                 segmentAllowance);
-        if (tryImmediateLocalEscape(player, segment.end(), "walkSegment-entry")) {
+        if (entryEscape && tryImmediateLocalEscape(player, segment.end(), "walkSegment-entry")) {
             if (player.getBlockPos().getSquaredDistance(segment.end()) <= CLOSE_ENOUGH_DISTANCE_SQ) {
                 return new SegmentResult(true, false);
             }
@@ -3296,7 +3359,7 @@ public final class MovementService {
         UUID botId = bot.getUuid();
         boolean mutationOk = allowMutation
                 && !Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get())
-                && AutoFaceEntity.isBotExecutingTask()
+                && botHasOwnTask(bot)
                 && !ConstructionProtectionService.hasActiveProtection(botId);
 
         // BREAK: a 2-rise loses its head-height cell (becomes a 1-block stair; the bot's own jump
@@ -3497,15 +3560,25 @@ public final class MovementService {
      * {@link PlannedMoveExecPolicy}. Logs one {@code planned move} line per call.
      */
     public static PlannedMoveResult executePlannedMove(ServerPlayerEntity bot, PlannedMove move, String label) {
+        return executePlannedMove(bot, move, label, Long.MAX_VALUE, true);
+    }
+
+    /**
+     * @param deadlineMs the walk's wall-clock deadline; long units (swim loop, multi-cell mining, a fall)
+     *                   stop with {@link PlannedMoveExecPolicy#REASON_DEADLINE} once it passes
+     * @param stopAfter  zero the bot's input after the move; false between consecutive SWIM cells
+     */
+    public static PlannedMoveResult executePlannedMove(ServerPlayerEntity bot, PlannedMove move, String label,
+                                                       long deadlineMs, boolean stopAfter) {
         PlannedMoveResult result;
         try {
-            result = executePlannedMoveInner(bot, move, label);
+            result = executePlannedMoveInner(bot, move, label, deadlineMs);
         } catch (RuntimeException e) {
             LOGGER.warn("planned move {} threw [{}]: {}", move == null ? "null" : move.kind(), label, e.toString());
             result = PlannedMoveResult.fail("exception " + e.getClass().getSimpleName(), 0, 0);
         }
         if (move != null) {
-            if (bot != null) {
+            if (bot != null && (stopAfter || !result.ok())) {
                 BotActions.stop(bot);
             }
             LOGGER.info("planned move {} {}->{} ok={} reason={} broke={} placed={} [{}] bot={}",
@@ -3516,7 +3589,8 @@ public final class MovementService {
         return result;
     }
 
-    private static PlannedMoveResult executePlannedMoveInner(ServerPlayerEntity bot, PlannedMove move, String label) {
+    private static PlannedMoveResult executePlannedMoveInner(ServerPlayerEntity bot, PlannedMove move, String label,
+                                                             long deadlineMs) {
         if (bot == null || move == null || bot.getUuid() == null) {
             return PlannedMoveResult.fail("no-bot-or-move", 0, 0);
         }
@@ -3536,35 +3610,48 @@ public final class MovementService {
         }
         BlockPos from = new BlockPos(move.fromX(), move.fromY(), move.fromZ());
         BlockPos to = new BlockPos(move.toX(), move.toY(), move.toZ());
-        boolean inWater = bot.isTouchingWater();
         BlockPos origin = groundedOrigin(bot);
-        BlockPos foot = BotPositionUtil.effectiveFootCell(world, origin);
-        boolean atOrigin = PlannedMoveExecPolicy.atOrigin(origin.getX() - from.getX(), origin.getY() - from.getY(),
-                origin.getZ() - from.getZ(), inWater)
-                || foot.equals(from);
+        boolean atOrigin = isAtPlannedOrigin(bot, world, origin, from);
+        PlannedMoveExecPolicy.OriginStep originStep = PlannedMoveExecPolicy.originStep(atOrigin,
+                bot.getX() - (from.getX() + 0.5D), bot.getZ() - (from.getZ() + 0.5D), origin.getY() - from.getY());
+        if (originStep == PlannedMoveExecPolicy.OriginStep.SETTLE) {
+            // A walk run ends up to 1.5 blocks short of its last cell (walkSegment's close-enough), which
+            // is this move's origin: settle onto it instead of failing the leg (review C1).
+            nudgeTowardExactBlock(bot, from, false, label + "-planned-settle");
+            origin = groundedOrigin(bot);
+            atOrigin = isAtPlannedOrigin(bot, world, origin, from);
+        }
         if (!atOrigin) {
             return PlannedMoveResult.fail("not-at-origin now=" + CellPos.format(origin.asLong()), 0, 0);
         }
         if (PlannedMoveExecPolicy.needsMutation(move)) {
             boolean ok = PlannedMoveExecPolicy.mutationAllowed(
                     Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get()),
-                    AutoFaceEntity.isBotExecutingTask(),
+                    botHasOwnTask(bot),
                     ConstructionProtectionService.hasActiveProtection(bot.getUuid()));
             if (!ok) {
                 return PlannedMoveResult.fail("mutation-gated", 0, 0);
             }
         }
         // Switch expression with no default: a new MoveKind without an executor fails to compile.
+        // DESCEND is never an action (PlanUnits walks it in a run); listed with the walks for exhaustiveness.
         return switch (move.kind()) {
-            case TRAVERSE, DIAGONAL -> executePlannedWalk(bot, world, move, from, to, label);
-            case ASCEND -> executePlannedAscend(bot, world, move, from, to, label);
-            case DESCEND -> executePlannedDescend(bot, world, move, from, to, label);
-            case FALL -> executePlannedFall(bot, world, from, to, label);
+            case TRAVERSE, DIAGONAL, DESCEND -> executePlannedWalk(bot, world, move, from, to, label, deadlineMs);
+            case ASCEND -> executePlannedAscend(bot, world, move, from, to, label, deadlineMs);
+            case FALL -> executePlannedFall(bot, world, from, to, label, deadlineMs);
             case ASCEND_PLACE -> executePlannedStairPlace(bot, world, move, from, to, label);
-            case SWIM -> executePlannedSwim(bot, world, from, to, label);
+            case SWIM -> executePlannedSwim(bot, world, from, to, label, deadlineMs);
             // No companion skill opts into DOWNWARD in 1.1.242 (SearchContext.allowDownward defaults false).
             case DOWNWARD -> PlannedMoveResult.fail("downward-no-executor", 0, 0);
         };
+    }
+
+    /** The executor's origin check: the grounded cell (or its lifted foot cell) is the move's origin. */
+    private static boolean isAtPlannedOrigin(ServerPlayerEntity bot, ServerWorld world, BlockPos origin, BlockPos from) {
+        boolean inWater = bot.isTouchingWater();
+        return PlannedMoveExecPolicy.atOrigin(origin.getX() - from.getX(), origin.getY() - from.getY(),
+                origin.getZ() - from.getZ(), inWater)
+                || BotPositionUtil.effectiveFootCell(world, origin).equals(from);
     }
 
     /**
@@ -3573,10 +3660,11 @@ public final class MovementService {
      * on that cell. Returns the count mined, or -(count+1) on failure.
      */
     private static int minePlannedCells(ServerPlayerEntity bot, ServerWorld world, PlannedMove move, BlockPos from,
-                                        String label) {
+                                        String label, long deadlineMs) {
         int broke = 0;
         for (long packed : move.toBreak()) {
-            if (abortRequested(bot)) {
+            if (abortRequested(bot)
+                    || PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadlineMs)) {
                 return -(broke + 1);
             }
             BlockPos cell = BlockPos.fromLong(packed);
@@ -3601,13 +3689,22 @@ public final class MovementService {
         return broke;
     }
 
+    /** Why a mining loop stopped short: abort, the walk deadline, or a failed break. */
+    private static String mineStopReason(ServerPlayerEntity bot, long deadlineMs) {
+        if (abortRequested(bot)) {
+            return "aborted";
+        }
+        return PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadlineMs)
+                ? PlannedMoveExecPolicy.REASON_DEADLINE : "break-failed";
+    }
+
     private static PlannedMoveResult executePlannedWalk(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
-                                                        BlockPos from, BlockPos to, String label) {
+                                                        BlockPos from, BlockPos to, String label, long deadlineMs) {
         int broke = 0;
         if (move.toBreak().length > 0) {
-            int mined = minePlannedCells(bot, world, move, from, label);
+            int mined = minePlannedCells(bot, world, move, from, label, deadlineMs);
             if (mined < 0) {
-                return PlannedMoveResult.fail(abortRequested(bot) ? "aborted" : "break-failed", -mined - 1, 0);
+                return PlannedMoveResult.fail(mineStopReason(bot, deadlineMs), -mined - 1, 0);
             }
             broke = mined;
         }
@@ -3616,12 +3713,15 @@ public final class MovementService {
     }
 
     private static PlannedMoveResult executePlannedAscend(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
-                                                          BlockPos from, BlockPos to, String label) {
-        int mined = minePlannedCells(bot, world, move, from, label);
+                                                          BlockPos from, BlockPos to, String label, long deadlineMs) {
+        int mined = minePlannedCells(bot, world, move, from, label, deadlineMs);
         boolean minedAll = mined >= 0;
         int broke = minedAll ? mined : -mined - 1;
-        if (!minedAll && abortRequested(bot)) {
-            return PlannedMoveResult.fail("aborted", broke, 0);
+        if (!minedAll) {
+            String why = mineStopReason(bot, deadlineMs);
+            if (!"break-failed".equals(why)) {
+                return PlannedMoveResult.fail(why, broke, 0);
+            }
         }
         boolean stepped = minedAll && stepUpOnto(bot, to, label + "-planned-ascend");
         String reason = PlannedMoveExecPolicy.stepOutcome(minedAll, stepped);
@@ -3653,18 +3753,8 @@ public final class MovementService {
         return null;
     }
 
-    private static PlannedMoveResult executePlannedDescend(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
-                                                           BlockPos from, BlockPos to, String label) {
-        String hazard = landingHazard(world, to);
-        if (hazard != null) {
-            return PlannedMoveResult.fail(hazard, 0, 0);
-        }
-        // A one-block step down: the walk nudge drops off the edge and groundedOrigin waits for the landing.
-        return executePlannedWalk(bot, world, move, from, to, label);
-    }
-
     private static PlannedMoveResult executePlannedFall(ServerPlayerEntity bot, ServerWorld world, BlockPos from,
-                                                        BlockPos to, String label) {
+                                                        BlockPos to, String label, long deadlineMs) {
         String hazard = landingHazard(world, to);
         if (hazard != null) {
             return PlannedMoveResult.fail(hazard, 0, 0);
@@ -3695,7 +3785,8 @@ public final class MovementService {
         if (!airborne) {
             return PlannedMoveResult.fail("walk-off-timeout", 0, 0);
         }
-        BotActions.stop(bot);
+        // No stop on the first airborne tick: the AABB can still overlap the origin's edge, and a zeroed
+        // velocity there drops the bot back beside the origin (landed-off-plan). Stop once landed.
         boolean landed = false;
         for (int tick = 0; tick < PlannedMoveExecPolicy.FALL_LAND_TICKS; tick++) {
             if (abortRequested(bot)) {
@@ -3705,8 +3796,12 @@ public final class MovementService {
                 landed = true;
                 break;
             }
+            if (PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadlineMs)) {
+                return PlannedMoveResult.fail(PlannedMoveExecPolicy.REASON_DEADLINE, 0, 0);
+            }
             sleep(PlannedMoveExecPolicy.TICK_MS);
         }
+        BotActions.stop(bot);
         if (!landed) {
             return PlannedMoveResult.fail("fall-land-timeout", 0, 0);
         }
@@ -3771,7 +3866,7 @@ public final class MovementService {
      * per-cell budget or when the bot's block has not changed for the stall window (a wall).
      */
     private static PlannedMoveResult executePlannedSwim(ServerPlayerEntity bot, ServerWorld world, BlockPos from,
-                                                        BlockPos to, String label) {
+                                                        BlockPos to, String label, long deadlineMs) {
         boolean exitMove = to.getY() > from.getY() || world.getFluidState(to).isEmpty();
         if (!world.getFluidState(to.up()).isEmpty() || hasCollision(world, to.up())) {
             // The plan swims with a dry, open head; a flooded or blocked head is off plan.
@@ -3797,6 +3892,9 @@ public final class MovementService {
             } else {
                 lastBlock = now;
                 sinceChange = 0;
+            }
+            if (PlannedMoveExecPolicy.deadlinePassed(System.currentTimeMillis(), deadlineMs)) {
+                return PlannedMoveResult.fail(PlannedMoveExecPolicy.REASON_DEADLINE, 0, 0);
             }
             if (PlannedMoveExecPolicy.swimGiveUp(tick, sinceChange)) {
                 return PlannedMoveResult.fail(tick >= PlannedMoveExecPolicy.SWIM_CELL_TICKS ? "swim-timeout" : "swim-stalled",
@@ -4703,8 +4801,9 @@ public final class MovementService {
         if (Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get())) {
             return false;
         }
-        // Keep this conservative: only mine during skills/build tasks, not during guard/patrol/follow.
-        if (!AutoFaceEntity.isBotExecutingTask()) {
+        // Keep this conservative: only mine during this bot's own skills/build tasks, not during
+        // guard/patrol/follow (1.1.242 I1: per bot, not the global head-rotation flag).
+        if (!botHasOwnTask(bot)) {
             return false;
         }
         if (ConstructionProtectionService.hasActiveProtection(bot.getUuid())) {

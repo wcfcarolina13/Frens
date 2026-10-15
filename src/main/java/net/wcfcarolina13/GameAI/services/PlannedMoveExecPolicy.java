@@ -30,6 +30,8 @@ public final class PlannedMoveExecPolicy {
     public static final int SWIM_STALL_TICKS = 30;
 
     public static final String REASON_OK = "ok";
+    /** A move stopped because the walk's deadline passed inside it (swim loop, multi-cell mining, fall). */
+    public static final String REASON_DEADLINE = "deadline";
     public static final String REASON_CANCEL_PREFIX = "cost verification ";
 
     private PlannedMoveExecPolicy() {
@@ -60,6 +62,60 @@ public final class PlannedMoveExecPolicy {
             return false;
         }
         return inWater ? Math.abs(dy) <= 1 : dy == 0;
+    }
+
+    /** What the executor does when the bot is not exactly on the move's origin (review C1). */
+    public enum OriginStep { AT_ORIGIN, SETTLE, FAIL }
+
+    /**
+     * Horizontal reach (blocks, bot position to the origin cell's centre) inside which a bot that is
+     * off the origin settles onto it first: walkSegment calls a segment done 1.5 blocks short of its end.
+     */
+    public static final double SETTLE_HORIZONTAL = 1.6D;
+
+    /**
+     * On the origin: run the move. Within {@link #SETTLE_HORIZONTAL} horizontally and one block of y
+     * (a walk run that ended short of the action's origin): settle onto it, then check again. Anything
+     * further is off plan and fails.
+     *
+     * @param hdx bot x minus the origin cell's centre x
+     * @param hdz bot z minus the origin cell's centre z
+     * @param dy  grounded block y minus the origin y
+     */
+    public static OriginStep originStep(boolean atOrigin, double hdx, double hdz, int dy) {
+        if (atOrigin) {
+            return OriginStep.AT_ORIGIN;
+        }
+        if (Math.abs(dy) <= 1 && hdx * hdx + hdz * hdz <= SETTLE_HORIZONTAL * SETTLE_HORIZONTAL) {
+            return OriginStep.SETTLE;
+        }
+        return OriginStep.FAIL;
+    }
+
+    /**
+     * Per-bot half of the mutation gate (review I1): this bot holds a running task ticket of its own.
+     * The ticket name and state are {@code TaskService.ActiveTaskInfo}'s, as strings. A cancelled or
+     * paused ticket does not count, and neither does a drop sweep (it only picks items up).
+     */
+    public static boolean botTaskAllowsMutation(boolean hasTicket, String ticketName, String state,
+                                                boolean cancelRequested) {
+        if (!hasTicket || cancelRequested || !"RUNNING".equals(state)) {
+            return false;
+        }
+        return ticketName != null && !"skill:drop_sweep".equalsIgnoreCase(ticketName);
+    }
+
+    /**
+     * Whether to zero the bot's input after a move. Consecutive SWIM cells keep their momentum (a stop
+     * per cell made the bot sink and restart); every other pair stops as before.
+     */
+    public static boolean stopAfterMove(MoveKind done, MoveKind next) {
+        return !(done == MoveKind.SWIM && next == MoveKind.SWIM);
+    }
+
+    /** True once the walk's wall-clock deadline has passed. */
+    public static boolean deadlinePassed(long nowMs, long deadlineMs) {
+        return nowMs > deadlineMs;
     }
 
     /** Wall-clock budget of a whole move, for logging and for callers that wrap it. */

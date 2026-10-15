@@ -76,4 +76,14 @@ class UnifiedWalkPolicyTest {
         assertEquals(-1, UnifiedWalkPolicy.failedHopOrigin(nodes, 5, 64, 0));
         assertEquals(-1, UnifiedWalkPolicy.failedHopOrigin(null, 0, 64, 0));
     }
+
+    @Test
+    void skipForwardToALaterUnitOrigin() {
+        List<Long> origins = List.of(10L, 20L, 30L, 40L);
+        assertEquals(1, UnifiedWalkPolicy.skipForwardIndex(origins, 1, 20L));   // on the current origin
+        assertEquals(3, UnifiedWalkPolicy.skipForwardIndex(origins, 1, 40L));   // already on a later origin
+        assertEquals(1, UnifiedWalkPolicy.skipForwardIndex(origins, 1, 10L));   // never backwards
+        assertEquals(1, UnifiedWalkPolicy.skipForwardIndex(origins, 1, 99L));   // off plan: the unit decides
+        assertEquals(0, UnifiedWalkPolicy.skipForwardIndex(null, 0, 10L));
+    }
 }

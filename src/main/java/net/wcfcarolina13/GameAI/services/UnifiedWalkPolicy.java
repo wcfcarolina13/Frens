@@ -63,6 +63,29 @@ public final class UnifiedWalkPolicy {
     }
 
     /**
+     * Skip-forward (review C1): the unit to run next when the bot stands at {@code botCell}. The
+     * current unit when the bot is on its origin; else the first later unit whose origin is the bot's
+     * cell (a walk run that overshot, or an earlier unit already carried it there); else the current
+     * unit, whose own origin check settles or fails.
+     *
+     * @param unitOrigins packed origin cell of every unit, in plan order
+     */
+    public static int skipForwardIndex(List<Long> unitOrigins, int current, long botCell) {
+        if (unitOrigins == null || current < 0 || current >= unitOrigins.size()) {
+            return current;
+        }
+        if (unitOrigins.get(current) == botCell) {
+            return current;
+        }
+        for (int j = current + 1; j < unitOrigins.size(); j++) {
+            if (unitOrigins.get(j) == botCell) {
+                return j;
+            }
+        }
+        return current;
+    }
+
+    /**
      * Index of the node the bot stands on in a walk run, so a failed run's next node is the first hop
      * to forbid on the replan; -1 when the bot is on none of them or on the last.
      */
