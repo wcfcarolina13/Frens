@@ -79,12 +79,4 @@ public final class NavigationHudOverlay {
         context.drawCenteredTextWithShadow(client.textRenderer,
                 Text.literal(controls), cx, y + 12, 0xFFB0B0B0);
     }
-
-    /** Handle keyboard input for Y/N accept/dismiss. */
-    public static boolean handleKeyPress(int keyCode) {
-        if (!isVisible()) return false;
-        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_Y) { accept(); return true; }
-        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_N) { dismiss(); return true; }
-        return false;
-    }
 }

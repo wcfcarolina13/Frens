@@ -108,7 +108,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final double GUARD_RADIUS_DEFAULT = 6.0D;
     private static final int WOODCUT_TREE_COUNT_MIN = 0;
     private static final int WOODCUT_TREE_COUNT_MAX = 64;
-    private static final int WOODCUT_TREE_COUNT_DEFAULT = 4;
     private static final int SKILL_COUNT_UNSET = 0;
     private static final int SKILL_FISH_COUNT_MIN = 1;
     private static final int SKILL_FISH_COUNT_MAX = 128;
@@ -3606,19 +3605,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         };
     }
 
-    private int getSkillEntryIndex(List<TopicEntry> entries, TopicAction action) {
-        if (entries == null || action == null) {
-            return -1;
-        }
-        for (int i = 0; i < entries.size(); i++) {
-            TopicEntry entry = entries.get(i);
-            if (entry != null && entry.action == action) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     private void drawAdjustableSkillRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry, int mouseX, int mouseY) {
         if (entry == null || entry.action == null) {
             return;
@@ -5025,14 +5011,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
 
-    private int getFollowEntryIndex(List<TopicEntry> entries) {
-        return getSkillEntryIndex(entries, TopicAction.FOLLOW);
-    }
-
-    private int getWoodcutEntryIndex(List<TopicEntry> entries) {
-        return getSkillEntryIndex(entries, TopicAction.SKILL_WOODCUT);
-    }
-
     private void handleTopicEntry(TopicEntry entry) {
         if (entry == null) {
             return;
@@ -5390,16 +5368,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
-    private boolean canOpenSpellsMenu() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.player == null) {
-            return false;
-        }
-        // Spells are normally cast at an Enchanting Table. A later-stage quest reward (Wizard's Tome)
-        // can allow access anywhere. An Eye of Ender can grant limited, cooldown-gated access.
-        return isNearEnchantingTable(client, 4) || hasSpellbookToken(client) || hasEyeOfEnderToken(client);
-    }
-
     /**
      * Determines whether the player can switch to the given bot alias.
      * Returns {@code null} if switching is allowed, or a reason string if blocked.
@@ -5513,20 +5481,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 return true;
             }
             if (lower.contains("wizard") && lower.contains("tome")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean hasItem(MinecraftClient client, net.minecraft.item.Item item) {
-        if (client == null || client.player == null || item == null) {
-            return false;
-        }
-        var inv = client.player.getInventory();
-        int n = inv.size();
-        for (int i = 0; i < n; i++) {
-            if (inv.getStack(i).isOf(item)) {
                 return true;
             }
         }

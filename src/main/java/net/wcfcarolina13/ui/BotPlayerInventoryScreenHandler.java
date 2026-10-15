@@ -38,7 +38,6 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     }
 
     private static final int BOT_SLOT_COUNT = 41;
-    private static final int PLAYER_SLOT_COUNT = 41;
     private static final int ARMOR_AND_OFFHAND_SLOTS = 5;
     private static final int MAIN_GRID_SLOTS = 27;
     private static final int HOTBAR_SLOTS = 9;
@@ -328,10 +327,6 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         return Math.max(0.0F, Math.min(1.0F, botStats.get(4) / 1000.0F));
     }
 
-    public int getBotTotalExperience() {
-        return botStats.get(5);
-    }
-
     public boolean isBotFollowing() {
         return botStats.get(6) != 0;
     }
@@ -383,10 +378,6 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         return botStats.get(13) != 0;
     }
 
-    public boolean isBotTaskActive() {
-        return botStats.get(14) != 0;
-    }
-
     public boolean isBotTaskPaused() {
         return botStats.get(15) != 0;
     }
@@ -413,14 +404,6 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public double getBotPatrolRadius() {
         return botStats.get(23) / 10.0D;
-    }
-
-    public int getSectionWidth() {
-        return SECTION_WIDTH;
-    }
-
-    public int getBlockGap() {
-        return BLOCK_GAP;
     }
 
     @Override

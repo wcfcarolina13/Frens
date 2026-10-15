@@ -8,8 +8,6 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -19,7 +17,6 @@ import java.util.UUID;
  * Permissions and skin policy are server-authoritative.
  */
 public final class BotSkinNetworkManager {
-    private static final Logger LOGGER = LoggerFactory.getLogger("BotSkinNetworkManager");
     private static boolean registered;
 
     private BotSkinNetworkManager() {}
