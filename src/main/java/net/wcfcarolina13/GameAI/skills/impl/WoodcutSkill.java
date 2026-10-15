@@ -111,7 +111,6 @@ public final class WoodcutSkill implements Skill {
     private static final long PILLAR_STEP_DELAY_MS = 100L;
     private static final long MINING_TIMEOUT_MS = 12_000L;
     private static final int MAX_RETRY_MINING = 5;
-    private static final int MAX_LOS_CLEAR_ATTEMPTS = 3;
     private static final int MAX_LEAF_CLEAR_BLOCKS_PER_TARGET = 24;
     private static final int MAX_LEAF_CLEAR_BLOCKS_PER_ATTEMPT = 8;
     private static final int MAX_TRUNK_LOS_RECOVERY_ATTEMPTS = 2;
@@ -133,7 +132,6 @@ public final class WoodcutSkill implements Skill {
     private static final double QUICK_TREE_SWEEP_RADIUS_SCAFFOLD = 12.0D;
     private static final double QUICK_TREE_SWEEP_VERTICAL_RANGE_SCAFFOLD = 9.0D;
     private static final long WOODCUT_COLLECTION_MAINTENANCE_INTERVAL_MS = 10_000L;
-    private static final int MAX_REPEATED_TRUNK_ENTRY_STALLS = 1;
     private static final int WOODCUT_PROACTIVE_DEPOSIT_EMPTY_SLOTS = 6;
     private static final int WOODCUT_PROACTIVE_DEPOSIT_WOOD_COUNT = 96;
     private static final int WOODCUT_OFFLOAD_LOCAL_CHEST_RADIUS = 48;
@@ -385,38 +383,6 @@ public final class WoodcutSkill implements Skill {
                     && pos.getZ() <= maxZ;
         }
 
-        private boolean containsXZ(BlockPos pos) {
-            return pos != null
-                    && pos.getX() >= minX
-                    && pos.getX() <= maxX
-                    && pos.getZ() >= minZ
-                    && pos.getZ() <= maxZ;
-        }
-
-        private boolean intersectsBox(BlockPos boxMin, BlockPos boxMax) {
-            if (boxMin == null || boxMax == null) {
-                return false;
-            }
-            return !(boxMax.getX() < minX
-                    || boxMin.getX() > maxX
-                    || boxMax.getY() < minY
-                    || boxMin.getY() > maxY
-                    || boxMax.getZ() < minZ
-                    || boxMin.getZ() > maxZ);
-        }
-
-        private boolean containsBox(BlockPos boxMin, BlockPos boxMax) {
-            if (boxMin == null || boxMax == null) {
-                return false;
-            }
-            return boxMin.getX() >= minX
-                    && boxMax.getX() <= maxX
-                    && boxMin.getY() >= minY
-                    && boxMax.getY() <= maxY
-                    && boxMin.getZ() >= minZ
-                    && boxMax.getZ() <= maxZ;
-        }
-
         private CleanupBounds clampCleanupBounds(int cleanupMinX,
                                                  int cleanupMaxX,
                                                  int cleanupMinY,
@@ -500,7 +466,6 @@ public final class WoodcutSkill implements Skill {
     private static final class WoodcutReachSession {
         private final List<BlockPos> placedBlocks = new ArrayList<>();
         private final Set<Long> placedKeys = new HashSet<>();
-        private final Map<BlockPos, BlockState> temporaryEntryTerrainRepairs = new LinkedHashMap<>();
         private final WoodcutRerouteBlacklist failedReroutes = new WoodcutRerouteBlacklist(WOODCUT_REROUTE_BLACKLIST_MS);
         private int leafBlocksBroken;
         private int losClearAttempts;
@@ -530,8 +495,6 @@ public final class WoodcutSkill implements Skill {
         private int rerouteBlacklistSkips;
         private int unsafeAnchorsRejected;
         private int pillarEscalationsRejected;
-        private int terrainRestoreAttempted;
-        private int terrainRestoreCompleted;
         private boolean replantAttempted;
         private int replantPlanted;
         private String replantStatus = "not-run";
@@ -568,23 +531,6 @@ public final class WoodcutSkill implements Skill {
 
         private boolean hasPlacements() {
             return !placedKeys.isEmpty();
-        }
-
-        private void recordTemporaryEntryTerrainRepair(BlockPos pos, BlockState originalState) {
-            if (pos == null || originalState == null || originalState.isAir()) {
-                return;
-            }
-            temporaryEntryTerrainRepairs.putIfAbsent(pos.toImmutable(), originalState);
-        }
-
-        private Map<BlockPos, BlockState> consumeTemporaryEntryTerrainRepairs() {
-            Map<BlockPos, BlockState> snapshot = new LinkedHashMap<>(temporaryEntryTerrainRepairs);
-            temporaryEntryTerrainRepairs.clear();
-            return snapshot;
-        }
-
-        private int pendingTemporaryEntryTerrainRepairs() {
-            return temporaryEntryTerrainRepairs.size();
         }
 
         private void recordFailedReroute(BlockPos target, BlockPos candidate, String reason) {
@@ -1614,7 +1560,6 @@ public final class WoodcutSkill implements Skill {
         if (!isInventoryFull(bot)) {
             runQuickPerTreeDropSweep(bot, source, reachSession);
         }
-        restoreTemporaryEntryTerrain(bot, source, world, target.base(), reachSession);
         logWoodcutMaintenanceSummary(target.base(), reachSession, "per-tree");
     }
 
@@ -2256,23 +2201,6 @@ public final class WoodcutSkill implements Skill {
         return remaining;
     }
 
-
-    private List<BlockPos> currentColumnPlacements(WoodcutReachSession reachSession, BlockPos column) {
-        List<BlockPos> placements = new ArrayList<>();
-        if (reachSession == null || column == null) {
-            return placements;
-        }
-        for (BlockPos placed : reachSession.placementsDescending()) {
-            if (placed == null || !reachSession.placedKeys.contains(placed.asLong())) {
-                continue;
-            }
-            if (placed.getX() == column.getX() && placed.getZ() == column.getZ()) {
-                placements.add(placed);
-            }
-        }
-        return placements;
-    }
-
     /**
      * Descends through the scaffold column level-by-level (top to bottom), mining bridge
      * blocks at each Y, running elevated/bridge sweeps for logs, then mining the column
@@ -2714,10 +2642,6 @@ public final class WoodcutSkill implements Skill {
             LOGGER.info("Woodcut cap cleanup: repositioned to {} for low cap {}", stand.toShortString(), next.toShortString());
         }
         return mined;
-    }
-
-    private long toColumnKey(BlockPos pos) {
-        return BlockPos.asLong(pos.getX(), 0, pos.getZ());
     }
 
     private boolean isBotInColumn(ServerPlayerEntity bot, BlockPos column) {
@@ -6947,94 +6871,24 @@ public final class WoodcutSkill implements Skill {
         return moved || bot.getBlockPos().getSquaredDistance(base) <= 36.0D;
     }
 
-    private void restoreTemporaryEntryTerrain(ServerPlayerEntity bot,
-                                              ServerCommandSource source,
-                                              ServerWorld world,
-                                              BlockPos base,
-                                              WoodcutReachSession reachSession) {
-        if (bot == null || source == null || world == null || reachSession == null) {
-            return;
-        }
-        Map<BlockPos, BlockState> repairs = reachSession.consumeTemporaryEntryTerrainRepairs();
-        reachSession.terrainRestoreAttempted += repairs.size();
-        int restored = 0;
-        for (Map.Entry<BlockPos, BlockState> entry : repairs.entrySet()) {
-            BlockPos pos = entry.getKey();
-            BlockState original = entry.getValue();
-            if (pos == null || original == null) {
-                continue;
-            }
-            if (bot.getBlockPos().equals(pos) || bot.getBlockPos().equals(pos.up())) {
-                continue;
-            }
-            if (ScaffoldService.isTrackedScaffold(bot.getUuid(), pos)) {
-                continue;
-            }
-            if (!isPlaceableTarget(world, pos)) {
-                continue;
-            }
-            List<Item> preferred = preferredTerrainRepairBlocks(original);
-            if (preferred.isEmpty()) {
-                continue;
-            }
-            if (BotActions.placeBlockAt(bot, pos, Direction.UP, preferred)) {
-                restored++;
-                LOGGER.info("Woodcut terrain restore: filled {} near {} using {}",
-                        pos.toShortString(),
-                        base == null ? "unknown" : base.toShortString(),
-                        preferred.get(0).getName().getString());
-            }
-        }
-        reachSession.terrainRestoreCompleted += restored;
-        LOGGER.info("Woodcut terrain restore summary: base={} attempted={} restored={}",
-                base == null ? "unknown" : base.toShortString(),
-                repairs.size(),
-                restored);
-    }
-
     private void logWoodcutMaintenanceSummary(BlockPos base,
                                               WoodcutReachSession reachSession,
                                               String stage) {
         if (base == null || reachSession == null) {
             return;
         }
-        LOGGER.info("Woodcut maintenance summary: base={} stage={} rerouteFailures={} rerouteBlacklistSkips={} unsafeAnchorsRejected={} pillarEscalationsRejected={} terrainRestoreAttempted={} terrainRestoreRestored={} pendingTerrainRepairs={} replantAttempted={} replantPlanted={} replantStatus={}",
+        LOGGER.info("Woodcut maintenance summary: base={} stage={} rerouteFailures={} rerouteBlacklistSkips={} unsafeAnchorsRejected={} pillarEscalationsRejected={} replantAttempted={} replantPlanted={} replantStatus={}",
                 base.toShortString(),
                 stage,
                 reachSession.rerouteFailures,
                 reachSession.rerouteBlacklistSkips,
                 reachSession.unsafeAnchorsRejected,
                 reachSession.pillarEscalationsRejected,
-                reachSession.terrainRestoreAttempted,
-                reachSession.terrainRestoreCompleted,
-                reachSession.pendingTemporaryEntryTerrainRepairs(),
                 reachSession.replantAttempted,
                 reachSession.replantPlanted,
                 reachSession.replantStatus);
     }
 
-    private List<Item> preferredTerrainRepairBlocks(BlockState original) {
-        LinkedHashSet<Item> preferred = new LinkedHashSet<>();
-        if (original != null) {
-            if (original.isOf(Blocks.COARSE_DIRT)) {
-                preferred.add(Items.COARSE_DIRT);
-            } else if (original.isOf(Blocks.ROOTED_DIRT)) {
-                preferred.add(Items.ROOTED_DIRT);
-            } else if (original.isIn(BlockTags.DIRT) || original.isOf(Blocks.GRASS_BLOCK) || original.isOf(Blocks.PODZOL)) {
-                preferred.add(Items.DIRT);
-            } else if (original.isOf(Blocks.GRAVEL)) {
-                preferred.add(Items.GRAVEL);
-            } else if (original.isOf(Blocks.SAND)) {
-                preferred.add(Items.SAND);
-            } else if (original.isOf(Blocks.RED_SAND)) {
-                preferred.add(Items.RED_SAND);
-            } else if (original.isIn(BlockTags.LOGS)) {
-                preferred.add(Items.DIRT);
-            }
-        }
-        preferred.addAll(PILLAR_BLOCKS);
-        return new ArrayList<>(preferred);
-    }
 
     private boolean canPlantSapling(ServerWorld world, BlockPos soil, BlockPos target) {
         BlockState soilState = world.getBlockState(soil);
