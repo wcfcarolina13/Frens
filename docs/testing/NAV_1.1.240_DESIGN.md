@@ -43,3 +43,7 @@ Riskiest assumption, test first with no code: toggle Baritone in the GUI in the 
 1. Make Baritone the default finder? (Production default is off.)
 2. Let bots break or gather natural blocks next to the Spawn-base protection (the cause of 0 scaffold), or keep protection strict?
 3. Accept bots leaving 1-block dirt stairs (PLACE) without tearing them down?
+
+## Result of the zero-code test (sandbox, 1.1.239, 23:16)
+
+`/bot config pathfinder baritone`, then woodcut on Bob from the gully. Baritone found the 42-block route in 11-20 ms (`Goal reached! 1562 iterations … pathLen=48`), where the bidirectional A* had timed out at 10 s on every try. Walking it failed at the first hop: `walk blocked near 19,65,126`, the same un-executable Up move onto the 2-high sand. So search speed is solved by Baritone. The blocker is (d)/(e): the Up move must become a real PLACE (a dirt stair) or a BREAK (mine the sand, by hand ~15 ticks), or be dropped so the search takes the terrace. Order for 1.1.240: Up-move fix plus the PLACE/BREAK slice first, then decide Baritone as default (decision 1), then (c) and (f). The sandbox was set back to `classic`.
