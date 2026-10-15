@@ -496,7 +496,7 @@ fail, even an improvement — note it and move on.
   - Bradley does: `/bot skill collect_dirt` where he digs a shaft deep enough to need ladders.
   - Pass when: the ladder column goes in on the same support side as before and he climbs out.
 - [ ] **Home data survives a normal quit (1.1.208, debounce)**
-  - Bradley does: change something BotHomeService owns (set nav mode or sleep in a new bed), then quit
+  - Bradley does: change something BotHomeService owns (set a base or sleep in a new bed), then quit
     to title within 2 s.
   - Claude watches for: no `frens-bot-home-writer` exception; file mtime updated at shutdown.
   - Pass when: on reload the change is present (`bot_home_data.json` was flushed on SERVER_STOPPING).

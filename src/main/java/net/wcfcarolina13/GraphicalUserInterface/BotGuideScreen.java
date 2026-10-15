@@ -1442,17 +1442,12 @@ public final class BotGuideScreen extends Screen {
                         "Fast Travel & Navigation Tiers",
                         "Companion fast travel speed depends on held artifacts.",
                         List.of(
-                                "All navigation uses fast travel \u2014 the bot disappears and reappears at the destination.",
-                                "Tier 1 (Map on bot): fast travel to bases at 2x delay (~2s/chunk).",
-                                "Tier 1 (Map + Compass on bot): fast travel to bases AND player at 2x delay.",
-                                "Tier 2 (Eye of Ender, either): standard speed (~1s/chunk) to bases and player.",
-                                "Tier 2 (Ender Pearls, both hold): same as Eye of Ender (pearls NOT consumed for storage/nav).",
-                                "Full Access (Wizard's Tome or Enchanting Table): standard speed everywhere.",
-                                "Cross-dimension travel adds 30 seconds. Minimum 5s, maximum 5 minutes."
+                                "Travel speed is decided by nav tiers: what the bot and you carry (Map and Compass, lodestone compass, Eye of Ender, Ender Pearls, Wizard's Tome) or being near an Enchanting Table.",
+                                "There is no walk or fast-travel setting. Without a gate the bot walks."
                         ),
-                        "/bot config <alias> nav_mode fast_travel",
-                        "Give bot a Map and Compass for basic navigation; Eye of Ender for faster travel.",
-                        "navigation mode fast travel tier map compass eye ender artifact speed"
+                        "UI-only",
+                        "Give the bot a Map and Compass for basic travel, or a bound lodestone compass or an Eye of Ender (bot or you) for full-speed travel. See Fast-Travel Gates for every gate.",
+                        "navigation fast travel tier map compass eye ender artifact speed"
                 ),
                 new GuideTopic(
                         "settings_preserve_expensive_gear",

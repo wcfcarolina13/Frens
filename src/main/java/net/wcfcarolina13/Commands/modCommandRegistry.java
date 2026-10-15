@@ -581,7 +581,6 @@ public class modCommandRegistry {
                             .then(BotHomeCommands.buildBase())
                             .then(BotHomeCommands.buildUnleashTethered())
 	                        .then(BotHomeCommands.buildLeashOnDismount())
-                            .then(BotHomeCommands.buildNavMode())
                             .then(BotLearningCommands.buildLearn())
 	                        .then(BotMovementCommands.buildCome())
                             .then(BotCompanionCommands.build())
@@ -7314,32 +7313,6 @@ public class modCommandRegistry {
                 ChatUtils.sendSystemMessage(source,
                         summary + " leash-on-dismount is now " + (on ? "ON" : "OFF") + ".");
             }
-        }
-        return successes;
-    }
-
-    // ===== Nav Mode Set =====
-
-    static int executeNavModeSetTargets(CommandContext<ServerCommandSource> context,
-                                        String targetArg,
-                                        String mode) throws CommandSyntaxException {
-        ServerCommandSource source = context.getSource();
-        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
-        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
-
-        int successes = 0;
-        for (ServerPlayerEntity bot : bots) {
-            if (bot == null) {
-                continue;
-            }
-            BotHomeService.setNavMode(bot, mode);
-            successes++;
-        }
-
-        if (!bots.isEmpty()) {
-            String summary = formatBotList(bots, isAll);
-            String label = "WALK".equals(mode) ? "walk" : "fast travel";
-            ChatUtils.sendSystemMessage(source, summary + " navigation mode set to " + label + ".");
         }
         return successes;
     }
