@@ -12,9 +12,4 @@
 
 ## Platform Notes
 - The mod jar is Java/Fabric and runs cross-platform (Windows, Linux, macOS) when Java 21 + matching Minecraft/Fabric are installed.
-- AI runtime packaging is controlled by `-PaiEnabled=true` builds. Those builds now include DJL native variants for:
-  - `linux-x86_64`
-  - `win-x86_64`
-  - `osx-x86_64`
-  - `osx-aarch64`
-- Default builds keep AI dependencies compile-only, which avoids shipping heavy native binaries by default.
+- There is one build flavour. The `-PaiEnabled=true` flag and its DJL native runtimes were removed in 1.1.251 with the legacy LLM chat path; souls talk to Ollama over HTTP and bundle no native AI libraries.

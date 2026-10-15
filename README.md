@@ -77,13 +77,13 @@ pinned but untested; please report what you see.
 [LoadGoverner](https://github.com/wcfcarolina13) companion mod lowers bot activity while a
 generation is in flight; without it, expect frame dips on lighter machines during replies.
 
-### 🧪 Learning Mode and the legacy AI runtime
+### 🧪 Learning Mode (legacy AI runtime retired)
 
 - **Learning Mode v1** - operator-only demonstration capture for recording traces used to tune
   movement/build behavior offline. No LLM involved.
 - The older pre-souls LLM chat path (cloud providers, `/bot llm`, the "LLM World" and per-bot
-  "LLM Chat" toggles) is **retired**. Nothing in the mod calls it any more, and its leftover code
-  is due for removal. Talking to companions is Soul Chat only (see above).
+  "LLM Chat" toggles) is **retired** and its code removed (1.1.251), together with the libraries
+  only it used (ollama4j, DJL, OpenNLP, SQLite). Talking to companions is Soul Chat only (see above).
 
 ### 📦 Persistence
 - **Inventory** - saved/loaded automatically between sessions
