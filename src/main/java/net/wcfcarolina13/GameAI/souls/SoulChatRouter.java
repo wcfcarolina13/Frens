@@ -17,11 +17,11 @@ import java.util.stream.Collectors;
 
 /**
  * Exclusive chat-routing gate: decides whether an already-resolved single-target bot DM belongs
- * to the soul-communication pilot instead of the legacy {@code LLMOrchestrator} path, and — when
+ * to the soul-communication pilot instead of the remaining chat routing, and — when
  * it does — drives the turn end to end through {@link SoulRuntime#submitTurn}.
  *
  * <p>{@link #decide} is the pure, unit-tested decision table: it answers only "does this turn
- * belong exclusively to souls" ({@link RouteOutcome#CONSUMED}) or "leave it to legacy routing"
+ * belong exclusively to souls" ({@link RouteOutcome#CONSUMED}) or "leave it to the rest of chat routing"
  * ({@link RouteOutcome#NOT_SOUL}) from the coarse enablement facts (master switch, index
  * readiness, cached profile activation). It deliberately ignores {@code pipelineAvailable},
  * {@code authorized}, and {@code reachability} for that coarse call — once a turn is enabled and

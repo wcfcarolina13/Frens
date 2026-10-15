@@ -15,7 +15,6 @@ import net.minecraft.world.World;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
-import net.wcfcarolina13.GameAI.llm.LLMOrchestrator;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 
 import java.util.Locale;
@@ -26,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Applies persisted /configMan toggles to the running server so players do not need to repeat console commands.
+ * Applies persisted Bot Controls toggles to the running server so players do not need to repeat console commands.
  */
 public final class BotControlApplier {
 
@@ -91,7 +90,6 @@ public final class BotControlApplier {
         SkillPreferences.setFollowTeleport(bot.getUuid(), settings.isFollowTeleport());
         SkillPreferences.setPauseOnFullInventory(bot.getUuid(), settings.isPauseOnFullInventory());
         SkillPreferences.setTeleportDuringDropSweep(bot.getUuid(), settings.isTeleportDuringDropSweep());
-        // LLM enablement is no longer pushed here — LLMOrchestrator reads ManualConfig lazily.
     }
 
     public static void scheduleAutoSpawns(MinecraftServer server) {

@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Regression guard for the 1.1.199 field log:
  * {@code Shared state unavailable for idle-hobbies: NoClassDefFoundError
  * io/github/amithkoujalgi/ollama4j/core/exceptions/OllamaBaseException} — the map used to live
- * on {@code FunctionCallerV2}, whose static initializer builds an {@code OllamaAPI}; non-AI builds
- * exclude ollama4j from the JAR, so every non-LLM caller got a throwaway empty map.
+ * on the legacy LLM function caller (deleted in 1.1.251), whose static initializer needed
+ * ollama4j; non-AI builds excluded it from the JAR, so every non-LLM caller got a throwaway map.
  */
 class SharedStateServiceTest {
 

@@ -34,7 +34,7 @@ public class DropdownMenuWidget extends ClickableWidget {
         this.active = true;
         this.visible = true;
 
-        this.selectedIndex = -1; // No initial selection; ConfigManager or caller can set one
+        this.selectedIndex = -1; // No initial selection; the caller can set one
         LOGGER.info("DropdownMenuWidget created with {} options, initial selectedIndex={}", 
             this.options.size(), this.selectedIndex);
         if (DEBUG && !this.options.isEmpty()) {

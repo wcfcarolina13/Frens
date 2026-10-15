@@ -558,10 +558,9 @@ public final class SoulSnapshotBuilder {
         boolean hasHeadroom = false;
         boolean hasEscapeRoute = false;
         try {
-            // Read enclosure/danger/entity state directly from its underlying sources instead of
-            // BotEventHandler.createInitialState(bot): that helper side-effects
-            // BotStuckService.setLastSafePosition and pays for several fields this capture
-            // discards (hotbar, armor, hunger, risk map, ...).
+            // Read enclosure/danger/entity state directly from its underlying sources, with no
+            // side effects (the old BotEventHandler.createInitialState helper, deleted in 1.1.251,
+            // also wrote BotStuckService.setLastSafePosition).
             BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
             enclosed = environmentSnapshot.enclosed();
             hasHeadroom = environmentSnapshot.hasHeadroom();

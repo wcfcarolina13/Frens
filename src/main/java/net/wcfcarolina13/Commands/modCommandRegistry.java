@@ -7854,10 +7854,9 @@ public class modCommandRegistry {
             //
             // We MUST NOT fall back to running the skill synchronously here:
             //   1. We're on the server tick thread — long skills would freeze the server.
-            //   2. Historically, building SkillContext via a former FunctionCallerV2 accessor could
-            //      trigger that class's static initializer (constructs OllamaAPI → NoClassDefFoundError
-            //      on non-AI builds). The map now lives in SharedStateService, but keep the
-            //      synchronous-fallback ban for reason 1.
+            //   2. Historically, building SkillContext via the legacy LLM function caller could
+            //      throw NoClassDefFoundError on non-AI builds. That caller is gone (1.1.251), but
+            //      keep the synchronous-fallback ban for reason 1.
             // Surface a clear error to the user instead.
             LOGGER.error("Failed to queue skill '{}' for bot {} — executor rejected the task. "
                             + "The skill executor is likely shut down (this can happen after exit-to-title "
