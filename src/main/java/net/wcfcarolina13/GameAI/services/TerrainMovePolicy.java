@@ -35,7 +35,19 @@ public final class TerrainMovePolicy {
     /** Fixed walk cost of a sidestep from an open cell; BREAK costs at least this, and ties go to walking. */
     public static final double SIDESTEP_COST = 2.0D;
 
+    /** Sidesteps allowed per (bot, goal) within {@link FailedRoutePolicy#TTL_MS}. */
+    public static final int MAX_SIDESTEPS_PER_GOAL = 1;
+
     public enum Move { WALK_AROUND, BREAK, PLACE, NONE }
+
+    /**
+     * Whether a sidestep may be offered toward a goal that already had {@code sidestepsForGoalWithinTtl}
+     * sidesteps. One per goal: beside a long soft wall a second sidestep just walks back and forth
+     * (1.1.240 review), so the next stuck event lets BREAK and PLACE compete without it.
+     */
+    public static boolean sidestepAllowed(int sidestepsForGoalWithinTtl) {
+        return sidestepsForGoalWithinTtl < MAX_SIDESTEPS_PER_GOAL;
+    }
 
     /**
      * @param rise                 solid cells stacked in front of the bot from foot level (4 means 4 or more)

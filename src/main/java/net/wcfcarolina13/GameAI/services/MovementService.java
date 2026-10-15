@@ -1241,10 +1241,11 @@ public final class MovementService {
             return false;
         }
         long timeoutMs = stepUp ? 1600L : 1100L;
-        // 1.1.240 C1: reach 0.45. Vec3d.ofCenter sits half a block above the feet, so 0.25 of any
-        // reach is vertical; 0.64 left ~0.62 horizontal and was met from the origin cell. 0.45
-        // leaves ~0.45 horizontal, inside the target cell. The nudge result is only a hint.
-        nudgeTowardUntilClose(bot, target, EXACT_BLOCK_REACH_SQ, timeoutMs, 0.18D, label);
+        // 1.1.240 C1: measured at feet level (Vec3d.ofBottomCenter), so a bot on a bottom slab or lower
+        // stair is not judged by a centre half a block above the floor. Reach 0.20 is ~0.45
+        // horizontal on flat ground, inside the target cell (its edge is 0.5 from the centre); a raised
+        // floor inside the target is caught by the foot-cell match. The nudge result is only a hint.
+        nudgeTowardUntilClose(bot, target, EXACT_BLOCK_REACH_SQ, timeoutMs, 0.18D, label, true);
         // Success = landed in the target cell. groundedOrigin waits for the landing (worker
         // thread); effectiveFootCell lifts a carpet/slab/soul-sand floor cell to the feet cell.
         BlockPos landed = groundedOrigin(bot);
@@ -1252,7 +1253,7 @@ public final class MovementService {
         return landed.equals(target) || BotPositionUtil.effectiveFootCell(world, landed).equals(target);
     }
 
-    private static final double EXACT_BLOCK_REACH_SQ = 0.45D;
+    private static final double EXACT_BLOCK_REACH_SQ = 0.20D;
 
     private static void commitLocalEscape(ServerPlayerEntity player,
                                           LocalEscapeCandidate candidate,
@@ -3019,7 +3020,10 @@ public final class MovementService {
      * leave the bot facing the same wall. In an open cell (the open/area numbers
      * {@link #findBestLocalEscapeCandidate} uses to skip its search) an adjacent sidestep counts at
      * {@link TerrainMovePolicy#SIDESTEP_COST}, so walking beats soft BREAK there. A walk is ok only if
-     * the bot's grounded cell changed; otherwise its first hop is remembered as a failed route.</p>
+     * the bot's grounded cell changed; otherwise its first hop is remembered as a failed route. A
+     * successful sidestep remembers its back-step (new cell to origin) as a failed route, and only one
+     * sidestep per goal is offered within {@link FailedRoutePolicy#TTL_MS}; after that BREAK and PLACE
+     * compete without it ({@link TerrainMovePolicy#sidestepAllowed}).</p>
      *
      * <p>Natural terrain (dirt, sand, gravel, clay) may be broken here, while
      * {@link #tryMineObstructionToward} refuses it. Deliberate (1.1.240 M3): obstruction mining is a
@@ -3127,7 +3131,13 @@ public final class MovementService {
         int detourBlocks = detour == null ? 0
                 : Math.max(1, detour.route() == null ? 1 : detour.route().size());
         boolean openCell = isOpenTerrainCell(world, origin);
-        BlockPos sidestep = detour == null && openCell ? findTerrainSidestep(world, botId, origin, goal, front) : null;
+        // One sidestep per goal within the TTL: a second stuck event toward the same goal lets BREAK and
+        // PLACE compete, so a bot beside a long soft wall does not pace back and forth (1.1.240 review).
+        FailedRoutePolicy.Goal sidestepGoal = new FailedRoutePolicy.Goal(goal.getX(), goal.getY(), goal.getZ());
+        boolean sidestepAllowed = TerrainMovePolicy.sidestepAllowed(
+                FAILED_ROUTES.sidestepsWithinTtl(botId, sidestepGoal, System.currentTimeMillis()));
+        BlockPos sidestep = detour == null && openCell && sidestepAllowed
+                ? findTerrainSidestep(world, botId, origin, goal, front) : null;
 
         TerrainMovePolicy.Decision decision = TerrainMovePolicy.choose(new TerrainMovePolicy.Inputs(
                 rise,
@@ -3142,9 +3152,9 @@ public final class MovementService {
                 !openCell,
                 sidestep != null));
         if (decision.move() == TerrainMovePolicy.Move.NONE) {
-            LOGGER.debug("terrain move: NONE [{}] bot={} from={} dir={} rise={} breakOk={} breakTicks={} scaffold={} placeOk={} detour=false open={}",
+            LOGGER.debug("terrain move: NONE [{}] bot={} from={} dir={} rise={} breakOk={} breakTicks={} scaffold={} placeOk={} detour=false open={} sidestepAllowed={}",
                     label, bot.getName().getString(), origin.toShortString(), dir, rise, breakOk, breakTicksSum,
-                    scaffoldCount, placeOk, openCell);
+                    scaffoldCount, placeOk, openCell, sidestepAllowed);
             return false;
         }
         LOGGER.info("terrain move: {} cost={} [{}] bot={} from={} dir={} rise={} walk={} break={} place={} cells={} breakTicks={} scaffold={} open={} walkVia={} goal={}",
@@ -3195,6 +3205,15 @@ public final class MovementService {
                     recordFailedRoute(bot, origin, firstHop, label + "-terrain-walk");
                 }
                 ok = walked && displaced;
+                if (ok && detour == null) {
+                    // The sidestep's own back-step is the nearest-to-goal neighbour of the new cell
+                    // beside a long wall; remember it so the bot cannot step straight back.
+                    recordFailedRoute(bot, now, origin, label + "-terrain-sidestep-back");
+                    if (!now.equals(sidestep)) {
+                        recordFailedRoute(bot, sidestep, origin, label + "-terrain-sidestep-back");
+                    }
+                    FAILED_ROUTES.recordSidestep(botId, sidestepGoal, System.currentTimeMillis());
+                }
                 detail += " displaced=" + displaced;
             }
             case BREAK -> {
@@ -3368,6 +3387,17 @@ public final class MovementService {
                                                 long timeoutMs,
                                                 double impulse,
                                                 String label) {
+        return nudgeTowardUntilClose(bot, target, reachSq, timeoutMs, impulse, label, false);
+    }
+
+    /** @param feetLevel measure reach to the target's bottom centre (feet level) instead of its centre */
+    private static boolean nudgeTowardUntilClose(ServerPlayerEntity bot,
+                                                 BlockPos target,
+                                                 double reachSq,
+                                                 long timeoutMs,
+                                                 double impulse,
+                                                 String label,
+                                                 boolean feetLevel) {
         if (bot == null || target == null) {
             return false;
         }
@@ -3378,7 +3408,7 @@ public final class MovementService {
         NUDGE_DEPTH.set(depth + 1);
         boolean allowAssists = depth == 0;
         long deadline = System.currentTimeMillis() + timeoutMs;
-        final Vec3d targetCenter = Vec3d.ofCenter(target);
+        final Vec3d targetCenter = feetLevel ? Vec3d.ofBottomCenter(target) : Vec3d.ofCenter(target);
         double best = bot.squaredDistanceTo(targetCenter);
         double start = best;
         LOGGER.debug("nudgeToward start [{}]: from={} to={} dist={}", label, bot.getBlockPos().toShortString(), target.toShortString(), Math.sqrt(best));

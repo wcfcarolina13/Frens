@@ -154,6 +154,22 @@ class TerrainMovePolicyTest {
     }
 
     @Test
+    void oneSidestepPerGoalThenBreakOrPlaceCompete() {
+        assertTrue(TerrainMovePolicy.sidestepAllowed(0));
+        assertFalse(TerrainMovePolicy.sidestepAllowed(1));
+        assertFalse(TerrainMovePolicy.sidestepAllowed(2));
+        // Second stuck event toward the same goal: the sidestep is withheld, so soft terrain breaks
+        // and a dirt-carrying bot facing a stone 2-rise places.
+        int sand = sandByHand();
+        boolean allowed = TerrainMovePolicy.sidestepAllowed(1);
+        Inputs again = new Inputs(2, 1, sand, sand, true, 0, false, false, 0, false, allowed);
+        assertEquals(Move.BREAK, TerrainMovePolicy.choose(again).move());
+        int stone = stoneByHand();
+        Inputs stoneWithDirt = new Inputs(2, 1, stone, stone, true, 64, true, false, 0, false, allowed);
+        assertEquals(Move.PLACE, TerrainMovePolicy.choose(stoneWithDirt).move());
+    }
+
+    @Test
     void trapCellIgnoresTheSidestep() {
         Inputs trap = new Inputs(2, 1, sandByHand(), sandByHand(), true, 0, false, false, 0, true, true);
         assertEquals(Move.BREAK, TerrainMovePolicy.choose(trap).move());

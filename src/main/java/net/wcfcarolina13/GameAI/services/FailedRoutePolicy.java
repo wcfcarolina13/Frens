@@ -28,7 +28,12 @@ public final class FailedRoutePolicy {
 
     private record Entry(long recordedMs, long lastSkipLogMs) {}
 
+    /** A goal cell a terrain sidestep was taken toward. */
+    public record Goal(int x, int y, int z) {}
+
     private final Map<UUID, Map<Key, Entry>> failed = new ConcurrentHashMap<>();
+    /** Per bot: goal -> when the last terrain sidestep toward it happened. */
+    private final Map<UUID, Map<Goal, Long>> sidesteps = new ConcurrentHashMap<>();
 
     public static Key key(int originX, int originY, int originZ, int hopX, int hopY, int hopZ) {
         return new Key(originX, originY, originZ, hopX, hopY, hopZ);
@@ -102,13 +107,46 @@ public final class FailedRoutePolicy {
         return true;
     }
 
+    /**
+     * Remembers a terrain sidestep toward {@code goal}. A later stuck event toward the same goal within
+     * {@link #TTL_MS} gets no sidestep option ({@link TerrainMovePolicy#sidestepAllowed}), so break or
+     * place compete instead of the bot pacing beside a wall (1.1.240 review). Expired entries are pruned.
+     */
+    public void recordSidestep(UUID botId, Goal goal, long nowMs) {
+        if (botId == null || goal == null) {
+            return;
+        }
+        Map<Goal, Long> perBot = sidesteps.computeIfAbsent(botId, id -> new ConcurrentHashMap<>());
+        perBot.values().removeIf(t -> !live(t, nowMs));
+        perBot.put(goal, nowMs);
+    }
+
+    /** Sidesteps toward {@code goal} still remembered at {@code nowMs}: 0 or 1. */
+    public int sidestepsWithinTtl(UUID botId, Goal goal, long nowMs) {
+        if (botId == null || goal == null) {
+            return 0;
+        }
+        Map<Goal, Long> perBot = sidesteps.get(botId);
+        Long at = perBot == null ? null : perBot.get(goal);
+        if (at == null) {
+            return 0;
+        }
+        if (!live(at, nowMs)) {
+            perBot.remove(goal);
+            return 0;
+        }
+        return 1;
+    }
+
     public void clear(UUID botId) {
         if (botId != null) {
             failed.remove(botId);
+            sidesteps.remove(botId);
         }
     }
 
     public void clearAll() {
         failed.clear();
+        sidesteps.clear();
     }
 }
