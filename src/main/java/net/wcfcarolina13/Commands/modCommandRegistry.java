@@ -44,11 +44,8 @@ import net.minecraft.sound.SoundEvent;
 import net.wcfcarolina13.ChatUtils.BotDialoguePlayer;
 import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
-import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
-import net.wcfcarolina13.Database.QTableExporter;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
-import net.wcfcarolina13.Entity.RayCasting;
 import net.wcfcarolina13.Entity.RespawnHandler;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.LLMClientFactory;
@@ -65,10 +62,6 @@ import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotInventoryFullDialogueService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
-import net.wcfcarolina13.GameAI.State;
-import net.wcfcarolina13.GameAI.StateActions;
-import java.io.ByteArrayOutputStream;
-import java.io.ObjectOutputStream;
 import java.nio.file.Path;
 import net.wcfcarolina13.OllamaClient.ollamaClient;
 import net.wcfcarolina13.PathFinding.ChartPathToBlock;
@@ -418,6 +411,7 @@ public class modCommandRegistry {
                                                 .executes(context -> {
                                                     boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
                                                     DebugToggleService.setRuntimeVerbose(enabled);
+                                                    refreshCommandTrees(context.getSource().getServer());
                                                     ChatUtils.sendSystemMessage(context.getSource(), "Debug set to " + (enabled ? "on" : "off"));
                                                     return 1;
                                                 })
@@ -434,6 +428,7 @@ public class modCommandRegistry {
                                             .then(literal("clear")
                                                 .executes(context -> {
                                                     DebugToggleService.clearRuntimeOverride();
+                                                    refreshCommandTrees(context.getSource().getServer());
                                                     ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
                                                     return 1;
                                                 })
@@ -503,17 +498,6 @@ public class modCommandRegistry {
                                                 ))
                                         )
                                 )
-	                        )
-	                        .then(literal("rl")
-	                                .then(CommandManager.argument("mode", StringArgumentType.string())
-	                                        .executes(context -> {
-	                                            boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
-	                                            enableReinforcementLearning = enabled;
-	                                            ChatUtils.sendSystemMessage(context.getSource(),
-	                                                    "Reinforcement learning loop set to " + (enabled ? "on" : "off"));
-	                                            return 1;
-	                                        })
-	                                )
 	                        )
 	                        .then(literal("llm")
 	                                .then(literal("world")
@@ -1060,54 +1044,9 @@ public class modCommandRegistry {
 	                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
 	                                )
 	                        )
-                        .then(literal("debug_serialization")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            try {
-                                                ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                if (bot == null) return 0;
-                                                State state = BotEventHandler.createInitialState(bot);
-                                                
-                                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                                ObjectOutputStream oos = new ObjectOutputStream(baos);
-                                                oos.writeObject(state);
-                                                oos.close();
-                                                
-                                                ChatUtils.sendSystemMessage(context.getSource(), "Serialization successful! Size: " + baos.size());
-                                                return 1;
-                                            } catch (Exception e) {
-                                                ChatUtils.sendSystemMessage(context.getSource(), "Serialization failed: " + e.toString());
-                                                e.printStackTrace();
-                                                return 0;
-                                            }
-                                        })
-                                )
-                        )
-                        .then(literal("debug_qtable_serialization")
-                                .executes(context -> {
-                                    try {
-                                        net.wcfcarolina13.Database.QTable qTable = new net.wcfcarolina13.Database.QTable();
-                                        ServerPlayerEntity bot = context.getSource().getPlayer();
-                                        if (bot != null) {
-                                            State state = BotEventHandler.createInitialState(bot);
-                                            qTable.addEntry(state, StateActions.Action.STAY, 0.0, state);
-                                        }
-                                        
-                                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                        ObjectOutputStream oos = new ObjectOutputStream(baos);
-                                        oos.writeObject(qTable);
-                                        oos.close();
-                                        
-                                        ChatUtils.sendSystemMessage(context.getSource(), "QTable Serialization successful! Size: " + baos.size());
-                                        return 1;
-                                    } catch (Exception e) {
-                                        ChatUtils.sendSystemMessage(context.getSource(), "QTable Serialization failed: " + e.toString());
-                                        e.printStackTrace();
-                                        return 0;
-                                    }
-                                })
-                        )
+                        // Dev helper, only registered for players while /bot debug is on.
                         .then(literal("test_chat_message")
+                                .requires(src -> DebugToggleService.verbose())
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> { testChatMessage(context); return 1; })
                                 )
@@ -1134,17 +1073,6 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
-                        .then(literal("detect_entities")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            if (bot != null) {
-                                                RayCasting.detect(bot);
-                                            }
-                                            return 1;
-                                        })
-                                )
-                        )
                         .then(literal("get_block_map")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("vertical", IntegerArgumentType.integer())
@@ -1164,58 +1092,6 @@ public class modCommandRegistry {
 
                                 )
 
-                        )
-
-                        .then(literal("detect_blocks")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("block_type", StringArgumentType.string())
-                                                .executes(context -> {
-
-                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    String blockType = StringArgumentType.getString(context, "block_type");
-
-                                                    BlockPos outPutPos = blockDetectionUnit.detectBlocks(bot, blockType);
-                                                    if (outPutPos == null) {
-                                                        blockDetectionUnit.setIsBlockDetectionActive(false);
-                                                        ChatUtils.sendSystemMessage(context.getSource(), "No matching block nearby.");
-                                                        return 1;
-                                                    }
-
-                                                    LOGGER.info("Detected Block: {} at x={}, y={}, z={}", blockType, outPutPos.getX(), outPutPos.getY(), outPutPos.getZ());
-                                                    blockDetectionUnit.setIsBlockDetectionActive(false);
-
-                                                    return 1;
-                                                })
-                                        )
-                                )
-                        )
-
-                        .then(literal("turn")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("direction", StringArgumentType.string())
-                                                .executes(context -> {
-
-                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    MinecraftServer server = bot.getCommandSource().getServer();
-                                                    String direction = StringArgumentType.getString(context, "direction");
-
-                                                    switch (direction) {
-                                                        case "left", "right", "back" -> {
-                                                            turnTool.turn(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), direction);
-
-                                                            LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getId(), bot.getFacing().getAxis().getId());
-                                                        }
-                                                        default -> {
-                                                            server.execute(() -> {
-                                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), "Invalid parameters! Accepted parameters: left, right, back only!");
-                                                            });
-                                                        }
-                                                    }
-
-                                                    return 1;
-                                                })
-                                        )
-                                )
                         )
 
 
@@ -1427,44 +1303,6 @@ public class modCommandRegistry {
                                 )
                         )
 
-                        .then(literal("detectDangerZone")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("lavaRange", IntegerArgumentType.integer())
-                                                .then(CommandManager.argument("cliffRange", IntegerArgumentType.integer())
-                                                        .then(CommandManager.argument("cliffDepth", IntegerArgumentType.integer())
-                                                                .executes(context -> {
-
-                                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-                                                                    MinecraftServer server = botSource.getServer();
-
-                                                                    int lavaRange = IntegerArgumentType.getInteger(context, "lavaRange");     // Range to check for lava blocks
-                                                                    int cliffRange = IntegerArgumentType.getInteger(context, "cliffRange");     // Forward range to check for cliffs
-                                                                    int cliffDepth = IntegerArgumentType.getInteger(context, "cliffDepth");    // Downward range to check for solid blocks
-
-                                                                    server.execute(() -> {
-                                                                        // Putting this part in a thread so that it doesn't hang the game.
-
-                                                                        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, lavaRange, cliffRange, cliffDepth);
-                                                                        if (dangerDistance > 0) {
-                                                                            DebugToggleService.debug(LOGGER, "Danger detected! Effective distance: {}", dangerDistance);
-                                                                            ChatUtils.sendChatMessages(botSource, "Danger detected! Effective distance to danger: " + (int) dangerDistance + " blocks");
-
-                                                                        } else {
-                                                                            DebugToggleService.debug(LOGGER, "No danger nearby.");
-                                                                            ChatUtils.sendChatMessages(botSource, "No danger nearby");
-                                                                        }
-
-                                                                    });
-
-                                                                    return 1;
-                                                                })
-                                                        )
-                                                )
-                                        )
-                                )
-                        )
-
 
                         .then(literal("getHotbarItems")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
@@ -1526,24 +1364,6 @@ public class modCommandRegistry {
 
                         )
 
-                        .then(literal("getHungerLevel")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-
-                                            int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
-
-                                            ChatUtils.sendChatMessages(botSource, "Hunger level: " + botHungerLevel);
-
-                                            return 1;
-
-                                        })
-                                )
-                        )
-
                         .then(literal("set")
                                 .then(literal("hunger")
                                         .then(CommandManager.argument("level", IntegerArgumentType.integer(0, 20))
@@ -1561,66 +1381,6 @@ public class modCommandRegistry {
                                                         })
                                                 )
                                         )
-                                )
-                        )
-
-                        .then(literal("getOxygenLevel")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-
-                                            int botHungerLevel = getPlayerOxygen.getBotOxygenLevel(bot);
-
-                                            ChatUtils.sendChatMessages(botSource, "Oxygen level: " + botHungerLevel);
-
-                                            return 1;
-                                        })
-                                )
-                        )
-                        .then(literal("getHealth")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-
-                                            int botHealthLevel = (int) bot.getHealth();
-
-                                            ChatUtils.sendChatMessages(botSource, "Health level: " + botHealthLevel);
-
-                                            return 1;
-                                        })
-                                )
-                        )
-
-                        .then(literal("isFoodItem")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-
-                                            ItemStack selectedItemStack = hotBarUtils.getSelectedHotbarItemStack(bot);
-
-                                            if (isFoodItem.checkFoodItem(selectedItemStack)) {
-
-                                                ChatUtils.sendChatMessages(botSource, "Currently selected item: " + selectedItemStack.getItem().getName().getString() + " is a food item.");
-
-                                            }
-
-                                            else {
-
-                                                ChatUtils.sendChatMessages(botSource, "Currently selected item: " + selectedItemStack.getItem().getName().getString() + " is not a food item.");
-
-                                            }
-
-                                            return 1;
-                                        })
                                 )
                         )
 
@@ -1650,22 +1410,6 @@ public class modCommandRegistry {
                                         })
 
                                 )
-                        )
-
-                        .then(literal("exportQTableToJSON")
-                                .executes(context -> {
-
-                                    MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
-                                    ServerCommandSource serverSource = context.getSource();
-
-                                    ChatUtils.sendSystemMessage(serverSource, "Exporting Q-table to JSON. Please wait.... ");
-
-                                    QTableExporter.exportQTable(BotEventHandler.qTableDir + "/qtable.bin", BotEventHandler.qTableDir + "/fullQTable.json");
-
-                                    ChatUtils.sendSystemMessage(serverSource, "Q-table has been successfully exported to a json file at: " + BotEventHandler.qTableDir + "/fullQTable.json" );
-
-                                    return 1;
-                                })
                         )
 
 	                        .then(literal("forget")
@@ -1820,7 +1564,9 @@ public class modCommandRegistry {
 	                                        })
 	                                )
                         )
+                        // Dev helper, only registered for players while /bot debug is on.
                         .then(literal("testgear")
+                                .requires(src -> DebugToggleService.verbose())
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> executeTestGearCommand(
                                                 context,
@@ -2131,6 +1877,14 @@ public class modCommandRegistry {
             case "survival", "s" -> GameMode.SURVIVAL;
             default -> null;
         };
+    }
+
+    /** Resends the command tree so debug-gated nodes (testgear, test_chat_message) appear or vanish in tab completion. */
+    private static void refreshCommandTrees(MinecraftServer server) {
+        if (server == null) return;
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            server.getPlayerManager().sendCommandTree(player);
+        }
     }
 
     private static String normalizeSpawnModeOrNull(String rawMode) {
