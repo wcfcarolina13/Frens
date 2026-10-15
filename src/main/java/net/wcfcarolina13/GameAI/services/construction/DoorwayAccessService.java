@@ -81,17 +81,6 @@ public final class DoorwayAccessService {
     }
 
     /**
-     * Analyze a doorway position and return its full structure.
-     * 
-     * @param bottomPos The bottom block of the doorway opening
-     * @param facingOutward Direction toward the exterior (where people approach from)
-     * @return Doorway record with all positions
-     */
-    public static Doorway analyzeDoorway(BlockPos bottomPos, Direction facingOutward) {
-        return Doorway.create(bottomPos, facingOutward);
-    }
-
-    /**
      * Detect doorways in a schematic by looking for 2-block-high air gaps in walls.
      * 
      * @param world The world
@@ -369,80 +358,6 @@ public final class DoorwayAccessService {
                 return false;
             }
         }
-    }
-
-    /**
-     * Check if a doorway has clear exterior access.
-     */
-    public static boolean hasExteriorAccess(ServerWorld world, Doorway doorway) {
-        if (world == null || doorway == null) return false;
-
-        // Check approach positions
-        BlockPos approach = doorway.outsideApproach();
-        BlockState approachState = world.getBlockState(approach);
-        BlockState approachAbove = world.getBlockState(approach.up());
-        BlockState groundBelow = world.getBlockState(approach.down());
-
-        // Need: solid ground, clear standing space (2 high)
-        return !groundBelow.isAir() && approachState.isAir() && approachAbove.isAir();
-    }
-
-    /**
-     * Check if a doorway has clear interior access.
-     */
-    public static boolean hasInteriorAccess(ServerWorld world, Doorway doorway) {
-        if (world == null || doorway == null) return false;
-
-        BlockPos inside = doorway.insidePos();
-        BlockState insideState = world.getBlockState(inside);
-        BlockState insideAbove = world.getBlockState(inside.up());
-        BlockState groundBelow = world.getBlockState(inside.down());
-
-        return !groundBelow.isAir() && insideState.isAir() && insideAbove.isAir();
-    }
-
-    /**
-     * Prepare a doorway for door installation.
-     * Ensures the doorway opening is exactly 2 blocks high and has proper support.
-     * 
-     * @param world The world
-     * @param source Command source
-     * @param bot The bot
-     * @param doorway The doorway to prepare
-     * @return True if doorway is ready for door placement
-     */
-    public static boolean prepareDoorwayForDoor(ServerWorld world,
-                                                 ServerCommandSource source,
-                                                 ServerPlayerEntity bot,
-                                                 Doorway doorway) {
-        // First clear any obstructions
-        clearDoorwayAccess(world, source, bot, doorway);
-        
-        // Check doorway dimensions
-        BlockState bottomState = world.getBlockState(doorway.bottomPos());
-        BlockState topState = world.getBlockState(doorway.topPos());
-        BlockState groundState = world.getBlockState(doorway.bottomPos().down());
-
-        // Bottom and top must be air (or already a door)
-        boolean openingClear = (bottomState.isAir() || bottomState.getBlock() instanceof DoorBlock)
-                            && (topState.isAir() || topState.getBlock() instanceof DoorBlock);
-
-        // Must have solid ground below door
-        boolean hasSupport = !groundState.isAir();
-
-        if (!openingClear) {
-            LOGGER.warn("Doorway opening not clear at {}", doorway.bottomPos().toShortString());
-            return false;
-        }
-
-        if (!hasSupport) {
-            LOGGER.warn("No support block below doorway at {}", doorway.bottomPos().toShortString());
-            // Could try to place a support block
-            return false;
-        }
-
-        LOGGER.info("Doorway at {} prepared for door installation", doorway.bottomPos().toShortString());
-        return true;
     }
 
     // ========== Helper Methods ==========

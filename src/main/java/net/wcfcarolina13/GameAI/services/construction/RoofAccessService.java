@@ -4,7 +4,6 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
@@ -22,7 +21,6 @@ import java.util.*;
  * <p>Key behaviors:</p>
  * <ul>
  *   <li>Pillar up to reach roof level from safe positions</li>
- *   <li>Walk perimeter and serpentine patterns on roof</li>
  *   <li>Escape from roof back to ground safely</li>
  *   <li>Track and cleanup roof access pillars</li>
  * </ul>
@@ -30,7 +28,6 @@ import java.util.*;
 public final class RoofAccessService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("roof-access-service");
-    private static final double REACH_DISTANCE_SQ = 20.25D;
 
     /**
      * Tracks temporary pillars built for roof access.
@@ -127,86 +124,6 @@ public final class RoofAccessService {
     }
 
     /**
-     * Walk a perimeter pattern on the roof, placing blocks within reach at each step.
-     * 
-     * @param world The world
-     * @param source Command source
-     * @param bot The bot
-     * @param roofCenter Center of the roof
-     * @param roofRadius Radius of the roof
-     * @param roofY Y level of the roof blocks
-     * @param placeCallback Called at each step with reachable positions to place
-     */
-    public static void walkRoofPerimeter(ServerWorld world,
-                                         ServerCommandSource source,
-                                         ServerPlayerEntity bot,
-                                         BlockPos roofCenter,
-                                         int roofRadius,
-                                         int roofY,
-                                         PlaceCallback placeCallback) {
-        if (bot == null || placeCallback == null) {
-            return;
-        }
-
-        int standY = roofY + 1; // Walk on top of roof
-        List<BlockPos> perimeter = buildRoofPerimeter(roofCenter, roofRadius, standY);
-
-        for (BlockPos walkPos : perimeter) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                break;
-            }
-
-            // Move to this position on the roof
-            directWalkTo(bot, walkPos);
-            sleepQuiet(100L);
-
-            // Call back to let the builder place blocks from here
-            placeCallback.onPosition(walkPos);
-        }
-    }
-
-    /**
-     * Walk a serpentine pattern across the roof interior.
-     */
-    public static void walkRoofSerpentine(ServerWorld world,
-                                          ServerCommandSource source,
-                                          ServerPlayerEntity bot,
-                                          BlockPos roofCenter,
-                                          int roofRadius,
-                                          int roofY,
-                                          PlaceCallback placeCallback) {
-        if (bot == null || placeCallback == null) {
-            return;
-        }
-
-        int standY = roofY + 1;
-        int cx = roofCenter.getX();
-        int cz = roofCenter.getZ();
-
-        // Serpentine: alternate direction each row
-        for (int dz = -roofRadius; dz <= roofRadius; dz++) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                break;
-            }
-
-            int startX = (dz % 2 == 0) ? -roofRadius : roofRadius;
-            int endX = (dz % 2 == 0) ? roofRadius : -roofRadius;
-            int stepX = (dz % 2 == 0) ? 1 : -1;
-
-            for (int dx = startX; stepX > 0 ? dx <= endX : dx >= endX; dx += stepX) {
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    break;
-                }
-
-                BlockPos walkPos = new BlockPos(cx + dx, standY, cz + dz);
-                directWalkTo(bot, walkPos);
-                sleepQuiet(80L);
-                placeCallback.onPosition(walkPos);
-            }
-        }
-    }
-
-    /**
      * Descend from the roof back to ground level safely.
      * Uses the roof access pillar if available, otherwise finds a safe drop.
      */
@@ -282,41 +199,7 @@ public final class RoofAccessService {
         return totalRemoved;
     }
 
-    // ========== Callback Interface ==========
-
-    @FunctionalInterface
-    public interface PlaceCallback {
-        void onPosition(BlockPos standPosition);
-    }
-
     // ========== Helper Methods ==========
-
-    private static List<BlockPos> buildRoofPerimeter(BlockPos center, int radius, int y) {
-        List<BlockPos> out = new ArrayList<>();
-        int cx = center.getX();
-        int cz = center.getZ();
-
-        // East edge (north -> south)
-        for (int dz = -radius; dz <= radius; dz++) {
-            out.add(new BlockPos(cx + radius, y, cz + dz));
-        }
-        // South edge (east-1 -> west)
-        for (int dx = radius - 1; dx >= -radius; dx--) {
-            out.add(new BlockPos(cx + dx, y, cz + radius));
-        }
-        // West edge (south-1 -> north)
-        for (int dz = radius - 1; dz >= -radius; dz--) {
-            out.add(new BlockPos(cx - radius, y, cz + dz));
-        }
-        // North edge (west+1 -> east-1)
-        for (int dx = -radius + 1; dx <= radius - 1; dx++) {
-            out.add(new BlockPos(cx + dx, y, cz - radius));
-        }
-
-        // Remove duplicates while preserving order
-        LinkedHashSet<BlockPos> uniq = new LinkedHashSet<>(out);
-        return new ArrayList<>(uniq);
-    }
 
     private static void directWalkTo(ServerPlayerEntity bot, BlockPos target) {
         Vec3d targetVec = Vec3d.ofCenter(target);

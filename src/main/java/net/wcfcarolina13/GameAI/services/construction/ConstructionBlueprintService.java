@@ -293,36 +293,6 @@ public final class ConstructionBlueprintService {
     }
 
     /**
-     * Generate a list of vantage points from which to build.
-     * Similar to the hovel builder's station concept.
-     */
-    public static List<BlockPos> generateBuildStations(ConstructionPlan plan, int stationSpacing) {
-        List<BlockPos> stations = new ArrayList<>();
-        int standY = plan.minY; // Ground level
-        
-        // Add corners as primary stations
-        for (BlockPos corner : plan.cornerPositions) {
-            // Stand just outside the corner
-            BlockPos station = corner.withY(standY);
-            stations.add(station);
-        }
-        
-        // Add center as a station for interior work
-        stations.add(plan.center.withY(standY));
-        
-        // Add perimeter stations for large structures
-        if (plan.width > 6 || plan.depth > 6) {
-            for (int i = 0; i < plan.perimeterPositions.size(); i += stationSpacing) {
-                BlockPos perimPos = plan.perimeterPositions.get(i);
-                stations.add(perimPos.withY(standY).offset(
-                        getOutwardDirection(perimPos, plan.center)));
-            }
-        }
-        
-        return stations;
-    }
-
-    /**
      * Adapter that converts a construction plan into shared placement targets.
      */
     public static List<PlacementTarget> toPlacementTargets(ConstructionPlan plan) {
@@ -353,14 +323,5 @@ public final class ConstructionBlueprintService {
             case DOOR -> PlacementTarget.TargetKind.DOOR;
             case DECORATION -> PlacementTarget.TargetKind.DECORATION;
         };
-    }
-
-    private static Direction getOutwardDirection(BlockPos pos, BlockPos center) {
-        int dx = pos.getX() - center.getX();
-        int dz = pos.getZ() - center.getZ();
-        if (Math.abs(dx) > Math.abs(dz)) {
-            return dx > 0 ? Direction.EAST : Direction.WEST;
-        }
-        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 }

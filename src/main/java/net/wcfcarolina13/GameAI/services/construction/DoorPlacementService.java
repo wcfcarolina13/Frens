@@ -1,20 +1,14 @@
 package net.wcfcarolina13.GameAI.services.construction;
 
-import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
-import net.minecraft.block.enums.DoorHinge;
-import net.minecraft.block.enums.DoubleBlockHalf;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.MovementService;
@@ -33,13 +27,11 @@ import java.util.Optional;
  *   <li>Finds optimal stance positions outside the door for placement</li>
  *   <li>Handles dual-half door block mechanics</li>
  *   <li>Clears doorway obstructions before placement</li>
- *   <li>Provides entry/exit navigation through doors</li>
  * </ul>
  */
 public final class DoorPlacementService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("door-placement-service");
-    private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks
     
     // All vanilla door items
     public static final List<Item> DOOR_ITEMS = List.of(
@@ -235,49 +227,6 @@ public final class DoorPlacementService {
                 LOGGER.debug("Doorway blocked at {} by {}", pos.toShortString(), state.getBlock().getName().getString());
             }
         }
-    }
-
-    /**
-     * Navigate a bot through a door (enter or exit).
-     */
-    public static boolean navigateThroughDoor(ServerWorld world,
-                                              ServerCommandSource source,
-                                              ServerPlayerEntity bot,
-                                              BlockPos doorPos,
-                                              Direction exitDirection) {
-        if (world == null || bot == null || doorPos == null) {
-            return false;
-        }
-
-        BlockState doorState = world.getBlockState(doorPos);
-        if (!(doorState.getBlock() instanceof DoorBlock)) {
-            // No door, just walk through
-            BlockPos target = doorPos.offset(exitDirection);
-            return moveToPosition(source, bot, target);
-        }
-
-        // Check if door is open
-        boolean isOpen = doorState.contains(Properties.OPEN) && doorState.get(Properties.OPEN);
-        
-        // If closed and not iron, try to open it
-        if (!isOpen && doorState.getBlock() != Blocks.IRON_DOOR) {
-            // Right-click to open
-            LookController.faceBlock(bot, doorPos);
-            sleepQuiet(100L);
-            // Would need use block interaction here
-            LOGGER.debug("Would need to open door at {}", doorPos.toShortString());
-        }
-
-        // Walk through
-        BlockPos target = doorPos.offset(exitDirection);
-        return moveToPosition(source, bot, target);
-    }
-
-    /**
-     * Calculate the door position for a structure given its center, radius, and door side.
-     */
-    public static BlockPos calculateDoorPosition(BlockPos center, int radius, Direction doorSide, int floorY) {
-        return center.offset(doorSide, radius).withY(floorY + 1);
     }
 
     // ========== Helper Methods ==========
