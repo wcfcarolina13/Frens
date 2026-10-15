@@ -562,6 +562,10 @@ public final class BotAutoReturnSunsetService {
         if (BotFleeService.tryResumeInterruptedSurvival(bot, server)) {
             return;
         }
+        // Surface recovery now runs on its own thread; routing here would start a second mover.
+        if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
+            return;
+        }
         if (BotFleeService.hasPendingInterruptedSurvival(bot.getUuid())) {
             return;
         }

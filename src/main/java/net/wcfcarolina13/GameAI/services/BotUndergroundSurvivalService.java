@@ -44,15 +44,15 @@ public final class BotUndergroundSurvivalService {
     private static final Map<UUID, StuckEscapeBackoffPolicy.State> STUCK_STATE = new ConcurrentHashMap<>();
 
     /**
-     * Set when {@link #recordRecoveryAttempt} runs on this thread, so the survival-level feed in
-     * {@link #onServerTick} does not record the same attempt twice (one attempt = one record).
-     */
-    /**
      * Bots holding still after {@code /bot stop}: the abort latch is set and nothing else is running.
      * Only used to log the hold once; removed when the latch clears.
      */
     private static final Set<UUID> HOLDING_AFTER_STOP = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Set when {@link #recordRecoveryAttempt} runs on this thread, so the survival-level feed in
+     * {@link #onServerTick} does not record the same attempt twice (one attempt = one record).
+     */
     private static final ThreadLocal<Boolean> ATTEMPT_RECORDED = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);

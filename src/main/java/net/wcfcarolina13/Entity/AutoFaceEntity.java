@@ -415,6 +415,10 @@ public class AutoFaceEntity {
                 if (BotFleeService.tryResumeInterruptedSurvival(bot, server)) {
                     return;
                 }
+                // Surface recovery runs off-thread; a resumed skill would fight it for movement.
+                if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
+                    return;
+                }
                 SkillResumeService.tryAutoResume(bot);
             }
         }
