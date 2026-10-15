@@ -51,6 +51,7 @@ import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutApproachFeasibilityPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutChatLines;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
@@ -468,6 +469,9 @@ public final class WoodcutSkill implements Skill {
         private boolean usedScaffold;
         private boolean preReachLeafClearAttempted;
         private int repeatedRepositionFailures;
+        // Failed dry-reposition stands for this target on any side. Parallel to the sign-keyed
+        // repeatedRepositionFailures, which resets when sorted candidates alternate sides.
+        private int dryRepositionFailures;
         private int minorTerrainCorrections;
         private int rerouteFailures;
         private int rerouteBlacklistSkips;
@@ -803,6 +807,11 @@ public final class WoodcutSkill implements Skill {
         long lastCollectionMaintenanceAtMs = 0L;
         boolean abortRequested = false;
         boolean axeBootstrapCraftFailed = false;
+        // Trapped-in-a-pocket tracking (WoodcutApproachFeasibilityPolicy): failed approaches in a
+        // row from about the same enclosed spot, and where that streak started.
+        int trappedStreak = 0;
+        BlockPos trappedAnchor = null;
+        boolean trappedExit = false;
         WoodcutFailureReason lastFailureReason = WoodcutFailureReason.NO_TARGET;
         BlockPos startPos = bot.getBlockPos();
         WoodcutWorkAreaState workAreaState = new WoodcutWorkAreaState(startPos);
@@ -1065,8 +1074,30 @@ public final class WoodcutSkill implements Skill {
                     workAreaState.markFailure(target.base());
                     logTargetTrace(target, reachSession, "APPROACH_FAILED");
                     logWoodcutMaintenanceSummary(target.base(), reachSession, "approach-failed");
+                    if (bot.getEntityWorld() instanceof ServerWorld trapWorld) {
+                        BlockPos here = bot.getBlockPos().toImmutable();
+                        boolean enclosedHere = isEnclosedHere(trapWorld, here);
+                        int moved = trappedAnchor == null ? 0 : (int) Math.floor(Math.sqrt(trappedAnchor.getSquaredDistance(here)));
+                        trappedStreak = WoodcutApproachFeasibilityPolicy.nextStuckStreak(enclosedHere, trappedStreak, moved);
+                        if (trappedStreak == 0) {
+                            trappedAnchor = null;
+                        } else if (trappedStreak == 1) {
+                            trappedAnchor = here;
+                            moved = 0;
+                        }
+                        boolean onPillar = isOnWoodcutPillar(bot, reachSession);
+                        if (WoodcutApproachFeasibilityPolicy.afterFailedApproach(enclosedHere, onPillar, trappedStreak, moved)
+                                == WoodcutApproachFeasibilityPolicy.Verdict.EXIT_TRAPPED) {
+                            LOGGER.warn("Woodcut: trapped at {} after {} failed targets (moved {} blocks); ending the run so surface recovery can take the task slot",
+                                    here.toShortString(), trappedStreak, moved);
+                            trappedExit = true;
+                            break;
+                        }
+                    }
                     continue;
                 }
+                trappedStreak = 0;
+                trappedAnchor = null;
                 regatherHandScaffoldAtTree(bot, target.base(), bootstrapRegatheredBases);
                 // Chat counts logs that actually left this tree (log blocks in its envelope before
                 // minus after), not mine attempts: retries and other break paths cannot skew it.
@@ -1154,7 +1185,7 @@ public final class WoodcutSkill implements Skill {
                 LOGGER.info("Woodcut: skipping cleanup of {} floater log(s): no axe yet (craftFailed={})",
                         pendingFloaters.size(), axeBootstrapCraftFailed);
             }
-            if (!pendingFloaters.isEmpty() && !abortRequested && !floaterPassBlockedByBootstrap
+            if (!pendingFloaters.isEmpty() && !abortRequested && !floaterPassBlockedByBootstrap && !trappedExit
                     && bot.getEntityWorld() instanceof ServerWorld floaterWorld) {
                 LOGGER.info("Woodcut: attempting cleanup of {} floater log(s) from partial harvests", pendingFloaters.size());
                 for (BlockPos floater : new HashSet<>(pendingFloaters)) {
@@ -1188,6 +1219,9 @@ public final class WoodcutSkill implements Skill {
 
             if (abortRequested) {
                 finalResult = SkillExecutionResult.failure("woodcut paused due to nearby threat.");
+            } else if (trappedExit) {
+                // The /bot skill worker echoes this to the owner (system path, no range gate).
+                finalResult = SkillExecutionResult.failure(WoodcutApproachFeasibilityPolicy.TRAPPED_LINE);
             } else if (axeBootstrapCraftFailed) {
                 finalResult = SkillExecutionResult.failure(AXE_BOOTSTRAP_CRAFT_FAILED_LINE);
             } else if (felled == 0 && selectedTargets > 0) {
@@ -1226,7 +1260,11 @@ public final class WoodcutSkill implements Skill {
                         Math.max(Math.abs(maxX - startPos.getX()), Math.abs(minX - startPos.getX())) + 3.0);
                 double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
 
-                if (!abortRequested) {
+                if (trappedExit) {
+                    // The cleanup pass starts with ensureAtSurface, which fails from the pocket
+                    // while this run still holds the task slot (1.1.238: "System task slot busy").
+                    LOGGER.info("Woodcut: trapped exit; skipping cleanup pass so surface recovery can run after the slot frees.");
+                } else if (!abortRequested) {
                     if (requestedBounds != null) {
                         // In bounded mode (e.g. farm clearing trees) this finally
                         // block runs in two cases:
@@ -2728,6 +2766,13 @@ public final class WoodcutSkill implements Skill {
         if (isTrunkWithinReach(world, base, bot)) {
             return true;
         }
+        // In a roofed pocket with no way to climb, every stand walk fails (1.1.238 sandbox: ten
+        // minutes on two trees). Leave the target before walking; the target loop ends the run
+        // once targets keep failing from the same spot.
+        if (approachFeasibility(world, bot, base, reachSession) == WoodcutApproachFeasibilityPolicy.Verdict.SKIP_TARGET) {
+            LOGGER.info("Woodcut approach: skipping {} (reason=enclosed, cannot climb)", base.toShortString());
+            return false;
+        }
         // First try a low, human-like standable near the base.
         BlockPos nearby = findDryStandableNear(world, base, 4, 4);
         if (nearby != null && isWithinRequestedBounds(nearby)) {
@@ -2806,6 +2851,12 @@ public final class WoodcutSkill implements Skill {
                                                 BlockPos base,
                                                 WoodcutReachSession reachSession,
                                                 Map<String, Object> sharedState) {
+        if (reachSession != null
+                && WoodcutApproachFeasibilityPolicy.dryRepositionBudgetSpent(reachSession.dryRepositionFailures)) {
+            LOGGER.info("Woodcut approach: dry reposition budget spent for {} ({} failed stands)",
+                    base.toShortString(), reachSession.dryRepositionFailures);
+            return false;
+        }
         List<BlockPos> candidates = new ArrayList<>();
         Set<Long> attemptedStands = new HashSet<>();
         int uniqueAttempts = 0;
@@ -2845,6 +2896,7 @@ public final class WoodcutSkill implements Skill {
             }
             if (reachSession != null) {
                 reachSession.recordRepositionFailure(base, stand, "reposition-around-trunk");
+                reachSession.dryRepositionFailures++;
                 if (reachSession.repeatedRepositionFailures >= MAX_IDENTICAL_REPOSITION_FAILURES
                         && tryBoundedTerrainCorrection(bot, source, world, base, stand, reachSession, sharedState)) {
                     reachSession.clearRepositionFailureTracking();
@@ -2855,10 +2907,70 @@ public final class WoodcutSkill implements Skill {
                             base.toShortString(), stand.toShortString());
                     break;
                 }
+                if (WoodcutApproachFeasibilityPolicy.dryRepositionBudgetSpent(reachSession.dryRepositionFailures)) {
+                    LOGGER.info("Woodcut approach: abandoning dry reposition for {} after {} failed stands on any side",
+                            base.toShortString(), reachSession.dryRepositionFailures);
+                    break;
+                }
             }
         }
         LOGGER.info("Woodcut approach: abandoned {} (reason=no trunk reach)", base.toShortString());
         return false;
+    }
+
+    /** Whether the bot stands in a roofed, walled pocket well below the surface (pure rule in WoodcutApproachFeasibilityPolicy). */
+    private static boolean isEnclosedHere(ServerWorld world, BlockPos feet) {
+        SafePositionService.SurfaceCandidateAssessment here = SafePositionService.analyzeSurfaceCandidate(world, feet);
+        return WoodcutApproachFeasibilityPolicy.isEnclosed(here.openSky(), here.nearSurface(), here.blockedCardinals());
+    }
+
+    /** Standing on scaffold this target or run placed: a climb is under way. */
+    private boolean isOnWoodcutPillar(ServerPlayerEntity bot, WoodcutReachSession reachSession) {
+        return (reachSession != null && reachSession.hasPlacements()) || isOnOwnScaffold(bot);
+    }
+
+    /**
+     * Whether pillaring is allowed right now, without side effects: bootstrapAllowsPillar may
+     * craft the axe, so it is not used for this probe. A bootstrap bot that already holds wood for
+     * the whole axe chain counts as allowed (the pillar gate would craft first).
+     */
+    private boolean mayPillarNow(ServerPlayerEntity bot) {
+        boolean bootstrapActive = axeBootstrapBots.contains(bot.getUuid());
+        boolean hasAxe = holdsAxe(bot);
+        if (WoodcutAxeBootstrapPolicy.mayPillar(bootstrapActive, hasAxe)) {
+            return true;
+        }
+        return axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.HAVE_ENOUGH_CRAFT;
+    }
+
+    /** Scaffold blocks held, plus planks the pillar stock could craft from logs (only with an axe). */
+    private int scaffoldBlocksAvailable(ServerPlayerEntity bot) {
+        int held = countPillarBlocks(bot);
+        if (WoodcutAxeBootstrapPolicy.mayConvertLogsToScaffold(holdsAxe(bot))) {
+            held += countInventoryTagged(bot, ItemTags.LOGS) * WoodcutAxeBootstrapPolicy.PLANKS_PER_LOG;
+        }
+        return held;
+    }
+
+    /** The before-approach verdict for a target (1.1.238 sandbox #16: trapped in a cave pocket). */
+    private WoodcutApproachFeasibilityPolicy.Verdict approachFeasibility(ServerWorld world,
+                                                                         ServerPlayerEntity bot,
+                                                                         BlockPos base,
+                                                                         WoodcutReachSession reachSession) {
+        BlockPos feet = bot.getBlockPos();
+        SafePositionService.SurfaceCandidateAssessment here = SafePositionService.analyzeSurfaceCandidate(world, feet);
+        if (!WoodcutApproachFeasibilityPolicy.isEnclosed(here.openSky(), here.nearSurface(), here.blockedCardinals())) {
+            return WoodcutApproachFeasibilityPolicy.Verdict.PROCEED;
+        }
+        boolean mayPillar = mayPillarNow(bot);
+        int scaffold = scaffoldBlocksAvailable(bot);
+        boolean onPillar = isOnWoodcutPillar(bot, reachSession);
+        WoodcutApproachFeasibilityPolicy.Verdict verdict = WoodcutApproachFeasibilityPolicy.beforeApproach(
+                here.openSky(), here.nearSurface(), here.blockedCardinals(), mayPillar, scaffold, onPillar);
+        LOGGER.info("Woodcut approach feasibility: base={} from={} openSky={} nearSurface={} blocked={} mayPillar={} scaffold={} onPillar={} verdict={}",
+                base.toShortString(), feet.toShortString(), here.openSky(), here.nearSurface(), here.blockedCardinals(),
+                mayPillar, scaffold, onPillar, verdict);
+        return verdict;
     }
 
     private void clearBaseObstacles(ServerWorld world, ServerPlayerEntity bot, BlockPos base) {
