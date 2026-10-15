@@ -500,54 +500,6 @@ public final class ToolProvisionService {
         return crafted > 0 && countTagged(bot, ItemTags.FENCES) >= minCount;
     }
 
-    public static boolean ensureBucket(ServerPlayerEntity bot,
-                                       ServerCommandSource source,
-                                       ServerPlayerEntity commander,
-                                       int minCount) {
-        if (bot == null || source == null) {
-            return false;
-        }
-        int have = countInventoryItem(bot, Items.BUCKET);
-        if (have >= minCount) {
-            return true;
-        }
-        ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftBucket(historyOwner)) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        if (!hasMaterial(bot, world, Items.IRON_INGOT)) {
-            return false;
-        }
-        int needed = Math.max(1, minCount - have);
-        int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "bucket", needed, null);
-        return crafted > 0 && countInventoryItem(bot, Items.BUCKET) >= minCount;
-    }
-
-    public static boolean ensureShield(ServerPlayerEntity bot,
-                                       ServerCommandSource source,
-                                       ServerPlayerEntity commander) {
-        if (bot == null || source == null) {
-            return false;
-        }
-        if (hasTool(bot, "shield")) {
-            return true;
-        }
-        ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftShield(historyOwner)) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        if (!hasMaterial(bot, world, Items.IRON_INGOT) || !hasPlanksOrLogs(bot, world)) {
-            return false;
-        }
-        return CraftingHelper.craftGeneric(source, bot, historyOwner, "shield", 1, null) > 0;
-    }
-
     public static boolean ensureLadders(ServerPlayerEntity bot,
                                         ServerCommandSource source,
                                         ServerPlayerEntity commander,
@@ -626,32 +578,6 @@ public final class ToolProvisionService {
         return crafted > 0 && countInventoryItem(bot, Items.CHEST) >= minCount;
     }
 
-    public static boolean ensureFurnace(ServerPlayerEntity bot,
-                                        ServerCommandSource source,
-                                        ServerPlayerEntity commander,
-                                        int minCount) {
-        if (bot == null || source == null) {
-            return false;
-        }
-        int have = countInventoryItem(bot, Items.FURNACE);
-        if (have >= minCount) {
-            return true;
-        }
-        ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftFurnace(historyOwner)) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        if (!hasCobbleMaterials(bot, world)) {
-            return false;
-        }
-        int needed = Math.max(1, minCount - have);
-        int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "furnace", needed, null);
-        return crafted > 0 && countInventoryItem(bot, Items.FURNACE) >= minCount;
-    }
-
     public static boolean ensureBed(ServerPlayerEntity bot,
                                     ServerCommandSource source,
                                     ServerPlayerEntity commander,
@@ -678,42 +604,6 @@ public final class ToolProvisionService {
         return crafted > 0 && countBeds(bot) >= minCount;
     }
 
-    public static boolean ensureDoor(ServerPlayerEntity bot,
-                                     ServerCommandSource source,
-                                     ServerPlayerEntity commander,
-                                     int minCount) {
-        if (bot == null || source == null) {
-            return false;
-        }
-        int have = countInventoryItem(bot, Items.OAK_DOOR)
-                + countInventoryItem(bot, Items.SPRUCE_DOOR)
-                + countInventoryItem(bot, Items.BIRCH_DOOR)
-                + countInventoryItem(bot, Items.JUNGLE_DOOR)
-                + countInventoryItem(bot, Items.ACACIA_DOOR)
-                + countInventoryItem(bot, Items.DARK_OAK_DOOR)
-                + countInventoryItem(bot, Items.MANGROVE_DOOR)
-                + countInventoryItem(bot, Items.CHERRY_DOOR)
-                + countInventoryItem(bot, Items.BAMBOO_DOOR)
-                + countInventoryItem(bot, Items.CRIMSON_DOOR)
-                + countInventoryItem(bot, Items.WARPED_DOOR);
-        if (have >= minCount) {
-            return true;
-        }
-        ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftDoor(historyOwner)) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        if (!hasPlanksOrLogs(bot, world)) {
-            return false;
-        }
-        int needed = Math.max(1, minCount - have);
-        int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "door", needed, null);
-        return crafted > 0;
-    }
-
     public static boolean ensureSticks(ServerPlayerEntity bot,
                                        ServerCommandSource source,
                                        ServerPlayerEntity commander,
@@ -738,32 +628,6 @@ public final class ToolProvisionService {
         int needed = Math.max(1, minCount - have);
         int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "stick", needed, null);
         return crafted > 0 && countInventoryItem(bot, Items.STICK) >= minCount;
-    }
-
-    public static boolean ensurePlanks(ServerPlayerEntity bot,
-                                       ServerCommandSource source,
-                                       ServerPlayerEntity commander,
-                                       int minCount) {
-        if (bot == null || source == null) {
-            return false;
-        }
-        int have = countTagged(bot, ItemTags.PLANKS);
-        if (have >= minCount) {
-            return true;
-        }
-        ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftPlanks(historyOwner)) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        if (!hasPlanksOrLogs(bot, world)) {
-            return false;
-        }
-        int needed = Math.max(1, minCount - have);
-        int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "planks", needed, null);
-        return crafted > 0 && countTagged(bot, ItemTags.PLANKS) >= minCount;
     }
 
     public static boolean ensureToolForKeyword(ServerPlayerEntity bot,
@@ -1000,42 +864,12 @@ public final class ToolProvisionService {
         return true; // Universally known recipe — no crafting history required
     }
 
-    private static boolean canCraftFurnace(ServerPlayerEntity commander) {
-        return canCraftExact(commander, Identifier.of("minecraft", "furnace"));
-    }
-
     private static boolean canCraftSaddle(ServerPlayerEntity commander) {
         return canCraftExact(commander, Identifier.of("minecraft", "saddle"));
     }
 
-    private static boolean canCraftBucket(ServerPlayerEntity commander) {
-        return canCraftExact(commander, Identifier.of("minecraft", "bucket"));
-    }
-
-    private static boolean canCraftShield(ServerPlayerEntity commander) {
-        return canCraftExact(commander, Identifier.of("minecraft", "shield"));
-    }
-
     private static boolean canCraftBed(ServerPlayerEntity commander) {
         return hasHistorySuffix(commander, "_bed");
-    }
-
-    private static boolean canCraftDoor(ServerPlayerEntity commander) {
-        if (commander == null) {
-            return false;
-        }
-        Set<Identifier> history = CraftingHistoryService.getHistory(commander);
-        return history.contains(Identifier.of("minecraft", "oak_door"))
-                || history.contains(Identifier.of("minecraft", "spruce_door"))
-                || history.contains(Identifier.of("minecraft", "birch_door"))
-                || history.contains(Identifier.of("minecraft", "jungle_door"))
-                || history.contains(Identifier.of("minecraft", "acacia_door"))
-                || history.contains(Identifier.of("minecraft", "dark_oak_door"))
-                || history.contains(Identifier.of("minecraft", "mangrove_door"))
-                || history.contains(Identifier.of("minecraft", "cherry_door"))
-                || history.contains(Identifier.of("minecraft", "bamboo_door"))
-                || history.contains(Identifier.of("minecraft", "crimson_door"))
-                || history.contains(Identifier.of("minecraft", "warped_door"));
     }
 
     private static boolean canCraftLead(ServerPlayerEntity commander) {
@@ -1052,10 +886,6 @@ public final class ToolProvisionService {
 
     private static boolean canCraftSticks(ServerPlayerEntity commander) {
         return canCraftExact(commander, Identifier.of("minecraft", "stick"));
-    }
-
-    private static boolean canCraftPlanks(ServerPlayerEntity commander) {
-        return hasHistorySuffix(commander, "_planks");
     }
 
     private static boolean canCraftCarrotOnStick(ServerPlayerEntity commander) {
@@ -1188,10 +1018,6 @@ public final class ToolProvisionService {
         return hasMaterial(bot, world, Items.COBBLESTONE)
                 || hasMaterial(bot, world, Items.COBBLED_DEEPSLATE)
                 || hasMaterial(bot, world, Items.BLACKSTONE);
-    }
-
-    private static boolean hasCobbleMaterials(ServerPlayerEntity bot, ServerWorld world) {
-        return hasStoneMaterials(bot, world);
     }
 
     private static boolean hasBedFiberPotential(ServerPlayerEntity bot, ServerWorld world, int bedCount) {

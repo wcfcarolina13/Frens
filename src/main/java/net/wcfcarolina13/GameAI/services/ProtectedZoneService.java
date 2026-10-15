@@ -168,18 +168,6 @@ public class ProtectedZoneService {
                 && pos.getY() >= minCorner.getY() && pos.getY() <= maxCorner.getY()
                 && pos.getZ() >= minCorner.getZ() && pos.getZ() <= maxCorner.getZ();
         }
-
-        public BlockPos getCentroid() {
-            return new BlockPos(
-                    (minCorner.getX() + maxCorner.getX()) / 2,
-                    (minCorner.getY() + maxCorner.getY()) / 2,
-                    (minCorner.getZ() + maxCorner.getZ()) / 2
-            );
-        }
-
-        public double distanceFrom(BlockPos pos) {
-            return Math.sqrt(pos.getSquaredDistance(getCentroid()));
-        }
     }
 
     /**
@@ -291,29 +279,6 @@ public class ProtectedZoneService {
 
         LOGGER.info("Removed protected zone '{}' from world {}", label, worldId);
         return true;
-    }
-
-    public static boolean removeZoneByPosition(ServerWorld world, BlockPos pos,
-                                               ServerPlayerEntity player, boolean isAdmin) {
-        if (world == null || pos == null || player == null) return false;
-
-        String worldId = getWorldId(world);
-        Map<String, ProtectedZone> worldZones = zones.get(worldId);
-        if (worldZones == null || worldZones.isEmpty()) return false;
-
-        ProtectedZone closest = null;
-        double minDist = 5.0;
-
-        for (ProtectedZone zone : worldZones.values()) {
-            double dist = zone.distanceFrom(pos);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = zone;
-            }
-        }
-
-        if (closest == null) return false;
-        return removeZone(world, closest.getLabel(), player, isAdmin);
     }
 
     /**
@@ -600,13 +565,6 @@ public class ProtectedZoneService {
             counter++;
         }
         return "zone-" + counter;
-    }
-
-    public static void clearWorld(ServerWorld world) {
-        if (world == null) return;
-        String worldId = getWorldId(world);
-        zones.remove(worldId);
-        LOGGER.info("Cleared all protected zones for world {}", worldId);
     }
 
     /** Drop every in-memory zone and load flag. SERVER_STOPPING: the next world must not inherit them. */

@@ -97,34 +97,6 @@ public final class MountPersistenceService {
     }
 
     /**
-     * Record a mount with explicit position coordinates (e.g., at destination rather than current pos).
-     */
-    public static void recordMountAtPosition(ServerPlayerEntity bot, Entity mount,
-                                              double x, double y, double z, boolean wasMounted) {
-        if (bot == null || mount == null || bot.getCommandSource().getServer() == null) {
-            return;
-        }
-        if (mount instanceof MobEntity mob && !mob.isPersistent()) {
-            mob.setPersistent();
-        }
-        ensureLoaded();
-        String alias = bot.getName().getString().toLowerCase();
-        String saveWorldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
-        String worldId = mount.getEntityWorld().getRegistryKey().getValue().toString();
-        String mountType = EntityType.getId(mount.getType()).toString();
-        boolean saddled = mount instanceof MobEntity mob && mob.hasSaddleEquipped();
-        float health = mount instanceof LivingEntity living ? living.getHealth() : -1.0f;
-        UUID leashTargetId = RideSyncService.getLeashTarget(bot.getUuid());
-        boolean heldByBot = leashTargetId != null && leashTargetId.equals(mount.getUuid());
-        MountState state = new MountState(mount.getUuid(), worldId, x, y, z,
-                mountType, saddled, health, wasMounted, heldByBot);
-        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
-        flush();
-        LOGGER.info("Mount record (manual pos): bot={} mount={} type={} pos=({},{},{}) wasMounted={} heldByBot={}",
-                alias, mount.getUuid(), mountType, (int)x, (int)y, (int)z, wasMounted, heldByBot);
-    }
-
-    /**
      * Drop the saved mount-state for this bot in the current world. Used by
      * {@link RideSyncService} when the saved state has been rejected as stale
      * for long enough that holding onto it just blocks future re-pairing.

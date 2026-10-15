@@ -600,13 +600,6 @@ public final class SmeltingService {
         return out;
     }
 
-    public static boolean hasCookableInventoryItems(ServerPlayerEntity bot, ServerWorld world) {
-        if (bot == null || world == null) {
-            return false;
-        }
-        return !listCookableIds(bot, world, Blocks.FURNACE.getDefaultState()).isEmpty();
-    }
-
     public static boolean hasCookableFoodInventoryItems(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return false;
@@ -1326,27 +1319,6 @@ public final class SmeltingService {
         return false;
     }
 
-    private static void maybeLoadFuel(ServerPlayerEntity bot,
-                                      ServerCommandSource source,
-                                      net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace,
-                                      boolean consented) {
-        Inventory inv = furnace;
-        if (!inv.getStack(1).isEmpty()) {
-            return; // fuel already present
-        }
-        FuelStack fuel = findCheapestFuel(bot, bot.getEntityWorld() instanceof ServerWorld sw ? sw : null);
-        if (fuel == null) {
-            return;
-        }
-        if (!consented) {
-            return;
-        }
-        inv.setStack(1, fuel.stack());
-        consumeFromInventory(bot, fuel.stack());
-        furnace.markDirty();
-        ChatUtils.sendSystemMessage(source, "Using fuel: " + fuel.name());
-    }
-
     private record FuelStack(ItemStack stack, String name) {}
 
     private static boolean hasFuel(ServerPlayerEntity bot, ServerWorld world) {
@@ -1442,33 +1414,6 @@ public final class SmeltingService {
         return moved;
     }
 
-    private static Map<Item, List<ItemStack>> findCookablesForItem(ServerPlayerEntity bot,
-                                                                   ServerWorld world,
-                                                                   net.minecraft.block.BlockState furnaceState,
-                                                                   Item item) {
-        Map<Item, List<ItemStack>> found = new LinkedHashMap<>();
-        if (bot == null || world == null || furnaceState == null || item == null) {
-            return found;
-        }
-        var recipeType = recipeTypeFor(furnaceState);
-        if (recipeType == null) {
-            return found;
-        }
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            if (!stack.isOf(item)) {
-                continue;
-            }
-            if (isFuelItem(stack, world)) {
-                continue;
-            }
-            if (matchesCookablePolicy(stack, world, recipeType, false)) {
-                found.computeIfAbsent(stack.getItem(), k -> new ArrayList<>()).add(stack.copy());
-            }
-        }
-        return found;
-    }
     private static int getFuelTime(ServerWorld world, ItemStack stack) {
         if (world == null || stack == null || stack.isEmpty()) {
             return 0;
@@ -1549,30 +1494,6 @@ public final class SmeltingService {
             return null;
         }
         return cookables.keySet().iterator().next();
-    }
-
-    private static int topUpInput(ServerPlayerEntity bot,
-                                  net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace,
-                                  Map<Item, List<ItemStack>> cookables) {
-        if (bot == null || furnace == null || cookables == null || cookables.isEmpty()) {
-            return 0;
-        }
-        ItemStack input = furnace.getStack(0);
-        if (input.isEmpty()) {
-            return 0;
-        }
-        List<ItemStack> stacks = cookables.get(input.getItem());
-        if (stacks == null || stacks.isEmpty()) {
-            return 0;
-        }
-        int inserted = 0;
-        for (ItemStack stack : stacks) {
-            if (insertIntoInput(furnace, stack.copy())) {
-                consumeFromInventory(bot, stack);
-                inserted++;
-            }
-        }
-        return inserted;
     }
 
     private static int topUpInputMatching(ServerPlayerEntity bot,
@@ -1798,33 +1719,6 @@ public final class SmeltingService {
         }
         chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return chests;
-    }
-
-    private static boolean moveNearBlock(ServerPlayerEntity bot, BlockPos target, double reachSq) {
-        if (bot == null || target == null) {
-            return false;
-        }
-        if (bot.getBlockPos().getSquaredDistance(target) <= reachSq) {
-            return true;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        BlockPos stand = target;
-        List<BlockPos> standOptions = findStandableOptions(world, target, 2);
-        if (!standOptions.isEmpty()) {
-            stand = standOptions.get(0);
-        }
-        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT,
-                stand,
-                stand,
-                null,
-                null,
-                bot.getHorizontalFacing());
-        MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
-        return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
     }
 
     private static ItemStack findInventoryChest(ServerPlayerEntity bot) {

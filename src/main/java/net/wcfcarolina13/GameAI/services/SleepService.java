@@ -294,38 +294,6 @@ public final class SleepService {
         return !world.isDay() || world.isThundering();
     }
 
-    private static ActionResult interactBed(ServerPlayerEntity bot, ServerWorld world, BlockPos bedPos) {
-        CompletableFuture<ActionResult> future = new CompletableFuture<>();
-        runOnServerThread(bot, () -> {
-            selectEmptyOrSafeHand(bot);
-            // Try several hit vectors to be robust across bed orientations and server-side handling.
-            // Prefer side-face hits first (clicking the inner face of the bed), then fall back to top-click.
-            ActionResult last = ActionResult.FAIL;
-            Vec3d center = Vec3d.ofCenter(bedPos);
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                Vec3d faceHit = center.add(dir.getOffsetX() * 0.45, 0.45, dir.getOffsetZ() * 0.45);
-                BlockHitResult faceBlockHit = new BlockHitResult(faceHit, dir.getOpposite(), bedPos, false);
-                ActionResult r = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, faceBlockHit);
-                if (r.isAccepted()) {
-                    future.complete(r);
-                    return;
-                }
-                last = r;
-            }
-            // Fallback: top-center click
-            BlockHitResult upHit = new BlockHitResult(center, Direction.UP, bedPos, false);
-            future.complete(bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, upHit));
-        });
-        try {
-            return future.get(750, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return ActionResult.FAIL;
-        } catch (ExecutionException | TimeoutException e) {
-            return ActionResult.FAIL;
-        }
-    }
-
     /**
      * After server reports the player is sleeping, the player's block position should be at or near the bed.
      * This helper waits briefly for the server to update the player's position and verifies it's close enough
@@ -486,32 +454,6 @@ public final class SleepService {
             if (p.squaredDistanceTo(bot) <= radiusSq) return true;
         }
         return false;
-    }
-
-    private static Optional<BlockPos> findNearestBed(ServerWorld world, BlockPos origin, int radius) {
-        if (world == null || origin == null) {
-            return Optional.empty();
-        }
-        BlockPos best = null;
-        double bestSq = Double.MAX_VALUE;
-        // Beds are frequently on different floors (basements / second stories).
-        // Scan a larger vertical range to avoid incorrectly falling back to crafting.
-        int vertical = Math.max(12, radius / 2);
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            BlockState state = world.getBlockState(pos);
-            if (!state.isIn(BlockTags.BEDS)) {
-                continue;
-            }
-            double sq = origin.getSquaredDistance(pos);
-            if (sq < bestSq) {
-                bestSq = sq;
-                best = pos.toImmutable();
-            }
-        }
-        return Optional.ofNullable(best);
     }
 
     private static boolean dimensionAllowsBeds(ServerWorld world) {
