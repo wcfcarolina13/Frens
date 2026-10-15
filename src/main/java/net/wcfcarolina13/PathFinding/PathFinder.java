@@ -140,10 +140,13 @@ public class PathFinder {
             if (!PathCompareFormat.isAdjacentStep(b.getX() - a.getX(), b.getZ() - a.getZ())) {
                 return false;
             }
+            boolean bodyDry = isPassable(world, b);
+            boolean bodyWet = !bodyDry && isWadeable(world, b);
             if (!PathMovePolicy.isExecutable(dy,
                     hasSupportedFloor(world, b),
-                    isPassable(world, b),
-                    isPassable(world, b.up()),
+                    bodyDry,
+                    bodyWet,
+                    isHeadClear(world, b.up(), bodyWet),
                     dy > 0 && isPassable(world, a.up(2)),
                     dy < 0 && isPassable(world, b.up(2)))) {
                 return false;
@@ -207,6 +210,7 @@ public class PathFinder {
                 if (closedForward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor)
+                        + PathMovePolicy.wadeCost(isWadeable(world, neighbor))
                         + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(world, neighbor)
                         - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(world, neighbor);
 
@@ -242,6 +246,7 @@ public class PathFinder {
                 if (closedBackward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor)
+                        + PathMovePolicy.wadeCost(isWadeable(world, neighbor))
                         + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(world, neighbor)
                         - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(world, neighbor);
 
@@ -287,10 +292,11 @@ public class PathFinder {
             BlockPos headPos = pos.up();
 
             boolean solidBelow = isSolidBlock(world, feetPos);
-            boolean bodyClear = isPassable(world, bodyPos);
-            boolean headClear = isPassable(world, headPos);
+            boolean bodyDry = isPassable(world, bodyPos);
+            boolean bodyWet = !bodyDry && isWadeable(world, bodyPos);
+            boolean headClear = isHeadClear(world, headPos, bodyWet);
 
-            boolean canStand = solidBelow && bodyClear && headClear;
+            boolean canStand = solidBelow && (bodyDry || bodyWet) && headClear;
             boolean jumpNeeded = current.jumpNeeded();
 
             // 1.1.240: never lift a node onto the block above it (that turned a planned cell
@@ -486,6 +492,7 @@ public class PathFinder {
 
     private static List<PathNode> tagBlocks(List<BlockPos> rawPath, ServerWorld world) {
         List<PathNode> taggedPath = new ArrayList<>();
+        int wadingCells = 0;
 
         for (int i = 0; i < rawPath.size(); i++) {
             BlockPos pos = rawPath.get(i);
@@ -496,8 +503,10 @@ public class PathFinder {
             boolean solidBelow = isSolidBlock(world, feetPos);
             boolean bodyIsSlab = isSlab(world, bodyPos);
             boolean canStepUpSlab = solidBelow && bodyIsSlab && isPassable(world, headPos);
-            boolean bodyClear = isPassable(world, bodyPos);
-            boolean headClear = isPassable(world, headPos);
+            boolean bodyDry = isPassable(world, bodyPos);
+            boolean bodyWet = !bodyDry && isWadeable(world, bodyPos);
+            boolean bodyClear = bodyDry || bodyWet;
+            boolean headClear = isHeadClear(world, headPos, bodyWet);
 
             boolean canStand = solidBelow && bodyClear && headClear;
             boolean jumpRequired = false;
@@ -556,11 +565,17 @@ public class PathFinder {
             String feetBlockType = world.getBlockState(feetPos).getBlock().getName().getString().toLowerCase();
             PathNode node = new PathNode(pos, feetBlockType, canStand, jumpRequired);
             taggedPath.add(node);
+            if (bodyWet && i > 0) {
+                wadingCells++;
+            }
 
             LOGGER.debug("Tag {}: solidBelow={} bodyClear={} headClear={} canStand={} jumpRequired={} canStepUpSlab={}",
                     pos, solidBelow, bodyClear, headClear, canStand, jumpRequired, canStepUpSlab);
         }
 
+        if (wadingCells > 0) {
+            LOGGER.info("[PathFinder] Path wades {} of {} cells", wadingCells, taggedPath.size());
+        }
         return taggedPath;
     }
 
@@ -613,6 +628,22 @@ public class PathFinder {
                 || net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(blockState, world, pos);
     }
 
+
+    /** Shallow water a body can wade through (see {@link WadeableWater}). */
+    private static boolean isWadeable(ServerWorld world, BlockPos pos) {
+        return WadeableWater.isWadeable(world.getBlockState(pos), world, pos);
+    }
+
+    /**
+     * Head cell: always dry passable (never fluid). Over a wading body it must also have no
+     * collision (a lily pad on the pond sits at head height).
+     */
+    private static boolean isHeadClear(ServerWorld world, BlockPos head, boolean overWater) {
+        if (!isPassable(world, head)) {
+            return false;
+        }
+        return !overWater || WadeableWater.headFitsOverWater(world.getBlockState(head), world, head);
+    }
 
     private static boolean isSolidBlock(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
@@ -668,6 +699,7 @@ public class PathFinder {
      * joined by an edge {@link PathMovePolicy} calls executable: flat, step-up of one block
      * with headroom above the origin, step-down of one block with a clear head lane. There is
      * no raw vertical "Up" candidate (1.1.240) — it planned pillars no executor can walk.
+     * The landing body may be shallow water on a solid floor (wading, slice E); the head may not.
      *
      * <p>The rule is symmetric for standing cells, which the bidirectional search needs: the
      * backward frontier expands with this same function, so every edge must be walkable in
@@ -680,23 +712,35 @@ public class PathFinder {
 
         for (int[] d : CARDINALS) {
             BlockPos flat = pos.add(d[0], 0, d[1]);
-            boolean flatBodyClear = isPassable(world, flat);
-            if (flatBodyClear) {
-                boolean flatHeadClear = isPassable(world, flat.up());
+            boolean flatDry = isPassable(world, flat);
+            boolean flatWet = !flatDry && isWadeable(world, flat);
+            if (flatDry || flatWet) {
+                boolean flatHeadDry = isPassable(world, flat.up());
                 if (hasSupportedFloor(world, flat)) {
-                    // Flat move.
-                    if (flatHeadClear) {
+                    // Flat move (the body may wade, slice E).
+                    if (PathMovePolicy.isExecutable(0,
+                            true,
+                            flatDry,
+                            flatWet,
+                            isHeadClear(world, flat.up(), flatWet),
+                            false,
+                            false)) {
                         addIfSafe(neighbors, flat, world, campfires);
                     }
                 } else {
-                    // Step-down: the flat cell is the landing head, flat.up() the head lane.
+                    // Step-down: the flat cell is the landing head, flat.up() the head lane. The
+                    // landing head is read strictly: floorless water in front means a water head
+                    // (deep water), which is refused.
                     BlockPos drop = flat.down();
+                    boolean dropDry = isPassable(world, drop);
+                    boolean dropWet = !dropDry && isWadeable(world, drop);
                     if (PathMovePolicy.isExecutable(-1,
                             hasSupportedFloor(world, drop),
-                            isPassable(world, drop),
-                            true,
+                            dropDry,
+                            dropWet,
+                            isHeadClear(world, flat, dropWet),
                             false,
-                            flatHeadClear)) {
+                            flatHeadDry)) {
                         addIfSafe(neighbors, drop, world, campfires);
                     }
                 }
@@ -706,10 +750,13 @@ public class PathFinder {
                 if (originHeadroom == null) {
                     originHeadroom = isPassable(world, pos.up(2));
                 }
+                boolean topDry = isPassable(world, top);
+                boolean topWet = !topDry && isWadeable(world, top);
                 if (PathMovePolicy.isExecutable(1,
                         true,
-                        isPassable(world, top),
-                        isPassable(world, top.up()),
+                        topDry,
+                        topWet,
+                        isHeadClear(world, top.up(), topWet),
                         originHeadroom,
                         false)) {
                     addIfSafe(neighbors, top, world, campfires);
@@ -720,10 +767,13 @@ public class PathFinder {
         // Straight down onto a floor. Only passes from a floorless origin (the bot's own cell
         // read mid-jump, or a floating goal); from a standing cell the body cell is the floor.
         BlockPos below = pos.down();
-        if (isPassable(world, below) && PathMovePolicy.isExecutable(-1,
+        boolean belowDry = isPassable(world, below);
+        boolean belowWet = !belowDry && isWadeable(world, below);
+        if ((belowDry || belowWet) && PathMovePolicy.isExecutable(-1,
                 hasSupportedFloor(world, below),
-                isPassable(world, below),
-                isPassable(world, pos),
+                belowDry,
+                belowWet,
+                isHeadClear(world, pos, belowWet),
                 false,
                 isPassable(world, pos.up()))) {
             addIfSafe(neighbors, below, world, campfires);

@@ -331,13 +331,17 @@ public class BaritoneStylePathFinder {
         if (ny < depthFloor) return;
 
         // Executable edge (1.1.240): standing landing cell, at most one block up or down,
-        // headroom above the origin for a rise, a clear head lane for a drop.
+        // headroom above the origin for a rise, a clear head lane for a drop. The body may
+        // wade (shallow water on a solid floor, slice E); the head never may.
         int dy = ny - parent.y;
         if (dy > PathMovePolicy.MAX_RISE || dy < -PathMovePolicy.MAX_DROP) return;
+        boolean bodyDry = isPassable(cache, nx, ny, nz);
+        boolean bodyWet = !bodyDry && isWadeable(cache, nx, ny, nz);
         if (!PathMovePolicy.isExecutable(dy,
                 hasSupportedFloor(cache, nx, ny, nz),
-                isPassable(cache, nx, ny, nz),
-                isPassable(cache, nx, ny + 1, nz),
+                bodyDry,
+                bodyWet,
+                isHeadClear(cache, nx, ny + 1, nz, bodyWet),
                 dy > 0 && isPassable(cache, parent.x, parent.y + 2, parent.z),
                 dy < 0 && isPassable(cache, nx, ny + 2, nz))) {
             return;
@@ -357,7 +361,7 @@ public class BaritoneStylePathFinder {
         BlockState bodyState = cache.getBlockState(nx, ny, nz);
         if (bodyState.getBlock() instanceof CampfireBlock && bodyState.get(CampfireBlock.LIT)) return;
 
-        double tentativeG = parent.gScore + moveCost
+        double tentativeG = parent.gScore + moveCost + PathMovePolicy.wadeCost(bodyWet)
                 + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.penaltyFor(cache.world, nx, ny, nz)
                 - net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService.bonusFor(cache.world, nx, ny, nz);
         double h = heuristic(nx, ny, nz, tx, ty, tz);
@@ -479,6 +483,21 @@ public class BaritoneStylePathFinder {
                 state, cache.world, cache.mutablePos.set(x, y, z));
     }
 
+    /** Shallow water a body can wade through (see {@link WadeableWater}). */
+    private static boolean isWadeable(ChunkCache cache, int x, int y, int z) {
+        return WadeableWater.isWadeable(cache.getBlockState(x, y, z), cache.world, cache.mutablePos.set(x, y, z));
+    }
+
+    /**
+     * Head cell: always dry passable (never fluid). Over a wading body it must also have no
+     * collision (a lily pad on the pond sits at head height).
+     */
+    private static boolean isHeadClear(ChunkCache cache, int x, int y, int z, boolean overWater) {
+        if (!isPassable(cache, x, y, z)) return false;
+        return !overWater || WadeableWater.headFitsOverWater(
+                cache.getBlockState(x, y, z), cache.world, cache.mutablePos.set(x, y, z));
+    }
+
     private static boolean isSolidBlock(ChunkCache cache, int x, int y, int z) {
         BlockState state = cache.getBlockState(x, y, z);
         return !state.isAir() && state.isOpaque();
@@ -535,6 +554,7 @@ public class BaritoneStylePathFinder {
      */
     private static List<PathFinder.PathNode> tagBlocks(List<BlockPos> rawPath, ChunkCache cache) {
         List<PathFinder.PathNode> taggedPath = new ArrayList<>(rawPath.size());
+        int wadingCells = 0;
 
         for (int i = 0; i < rawPath.size(); i++) {
             BlockPos pos = rawPath.get(i);
@@ -542,9 +562,14 @@ public class BaritoneStylePathFinder {
 
             boolean solidBelow = isSolidBlock(cache, x, y - 1, z);
             boolean bodyIsSlab = isSlab(cache, x, y, z);
+            boolean bodyDry = isPassable(cache, x, y, z);
+            boolean bodyWet = !bodyDry && isWadeable(cache, x, y, z);
             boolean canStand = solidBelow
-                    && isPassable(cache, x, y, z)
-                    && isPassable(cache, x, y + 1, z);
+                    && (bodyDry || bodyWet)
+                    && isHeadClear(cache, x, y + 1, z, bodyWet);
+            if (bodyWet && i > 0) {
+                wadingCells++;
+            }
 
             if (!canStand && i > 0) {
                 LOGGER.warn("[BaritonePathFinder] Refusing path: node {} of {} at {} is not a standing cell",
@@ -569,6 +594,9 @@ public class BaritoneStylePathFinder {
             taggedPath.add(new PathFinder.PathNode(pos, feetBlockType, canStand, jumpRequired));
         }
 
+        if (wadingCells > 0) {
+            LOGGER.info("[BaritonePathFinder] Path wades {} of {} cells", wadingCells, taggedPath.size());
+        }
         return taggedPath;
     }
 
