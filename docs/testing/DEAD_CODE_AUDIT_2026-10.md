@@ -316,6 +316,30 @@ Not merged on purpose: the three `pillarUp` copies (`WoodcutCleanupSkill:1757`, 
 16. **Keybind migration (B9) and eye-spell hint (B10).** Recommended: delete both, ~95 lines total.
 17. **Woodcut entry-terrain restore (Phase 13, first row).** Listed under SAFE because removal is behaviour-preserving, but the feature was intended (CHANGELOG 8239). If Bradley still wants temporary terrain restored after a tree, the fix is to call `recordTemporaryEntryTerrainRepair` from wherever `carveEntryHeadway` now places blocks, not to delete. Recommended: delete, 1.1.230's protection nudges cover the case.
 
+## 5a. Bradley's answers (2026-10-15)
+
+Standing rule for every removal: first confirm nothing useful in the removed code is unmerged (move it out if it is), and update all documentation in the same build, including the in-game Guide.
+
+1. RL and training mode: **delete** (after confirming nothing useful is unmerged, e.g. ThreatDetector/ResourceEvaluator users).
+2. Pre-souls LLM chat path: **retire** it and remove the "LLM World (legacy)" and per-bot "LLM Chat" toggles. Keep `OllamaLocalClient`/`LLMClientFactory` only if souls or another live path needs a raw client (verify first). B11/B12 go with it.
+3. ToolRegistry state updaters: **delete** with the Q2 retirement.
+4. Dev/debug `/bot` subcommands: **delete** all except `testgear` and `test_chat_message`, which stay behind `DebugToggleService` (only registered/usable when debug is on).
+5. Flee tactics: **delete** `emergencyPillarUp` and `findNearbyTree` (pillaring exposes the bot to skeletons and phantoms, the opposite of seeking cover). **Rebuild wall-off** as a feature, not a deletion: after the village-house check and before cliff-dig, needs ≥4 blocks, walk with the real mover and confirm arrival, seal 1-2 open faces of a natural overhang, accept only if `assessShelterAt` validates, else fall through to cliff-dig/dig-down; record placed blocks for morning teardown; fix the isSolidBlock footing check and off-thread reads. Leaves no hole (dig-down bunkers caused the 1.1.235-1.1.237 stuck-in-a-hole bugs). Sandbox test at dusk by a natural overhang.
+6. `/bot nav_mode`: **delete** command, setter, getter, stored field (and any Guide mention). Nav tiers + lodestone/Eye of Ender already decide travel.
+7. Client nav tier cache: **delete** `BotNavTierPayload` (registration, send sites, client receiver), the client cache and getter.
+8. Combat line hooks: **wire in** `noteCombatSituation` (hostile scan reports the dangerous-mob count) and `onBotHitPlayer` (melee path when the target is a player); existing toggles and cooldowns apply.
+9. Ownerless bases: **add** `/bot base owner <base name> <player|server|none>` (admin-only) reusing the existing `BaseSetOwnerPayload` server handler logic; Guide line under Bases.
+10. Disabled quest templates: **keep** (data; the list is the switch for the questing rework).
+11. Persisted unused config keys: **keep** `autoSpawn` and `allowEveryoneSkinChange` until the next format bump; **delete** `modeSelectedAtEpochMs`/`modeSelectedByName` now; **delete** the legacy `botSkins` mirror after confirming the one-time seeding migration covers all configs; **keep** `companionDiedAtEpochMs`/`companionDiedDimension`/`companionDiedPos` for a new backlog feature: a retrieval mission where you send a bot to the recorded death coordinates to collect the dropped items (companion deaths now, the player's own death if we record it the same way).
+12. Legacy 1-arg config lookups: **keep**; backlog a migration that copies global per-bot entries into each world's legacy slot, then delete them.
+13. Legacy migrations: **keep** the config folder move; **delete** `MappedVillageService.importLegacyIfNeeded` now; mount `_legacy`: **stop writing it** in the cleanup build, **delete the promotion** one build later.
+14. `RideSyncService.clearLeashTarget`: **wire in** from the force-dismount hotkey, `/bot unmount`, and deliberate leash-break paths.
+15. Fortification accessors: **delete** the three methods, **keep** the saved fields.
+16. Keybind migration (B9) and eye-spell client hint (B10): **delete** both.
+17. Woodcut entry-terrain restore: **delete** (writer removed in `19447079`; scaffold and temporary supports have their own working cleanup).
+
+**New backlog items from these answers:** wall-off night shelter rebuild (Q5), combat line hooks (Q8), `/bot base owner` command (Q9), death-location retrieval mission (Q11), per-world migration of global bot controls (Q12), mount `_legacy` promotion removal one build after the write stops (Q13), leash-target clearing (Q14).
+
 ## 6. Challenged and demoted
 
 | # | Auditor claim | Finding | New rank |

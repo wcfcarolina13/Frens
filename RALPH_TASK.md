@@ -15,7 +15,7 @@ Field items now 303 (Phase 6am).
 merges, and 17 NEEDS-BRADLEY questions (RL/Q-learning ~2,400 lines, legacy LLM path + cloud clients, dev /bot
 subcommands, nav_mode, disabled flee tactics, combat line hooks, quest templates, persisted unused config keys). Phase 2
 (removals) waits for Bradley's answers to section 5.
-**Next:** (1) Bradley answers the audit questions, then removal builds of ≤5 files each. (2) A longer unified A/B
+**Next:** (1) Bradley ANSWERED all 17 audit questions (2026-10-15, `docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a): run the removal builds (≤5 files each, standing rule: confirm nothing useful is unmerged, update all docs incl. the in-game Guide in the same build) plus the small feature items listed there (wall-off shelter rebuild, combat line hooks, /bot base owner, leash clearing; later: death-location retrieval mission, bot-control migration). (2) A longer unified A/B
 (daylight, axes, bots outside the Spawn base, terrain forcing break/place/swim; Phase 6am item 1); if unified wins, the
 next build makes it the default and removes the old finders and the toggle (design slice D). (3) Open: woodcut should
 blacklist a stand on GOAL_NOT_STANDABLE, ranged mobs don't pause a skill (Eve died to a Bogged), cancelled-mining ERROR
