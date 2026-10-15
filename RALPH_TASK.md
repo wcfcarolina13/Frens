@@ -3,7 +3,16 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.246) — next session starts here
+## Session Handoff 2026-10-15 (1.1.247) — next session starts here
+
+**State:** main = origin/main @ 1.1.247. Suite 2472 green. Audit section 3 (all 16 SAFE-DELETE phases) is done. 1.1.247 =
+Phases 13-16, Q17 entry-terrain restore, Q5 flee pillar deletions. No new field items.
+**Next:** Q8/Q9/Q14 features (scoped), the Q5 wall-off rebuild (Fable design ready), the Q2/Q3 legacy LLM retirement (split
+builds, ~10k lines, deps verified). Mount `_legacy` promotion removal waits until Nirn has been loaded on 1.1.246 or later.
+**Needs Bradley:** CLAUDE.md (main checkout, gitignored) counts: FortifySkillTypes 15 records, FortifyEscapeHelper 13
+methods without clearImmediateOverheadForEscape. The Q14 and `/bot base remove|rename` notes in the 1.1.246 block still apply.
+
+## Session Handoff 2026-10-15 (1.1.246) — superseded
 
 **State:** main = origin/main @ 1.1.246. Suite 2472 green. 1.1.246 = audit Phases 9-10, Q6 nav_mode (Guide topic rewritten
 from the real gates), Q7 nav tier payload, Q11 (modeSelected*, botSkins mirror), Q13 (village legacy import, mount `_legacy`

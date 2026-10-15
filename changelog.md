@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Dead-code removal 5: woodcut, tree detection, farm, shelter, small skills, Fortify helpers, flee pillar (audit Phases 13 to 16, Q17, Q5 deletions); 1.1.247 (2026-10-15)
+
+Fifth removal build of the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 3 Phases 13 to 16), with Bradley's answers 17 and 5 (deletions only, the wall-off night shelter is rebuilt in its own build). About 920 lines removed net, no functional change.
+
+- **Woodcut entry-terrain restore removed** (`d6e8bb18`, Q17). Its only writer went in `19447079` (2026-04-01), so the restore loop ran over an empty map every tree and logged an empty summary. Gone with its counters, `preferredTerrainRepairBlocks` (found in scoping) and seven small dead helpers and constants. The woodcut maintenance summary loses three always-zero fields.
+- **Tree detection, cleanup, dirt and farm leftovers** (`bb80bae9`). `TreeDetector.findFloatingLog/collectOwnedTreeLogs/isOwnedTreeLog/collectConnectedLogs/withinLimits` and two unused accessors (the canopy-overlap fix lives in `leafBelongsToSelectedTree`), the superseded `WoodcutCleanupSkill` floater classifiers (`TreeDetector.classifyCleanupLog` is live), `CollectDirtSkill`'s falling-block wait copy (`FallingBlockStabilizer` is live), eight `FarmSkill` helpers.
+- **Shelter, hovel, burrow, fishing** (`29a39e66`). Three `ShelterSkill` helpers, four `HovelPerimeterBuilder` helpers and its three always-true toggles folded to their true branch, two `HovelBlueprint` builders, `BurrowBuilder.sleepQuiet`, `FishingSkill.isBlacklisted`. Ratchet unchanged.
+- **Small skills and Fortify** (`4dc7504f`, `21266267`). DirtShovel, Hunt, TorchPlacer, LeashToFence, StripMine leftovers, `FortifyEscapeHelper.updateProtectedPositions` (a no-op) and `clearImmediateOverheadForEscape`, a test hook no test called, `ApproachCandidateEval`, two unread loggers.
+- **Flee pillar removed** (`c3bb73b7`, Q5). `emergencyPillarUp` (pillaring exposes the bot to skeletons and phantoms), `findNearbyTree`, the unused `phantomsPresent`/`hasBlocks` parameters, and `FortifyExecutionPolicyUtil.segmentBucketForLine` (dead after the Fortify test hook went). `emergencyWallOff`, `findNearbyOverhangShelter` and `hasPlaceableBlocks` stay for the rebuild.
+- **Unmerged value check:** by ruling, the entry-terrain restore and the pillar. Also never wired and gone: farm grid snapping and water offset helpers, a hovel roof-walk threshold, `TorchPlacer.hasProtectedTorch`, and the leash-button UI hook `isHoldingLeashedAnimal`. Restore from the parent of the phase commit if a feature wants them.
+- **Follow-ups noted, not fixed:** `TorchPlacer.RECENTLY_PLACED_TORCHES` is now write-only and `registerPlacedTorch` starts a thread per torch only to expire the entry. `TreeTarget.nearbyRootedBases`/`canopyLeaves` have no reader left.
+- **Docs:** CLAUDE.md counts for `FortifySkillTypes` (15 records) and `FortifyEscapeHelper` (13 methods, no `clearImmediateOverheadForEscape`) need an edit in the main checkout (gitignored, not writable from the release worktree). No Guide or README mentions.
+- **Tests:** 2472 → 2472. `WoodcutCleanupSkillTest` and `SupplyBypassClosedTest` gates green after each commit. Sandbox smoke: woodcut starts, no ERROR lines.
+- **Field checks:** none new (log lines only).
+
 ## Dead-code removal 4: nav_mode, nav tier payload, legacy config and village data, client leftovers (audit Phases 9, 10, Q6, Q7, Q11, Q13, Q15, Q16); 1.1.246 (2026-10-15)
 
 Fourth removal build of the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md`), Bradley's answers 6, 7, 11, 13, 15 and 16 in section 5a plus section 3 Phases 9 and 10. About 710 lines removed net.
