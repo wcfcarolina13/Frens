@@ -54,7 +54,7 @@ public final class BotRespawnPromptService {
         // Shelve until user answers or toggles autoRespawn on.
         ManualConfig.BotControlSettings ctrl = Frens.CONFIG != null
                 ? Frens.CONFIG.getOrCreateBotControl(alias, worldKey) : null;
-        String mode = "training";
+        String mode = "admin";
         if (ctrl != null) {
             ctrl.setAutoSpawnOnLoad(false);
             String configured = ctrl.getSpawnMode();
@@ -154,7 +154,7 @@ public final class BotRespawnPromptService {
             String worldKey = BotWorldStateService.currentWorldKey(server);
             ManualConfig.BotControlSettings ctrl = Frens.CONFIG != null
                     ? Frens.CONFIG.getEffectiveBotControl(alias, worldKey) : null;
-            mode = ctrl != null && ctrl.getSpawnMode() != null ? ctrl.getSpawnMode() : "training";
+            mode = ctrl != null && ctrl.getSpawnMode() != null ? ctrl.getSpawnMode() : "admin";
         }
         clear(alias);
         runSpawn(server, alias, mode);

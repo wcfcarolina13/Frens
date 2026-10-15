@@ -160,12 +160,12 @@ public final class BotControlApplier {
             if (existing != null || !AUTO_SPAWNED_THIS_SESSION.add(normalizedAlias)) {
                 continue;
             }
-            // Resolve spawn mode from per-world controls, falling back to "training"
+            // Resolve spawn mode from per-world controls, falling back to "admin"
             ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(alias, currentWorldKey);
             if (settings != null && !settings.isAutoSpawnOnLoad()) {
                 continue;
             }
-            String mode = settings != null ? settings.getSpawnMode() : "training";
+            String mode = settings != null ? settings.getSpawnMode() : "admin";
             ManualConfig.BotSpawn finalSpawn = spawn;
             boolean finalHasWorldState = hasWorldState;
             Runnable task = () -> {

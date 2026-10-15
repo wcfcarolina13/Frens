@@ -861,7 +861,7 @@ public final class BotGuideScreen extends Screen {
                         "Configure spawn behavior and per-bot preferences in one place.",
                         List.of(
                             "Open from Admin tab: Bot Controls >.",
-                            "Spawn modes are Training, Questing, and Admin.",
+                            "Spawn modes are Questing and Admin.",
                             "General settings include Global Text Dialogue and Global Voiced Dialogue toggles.",
                             "Also includes gameplay, survival, behavior, and pathfinder toggles.",
                             "Use this as the primary settings hub instead of memorizing many commands.",

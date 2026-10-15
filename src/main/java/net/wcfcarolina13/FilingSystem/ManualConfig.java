@@ -818,28 +818,6 @@ public class ManualConfig {
         return botSpawnPoints;
     }
 
-    /** @deprecated Legacy setter. Use {@link #setBotSpawn(String, String, BotSpawn)} instead. */
-    @Deprecated
-    public void setBotSpawnPoints(Map<String, BotSpawn> botSpawnPoints) {
-        this.botSpawnPoints = normalizeAliasMap(botSpawnPoints);
-    }
-
-    /** @deprecated Legacy setter. Use {@link #setBotSpawn(String, String, BotSpawn)} instead. */
-    @Deprecated
-    public void setBotSpawn(String alias, BotSpawn spawn) {
-        if (alias == null || alias.isBlank() || spawn == null) {
-            return;
-        }
-        putAliasValue(getBotSpawnPoints(), alias, spawn);
-    }
-
-    /** @deprecated Legacy getter. Use {@link #getBotSpawn(String, String)} instead. */
-    @Deprecated
-    public BotSpawn getBotSpawn(String alias) {
-        String key = resolveAliasKey(getBotSpawnPoints(), alias);
-        return key != null ? getBotSpawnPoints().get(key) : null;
-    }
-
     // ── Per-world BotSpawn accessors ──
 
     public Map<String, Map<String, BotSpawn>> getBotSpawnPointsByWorld() {
@@ -1306,12 +1284,6 @@ public class ManualConfig {
         return botQuestMemory.computeIfAbsent(key, ignored -> new BotQuestMemory());
     }
 
-    /** @deprecated Legacy setter. Use per-world methods instead. */
-    @Deprecated
-    public void setBotControls(Map<String, BotControlSettings> botControls) {
-        this.botControls = normalizeAliasMap(botControls);
-    }
-
     /** @deprecated Legacy global accessor. Use {@link #getOrCreateBotControl(String, String)} with worldKey. */
     @Deprecated
     public BotControlSettings getOrCreateBotControl(String alias) {
@@ -1769,13 +1741,13 @@ public class ManualConfig {
         /**
          * Whether this bot should automatically respawn on death (skip resurrection ritual).
          * If the explicit value has not been set, derives a default from the spawn mode:
-         * admin/training → true, questing/play → false.
+         * admin → true, questing/play → false.
          */
         public boolean isAutoRespawnOnDeath() {
             if (autoRespawnOnDeath != null) {
                 return autoRespawnOnDeath;
             }
-            // Mode-based default: admin/training bots auto-respawn; questing/play bots require ritual.
+            // Mode-based default: admin bots auto-respawn; questing/play bots require ritual.
             String mode = getSpawnMode();
             return !"play".equalsIgnoreCase(mode);
         }
@@ -1798,10 +1770,10 @@ public class ManualConfig {
                 return;
             }
             String normalized = spawnMode.trim().toLowerCase();
-            // Preserve the actual mode (admin, questing, training, play).
-            // Legacy 'play' is kept as-is for backward compat.
+            // Preserve the actual mode (admin, questing, play).
+            // Legacy 'play' is kept as-is for backward compat. Removed 'training' falls to admin.
             switch (normalized) {
-                case "admin", "questing", "training", "play" -> this.spawnMode = normalized;
+                case "admin", "questing", "play" -> this.spawnMode = normalized;
                 default -> this.spawnMode = "admin";
             }
         }

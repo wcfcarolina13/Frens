@@ -3149,20 +3149,6 @@ public class FrensClient implements ClientModInitializer {
         drawTopTip(context, TopTipLane.CENTER, lines, style);
     }
     
-    /**
-     * Called every client tick to render the schematic preview overlay.
-     */
-    private static void renderSchematicPreviewTick(MinecraftClient client) {
-        if (!hasPendingPlacementPreview()) {
-            return;
-        }
-        if (client == null || client.player == null || client.world == null || client.currentScreen != null) {
-            return;
-        }
-        // Actual rendering will be done using debug renderer or a custom approach
-        // For now, just ensure the preview state is tracked
-    }
-
     private static void handleGoToLook(MinecraftClient client) {
         if (client == null || client.player == null) {
             return;
