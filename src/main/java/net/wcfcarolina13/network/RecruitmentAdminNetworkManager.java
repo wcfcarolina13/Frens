@@ -202,6 +202,10 @@ public final class RecruitmentAdminNetworkManager {
             }
             case "enable", "disable" -> {
                 boolean enabled = "enable".equals(action);
+                if (!SurvivalRecruitmentService.allowsWorldMode(server, enabled)) {
+                    out.add(net.wcfcarolina13.GameAI.services.WorldModeChooserPolicy.QUESTING_OFF_LINE);
+                    break;
+                }
                 String targetWorldMode = enabled ? "questing" : "admin";
                 String currentWorldMode = st != null ? st.getSelectedWorldMode() : null;
                 boolean shouldWarnAboutSwitch = st != null

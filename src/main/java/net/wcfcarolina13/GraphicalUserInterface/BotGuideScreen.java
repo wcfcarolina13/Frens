@@ -709,8 +709,31 @@ public final class BotGuideScreen extends Screen {
                 || id.equals("admin_worldmode_reset");
     }
 
+    /**
+     * Questing world-mode topics, hidden while the server's questingModeEnabled flag is off
+     * (1.1.235). The flag reaches the client through the config sync.
+     */
+    private static boolean isQuestingOnlyGuideTopic(GuideTopic topic) {
+        if (topic == null || topic.id() == null) {
+            return false;
+        }
+        String id = topic.id().trim().toLowerCase(Locale.ROOT);
+        return id.equals("modes_quest")
+                || id.equals("modes_delegate")
+                || id.equals("admin_worldmode_reset");
+    }
+
     private List<GuideTopic> filteredTopics() {
         List<GuideTopic> base = baseTopics();
+        if (net.wcfcarolina13.Frens.CONFIG == null || !net.wcfcarolina13.Frens.CONFIG.isQuestingModeEnabled()) {
+            ArrayList<GuideTopic> visible = new ArrayList<>();
+            for (GuideTopic topic : base) {
+                if (!isQuestingOnlyGuideTopic(topic)) {
+                    visible.add(topic);
+                }
+            }
+            base = visible;
+        }
         if (!isAdminUser()) {
             ArrayList<GuideTopic> filtered = new ArrayList<>();
             for (GuideTopic topic : base) {

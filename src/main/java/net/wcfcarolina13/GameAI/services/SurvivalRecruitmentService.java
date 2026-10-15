@@ -24,6 +24,7 @@ import net.wcfcarolina13.Entity.RespawnHandler;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.network.OpenRecruitmentDialoguePayload;
+import net.wcfcarolina13.network.OpenRosterPayload;
 import net.wcfcarolina13.network.RecruitmentPromptPayload;
 import net.wcfcarolina13.network.RecruitmentStatePayload;
 
@@ -236,7 +237,22 @@ public final class SurvivalRecruitmentService {
         boolean recruited = st != null && st.isRecruited();
         String alias = st != null ? st.getBotAlias() : "Jake";
         boolean canChooseMode = canChooseWorldMode(player);
-        boolean modeSelectionRequired = canChooseMode && (st == null || !st.isModeSelectionDone() || st.getSelectedWorldMode() == null);
+        WorldModeChooserPolicy.Decision chooser = WorldModeChooserPolicy.decide(
+                isQuestingModeEnabled(),
+                st != null && st.isModeSelectionDone(),
+                st != null ? st.getSelectedWorldMode() : null,
+                canChooseMode);
+        boolean openRoster = false;
+        if (chooser == WorldModeChooserPolicy.Decision.AUTO_ADMIN && server != null
+                && !(player instanceof createFakePlayer)) {
+            // Questing is off: no chooser. The first player who could choose sets the world to Admin.
+            setWorldMode(server, false, "questing-off-default");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), WorldModeChooserPolicy.AUTO_ADMIN_LINE);
+            openRoster = true;
+            Frens.LOGGER.info("[recruit] Questing mode is off: world '{}' set to Admin on join of {}",
+                    stateKey(server), player.getName().getString());
+        }
+        boolean modeSelectionRequired = chooser == WorldModeChooserPolicy.Decision.SHOW_CHOOSER;
         boolean allowCustomSkins = st != null && st.isAllowCustomSkins();
         ServerPlayNetworking.send(player, new RecruitmentStatePayload(
                 enabled,
@@ -248,6 +264,26 @@ public final class SurvivalRecruitmentService {
                 allowCustomSkins,
                 // Display label only (the World Mode screen prints it); never a store key.
                 BotWorldStateService.currentLevelName(server)));
+        // After the state, so the client already reads Admin when the roster opens.
+        if (openRoster && ServerPlayNetworking.canSend(player, OpenRosterPayload.ID)) {
+            ServerPlayNetworking.send(player, OpenRosterPayload.INSTANCE);
+        }
+    }
+
+    /** The server's {@code questingModeEnabled} flag (default off). */
+    public static boolean isQuestingModeEnabled() {
+        return Frens.CONFIG != null && Frens.CONFIG.isQuestingModeEnabled();
+    }
+
+    /**
+     * Whether the world may be set to {@code questingMode ? Questing : Admin} right now; see
+     * {@link WorldModeChooserPolicy#allowsWorldMode}. Every switch-to-Questing entry point asks this
+     * before its confirm step and answers {@link WorldModeChooserPolicy#QUESTING_OFF_LINE} on false.
+     */
+    public static boolean allowsWorldMode(MinecraftServer server, boolean questingMode) {
+        ManualConfig.SurvivalRecruitmentState st = server != null ? getState(server) : null;
+        return WorldModeChooserPolicy.allowsWorldMode(isQuestingModeEnabled(), questingMode,
+                st != null ? st.getSelectedWorldMode() : null);
     }
 
     public static boolean isAllowCustomSkins(MinecraftServer server) {
@@ -481,6 +517,11 @@ public final class SurvivalRecruitmentService {
         if (server == null || Frens.CONFIG == null) {
             return;
         }
+        if (!allowsWorldMode(server, questingMode)) {
+            // Tripwire: callers check first and tell the player. Reaching here means one did not.
+            Frens.LOGGER.warn("[recruit] Refused to set world mode to Questing for {}: questing mode is off", actorName);
+            return;
+        }
         noteModeSelectionConfigured(server, questingMode, actorName);
         Frens.CONFIG.save();
     }
@@ -495,6 +536,12 @@ public final class SurvivalRecruitmentService {
         }
         if (!canChooseWorldMode(player)) {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "You are not allowed to change world mode.");
+            sendRecruitmentState(player);
+            return;
+        }
+        if (!allowsWorldMode(server, questingMode)) {
+            // A stale chooser (flag turned off while it was open) or an older client.
+            ChatUtils.sendSystemMessage(player.getCommandSource(), WorldModeChooserPolicy.QUESTING_OFF_LINE);
             sendRecruitmentState(player);
             return;
         }

@@ -621,6 +621,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenRecruitmentDialoguePayload.ID, OpenRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(RecruitmentStatePayload.ID, RecruitmentStatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.OpenRosterPayload.ID, net.wcfcarolina13.network.OpenRosterPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestRecruitmentDialoguePayload.ID, RequestRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ConfirmRecruitmentPayload.ID, ConfirmRecruitmentPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestRecruitmentReplayPayload.ID, net.wcfcarolina13.network.RequestRecruitmentReplayPayload.CODEC);

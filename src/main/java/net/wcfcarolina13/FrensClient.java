@@ -228,6 +228,9 @@ public class FrensClient implements ClientModInitializer {
     private static String modeSelectionWorldKey = "default";
     private static boolean modeSelectionAutoOpenPending = false;
     private static boolean modeSelectionOpenedThisConnection = false;
+    // Server set this new world to Admin because Questing is off (1.1.235): open the roster once,
+    // as choosing Admin in the chooser does.
+    private static boolean autoAdminRosterPending = false;
     private static boolean allowCustomSkins = false;
 
     // Auto-open recruitment dialogue once when entering a village (prompt transitions hidden -> visible).
@@ -669,6 +672,7 @@ public class FrensClient implements ClientModInitializer {
                 modeSelectionWorldKey = "default";
                 modeSelectionAutoOpenPending = false;
                 modeSelectionOpenedThisConnection = false;
+                autoAdminRosterPending = false;
                 allowCustomSkins = false;
                 spellHintFirstScanDone = false;
                 learningInputStreamActive = false;
@@ -699,6 +703,11 @@ public class FrensClient implements ClientModInitializer {
                 client.setScreen(new WorldModeSelectionScreen(modeSelectionWorldKey, true));
                 modeSelectionAutoOpenPending = false;
                 modeSelectionOpenedThisConnection = true;
+                return;
+            }
+            if (autoAdminRosterPending) {
+                autoAdminRosterPending = false;
+                openRosterScreen(null);
                 return;
             }
 
@@ -908,6 +917,9 @@ public class FrensClient implements ClientModInitializer {
                 resumeDecisionBotName = payload.active() ? payload.botName() : null;
             });
         });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.OpenRosterPayload.ID, (payload, context) ->
+                context.client().execute(() -> autoAdminRosterPending = true));
 
         ClientPlayNetworking.registerGlobalReceiver(RecruitmentStatePayload.ID, (payload, context) -> {
             context.client().execute(() -> {

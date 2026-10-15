@@ -111,6 +111,9 @@ public class ManualConfig {
     // === Survival recruitment mode ("find a village, then recruit") ===
     // When enabled, bots do not auto-spawn / restore until the world has been "recruited".
     private boolean survivalRecruitmentMode = false;
+    // Server flag (1.1.235): Questing world mode is offered only when this is on. Off = a new world
+    // goes straight to Admin; worlds already saved as Questing keep working. /bot config questingMode.
+    private boolean questingModeEnabled = false;
     // Per-world (level-name key) recruitment state.
     private Map<String, SurvivalRecruitmentState> survivalRecruitment = new HashMap<>();
     // Legacy level-name key -> save fingerprint that adopted it (1.1.234 per-save keying).
@@ -1218,6 +1221,14 @@ public class ManualConfig {
 
     public void setSurvivalRecruitmentMode(boolean survivalRecruitmentMode) {
         this.survivalRecruitmentMode = survivalRecruitmentMode;
+    }
+
+    public boolean isQuestingModeEnabled() {
+        return questingModeEnabled;
+    }
+
+    public void setQuestingModeEnabled(boolean questingModeEnabled) {
+        this.questingModeEnabled = questingModeEnabled;
     }
 
     public Map<String, SurvivalRecruitmentState> getSurvivalRecruitment() {

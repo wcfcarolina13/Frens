@@ -31,6 +31,7 @@ public class SharedConfig {
     public Integer undergroundLingerMinutes;
     public Integer undergroundProximityBlocks;
     public Boolean survivalRecruitmentMode;
+    public Boolean questingModeEnabled;
     public Boolean soulsEnabled;
     public Boolean soulPartyEnabled;
     public Boolean soulBanterEnabled;
@@ -69,6 +70,7 @@ public class SharedConfig {
         snapshot.undergroundLingerMinutes = config.getUndergroundLingerMinutes();
         snapshot.undergroundProximityBlocks = config.getUndergroundProximityBlocks();
         snapshot.survivalRecruitmentMode = config.isSurvivalRecruitmentMode();
+        snapshot.questingModeEnabled = config.isQuestingModeEnabled();
         snapshot.soulsEnabled = config.isSoulsEnabled();
         snapshot.soulPartyEnabled = config.isSoulPartyEnabled();
         snapshot.soulBanterEnabled = config.isSoulBanterEnabled();
@@ -118,6 +120,7 @@ public class SharedConfig {
         if (undergroundLingerMinutes != null) config.setUndergroundLingerMinutes(undergroundLingerMinutes);
         if (undergroundProximityBlocks != null) config.setUndergroundProximityBlocks(undergroundProximityBlocks);
         if (survivalRecruitmentMode != null) config.setSurvivalRecruitmentMode(survivalRecruitmentMode);
+        if (questingModeEnabled != null) config.setQuestingModeEnabled(questingModeEnabled);
         if (soulsEnabled != null) config.setSoulsEnabled(soulsEnabled);
         if (soulPartyEnabled != null) config.setSoulPartyEnabled(soulPartyEnabled);
         if (soulBanterEnabled != null) config.setSoulBanterEnabled(soulBanterEnabled);

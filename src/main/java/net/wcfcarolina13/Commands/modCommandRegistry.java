@@ -132,6 +132,7 @@ import static net.wcfcarolina13.PathFinding.PathFinder.*;
 import static net.minecraft.server.command.CommandManager.literal;
 import net.wcfcarolina13.PacketHandler.InputPacketHandler;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
+import net.wcfcarolina13.GameAI.services.WorldModeChooserPolicy;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.wcfcarolina13.network.RecruitmentPromptPayload;
 import net.wcfcarolina13.network.CompanionQuestStatePayload;
@@ -607,6 +608,20 @@ public class modCommandRegistry {
 	                        .then(BotCombatCommands.buildStance())
 	                        .then(BotEquipCommands.build())
 	                        .then(literal("config")
+                                .then(literal("questingMode")
+                                        .requires(Frens::hasBotCommandPermission)
+                                        .executes(context -> {
+                                            boolean on = SurvivalRecruitmentService.isQuestingModeEnabled();
+                                            context.getSource().sendFeedback(() -> Text.literal(
+                                                    "Questing mode: " + (on ? "ON" : "OFF")
+                                                            + ". Usage: /bot config questingMode <on|off>"), false);
+                                            return 1;
+                                        })
+                                        .then(literal("on")
+                                                .executes(context -> executeQuestingModeFlag(context, true)))
+                                        .then(literal("off")
+                                                .executes(context -> executeQuestingModeFlag(context, false)))
+                                )
                                 .then(literal("diagnostics")
                                         .requires(Frens::hasBotCommandPermission)
                                         .then(literal("on")
@@ -2212,6 +2227,27 @@ public class modCommandRegistry {
         return 1;
     }
 
+    /**
+     * {@code /bot config questingMode on|off}: the server flag that offers Questing world mode.
+     * Never changes a world's saved mode. Clients get the new value through the config sync.
+     */
+    private static int executeQuestingModeFlag(CommandContext<ServerCommandSource> context, boolean on) {
+        if (Frens.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Config not ready.");
+            return 0;
+        }
+        Frens.CONFIG.setQuestingModeEnabled(on);
+        Frens.CONFIG.save();
+        MinecraftServer server = context.getSource().getServer();
+        if (server != null) {
+            net.wcfcarolina13.network.configNetworkManager.broadcastConfigSync(server);
+        }
+        context.getSource().sendFeedback(() -> Text.literal(on
+                ? "Questing mode: ON. New worlds offer the World Mode chooser. A world already set to Admin keeps it until /bot worldmode reset."
+                : "Questing mode: OFF. New worlds start in Admin mode. Worlds already in Questing keep it."), true);
+        return 1;
+    }
+
     private static int executeRecruitEnable(CommandContext<ServerCommandSource> context, boolean enabled) {
         if (!hasOperatorPermissions(context)) {
             ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
@@ -2224,6 +2260,10 @@ public class modCommandRegistry {
 
         MinecraftServer server = context.getSource().getServer();
         String botAlias = "Jake";
+        if (server != null && !SurvivalRecruitmentService.allowsWorldMode(server, enabled)) {
+            ChatUtils.sendSystemMessage(context.getSource(), WorldModeChooserPolicy.QUESTING_OFF_LINE);
+            return 0;
+        }
         if (server != null) {
             String targetWorldMode = enabled ? "questing" : "admin";
             ManualConfig.SurvivalRecruitmentState before = SurvivalRecruitmentService.getState(server);
@@ -6199,7 +6239,9 @@ public class modCommandRegistry {
             net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(p);
         }
         ChatUtils.sendSystemMessage(context.getSource(),
-                "World mode reset. Press [-] or rejoin to reopen the mode selection screen.");
+                SurvivalRecruitmentService.isQuestingModeEnabled()
+                        ? "World mode reset. Press [-] or rejoin to reopen the mode selection screen."
+                        : "World mode reset. Questing mode is turned off on this server, so the world is in Admin mode.");
         return 1;
     }
 
