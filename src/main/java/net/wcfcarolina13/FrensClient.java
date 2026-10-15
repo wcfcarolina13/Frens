@@ -1493,15 +1493,41 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         rosterOpenedAwaitingBot = true;
-        java.util.List<String> known = getKnownRestorableBotAliases();
-        net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.Scope scope =
-                net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
-                        java.util.Set.of(), java.util.Set.of(), false);
-        RosterWorldMembership membership = readRosterWorldMembership(client);
-        if (membership != null) {
-            scope = net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
-                    membership.inThisWorld(), membership.withAnyWorld(), true);
+        java.util.concurrent.CompletableFuture<RosterWorldMembership> pending = submitRosterWorldMembership(client);
+        RosterWorldMembership membership = null;
+        boolean late = false;
+        if (pending != null) {
+            try {
+                membership = pending.get(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                late = true;
+                Frens.LOGGER.info("roster world scope not ready in 500 ms, showing every world for now and refreshing when the server answers");
+            } catch (Throwable t) {
+                Frens.LOGGER.info("roster world scope unavailable, showing every world: {}", String.valueOf(t));
+            }
         }
+        BotRestoreScreen screen = buildRosterScreen(client, parent, membership);
+        client.setScreen(screen);
+        if (late) {
+            // Swap in the scoped list once the server answers, if the user is still on this screen.
+            pending.thenAccept(m -> client.execute(() -> {
+                if (m != null && client.currentScreen == screen) {
+                    Frens.LOGGER.info("roster world scope arrived late, refreshing the roster");
+                    client.setScreen(buildRosterScreen(client, parent, m));
+                }
+            }));
+        }
+    }
+
+    /** The roster screen for a membership read, or the unscoped (every world) list when it is null. */
+    private static BotRestoreScreen buildRosterScreen(MinecraftClient client, Screen parent,
+                                                      RosterWorldMembership membership) {
+        java.util.List<String> known = getKnownRestorableBotAliases();
+        net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.Scope scope = membership == null
+                ? net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
+                        java.util.Set.of(), java.util.Set.of(), false)
+                : net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
+                        membership.inThisWorld(), membership.withAnyWorld(), true);
         java.util.Set<String> present = presentPlayerNamesLower(client);
         java.util.Set<String> presentOrEmpty = present == null ? java.util.Set.of() : present;
         java.util.List<String> restorable = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
@@ -1509,7 +1535,7 @@ public class FrensClient implements ClientModInitializer {
         java.util.List<String> otherWorlds = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
                 scope.otherWorlds(), presentOrEmpty);
         boolean allSavedPresent = !scope.thisWorld().isEmpty() && restorable.isEmpty();
-        client.setScreen(new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent));
+        return new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent);
     }
 
     /** Lower-cased aliases with a per-world record here, and with one in any world. */
@@ -1519,10 +1545,11 @@ public class FrensClient implements ClientModInitializer {
     /**
      * Reads which companions have a spawn point or saved position in the open save. Singleplayer
      * only (the integrated server): the stores are read on the server thread, read-only, so no
-     * legacy key is migrated by looking. Null when the world key cannot be known (multiplayer
-     * client, or the server did not answer in time), which keeps every companion in this world.
+     * legacy key is migrated by looking. Null when there is no integrated server (multiplayer
+     * client), which keeps every companion in this world.
      */
-    private static RosterWorldMembership readRosterWorldMembership(MinecraftClient client) {
+    private static java.util.concurrent.CompletableFuture<RosterWorldMembership> submitRosterWorldMembership(
+            MinecraftClient client) {
         net.minecraft.server.integrated.IntegratedServer server = client == null ? null : client.getServer();
         if (server == null) {
             return null;
@@ -1563,9 +1590,9 @@ public class FrensClient implements ClientModInitializer {
                     }
                 }
                 return new RosterWorldMembership(here, any);
-            }).get(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            });
         } catch (Throwable t) {
-            Frens.LOGGER.debug("roster world scope unavailable: {}", String.valueOf(t));
+            Frens.LOGGER.info("roster world scope unavailable, showing every world: {}", String.valueOf(t));
             return null;
         }
     }

@@ -64,4 +64,13 @@ class RosterScreenCopyTest {
             assertFalse(text.contains(";"), text);
         }
     }
+
+    @Test
+    void createHintPointsAtOtherWorldsPlainly() {
+        String hint = RosterScreenCopy.createNameInOtherWorldHint();
+        assertTrue(hint.contains("another world"), hint);
+        assertTrue(hint.contains("Other worlds"), hint);
+        assertFalse(hint.contains("\u2014"), hint);
+        assertFalse(hint.contains(";"), hint);
+    }
 }

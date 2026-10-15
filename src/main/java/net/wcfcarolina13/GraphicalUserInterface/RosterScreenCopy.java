@@ -80,4 +80,9 @@ public final class RosterScreenCopy {
     public static String otherWorldsToggle(int otherWorldsCount, boolean open) {
         return open ? "Back to this world" : "Other worlds (" + Math.max(0, otherWorldsCount) + ")";
     }
+
+    /** Why Create is greyed when the typed name already belongs to a companion in another world. */
+    public static String createNameInOtherWorldHint() {
+        return "That name belongs to a companion in another world. Bring them in from Other worlds.";
+    }
 }

@@ -5,6 +5,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.network.BotActionClientSender;
 import net.wcfcarolina13.network.BotActionPolicy;
@@ -238,21 +239,28 @@ public class BotRestoreScreen extends Screen {
     private void updateCreateButtonState() {
         if (createButton == null || createNameField == null) return;
         String s = createNameField.getText().trim();
+        boolean inOtherWorld = !s.isEmpty() && aliasIn(otherWorlds, s);
         boolean valid = !s.isEmpty()
                 && s.length() <= MAX_NAME_LEN
                 && NAME_PATTERN.matcher(s).matches()
                 && !aliasExists(s);
         createButton.active = valid;
+        // Greyed because the name is taken in another world: say where to find that companion.
+        createButton.setTooltip(inOtherWorld
+                ? Tooltip.of(Text.literal(RosterScreenCopy.createNameInOtherWorldHint()))
+                : null);
     }
 
     private boolean aliasExists(String candidate) {
+        return aliasIn(aliases, candidate) || aliasIn(otherWorlds, candidate);
+    }
+
+    private static boolean aliasIn(List<String> list, String candidate) {
         if (candidate == null) return false;
         String norm = candidate.trim().toLowerCase(Locale.ROOT);
-        for (List<String> list : List.of(aliases, otherWorlds)) {
-            for (String alias : list) {
-                if (alias.trim().toLowerCase(Locale.ROOT).equals(norm)) {
-                    return true;
-                }
+        for (String alias : list) {
+            if (alias.trim().toLowerCase(Locale.ROOT).equals(norm)) {
+                return true;
             }
         }
         return false;
