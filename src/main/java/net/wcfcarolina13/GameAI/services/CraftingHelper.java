@@ -2028,6 +2028,12 @@ public final class CraftingHelper {
         return placeResult.reason().toLowerCase(Locale.ROOT).contains("bot-intersects-target");
     }
 
+    /**
+     * After a placement refused because the bot's hitbox reaches into the place cell: step to the
+     * planned stand (re-centering when the bot's block already is that stand) or, when the plan has
+     * no stand clear of the place cell, to a relocation stand that never holds it, then retry once.
+     * The decision is {@link UtilityPlacementStandPolicy#decide}.
+     */
     private static boolean retryCraftingTablePlacementAfterLocalReposition(ServerCommandSource source,
                                                                            ServerPlayerEntity bot,
                                                                            ServerWorld world,
@@ -2037,20 +2043,39 @@ public final class CraftingHelper {
         if (source == null || bot == null || world == null || prepared == null || placeAt == null) {
             return false;
         }
-        BlockPos stand = prepared.standPos();
-        if (stand == null || stand.equals(bot.getBlockPos())) {
-            stand = findPlacementRelocationStand(world, bot.getBlockPos(), placeAt);
+        BlockPos planned = prepared.standPos();
+        UtilityPlacementStandPolicy.Action action = UtilityPlacementStandPolicy.decide(
+                botOverlapsCell(bot, placeAt),
+                planned != null,
+                planned != null ? planned.getX() : 0,
+                planned != null ? planned.getY() : 0,
+                planned != null ? planned.getZ() : 0,
+                placeAt.getX(), placeAt.getY(), placeAt.getZ());
+        BlockPos stand = null;
+        switch (action) {
+            case PLACE_NOW -> { }
+            case STEP_TO_STAND -> stand = planned;
+            case RELOCATE -> stand = findRepositionStandClearOf(world, bot.getBlockPos(), placeAt, placeAt);
         }
-        if (stand == null || stand.equals(bot.getBlockPos())) {
+        if (action != UtilityPlacementStandPolicy.Action.PLACE_NOW && stand == null) {
+            LOGGER.info("Crafting table local reposition [{}]: no stand clear of place={} bot={}",
+                    label, placeAt.toShortString(), bot.getBlockPos().toShortString());
             return false;
         }
-        LOGGER.info("Crafting table local reposition [{}]: bot={} stand={} place={}",
-                label,
-                bot.getBlockPos().toShortString(),
-                stand.toShortString(),
-                placeAt.toShortString());
-        if (!moveToPlacementStand(source, bot, stand, STATION_REACH_SQ, label + "-reposition")) {
-            return false;
+        if (stand != null) {
+            LOGGER.info("Crafting table local reposition [{}]: action={} bot={} stand={} place={}",
+                    label,
+                    action,
+                    bot.getBlockPos().toShortString(),
+                    stand.toShortString(),
+                    placeAt.toShortString());
+            if (!stand.equals(bot.getBlockPos())
+                    && !moveToPlacementStand(source, bot, stand, STATION_REACH_SQ, label + "-reposition")) {
+                return false;
+            }
+            if (stand.equals(bot.getBlockPos())) {
+                recenterOnStand(bot, stand);
+            }
         }
         BotActions.PlaceResult retryResult = BotActions.tryPlaceBlockAt(bot, placeAt, Direction.UP, java.util.List.of(Items.CRAFTING_TABLE));
         boolean placed = retryResult.success() && world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
@@ -2060,6 +2085,46 @@ public final class CraftingHelper {
                     retryResult.reason());
         }
         return placed;
+    }
+
+    /** Whether the bot's hitbox reaches into the block cell, as a footprint check of {@link UtilityPlacementStandPolicy}. */
+    private static boolean botOverlapsCell(ServerPlayerEntity bot, BlockPos cell) {
+        if (bot == null || cell == null) {
+            return false;
+        }
+        net.minecraft.util.math.Box box = bot.getBoundingBox();
+        final double eps = 1.0E-7D;
+        return UtilityPlacementStandPolicy.footprintOverlapsCell(
+                (int) Math.floor(box.minX), (int) Math.floor(box.maxX - eps),
+                (int) Math.floor(box.minY), (int) Math.floor(box.maxY - eps),
+                (int) Math.floor(box.minZ), (int) Math.floor(box.maxZ - eps),
+                cell.getX(), cell.getY(), cell.getZ());
+    }
+
+    /**
+     * Walks the bot toward the middle of the stand it is on (a few short steps, worker thread only:
+     * callers are behind {@link CraftingStationPolicy#mayWalk}) so its hitbox stays inside the stand.
+     */
+    private static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
+        if (bot == null || stand == null) {
+            return;
+        }
+        Vec3d center = Vec3d.ofBottomCenter(stand);
+        for (int i = 0; i < 4; i++) {
+            double dx = center.x - bot.getX();
+            double dz = center.z - bot.getZ();
+            if (dx * dx + dz * dz <= 0.01D) {
+                break;
+            }
+            BotActions.moveToward(bot, center, 0.5D);
+            try {
+                Thread.sleep(60L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        BotActions.stop(bot);
     }
 
     static PreparedPlacement prepareNearbyUtilityPlacement(ServerCommandSource source,
@@ -2075,7 +2140,7 @@ public final class CraftingHelper {
         // server thread itself would have to run, and a relocation is a walk.
         boolean onServerThread = isServerThreadCall(source, bot);
         PlacementAttemptLog attemptLog = new PlacementAttemptLog(label, origin);
-        PreparedPlacement immediate = findPreparedPlacement(world, origin, origin, label, false, false, attemptLog);
+        PreparedPlacement immediate = findPreparedPlacement(world, bot, origin, origin, label, false, false, attemptLog);
         if (immediate != null) {
             attemptLog.flush("ready", immediate, bot.getBlockPos(), false);
             return immediate;
@@ -2095,7 +2160,7 @@ public final class CraftingHelper {
             attemptLog.noteRelocation(relocation);
             if (moveToPlacementStand(source, bot, relocation, interactionReachSq, label + "-placement-relocate")) {
                 BlockPos movedOrigin = bot.getBlockPos();
-                PreparedPlacement relocatedImmediate = findPreparedPlacement(world, movedOrigin, movedOrigin, label, false, true, attemptLog);
+                PreparedPlacement relocatedImmediate = findPreparedPlacement(world, bot, movedOrigin, movedOrigin, label, false, true, attemptLog);
                 if (relocatedImmediate != null) {
                     attemptLog.flush("relocated-ready", relocatedImmediate, bot.getBlockPos(), false);
                     return relocatedImmediate;
@@ -2158,7 +2223,13 @@ public final class CraftingHelper {
         return null;
     }
 
+    /**
+     * The nearest ready place cell with a ready adjacent stand. A cell the bot's own hitbox reaches
+     * into is skipped: its block position may be the stand next door while its body pokes over the
+     * edge, and the placement would then fail with "bot-intersects-target".
+     */
     private static PreparedPlacement findPreparedPlacement(ServerWorld world,
+                                                           ServerPlayerEntity bot,
                                                            BlockPos origin,
                                                            BlockPos reference,
                                                            String label,
@@ -2168,6 +2239,10 @@ public final class CraftingHelper {
         for (BlockPos pos : buildNearbyPlacementCandidates(origin)) {
             if (!isPlacementCellReady(world, pos)) {
                 logPlacementRejection(attemptLog, pos, placementRejectReason(world, pos));
+                continue;
+            }
+            if (botOverlapsCell(bot, pos)) {
+                logPlacementRejection(attemptLog, pos, "bot-occupies");
                 continue;
             }
             BlockPos stand = findAdjacentStandCandidate(world, pos, reference, false);
@@ -2209,6 +2284,45 @@ public final class CraftingHelper {
             BlockPos safe = SafePositionService.findSafeNear(world, origin, radius);
             if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))) {
                 return safe.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Retry-path stand search. The nearest ready stand around {@code origin} (rings out to
+     * {@link #LOCAL_PLACEMENT_RELOCATION_RADIUS}) other than the bot's block, and, with
+     * {@code avoidPlace} set, never one that is (or whose body column holds) that place cell.
+     *
+     * <p>Walks the rings itself: {@link SafePositionService#findSafeNear} always returns the first
+     * safe column, ring 0 included, so a caller that rejected that column got the same one back at
+     * every radius. Searching around the place cell handed back the place cell (open air on grass),
+     * which is how the reposition walked the bot onto its own table cell.
+     */
+    private static BlockPos findRepositionStandClearOf(ServerWorld world, BlockPos botPos, BlockPos origin, BlockPos avoidPlace) {
+        if (world == null || origin == null) {
+            return null;
+        }
+        for (int r = 0; r <= LOCAL_PLACEMENT_RELOCATION_RADIUS; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) {
+                        continue;
+                    }
+                    BlockPos safe = SafePositionService.findSafeColumn(world, origin.add(dx, 0, dz));
+                    if (safe == null || !isStandCellReady(world, safe)) {
+                        continue;
+                    }
+                    if (botPos != null && safe.equals(botPos)) {
+                        continue;
+                    }
+                    if (avoidPlace != null && UtilityPlacementStandPolicy.standOverlapsPlace(
+                            safe.getX(), safe.getY(), safe.getZ(),
+                            avoidPlace.getX(), avoidPlace.getY(), avoidPlace.getZ())) {
+                        continue;
+                    }
+                    return safe.toImmutable();
+                }
             }
         }
         return null;
