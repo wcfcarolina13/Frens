@@ -84,10 +84,8 @@ public final class FortificationPersistenceService {
         Set<String> allowedOwnerUuids;
 
         public String getName() { return name; }
-        public String getWorldKey() { return worldKey; }
         public BlockPos getCenter() { return center != null ? center.toBlockPos() : BlockPos.ORIGIN; }
         public int getSearchRadius() { return searchRadius; }
-        public long getCreatedAt() { return createdAt; }
         public Set<Integer> getCompletedEdges() { return completedEdges != null ? completedEdges : new HashSet<>(); }
         public int getLastEdgeIndex() { return lastEdgeIndex; }
         public int getTotalBlocksPlaced() { return totalBlocksPlaced; }
@@ -110,9 +108,7 @@ public final class FortificationPersistenceService {
         }
         public int getSchemaVersion() { return schemaVersion > 0 ? schemaVersion : 1; }
         public long getSchemaRevision() { return schemaRevision > 0 ? schemaRevision : 1L; }
-        public long getSchemaUpdatedAt() { return schemaUpdatedAt > 0 ? schemaUpdatedAt : createdAt; }
         public String getSchemaOrigin() { return schemaOrigin != null ? schemaOrigin : "legacy"; }
-        public String getSchemaParentName() { return schemaParentName; }
         public String getPoiStructureSignature() { return poiStructureSignature != null ? poiStructureSignature : ""; }
         public String getHullSignature() { return hullSignature != null ? hullSignature : ""; }
         public String getOwnerUuid() { return ownerUuid != null ? ownerUuid : ""; }

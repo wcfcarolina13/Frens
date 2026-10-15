@@ -395,14 +395,11 @@ public final class MountPersistenceService {
                         String alias = entry.getKey().toString();
                         Object value = entry.getValue();
                         if (value instanceof Map<?, ?> innerMap) {
-                            // Check if this is old format (MountState fields directly)
-                            // or new format (worldKey → MountState nested objects)
-                            if (innerMap.containsKey("mountUuid") || innerMap.containsKey("worldId")) {
-                                // Old format: alias → MountState directly
-                                MountState st = GSON.fromJson(GSON.toJson(value), MountState.class);
-                                Map<String, MountState> worldMap = new HashMap<>();
-                                worldMap.put("_legacy", st);
-                                STATE.put(alias, worldMap);
+                            // Old format (MountState fields directly under the alias) is no
+                            // longer converted to a _legacy entry: skip it. New format nests
+                            // worldKey → MountState.
+                            if (MountStateFormatPolicy.isPreWorldFormat(innerMap)) {
+                                LOGGER.info("Skipping pre-per-world mount record for {} (old format, no longer migrated)", alias);
                             } else {
                                 // New format: alias → { worldKey → MountState }
                                 Map<String, MountState> worldMap = new HashMap<>();

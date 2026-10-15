@@ -16,14 +16,11 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Persisted registry of player-mapped villages represented by convex hulls.
@@ -33,12 +30,10 @@ public final class MappedVillageService {
     private static final Logger LOGGER = LoggerFactory.getLogger("mapped-villages");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String FILE_NAME = "mapped_villages.json";
-    private static final Path LEGACY_FILE = FabricLoader.getInstance().getConfigDir().resolve("frens_mapped_villages.json");
     private static final Object LOCK = new Object();
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
-    private static final Set<String> LEGACY_IMPORTED_DIMENSIONS = new HashSet<>();
 
     private MappedVillageService() {
     }
@@ -113,17 +108,6 @@ public final class MappedVillageService {
 
     private static final class WorldData {
         Map<String, MappedVillage> villages = new HashMap<>();
-    }
-
-    private static final class LegacyVillageData {
-        String name;
-        String dimension;
-        List<LegacyWallPoint> hull;
-    }
-
-    private static final class LegacyWallPoint {
-        int x;
-        int z;
     }
 
     public static MappedVillage create(String name,
@@ -293,7 +277,6 @@ public final class MappedVillageService {
 
     private static void ensureWorldReady(MinecraftServer server, ServerWorld world) {
         ensureLoaded();
-        importLegacyIfNeeded(server, world);
     }
 
     private static void ensureLoaded() {
@@ -315,102 +298,6 @@ public final class MappedVillageService {
             }
             loaded = true;
         }
-    }
-
-    private static void importLegacyIfNeeded(MinecraftServer server, ServerWorld world) {
-        if (server == null || world == null || !Files.exists(LEGACY_FILE)) {
-            return;
-        }
-        String dimension = world.getRegistryKey().getValue().toString();
-        synchronized (LOCK) {
-            if (LEGACY_IMPORTED_DIMENSIONS.contains(dimension)) {
-                return;
-            }
-        }
-
-        List<LegacyVillageData> legacyEntries;
-        try (Reader reader = Files.newBufferedReader(LEGACY_FILE)) {
-            LegacyVillageData[] parsed = GSON.fromJson(reader, LegacyVillageData[].class);
-            legacyEntries = parsed != null ? List.of(parsed) : List.of();
-        } catch (Exception e) {
-            LOGGER.warn("Failed to import legacy mapped villages: {}", e.getMessage());
-            synchronized (LOCK) {
-                LEGACY_IMPORTED_DIMENSIONS.add(dimension);
-            }
-            return;
-        }
-
-        if (legacyEntries.isEmpty()) {
-            synchronized (LOCK) {
-                LEGACY_IMPORTED_DIMENSIONS.add(dimension);
-            }
-            return;
-        }
-
-        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
-        boolean importedAny = false;
-        synchronized (LOCK) {
-            WorldData wd = worldData(worldKey);
-            for (LegacyVillageData legacy : legacyEntries) {
-                if (legacy == null || legacy.name == null || legacy.name.isBlank()) {
-                    continue;
-                }
-                if (legacy.dimension == null || !legacy.dimension.equals(dimension)) {
-                    continue;
-                }
-                String key = normKey(legacy.name);
-                if (wd.villages.containsKey(key)) {
-                    continue;
-                }
-                List<VillageFortificationLayoutService.WallPoint> hull = fromLegacyHull(legacy.hull);
-                if (hull.size() < 3) {
-                    continue;
-                }
-                BlockPos center = estimateCenter(hull);
-                wd.villages.put(key, create(legacy.name.trim(), worldKey, dimension, center, hull));
-                importedAny = true;
-            }
-            LEGACY_IMPORTED_DIMENSIONS.add(dimension);
-        }
-
-        if (importedAny) {
-            LOGGER.info("Imported legacy mapped villages for dimension '{}'", dimension);
-            flush();
-        }
-    }
-
-    private static List<VillageFortificationLayoutService.WallPoint> fromLegacyHull(List<LegacyWallPoint> hull) {
-        if (hull == null || hull.isEmpty()) {
-            return List.of();
-        }
-        List<VillageFortificationLayoutService.WallPoint> out = new ArrayList<>(hull.size());
-        for (LegacyWallPoint point : hull) {
-            if (point != null) {
-                out.add(new VillageFortificationLayoutService.WallPoint(point.x, point.z));
-            }
-        }
-        return out;
-    }
-
-    private static BlockPos estimateCenter(Collection<VillageFortificationLayoutService.WallPoint> hull) {
-        if (hull == null || hull.isEmpty()) {
-            return BlockPos.ORIGIN;
-        }
-        long sumX = 0L;
-        long sumZ = 0L;
-        int count = 0;
-        for (VillageFortificationLayoutService.WallPoint point : hull) {
-            if (point == null) {
-                continue;
-            }
-            sumX += point.x();
-            sumZ += point.z();
-            count++;
-        }
-        if (count <= 0) {
-            return BlockPos.ORIGIN;
-        }
-        return new BlockPos((int) Math.round((double) sumX / count), 64, (int) Math.round((double) sumZ / count));
     }
 
     private static Path stateFile() {
