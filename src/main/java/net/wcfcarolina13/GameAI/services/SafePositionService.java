@@ -228,13 +228,18 @@ public final class SafePositionService {
             return false;
         }
         int columnGap = Math.max(0, columnSurfaceFeetY(world, feet.getX(), feet.getZ()) - feet.getY());
-        return hasLowRoofCover(world, feet, 4)
-                && columnGap <= 4
-                && assessment.cardinalStandableNeighbors() >= 2
-                && assessment.totalStandableNeighbors() >= 3
-                && assessment.steepDropNeighbors() <= 1
-                && assessment.blockedCardinals() <= 2
-                && assessment.localHeightVariance() <= 6;
+        // nearSurface (wide sample) is required: columnGap reads the tile's own column, so a
+        // capped pit below the real surface would otherwise count as ready.
+        return SurfaceReadinessPolicy.lowRoofReady(
+                true,
+                hasLowRoofCover(world, feet, 4),
+                assessment.nearSurface(),
+                columnGap,
+                assessment.cardinalStandableNeighbors(),
+                assessment.totalStandableNeighbors(),
+                assessment.steepDropNeighbors(),
+                assessment.blockedCardinals(),
+                assessment.localHeightVariance());
     }
 
     static int scoreSurfaceAssessment(SurfaceCandidateAssessment assessment) {

@@ -41,4 +41,32 @@ public final class SurfaceReadinessPolicy {
                 && steepDropNeighbors <= 1
                 && blockedCardinals <= 2;
     }
+
+    /**
+     * The low-roof fallback of {@code SafePositionService.isRecoveryReadySurface}: a standable tile
+     * with a low roof (tree overhang, porch) still counts as ready, but only when it is at the real
+     * surface by the wide sample ({@code nearSurface}). {@code columnGap} is measured from the
+     * tile's own column heightmap, so a covered pit capped a few blocks overhead passes the gap
+     * check on its own; without {@code nearSurface} a bot at the bottom of a capped trench three
+     * below the surrounding ground read as "at the surface" and nothing ever climbed it out.
+     */
+    public static boolean lowRoofReady(boolean standable,
+                                       boolean lowRoof,
+                                       boolean nearSurface,
+                                       int columnGap,
+                                       int cardinalStandableNeighbors,
+                                       int totalStandableNeighbors,
+                                       int steepDropNeighbors,
+                                       int blockedCardinals,
+                                       int localHeightVariance) {
+        return standable
+                && lowRoof
+                && nearSurface
+                && columnGap <= 4
+                && cardinalStandableNeighbors >= 2
+                && totalStandableNeighbors >= 3
+                && steepDropNeighbors <= 1
+                && blockedCardinals <= 2
+                && localHeightVariance <= 6;
+    }
 }

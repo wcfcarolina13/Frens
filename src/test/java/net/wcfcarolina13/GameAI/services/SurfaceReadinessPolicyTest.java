@@ -47,4 +47,29 @@ class SurfaceReadinessPolicyTest {
         assertFalse(SurfaceReadinessPolicy.canopyOnly(65, 64));
         assertFalse(SurfaceReadinessPolicy.canopyOnly(80, 40));
     }
+
+    @Test
+    void coveredPitBelowTheWideSurfaceIsNotLowRoofReady() {
+        // Jake, 1.1.236 sandbox: feet 62 in a capped trench, wide surface 65, cap 3 overhead.
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, false, 3, 2, 3, 0, 1, 3));
+    }
+
+    @Test
+    void lowRoofAtTheRealSurfaceIsReady() {
+        // Tree overhang at ground level: same shape, but nearSurface by the wide sample.
+        assertTrue(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 3, 0, 1, 3));
+    }
+
+    @Test
+    void lowRoofKeepsItsOtherThresholds() {
+        assertTrue(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 4, 2, 3, 1, 2, 6));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(false, true, true, 3, 2, 3, 0, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, false, true, 3, 2, 3, 0, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 5, 2, 3, 0, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 1, 3, 0, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 2, 0, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 3, 2, 1, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 3, 0, 3, 3));
+        assertFalse(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 3, 0, 1, 7));
+    }
 }
