@@ -51,6 +51,7 @@ import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutFinalReasonPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutStandRetryPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutApproachFeasibilityPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
@@ -102,7 +103,8 @@ public final class WoodcutSkill implements Skill {
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
     // Hand scaffold gather beyond reach (radius 6 since 1.1.240): a few short bounded walks per gather.
     private static final int MAX_SCAFFOLD_GATHER_WALKS = 3;
-    private static final double SCAFFOLD_GATHER_WALK_REACH_SQ = 9.0D;
+    // Arrival at the stand beside the source (feet Y, so effectively horizontal): about 2 blocks.
+    private static final double SCAFFOLD_GATHER_WALK_REACH_SQ = 4.0D;
     private static final long SCAFFOLD_GATHER_WALK_TIMEOUT_MS = 2_500L;
     private static final long PILLAR_STEP_DELAY_MS = 100L;
     private static final long MINING_TIMEOUT_MS = 12_000L;
@@ -1047,7 +1049,13 @@ public final class WoodcutSkill implements Skill {
                                 target.base().toShortString(), detectionProtection.reason());
                         totalFailures++;
                         consecutiveFailures++;
-                        lastFailureReason = WoodcutFailureReason.PROTECTED_AT_MINING;
+                        // Never selected again this run (detection and relocation skip failed bases).
+                        failedBases.add(target.base().toImmutable());
+                        failedBaseReasons.put(target.base().toImmutable(), "protected:" + detectionProtection.reason());
+                        // A run whose real failures were paths keeps the path line (1.1.240 field).
+                        if (WoodcutFinalReasonPolicy.selectionRefusalSetsReason(lastFailureReason.name())) {
+                            lastFailureReason = WoodcutFailureReason.PROTECTED_AT_MINING;
+                        }
                         continue;
                     }
                 }
@@ -2801,6 +2809,9 @@ public final class WoodcutSkill implements Skill {
         if (isTrunkWithinReach(world, base, bot)) {
             return true;
         }
+        // Set when a stand walk failed from the unmoved start cell but the bot can climb: the
+        // remaining stands are skipped and the approach goes straight to the pillar last resort.
+        boolean standsSkipped = false;
         // Starving with nothing to eat: leave the approach, the target loop head pauses the run.
         if (checkWoodcutHunger(source, bot)) {
             return false;
@@ -2836,7 +2847,10 @@ public final class WoodcutSkill implements Skill {
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
             MovementService.clearRecentWalkAttempt(bot.getUuid());
             if (shouldSkipRemainingStands(bot, base, approachOrigin, res.detail())) {
-                return false;
+                if (!pillarAfterStandSkip(bot, base, reachSession)) {
+                    return false;
+                }
+                standsSkipped = true;
             }
         }
         if (checkWoodcutHunger(source, bot)) {
@@ -2844,7 +2858,9 @@ public final class WoodcutSkill implements Skill {
         }
         // Fallback to planner if simple stand failed.
         MovementService.MovementOptions options = WOODCUT_MOVEMENT_OPTIONS;
-        Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(bot, base, options);
+        Optional<MovementService.MovementPlan> planOpt = standsSkipped
+                ? Optional.empty()
+                : MovementService.planLootApproach(bot, base, options);
         if (planOpt.isPresent()) {
             MovementService.MovementPlan plan = planOpt.get();
             BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
@@ -2868,28 +2884,37 @@ public final class WoodcutSkill implements Skill {
                         approach.toShortString(), base.toShortString(), result.detail());
                 if (shouldSkipRemainingStands(bot, base, approachOrigin, result.detail())) {
                     ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
-                    return false;
+                    if (!pillarAfterStandSkip(bot, base, reachSession)) {
+                        return false;
+                    }
+                    standsSkipped = true;
                 }
             }
-            // Clear overhead soft blocks around bot before repositioning — the bot may be in a
-            // depression with leaves at head level preventing all diagonal movement.
-            clearLocalOverheadObstacles(world, bot);
-            if (tryDryRepositionAroundTrunk(source, bot, world, base, reachSession, sharedState)) {
-                return true;
+            if (!standsSkipped) {
+                // Clear overhead soft blocks around bot before repositioning — the bot may be in a
+                // depression with leaves at head level preventing all diagonal movement.
+                clearLocalOverheadObstacles(world, bot);
+                if (tryDryRepositionAroundTrunk(source, bot, world, base, reachSession, sharedState)) {
+                    return true;
+                }
+                ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
+                // A stand walk failed from the cell the approach started in: no post-abandon
+                // reposition. Able to climb: the pillar last resort below still runs.
+                if (reachSession != null && reachSession.standsSkipped) {
+                    if (!pillarAfterStandSkip(bot, base, reachSession)) {
+                        return false;
+                    }
+                    standsSkipped = true;
+                }
             }
-            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
-            // A stand walk failed from the cell the approach started in: no post-abandon reposition.
-            if (reachSession != null && reachSession.standsSkipped) {
-                return false;
-            }
-        } else {
+        } else if (!standsSkipped) {
             LOGGER.info("Woodcut approach: no planner path for {} (reason=no dry stand)", base.toShortString());
         }
         if (checkWoodcutHunger(source, bot)) {
             return false;
         }
         // Last resort: try to pillar from here to reach the trunk directly.
-        if (prepareReach(bot, source, base, reachSession, sharedState)) {
+        if (prepareReach(bot, source, base, reachSession, sharedState, standsSkipped)) {
             return true;
         }
         if (reachSession != null && reachSession.hasPlacements()) {
@@ -2899,6 +2924,24 @@ public final class WoodcutSkill implements Skill {
         ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
         LOGGER.warn("Woodcut approach: no trunk reach for {} (reason=no trunk reach)", base.toShortString());
         return false;
+    }
+
+    /**
+     * After {@link #shouldSkipRemainingStands} said skip: marks the session and returns whether the
+     * approach falls through to the pillar last resort ({@link WoodcutApproachFeasibilityPolicy#canClimb})
+     * instead of leaving the target. A bot with an axe and scaffold lost its pillar to one failed
+     * stand walk before (1.1.240 review I4).
+     */
+    private boolean pillarAfterStandSkip(ServerPlayerEntity bot, BlockPos base, WoodcutReachSession reachSession) {
+        if (reachSession != null) {
+            reachSession.standsSkipped = true;
+        }
+        boolean mayPillar = mayPillarNow(bot);
+        int scaffold = scaffoldBlocksAvailable(bot);
+        boolean climb = WoodcutApproachFeasibilityPolicy.canClimb(mayPillar, scaffold);
+        LOGGER.info("Woodcut approach: stands skipped for {}; {} (mayPillar={} scaffold={})",
+                base.toShortString(), climb ? "trying the pillar last resort" : "leaving the target", mayPillar, scaffold);
+        return climb;
     }
 
     /** Horizontal blocks the bot moved since the target's first approach (unknown origin: never "unmoved"). */
@@ -3480,12 +3523,26 @@ public final class WoodcutSkill implements Skill {
                                  BlockPos target,
                                  WoodcutReachSession reachSession,
                                  Map<String, Object> sharedState) {
+        return prepareReach(bot, source, target, reachSession, sharedState, false);
+    }
+
+    /**
+     * @param pillarOnly the approach already skipped the target's stands (a path failure from an
+     *                   unmoved cell): no move-under or reposition walks, which would repeat the
+     *                   failed search; go straight to the pillar.
+     */
+    private boolean prepareReach(ServerPlayerEntity bot,
+                                 ServerCommandSource source,
+                                 BlockPos target,
+                                 WoodcutReachSession reachSession,
+                                 Map<String, Object> sharedState,
+                                 boolean pillarOnly) {
         boolean onPillar = reachSession != null && reachSession.hasPlacements();
         if (isWithinReach(bot, target)) {
             LOGGER.debug("Woodcut reach: {} already within reach", target.toShortString());
             return true;
         }
-        if (!onPillar) {
+        if (!onPillar && !pillarOnly) {
             moveUnderTarget(source, bot, target);
             if (isWithinReach(bot, target)) {
                 LOGGER.debug("Woodcut reach: moved under {}", target.toShortString());
@@ -4280,6 +4337,26 @@ public final class WoodcutSkill implements Skill {
         if (nearestTree == null && requestedBounds == null) {
             Optional<TreeDetector.TreeTarget> rememberedTarget = WoodcutKnowledgeService.findRememberedTarget(
                     bot, world, origin, radius, vertical, visited, failedBases);
+            // A remembered site skips the scan's protection filter, so ask the same check the target
+            // loop asks before taking it. Refused: mark the base failed for this run and forget the
+            // site, or it is revived and refused on every scan (1.1.240 field: 22 times in 45 s).
+            if (rememberedTarget.isPresent()) {
+                TreeDetector.TreeTarget remembered = rememberedTarget.get();
+                TreeDetector.WoodcutProtectionDecision rememberedProtection = TreeDetector.getWoodcutProtectionDecision(
+                        world, remembered.base(), Math.max(4, remembered.height()));
+                if (rememberedProtection.blocked()) {
+                    LOGGER.info("Woodcut detect: dropping remembered target base={} (reason={}); forgetting the site",
+                            remembered.base().toShortString(), rememberedProtection.reason());
+                    if (failedBases != null) {
+                        failedBases.add(remembered.base().toImmutable());
+                    }
+                    if (failedBaseReasons != null) {
+                        failedBaseReasons.put(remembered.base().toImmutable(), "protected:" + rememberedProtection.reason());
+                    }
+                    WoodcutKnowledgeService.updateTreeSite(bot, world, remembered, List.of(), null);
+                    rememberedTarget = Optional.empty();
+                }
+            }
             if (rememberedTarget.isPresent()) {
                 nearestTree = rememberedTarget.get();
                 nearestTreeDist = origin.getSquaredDistance(nearestTree.base());
@@ -5663,10 +5740,19 @@ public final class WoodcutSkill implements Skill {
                 if (walks >= MAX_SCAFFOLD_GATHER_WALKS) {
                     continue;
                 }
+                // Walk to a standing cell beside the source at the bot's feet Y, never to the dirt
+                // cell itself: a head-level source made the nudge jump into the block for the whole
+                // timeout, and its stuck assists may mine terrain (1.1.240 review I6).
+                BlockPos stand = findDryStandableNear(world, new BlockPos(pos.getX(), origin.getY(), pos.getZ()), 1, 0);
+                if (stand == null) {
+                    LOGGER.info("Woodcut scaffold gather: no standing cell beside {} at feet Y {}; skipping it",
+                            pos.toShortString(), origin.getY());
+                    continue;
+                }
                 walks++;
-                LOGGER.info("Woodcut scaffold gather: walking toward {} (walk {}/{})",
-                        pos.toShortString(), walks, MAX_SCAFFOLD_GATHER_WALKS);
-                MovementService.nudgeTowardUntilClose(bot, pos, SCAFFOLD_GATHER_WALK_REACH_SQ,
+                LOGGER.info("Woodcut scaffold gather: walking to stand {} beside {} (walk {}/{})",
+                        stand.toShortString(), pos.toShortString(), walks, MAX_SCAFFOLD_GATHER_WALKS);
+                MovementService.nudgeTowardUntilClose(bot, stand, SCAFFOLD_GATHER_WALK_REACH_SQ,
                         SCAFFOLD_GATHER_WALK_TIMEOUT_MS, 0.20D, "scaffold-gather");
                 if (bot.squaredDistanceTo(Vec3d.ofCenter(pos)) > REACH_DISTANCE_SQ) {
                     continue;
@@ -5755,7 +5841,11 @@ public final class WoodcutSkill implements Skill {
                     return true;
                 }
             }
-            gatherNearbyPillarBlocks(bot, world, 1);
+            // The gather may walk (up to MAX_SCAFFOLD_GATHER_WALKS bounded nudges): log what it cost.
+            long gatherStartedAt = System.nanoTime();
+            int gatheredForRecovery = gatherNearbyPillarBlocks(bot, world, 1);
+            LOGGER.info("Woodcut {}: scaffold gather added {}ms to surface recovery (gathered {})",
+                    label, (System.nanoTime() - gatherStartedAt) / 1_000_000L, gatheredForRecovery);
             available = countPillarBlocks(bot);
             if (available <= 0) {
                 LOGGER.info("Woodcut {}: no scaffold stock after staging/gather; skipping further pillar-style recovery at {}",
