@@ -7,7 +7,6 @@ import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.tag.BlockTags;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -2796,39 +2795,6 @@ public final class CraftingHelper {
         }
     }
 
-    private static ItemStack stashInChest(ServerPlayerEntity bot, ItemStack stack) {
-        if (bot == null || stack == null || stack.isEmpty() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return stack;
-        }
-        List<BlockPos> chests = findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS);
-        debugChest("StashInChest chestsFound=" + chests.size() + " botPos=" + bot.getBlockPos().toShortString());
-        if (chests.isEmpty()) {
-            debugChest("StashInChest no chests within radius=" + CHEST_SEARCH_RADIUS);
-        }
-        for (BlockPos pos : chests) {
-            debugChest("Stash chest candidate pos=" + pos.toShortString()
-                    + " distSq=" + bot.getBlockPos().getSquaredDistance(pos));
-        }
-        ItemStack remaining = depositIntoChests(bot, stack.copy(), chests, true);
-        if (remaining.isEmpty()) {
-            return ItemStack.EMPTY;
-        }
-        remaining = depositIntoChests(bot, remaining, chests, false);
-        if (remaining.isEmpty()) {
-            return ItemStack.EMPTY;
-        }
-        net.minecraft.block.entity.ChestBlockEntity placed = placeChestNearBot(world, bot, STATION_REACH_SQ);
-        if (placed == null) {
-            return remaining;
-        }
-        ItemStack afterPlaced = insertIntoInventory(placed, remaining.copy());
-        if (afterPlaced.isEmpty()) {
-            placed.markDirty();
-            return ItemStack.EMPTY;
-        }
-        return afterPlaced;
-    }
-
     private static void ensureInventorySpaceForOutput(ServerPlayerEntity bot,
                                                       ServerCommandSource source,
                                                       Item output,
@@ -3033,55 +2999,6 @@ public final class CraftingHelper {
         return bot.getInventory().getEmptySlot() != -1;
     }
 
-    private static void offloadMatchingItems(ServerPlayerEntity bot,
-                                             Map<Item, Integer> remainingReserves,
-                                             int[] keepPlanks,
-                                             int[] keepLogs,
-                                             List<BlockPos> chests,
-                                             Predicate<ItemStack> allowMove) {
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            if (bot.getInventory().getEmptySlot() != -1) {
-                return;
-            }
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty() || !allowMove.test(stack)) {
-                continue;
-            }
-            String itemName = stack.getItem().getName().getString();
-            int keep = 0;
-            Integer itemReserve = remainingReserves.get(stack.getItem());
-            if (itemReserve != null && itemReserve > 0) {
-                keep = Math.min(itemReserve, stack.getCount());
-                remainingReserves.put(stack.getItem(), itemReserve - keep);
-            } else if (stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS) && keepPlanks[0] > 0) {
-                keep = Math.min(keepPlanks[0], stack.getCount());
-                keepPlanks[0] -= keep;
-            } else if (stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS) && keepLogs[0] > 0) {
-                keep = Math.min(keepLogs[0], stack.getCount());
-                keepLogs[0] -= keep;
-            }
-            int toMove = stack.getCount() - keep;
-            if (toMove <= 0) {
-                continue;
-            }
-            debugChest("Offload candidate item=" + itemName + " count=" + stack.getCount() + " keep=" + keep);
-            ItemStack moving = stack.copy();
-            moving.setCount(toMove);
-            ItemStack remaining = depositIntoChests(bot, moving, chests, true);
-            if (!remaining.isEmpty()) {
-                remaining = depositIntoChests(bot, remaining, chests, false);
-            }
-            int moved = toMove - remaining.getCount();
-            if (moved > 0) {
-                debugChest("Offloaded " + moved + "x " + itemName);
-                stack.decrement(moved);
-                if (stack.isEmpty()) {
-                    bot.getInventory().setStack(i, ItemStack.EMPTY);
-                }
-            }
-        }
-    }
-
     private static boolean isCheapDumpItem(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return false;
@@ -3144,171 +3061,8 @@ public final class CraftingHelper {
         return false;
     }
 
-
-    private static ItemStack depositIntoChests(ServerPlayerEntity bot,
-                                               ItemStack stack,
-                                               List<BlockPos> chests,
-                                               boolean requireSameItem) {
-        if (bot == null || stack == null || stack.isEmpty() || chests == null || chests.isEmpty()) {
-            return stack;
-        }
-        for (BlockPos pos : chests) {
-            if (stack.isEmpty()) {
-                return ItemStack.EMPTY;
-            }
-            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-                debugChest("Chest skip pos=" + pos.toShortString() + " world=null");
-                continue;
-            }
-            if (!world.isChunkLoaded(pos)) {
-                debugChest("Chest skip pos=" + pos.toShortString() + " chunkNotLoaded");
-                continue;
-            }
-            var be = world.getBlockEntity(pos);
-            if (!(be instanceof net.minecraft.block.entity.ChestBlockEntity chest)) {
-                debugChest("Chest skip pos=" + pos.toShortString()
-                        + " be=" + (be == null ? "null" : be.getClass().getSimpleName()));
-                continue;
-            }
-            boolean containsItem = chestContainsItem(chest, stack.getItem());
-            boolean hasItemSpace = chestHasSpace(chest, stack.getItem());
-            boolean hasAnySpace = chestHasAnySpace(chest);
-            if (requireSameItem) {
-                if (!containsItem || !hasItemSpace) {
-                    debugChest("Chest skip pos=" + pos.toShortString()
-                            + " requireSameItem=true containsItem=" + containsItem
-                            + " hasItemSpace=" + hasItemSpace);
-                    continue;
-                }
-            } else if (!hasAnySpace) {
-                debugChest("Chest skip pos=" + pos.toShortString()
-                        + " requireSameItem=false hasAnySpace=false");
-                continue;
-            }
-            if (!ensureInteractable(bot, bot.getCommandSource(), pos, STATION_REACH_SQ)) {
-                debugChest("Chest not interactable at " + pos.toShortString()
-                        + " requireSameItem=" + requireSameItem
-                        + " botPos=" + bot.getBlockPos().toShortString());
-                continue;
-            }
-            int before = stack.getCount();
-            ItemStack remaining = insertIntoInventory(chest, stack.copy());
-            if (remaining.getCount() != before) {
-                chest.markDirty();
-                debugChest("Inserted into chest at " + pos.toShortString()
-                        + " item=" + stack.getItem().getName().getString()
-                        + " moved=" + (before - remaining.getCount()));
-            } else {
-                debugChest("Insert into chest at " + pos.toShortString()
-                        + " did not move item=" + stack.getItem().getName().getString()
-                        + " requireSameItem=" + requireSameItem);
-            }
-            stack = remaining;
-        }
-        return stack;
-    }
-
     private static void debugChest(String message) {
         DebugToggleService.debug(LOGGER, "[ChestDebug] {}", message);
-    }
-
-    private static boolean ensureInteractable(ServerPlayerEntity bot,
-                                              ServerCommandSource source,
-                                              BlockPos target,
-                                              double reachSq) {
-        if (bot == null || source == null || target == null) {
-            return false;
-        }
-        if (BlockInteractionService.canInteract(bot, target, reachSq)) {
-            return true;
-        }
-        if (!(source.getWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        List<BlockPos> standOptions = findStandableOptions(world, target, 2);
-        if (standOptions.isEmpty()) {
-            standOptions = List.of(target);
-        }
-        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-        for (BlockPos stand : standOptions) {
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT,
-                    stand,
-                    stand,
-                    null,
-                    null,
-                    bot.getHorizontalFacing());
-            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
-            if (res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq) {
-                if (BlockInteractionService.canInteract(bot, target, reachSq)) {
-                    return true;
-                }
-            }
-        }
-        return BlockInteractionService.canInteract(bot, target, reachSq);
-    }
-
-    private static boolean chestContainsItem(Inventory chest, net.minecraft.item.Item item) {
-        for (int i = 0; i < chest.size(); i++) {
-            ItemStack stack = chest.getStack(i);
-            if (!stack.isEmpty() && stack.isOf(item)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean chestHasSpace(Inventory chest, net.minecraft.item.Item item) {
-        for (int i = 0; i < chest.size(); i++) {
-            ItemStack stack = chest.getStack(i);
-            if (stack.isEmpty()) {
-                return true;
-            }
-            if (stack.isOf(item) && stack.getCount() < stack.getMaxCount()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean chestHasAnySpace(Inventory chest) {
-        for (int i = 0; i < chest.size(); i++) {
-            ItemStack stack = chest.getStack(i);
-            if (stack.isEmpty()) {
-                return true;
-            }
-            if (stack.getCount() < stack.getMaxCount()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static net.minecraft.block.entity.ChestBlockEntity placeChestNearBot(ServerWorld world,
-                                                                                 ServerPlayerEntity bot,
-                                                                                 double reachSq) {
-        if (world == null || bot == null) {
-            return null;
-        }
-        if (findItemInInventory(bot, Items.CHEST) == -1) {
-            return null;
-        }
-        PreparedPlacement prepared = prepareNearbyUtilityPlacement(bot.getCommandSource(), bot, world, bot.getBlockPos(), "chest", reachSq);
-        if (prepared == null) {
-            return null;
-        }
-        if (prepared.standPos() != null && !BlockInteractionService.canInteract(bot, prepared.placePos(), reachSq)) {
-            moveToPlacementStand(bot.getCommandSource(), bot, prepared.standPos(), reachSq, "chest-stand");
-        }
-        if (BotActions.placeBlockAt(bot, prepared.placePos(), java.util.List.of(Items.CHEST))
-                && world.getBlockState(prepared.placePos()).isOf(net.minecraft.block.Blocks.CHEST)) {
-            var be = world.getBlockEntity(prepared.placePos());
-            if (be instanceof net.minecraft.block.entity.ChestBlockEntity chest) {
-                ChatUtils.sendSystemMessage(bot.getCommandSource(), "Placed a chest to store items.");
-                return chest;
-            }
-        }
-        return null;
     }
 
     private static int countCobble(ServerPlayerEntity bot) {
@@ -3791,26 +3545,6 @@ public final class CraftingHelper {
         return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
     }
 
-    private static ItemStack insertIntoInventory(Inventory inv, ItemStack stack) {
-        ItemStack remaining = stack.copy();
-        for (int i = 0; i < inv.size(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (slot.isEmpty()) {
-                inv.setStack(i, remaining);
-                return ItemStack.EMPTY;
-            }
-            if (ItemStack.areItemsEqual(slot, remaining) && ItemStack.areEqual(slot, remaining) && slot.getCount() < slot.getMaxCount()) {
-                int canAdd = Math.min(slot.getMaxCount() - slot.getCount(), remaining.getCount());
-                slot.increment(canAdd);
-                remaining.decrement(canAdd);
-                if (remaining.isEmpty()) {
-                    return ItemStack.EMPTY;
-                }
-            }
-        }
-        return remaining;
-    }
-
     private static void ensurePlanksFromLogs(ServerPlayerEntity bot, int neededExtra) {
         int planks = countPlanks(bot);
         if (planks >= neededExtra) {
@@ -3905,44 +3639,5 @@ public final class CraftingHelper {
             return;
         }
         recordCraftHistory(commander, Registries.ITEM.getId(output));
-    }
-
-    /**
-     * Lightweight, per-tick style walk toward a static station without teleport; keeps server load low.
-     */
-    private static boolean tickFollowStation(ServerPlayerEntity bot, BlockPos target, long timeoutMs, double impulse) {
-        if (bot == null || target == null) {
-            return false;
-        }
-        LOGGER.info("tickFollowStation start: bot={} target={} dist={}", bot.getName().getString(), target.toShortString(), Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            double distSq = bot.getBlockPos().getSquaredDistance(target);
-            if (distSq <= STATION_REACH_SQ) {
-                net.wcfcarolina13.GameAI.BotActions.stop(bot);
-                return true;
-            }
-            Vec3d center = new Vec3d(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
-            net.wcfcarolina13.GameAI.BotActions.stop(bot);
-            net.wcfcarolina13.Entity.LookController.faceBlock(bot, target);
-            net.wcfcarolina13.GameAI.BotActions.sprint(bot, distSq > 9.0);
-            if (center.y - bot.getY() > 0.6D) {
-                net.wcfcarolina13.GameAI.BotActions.jump(bot);
-            } else {
-                net.wcfcarolina13.GameAI.BotActions.autoJumpIfNeeded(bot);
-            }
-            net.wcfcarolina13.GameAI.BotActions.applyMovementInput(bot, center, impulse);
-            try {
-                Thread.sleep(80L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        boolean reached = bot.getBlockPos().getSquaredDistance(target) <= STATION_REACH_SQ;
-        if (!reached) {
-            LOGGER.warn("tickFollowStation failed: bot at {} still {} blocks from {}", bot.getBlockPos().toShortString(), String.format("%.2f", Math.sqrt(bot.getBlockPos().getSquaredDistance(target))), target.toShortString());
-        }
-        return reached;
     }
 }

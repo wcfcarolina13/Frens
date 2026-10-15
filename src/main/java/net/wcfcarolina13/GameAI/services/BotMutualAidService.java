@@ -978,33 +978,6 @@ public final class BotMutualAidService {
                 handoff.kind().name().toLowerCase(Locale.ROOT));
     }
 
-    private static boolean approachAndInteract(ServerPlayerEntity bot, BlockPos target) {
-        if (bot == null || target == null) {
-            return false;
-        }
-        if (BlockInteractionService.canInteract(bot, target)) {
-            return true;
-        }
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT,
-                target,
-                target,
-                null,
-                null,
-                null
-        );
-        MovementService.MovementResult result = MovementService.execute(
-                bot.getCommandSource().withSilent(),
-                bot,
-                plan,
-                Boolean.FALSE,
-                true,
-                true,
-                false
-        );
-        return result != null && (result.success() || BlockInteractionService.canInteract(bot, target));
-    }
-
     /**
      * Chests only (anything whose block is a {@link ChestBlock}): a barrel, shulker or other
      * container is never asked, since the supply policy refuses anything but a chest.

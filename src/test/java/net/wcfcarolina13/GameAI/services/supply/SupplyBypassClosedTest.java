@@ -88,8 +88,9 @@ class SupplyBypassClosedTest {
                 "owner-initiated /bot withdraw + Quick Fetch (performStoreTransferWithBotDetailed) + deposits; read-only "
                         + "item-type snapshot; askBeforeWalking's read before the facade (1.1.220 fix wave: dead "
                         + "performStoreTransfer and its chest probe deleted, 6 -> 5)");
-        allow(CRAFTING, 3,
-                "deposits (depositIntoChests, placeChestNearBot) + findPullCandidates' read-only listing for the facade");
+        allow(CRAFTING, 1,
+                "findPullCandidates' read-only listing for the facade (1.1.245: dead stash/offload deposit chain and "
+                        + "private placeChestNearBot overload deleted, 3 -> 1)");
         allow(MUTUAL_AID, 1,
                 "merged chest read-only listing; every take goes through askForFood (facade)");
         allow(SERVICES + "NavigationArtifactService.java", 2,

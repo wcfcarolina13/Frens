@@ -828,21 +828,6 @@ public final class BotRescueService {
         return recent.isOf(DamageTypes.IN_WALL) && tookRecentObstructDamage(bot);
     }
 
-    @SuppressWarnings("unused")
-    private static boolean ensureRescueTool(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
-        List<BlockPos> samples = List.of(center, center.up(), center.down());
-        for (BlockPos sample : samples) {
-            BlockState state = world.getBlockState(sample);
-            String keyword = preferredToolKeyword(state);
-            if (keyword != null && BotActions.selectHarvestToolOrHands(bot, keyword)) {
-                return true;
-            }
-        }
-        return BotActions.selectHarvestToolOrHands(bot, "pickaxe")
-                || BotActions.selectHarvestToolOrHands(bot, "shovel")
-                || BotActions.selectHarvestToolOrHands(bot, "axe");
-    }
-
     private static String preferredToolKeyword(BlockState state) {
         if (state == null || state.isAir()) {
             return null;
@@ -884,36 +869,6 @@ public final class BotRescueService {
         }
 
         return bestDir;
-    }
-
-    private static void alertSuffocation(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return;
-        }
-        ServerCommandSource source = bot.getCommandSource();
-        if (source == null) {
-            return;
-        }
-        MinecraftServer srv = source != null ? source.getServer() : null;
-        if (srv == null) {
-            return;
-        }
-        UUID uuid = bot.getUuid();
-        long now = srv.getTicks();
-        long last = LAST_SUFFOCATION_ALERT_TICK.getOrDefault(uuid, -1L);
-        if (last >= 0 && (now - last) < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
-            return;
-        }
-        String msg = "I'm suffocating!";
-        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg);
-        CompanionOverheadDialogueService.showOverheadLine(bot, msg, 3_000, 48.0, "rescue", "suffocating");
-        // Play the voiced dialogue for this message if voiced dialogue is enabled
-        try {
-            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg, VoiceLineCategory.SURVIVAL_STATUS);
-        } catch (Exception ignored) {
-            // Best-effort: do not let dialogue playback failures affect rescue logic
-        }
-        LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
     /**

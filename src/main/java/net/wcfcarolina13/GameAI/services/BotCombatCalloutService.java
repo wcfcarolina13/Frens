@@ -724,50 +724,6 @@ public final class BotCombatCalloutService {
     
     // ========== Line pickers ==========
     
-    @SuppressWarnings("unused")
-    private static String pickThreatLine(String threatName) {
-        return choose(
-            "Heads up! " + threatName + "!",
-            "Watch out, " + threatName + " incoming!",
-            "We've got company—" + threatName + "!",
-            threatName + " spotted!",
-            "Hostile ahead!"
-        );
-    }
-    
-    @SuppressWarnings("unused")
-    private static String pickEngagementLine() {
-        return choose(
-            "Engaging!",
-            "I've got this one!",
-            "Taking it on!",
-            "Fighting!",
-            "Here we go!"
-        );
-    }
-    
-    @SuppressWarnings("unused")
-    private static String pickDamageLine() {
-        return choose(
-            "Ow! That hurt!",
-            "I'm hit!",
-            "Taking damage!",
-            "Ouch!",
-            "They got me!"
-        );
-    }
-    
-    @SuppressWarnings("unused")
-    private static String pickLowHealthLine() {
-        return choose(
-            "I'm in trouble here!",
-            "Need to back off!",
-            "I'm hurt bad!",
-            "Getting low!",
-            "This isn't good!"
-        );
-    }
-    
     private static KillCallout pickKillCallout(Entity killed) {
         // Use the already-recorded kill variants that exist in sounds.json.
         // We pick a *sound event* so subtitles can be accurate and the clip pool is consistent.
@@ -930,17 +886,6 @@ public final class BotCombatCalloutService {
         return new KillCallout("Enemy down.", BotDialogueSounds.LINE_COMBAT_KILL);
     }
     
-    @SuppressWarnings("unused")
-    private static String pickCombatEndLine() {
-        return choose(
-            "All clear.",
-            "That was close.",
-            "We're safe now.",
-            "Threat neutralized.",
-            "Area secure."
-        );
-    }
-    
     private static boolean maybePlayWeightedLine(ServerPlayerEntity bot, WeightedLine[] pool, String forcedId) {
         WeightedLine line = pickWeightedLine(pool, forcedId);
         if (line == null) {
@@ -1007,11 +952,6 @@ public final class BotCombatCalloutService {
                 || type == EntityType.WITHER_SKULL;
     }
     
-    private static String choose(String... options) {
-        if (options == null || options.length == 0) return "";
-        return options[RNG.nextInt(options.length)];
-    }
-
     /**
      * Debug trigger entrypoint for `/bot dialogue_test`.
      * Returns true if the trigger key is handled by this service.

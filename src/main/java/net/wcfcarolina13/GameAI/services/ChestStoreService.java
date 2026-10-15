@@ -542,43 +542,6 @@ public final class ChestStoreService {
         }, 1200, Set.of());
     }
 
-    private static BlockPos findNearbyChest(ServerCommandSource source, UUID botId, int radius, int ySpan) {
-        if (source == null || botId == null) {
-            return null;
-        }
-        MinecraftServer server = source.getServer();
-        if (server == null) {
-            return null;
-        }
-        return callOnServer(server, () -> {
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
-            if (bot == null || bot.isRemoved()) {
-                return null;
-            }
-            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-                return null;
-            }
-            BlockPos origin = bot.getBlockPos();
-            double best = Double.MAX_VALUE;
-            BlockPos bestPos = null;
-            for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius))) {
-                if (!world.isChunkLoaded(pos)) {
-                    continue;
-                }
-                BlockState state = world.getBlockState(pos);
-                if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST) && !state.isOf(Blocks.BARREL)) {
-                    continue;
-                }
-                double d = origin.getSquaredDistance(pos);
-                if (d < best) {
-                    best = d;
-                    bestPos = pos.toImmutable();
-                }
-            }
-            return bestPos;
-        }, 1200, null);
-    }
-
     private static List<BlockPos> findNearbyChestPositions(ServerWorld world, BlockPos origin, int radius, int ySpan) {
         if (world == null || origin == null) {
             return List.of();
@@ -647,30 +610,6 @@ public final class ChestStoreService {
             }
         }
         return placed;
-    }
-
-    private static boolean hasAnyAdjacentStand(ServerWorld world, BlockPos chestPos) {
-        if (world == null || chestPos == null) {
-            return false;
-        }
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos stand = chestPos.offset(dir);
-            BlockPos below = stand.down();
-            if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(below).isEmpty()) {
-                continue;
-            }
-            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
-                continue;
-            }
-            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
-                continue;
-            }
-            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
-                continue;
-            }
-            return true;
-        }
-        return false;
     }
 
     private static int countItem(ServerPlayerEntity bot, Item item) {
@@ -886,35 +825,6 @@ public final class ChestStoreService {
         }
         BlockPos partner = pos.offset(ChestBlock.getFacing(state));
         return world.isChunkLoaded(partner) ? partner.toImmutable() : null;
-    }
-
-    public static DepositProbeResult probeDepositMatchingWalkOnly(ServerCommandSource source,
-                                                                 ServerPlayerEntity bot,
-                                                                 BlockPos chestPos,
-                                                                 Predicate<ItemStack> matcher) {
-        if (bot == null || chestPos == null || source == null || matcher == null) {
-            return new DepositProbeResult(0, false, false, false);
-        }
-        MinecraftServer server = source.getServer();
-        if (server == null) {
-            return new DepositProbeResult(0, false, false, false);
-        }
-
-        debugChest("Deposit probe walk-only: chest=" + chestPos.toShortString()
-                + " botPos=" + bot.getBlockPos().toShortString()
-                + " thread=" + Thread.currentThread().getName()
-                + " serverThread=" + server.isOnThread()
-                + " sourceWorld=" + worldKeyName(source.getWorld())
-                + " botWorld=" + worldKeyName(bot.getEntityWorld()));
-        TransferAttemptResult result = performStoreTransferWithBotDetailed(
-                source,
-                bot,
-                chestPos,
-                Integer.MAX_VALUE,
-                withScaffoldReserve(bot, matcher),
-                true,
-                WALK_ONLY);
-        return new DepositProbeResult(result.moved(), result.chestPresent(), result.reachedStand(), result.interacted());
     }
 
     public static DepositProbeResult probeDepositMatchingObstacleAware(ServerCommandSource source,
