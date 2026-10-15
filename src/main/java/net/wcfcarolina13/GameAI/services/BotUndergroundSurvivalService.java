@@ -103,7 +103,10 @@ public final class BotUndergroundSurvivalService {
             NEXT_CHECK_TICK.put(botId, nowTick + CHECK_INTERVAL_TICKS);
 
             boolean abortLatched = TaskService.isAbortRequested(botId);
-            if (!abortLatched) {
+            String latchReason = abortLatched ? TaskService.getCancelReason(botId).orElse("") : null;
+            SurvivalLatchPolicy.Decision latchDecision = SurvivalLatchPolicy.decide(
+                    abortLatched, latchReason, TaskService.hasActiveTask(botId));
+            if (latchDecision != SurvivalLatchPolicy.Decision.HOLD) {
                 HOLDING_AFTER_STOP.remove(botId);
             }
 
@@ -120,8 +123,9 @@ public final class BotUndergroundSurvivalService {
                 continue;
             }
             // A stopped bot stays put: the abort latch from /bot stop would abort every staging walk
-            // instantly, so do not relaunch recovery until the next command clears it.
-            if (abortLatched) {
+            // instantly, so do not relaunch recovery until the next command clears it. Only the
+            // manual stop holds; a death or threat latch is cleared just before dispatch below.
+            if (latchDecision == SurvivalLatchPolicy.Decision.HOLD) {
                 if (HOLDING_AFTER_STOP.add(botId)) {
                     LOGGER.info("Underground survival: {} holding still after a stop command until the next command",
                             bot.getName().getString());
@@ -146,6 +150,8 @@ public final class BotUndergroundSurvivalService {
             if (BotFleeService.isSurfaceRecoveryActive(botId)) continue;
             if (BotFleeService.isBreakingFree(botId)) continue;
             if (BotFleeService.isInShelter(botId)) continue;
+            // Creeper backoff owns the bot's movement and its own "creeper-fuse" latch.
+            if (BotCreeperDefenseService.isBackingOff(botId)) continue;
 
             // Stuck with nothing to build with: back off instead of relaunching every 10 s.
             StuckEscapeBackoffPolicy.State stuck = STUCK_STATE.get(botId);
@@ -161,6 +167,14 @@ public final class BotUndergroundSurvivalService {
                     }
                     if (StuckEscapeBackoffPolicy.inCooldown(observed, nowTick)) continue;
                 }
+            }
+
+            // A death or threat abort left its latch with no task to clear it: every staging walk
+            // would abort instantly, so clear it here, where escape really dispatches.
+            if (latchDecision == SurvivalLatchPolicy.Decision.CLEAR_AND_PROCEED) {
+                TaskService.clearAbortLatch(botId);
+                LOGGER.info("Underground survival: cleared a stale abort latch for {} (reason={}) so escape can run",
+                        bot.getName().getString(), latchReason);
             }
 
             // Dispatch to worker thread (ensureAtSurface is blocking)
