@@ -102,6 +102,32 @@ public class PathFinder {
         return Boolean.TRUE.equals(LAST_SEARCH_BOXED_IN.get());
     }
 
+    /**
+     * {planId, target.asLong()} of the last bot plan made on this thread (1.1.242). walkTo plans and
+     * records its outcome on the same worker thread, so the outcome line can carry the plan ID.
+     */
+    private static final ThreadLocal<long[]> LAST_PLAN = new ThreadLocal<>();
+
+    static void noteLastPlan(long planId, BlockPos target) {
+        if (planId > 0 && target != null) {
+            LAST_PLAN.set(new long[]{planId, target.asLong()});
+        }
+    }
+
+    /**
+     * The plan ID of this thread's last bot plan toward {@code destination}, or 0 when the last plan
+     * went elsewhere or there was none. Clears it, so a later walk that never plans gets 0, not a
+     * stale ID.
+     */
+    public static long takeLastPlanId(BlockPos destination) {
+        long[] last = LAST_PLAN.get();
+        LAST_PLAN.remove();
+        if (last == null || destination == null || last[1] != destination.asLong()) {
+            return 0L;
+        }
+        return last[0];
+    }
+
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world) {
         return calculatePath(start, target, world, null, null);
     }

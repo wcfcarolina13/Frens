@@ -1,5 +1,7 @@
 package net.wcfcarolina13.PathFinding;
 
+import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
+
 /**
  * The one {@code [PathCompare]} log line (1.1.240 slice D). The format is FIXED:
  * tools/logs/frens_log_report.py parses it with {@code (\w+)=(\S+)} pairs and
@@ -59,9 +61,20 @@ public final class PathCompareFormat {
      * {@code null} gives {@code n/a}. {@code detail} is always the last field.
      */
     public static String outcomeLine(String botName, int x, int y, int z, Boolean reached, String detail) {
+        return outcomeLine(botName, x, y, z, reached, detail, 0L);
+    }
+
+    /**
+     * As above with the plan ID of the walk's last plan (1.1.242): {@code plan=p<n>} sits before
+     * {@code detail=} so detail stays the last field. {@code planId <= 0} (a walk that never planned)
+     * omits the field and the analyzer falls back to its time-window join.
+     */
+    public static String outcomeLine(String botName, int x, int y, int z, Boolean reached, String detail,
+                                     long planId) {
         return "[PathCompareOutcome] bot=" + sanitize(botName)
                 + " to=" + x + "," + y + "," + z
                 + " reached=" + (reached == null ? "n/a" : reached ? "yes" : "no")
+                + (planId > 0 ? " plan=" + PathPlanIds.format(planId) : "")
                 + " detail=" + sanitizeDetail(detail);
     }
 

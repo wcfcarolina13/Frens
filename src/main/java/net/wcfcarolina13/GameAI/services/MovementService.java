@@ -1966,10 +1966,11 @@ public final class MovementService {
         UUID botId = player != null ? player.getUuid() : null;
         if (botId != null && destination != null && result != null) {
             LAST_WALK_ATTEMPT.put(botId, new PathAttempt(destination, System.currentTimeMillis(), result.success(), result.detail()));
+            long planId = PathFinder.takeLastPlanId(destination);
             if (PathCompareService.isEnabled()) {
                 LOGGER.info(PathCompareFormat.outcomeLine(player.getName().getString(),
                         destination.getX(), destination.getY(), destination.getZ(),
-                        result.success(), result.detail()));
+                        result.success(), result.detail(), planId));
             }
         }
         return result;
