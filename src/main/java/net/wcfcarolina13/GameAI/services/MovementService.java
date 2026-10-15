@@ -25,6 +25,8 @@ import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.PathFinding.GoTo;
+import net.wcfcarolina13.PathFinding.PathCompareFormat;
+import net.wcfcarolina13.PathFinding.PathCompareService;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import net.wcfcarolina13.PathFinding.Segment;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
@@ -871,7 +873,7 @@ public final class MovementService {
         ServerWorld world = getWorld(player);
         BlockPos currentPos = player.getBlockPos();
         if (world == null || destination == null) {
-            return recordAttempt(player.getUuid(), destination,
+            return recordAttempt(player, destination,
                     new WalkResult(false, currentPos, label + ": no world/destination for walking"));
         }
         // Guard: if the caller requests a non-standable destination, adjust to a nearby standable tile.
@@ -885,7 +887,7 @@ public final class MovementService {
         }
         if (abortRequested(player)) {
             BotActions.stop(player);
-            return recordAttempt(player.getUuid(), destination,
+            return recordAttempt(player, destination,
                     new WalkResult(false, currentPos, label + ": aborted"));
         }
 
@@ -903,7 +905,7 @@ public final class MovementService {
         if (tryImmediateLocalEscape(player, destination, label + "-prewalk")) {
             currentPos = player.getBlockPos();
             if (currentPos.getSquaredDistance(destination) <= CLOSE_ENOUGH_DISTANCE_SQ) {
-                return recordAttempt(player.getUuid(), destination,
+                return recordAttempt(player, destination,
                         new WalkResult(true, currentPos, label + ": escaped locally"));
             }
         }
@@ -915,7 +917,7 @@ public final class MovementService {
             if (distSq <= 144.0D && dy <= 2) {
                 boolean direct = walkDirect(player, destination, fastReplan ? 900L : 2400L);
                 if (direct) {
-                    return recordAttempt(player.getUuid(), destination,
+                    return recordAttempt(player, destination,
                             new WalkResult(true, destination, label + ": walked directly"));
                 }
             }
@@ -928,7 +930,7 @@ public final class MovementService {
         for (int attempt = 0; attempt < 2; attempt++) {
             if (abortRequested(player)) {
                 BotActions.stop(player);
-                return recordAttempt(player.getUuid(), destination,
+                return recordAttempt(player, destination,
                         new WalkResult(false, player.getBlockPos(), label + ": aborted"));
             }
             BlockPos planStart = walkPlanStart(player);
@@ -977,10 +979,10 @@ public final class MovementService {
                 }
                 boolean straightWalk = walkDirect(player, destination, fastReplan ? 1400L : 3500L);
                 if (straightWalk) {
-                    return recordAttempt(player.getUuid(), destination,
+                    return recordAttempt(player, destination,
                             new WalkResult(true, destination, label + ": walked directly (no path)"));
                 }
-                return recordAttempt(player.getUuid(), destination,
+                return recordAttempt(player, destination,
                         new WalkResult(false, player.getBlockPos(), label + ": no walkable path"));
             }
 
@@ -1007,7 +1009,7 @@ public final class MovementService {
                         LOGGER.debug("walkTo replan after stall near {}", segment.end());
                         break; // rebuild path from new position
                     }
-                    return recordAttempt(player.getUuid(), destination,
+                    return recordAttempt(player, destination,
                             new WalkResult(false, lastReached, label + ": walk blocked near " + segment.end()));
                 }
                 lastReached = segment.end();
@@ -1018,11 +1020,11 @@ public final class MovementService {
                 String detail = arrived
                         ? label + ": walked to destination"
                         : label + ": walk ended " + String.format("%.2f", Math.sqrt(finalDistanceSq)) + " blocks away";
-                return recordAttempt(player.getUuid(), destination,
+                return recordAttempt(player, destination,
                         new WalkResult(arrived, player.getBlockPos(), detail));
             }
         }
-        return recordAttempt(player.getUuid(), destination,
+        return recordAttempt(player, destination,
                 new WalkResult(false, player.getBlockPos(), label + ": walk blocked after replans"));
     }
 
@@ -1951,9 +1953,22 @@ public final class MovementService {
         return null;
     }
 
-    private static WalkResult recordAttempt(UUID botId, BlockPos destination, WalkResult result) {
+    /**
+     * Remembers the walk outcome for throttling and, while the shadow PathCompare is enabled, logs
+     * one {@code [PathCompareOutcome]} line so the analyzer can join it to the {@code [PathCompare]}
+     * line for the same bot and target. {@code reached=yes} means the walk reported success, which
+     * includes the close-enough distance tolerance and a direct walk that never planned; it is not
+     * an exact arrival on the goal block.
+     */
+    private static WalkResult recordAttempt(ServerPlayerEntity player, BlockPos destination, WalkResult result) {
+        UUID botId = player != null ? player.getUuid() : null;
         if (botId != null && destination != null && result != null) {
             LAST_WALK_ATTEMPT.put(botId, new PathAttempt(destination, System.currentTimeMillis(), result.success(), result.detail()));
+            if (PathCompareService.isEnabled()) {
+                LOGGER.info(PathCompareFormat.outcomeLine(player.getName().getString(),
+                        destination.getX(), destination.getY(), destination.getZ(),
+                        result.success(), result.detail()));
+            }
         }
         return result;
     }

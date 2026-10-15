@@ -68,4 +68,37 @@ class PathCompareFormatTest {
         assertFalse(PathCompareFormat.isAdjacentStep(2, 0));
         assertFalse(PathCompareFormat.isAdjacentStep(0, -2));
     }
+
+    @Test
+    void outcomeLineMatchesTheFixedFormat() {
+        assertEquals("[PathCompareOutcome] bot=Jake to=40,66,-8 reached=yes detail=woodcut:_walked_to_destination",
+                PathCompareFormat.outcomeLine("Jake", 40, 66, -8, true, "woodcut: walked to destination"));
+        assertEquals("[PathCompareOutcome] bot=Two_Words to=1,2,3 reached=no detail=walk_blocked_near_1,2,3",
+                PathCompareFormat.outcomeLine("Two Words", 1, 2, 3, false, "walk blocked  near 1,2,3"));
+        assertEquals("[PathCompareOutcome] bot=? to=0,0,0 reached=n/a detail=-",
+                PathCompareFormat.outcomeLine(null, 0, 0, 0, null, null));
+    }
+
+    @Test
+    void outcomeDetailIsOneBoundedTokenWithoutEquals() {
+        String d = PathCompareFormat.sanitizeDetail("  a=b\tc\nd  " + "x".repeat(200));
+        assertFalse(d.contains("="));
+        assertFalse(d.matches(".*\\s.*"));
+        assertTrue(d.startsWith("a:b_c_d_"));
+        assertEquals(PathCompareFormat.OUTCOME_DETAIL_MAX, d.length());
+        assertEquals("-", PathCompareFormat.sanitizeDetail("   "));
+    }
+
+    @Test
+    void outcomeLineParsesAsKeyValuesAndNotAsAPathCompareLine() {
+        String line = PathCompareFormat.outcomeLine("Bob", -5, 70, 12, false, "label: no walkable path (bot=Bob)");
+        assertFalse(Pattern.compile("\\[PathCompare\\] (.*)$").matcher(line).find());
+        Matcher m = Pattern.compile("\\[PathCompareOutcome\\] bot=(\\S+) to=(-?\\d+),(-?\\d+),(-?\\d+)"
+                + " reached=(yes|no|n/a) detail=(\\S+)$").matcher(line);
+        assertTrue(m.find());
+        assertEquals("Bob", m.group(1));
+        assertEquals("-5", m.group(2));
+        assertEquals("no", m.group(5));
+        assertEquals("label:_no_walkable_path_(bot:Bob)", m.group(6));
+    }
 }

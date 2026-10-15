@@ -144,6 +144,10 @@ PATTERNS = [
     ("woodcut_cleanup completed", re.compile(r"minedLogs=(\d+)"), "wc_cleanup_mined"),
     ("Woodcut: trapped", re.compile(r"Woodcut: trapped (exit|at)"), "wc_trapped"),
     ("[PathCompare]", re.compile(r"\[PathCompare\] (.*)$"), "pathcompare"),
+    # Logged when a planned walk ends. Its own trigger: "[PathCompare]" is not a substring of it.
+    ("[PathCompareOutcome]", re.compile(
+        r"\[PathCompareOutcome\] bot=(\S+) to=(-?\d+,-?\d+,-?\d+) reached=(yes|no|n/a)(?: detail=(\S*))?"),
+     "pathcompare_outcome"),
     ("hp=", re.compile(r"\bhp=([\d.]+)"), "vital_hp"),
     ("food=", re.compile(r"\bfood=(\d+)"), "vital_food"),
     ("pos=", re.compile(r"\bpos=" + POS_RE), "position"),
@@ -208,6 +212,7 @@ class Analyzer(object):
         self.terrain = defaultdict(list)  # decision -> costs
         self.obstruction = Counter()
         self.pathcompare = []  # type: List[dict]
+        self.pc_outcomes = []  # type: List[dict]
 
     @staticmethod
     def _new_bot():
@@ -539,6 +544,14 @@ class Analyzer(object):
                 self.bots[who]["primary"][rec["primary"]] += 1
         self.pathcompare.append(rec)
 
+    def _h_pathcompare_outcome(self, m, t, thread, bot, msg, level):
+        who = m.group(1)
+        self._set_roster(who)
+        if self.only_bot and who != self.only_bot:
+            return
+        self.pc_outcomes.append({"t": t, "bot": who, "to": m.group(2), "reached": m.group(3),
+                                 "detail": m.group(4) or ""})
+
     def _h_vital_hp(self, m, t, thread, bot, msg, level):
         if bot and self.explicit:  # pool threads serve several bots; never guess a position/vital
             v = float(HP_ALL_RE.findall(msg)[-1])  # last value wins ("before=hp=.. after=hp=..")
@@ -573,7 +586,7 @@ class Analyzer(object):
             "overview": self._overview(top),
             "bots": self._bots_report(),
             "pathfinding": self._paths_report(top),
-            "pathcompare": pathcompare_stats(self.pathcompare),
+            "pathcompare": pathcompare_stats(self.pathcompare, self.pc_outcomes),
             "ab": self._ab_report(),
         }
         return rep
@@ -665,12 +678,71 @@ def infer_finder(primary, modes):
     return "none", "-"
 
 
-def pathcompare_stats(records):
-    # type: (List[dict]) -> dict
+# An outcome joins the latest unjoined [PathCompare] line for the same bot+to at most this many
+# seconds before it (a walk that never planned must not borrow an old compare line).
+OUTCOME_JOIN_WINDOW_S = 300
+
+
+def join_outcomes(records, outcomes):
+    # type: (List[dict], List[dict]) -> List[tuple]
+    """Pairs each outcome with the latest earlier unjoined PathCompare record (or None)."""
+    by_key = defaultdict(list)
+    for r in records:
+        by_key[(r.get("bot"), r.get("to"))].append(r)
+    used = set()
+    out = []
+    for o in outcomes:
+        match = None
+        for r in reversed(by_key.get((o["bot"], o["to"]), [])):
+            if r["t"] is None or o["t"] is None or r["t"] > o["t"]:
+                continue
+            if o["t"] - r["t"] > OUTCOME_JOIN_WINDOW_S:
+                break
+            if id(r) not in used:
+                match = r
+                break
+        if match is not None:
+            used.add(id(match))
+        out.append((o, match))
+    return out
+
+
+def _rate(rows):
+    n = len(rows)
+    yes = sum(1 for o in rows if o["reached"] == "yes")
+    return {"n": n, "reached": yes, "reached_pct": round(100.0 * yes / n, 1) if n else None}
+
+
+def outcome_stats(records, outcomes):
+    # type: (List[dict], List[dict]) -> dict
+    pairs = join_outcomes(records, outcomes)
+    joined = [(o, r) for o, r in pairs if r is not None]
+    by_primary = defaultdict(list)
+    by_exec = defaultdict(list)
+    for o, r in joined:
+        primary = r.get("primary", "?")
+        by_primary[primary].append(o)
+        status = r["finders"].get(primary, {}).get("exec", "?")
+        by_exec[status].append(o)
+    return {
+        "count": len(outcomes),
+        "overall": _rate(outcomes),
+        "joined": len(joined),
+        "unjoined": len(pairs) - len(joined),
+        "per_primary": {k: _rate(v) for k, v in sorted(by_primary.items())},
+        "per_primary_exec": {k: _rate(v) for k, v in sorted(by_exec.items())},
+        "exec_not_reached": sum(1 for o in by_exec.get("exec", []) if o["reached"] != "yes"),
+    }
+
+
+def pathcompare_stats(records, outcomes=None):
+    # type: (List[dict], Optional[List[dict]]) -> dict
+    oc = outcome_stats(records, outcomes) if outcomes else {"count": 0}
     if not records:
-        return {"count": 0}
+        return {"count": 0, "outcomes": oc}
     finders = sorted(set(k for r in records for k in r["finders"]))
-    out = {"count": len(records), "finders": finders, "per_finder": {}, "pairs": {}, "per_bot": {}}
+    out = {"count": len(records), "finders": finders, "per_finder": {}, "pairs": {}, "per_bot": {},
+           "outcomes": oc}
     for f in finders:
         rs = [r["finders"][f] for r in records if f in r["finders"]]
         found = [x for x in rs if x["len"] > 0]
@@ -797,7 +869,7 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
     o.append("## 4. PathCompare")
     if not pc["count"]:
         o.append("No [PathCompare] lines.")
-    else:
+    if pc["count"]:
         for f, v in pc["per_finder"].items():
             o.append("- %s: n=%d found=%s%% exec(of found)=%s%% p50=%sms p90=%sms" % (
                 f, v["n"], _fmt(v["found_pct"]), _fmt(v["exec_of_found_pct"]), _fmt(v["p50_ms"]), _fmt(v["p90_ms"])))
@@ -805,6 +877,16 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
             o.append("- %s: %s" % (k, ", ".join("%s=%s" % (a, _fmt(b)) for a, b in v.items())))
         for k, v in sorted(pc["per_bot"].items()):
             o.append("- bot %s: n=%d primary=%s found=%s" % (k, v["n"], v["primary"], v["found"]))
+    oc = pc.get("outcomes") or {"count": 0}
+    if oc["count"]:
+        ov = oc["overall"]
+        o.append("- walk outcomes: n=%d reached=%d (%s%%), joined to a compare line %d, unjoined %d" % (
+            ov["n"], ov["reached"], _fmt(ov["reached_pct"]), oc["joined"], oc["unjoined"]))
+        for k, v in oc["per_primary"].items():
+            o.append("  - primary %s: reached %d/%d (%s%%)" % (k, v["reached"], v["n"], _fmt(v["reached_pct"])))
+        for k, v in oc["per_primary_exec"].items():
+            o.append("  - primary path %s: reached %d/%d (%s%%)" % (k, v["reached"], v["n"], _fmt(v["reached_pct"])))
+        o.append("  - exec but not reached: %d" % oc["exec_not_reached"])
 
     ab = rep["ab"]
     o.append("")

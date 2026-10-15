@@ -122,6 +122,52 @@ class ReportUnitTest(unittest.TestCase):
         self.assertEqual(pf["modes"]["baritone"]["count"], 1)
         self.assertIn("3 finder lines from the frens-pathcompare thread excluded", flr.render_md(rep))
 
+    def test_pathcompare_outcome_joins_latest_compare_line(self):
+        rep = run_lines("""
+[10:00:00] [mod-command-skill-1/INFO]: [PathCompare] bot=Jake from=0,64,0 to=10,64,20 primary=baritone bidir=90ms/14/exec baritone=12ms/15/exec
+[10:00:05] [mod-command-skill-1/INFO]: [PathCompare] bot=Jake from=1,64,1 to=10,64,20 primary=baritone bidir=80ms/13/exec baritone=11ms/14/noexec
+[10:00:09] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=10,64,20 reached=no detail=woodcut:_walk_blocked_near_9,64,19
+[10:00:10] [mod-command-skill-2/INFO]: [PathCompare] bot=Bob from=5,68,11 to=-12,68,152 primary=bidir bidir=50ms/40/exec baritone=15ms/40/exec
+[10:00:20] [mod-command-skill-2/INFO]: [PathCompareOutcome] bot=Bob to=-12,68,152 reached=no detail=stand:_no_walkable_path
+[10:00:30] [mod-command-skill-1/INFO]: [PathCompare] bot=Jake from=3,64,3 to=30,64,30 primary=baritone bidir=70ms/20/exec baritone=9ms/21/exec
+[10:00:31] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=30,64,30 reached=yes detail=woodcut:_walked_to_destination
+[10:00:32] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=30,64,30 reached=yes detail=woodcut:_walked_directly
+[10:00:40] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=99,64,99 reached=n/a
+""")
+        pc = rep["pathcompare"]
+        self.assertEqual(pc["count"], 4)  # outcome lines never count as compare lines
+        oc = pc["outcomes"]
+        self.assertEqual(oc["count"], 5)
+        self.assertEqual(oc["overall"]["reached"], 2)
+        self.assertEqual(oc["joined"], 3)  # the second 30,64,30 outcome and 99,64,99 find no unjoined line
+        self.assertEqual(oc["unjoined"], 2)
+        self.assertEqual(oc["per_primary"]["baritone"], {"n": 2, "reached": 1, "reached_pct": 50.0})
+        self.assertEqual(oc["per_primary"]["bidir"], {"n": 1, "reached": 0, "reached_pct": 0.0})
+        # Jake's first outcome joins the LATEST compare line (baritone noexec), not the earlier exec one.
+        self.assertEqual(oc["per_primary_exec"]["noexec"], {"n": 1, "reached": 0, "reached_pct": 0.0})
+        self.assertEqual(oc["per_primary_exec"]["exec"], {"n": 2, "reached": 1, "reached_pct": 50.0})
+        self.assertEqual(oc["exec_not_reached"], 1)
+        # The sanitized detail ("walk_blocked_near", "no_walkable_path") never counts as a walk failure.
+        self.assertNotIn("unknown", rep["pathfinding"]["modes"])
+        md = flr.render_md(rep)
+        self.assertIn("walk outcomes: n=5 reached=2 (40%)", md)
+        self.assertIn("exec but not reached: 1", md)
+
+    def test_pathcompare_regex_ignores_outcome_lines(self):
+        line = "[PathCompareOutcome] bot=Jake to=1,2,3 reached=yes detail=x"
+        for trigger, rx, name in flr.PATTERNS:
+            if name == "pathcompare":
+                self.assertNotIn(trigger, line)
+                self.assertIsNone(rx.search(line))
+            if name == "pathcompare_outcome":
+                self.assertIn(trigger, line)
+                self.assertIsNotNone(rx.search(line))
+
+    def test_outcomes_without_compare_lines_still_render(self):
+        rep = run_lines("[10:00:00] [Server thread/INFO]: [PathCompareOutcome] bot=Bob to=1,2,3 reached=no detail=-")
+        self.assertEqual(rep["pathcompare"]["outcomes"]["unjoined"], 1)
+        self.assertIn("walk outcomes: n=1 reached=0", flr.render_md(rep))
+
     def test_spam_and_masking(self):
         lines = "\n".join("[10:00:%02d] [Server thread/WARN]: Mining attempt 1/3 out-of-reach at %d, 64, 2" % (i % 60, i)
                           for i in range(70))

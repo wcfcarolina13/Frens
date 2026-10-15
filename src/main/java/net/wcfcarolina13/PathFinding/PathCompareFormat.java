@@ -49,6 +49,34 @@ public final class PathCompareFormat {
                 + " baritone=" + finderValue(baritoneMs, baritoneLen, baritoneStatus);
     }
 
+    /** Longest detail kept on an outcome line; walk details can run long. */
+    static final int OUTCOME_DETAIL_MAX = 80;
+
+    /**
+     * The {@code [PathCompareOutcome]} line logged when a planned walk ends, so the analyzer can
+     * join the primary walk's real outcome to the async {@code [PathCompare]} line for the same
+     * bot and target. {@code reached} is the walk's own success flag (distance tolerance applies),
+     * {@code null} gives {@code n/a}. {@code detail} is always the last field.
+     */
+    public static String outcomeLine(String botName, int x, int y, int z, Boolean reached, String detail) {
+        return "[PathCompareOutcome] bot=" + sanitize(botName)
+                + " to=" + x + "," + y + "," + z
+                + " reached=" + (reached == null ? "n/a" : reached ? "yes" : "no")
+                + " detail=" + sanitizeDetail(detail);
+    }
+
+    /**
+     * One token: whitespace runs become {@code _} and {@code =} becomes {@code :}, so the k=v parse
+     * holds and the detail never trips the analyzer's phrase triggers ({@code walk blocked near}).
+     */
+    static String sanitizeDetail(String detail) {
+        if (detail == null || detail.isBlank()) {
+            return "-";
+        }
+        String s = detail.strip().replaceAll("\\s+", "_").replace('=', ':');
+        return s.length() > OUTCOME_DETAIL_MAX ? s.substring(0, OUTCOME_DETAIL_MAX) : s;
+    }
+
     /** Bot names never carry whitespace in practice; guard anyway so the k=v parse holds. */
     static String sanitize(String name) {
         if (name == null || name.isEmpty()) {

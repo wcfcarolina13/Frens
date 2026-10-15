@@ -49,6 +49,15 @@ frens_log_report.py LOG [LOG ...] [--since HH:MM:SS] [--until HH:MM:SS] [--bot N
    pair: both found, only one found, neither, who was faster, and the median ms ratio. Also a
    per-bot breakdown. Parsing goes by key, so new `k=v` fields and new finders are picked up
    automatically.
+   Walk outcomes: `[PathCompareOutcome] bot=<name> to=x,y,z reached=<yes|no|n/a> detail=<token>`
+   is logged (while the shadow compare is on) when a planned `walkTo` ends. Each outcome joins
+   the latest earlier unjoined `[PathCompare]` line for the same bot and `to=`, within 300 s.
+   The report gives the overall reached rate, reached rate per primary finder and per primary
+   path status (`exec`/`noexec`/`none`), the count of `exec` paths that were not reached (the
+   number to watch), and how many outcomes found no compare line (a direct walk that never
+   planned, or a throttled replan to the same target). `reached=yes` is the walk's own success
+   flag, so the close-enough distance tolerance applies. The detail is one token (spaces become
+   `_`, `=` becomes `:`, at most 80 chars), so it never trips the walk-failure phrases.
 5. **A/B per bot**: the finder for each bot comes from the `PathCompare primary=` majority,
    falling back to the PathFinder mode majority (at least 80%, otherwise `mixed`). Then: paths,
    p50, % len0, logs cut, targets abandoned, stuck episodes, deaths, and the median seconds
