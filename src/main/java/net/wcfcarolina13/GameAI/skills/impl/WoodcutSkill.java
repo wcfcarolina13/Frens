@@ -50,6 +50,7 @@ import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutChatLines;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
@@ -157,12 +158,12 @@ public final class WoodcutSkill implements Skill {
     }
 
     /**
-     * Per-run, per-bot blocks the protection checks refused (block pos -> refusal reason). A
+     * Per-run, per-bot blocks the protection checks refused (block pos + target tree -> reason). A
      * refused block is logged once and not retried for the rest of the run, so a protected
      * tree no longer produces a refusal line per leaf-clear pass. Keyed by bot because this
      * skill is one shared instance; filled at run start and removed in the run's finally.
      */
-    private final Map<UUID, Map<Long, String>> refusedMineTargetsByBot = new ConcurrentHashMap<>();
+    private final Map<UUID, WoodcutRefusedTargets> refusedMineTargetsByBot = new ConcurrentHashMap<>();
     private static final String AXE_BOOTSTRAP_START_LINE = "No axe yet, so I'll punch a tree first.";
     private static final String AXE_BOOTSTRAP_CRAFT_FAILED_LINE =
             "I punched enough wood for an axe but couldn't craft one. Give me an axe or some room for a crafting table and try again.";
@@ -732,7 +733,7 @@ public final class WoodcutSkill implements Skill {
         int verticalRange = Math.max(4, getIntParameter(context.parameters(), "verticalRange", DEFAULT_VERTICAL_RANGE));
         RequestedWorkBounds requestedBounds = RequestedWorkBounds.fromParameters(context.parameters());
         activeRequestedBounds = requestedBounds;
-        refusedMineTargetsByBot.put(bot.getUuid(), new ConcurrentHashMap<>());
+        refusedMineTargetsByBot.put(bot.getUuid(), new WoodcutRefusedTargets());
         try {
             int startTimeOfDay = bot.getEntityWorld() != null ? (int) (bot.getEntityWorld().getTimeOfDay() % 24000L) : 0;
         if (!internal && startTimeOfDay >= SUNSET_TIME_OF_DAY) {
@@ -4749,15 +4750,16 @@ public final class WoodcutSkill implements Skill {
             LOGGER.info("Woodcut bounded: refusing to mine {} outside requested bounds {}", pos.toShortString(), activeRequestedBounds);
             return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "requested-bounds");
         }
-        Map<Long, String> refusedTargets = refusedMineTargetsByBot.get(bot.getUuid());
-        String cachedRefusal = refusedTargets == null ? null : refusedTargets.get(pos.asLong());
+        WoodcutRefusedTargets refusedTargets = refusedMineTargetsByBot.get(bot.getUuid());
+        Long refusedTargetKey = associatedTargetBase == null ? null : associatedTargetBase.asLong();
+        String cachedRefusal = refusedTargets == null ? null : refusedTargets.get(pos.asLong(), refusedTargetKey);
         if (cachedRefusal != null) {
             return new MineAttemptResult(false, WoodcutFailureReason.PROTECTED_AT_MINING, cachedRefusal);
         }
         TreeDetector.WoodcutProtectionDecision decision = getWoodcutMutationDecision(world, pos, associatedTargetBase);
         if (decision.blocked()) {
             LOGGER.info("Woodcut: refusing to mine {} (reason={})", pos.toShortString(), decision.reason());
-            rememberRefusedMineTarget(refusedTargets, pos, decision.reason());
+            rememberRefusedMineTarget(refusedTargets, pos, refusedTargetKey, decision.reason());
             return new MineAttemptResult(false, WoodcutFailureReason.PROTECTED_AT_MINING, decision.reason());
         }
         Vec3d center = Vec3d.ofCenter(pos);
@@ -4797,7 +4799,7 @@ public final class WoodcutSkill implements Skill {
             if (result != null && result.startsWith("⚠️")) {
                 if (lower.contains("protected village block") || lower.contains("protected claim")) {
                     LOGGER.info("Woodcut: miner refused {} ('{}'); not retrying it this run", pos.toShortString(), result);
-                    rememberRefusedMineTarget(refusedTargets, pos, result);
+                    rememberRefusedMineTarget(refusedTargets, pos, refusedTargetKey, result);
                     return new MineAttemptResult(false, WoodcutFailureReason.PROTECTED_AT_MINING, result);
                 }
                 LOGGER.warn("Woodcut mining returned '{}' at {}", result, pos.toShortString());
@@ -4827,9 +4829,10 @@ public final class WoodcutSkill implements Skill {
         }
     }
 
-    private static void rememberRefusedMineTarget(Map<Long, String> refusedTargets, BlockPos pos, String reason) {
+    private static void rememberRefusedMineTarget(WoodcutRefusedTargets refusedTargets, BlockPos pos,
+                                                  Long targetBase, String reason) {
         if (refusedTargets != null && pos != null) {
-            refusedTargets.putIfAbsent(pos.asLong(), reason == null ? "protected" : reason);
+            refusedTargets.remember(pos.asLong(), targetBase, reason);
         }
     }
 
