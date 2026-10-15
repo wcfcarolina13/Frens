@@ -1,0 +1,17 @@
+{
+  "_comment": "Retention per Prism instance. Paths expand ~ and $HOME. Digests are kept forever. screenshots null = never touched.",
+  "instances_root": "~/Library/Application Support/PrismLauncher/instances",
+  "archive_root": "~/Library/Application Support/PrismLauncher/frens-log-archive",
+  "min_age_hours": 24,
+  "instances": {
+    "mcp-sandbox": {
+      "logs": {"archive_after_days": 3, "delete_raw_after_days": 14},
+      "screenshots": {"dirs": ["screenshots", "screenshots/mcp"], "archive_after_days": 7, "delete_after_days": 30}
+    },
+    "1.21.11": {
+      "_comment": "Bradley's main world Nirn: longer retention, screenshots never touched.",
+      "logs": {"archive_after_days": 14, "delete_raw_after_days": 90},
+      "screenshots": null
+    }
+  }
+}

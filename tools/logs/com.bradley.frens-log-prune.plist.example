@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Example only: NOT installed. Copy to ~/Library/LaunchAgents/com.bradley.frens-log-prune.plist
+  after Bradley approves (see tools/logs/README.md). launchd does not expand ~ or $HOME:
+  every path below is absolute. /usr/bin/python3 is 3.9.6.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bradley.frens-log-prune</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/roti/AI-Player-checkpoint/tools/logs/frens_log_prune.py</string>
+        <string>--apply</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>11</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/roti/Library/Application Support/PrismLauncher/frens-log-archive/prune.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/roti/Library/Application Support/PrismLauncher/frens-log-archive/prune.log</string>
+</dict>
+</plist>

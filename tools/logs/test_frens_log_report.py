@@ -1,0 +1,276 @@
+"""Unit tests for frens_log_report.py and frens_log_prune.py.
+
+Run from tools/logs:  python3 -m unittest
+"""
+import gzip
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import frens_log_prune as prune  # noqa: E402
+import frens_log_report as flr  # noqa: E402
+
+FIXTURE = os.path.join(HERE, "fixtures", "synthetic_ab.log")
+
+
+def run_lines(text, **kw):
+    a = flr.Analyzer(**kw)
+    for line in text.strip("\n").split("\n"):
+        a.feed(line + "\n")
+    return a.report()
+
+
+class ReportFixtureTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rep = flr.analyze(FIXTURE)
+
+    def test_roster_excludes_human(self):
+        self.assertEqual(self.rep["overview"]["bots"], ["Jake", "Bob"])
+
+    def test_midnight_wrap_keeps_order(self):
+        ov = self.rep["overview"]
+        self.assertEqual(ov["span"], ["23:58:00", "d1+00:00:40"])
+        self.assertEqual(ov["span_s"], 160)
+
+    def test_pathcompare_pairs_and_tolerance(self):
+        pc = self.rep["pathcompare"]
+        self.assertEqual(pc["count"], 2)
+        self.assertEqual(pc["finders"], ["baritone", "bidir"])
+        pair = pc["pairs"]["baritone_vs_bidir"]
+        self.assertEqual(pair["both_found"], 1)
+        self.assertEqual(pair["only_baritone"], 1)
+        self.assertEqual(pair["only_bidir"], 0)
+        self.assertEqual(pair["baritone_faster"], 2)
+        self.assertEqual(pair["median_ms_ratio_bidir_over_baritone"], 10.0)
+        self.assertEqual(pc["per_finder"]["baritone"]["exec_of_found_pct"], 50.0)
+        self.assertEqual(pc["per_bot"]["Bob"]["primary"], {"baritone": 1})
+
+    def test_ab_finder_per_bot(self):
+        rows = {r["bot"]: r for r in self.rep["ab"]["rows"]}
+        self.assertEqual(rows["Jake"]["finder"], "bidir")
+        self.assertEqual(rows["Bob"]["finder"], "baritone")
+        self.assertTrue(self.rep["ab"]["is_ab"])
+        self.assertEqual(rows["Jake"]["logs_cut"], 4)
+        self.assertEqual(rows["Jake"]["median_start_to_first_log_s"], 85)
+        self.assertEqual(rows["Bob"]["targets_abandoned"], 1)
+        self.assertEqual(rows["Bob"]["stuck_episodes"], 1)
+        self.assertEqual(rows["Bob"]["deaths"], 1)
+
+    def test_bob_timeline_and_stand_vs_target(self):
+        bob = self.rep["bots"]["Bob"]
+        self.assertEqual(bob["stands_abandoned"], 1)
+        self.assertEqual(bob["abandon_reasons"], {"no trunk reach": 1})
+        self.assertEqual(bob["stuck_events"], 2)
+        kinds = [e["kind"] for e in bob["timeline"]]
+        self.assertEqual(kinds[0], "SKILL+")
+        self.assertIn("DEATH", kinds)
+        self.assertEqual(kinds[-1], "SKILL-")
+        self.assertEqual(bob["chat_lines"], 1)  # the death echo in [CHAT] is not a second death
+
+    def test_pathfinding_extras(self):
+        pf = self.rep["pathfinding"]
+        self.assertEqual(pf["baritone"], {"Using best-so-far": 1})
+        self.assertEqual(pf["terrain_moves"]["BREAK"], {"count": 1, "median_cost": 4.5})
+        self.assertEqual(pf["terrain_moves"]["WALK_AROUND"]["count"], 1)
+        self.assertEqual(pf["obstruction_mine"], {"refused": 1})
+        self.assertEqual(pf["modes"]["baritone"]["walk_outcomes"], {"pursuit failed": 1, "walk blocked near": 1})
+
+    def test_markdown_renders(self):
+        md = flr.render_md(self.rep)
+        for h in ("## 1. Overview", "## 2. Bots", "## 3. Pathfinding", "## 4. PathCompare", "## 5. A/B"):
+            self.assertIn(h, md)
+
+
+class ReportUnitTest(unittest.TestCase):
+    def test_thread_binding_rebinds(self):
+        rep = run_lines("""
+[10:00:00] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Jake on thread mod-command-skill-1
+[10:00:01] [mod-command-skill-1/INFO]: [PathFinder] mode=bidir elapsed=10ms pathLen=3 from=1, 2, 3 to=4, 5, 6
+[10:00:02] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Bob on thread mod-command-skill-1
+[10:00:03] [mod-command-skill-1/INFO]: [PathFinder] mode=bidir elapsed=20ms pathLen=0 from=1, 2, 3 to=4, 5, 6
+[10:00:04] [mod-command-skill-1/INFO]: [PathFinder] mode=bidir elapsed=30ms pathLen=0 from=1, 2, 3 to=4, 5, 6
+""")
+        rows = {r["bot"]: r for r in rep["ab"]["rows"]}
+        self.assertEqual(rows["Jake"]["paths"], 1)
+        self.assertEqual(rows["Bob"]["paths"], 2)
+        self.assertEqual(rows["Bob"]["pathLen0_pct"], 100.0)
+
+    def test_spam_and_masking(self):
+        lines = "\n".join("[10:00:%02d] [Server thread/WARN]: Mining attempt 1/3 out-of-reach at %d, 64, 2" % (i % 60, i)
+                          for i in range(70))
+        rep = run_lines(lines, spam_per_min=60)
+        self.assertEqual(rep["overview"]["warn_patterns"][0]["count"], 70)
+        self.assertEqual(rep["overview"]["spam"][0]["peak_per_min"], 70)
+        self.assertIn("at N, N, N", rep["overview"]["spam"][0]["pattern"])
+
+    def test_since_until_and_bot_filter(self):
+        text = """
+[10:00:00] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Jake on thread mod-command-skill-1
+[10:05:00] [mod-command-skill-2/INFO]: Skill 'woodcut' starting for bot Bob on thread mod-command-skill-2
+[10:10:00] [mod-command-skill-1/INFO]: Woodcut unified: mined 2 logs for base 1, 2, 3
+"""
+        rep = run_lines(text, since=flr.parse_hms("10:04"), only_bot="Jake")
+        self.assertEqual(rep["overview"]["lines"], 2)
+        self.assertEqual(list(rep["bots"]), ["Jake"])
+        self.assertEqual(rep["bots"]["Jake"]["logs_mined"], 2)
+
+    def test_gz_and_partial_last_line(self):
+        d = tempfile.mkdtemp()
+        try:
+            gz = os.path.join(d, "a.log.gz")
+            with gzip.open(gz, "wt") as fh:
+                fh.write("[10:00:00] [Server thread/INFO]: Bob joined the game\n")
+            plain = os.path.join(d, "latest.log")
+            with open(plain, "w") as fh:
+                fh.write("[10:00:01] [Server thread/INFO]: one\n[10:00:02] [Server thread/INFO]: half-writ")
+            rep = flr.analyze([gz, plain])
+            self.assertEqual(rep["overview"]["lines"], 2)  # partial line left for the next read
+        finally:
+            shutil.rmtree(d)
+
+
+class PruneTest(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.inst_root = os.path.join(self.d, "instances")
+        self.arch = os.path.join(self.d, "archive")
+        self.now = time.time()
+        for inst in ("mcp-sandbox", "1.21.11"):
+            for sub in ("logs", "screenshots", "crash-reports"):
+                os.makedirs(os.path.join(self.inst_root, inst, "minecraft", sub))
+        self.config = {
+            "instances_root": self.inst_root, "archive_root": self.arch, "min_age_hours": 24,
+            "instances": {
+                "mcp-sandbox": {"logs": {"archive_after_days": 3, "delete_raw_after_days": 14},
+                                "screenshots": {"dirs": ["screenshots", "screenshots/mcp"],
+                                                "archive_after_days": 7, "delete_after_days": 30}},
+                "1.21.11": {"logs": {"archive_after_days": 14, "delete_raw_after_days": 90}, "screenshots": None},
+            }}
+
+    def tearDown(self):
+        shutil.rmtree(self.d)
+
+    def mk(self, rel, days_old, text="[10:00:00] [Server thread/INFO]: hello\n"):
+        p = os.path.join(self.d, rel)
+        if not os.path.isdir(os.path.dirname(p)):
+            os.makedirs(os.path.dirname(p))
+        if p.endswith(".gz"):
+            with gzip.open(p, "wt") as fh:
+                fh.write(text)
+        else:
+            with open(p, "w") as fh:
+                fh.write(text)
+        t = self.now - days_old * 86400
+        os.utime(p, (t, t))
+        return p
+
+    def ops(self, actions):
+        return sorted((a["op"], os.path.basename(a["src"])) for a in actions)
+
+    def test_age_rules(self):
+        sb = "instances/mcp-sandbox/minecraft/"
+        nirn = "instances/1.21.11/minecraft/"
+        self.mk(sb + "logs/old.log.gz", 4)
+        self.mk(sb + "logs/young.log.gz", 2)
+        self.mk(sb + "logs/latest.log", 40)
+        self.mk(sb + "logs/notes.txt", 40)
+        self.mk(nirn + "logs/nirn-old.log.gz", 20)
+        self.mk(nirn + "logs/nirn-mid.log.gz", 10)
+        self.mk(nirn + "screenshots/n.png", 400)
+        self.mk(sb + "screenshots/s-old.png", 8)
+        self.mk(sb + "screenshots/s-new.png", 6)
+        self.mk(sb + "screenshots/mcp/m-old.png", 9)
+        self.mk(sb + "crash-reports/crash.log", 400)
+        self.mk("archive/mcp-sandbox/raw/ancient.log.gz", 15)
+        self.mk("archive/mcp-sandbox/raw/recent.log.gz", 13)
+        self.mk("archive/mcp-sandbox/screenshots/gone.png", 31)
+        actions, refusals, _ = prune.plan(self.config, now=self.now)
+        self.assertEqual(self.ops(actions), [
+            ("archive_log", "nirn-old.log.gz"), ("archive_log", "old.log.gz"),
+            ("delete", "ancient.log.gz"), ("delete", "gone.png"),
+            ("move", "m-old.png"), ("move", "s-old.png")])
+        self.assertEqual(refusals, [])
+
+    def test_24h_floor_beats_zero_retention(self):
+        self.config["instances"]["mcp-sandbox"]["logs"]["archive_after_days"] = 0
+        self.mk("instances/mcp-sandbox/minecraft/logs/fresh.log.gz", 0.5)
+        actions, _, _ = prune.plan(self.config, now=self.now)
+        self.assertEqual(actions, [])
+
+    def test_symlink_and_outside_refused(self):
+        outside = self.mk("elsewhere/secret.log.gz", 30)
+        os.symlink(outside, os.path.join(self.inst_root, "mcp-sandbox", "minecraft", "logs", "link.log.gz"))
+        actions, refusals, guard = prune.plan(self.config, now=self.now)
+        self.assertEqual(actions, [])
+        self.assertTrue(any("symlink" in r for r in refusals))
+        with self.assertRaises(prune.Refused):
+            guard.check(outside)
+        with self.assertRaises(prune.Refused):
+            guard.check(self.mk("instances/mcp-sandbox/minecraft/crash-reports/c.log", 30))
+        with self.assertRaises(prune.Refused):
+            guard.check(os.path.join(self.inst_root, "mcp-sandbox", "minecraft", "logs", "latest.log"))
+
+    def test_archive_overlapping_instance_refused(self):
+        self.config["archive_root"] = os.path.join(self.inst_root, "mcp-sandbox", "minecraft", "arch")
+        with self.assertRaises(prune.Refused):
+            prune.plan(self.config, now=self.now)
+
+    def test_dry_run_changes_nothing_apply_acts(self):
+        src = self.mk("instances/mcp-sandbox/minecraft/logs/old.log.gz", 4)
+        doomed = self.mk("archive/mcp-sandbox/raw/ancient.log.gz", 15)
+        actions, _, guard = prune.plan(self.config, now=self.now)
+        out = io.StringIO()
+        self.assertEqual(prune.execute(actions, guard, apply=False, out=out), 0)
+        self.assertTrue(os.path.exists(src))
+        self.assertTrue(os.path.exists(doomed))
+        self.assertFalse(os.path.exists(os.path.join(self.arch, "mcp-sandbox", "digests")))
+        self.assertEqual(prune.execute(actions, guard, apply=True, out=out), 0)
+        self.assertFalse(os.path.exists(src))
+        self.assertFalse(os.path.exists(doomed))
+        real_arch = os.path.realpath(self.arch)
+        self.assertTrue(os.path.exists(os.path.join(real_arch, "mcp-sandbox", "raw", "old.log.gz")))
+        with open(os.path.join(real_arch, "mcp-sandbox", "digests", "old.log.gz.json")) as fh:
+            self.assertEqual(json.load(fh)["overview"]["lines"], 1)
+        self.assertTrue(os.path.exists(os.path.join(real_arch, "mcp-sandbox", "digests", "old.log.gz.md")))
+
+    def test_digest_failure_keeps_log(self):
+        src = self.mk("instances/mcp-sandbox/minecraft/logs/old.log.gz", 4)
+        actions, _, guard = prune.plan(self.config, now=self.now)
+        orig = prune.write_digest
+
+        def boom(*a):
+            raise RuntimeError("digest broke")
+        prune.write_digest = boom
+        try:
+            errors = prune.execute(actions, guard, apply=True, out=io.StringIO())
+        finally:
+            prune.write_digest = orig
+        self.assertEqual(errors, 1)
+        self.assertTrue(os.path.exists(src))
+
+    def test_main_exit_code_and_summary(self):
+        self.mk("instances/mcp-sandbox/minecraft/logs/old.log.gz", 4)
+        cfg = os.path.join(self.d, "cfg.json")
+        with open(cfg, "w") as fh:
+            json.dump(self.config, fh)
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            rc = prune.main(["--config", cfg])
+        finally:
+            sys.stdout = old
+        self.assertEqual(rc, 0)
+        self.assertIn("dry-run: archive 1 logs", buf.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

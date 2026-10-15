@@ -1,0 +1,27 @@
+[23:58:00] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=admin, dimType=minecraft:overworld, pos=(1.5, 68.0, 11.5)
+[23:58:00] [Server thread/INFO]: spawnBot starting: botName=Bob, mode=admin, dimType=minecraft:overworld, pos=(5.5, 68.0, 11.5)
+[23:58:01] [Server thread/INFO]: RotiWokeman joined the game
+[23:58:05] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Jake on thread mod-command-skill-1
+[23:58:05] [mod-command-skill-2/INFO]: Skill 'woodcut' starting for bot Bob on thread mod-command-skill-2
+[23:58:06] [mod-command-skill-1/INFO]: Woodcut: selected tree target base=10, 64, 20 top=10, 70, 20 height=7
+[23:58:06] [mod-command-skill-1/INFO]: [PathCompare] bot=Jake from=1,68,11 to=10,64,20 primary=bidir bidir=120ms/14/exec baritone=12ms/15/exec
+[23:58:06] [mod-command-skill-1/INFO]: [PathFinder] mode=bidir elapsed=120ms pathLen=14 from=1, 68, 11 to=10, 64, 20
+[23:58:07] [mod-command-skill-2/INFO]: Woodcut: selected tree target base=-12, 68, 152 top=-12, 75, 152 height=8
+[23:58:07] [mod-command-skill-2/INFO]: [PathCompare] bot=Bob from=5,68,11 to=-12,68,152 primary=baritone bidir=11000ms/0/none baritone=15ms/40/noexec futureField=7
+[23:58:07] [mod-command-skill-2/INFO]: [BaritonePathFinder] Start=(5,68,11) Target=(-12,68,152) timeout=500ms
+[23:58:07] [mod-command-skill-2/WARN]: [BaritonePathFinder] Using best-so-far[coeff=1.5] dist=12.0 at (1,2,3)
+[23:58:07] [mod-command-skill-2/INFO]: [PathFinder] mode=baritone elapsed=15ms pathLen=40 from=5, 68, 11 to=-12, 68, 152
+[23:58:08] [mod-command-skill-2/WARN]: pursuit failed [direct]: finalDist=8.4
+[23:58:08] [mod-command-skill-2/INFO]: terrain move: BREAK at 3, 64, 5 cost=4.5 alt=WALK_AROUND
+[23:58:08] [mod-command-skill-2/INFO]: terrain move: WALK_AROUND at 3, 64, 6 cost=9.0
+[23:58:09] [mod-command-skill-2/INFO]: movement obstruction mine refused [walkSegment]: bot=Bob pos=3, 64, 5 state=block.minecraft.stone reason=too-slow
+[23:59:30] [mod-command-skill-1/INFO]: Woodcut unified: mined 4 logs for base 10, 64, 20
+[23:59:59] [mod-command-skill-2/INFO]: Woodcut approach: abandoned dry stand -11, 68, 152 for -12, 68, 152 (reason=path failed detail=direct: walk blocked near class_2338{x=1, y=2, z=3})
+[00:00:10] [mod-command-skill-2/INFO]: Woodcut approach: abandoned -12, 68, 152 (reason=no trunk reach)
+[00:00:11] [mod-command-skill-2/WARN]: ensureAtSurface: Bob failed at 3, 62, 5 openSky=false standable=true nearSurface=false cardinal=1 total=1
+[00:00:12] [Server thread/INFO]: Stuck-escape backoff: Bob failed surface recovery 2 times at Y=62 with nothing to build with, pausing retries for 30 s
+[00:00:20] [Render thread/INFO]: [System] [CHAT] Bob: I'm stuck in a hole with nothing to build with.
+[00:00:21] [Server thread/INFO]: Bob was slain by Zombie
+[00:00:21] [Render thread/INFO]: [System] [CHAT] Bob was slain by Zombie
+[00:00:30] [mod-command-skill-1/INFO]: Skill 'woodcut' finished for bot Jake: success=true msg='Woodcut done.'
+[00:00:40] [mod-command-skill-2/INFO]: Skill 'woodcut' finished for bot Bob: success=false msg='Found a tree, but couldn't finish.'
