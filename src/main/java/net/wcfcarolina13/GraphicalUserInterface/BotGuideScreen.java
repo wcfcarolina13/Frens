@@ -1442,11 +1442,13 @@ public final class BotGuideScreen extends Screen {
                         "Fast Travel & Navigation Tiers",
                         "Companion fast travel speed depends on held artifacts.",
                         List.of(
-                                "Travel speed is decided by nav tiers: what the bot and you carry (Map and Compass, lodestone compass, Eye of Ender, Ender Pearls, Wizard's Tome) or being near an Enchanting Table.",
-                                "There is no walk or fast-travel setting. Without a gate the bot walks."
+                                "Full speed: the bot holds a bound lodestone compass, the bot or you hold an Eye of Ender or a Wizard's Tome, the bot or you are within 6 blocks of an Enchanting Table, or the bot and you both hold Ender Pearls.",
+                                "Slower: the bot holds a Map and Compass that show the destination (underground it also needs a torch or lantern), or a smoke signal marks the destination base.",
+                                "There is no walk or fast-travel setting. Without a gate the bot walks.",
+                                "Cross-dimension travel adds 30 seconds. Delays run from 7 seconds to 5 minutes."
                         ),
                         "UI-only",
-                        "Give the bot a Map and Compass for basic travel, or a bound lodestone compass or an Eye of Ender (bot or you) for full-speed travel. See Fast-Travel Gates for every gate.",
+                        "Give the bot a Map and Compass for basic travel. For full speed, give the bot a bound lodestone compass, or carry an Eye of Ender yourself (one in the bot's inventory works too). See Fast-Travel Gates for every gate.",
                         "navigation fast travel tier map compass eye ender artifact speed"
                 ),
                 new GuideTopic(

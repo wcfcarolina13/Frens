@@ -50,20 +50,12 @@ public final class MappedVillageService {
             return name != null ? name : "";
         }
 
-        public String getWorldKey() {
-            return worldKey != null ? worldKey : "";
-        }
-
         public String getDimension() {
             return dimension != null ? dimension : "";
         }
 
         public BlockPos getCenter() {
             return center != null ? center.toBlockPos() : BlockPos.ORIGIN;
-        }
-
-        public long getCreatedAt() {
-            return createdAt;
         }
 
         public int getVertexCount() {
@@ -133,7 +125,7 @@ public final class MappedVillageService {
     }
 
     public static List<MappedVillage> listForWorld(MinecraftServer server, ServerWorld world) {
-        ensureWorldReady(server, world);
+        ensureLoaded();
         if (server == null || world == null) {
             return List.of();
         }
@@ -150,7 +142,7 @@ public final class MappedVillageService {
     }
 
     public static Optional<MappedVillage> load(MinecraftServer server, ServerWorld world, String name) {
-        ensureWorldReady(server, world);
+        ensureLoaded();
         if (server == null || world == null || name == null || name.isBlank()) {
             return Optional.empty();
         }
@@ -164,7 +156,7 @@ public final class MappedVillageService {
     }
 
     public static boolean save(MinecraftServer server, ServerWorld world, MappedVillage village) {
-        ensureWorldReady(server, world);
+        ensureLoaded();
         if (server == null || world == null || village == null || village.getName().isBlank()) {
             return false;
         }
@@ -179,7 +171,7 @@ public final class MappedVillageService {
     }
 
     public static boolean delete(MinecraftServer server, ServerWorld world, String name) {
-        ensureWorldReady(server, world);
+        ensureLoaded();
         if (server == null || world == null || name == null || name.isBlank()) {
             return false;
         }
@@ -195,7 +187,7 @@ public final class MappedVillageService {
     }
 
     public static boolean rename(MinecraftServer server, ServerWorld world, String oldName, String newName) {
-        ensureWorldReady(server, world);
+        ensureLoaded();
         if (server == null || world == null || oldName == null || oldName.isBlank() || newName == null || newName.isBlank()) {
             return false;
         }
@@ -273,10 +265,6 @@ public final class MappedVillageService {
             }
         }
         return Optional.empty();
-    }
-
-    private static void ensureWorldReady(MinecraftServer server, ServerWorld world) {
-        ensureLoaded();
     }
 
     private static void ensureLoaded() {
