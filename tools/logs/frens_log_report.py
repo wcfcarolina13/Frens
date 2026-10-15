@@ -678,32 +678,42 @@ def infer_finder(primary, modes):
     return "none", "-"
 
 
-# An outcome joins the latest unjoined [PathCompare] line for the same bot+to at most this many
-# seconds before it (a walk that never planned must not borrow an old compare line).
+# An outcome joins the latest [PathCompare] line for the same bot+to that is at most
+# OUTCOME_JOIN_WINDOW_S before it and at most OUTCOME_JOIN_LATE_S after it. The compare line is
+# written on the frens-pathcompare thread once the shadow finder finishes, so for a fast failure it
+# often lands after the outcome. If that latest line is already taken, the outcome stays unjoined:
+# falling back to an older line would shift every later pair by one when a target is retried.
 OUTCOME_JOIN_WINDOW_S = 300
+OUTCOME_JOIN_LATE_S = 15
 
 
 def join_outcomes(records, outcomes):
     # type: (List[dict], List[dict]) -> List[tuple]
-    """Pairs each outcome with the latest earlier unjoined PathCompare record (or None)."""
+    """Pairs each outcome with (compare record or None, reason). reason is "joined",
+    "no_compare_line" (nothing in the window: a direct or aborted walk that never planned) or
+    "compare_line_used" (the nearest line already belongs to another outcome)."""
     by_key = defaultdict(list)
     for r in records:
-        by_key[(r.get("bot"), r.get("to"))].append(r)
+        if r["t"] is not None:
+            by_key[(r.get("bot"), r.get("to"))].append(r)
     used = set()
     out = []
     for o in outcomes:
-        match = None
-        for r in reversed(by_key.get((o["bot"], o["to"]), [])):
-            if r["t"] is None or o["t"] is None or r["t"] > o["t"]:
-                continue
-            if o["t"] - r["t"] > OUTCOME_JOIN_WINDOW_S:
+        latest = None
+        if o["t"] is not None:
+            for r in reversed(by_key.get((o["bot"], o["to"]), [])):
+                if r["t"] > o["t"] + OUTCOME_JOIN_LATE_S:
+                    continue
+                if o["t"] - r["t"] <= OUTCOME_JOIN_WINDOW_S:
+                    latest = r
                 break
-            if id(r) not in used:
-                match = r
-                break
-        if match is not None:
-            used.add(id(match))
-        out.append((o, match))
+        if latest is None:
+            out.append((o, None, "no_compare_line"))
+        elif id(latest) in used:
+            out.append((o, None, "compare_line_used"))
+        else:
+            used.add(id(latest))
+            out.append((o, latest, "joined"))
     return out
 
 
@@ -716,7 +726,7 @@ def _rate(rows):
 def outcome_stats(records, outcomes):
     # type: (List[dict], List[dict]) -> dict
     pairs = join_outcomes(records, outcomes)
-    joined = [(o, r) for o, r in pairs if r is not None]
+    joined = [(o, r) for o, r, _ in pairs if r is not None]
     by_primary = defaultdict(list)
     by_exec = defaultdict(list)
     for o, r in joined:
@@ -729,6 +739,8 @@ def outcome_stats(records, outcomes):
         "overall": _rate(outcomes),
         "joined": len(joined),
         "unjoined": len(pairs) - len(joined),
+        "unjoined_no_compare": sum(1 for _, _, why in pairs if why == "no_compare_line"),
+        "unjoined_line_used": sum(1 for _, _, why in pairs if why == "compare_line_used"),
         "per_primary": {k: _rate(v) for k, v in sorted(by_primary.items())},
         "per_primary_exec": {k: _rate(v) for k, v in sorted(by_exec.items())},
         "exec_not_reached": sum(1 for o in by_exec.get("exec", []) if o["reached"] != "yes"),
@@ -880,8 +892,10 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
     oc = pc.get("outcomes") or {"count": 0}
     if oc["count"]:
         ov = oc["overall"]
-        o.append("- walk outcomes: n=%d reached=%d (%s%%), joined to a compare line %d, unjoined %d" % (
-            ov["n"], ov["reached"], _fmt(ov["reached_pct"]), oc["joined"], oc["unjoined"]))
+        o.append("- walk outcomes: n=%d reached=%d (%s%%), joined to a compare line %d, unjoined %d"
+                 " (no compare line %d, nearest line already used %d)" % (
+                     ov["n"], ov["reached"], _fmt(ov["reached_pct"]), oc["joined"], oc["unjoined"],
+                     oc["unjoined_no_compare"], oc["unjoined_line_used"]))
         for k, v in oc["per_primary"].items():
             o.append("  - primary %s: reached %d/%d (%s%%)" % (k, v["reached"], v["n"], _fmt(v["reached_pct"])))
         for k, v in oc["per_primary_exec"].items():

@@ -141,6 +141,8 @@ class ReportUnitTest(unittest.TestCase):
         self.assertEqual(oc["overall"]["reached"], 2)
         self.assertEqual(oc["joined"], 3)  # the second 30,64,30 outcome and 99,64,99 find no unjoined line
         self.assertEqual(oc["unjoined"], 2)
+        self.assertEqual(oc["unjoined_line_used"], 1)  # second 30,64,30 outcome
+        self.assertEqual(oc["unjoined_no_compare"], 1)  # 99,64,99: a walk that never planned
         self.assertEqual(oc["per_primary"]["baritone"], {"n": 2, "reached": 1, "reached_pct": 50.0})
         self.assertEqual(oc["per_primary"]["bidir"], {"n": 1, "reached": 0, "reached_pct": 0.0})
         # Jake's first outcome joins the LATEST compare line (baritone noexec), not the earlier exec one.
@@ -152,6 +154,36 @@ class ReportUnitTest(unittest.TestCase):
         md = flr.render_md(rep)
         self.assertIn("walk outcomes: n=5 reached=2 (40%)", md)
         self.assertIn("exec but not reached: 1", md)
+
+    def test_outcome_joins_compare_line_written_after_it(self):
+        rep = run_lines("""
+[10:00:00] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no detail=woodcut:_no_path
+[10:00:03] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=baritone bidir=900ms/0/none baritone=3000ms/9/exec
+[10:01:00] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=6,64,6 reached=no detail=-
+[10:01:20] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=6,64,6 primary=baritone bidir=1ms/0/none baritone=1ms/9/exec
+""")
+        oc = rep["pathcompare"]["outcomes"]
+        self.assertEqual(oc["joined"], 1)  # 3 s late joins, 20 s late does not
+        self.assertEqual(oc["unjoined_no_compare"], 1)
+        self.assertEqual(oc["exec_not_reached"], 1)
+
+    def test_used_latest_line_leaves_outcome_unjoined_without_fallback(self):
+        rep = run_lines("""
+[10:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=baritone bidir=9ms/4/exec baritone=3ms/4/exec
+[10:00:10] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=baritone bidir=9ms/0/none baritone=3ms/0/noexec
+[10:00:11] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no detail=a
+[10:00:12] [mod-command-skill-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no detail=b
+""")
+        oc = rep["pathcompare"]["outcomes"]
+        # The first outcome takes the 10:00:10 noexec line; the second finds it used and does NOT
+        # fall back to the older 10:00:00 exec line.
+        self.assertEqual(oc["joined"], 1)
+        self.assertEqual(oc["unjoined"], 1)
+        self.assertEqual(oc["unjoined_line_used"], 1)
+        self.assertEqual(oc["unjoined_no_compare"], 0)
+        self.assertEqual(oc["per_primary_exec"], {"noexec": {"n": 1, "reached": 0, "reached_pct": 0.0}})
+        self.assertEqual(oc["exec_not_reached"], 0)
+        self.assertIn("nearest line already used 1", flr.render_md(rep))
 
     def test_pathcompare_regex_ignores_outcome_lines(self):
         line = "[PathCompareOutcome] bot=Jake to=1,2,3 reached=yes detail=x"

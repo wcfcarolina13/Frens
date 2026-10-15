@@ -50,12 +50,18 @@ frens_log_report.py LOG [LOG ...] [--since HH:MM:SS] [--until HH:MM:SS] [--bot N
    per-bot breakdown. Parsing goes by key, so new `k=v` fields and new finders are picked up
    automatically.
    Walk outcomes: `[PathCompareOutcome] bot=<name> to=x,y,z reached=<yes|no|n/a> detail=<token>`
-   is logged (while the shadow compare is on) when a planned `walkTo` ends. Each outcome joins
-   the latest earlier unjoined `[PathCompare]` line for the same bot and `to=`, within 300 s.
-   The report gives the overall reached rate, reached rate per primary finder and per primary
-   path status (`exec`/`noexec`/`none`), the count of `exec` paths that were not reached (the
-   number to watch), and how many outcomes found no compare line (a direct walk that never
-   planned, or a throttled replan to the same target). `reached=yes` is the walk's own success
+   is logged (while the shadow compare is on) when a `walkTo` ends. Each outcome joins the
+   latest `[PathCompare]` line for the same bot and `to=` that is at most 300 s before it and at
+   most 15 s after it. The compare line is written on the `frens-pathcompare` thread once the
+   shadow finder finishes, so for a fast failure it often lands after its outcome. If that
+   latest line already belongs to an earlier outcome, the outcome stays unjoined: it never falls
+   back to an older line, which would shift every later pair by one when a target is retried.
+   Outcome lines are also logged by direct or aborted walks that never planned; those have no
+   compare line and appear as unjoined. The report gives the overall reached rate, reached rate
+   per primary finder and per primary path status (`exec`/`noexec`/`none`), the count of `exec`
+   paths that were not reached (the number to watch), and the unjoined outcomes split into
+   "no compare line" (direct or aborted walks, throttled replans) and "nearest line already
+   used" (repeat outcomes for one plan). `reached=yes` is the walk's own success
    flag, so the close-enough distance tolerance applies. The detail is one token (spaces become
    `_`, `=` becomes `:`, at most 80 chars), so it never trips the walk-failure phrases.
 5. **A/B per bot**: the finder for each bot comes from the `PathCompare primary=` majority,
