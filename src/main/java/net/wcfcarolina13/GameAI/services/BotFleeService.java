@@ -8,6 +8,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -33,10 +34,17 @@ import net.wcfcarolina13.GameAI.services.navigation.VoxelJunctionService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -58,7 +66,7 @@ public final class BotFleeService {
     private static final int COOLDOWN_TICKS = 100;
 
     /** Type of tactical shelter the bot is occupying. */
-    public enum ShelterType { CLIFF, DIG_DOWN, VILLAGE_HOUSE, JOIN_ENCLOSED }
+    public enum ShelterType { CLIFF, DIG_DOWN, VILLAGE_HOUSE, JOIN_ENCLOSED, WALL_OFF }
 
     public enum ShelterInvalidReason {
         VALID,
@@ -73,14 +81,32 @@ public final class BotFleeService {
         NO_DOORWAY
     }
 
-    /** Metadata for an active tactical shelter. */
+    /**
+     * Metadata for an active tactical shelter. {@code placedBlocks} is the wall-off ledger: the
+     * cells the bot placed, the only cells its dawn teardown may mine. Empty for every other type.
+     */
     public record ShelterInfo(long enteredTick,
                               ShelterType type,
                               BlockPos capPos,
                               Direction entryDir,
                               BlockPos interiorPos,
                               long lastValidatedTick,
-                              ShelterInvalidReason lastValidationReason) {}
+                              ShelterInvalidReason lastValidationReason,
+                              List<BlockPos> placedBlocks) {
+        public ShelterInfo {
+            placedBlocks = placedBlocks == null ? List.of() : List.copyOf(placedBlocks);
+        }
+
+        public ShelterInfo(long enteredTick,
+                           ShelterType type,
+                           BlockPos capPos,
+                           Direction entryDir,
+                           BlockPos interiorPos,
+                           long lastValidatedTick,
+                           ShelterInvalidReason lastValidationReason) {
+            this(enteredTick, type, capPos, entryDir, interiorPos, lastValidatedTick, lastValidationReason, List.of());
+        }
+    }
 
     public record ShelterAssessment(boolean valid,
                                     ShelterType type,
@@ -139,6 +165,11 @@ public final class BotFleeService {
             Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS,
             Items.JUNGLE_PLANKS, Items.ACACIA_PLANKS, Items.DARK_OAK_PLANKS,
             Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.BAMBOO_PLANKS);
+
+    /** Registry ids of {@link #SEAL_BLOCKS}, for {@link WallOffPolicy}'s pure counting and teardown rules. */
+    private static final Set<String> SEAL_IDS = SEAL_BLOCKS.stream()
+            .map(item -> Registries.ITEM.getId(item).toString())
+            .collect(Collectors.toUnmodifiableSet());
 
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
@@ -246,7 +277,8 @@ public final class BotFleeService {
                     info.entryDir(),
                     assessment.standPos(),
                     nowTick,
-                    ShelterInvalidReason.VALID));
+                    ShelterInvalidReason.VALID,
+                    info.placedBlocks()));
             if (shouldBreakShelterForStarvation(bot, world)) {
                 SHELTER_ACTIVE.remove(bot.getUuid());
                 LOGGER.info("Bot {} breaking tactical shelter for urgent food recovery (food={})",
@@ -910,18 +942,27 @@ public final class BotFleeService {
     private static void runEmergencyTacticChain(ServerPlayerEntity bot, long gen) {
         if (isStaleShelter(bot, gen)) return;
 
+        // 1. Out of the water first.
         if (bot.getEntityWorld() instanceof ServerWorld dryWorld
                 && prioritizeDryLand(bot, dryWorld, "night-shelter-water", 12, gen)) {
             if (isStaleShelter(bot, gen)) return;
         }
 
+        // 2. A village house with a door.
         if (bot.getEntityWorld() instanceof ServerWorld villageWorld) {
             if (tryVillageHouseShelter(bot, villageWorld, gen)) {
                 return;
             }
         }
 
-        // 2. Dig into cliff face — most reliable: mine in, seal entrance, fully enclosed.
+        // 3. Wall off a natural overhang: seal its 1-2 open faces, no hole dug. Falls through
+        //    unless assessShelterAt validates the finished cell.
+        if (bot.getEntityWorld() instanceof ServerWorld wallWorld && tryWallOffShelter(bot, wallWorld, gen)) {
+            return;
+        }
+        if (isStaleShelter(bot, gen)) return;
+
+        // 4. Dig into cliff face — most reliable: mine in, seal entrance, fully enclosed.
         if (bot.getEntityWorld() instanceof ServerWorld world3) {
             net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
             if (cliffDir != null) {
@@ -932,15 +973,11 @@ public final class BotFleeService {
             }
         }
 
-        // 3. Dig straight down — always available, self-supplying blocks
+        // 5. Dig straight down — always available, self-supplying blocks
         BlockPos digSpot = bot.getBlockPos();
         LOGGER.info("Bot {} trying emergency dig-down at {}",
                 bot.getName().getString(), digSpot.toShortString());
         emergencyDigDown(bot, digSpot, gen);
-
-        // 4. Wall-off — DISABLED: detection finds false positives (bot's own placed blocks,
-        //    partial shelters) and reports success without actually protecting the bot.
-        //    Needs stricter shelter detection before re-enabling.
     }
 
     /**
@@ -1101,105 +1138,454 @@ public final class BotFleeService {
         return false;
     }
 
+    // ── Wall-off night shelter ─────────────────────────────────────────────
+
+    /** Wall-clock budget across candidates; the first candidate always runs. */
+    private static final long WALL_OFF_BUDGET_MS = 12_000L;
+    /** Timeout for each bounded server-thread hop of the wall-off step. */
+    private static final long WALL_OFF_HOP_TIMEOUT_MS = 500L;
+    /** Bounded centring after the mover: the seal cells are adjacent to the stand cell. */
+    private static final long WALL_OFF_CENTRE_TIMEOUT_MS = 2_500L;
+
+    /** The server-thread snapshot and the absolute block its offsets are relative to (the bot's feet). */
+    private record WallOffScan(BlockPos origin, WallOffPolicy.Snapshot snapshot) {}
+
+    private record WallOffTeardown(int removed, int skipped) {}
+
     /**
-     * Finds a nearby overhang, shallow cave, or cliff recess that the bot can wall off.
-     * A shelter candidate is a position with:
-     * - Solid block overhead (not sky-visible)
-     * - At least 2 solid walls on the sides (back + one side minimum)
-     * - At most 2 open faces to wall off (needs few blocks to seal)
-     * - Walkable floor
+     * Step 3 of the tactic chain: walk to a natural overhang cell with one or two open faces, seal
+     * them with seal-family blocks, and register the cell only when {@link #assessShelterAt}
+     * validates it. Returns true only when {@code SHELTER_ACTIVE} was set; every other outcome
+     * removes what it placed and falls through to cliff-dig / dig-down.
      */
-    private static BlockPos findNearbyOverhangShelter(ServerWorld world, BlockPos center, int searchRadius) {
-        BlockPos best = null;
-        int bestOpenFaces = Integer.MAX_VALUE; // fewer open faces = better shelter
-        double bestDistSq = Double.MAX_VALUE;
+    private static boolean tryWallOffShelter(ServerPlayerEntity bot, ServerWorld world, long gen) {
+        if (bot == null || world == null || isStaleShelter(bot, gen)) {
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return false;
+        }
+        String name = bot.getName().getString();
+        long startMs = System.currentTimeMillis();
+        float hpStart = bot.getHealth();
+        try {
+            WallOffScan scan = callOnServer(server, () -> buildWallOffScan(bot, world), WALL_OFF_HOP_TIMEOUT_MS, null);
+            if (scan == null) {
+                LOGGER.info("Bot {} wall-off: snapshot timeout", name);
+                return false;
+            }
+            WallOffPolicy.Snapshot snap = scan.snapshot();
+            boolean gatesOk = snap.blocks() >= WallOffPolicy.MIN_BLOCKS && snap.hotbarHasSealBlock();
+            List<WallOffPolicy.Candidate> ranked = gatesOk
+                    ? WallOffPolicy.rank(snap, WallOffPolicy.MAX_PLACEMENTS)
+                    : List.of();
+            LOGGER.info("Bot {} wall-off: scan r={} candidates={} blocks={} hotbarOk={}",
+                    name, WallOffPolicy.SEARCH_RADIUS, ranked.size(), snap.blocks(), snap.hotbarHasSealBlock());
+            if (!gatesOk) {
+                return false;
+            }
+            if (ranked.isEmpty()) {
+                LOGGER.info("Bot {} wall-off: no candidate", name);
+                return false;
+            }
 
-        for (int dx = -searchRadius; dx <= searchRadius; dx++) {
-            for (int dz = -searchRadius; dz <= searchRadius; dz++) {
-                for (int dy = -3; dy <= 2; dy++) {
-                    BlockPos feet = center.add(dx, dy, dz);
-                    // Must have solid floor, open feet/head space, and overhead cover
-                    if (!world.getBlockState(feet.down()).isSolidBlock(world, feet.down())) continue;
-                    if (!world.getBlockState(feet).isAir()) continue;
-                    if (!world.getBlockState(feet.up()).isAir()) continue;
-                    if (world.isSkyVisible(feet.up(2))) continue; // needs overhead cover
+            BlockPos origin = scan.origin();
+            for (int i = 0; i < ranked.size(); i++) {
+                if (i > 0 && System.currentTimeMillis() - startMs > WALL_OFF_BUDGET_MS) {
+                    LOGGER.info("Bot {} wall-off: walk aborted reason=budget", name);
+                    return false;
+                }
+                String abort = wallOffAbortReason(bot, gen, hpStart);
+                if (abort != null) {
+                    LOGGER.info("Bot {} wall-off: walk aborted reason={}", name, abort);
+                    return false;
+                }
+                WallOffPolicy.Candidate candidate = ranked.get(i);
+                BlockPos feet = toWorld(origin, candidate.feet());
+                List<BlockPos> plan = new ArrayList<>();
+                for (WallOffPolicy.Cell cell : WallOffPolicy.placementOrder(candidate)) {
+                    plan.add(toWorld(origin, cell));
+                }
+                LOGGER.info("Bot {} wall-off: walking to {} placements={} faces={}",
+                        name, feet.toShortString(), plan.size(), candidate.openFaces());
+                if (!bot.getBlockPos().equals(feet)) {
+                    moveTowardLocalShelterAnchor(bot, world, feet, "wall-off");
+                }
+                abort = wallOffAbortReason(bot, gen, hpStart);
+                if (abort != null) {
+                    LOGGER.info("Bot {} wall-off: walk aborted reason={}", name, abort);
+                    return false;
+                }
+                WallOffPolicy.Arrival arrival = centreOnWallOffCell(bot, server, feet);
+                LOGGER.info("Bot {} wall-off: arrival {} at {} target {}",
+                        name, arrival.name().toLowerCase(), bot.getBlockPos().toShortString(), feet.toShortString());
+                if (arrival != WallOffPolicy.Arrival.ARRIVED) {
+                    continue;
+                }
+                abort = wallOffAbortReason(bot, gen, hpStart);
+                if (abort != null) {
+                    LOGGER.info("Bot {} wall-off: walk aborted reason={}", name, abort);
+                    return false;
+                }
+                return sealAndRegisterWallOff(bot, world, server, gen, feet, plan, toDirection(candidate.primaryFace()));
+            }
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            LOGGER.warn("Bot {} wall-off failed: {}", name, e.getMessage());
+            return false;
+        }
+    }
 
-                    // Count open cardinal faces at feet level
-                    int openFaces = 0;
-                    for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-                        BlockPos neighbor = feet.offset(dir);
-                        if (world.getBlockState(neighbor).isAir()
-                                || world.getBlockState(neighbor).isReplaceable()) {
-                            openFaces++;
-                        }
+    /** Seals {@code plan} in order, verifies, validates, and registers. Tears down on every failure. */
+    private static boolean sealAndRegisterWallOff(ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  MinecraftServer server,
+                                                  long gen,
+                                                  BlockPos feet,
+                                                  List<BlockPos> plan,
+                                                  Direction primaryDir) throws InterruptedException {
+        String name = bot.getName().getString();
+        List<BlockPos> ledger = new ArrayList<>();
+        for (int i = 0; i < plan.size(); i++) {
+            if (isStaleShelter(bot, gen)) {
+                return false;
+            }
+            BlockPos cell = plan.get(i);
+            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, SEAL_BLOCKS, false);
+            if (result == null || !result.success()) {
+                Thread.sleep(300L);
+                result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, SEAL_BLOCKS, false);
+            }
+            if (result != null && result.success()) {
+                ledger.add(cell);
+                LOGGER.info("Bot {} wall-off: placed {} ({}/{})", name, cell.toShortString(), i + 1, plan.size());
+                continue;
+            }
+            WallOffTeardown torn = tearDownWallOffLedger(bot, server, ledger);
+            LOGGER.info("Bot {} wall-off: place failed at {} reason={} — tore down {}",
+                    name, cell.toShortString(), result != null ? result.reason() : "null", torn.removed());
+            return false;
+        }
+
+        List<BlockPos> placed = List.copyOf(ledger);
+        Boolean holds = callOnServer(server, () -> {
+            for (BlockPos cell : placed) {
+                if (!world.getBlockState(cell).blocksMovement()) {
+                    return false;
+                }
+            }
+            return true;
+        }, WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE);
+        if (!Boolean.TRUE.equals(holds)) {
+            WallOffTeardown torn = tearDownWallOffLedger(bot, server, placed);
+            LOGGER.info("Bot {} wall-off: verify failed — tore down {}", name, torn.removed());
+            return false;
+        }
+        LOGGER.info("Bot {} wall-off: sealed at {} placed={}", name, feet.toShortString(), placed.size());
+
+        if (isStaleShelter(bot, gen)) {
+            return false;
+        }
+        BlockPos firstFeet = placed.get(0);
+        for (BlockPos cell : placed) {
+            if (cell.getY() == feet.getY()) {
+                firstFeet = cell;
+                break;
+            }
+        }
+        final BlockPos capPos = firstFeet;
+        // Reads world state off-thread, as the dig-down and cliff accept steps do (pre-existing precedent).
+        ShelterAssessment assessment = assessShelterAt(bot, world, feet, ShelterType.WALL_OFF, capPos, primaryDir);
+        final BlockPos stand = assessment.standPos() != null ? assessment.standPos() : feet;
+        if (!assessment.valid()) {
+            String reason = assessment.reason().name().toLowerCase();
+            boolean sealedAnyway = false;
+            if (!WallOffPolicy.teardownOnReject(reason)) {
+                sealedAnyway = Boolean.TRUE.equals(callOnServer(server,
+                        () -> isShelterEntranceSecured(world, stand, ShelterType.WALL_OFF, capPos, primaryDir),
+                        WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE));
+            }
+            if (!sealedAnyway) {
+                WallOffTeardown torn = tearDownWallOffLedger(bot, server, placed);
+                LOGGER.info("Bot {} wall-off rejected reason={} tore down {}", name, reason, torn.removed());
+                return false;
+            }
+            LOGGER.info("Bot {} wall-off: hostile adjacent but sealed, registering", name);
+        }
+
+        long tick = server.getTicks();
+        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                tick,
+                ShelterType.WALL_OFF,
+                capPos,
+                primaryDir,
+                stand,
+                tick,
+                ShelterInvalidReason.VALID,
+                placed));
+        LOGGER.info("Bot {} wall-off shelter active at {} blocks={}", name, stand.toShortString(), placed.size());
+
+        int shelterBites = HealingService.stabilizeEat(bot, 5);
+        if (shelterBites > 0) {
+            LOGGER.info("Bot {} ate {} items inside wall-off shelter (hp={})",
+                    name, shelterBites, String.format("%.1f", bot.getHealth()));
+        }
+        return true;
+    }
+
+    /** Null when the walk may continue, else the reason to fall through. */
+    private static String wallOffAbortReason(ServerPlayerEntity bot, long gen, float hpStart) {
+        if (isStaleShelter(bot, gen)) {
+            return "stale";
+        }
+        if (shouldAbortSurvival(bot)) {
+            return "abort";
+        }
+        if (WallOffPolicy.abortWalk(hpStart, bot.getHealth())) {
+            return "hp-drop";
+        }
+        return null;
+    }
+
+    /**
+     * Small bounded centring loop toward the stand cell's bottom centre. The final verdict is read
+     * in one server hop; the loop's own position reads are off-thread like the nudge helpers'.
+     */
+    private static WallOffPolicy.Arrival centreOnWallOffCell(ServerPlayerEntity bot,
+                                                            MinecraftServer server,
+                                                            BlockPos feet) throws InterruptedException {
+        Vec3d target = Vec3d.ofBottomCenter(feet);
+        long deadline = System.currentTimeMillis() + WALL_OFF_CENTRE_TIMEOUT_MS;
+        boolean moved = false;
+        while (System.currentTimeMillis() < deadline) {
+            if (WallOffPolicy.arrival(bot.getX(), bot.getY(), bot.getZ(), bot.isOnGround(),
+                    feet.getX(), feet.getY(), feet.getZ()) == WallOffPolicy.Arrival.ARRIVED) {
+                break;
+            }
+            double dx = target.x - bot.getX();
+            double dz = target.z - bot.getZ();
+            double horizSq = dx * dx + dz * dz;
+            if (horizSq > 4.0D || Math.abs(target.y - bot.getY()) > 0.6D) {
+                break; // the mover did not get close enough; centring will not fix it
+            }
+            double impulse = Math.max(0.04D, Math.min(0.10D, Math.sqrt(horizSq) * 0.25D));
+            BotActions.applyMovementInput(bot, target, impulse);
+            moved = true;
+            Thread.sleep(90L);
+        }
+        if (moved) {
+            BotActions.stop(bot);
+            Thread.sleep(150L);
+        }
+        return callOnServer(server,
+                () -> WallOffPolicy.arrival(bot.getX(), bot.getY(), bot.getZ(), bot.isOnGround(),
+                        feet.getX(), feet.getY(), feet.getZ()),
+                WALL_OFF_HOP_TIMEOUT_MS, WallOffPolicy.Arrival.OFF_CELL);
+    }
+
+    /**
+     * Mines the ledger in reverse placement order (head before feet, so a gravel or sand head
+     * block never drops into a freed feet cell), only where the cell still holds a seal-family
+     * block. Never touches anything outside the ledger.
+     */
+    private static WallOffTeardown tearDownWallOffLedger(ServerPlayerEntity bot,
+                                                         MinecraftServer server,
+                                                         List<BlockPos> ledger) throws InterruptedException {
+        int removed = 0;
+        int skipped = 0;
+        if (ledger == null || ledger.isEmpty() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return new WallOffTeardown(0, 0);
+        }
+        String name = bot.getName().getString();
+        for (int i = ledger.size() - 1; i >= 0; i--) {
+            BlockPos cell = ledger.get(i);
+            String id = callOnServer(server, () -> {
+                BlockState state = world.getBlockState(cell);
+                return state.isAir() ? "" : Registries.ITEM.getId(state.getBlock().asItem()).toString();
+            }, WALL_OFF_HOP_TIMEOUT_MS, null);
+            if (id == null) {
+                skipped++;
+                LOGGER.info("Bot {} wall-off teardown: skipped {} (read timeout)", name, cell.toShortString());
+                continue;
+            }
+            if (id.isEmpty()) {
+                removed++; // already open
+                continue;
+            }
+            if (!WallOffPolicy.teardownAllowed(id, SEAL_IDS)) {
+                skipped++;
+                LOGGER.info("Bot {} wall-off teardown: skipped {} ({} is not a seal block)",
+                        name, cell.toShortString(), id);
+                continue;
+            }
+            MiningTool.mineBlock(bot, cell, false).join();
+            Thread.sleep(200L);
+            Boolean open = callOnServer(server, () -> !world.getBlockState(cell).blocksMovement(),
+                    WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE);
+            if (Boolean.TRUE.equals(open)) {
+                removed++;
+            } else {
+                skipped++;
+                LOGGER.info("Bot {} wall-off teardown: {} still blocks after mining", name, cell.toShortString());
+            }
+        }
+        return new WallOffTeardown(removed, skipped);
+    }
+
+    /** Server thread only: one bounded read of the box around the bot's feet plus its seal blocks. */
+    private static WallOffScan buildWallOffScan(ServerPlayerEntity bot, ServerWorld world) {
+        BlockPos origin = bot.getBlockPos().toImmutable();
+        int r = WallOffPolicy.READ_RADIUS;
+        int dyMin = WallOffPolicy.READ_DY_MIN;
+        int dyMax = WallOffPolicy.READ_DY_MAX;
+        int volume = WallOffPolicy.Snapshot.volume(r, dyMin, dyMax);
+        byte[] cells = new byte[volume];
+        boolean[] sky = new boolean[volume];
+        BlockPos.Mutable m = new BlockPos.Mutable();
+        for (int dy = dyMin; dy <= dyMax; dy++) {
+            for (int dz = -r; dz <= r; dz++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    m.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    int idx = WallOffPolicy.Snapshot.index(r, dyMin, dx, dy, dz);
+                    cells[idx] = classifyWallOffCell(world, m);
+                    sky[idx] = world.isSkyVisible(m);
+                }
+            }
+        }
+
+        // Claims: ask the real authorization only for clear cells a candidate could seal
+        // (feet/head beside a possible stand cell). Marks are applied after the pass so a mark
+        // never changes another cell's stand test.
+        Set<Integer> refused = new java.util.HashSet<>();
+        Set<Integer> asked = new java.util.HashSet<>();
+        for (int dy = WallOffPolicy.SEARCH_DY_MIN; dy <= WallOffPolicy.SEARCH_DY_MAX; dy++) {
+            for (int dz = -WallOffPolicy.SEARCH_RADIUS; dz <= WallOffPolicy.SEARCH_RADIUS; dz++) {
+                for (int dx = -WallOffPolicy.SEARCH_RADIUS; dx <= WallOffPolicy.SEARCH_RADIUS; dx++) {
+                    if (cells[WallOffPolicy.Snapshot.index(r, dyMin, dx, dy - 1, dz)] != WallOffPolicy.SOLID
+                            || cells[WallOffPolicy.Snapshot.index(r, dyMin, dx, dy, dz)] != WallOffPolicy.CLEAR
+                            || cells[WallOffPolicy.Snapshot.index(r, dyMin, dx, dy + 1, dz)] != WallOffPolicy.CLEAR
+                            || cells[WallOffPolicy.Snapshot.index(r, dyMin, dx, dy + 2, dz)] != WallOffPolicy.SOLID) {
+                        continue;
                     }
-                    // Good shelter: 1-2 open faces (easy to wall off). 0 = fully enclosed already.
-                    // 3-4 open faces = too exposed, would need too many blocks.
-                    if (openFaces < 1 || openFaces > 2) continue;
-
-                    double distSq = center.getSquaredDistance(feet);
-                    // Prefer: fewer open faces first, then closer
-                    if (openFaces < bestOpenFaces
-                            || (openFaces == bestOpenFaces && distSq < bestDistSq)) {
-                        bestOpenFaces = openFaces;
-                        bestDistSq = distSq;
-                        best = feet.toImmutable();
+                    for (WallOffPolicy.Face face : WallOffPolicy.Face.values()) {
+                        for (int k = 0; k <= 1; k++) {
+                            int idx = WallOffPolicy.Snapshot.index(r, dyMin, dx + face.dx, dy + k, dz + face.dz);
+                            if (cells[idx] != WallOffPolicy.CLEAR || !asked.add(idx)) {
+                                continue;
+                            }
+                            BlockPos pos = origin.add(dx + face.dx, dy + k, dz + face.dz);
+                            if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
+                                refused.add(idx);
+                            }
+                        }
                     }
                 }
             }
         }
-        return best;
+        for (int idx : refused) {
+            cells[idx] = WallOffPolicy.PROTECTED;
+        }
+
+        // Hostiles: the read box widened by the 4-block rule so an edge candidate still sees them.
+        int reach = r + 4;
+        List<int[]> hostiles = new ArrayList<>();
+        Box box = new Box(origin.getX() - reach, origin.getY() + dyMin - 4, origin.getZ() - reach,
+                origin.getX() + reach + 1, origin.getY() + dyMax + 5, origin.getZ() + reach + 1);
+        for (net.minecraft.entity.mob.HostileEntity mob : world.getEntitiesByClass(
+                net.minecraft.entity.mob.HostileEntity.class, box, e -> e != null && e.isAlive() && !e.isRemoved())) {
+            BlockPos p = mob.getBlockPos();
+            hostiles.add(new int[]{p.getX() - origin.getX(), p.getY() - origin.getY(), p.getZ() - origin.getZ()});
+        }
+
+        Map<String, Integer> counts = new HashMap<>();
+        boolean hotbarSeal = false;
+        var inventory = bot.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String id = Registries.ITEM.getId(stack.getItem()).toString();
+            if (!SEAL_IDS.contains(id)) {
+                continue;
+            }
+            counts.merge(id, stack.getCount(), Integer::sum);
+            if (i < 9) {
+                hotbarSeal = true;
+            }
+        }
+        boolean hotbarOk = !HotbarLockService.isLocked(bot) || hotbarSeal;
+        int blocks = WallOffPolicy.countSealable(counts, SEAL_IDS);
+
+        return new WallOffScan(origin, new WallOffPolicy.Snapshot(r, dyMin, dyMax, cells, sky,
+                hostiles.toArray(new int[0][]), blocks, hotbarOk));
     }
 
-    /**
-     * Emergency wall-off: walk to a shelter position (overhang/cave), then place blocks
-     * to seal the open faces. Optionally place a torch inside if the bot has one.
-     */
-    private static void emergencyWallOff(ServerPlayerEntity bot, BlockPos shelter) {
+    /** Collision-based cell code; hazards first because lava and fire have empty collision. */
+    private static byte classifyWallOffCell(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isOf(Blocks.LAVA) || state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE)
+                || state.isOf(Blocks.CACTUS) || state.isOf(Blocks.MAGMA_BLOCK)
+                || state.isOf(Blocks.CAMPFIRE) || state.isOf(Blocks.SOUL_CAMPFIRE)) {
+            return WallOffPolicy.HAZARD;
+        }
+        var fluid = state.getFluidState();
+        if (!fluid.isEmpty()) {
+            return fluid.isStill() ? WallOffPolicy.HAZARD : WallOffPolicy.FLUID;
+        }
+        if (state.isAir()) {
+            return WallOffPolicy.CLEAR;
+        }
+        boolean noCollision = state.getCollisionShape(world, pos).isEmpty();
+        if (state.isReplaceable() && noCollision) {
+            return WallOffPolicy.CLEAR;
+        }
+        return noCollision ? WallOffPolicy.PARTIAL : WallOffPolicy.SOLID;
+    }
+
+    private static BlockPos toWorld(BlockPos origin, WallOffPolicy.Cell cell) {
+        return origin.add(cell.dx(), cell.dy(), cell.dz()).toImmutable();
+    }
+
+    private static Direction toDirection(WallOffPolicy.Face face) {
+        if (face == null) {
+            return null;
+        }
+        return switch (face) {
+            case NORTH -> Direction.NORTH;
+            case SOUTH -> Direction.SOUTH;
+            case WEST -> Direction.WEST;
+            case EAST -> Direction.EAST;
+        };
+    }
+
+    /** Bounded server-thread call from a worker; runs inline when already on the server thread. */
+    private static <T> T callOnServer(MinecraftServer server, Supplier<T> action, long timeoutMs, T fallback) {
+        if (server == null || action == null) {
+            return fallback;
+        }
+        if (server.isOnThread()) {
+            return action.get();
+        }
+        CompletableFuture<T> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(action.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
         try {
-            // Walk to the shelter.
-            bot.getCommandSource().getServer().execute(() ->
-                    FollowMovementService.moveToward(bot, Vec3d.ofCenter(shelter), 1.0, true, null));
-            Thread.sleep(2000);
-
-            if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
-
-            // Wall off open faces at feet level AND head level.
-            for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-                BlockPos wallFeet = shelter.offset(dir);
-                BlockPos wallHead = wallFeet.up();
-                if (world.getBlockState(wallFeet).isAir() || world.getBlockState(wallFeet).isReplaceable()) {
-                    bot.getCommandSource().getServer().execute(() ->
-                            BotActions.placeBlockAt(bot, wallFeet));
-                    Thread.sleep(300);
-                }
-                if (world.getBlockState(wallHead).isAir() || world.getBlockState(wallHead).isReplaceable()) {
-                    bot.getCommandSource().getServer().execute(() ->
-                            BotActions.placeBlockAt(bot, wallHead));
-                    Thread.sleep(300);
-                }
-            }
-
-            // Place a torch inside if the bot has one.
-            for (int i = 0; i < bot.getInventory().size(); i++) {
-                var stack = bot.getInventory().getStack(i);
-                if (stack.isOf(Items.TORCH)) {
-                    BlockPos torchPos = shelter;
-                    bot.getCommandSource().getServer().execute(() ->
-                            BotActions.placeBlockAt(bot, torchPos));
-                    break;
-                }
-            }
-
-            LOGGER.info("Bot {} walled off shelter at {}",
-                    bot.getName().getString(), shelter.toShortString());
-
-            // Wait inside to heal.
-            Thread.sleep(5000);
+            return future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return fallback;
         } catch (Exception e) {
-            LOGGER.warn("Emergency wall-off failed for {}: {}", bot.getName().getString(), e.getMessage());
+            return fallback;
         }
     }
 
@@ -1299,6 +1685,16 @@ public final class BotFleeService {
                     yield true;
                 }
                 yield VoxelJunctionService.countOpenFaces(world, stand) <= 1;
+            }
+            case WALL_OFF -> {
+                // Strictest rule: all eight side cells (feet and head on every face) block movement.
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    BlockPos side = stand.offset(dir);
+                    if (!world.getBlockState(side).blocksMovement() || !world.getBlockState(side.up()).blocksMovement()) {
+                        yield false;
+                    }
+                }
+                yield true;
             }
             case VILLAGE_HOUSE -> {
                 if (capPos == null) {
@@ -1944,6 +2340,8 @@ public final class BotFleeService {
                 breakFreeDugDown(bot, world, info);
             } else if (info != null && info.type() == ShelterType.VILLAGE_HOUSE && info.capPos() != null) {
                 breakFreeVillageHouse(bot, world, info);
+            } else if (info != null && info.type() == ShelterType.WALL_OFF && info.capPos() != null) {
+                breakFreeWallOff(bot, world, info);
             } else {
                 breakFreeGeneric(bot, world, pos);
             }
@@ -2025,6 +2423,34 @@ public final class BotFleeService {
         LOGGER.info("Bot {} broke cap of dig-down shelter at {}", bot.getName().getString(),
                 capPos.toShortString());
         // Pillar up is handled by escapeToSurface()
+    }
+
+    /**
+     * Break free from a wall-off shelter: mine only the ledger cells that still hold seal-family
+     * blocks, then step out through the primary face.
+     */
+    private static void breakFreeWallOff(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
+            throws InterruptedException {
+        MinecraftServer server = bot.getCommandSource().getServer();
+        String name = bot.getName().getString();
+        List<BlockPos> ledger = info.placedBlocks();
+        WallOffTeardown torn = tearDownWallOffLedger(bot, server, ledger);
+        LOGGER.info("Bot {} wall-off teardown: removed {}/{} skipped={}",
+                name, torn.removed(), ledger.size(), torn.skipped());
+        Direction exitDir = info.entryDir();
+        if (exitDir == null || shouldAbortSurvival(bot)) {
+            return;
+        }
+        BlockPos stand = info.interiorPos() != null ? info.interiorPos() : bot.getBlockPos();
+        BlockPos far = stand.offset(exitDir, 2).toImmutable();
+        boolean farStandable = Boolean.TRUE.equals(callOnServer(server,
+                () -> VoxelJunctionService.isStandable(world, far), WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE));
+        BlockPos exitTarget = farStandable ? far : stand.offset(exitDir).toImmutable();
+        MovementService.MovementPlan exitPlan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT, exitTarget, exitTarget, null, null, null);
+        MovementService.execute(bot.getCommandSource(), bot, exitPlan, Boolean.FALSE, true);
+        Thread.sleep(600L);
+        LOGGER.info("Bot {} broke free from wall-off shelter via {}", name, exitDir.asString());
     }
 
     private static void breakFreeVillageHouse(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
