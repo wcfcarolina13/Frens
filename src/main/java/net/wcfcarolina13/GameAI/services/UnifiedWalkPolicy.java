@@ -23,9 +23,10 @@ public final class UnifiedWalkPolicy {
     }
 
     /**
-     * NO_PATH: the boxed-in terrain move survives only for a non-mutating request (the search could not
-     * consider breaks or places, so a costed BREAK/PLACE may still free the bot), once per walk. Every
-     * other reason is final for this walk and goes back to the caller in the detail.
+     * NO_PATH: the boxed-in terrain move survives only for a request without breaks (swim and falls
+     * were already searched, so only the terrain move's walk-around or BFS escape is left; its own
+     * mutation gate keeps BREAK/PLACE off, the same gate that kept them out of the request), once per
+     * walk. Every other reason is final for this walk and goes back to the caller in the detail.
      */
     public static NoPathStep onNoPath(NoPathReason reason, boolean requestAllowsBreak, boolean boxedInTried) {
         if (reason == NoPathReason.BOXED_IN && !requestAllowsBreak && !boxedInTried) {

@@ -16,6 +16,14 @@ class WoodcutStandRetryPolicyTest {
         assertTrue(WoodcutStandRetryPolicy.isPathFailure("approach-plan: walk blocked after replans"));
         assertTrue(WoodcutStandRetryPolicy.isPathFailure("A* timeout after 10000 ms"));
         assertTrue(WoodcutStandRetryPolicy.isPathFailure("NO WALKABLE PATH"));
+        // 1.1.242 unified walkTo details
+        assertTrue(WoodcutStandRetryPolicy.isPathFailure("move-to-stand: no walkable path reason=BLOCKED_PROTECTED plan=p4"));
+        assertTrue(WoodcutStandRetryPolicy.isPathFailure(
+                "move-to-stand: walk blocked: planned ASCEND failed: break-failed plan=p7"));
+        assertTrue(WoodcutStandRetryPolicy.isPathFailure(
+                "move-to-stand: walk blocked: cost verification move 2 ASCEND cost +12.0 ticks plan=p9"));
+        assertFalse(WoodcutStandRetryPolicy.isPathFailure("move-to-stand: walk blocked: planned SWIM failed: aborted plan=p3"),
+                "an aborted action is a stop, not a path failure");
     }
 
     @Test

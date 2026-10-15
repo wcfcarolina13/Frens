@@ -1048,14 +1048,14 @@ public final class MovementService {
     /**
      * walkTo's request (1.1.242): break and place only under the same gate as a terrain BREAK/PLACE
      * ({@code mutationOk}: a running skill task, no obstruction-mine opt-out, no construction
-     * protection); otherwise the legacy move set walkSegment can walk.
+     * protection). Swim and falls up to 3 always: they change nothing in the world.
      */
     private static PlanRequest walkPlanRequest(ServerPlayerEntity player) {
         boolean mutation = PlannedMoveExecPolicy.mutationAllowed(
                 Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get()),
                 AutoFaceEntity.isBotExecutingTask(),
                 ConstructionProtectionService.hasActiveProtection(player.getUuid()));
-        return mutation ? PlanRequest.walkTo(true, true) : PlanRequest.legacyWalk();
+        return PlanRequest.walkTo(mutation, mutation);
     }
 
     /**
@@ -1112,7 +1112,7 @@ public final class MovementService {
                         label + ": no walkable path reason=" + reason + " plan=" + planTag);
             }
             if (!preclearDone && UnifiedWalkPolicy.preclearStepUps(request.allowBreak())) {
-                // Legacy move set: keep the 1.1.240 step-up pre-trim, then replan once from the same cell.
+                // No planned breaks: keep the 1.1.240 step-up pre-trim, then replan once from the same cell.
                 preclearDone = true;
                 if (preclearPlannedStepUps(player, result.nodes(), "walkTo-preclear")) {
                     legStart = walkPlanStart(player);
@@ -1143,9 +1143,9 @@ public final class MovementService {
                 CostVerifier.Verdict verdict = CostVerifier.check(ctx, plan, unit.firstMoveIndex(),
                         PathFinder.rebindToFreshView(ctx).terrain());
                 if (PlannedMoveExecPolicy.cancelLeg(verdict)) {
-                    failure = PlannedMoveExecPolicy.cancelReason(verdict);
+                    failure = "walk blocked: " + PlannedMoveExecPolicy.cancelReason(verdict);
                     LOGGER.info("walkTo leg cancelled: {} [{}] bot={} plan={} planned={} live={}",
-                            failure, label, bot, planTag,
+                            PlannedMoveExecPolicy.cancelReason(verdict), label, bot, planTag,
                             String.format(Locale.ROOT, "%.1f", verdict.plannedTicks()),
                             String.format(Locale.ROOT, "%.1f", verdict.liveTicks()));
                     break;
@@ -1174,7 +1174,7 @@ public final class MovementService {
                     }
                     PlannedMoveResult done = executePlannedMove(player, move, label + "-" + planTag);
                     if (!done.ok()) {
-                        failure = "planned " + move.kind() + " failed: " + done.reason();
+                        failure = "walk blocked: planned " + move.kind() + " failed: " + done.reason();
                         BlockPos from = new BlockPos(move.fromX(), move.fromY(), move.fromZ());
                         if (walkPlanStart(player).equals(from)) {
                             recordFailedRoute(player, from, to, label + "-unified-action");
