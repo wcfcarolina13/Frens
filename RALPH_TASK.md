@@ -3,7 +3,26 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.241) — next session starts here
+## Session Handoff 2026-10-15 (1.1.242) — next session starts here
+
+**State:** main = origin/main @ 1.1.242 (overnight run, Bradley asleep). Suite 2464 green. 1.1.242 = the unified
+pathfinder (`PathFinding/unified/`, design `docs/testing/NAV_1.1.242_MERGED_FINDER_DESIGN.md`) shipped OPT-IN: default stays
+Baritone because a 4-bot A/B had unified reach 46% vs the 61.5% baseline (causes fixed since, not re-measured at length).
+Also: audit live-bug fixes B1-B5, B7, B8 (fishing auto-cook, fishing deposit chest, honey, wool, Fortify block-entity
+guard, mount streak, detect_blocks), per-bot dig gate (only the bot's own skill/hobby/surface-recovery task can dig).
+Field items now 303 (Phase 6am).
+**Dead-code audit:** phase 1 done, `docs/testing/DEAD_CODE_AUDIT_2026-10.md`: ~4,100 safe-delete lines in 16 phases, 12
+merges, and 17 NEEDS-BRADLEY questions (RL/Q-learning ~2,400 lines, legacy LLM path + cloud clients, dev /bot
+subcommands, nav_mode, disabled flee tactics, combat line hooks, quest templates, persisted unused config keys). Phase 2
+(removals) waits for Bradley's answers to section 5.
+**Next:** (1) Bradley answers the audit questions, then removal builds of ≤5 files each. (2) A longer unified A/B
+(daylight, axes, bots outside the Spawn base, terrain forcing break/place/swim; Phase 6am item 1); if unified wins, the
+next build makes it the default and removes the old finders and the toggle (design slice D). (3) Open: woodcut should
+blacklist a stand on GOAL_NOT_STANDABLE, ranged mobs don't pause a skill (Eve died to a Bogged), cancelled-mining ERROR
+log noise. Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or
+re-scoped by Bradley.
+
+## Session Handoff 2026-10-15 (1.1.241) — superseded
 
 **State:** main = origin/main @ 1.1.241. Suite 2357 green. 1.1.241 = the small items after 1.1.240: woodcut tree claims
 (`WoodcutTreeClaims`, sandbox #19), creeper backoff says a plain line instead of `creeper-fuse` (#18), torch-hold log keyed
