@@ -3,7 +3,16 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.248) — next session starts here
+## Session Handoff 2026-10-15 (1.1.249) — next session starts here
+
+**State:** main = origin/main @ 1.1.249. Suite 2531 green. 1.1.249 = the Q5 wall-off night shelter (design
+`docs/testing/WALL_OFF_SHELTER_DESIGN.md`, pure `WallOffPolicy`), sandbox dusk and dawn passed. Field items: Phase 6aq.
+**Next:** Q2/Q3 legacy LLM retirement build A (reviewed merge-ready, branch `llm-retire-a`) as 1.1.250, then build B (delete
+the dead legacy classes, the stub trees, ollama4j, DJL, OpenNLP, sqlite-jdbc, jsoup, commons-*) as 1.1.251.
+**Follow-ups:** wall-off seal order should prefer dirt without a pickaxe; dig-down leaves an uncapped bunker when the cap
+fails; wall-off persistence across reload; mount `_legacy` promotion removal after Nirn runs >= 1.1.246.
+
+## Session Handoff 2026-10-15 (1.1.248) — superseded
 
 **State:** main = origin/main @ 1.1.248. Suite 2501 green. 1.1.248 = Q8 combat callouts wired, Q9 `/bot base owner`, Q14 leash
 target forgotten after a fence tie or death. Field items: Phase 6ap.
