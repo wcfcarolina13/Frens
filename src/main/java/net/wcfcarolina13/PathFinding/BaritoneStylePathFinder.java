@@ -157,7 +157,7 @@ public class BaritoneStylePathFinder {
             if ((++iterations & 0x3FF) == 0 && System.currentTimeMillis() > deadline) {
                 LOGGER.info("[BaritonePathFinder] Timeout after {}ms, {} iterations, {} nodes expanded",
                         timeoutMs, iterations, nodesExpanded);
-                return extractBestPartialPath(bestSoFar, sx, sy, sz, world);
+                return extractBestPartialPath(bestSoFar, sx, sy, sz, cache);
             }
 
             Node current = openSet.poll();
@@ -168,7 +168,7 @@ public class BaritoneStylePathFinder {
                 LOGGER.info("[BaritonePathFinder] Goal reached! {} iterations, {} nodes expanded",
                         iterations, nodesExpanded);
                 List<BlockPos> rawPath = reconstructPath(current);
-                return tagBlocks(rawPath, world);
+                return tagBlocks(rawPath, cache);
             }
 
             closedSet.put(current.packed, current);
@@ -181,7 +181,7 @@ public class BaritoneStylePathFinder {
 
         // Open set exhausted — no path exists
         LOGGER.warn("[BaritonePathFinder] Open set exhausted, {} nodes expanded", nodesExpanded);
-        List<PathFinder.PathNode> partial = extractBestPartialPath(bestSoFar, sx, sy, sz, world);
+        List<PathFinder.PathNode> partial = extractBestPartialPath(bestSoFar, sx, sy, sz, cache);
         if (!partial.isEmpty()) {
             return partial;
         }
@@ -197,21 +197,24 @@ public class BaritoneStylePathFinder {
 
         int cx = current.x, cy = current.y, cz = current.z;
 
-        // Cardinal flat moves — require solid floor
-        tryAddNeighbor(cx + 1, cy, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx - 1, cy, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx, cy, cz + 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx, cy, cz - 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddDiagonalNeighbor(cx + 1, cy, cz + 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddDiagonalNeighbor(cx + 1, cy, cz - 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddDiagonalNeighbor(cx - 1, cy, cz + 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddDiagonalNeighbor(cx - 1, cy, cz - 1, current, 1.4, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Every move below lands on a standing cell and passes PathMovePolicy (1.1.240):
+        // flat, diagonal with corner clearance, step-up of exactly one block with headroom
+        // above the origin, step-down of one block. There is no raw vertical "Up" move — it
+        // planned pillars (a 2-high rise onto sand) that no executor can walk.
 
-        // Down — require floor at landing position
-        tryAddNeighbor(cx, cy - 1, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Cardinal flat moves
+        tryAddNeighbor(cx + 1, cy, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx - 1, cy, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx, cy, cz + 1, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx, cy, cz - 1, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx + 1, cy, cz + 1, current, 1.4, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx + 1, cy, cz - 1, current, 1.4, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx - 1, cy, cz + 1, current, 1.4, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddDiagonalNeighbor(cx - 1, cy, cz - 1, current, 1.4, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
-        // Up (raw vertical climb) — no floor required at jump destination
-        tryAddNeighbor(cx, cy + 1, cz, current, 1.5, false, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Straight down onto a floor. Only ever passes from a floorless origin (the bot's
+        // own cell read mid-jump); from a standing cell the body cell is the floor block.
+        tryAddNeighbor(cx, cy - 1, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
         // Smart step-up moves: step onto solid block in front (4 cardinals)
         tryStepUp(cx + 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
@@ -237,7 +240,6 @@ public class BaritoneStylePathFinder {
     private static void tryAddDiagonalNeighbor(
             int nx, int ny, int nz,
             Node parent, double moveCost,
-            boolean requireFloor,
             int tx, int ty, int tz,
             ChunkCache cache,
             PriorityQueue<Node> openSet, Map<Long, Node> openMap, Map<Long, Node> closedSet,
@@ -247,7 +249,7 @@ public class BaritoneStylePathFinder {
         if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
             return;
         }
-        tryAddNeighbor(nx, ny, nz, parent, moveCost, requireFloor, tx, ty, tz, cache,
+        tryAddNeighbor(nx, ny, nz, parent, moveCost, tx, ty, tz, cache,
                 openSet, openMap, closedSet, bestSoFar, bestScores);
     }
 
@@ -257,15 +259,10 @@ public class BaritoneStylePathFinder {
                                     PriorityQueue<Node> openSet, Map<Long, Node> openMap,
                                     Map<Long, Node> closedSet,
                                     Node[] bestSoFar, double[] bestScores) {
-        // Block in front must be solid, space above must be clear (body + head)
-        if (isSolidBlock(cache, nx, cy, nz)
-                && isPassable(cache, nx, cy + 1, nz)
-                && isPassable(cache, nx, cy + 2, nz)) {
-            // Ensure bot has headroom to jump from its current position
-            if (!isPassable(cache, parent.x, parent.y + 2, parent.z)) {
-                return;
-            }
-            tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, false, tx, ty, tz, cache,
+        // Cheap gate: only a solid block in front can be stepped onto. The landing body/head
+        // and the headroom above the origin are checked by PathMovePolicy in tryAddNeighbor.
+        if (isSolidBlock(cache, nx, cy, nz)) {
+            tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
     }
@@ -281,21 +278,16 @@ public class BaritoneStylePathFinder {
         if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
             return;
         }
-        if (isSolidBlock(cache, nx, cy, nz)
-                && isPassable(cache, nx, cy + 1, nz)
-                && isPassable(cache, nx, cy + 2, nz)) {
-            if (!isPassable(cache, parent.x, parent.y + 2, parent.z)) {
-                return;
-            }
-            tryAddNeighbor(nx, cy + 1, nz, parent, 1.8, false, tx, ty, tz, cache,
+        if (isSolidBlock(cache, nx, cy, nz)) {
+            tryAddNeighbor(nx, cy + 1, nz, parent, 1.8, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
     }
 
     /**
      * Step-down move: when the flat position (nx, cy, nz) lacks a floor (staircase),
-     * check if we can drop to (nx, cy-1, nz) with solid ground below.
-     * Mirrors tryStepUp for downhill navigation.
+     * drop to (nx, cy-1, nz). PathMovePolicy requires a floor under the landing, a clear
+     * landing body/head and a clear cell at landing.y + 2 (the head passes through it).
      */
     private static void tryStepDown(int nx, int cy, int nz,
                                     Node parent, int tx, int ty, int tz,
@@ -303,17 +295,8 @@ public class BaritoneStylePathFinder {
                                     PriorityQueue<Node> openSet, Map<Long, Node> openMap,
                                     Map<Long, Node> closedSet,
                                     Node[] bestSoFar, double[] bestScores) {
-        int dropY = cy - 1;
-        if (isPassable(cache, nx, dropY, nz)
-                && isPassable(cache, nx, dropY + 1, nz)
-                && hasSupportedFloor(cache, nx, dropY, nz)) {
-            // Ensure the space the bot occupies before falling is passable
-            if (!isPassable(cache, nx, dropY + 2, nz)) {
-                return;
-            }
-            tryAddNeighbor(nx, dropY, nz, parent, 1.2, false, tx, ty, tz, cache,
-                    openSet, openMap, closedSet, bestSoFar, bestScores);
-        }
+        tryAddNeighbor(nx, cy - 1, nz, parent, 1.2, tx, ty, tz, cache,
+                openSet, openMap, closedSet, bestSoFar, bestScores);
     }
 
     private static void tryDiagonalStepDown(int nx, int cy, int nz,
@@ -327,22 +310,13 @@ public class BaritoneStylePathFinder {
         if (!hasDiagonalClearance(cache, parent.x, parent.y, parent.z, dx, dz)) {
             return;
         }
-        int dropY = cy - 1;
-        if (isPassable(cache, nx, dropY, nz)
-                && isPassable(cache, nx, dropY + 1, nz)
-                && hasSupportedFloor(cache, nx, dropY, nz)) {
-            if (!isPassable(cache, nx, dropY + 2, nz)) {
-                return;
-            }
-            tryAddNeighbor(nx, dropY, nz, parent, 1.5, false, tx, ty, tz, cache,
-                    openSet, openMap, closedSet, bestSoFar, bestScores);
-        }
+        tryAddNeighbor(nx, cy - 1, nz, parent, 1.5, tx, ty, tz, cache,
+                openSet, openMap, closedSet, bestSoFar, bestScores);
     }
 
     private static void tryAddNeighbor(
             int nx, int ny, int nz,
             Node parent, double moveCost,
-            boolean requireFloor,
             int tx, int ty, int tz,
             ChunkCache cache,
             PriorityQueue<Node> openSet, Map<Long, Node> openMap, Map<Long, Node> closedSet,
@@ -356,11 +330,18 @@ public class BaritoneStylePathFinder {
         int depthFloor = Math.min(cache.startY, ty) - 2;
         if (ny < depthFloor) return;
 
-        // Walkability check using chunk cache (body + head passable)
-        if (!isPassable(cache, nx, ny, nz) || !isPassable(cache, nx, ny + 1, nz)) return;
-
-        // Floor support: reject air-walking nodes (prevents impossible floating paths)
-        if (requireFloor && !hasSupportedFloor(cache, nx, ny, nz)) return;
+        // Executable edge (1.1.240): standing landing cell, at most one block up or down,
+        // headroom above the origin for a rise, a clear head lane for a drop.
+        int dy = ny - parent.y;
+        if (dy > PathMovePolicy.MAX_RISE || dy < -PathMovePolicy.MAX_DROP) return;
+        if (!PathMovePolicy.isExecutable(dy,
+                hasSupportedFloor(cache, nx, ny, nz),
+                isPassable(cache, nx, ny, nz),
+                isPassable(cache, nx, ny + 1, nz),
+                dy > 0 && isPassable(cache, parent.x, parent.y + 2, parent.z),
+                dy < 0 && isPassable(cache, nx, ny + 2, nz))) {
+            return;
+        }
 
         // Cheap hazard checks: magma floor and direct campfire contact only.
         // The expensive 75-block-area campfire scan is NOT done here — it was the
@@ -414,7 +395,7 @@ public class BaritoneStylePathFinder {
     }
 
     private static List<PathFinder.PathNode> extractBestPartialPath(
-            Node[] bestSoFar, int sx, int sy, int sz, ServerWorld world) {
+            Node[] bestSoFar, int sx, int sy, int sz, ChunkCache cache) {
 
         // Iterate from best quality (lowest coefficient) to worst
         for (int i = 0; i < bestSoFar.length; i++) {
@@ -437,7 +418,7 @@ public class BaritoneStylePathFinder {
                     rawPath = new ArrayList<>(rawPath.subList(0, cutLen));
                 }
 
-                return tagBlocks(rawPath, world);
+                return tagBlocks(rawPath, cache);
             }
         }
 
@@ -542,120 +523,56 @@ public class BaritoneStylePathFinder {
         return path;
     }
 
-    // --- Block tagging (reuses PathFinder's logic, adapted inline) ---
-    private static List<PathFinder.PathNode> tagBlocks(List<BlockPos> rawPath, ServerWorld world) {
-        List<PathFinder.PathNode> taggedPath = new ArrayList<>();
+    // --- Block tagging ---
+    /**
+     * Tags each search node with walkable/jump flags. Uses the same passability and floor
+     * predicates as the search, so search and tag cannot disagree.
+     *
+     * <p>1.1.240: nodes are never lifted or dropped. Index 0 is the bot's own cell and is
+     * emitted as-is (it may be mid-jump or inside a slab). Every later node is a standing
+     * cell by construction; if one is not, the path is refused (one WARN) rather than
+     * quietly reshaped into a hop no executor can walk.
+     */
+    private static List<PathFinder.PathNode> tagBlocks(List<BlockPos> rawPath, ChunkCache cache) {
+        List<PathFinder.PathNode> taggedPath = new ArrayList<>(rawPath.size());
 
         for (int i = 0; i < rawPath.size(); i++) {
             BlockPos pos = rawPath.get(i);
-            BlockPos feetPos = pos.down();
-            BlockPos bodyPos = pos;
-            BlockPos headPos = pos.up();
+            int x = pos.getX(), y = pos.getY(), z = pos.getZ();
 
-            boolean solidBelow = isSolidBlockWorld(world, feetPos);
-            boolean bodyIsSlab = isSlab(world, bodyPos);
-            boolean bodyClear = isPassableWorld(world, bodyPos);
-            boolean headClear = isPassableWorld(world, headPos);
+            boolean solidBelow = isSolidBlock(cache, x, y - 1, z);
+            boolean bodyIsSlab = isSlab(cache, x, y, z);
+            boolean canStand = solidBelow
+                    && isPassable(cache, x, y, z)
+                    && isPassable(cache, x, y + 1, z);
 
-            boolean canStand = solidBelow && bodyClear && headClear;
-            boolean jumpRequired = false;
-
-            BlockState bodyState = world.getBlockState(bodyPos);
-            boolean isCrop = bodyState.isIn(BlockTags.CROPS);
-            if (bodyClear && isCrop) {
-                jumpRequired = false;
+            if (!canStand && i > 0) {
+                LOGGER.warn("[BaritonePathFinder] Refusing path: node {} of {} at {} is not a standing cell",
+                        i, rawPath.size(), pos.toShortString());
+                return new ArrayList<>();
             }
 
+            boolean jumpRequired = false;
             if (i > 0) {
                 BlockPos prev = rawPath.get(i - 1);
-                int dy = pos.getY() - prev.getY();
-
+                int dy = y - prev.getY();
                 if (dy > 0) {
-                    boolean canStepUpSlab = solidBelow && bodyIsSlab && isPassableWorld(world, headPos);
-                    if (bodyIsSlab || canStepUpSlab) {
-                        jumpRequired = false;
-                    } else {
-                        jumpRequired = true;
-                    }
+                    jumpRequired = !bodyIsSlab;
                 } else {
-                    int dx = pos.getX() - prev.getX();
-                    int dz = pos.getZ() - prev.getZ();
-                    BlockPos forward = prev.add(dx, 0, dz);
-                    if (isSolidBlockWorld(world, forward) && !isSlab(world, forward)) {
-                        jumpRequired = true;
-                    } else if (isSlab(world, forward)) {
-                        jumpRequired = false;
-                    }
+                    // Same level or a drop: the cell in front at the origin's height.
+                    int fy = prev.getY();
+                    jumpRequired = !isSlab(cache, x, fy, z) && isSolidBlock(cache, x, fy, z);
                 }
             }
 
-            if (!canStand) {
-                BlockPos upFeet = feetPos.up();
-                BlockPos upBody = bodyPos.up();
-                BlockPos upHead = headPos.up();
-
-                boolean canStandUp = isSolidBlockWorld(world, upFeet)
-                        && isPassableWorld(world, upBody)
-                        && isPassableWorld(world, upHead);
-
-                if (canStandUp) {
-                    BlockState upHeadState = world.getBlockState(upHead);
-                    boolean isSlabAbove = upHeadState.isIn(BlockTags.SLABS);
-                    boolean hasCollision = !upHeadState.getCollisionShape(world, upHead).isEmpty();
-                    if (isSlabAbove || hasCollision) {
-                        continue;
-                    }
-                    canStand = true;
-                    jumpRequired = true;
-                    pos = pos.up();
-                } else {
-                    continue;
-                }
-            }
-
-            String feetBlockType = world.getBlockState(feetPos).getBlock().getName().getString().toLowerCase();
-            PathFinder.PathNode node = new PathFinder.PathNode(pos, feetBlockType, canStand, jumpRequired);
-            taggedPath.add(node);
+            String feetBlockType = cache.getBlockState(x, y - 1, z).getBlock().getName().getString().toLowerCase();
+            taggedPath.add(new PathFinder.PathNode(pos, feetBlockType, canStand, jumpRequired));
         }
 
         return taggedPath;
     }
 
-    // World-based checks (for tagBlocks, which operates on BlockPos)
-    private static boolean isPassableWorld(ServerWorld world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
-        if (net.wcfcarolina13.GameAI.services.BotHazardService.isDeadlyBlock(state)) return false;
-        if (state.getBlock() instanceof DoorBlock) {
-            if (state.isOf(Blocks.IRON_DOOR)) {
-                return state.getCollisionShape(world, pos).isEmpty();
-            }
-            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
-                return false;
-            }
-            return true;
-        }
-        if (state.getBlock() instanceof TrapdoorBlock) {
-            if (state.isOf(Blocks.IRON_TRAPDOOR)) {
-                return state.getCollisionShape(world, pos).isEmpty();
-            }
-            if (net.wcfcarolina13.GameAI.services.LockableBlockService.isLocked(world, pos)) {
-                return false;
-            }
-            return true;
-        }
-        FluidState fluid = world.getFluidState(pos);
-        if (!fluid.isEmpty()) return false;
-        // Air OR thin walkable partial (carpets, pressure plates, rails, tripwire, ...).
-        return state.isAir()
-                || net.wcfcarolina13.GameAI.services.WalkablePartialBlocks.isPathable(state, world, pos);
-    }
-
-    private static boolean isSolidBlockWorld(ServerWorld world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
-        return !state.isAir() && state.isOpaque();
-    }
-
-    private static boolean isSlab(ServerWorld world, BlockPos pos) {
-        return world.getBlockState(pos).isIn(BlockTags.SLABS);
+    private static boolean isSlab(ChunkCache cache, int x, int y, int z) {
+        return cache.getBlockState(x, y, z).isIn(BlockTags.SLABS);
     }
 }
