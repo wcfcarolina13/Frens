@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -46,6 +47,12 @@ public final class BotUndergroundSurvivalService {
      * Set when {@link #recordRecoveryAttempt} runs on this thread, so the survival-level feed in
      * {@link #onServerTick} does not record the same attempt twice (one attempt = one record).
      */
+    /**
+     * Bots holding still after {@code /bot stop}: the abort latch is set and nothing else is running.
+     * Only used to log the hold once; removed when the latch clears.
+     */
+    private static final Set<UUID> HOLDING_AFTER_STOP = ConcurrentHashMap.newKeySet();
+
     private static final ThreadLocal<Boolean> ATTEMPT_RECORDED = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);
@@ -67,6 +74,7 @@ public final class BotUndergroundSurvivalService {
         // inherit a cooldown or throttle from it.
         STUCK_STATE.clear();
         NEXT_CHECK_TICK.clear();
+        HOLDING_AFTER_STOP.clear();
     }
 
     /** Re-create the underground survival executor if it was shut down. Called from {@code SERVER_STARTED}. */
@@ -94,6 +102,11 @@ public final class BotUndergroundSurvivalService {
             if (nowTick < NEXT_CHECK_TICK.getOrDefault(botId, 0L)) continue;
             NEXT_CHECK_TICK.put(botId, nowTick + CHECK_INTERVAL_TICKS);
 
+            boolean abortLatched = TaskService.isAbortRequested(botId);
+            if (!abortLatched) {
+                HOLDING_AFTER_STOP.remove(botId);
+            }
+
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) continue;
             if (world.getRegistryKey() != World.OVERWORLD) continue;
 
@@ -103,6 +116,15 @@ public final class BotUndergroundSurvivalService {
                 if (STUCK_STATE.containsKey(botId) && TaskService.getActiveTaskInfo(botId)
                         .map(info -> info.origin() == TaskService.Origin.COMMAND).orElse(false)) {
                     clearStuckEpisode(bot, "owner command");
+                }
+                continue;
+            }
+            // A stopped bot stays put: the abort latch from /bot stop would abort every staging walk
+            // instantly, so do not relaunch recovery until the next command clears it.
+            if (abortLatched) {
+                if (HOLDING_AFTER_STOP.add(botId)) {
+                    LOGGER.info("Underground survival: {} holding still after a stop command until the next command",
+                            bot.getName().getString());
                 }
                 continue;
             }
