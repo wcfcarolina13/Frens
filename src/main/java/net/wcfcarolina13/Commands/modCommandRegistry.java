@@ -402,48 +402,48 @@ public class modCommandRegistry {
                                                 )
                                             )
                                             )
-                                        // Manual emote test: /bot emote list -> print available names.
-                                        // /bot emote <name> -> force-play on every nearby registered bot.
-                                        // /bot emote <name> <bot> -> force-play on a specific bot.
-                                        .then(literal("emote")
-                                            .then(literal("list")
-                                                .executes(context -> {
-                                                    var src = context.getSource();
-                                                    if (!net.wcfcarolina13.GameAI.services.EmotecraftBridge.isAvailable()) {
-                                                        ChatUtils.sendSystemMessage(src, "Emotecraft not detected on this instance.");
-                                                        return 0;
-                                                    }
-                                                    StringBuilder sb = new StringBuilder("Emotes: ");
-                                                    var values = net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.values();
-                                                    for (int i = 0; i < values.length; i++) {
-                                                        if (i > 0) sb.append(", ");
-                                                        sb.append(values[i].slug);
-                                                    }
-                                                    ChatUtils.sendSystemMessage(src, sb.toString());
-                                                    return 1;
-                                                })
-                                            )
-                                            .then(CommandManager.argument("name", StringArgumentType.string())
-                                                .executes(context -> executeEmote(context, null))
-                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                    .executes(context -> {
-                                                        ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                        return executeEmote(context, bot);
-                                                    })
-                                                )
-                                            )
-                                        )
-                                // Operator helper: quickly give yourself the Wizard's Tome quest item.
-                                .then(literal("wizard_tome")
-                                        .executes(context -> executeGiveWizardTome(context.getSource(), 1))
-                                        .then(CommandManager.argument("amount", IntegerArgumentType.integer(1, 64))
-                                                .executes(context -> executeGiveWizardTome(
-                                                        context.getSource(),
-                                                        IntegerArgumentType.getInteger(context, "amount")
-                                                ))
-                                        )
-                                )
 	                        )
+                        // Manual emote test: /bot emote list -> print available names.
+                        // /bot emote <name> -> force-play on every nearby registered bot.
+                        // /bot emote <name> <bot> -> force-play on a specific bot.
+                        .then(literal("emote")
+                            .then(literal("list")
+                                .executes(context -> {
+                                    var src = context.getSource();
+                                    if (!net.wcfcarolina13.GameAI.services.EmotecraftBridge.isAvailable()) {
+                                        ChatUtils.sendSystemMessage(src, "Emotecraft not detected on this instance.");
+                                        return 0;
+                                    }
+                                    StringBuilder sb = new StringBuilder("Emotes: ");
+                                    var values = net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.values();
+                                    for (int i = 0; i < values.length; i++) {
+                                        if (i > 0) sb.append(", ");
+                                        sb.append(values[i].slug);
+                                    }
+                                    ChatUtils.sendSystemMessage(src, sb.toString());
+                                    return 1;
+                                })
+                            )
+                            .then(CommandManager.argument("name", StringArgumentType.string())
+                                .executes(context -> executeEmote(context, null))
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                    .executes(context -> {
+                                        ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                        return executeEmote(context, bot);
+                                    })
+                                )
+                            )
+                        )
+                        // Operator helper: quickly give yourself the Wizard's Tome quest item.
+                        .then(literal("wizard_tome")
+                                .executes(context -> executeGiveWizardTome(context.getSource(), 1))
+                                .then(CommandManager.argument("amount", IntegerArgumentType.integer(1, 64))
+                                        .executes(context -> executeGiveWizardTome(
+                                                context.getSource(),
+                                                IntegerArgumentType.getInteger(context, "amount")
+                                        ))
+                                )
+                        )
                         // In-game debug toggle: /bot debug <on|off>, /bot debug status, /bot debug clear
                         .then(literal("debug")
                             .then(CommandManager.argument("mode", StringArgumentType.string())
@@ -1749,7 +1749,7 @@ public class modCommandRegistry {
         String name = StringArgumentType.getString(context, "name");
         var emote = net.wcfcarolina13.GameAI.services.EmotecraftBridge.EmoteId.bySlug(name);
         if (emote == null) {
-            ChatUtils.sendSystemMessage(src, "Unknown emote '" + name + "'. Try /bot debug emote list");
+            ChatUtils.sendSystemMessage(src, "Unknown emote '" + name + "'. Try /bot emote list");
             return 0;
         }
         // Manual test command: force-play, bypassing cooldown.

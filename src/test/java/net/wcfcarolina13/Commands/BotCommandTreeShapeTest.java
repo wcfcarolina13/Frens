@@ -95,7 +95,7 @@ class BotCommandTreeShapeTest {
         int bot = depthOf("bot");
         int child = bot + 1;
         assertEquals(child, depthOf("spawn"), "spawn must be a child of bot");
-        for (String name : new String[]{"debug", "llm", "config", "testgear", "test_chat_message", "recruit", "compass"}) {
+        for (String name : new String[]{"debug", "emote", "wizard_tome", "llm", "config", "testgear", "test_chat_message", "recruit", "compass"}) {
             assertEquals(child, depthOf(name), "/bot " + name + " must be a direct child of literal(\"bot\"), a sibling of spawn");
         }
     }
@@ -105,6 +105,12 @@ class BotCommandTreeShapeTest {
         int debug = depthOf("debug");
         assertEquals(debug + 1, depthOf("status"), "/bot debug status");
         assertEquals(debug + 1, depthOf("nav-hazard"), "/bot debug nav-hazard");
+    }
+
+    @Test
+    void emoteListSitsUnderEmote() {
+        // "list" first appears inside /bot emote, ahead of /bot ally list.
+        assertEquals(depthOf("emote") + 1, depthOf("list"), "/bot emote list");
     }
 
     @Test
