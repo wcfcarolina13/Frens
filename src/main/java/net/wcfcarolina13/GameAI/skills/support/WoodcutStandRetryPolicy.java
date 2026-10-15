@@ -40,7 +40,8 @@ public final class WoodcutStandRetryPolicy {
             return false;
         }
         String lower = detail.toLowerCase(Locale.ROOT);
-        if (lower.contains("aborted")) {
+        // A throttled or cooling-down walk never searched; its text embeds the previous failure.
+        if (lower.contains("aborted") || lower.contains("throttled") || lower.contains("cooling down")) {
             return false;
         }
         for (String marker : PATH_FAILURE_MARKERS) {

@@ -26,7 +26,10 @@ class WoodcutStandRetryPolicyTest {
         assertFalse(WoodcutStandRetryPolicy.isPathFailure("requested-bounds"));
         assertFalse(WoodcutStandRetryPolicy.isPathFailure("null-plan"));
         assertFalse(WoodcutStandRetryPolicy.isPathFailure("Invalid movement request."));
-        assertFalse(WoodcutStandRetryPolicy.isPathFailure("move-to-stand: throttled (recent path attempt) – last: x"));
+        assertFalse(WoodcutStandRetryPolicy.isPathFailure(
+                "move-to-stand: throttled (recent path attempt) – last: approach-direct: no walkable path"),
+                "a throttled walk never searched, even though it quotes the last failure");
+        assertFalse(WoodcutStandRetryPolicy.isPathFailure("move-to-stand: cooling down after failure near 1, 2, 3"));
     }
 
     @Test
