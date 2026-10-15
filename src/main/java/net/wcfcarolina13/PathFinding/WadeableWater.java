@@ -14,12 +14,12 @@ import net.minecraft.world.BlockView;
  * water; a bubble column is refused (it pushes the bot up or drags it down); a waterlogged block
  * with collision (slab, stairs, fence, ...) is refused, the bot cannot walk through it.
  */
-final class WadeableWater {
+public final class WadeableWater {
 
     private WadeableWater() {
     }
 
-    static boolean isWadeable(BlockState state, BlockView world, BlockPos pos) {
+    public static boolean isWadeable(BlockState state, BlockView world, BlockPos pos) {
         if (state == null || state.isAir() || state.isOf(Blocks.BUBBLE_COLUMN)) {
             return false;
         }
@@ -37,7 +37,7 @@ final class WadeableWater {
      * pad is a walkable partial (fine to stand ON), but it sits at head height over a 1-deep pond
      * and blocks a wading bot.
      */
-    static boolean headFitsOverWater(BlockState headState, BlockView world, BlockPos headPos) {
+    public static boolean headFitsOverWater(BlockState headState, BlockView world, BlockPos headPos) {
         return headState != null && headState.getCollisionShape(world, headPos).isEmpty();
     }
 }
