@@ -2191,21 +2191,25 @@ public final class BotFleeService {
         int feetY = bot.getBlockY();
         int wideSurfaceY = SafePositionService.wideSurfaceFeetY(world, bot.getBlockX(), bot.getBlockZ());
         int scaffoldCount = countScaffoldBlocks(bot);
+        boolean nearBase = BotHomeService.isNearAnyBase(bot, 32.0D);
+        // isDay() is always false in fixed-time dimensions (Nether, End): no night rule there.
+        boolean hasDayCycle = !world.getDimension().hasFixedTime();
+        boolean thundering = world.isThundering();
         UndergroundLingerPolicy.Decision lingerPre = UndergroundLingerPolicy.decide(
-                posCheck.openSky(), feetY, wideSurfaceY, world.isDay(), world.isThundering(),
-                scaffoldCount, foodLevel, isInShelter(botId));
+                posCheck.openSky(), feetY, wideSurfaceY, hasDayCycle, world.isDay(), thundering,
+                scaffoldCount, foodLevel, isInShelter(botId), nearBase);
         // Shelter and night win over the #0 bypass (which used to skip the night check #9).
         if (lingerPre == UndergroundLingerPolicy.Decision.SUPPRESS_SHELTERED) {
             LOGGER.info("Bot {} linger: suppressed — inside own shelter", name);
             return true;
         }
         if (lingerPre == UndergroundLingerPolicy.Decision.SUPPRESS_NIGHT) {
-            LOGGER.info("Bot {} linger: suppressed — nighttime, waiting for dawn (food={})", name, foodLevel);
+            LOGGER.info("Bot {} linger: suppressed — {}, waiting it out (food={})",
+                    name, thundering ? "thunderstorm" : "nighttime", foodLevel);
             return true;
         }
         if (!posCheck.openSky() && !posCheck.nearSurface()) {
             boolean commanderHere = isCommanderNearby(bot, server);
-            boolean nearBase = BotHomeService.isNearAnyBase(bot, 32.0D);
             if (commanderHere || nearBase) {
                 LOGGER.info("Bot {} linger: non-functional position but {} — staying put",
                         name, commanderHere ? "commander nearby" : "near base");
@@ -2290,8 +2294,8 @@ public final class BotFleeService {
             COMMANDER_LEFT_TICK.remove(botId);
         }
 
-        // 7b. Shallow open-sky hole by day with scaffold — pillar out (mines overhead by hand),
-        //     no pickaxe needed and no reason to wait just because the bot is fed (#8, #12).
+        // 7b. Shallow open-sky hole by day with enough scaffold, away from any base — pillar out
+        //     (mines overhead with the held tool, never inside a base), no pickaxe needed and no reason to wait just because the bot is fed (#8, #12).
         if (lingerPre == UndergroundLingerPolicy.Decision.ALLOW_RECOVERY) {
             LOGGER.info("Bot {} linger: allow — shallow open-sky hole by day, climbing out (depth={} scaffold={})",
                     name, UndergroundLingerPolicy.depthBelowSurface(feetY, wideSurfaceY), scaffoldCount);
