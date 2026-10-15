@@ -41,16 +41,25 @@ frens_log_report.py LOG [LOG ...] [--since HH:MM:SS] [--until HH:MM:SS] [--bot N
 3. **Pathfinding**: for each `[PathFinder] mode=`: count, p50/p90/max ms, % pathLen=0, and the
    walk-failure mentions on that thread after a path from that mode. Also A* timeouts,
    Baritone outcomes, `movement obstruction mine` mined and refused, `terrain move:` decisions
-   with median cost, and local-escape routes repeated at least 3 times per bot. A* timeouts and
+   with median cost, and local-escape routes repeated at least 3 times per bot. Unified lines
+   (1.1.242, `... plan=p<n> status=<FULL|PARTIAL|NO_PATH> reason=<reason> ...`) add the plan
+   status counts and the NO_PATH reasons per mode. A* timeouts and
    Baritone outcomes logged by the shadow `frens-pathcompare` thread are left out (they are
    counted once, as excluded, and their result is in the `[PathCompare]` line).
 4. **PathCompare**: pairs up `[PathCompare] bot=… primary=… bidir=<ms>ms/<len>/<exec|noexec|none>
    baritone=…` lines. For each finder: found %, executable % of found, p50/p90 ms. For each
    pair: both found, only one found, neither, who was faster, and the median ms ratio. Also a
    per-bot breakdown. Parsing goes by key, so new `k=v` fields and new finders are picked up
-   automatically.
-   Walk outcomes: `[PathCompareOutcome] bot=<name> to=x,y,z reached=<yes|no|n/a> detail=<token>`
-   is logged (while the shadow compare is on) when a `walkTo` ends. Each outcome joins the
+   automatically. Since 1.1.242 the line has a third finder, `unified=<ms>ms/<len>/<status>`
+   (status from the move simulator, so planned breaks and places count as executable), and the
+   primary's `plan=p<n>`. "Unified-only reachable" counts lines where unified found a path and
+   every other finder found none: the merged finder reaching what the old ones could not, not a
+   disagreement.
+   Walk outcomes: `[PathCompareOutcome] bot=<name> to=x,y,z reached=<yes|no|n/a> [plan=p<n>]
+   detail=<token>` is logged (while the shadow compare is on) when a `walkTo` ends. An outcome
+   with `plan=` joins the compare line with the same plan ID and stays unjoined when there is
+   none (a dropped shadow job). Plan IDs restart at `p1` every server session, so it takes the
+   latest unused line with its ID that is at most 15 s after it. An outcome without it joins the
    latest `[PathCompare]` line for the same bot and `to=` that is at most 300 s before it and at
    most 15 s after it. The compare line is written on the `frens-pathcompare` thread once the
    shadow finder finishes, so for a fast failure it often lands after its outcome. If that

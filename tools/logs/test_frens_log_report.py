@@ -185,6 +185,75 @@ class ReportUnitTest(unittest.TestCase):
         self.assertEqual(oc["exec_not_reached"], 0)
         self.assertIn("nearest line already used 1", flr.render_md(rep))
 
+    def test_plan_id_join_is_exact_and_preferred(self):
+        rep = run_lines("""
+[10:00:00] [Worker-1/INFO]: [PathFinder] mode=unified elapsed=2ms pathLen=10 from=0, 64, 0 to=5, 64, 5 plan=p1 status=FULL reason=NONE moves=9 nodes=30
+[10:00:01] [Worker-1/INFO]: [PathFinder] mode=unified elapsed=1ms pathLen=10 from=0, 64, 0 to=5, 64, 5 plan=p2 status=FULL reason=NONE moves=9 nodes=31
+[10:00:02] [Worker-1/INFO]: [PathFinder] mode=unified elapsed=1ms pathLen=0 from=0, 64, 0 to=9, 64, 9 plan=p3 status=NO_PATH reason=BLOCKED_PROTECTED moves=0 nodes=1
+[10:00:03] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=unified bidir=9ms/10/exec baritone=3ms/10/exec unified=2ms/10/exec plan=p1
+[10:00:04] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=unified bidir=9ms/0/none baritone=3ms/0/none unified=1ms/10/noexec plan=p2
+[10:00:05] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=yes plan=p1 detail=a
+[10:00:06] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no plan=p9 detail=b
+[10:00:07] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no detail=c
+""")
+        oc = rep["pathcompare"]["outcomes"]
+        # p1 joins its own line although the p2 line is later; p9 has no line and does not guess;
+        # the plan-less outcome falls back to the time join and takes the latest line (p2).
+        self.assertEqual(oc["joined_by_plan"], 1)
+        self.assertEqual(oc["joined"], 2)
+        self.assertEqual(oc["unjoined_no_compare"], 1)
+        self.assertEqual(oc["per_primary_exec"], {"exec": {"n": 1, "reached": 1, "reached_pct": 100.0},
+                                                  "noexec": {"n": 1, "reached": 0, "reached_pct": 0.0}})
+        pc = rep["pathcompare"]
+        self.assertEqual(pc["finders"], ["baritone", "bidir", "unified"])
+        self.assertEqual(pc["unified_only_reachable"],
+                         {"lines_with_unified": 2, "count": 1, "by_status": {"noexec": 1},
+                          "by_primary": {"unified": 1}})
+        self.assertEqual(pc["pairs"]["baritone_vs_unified"]["only_unified"], 1)
+        modes = rep["pathfinding"]["modes"]
+        self.assertEqual(modes["unified"]["count"], 3)
+        self.assertEqual(modes["unified"]["plan_status"], {"FULL": 2, "NO_PATH": 1})
+        self.assertEqual(modes["unified"]["no_path_reasons"], {"BLOCKED_PROTECTED": 1})
+        md = flr.render_md(rep)
+        self.assertIn("unified-only reachable: 1 of 2 lines", md)
+        self.assertIn("(by plan ID 1)", md)
+        self.assertIn("unified plans", md)
+
+    def test_used_plan_line_blocks_the_time_join(self):
+        rep = run_lines("""
+[10:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=unified bidir=9ms/4/exec baritone=3ms/4/exec unified=1ms/4/exec plan=p4
+[10:00:01] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=no detail=old_format_walk
+[10:00:02] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=yes plan=p4 detail=x
+""")
+        oc = rep["pathcompare"]["outcomes"]
+        # The plan join claims the line first, so the earlier plan-less outcome finds it used.
+        self.assertEqual(oc["joined_by_plan"], 1)
+        self.assertEqual(oc["joined"], 1)
+        self.assertEqual(oc["unjoined_line_used"], 1)
+
+    def test_plan_ids_reused_after_a_restart_join_their_own_session(self):
+        rep = run_lines("""
+[10:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=unified bidir=9ms/4/exec baritone=3ms/4/exec unified=1ms/4/exec plan=p1
+[10:00:05] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=5,64,5 reached=yes plan=p1 detail=first_session
+[11:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=8,64,8 primary=unified bidir=9ms/0/none baritone=3ms/0/none unified=1ms/6/noexec plan=p1
+[11:00:05] [Worker-1/INFO]: [PathCompareOutcome] bot=Jake to=8,64,8 reached=no plan=p1 detail=second_session
+""")
+        oc = rep["pathcompare"]["outcomes"]
+        self.assertEqual(oc["joined_by_plan"], 2)
+        # Each outcome took its own session's line: exec/reached for the first, noexec/not for the second.
+        self.assertEqual(oc["per_primary_exec"], {"exec": {"n": 1, "reached": 1, "reached_pct": 100.0},
+                                                  "noexec": {"n": 1, "reached": 0, "reached_pct": 0.0}})
+
+    def test_old_two_finder_lines_still_parse(self):
+        rep = run_lines("""
+[10:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Jake from=0,64,0 to=5,64,5 primary=baritone bidir=9ms/4/exec baritone=3ms/4/exec
+[10:00:01] [Worker-1/INFO]: [PathFinder] mode=baritone elapsed=3ms pathLen=4 from=0, 64, 0 to=5, 64, 5
+""")
+        pc = rep["pathcompare"]
+        self.assertEqual(pc["unified_only_reachable"]["lines_with_unified"], 0)
+        self.assertNotIn("plan_status", rep["pathfinding"]["modes"]["baritone"])
+        self.assertNotIn("unified-only", flr.render_md(rep))
+
     def test_pathcompare_regex_ignores_outcome_lines(self):
         line = "[PathCompareOutcome] bot=Jake to=1,2,3 reached=yes detail=x"
         for trigger, rx, name in flr.PATTERNS:

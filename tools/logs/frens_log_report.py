@@ -116,7 +116,8 @@ PATTERNS = [
      "skill_finish"),
     ("[CHAT]", re.compile(r"\[CHAT\] (.*)$"), "chat"),
     ("[PathFinder] mode=", re.compile(
-        r"\[PathFinder\] mode=(\w+) elapsed=(\d+)ms pathLen=(\d+)(?: from=" + POS_RE + r")?(?: to=" + POS_RE + r")?"),
+        r"\[PathFinder\] mode=(\w+) elapsed=(\d+)ms pathLen=(\d+)(?: from=" + POS_RE + r")?(?: to=" + POS_RE + r")?"
+        r"(?: plan=(\S+))?(?: status=(\w+) reason=(\w+))?"),
      "pathfinder"),
     ("A* pathfinding timed out", re.compile(r"A\* pathfinding timed out after (\d+)ms"), "astar_timeout"),
     ("[BaritonePathFinder]", re.compile(
@@ -146,7 +147,8 @@ PATTERNS = [
     ("[PathCompare]", re.compile(r"\[PathCompare\] (.*)$"), "pathcompare"),
     # Logged when a planned walk ends. Its own trigger: "[PathCompare]" is not a substring of it.
     ("[PathCompareOutcome]", re.compile(
-        r"\[PathCompareOutcome\] bot=(\S+) to=(-?\d+,-?\d+,-?\d+) reached=(yes|no|n/a)(?: detail=(\S*))?"),
+        r"\[PathCompareOutcome\] bot=(\S+) to=(-?\d+,-?\d+,-?\d+) reached=(yes|no|n/a)(?: plan=(\S+))?"
+        r"(?: detail=(\S*))?"),
      "pathcompare_outcome"),
     ("hp=", re.compile(r"\bhp=([\d.]+)"), "vital_hp"),
     ("food=", re.compile(r"\bfood=(\d+)"), "vital_food"),
@@ -202,7 +204,7 @@ class Analyzer(object):
         self.system_chat = Counter()
         self.player_deaths = []
         # pathfinding
-        self.paths = defaultdict(lambda: {"elapsed": [], "len0": 0, "n": 0})
+        self.paths = defaultdict(lambda: {"elapsed": [], "len0": 0, "n": 0, "status": Counter(), "reason": Counter()})
         self.astar_timeouts = 0
         self.shadow_finder_lines = 0  # finder lines from the PathCompare thread, not counted above
         self.baritone = Counter()
@@ -418,6 +420,9 @@ class Analyzer(object):
         p["elapsed"].append(ms)
         if plen == 0:
             p["len0"] += 1
+        if m.group(11):  # unified lines (1.1.242) carry the plan status and NO_PATH reason
+            p["status"][m.group(11)] += 1
+            p["reason"][m.group(12)] += 1
         self.thread_mode[thread] = mode
         if bot:
             b = self.bots[bot]
@@ -550,7 +555,7 @@ class Analyzer(object):
         if self.only_bot and who != self.only_bot:
             return
         self.pc_outcomes.append({"t": t, "bot": who, "to": m.group(2), "reached": m.group(3),
-                                 "detail": m.group(4) or ""})
+                                 "plan": m.group(4), "detail": m.group(5) or ""})
 
     def _h_vital_hp(self, m, t, thread, bot, msg, level):
         if bot and self.explicit:  # pool threads serve several bots; never guess a position/vital
@@ -637,6 +642,9 @@ class Analyzer(object):
             modes[mode] = {"count": p["n"], "p50_ms": pct(e, 50), "p90_ms": pct(e, 90), "max_ms": max(e) if e else None,
                            "pathLen0_pct": round(100.0 * p["len0"] / p["n"], 1) if p["n"] else None,
                            "walk_outcomes": dict(self.walk.get(mode, {}))}
+            if p["status"]:
+                modes[mode]["plan_status"] = dict(p["status"])
+                modes[mode]["no_path_reasons"] = {k: v for k, v in p["reason"].items() if k != "NONE"}
         if "unknown" in self.walk and "unknown" not in modes:
             modes["unknown"] = {"count": 0, "walk_outcomes": dict(self.walk["unknown"])}
         rep = [{"bot": k[0], "route": k[1], "count": n} for k, n in self.escapes.most_common(top) if n >= 3]
@@ -678,27 +686,54 @@ def infer_finder(primary, modes):
     return "none", "-"
 
 
-# An outcome joins the latest [PathCompare] line for the same bot+to that is at most
-# OUTCOME_JOIN_WINDOW_S before it and at most OUTCOME_JOIN_LATE_S after it. The compare line is
-# written on the frens-pathcompare thread once the shadow finder finishes, so for a fast failure it
-# often lands after the outcome. If that latest line is already taken, the outcome stays unjoined:
-# falling back to an older line would shift every later pair by one when a target is retried.
+# An outcome that carries plan=<id> (1.1.242) joins the [PathCompare] line with the same plan ID;
+# when no compare line has that ID (the shadow job was dropped) it stays unjoined rather than
+# guessing. Plan IDs restart at p1 every server session, so one log can hold the same ID several
+# times: the outcome takes the latest unused line with its ID that is at most OUTCOME_JOIN_LATE_S
+# after it. An outcome without a plan ID falls back to the time heuristic: it joins the latest
+# [PathCompare] line for the same bot+to that is at most OUTCOME_JOIN_WINDOW_S before it and at most
+# OUTCOME_JOIN_LATE_S after it. The compare line is written on the frens-pathcompare thread once the
+# shadow finders finish, so for a fast failure it often lands after the outcome. If that latest line
+# is already taken (by either join), the outcome stays unjoined: falling back to an older line would
+# shift every later pair by one when a target is retried.
 OUTCOME_JOIN_WINDOW_S = 300
 OUTCOME_JOIN_LATE_S = 15
 
 
 def join_outcomes(records, outcomes):
     # type: (List[dict], List[dict]) -> List[tuple]
-    """Pairs each outcome with (compare record or None, reason). reason is "joined",
-    "no_compare_line" (nothing in the window: a direct or aborted walk that never planned) or
+    """Pairs each outcome with (compare record or None, reason). reason is "joined_plan" (same plan
+    ID), "joined" (time window), "no_compare_line" (nothing in the window, or no line with the
+    outcome's plan ID: a direct or aborted walk that never planned, or a dropped shadow job) or
     "compare_line_used" (the nearest line already belongs to another outcome)."""
     by_key = defaultdict(list)
+    by_plan = defaultdict(list)
     for r in records:
+        if r.get("plan"):
+            by_plan[r["plan"]].append(r)
         if r["t"] is not None:
             by_key[(r.get("bot"), r.get("to"))].append(r)
     used = set()
+    plan_hits = {}
+    for i, o in enumerate(outcomes):
+        if not o.get("plan"):
+            continue
+        for r in reversed(by_plan.get(o["plan"], [])):
+            if id(r) in used:
+                continue
+            if o["t"] is not None and r["t"] is not None and r["t"] > o["t"] + OUTCOME_JOIN_LATE_S:
+                continue
+            used.add(id(r))
+            plan_hits[i] = r
+            break
     out = []
-    for o in outcomes:
+    for i, o in enumerate(outcomes):
+        if i in plan_hits:
+            out.append((o, plan_hits[i], "joined_plan"))
+            continue
+        if o.get("plan"):
+            out.append((o, None, "no_compare_line"))
+            continue
         latest = None
         if o["t"] is not None:
             for r in reversed(by_key.get((o["bot"], o["to"]), [])):
@@ -738,6 +773,7 @@ def outcome_stats(records, outcomes):
         "count": len(outcomes),
         "overall": _rate(outcomes),
         "joined": len(joined),
+        "joined_by_plan": sum(1 for _, _, why in pairs if why == "joined_plan"),
         "unjoined": len(pairs) - len(joined),
         "unjoined_no_compare": sum(1 for _, _, why in pairs if why == "no_compare_line"),
         "unjoined_line_used": sum(1 for _, _, why in pairs if why == "compare_line_used"),
@@ -789,7 +825,25 @@ def pathcompare_stats(records, outcomes=None):
                 pb["found"][f] += 1
     out["per_bot"] = {k: {"n": v["n"], "primary": dict(v["primary"]), "found": dict(v["found"])}
                       for k, v in per_bot.items()}
+    out["unified_only_reachable"] = unified_only_reachable(records)
     return out
+
+
+UNIFIED = "unified"
+
+
+def unified_only_reachable(records):
+    # type: (List[dict]) -> dict
+    """Lines where the unified finder found a path and every other finder on the line found none
+    (1.1.242). That is the merged finder reaching what the old ones could not (break, place, swim),
+    not a disagreement. "by_status" splits it by the unified exec/noexec status."""
+    rows = [r for r in records if UNIFIED in r["finders"] and len(r["finders"]) > 1]
+    hits = [r for r in rows if r["finders"][UNIFIED]["len"] > 0
+            and all(v["len"] == 0 for f, v in r["finders"].items() if f != UNIFIED)]
+    by_status = Counter(r["finders"][UNIFIED]["exec"] for r in hits)
+    by_primary = Counter(r.get("primary", "?") for r in hits)
+    return {"lines_with_unified": len(rows), "count": len(hits),
+            "by_status": dict(by_status), "by_primary": dict(by_primary)}
 
 
 # --------------------------------------------------------------------------- markdown
@@ -865,6 +919,8 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
         o.append("- %s: n=%d p50=%sms p90=%sms max=%sms pathLen0=%s%% walk fails %s" % (
             mode, p["count"], _fmt(p.get("p50_ms")), _fmt(p.get("p90_ms")), _fmt(p.get("max_ms")),
             _fmt(p.get("pathLen0_pct")), p["walk_outcomes"] or "{}"))
+        if p.get("plan_status"):
+            o.append("  - %s plans %s, no-path reasons %s" % (mode, p["plan_status"], p["no_path_reasons"] or "{}"))
     o.append("- A* timeouts %d | Baritone %s | obstruction mine %s" % (
         pf["astar_timeouts"], pf["baritone"] or "{}", pf["obstruction_mine"] or "{}"))
     if pf.get("shadow_finder_lines_excluded"):
@@ -889,13 +945,17 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
             o.append("- %s: %s" % (k, ", ".join("%s=%s" % (a, _fmt(b)) for a, b in v.items())))
         for k, v in sorted(pc["per_bot"].items()):
             o.append("- bot %s: n=%d primary=%s found=%s" % (k, v["n"], v["primary"], v["found"]))
+        uo = pc.get("unified_only_reachable") or {}
+        if uo.get("lines_with_unified"):
+            o.append("- unified-only reachable: %d of %d lines with a unified field (status %s, primary %s)" % (
+                uo["count"], uo["lines_with_unified"], uo["by_status"] or "{}", uo["by_primary"] or "{}"))
     oc = pc.get("outcomes") or {"count": 0}
     if oc["count"]:
         ov = oc["overall"]
-        o.append("- walk outcomes: n=%d reached=%d (%s%%), joined to a compare line %d, unjoined %d"
+        o.append("- walk outcomes: n=%d reached=%d (%s%%), joined to a compare line %d (by plan ID %d), unjoined %d"
                  " (no compare line %d, nearest line already used %d)" % (
-                     ov["n"], ov["reached"], _fmt(ov["reached_pct"]), oc["joined"], oc["unjoined"],
-                     oc["unjoined_no_compare"], oc["unjoined_line_used"]))
+                     ov["n"], ov["reached"], _fmt(ov["reached_pct"]), oc["joined"], oc["joined_by_plan"],
+                     oc["unjoined"], oc["unjoined_no_compare"], oc["unjoined_line_used"]))
         for k, v in oc["per_primary"].items():
             o.append("  - primary %s: reached %d/%d (%s%%)" % (k, v["reached"], v["n"], _fmt(v["reached_pct"])))
         for k, v in oc["per_primary_exec"].items():
