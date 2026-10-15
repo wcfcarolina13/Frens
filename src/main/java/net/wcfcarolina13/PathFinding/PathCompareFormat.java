@@ -51,6 +51,43 @@ public final class PathCompareFormat {
                 + " baritone=" + finderValue(baritoneMs, baritoneLen, baritoneStatus);
     }
 
+    /**
+     * The 1.1.242 three-finder line: {@code unified=} after {@code baritone=}, then {@code plan=p<n>}
+     * (the primary's plan ID, omitted when {@code planId <= 0}). Both additive to the k=v parse.
+     */
+    public static String line(String botName,
+                              int fromX, int fromY, int fromZ,
+                              int toX, int toY, int toZ,
+                              PathFinderChoice primary,
+                              long bidirMs, int bidirLen, String bidirStatus,
+                              long baritoneMs, int baritoneLen, String baritoneStatus,
+                              long unifiedMs, int unifiedLen, String unifiedStatus,
+                              long planId) {
+        return line(botName, fromX, fromY, fromZ, toX, toY, toZ, primary,
+                bidirMs, bidirLen, bidirStatus, baritoneMs, baritoneLen, baritoneStatus)
+                + " unified=" + finderValue(unifiedMs, unifiedLen, unifiedStatus)
+                + (planId > 0 ? " plan=" + PathPlanIds.format(planId) : "");
+    }
+
+    /**
+     * A unified plan's node count, comparable with the old finders' path lengths: moves + 1 (the start),
+     * 1 for a FULL plan already at the goal, 0 for NO_PATH.
+     */
+    public static int unifiedLen(boolean noPath, int moves) {
+        return noPath ? 0 : moves + 1;
+    }
+
+    /**
+     * A unified plan's status: none for NO_PATH, else exec/noexec from {@code MoveSimulator} (not
+     * {@link PathFinder#isPathExecutable}, which refuses every planned break or place).
+     */
+    public static String unifiedStatus(boolean noPath, boolean simulatedExecutable) {
+        if (noPath) {
+            return NONE;
+        }
+        return simulatedExecutable ? EXEC : NOEXEC;
+    }
+
     /** Longest detail kept on an outcome line; walk details can run long. */
     static final int OUTCOME_DETAIL_MAX = 80;
 

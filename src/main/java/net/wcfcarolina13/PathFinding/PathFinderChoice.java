@@ -1,12 +1,17 @@
 package net.wcfcarolina13.PathFinding;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * The two finders {@link PathFinder} can dispatch to. Debug/A-B only: this goes away when the
- * finders merge into one (1.1.240 slice D). {@link #label()} is the token the logs use.
+ * The finders {@link PathFinder} can dispatch to. {@link #label()} is the token the logs use.
+ * UNIFIED is the 1.1.242 merged finder; BIDIR and BARITONE stay callable for PathCompare during the
+ * field window and go in slice D.
  */
 public enum PathFinderChoice {
     BIDIR("bidir"),
-    BARITONE("baritone");
+    BARITONE("baritone"),
+    UNIFIED("unified");
 
     private final String label;
 
@@ -18,16 +23,34 @@ public enum PathFinderChoice {
         return label;
     }
 
-    public PathFinderChoice other() {
-        return this == BIDIR ? BARITONE : BIDIR;
+    /** Every finder except this one, in declaration order: what the PathCompare shadow runs. */
+    public List<PathFinderChoice> others() {
+        List<PathFinderChoice> out = new ArrayList<>(2);
+        for (PathFinderChoice c : values()) {
+            if (c != this) {
+                out.add(c);
+            }
+        }
+        return out;
     }
 
-    /** Parses a command token: baritone, classic/bidir. Anything else (including "default") is null. */
+    /**
+     * Field-window mapping of the persisted boolean {@code baritonePathfinderEnabled} (it stays a
+     * boolean until slice D): true (the 1.1.240 migrated default) is UNIFIED, false is BIDIR. BARITONE
+     * as a primary exists only in memory, through {@code /bot config pathfinder baritone}.
+     */
+    public static PathFinderChoice fromLegacyFlag(boolean baritonePathfinderEnabled) {
+        return baritonePathfinderEnabled ? UNIFIED : BIDIR;
+    }
+
+    /** Parses a command token: unified, baritone, classic/bidir. Anything else (including "default") is null. */
     public static PathFinderChoice parse(String token) {
         if (token == null) {
             return null;
         }
         switch (token.toLowerCase(java.util.Locale.ROOT)) {
+            case "unified":
+                return UNIFIED;
             case "baritone":
                 return BARITONE;
             case "classic":

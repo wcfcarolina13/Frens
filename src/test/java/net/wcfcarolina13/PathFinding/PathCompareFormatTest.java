@@ -101,4 +101,66 @@ class PathCompareFormatTest {
         assertEquals("no", m.group(5));
         assertEquals("label:_no_walkable_path_(bot:Bob)", m.group(6));
     }
+
+    @Test
+    void threeFinderLineMatchesTheFixedFormat() {
+        String line = PathCompareFormat.line("Jake", 12, 64, -30, 40, 66, -8,
+                PathFinderChoice.UNIFIED,
+                1840L, 0, PathCompareFormat.NONE,
+                37L, 31, PathCompareFormat.EXEC,
+                2L, 29, PathCompareFormat.NOEXEC,
+                12L);
+        assertEquals("[PathCompare] bot=Jake from=12,64,-30 to=40,66,-8 primary=unified"
+                + " bidir=1840ms/0/none baritone=37ms/31/exec unified=2ms/29/noexec plan=p12", line);
+        String noPlan = PathCompareFormat.line("Jake", 0, 0, 0, 1, 1, 1, PathFinderChoice.BARITONE,
+                1L, 1, "exec", 1L, 1, "exec", 1L, 1, "exec", 0L);
+        assertTrue(noPlan.endsWith(" unified=1ms/1/exec"));
+    }
+
+    @Test
+    void threeFinderLineParsesWithTheAnalyzerRegexes() {
+        Pattern kv = Pattern.compile("(\\w+)=(\\S+)");
+        Pattern finder = Pattern.compile("^(-?\\d+)ms/(-?\\d+)/(\\w+)");
+        String line = PathCompareFormat.line("Bob", -1, -2, -3, 4, 5, 6, PathFinderChoice.UNIFIED,
+                5L, 3, "exec", 6L, 4, "noexec", 1L, 5, "exec", 7L);
+        Matcher m = kv.matcher(line.substring("[PathCompare] ".length()));
+        java.util.Set<String> finders = new java.util.HashSet<>();
+        java.util.Map<String, String> plain = new java.util.HashMap<>();
+        while (m.find()) {
+            if (finder.matcher(m.group(2)).find()) {
+                finders.add(m.group(1));
+            } else {
+                plain.put(m.group(1), m.group(2));
+            }
+        }
+        assertEquals(java.util.Set.of("bidir", "baritone", "unified"), finders);
+        assertEquals("p7", plain.get("plan"));
+        assertEquals("unified", plain.get("primary"));
+        assertEquals(5, plain.size()); // bot, from, to, primary, plan
+    }
+
+    @Test
+    void unifiedLenAndStatus() {
+        assertEquals(0, PathCompareFormat.unifiedLen(true, 0));
+        assertEquals(1, PathCompareFormat.unifiedLen(false, 0));
+        assertEquals(13, PathCompareFormat.unifiedLen(false, 12));
+        assertEquals("none", PathCompareFormat.unifiedStatus(true, true));
+        assertEquals("exec", PathCompareFormat.unifiedStatus(false, true));
+        assertEquals("noexec", PathCompareFormat.unifiedStatus(false, false));
+    }
+
+    @Test
+    void outcomeLineCarriesThePlanBeforeTheDetail() {
+        assertEquals("[PathCompareOutcome] bot=Jake to=40,66,-8 reached=yes plan=p42 detail=walked",
+                PathCompareFormat.outcomeLine("Jake", 40, 66, -8, true, "walked", 42L));
+        assertEquals("[PathCompareOutcome] bot=Jake to=40,66,-8 reached=no detail=walked",
+                PathCompareFormat.outcomeLine("Jake", 40, 66, -8, false, "walked", 0L));
+        // tools/logs/frens_log_report.py outcome regex
+        Matcher m = Pattern.compile("\\[PathCompareOutcome\\] bot=(\\S+) to=(-?\\d+,-?\\d+,-?\\d+)"
+                + " reached=(yes|no|n/a)(?: plan=(\\S+))?(?: detail=(\\S*))?")
+                .matcher(PathCompareFormat.outcomeLine("Bob", 1, 2, 3, null, "a b", 3L));
+        assertTrue(m.find());
+        assertEquals("p3", m.group(4));
+        assertEquals("a_b", m.group(5));
+    }
 }

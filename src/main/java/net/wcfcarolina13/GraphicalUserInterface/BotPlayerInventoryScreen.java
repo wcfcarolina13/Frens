@@ -6581,7 +6581,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         boolean newValue = !Frens.CONFIG.isBaritonePathfinderEnabled();
         Frens.CONFIG.setBaritonePathfinderEnabled(newValue);
         Frens.CONFIG.save();
-        net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = newValue;
+        net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = net.wcfcarolina13.PathFinding.PathFinderChoice.fromLegacyFlag(newValue);
     }
 
     private boolean isLockBlocksModeActive() {

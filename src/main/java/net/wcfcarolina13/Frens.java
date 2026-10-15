@@ -900,8 +900,8 @@ public class Frens implements ModInitializer {
             }
 
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);
-            net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE =
-                    CONFIG != null && CONFIG.isBaritonePathfinderEnabled();
+            net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = net.wcfcarolina13.PathFinding.PathFinderChoice.fromLegacyFlag(
+                    CONFIG != null && CONFIG.isBaritonePathfinderEnabled());
 
             if (CONFIG != null) {
                 net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.setFortBufferRadius(
@@ -963,6 +963,7 @@ public class Frens implements ModInitializer {
             // 1.1.240 slice D debug A/B: in-memory only, gone with the server.
             net.wcfcarolina13.PathFinding.PathCompareService.shutdownExecutors();
             net.wcfcarolina13.PathFinding.PathFinderOverrides.clearAll();
+            net.wcfcarolina13.PathFinding.unified.PathPlanIds.reset();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.shutdownExecutor();
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);

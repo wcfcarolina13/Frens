@@ -209,6 +209,17 @@ public class modCommandRegistry {
         return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
     }
 
+    private static String describePathFinder(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
+        if (choice == null) {
+            return "unified";
+        }
+        return switch (choice) {
+            case UNIFIED -> "unified (1.1.242)";
+            case BARITONE -> "baritone";
+            case BIDIR -> "classic (bidirectional A*)";
+        };
+    }
+
     /** Quotes a bot name for a suggested command when it contains a space (string arguments accept quotes). */
     private static String quoteCommandArgument(String name) {
         if (name == null) {
@@ -738,12 +749,12 @@ public class modCommandRegistry {
                                                                     net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
                                                             if (choice == null && !"default".equals(mode)) {
                                                                 context.getSource().sendFeedback(
-                                                                        () -> Text.literal("Usage: /bot config pathfinder <baritone|classic|default> <bot>"), false);
+                                                                        () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic|default> <bot>"), false);
                                                                 return 0;
                                                             }
                                                             net.wcfcarolina13.PathFinding.PathFinderOverrides.set(target.getUuid(), choice);
                                                             String shown = choice == null
-                                                                    ? "global default (" + (net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE ? "baritone" : "bidir") + ")"
+                                                                    ? "global default (" + net.wcfcarolina13.PathFinding.PathFinder.ACTIVE.label() + ")"
                                                                     : choice.label();
                                                             LOGGER.info("[PathFinder] per-bot override bot={} finder={}",
                                                                     botName, choice == null ? "default" : choice.label());
@@ -752,29 +763,31 @@ public class modCommandRegistry {
                                                             return 1;
                                                         }))
                                                 .executes(context -> {
+                                                    // Field window (1.1.242): unified and classic are saved through the old
+                                                    // boolean (true = unified, false = classic); baritone is in memory only.
                                                     String mode = StringArgumentType.getString(context, "mode").toLowerCase();
-                                                    boolean baritone;
-                                                    switch (mode) {
-                                                        case "baritone": baritone = true; break;
-                                                        case "classic": case "bidir": baritone = false; break;
-                                                        default:
-                                                            context.getSource().sendFeedback(
-                                                                    () -> Text.literal("Usage: /bot config pathfinder <baritone|classic>"), false);
-                                                            return 0;
+                                                    net.wcfcarolina13.PathFinding.PathFinderChoice choice =
+                                                            net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
+                                                    if (choice == null) {
+                                                        context.getSource().sendFeedback(
+                                                                () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic> [bot]"), false);
+                                                        return 0;
                                                     }
-                                                    net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = baritone;
-                                                    if (Frens.CONFIG != null) {
-                                                        Frens.CONFIG.setBaritonePathfinderEnabled(baritone);
+                                                    net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = choice;
+                                                    boolean saved = choice != net.wcfcarolina13.PathFinding.PathFinderChoice.BARITONE;
+                                                    if (saved && Frens.CONFIG != null) {
+                                                        Frens.CONFIG.setBaritonePathfinderEnabled(
+                                                                choice == net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED);
                                                         Frens.CONFIG.save();
                                                     }
-                                                    String name = baritone ? "baritone" : "classic (bidirectional A*)";
+                                                    LOGGER.info("[PathFinder] global finder={} saved={}", choice.label(), saved);
+                                                    String name = describePathFinder(choice) + (saved ? "" : " (debug, not saved)");
                                                     context.getSource().sendFeedback(
                                                             () -> Text.literal("Pathfinder switched to: " + name), true);
                                                     return 1;
                                                 }))
                                         .executes(context -> {
-                                            String current = net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE
-                                                    ? "baritone" : "classic (bidirectional A*)";
+                                            String current = describePathFinder(net.wcfcarolina13.PathFinding.PathFinder.ACTIVE);
                                             context.getSource().sendFeedback(
                                                     () -> Text.literal("Current pathfinder: " + current), false);
                                             return 1;

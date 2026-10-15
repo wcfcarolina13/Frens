@@ -17,14 +17,36 @@ class PathFinderOverridesTest {
 
     @Test
     void overrideWinsOverGlobal() {
-        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolve(PathFinderChoice.BIDIR, true));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(PathFinderChoice.BARITONE, false));
+        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolve(PathFinderChoice.BIDIR, PathFinderChoice.UNIFIED));
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(PathFinderChoice.BARITONE, PathFinderChoice.BIDIR));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolve(PathFinderChoice.UNIFIED, PathFinderChoice.BARITONE));
     }
 
     @Test
     void noOverrideFollowsGlobal() {
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(null, true));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolve(null, false));
+        for (PathFinderChoice active : PathFinderChoice.values()) {
+            assertEquals(active, PathFinderOverrides.resolve(null, active));
+        }
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolve(null, null));
+    }
+
+    @Test
+    void legacyFlagMapsToUnifiedOrClassic() {
+        // Field window: the persisted boolean stays; true (the migrated default) is UNIFIED, false BIDIR.
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderChoice.fromLegacyFlag(true));
+        assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.fromLegacyFlag(false));
+        // Through the dispatch precedence: a per-bot override still beats the mapped global.
+        UUID bot = UUID.randomUUID();
+        PathFinderOverrides.set(bot, PathFinderChoice.BARITONE);
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(bot, PathFinderChoice.fromLegacyFlag(true)));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(UUID.randomUUID(), PathFinderChoice.fromLegacyFlag(true)));
+    }
+
+    @Test
+    void othersAreTheTwoShadowFinders() {
+        assertEquals(java.util.List.of(PathFinderChoice.BIDIR, PathFinderChoice.BARITONE), PathFinderChoice.UNIFIED.others());
+        assertEquals(java.util.List.of(PathFinderChoice.BARITONE, PathFinderChoice.UNIFIED), PathFinderChoice.BIDIR.others());
+        assertEquals(java.util.List.of(PathFinderChoice.BIDIR, PathFinderChoice.UNIFIED), PathFinderChoice.BARITONE.others());
     }
 
     @Test
@@ -32,12 +54,12 @@ class PathFinderOverridesTest {
         UUID a = UUID.randomUUID();
         UUID b = UUID.randomUUID();
         PathFinderOverrides.set(a, PathFinderChoice.BIDIR);
-        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolveFor(a, true));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(b, true));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(null, true));
+        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolveFor(a, PathFinderChoice.UNIFIED));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(b, PathFinderChoice.UNIFIED));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(null, PathFinderChoice.UNIFIED));
         PathFinderOverrides.set(a, null);
         assertNull(PathFinderOverrides.get(a));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(a, true));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(a, PathFinderChoice.UNIFIED));
     }
 
     @Test
@@ -52,11 +74,12 @@ class PathFinderOverridesTest {
     @Test
     void parseAcceptsCommandTokens() {
         assertEquals(PathFinderChoice.BARITONE, PathFinderChoice.parse("Baritone"));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderChoice.parse("unified"));
+        assertEquals("unified", PathFinderChoice.UNIFIED.label());
         assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.parse("classic"));
         assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.parse("bidir"));
         assertNull(PathFinderChoice.parse("default"));
         assertNull(PathFinderChoice.parse(null));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.BARITONE.other());
         assertEquals("bidir", PathFinderChoice.BIDIR.label());
     }
 }

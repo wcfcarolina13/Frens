@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Per-bot finder override for head-to-head data (1.1.240 slice D). Debug/A-B only, in memory
  * only (cleared at SERVER_STOPPING), not a user feature: it goes away when the finders merge.
- * An override wins over the global {@link PathFinder#USE_BARITONE_STYLE} flag.
+ * An override wins over the global {@link PathFinder#ACTIVE} choice.
  */
 public final class PathFinderOverrides {
 
@@ -16,17 +16,17 @@ public final class PathFinderOverrides {
     private PathFinderOverrides() {
     }
 
-    /** Precedence: a per-bot override, else the global flag. */
-    public static PathFinderChoice resolve(PathFinderChoice override, boolean globalBaritone) {
+    /** Precedence: a per-bot override, else the global choice, else UNIFIED. */
+    public static PathFinderChoice resolve(PathFinderChoice override, PathFinderChoice active) {
         if (override != null) {
             return override;
         }
-        return globalBaritone ? PathFinderChoice.BARITONE : PathFinderChoice.BIDIR;
+        return active != null ? active : PathFinderChoice.UNIFIED;
     }
 
-    /** The finder this bot plans with right now; a null bot follows the global flag. */
-    public static PathFinderChoice resolveFor(UUID botUuid, boolean globalBaritone) {
-        return resolve(get(botUuid), globalBaritone);
+    /** The finder this bot plans with right now; a null bot follows the global choice. */
+    public static PathFinderChoice resolveFor(UUID botUuid, PathFinderChoice active) {
+        return resolve(get(botUuid), active);
     }
 
     public static PathFinderChoice get(UUID botUuid) {

@@ -8,10 +8,22 @@ import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3i;
 import net.wcfcarolina13.GameAI.services.BotCampfireAvoidanceService;
+import net.wcfcarolina13.PathFinding.unified.ExecUnit;
+import net.wcfcarolina13.PathFinding.unified.NoPathReason;
+import net.wcfcarolina13.PathFinding.unified.PathPlan;
+import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
+import net.wcfcarolina13.PathFinding.unified.PlanAdapter;
+import net.wcfcarolina13.PathFinding.unified.PlanRequest;
+import net.wcfcarolina13.PathFinding.unified.PlanStatus;
+import net.wcfcarolina13.PathFinding.unified.SearchContext;
+import net.wcfcarolina13.PathFinding.unified.UnifiedPathFinder;
+import net.wcfcarolina13.PathFinding.unified.WorldTerrainView;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,11 +36,12 @@ public class PathFinder {
     private static final int MAX_SEGMENT_MANHATTAN_SPAN = 6;
 
     /**
-     * Which finder {@link #calculatePath} uses. Baritone-style is the default since 1.1.240
-     * (Bradley, 2026-10-14); the bidirectional A* below is the "classic" fallback. Frens.java
-     * copies the persisted config value in at server start.
+     * Which finder {@link #calculatePath} and {@link #plan} use when a bot has no override. The
+     * unified finder is the default from 1.1.242; Frens.java, the shared-config save and the GUI copy
+     * the persisted boolean in through {@link PathFinderChoice#fromLegacyFlag} (true is UNIFIED,
+     * false is BIDIR). BARITONE as a primary is in memory only ({@code /bot config pathfinder baritone}).
      */
-    public static boolean USE_BARITONE_STYLE = true;
+    public static volatile PathFinderChoice ACTIVE = PathFinderChoice.UNIFIED;
 
     public static class PathNode {
         public final BlockPos pos;
@@ -133,35 +146,189 @@ public class PathFinder {
     }
 
     /**
-     * Plans for a known bot. A per-bot {@link PathFinderOverrides} entry wins over the global
-     * {@link #USE_BARITONE_STYLE} flag (debug/A-B only, 1.1.240 slice D). When the shadow
-     * compare is on, the OTHER finder is queued on the same start/goal for one
-     * {@code [PathCompare]} line; its result is never used here.
+     * Plans for a known bot and returns today's node list. A per-bot {@link PathFinderOverrides}
+     * entry wins over {@link #ACTIVE} (debug/A-B only). With the unified finder the request is
+     * {@link PlanRequest#legacyWalk()}: the old move set priced in ticks, so the result is walkable by
+     * {@code walkSegment} unchanged. Callers that execute break, place, swim or fall moves use
+     * {@link #plan(BlockPos, BlockPos, ServerWorld, ServerPlayerEntity, PlanRequest)} instead.
      */
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world,
                                                UUID botUuid, String botName) {
-        PathFinderChoice choice = PathFinderOverrides.resolveFor(botUuid, USE_BARITONE_STYLE);
+        return dispatch(start, target, world, botUuid, botName, PlanRequest.legacyWalk(),
+                WorldTerrainView.BotSnapshot.NONE).nodes();
+    }
+
+    /**
+     * One plan, whatever the finder: the node list every caller can walk, plus the unified
+     * {@link PathPlan} and its {@link SearchContext} when the unified finder ran (null otherwise).
+     *
+     * @param planId  the {@code plan=} token on this plan's log lines ({@link PathPlanIds#format})
+     * @param context the context the unified search ran with; its terrain is the searching thread's
+     *                view and must not be read from another thread ({@link WorldTerrainView#fresh()})
+     */
+    public record PlanResult(PathFinderChoice finder, long planId, List<PathNode> nodes, PathPlan plan,
+                             SearchContext context, long elapsedMs, boolean boxedIn) {
+        public PlanResult {
+            nodes = nodes == null ? new ArrayList<>() : nodes;
+        }
+
+        public boolean isUnified() {
+            return plan != null;
+        }
+
+        /** The unified reason, or BOXED_IN / NONE from the old finders' boxed-in flag. */
+        public NoPathReason reason() {
+            if (plan != null) {
+                return plan.reason();
+            }
+            return nodes.isEmpty() && boxedIn ? NoPathReason.BOXED_IN : NoPathReason.NONE;
+        }
+
+        /** The executor's unit list (empty for the old finders, which only have {@link #nodes()}). */
+        public List<ExecUnit> units() {
+            return plan == null ? List.of() : PlanAdapter.toUnits(plan, context);
+        }
+    }
+
+    /**
+     * The 1.1.242 entry for a bot walk: tool speeds, dirt count, sprint and territory are snapshotted
+     * from {@code bot} now, on the calling thread, and never read live during the search.
+     */
+    public static PlanResult plan(BlockPos start, BlockPos goal, ServerWorld world, ServerPlayerEntity bot,
+                                  PlanRequest req) {
+        return dispatch(start, goal, world,
+                bot != null ? bot.getUuid() : null,
+                bot != null ? bot.getName().getString() : null,
+                req != null ? req : PlanRequest.legacyWalk(),
+                WorldTerrainView.BotSnapshot.of(bot));
+    }
+
+    /** As above for a bot known only by ID (hand-only tools, no dirt, no territory claim check). */
+    public static PlanResult plan(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid, String botName,
+                                  PlanRequest req) {
+        return dispatch(start, goal, world, botUuid, botName, req != null ? req : PlanRequest.legacyWalk(),
+                WorldTerrainView.BotSnapshot.NONE);
+    }
+
+    private static PlanResult dispatch(BlockPos start, BlockPos target, ServerWorld world, UUID botUuid,
+                                       String botName, PlanRequest req, WorldTerrainView.BotSnapshot snapshot) {
+        PathFinderChoice choice = PathFinderOverrides.resolveFor(botUuid, ACTIVE);
         noteSearchBoxedIn(false);
+        long planId = PathPlanIds.next();
+        if (isServerThread(world)) {
+            req = req.onServerThread();
+        }
         long startTime = System.nanoTime();
-        List<PathNode> result = runFinder(choice, start, target, world);
+        PlanResult result;
+        if (choice == PathFinderChoice.UNIFIED) {
+            result = runUnifiedSafely(start, target, world, req, snapshot, planId);
+        } else {
+            result = new PlanResult(choice, planId, runFinder(choice, start, target, world), null, null, 0L, false);
+        }
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
-        LOGGER.info("[PathFinder] mode={} elapsed={}ms pathLen={} from={} to={}",
-                choice.label(), elapsedMs, result.size(), start.toShortString(), target.toShortString());
-        if (botName != null && PathCompareService.isEnabled()) {
-            PathCompareService.submit(botName, start, target, world, choice, elapsedMs,
-                    PathCompareService.positions(result));
+        result = new PlanResult(result.finder(), planId, result.nodes(), result.plan(), result.context(), elapsedMs,
+                result.nodes().isEmpty() && lastSearchBoxedIn());
+        if (result.plan() != null) {
+            PathPlan p = result.plan();
+            LOGGER.info("[PathFinder] mode={} elapsed={}ms pathLen={} from={} to={} plan={} status={} reason={} moves={} nodes={}",
+                    choice.label(), elapsedMs, result.nodes().size(), start.toShortString(), target.toShortString(),
+                    PathPlanIds.format(planId), p.status(), p.reason(), p.moves().size(), p.nodesExpanded());
+        } else {
+            LOGGER.info("[PathFinder] mode={} elapsed={}ms pathLen={} from={} to={} plan={}",
+                    result.finder().label(), elapsedMs, result.nodes().size(), start.toShortString(),
+                    target.toShortString(), PathPlanIds.format(planId));
+        }
+        if (botName != null) {
+            noteLastPlan(planId, target);
+            if (PathCompareService.isEnabled()) {
+                PathCompareService.submit(botName, start, target, world, result, req, snapshot);
+            }
         }
         return result;
     }
 
+    private static boolean isServerThread(ServerWorld world) {
+        MinecraftServer server = world != null ? world.getServer() : null;
+        return server != null && server.isOnThread();
+    }
+
+    /**
+     * The unified finder, guarded for the field window: an exception (a world read the view did not
+     * expect) logs one WARN and falls back to the Baritone-style finder, so a walk never dies on it.
+     */
+    private static PlanResult runUnifiedSafely(BlockPos start, BlockPos target, ServerWorld world, PlanRequest req,
+                                               WorldTerrainView.BotSnapshot snapshot, long planId) {
+        try {
+            return runUnified(start, target, world, req, snapshot, planId);
+        } catch (RuntimeException e) {
+            LOGGER.warn("[PathFinder] unified search failed plan={} from={} to={}: {}; using baritone",
+                    PathPlanIds.format(planId), start.toShortString(), target.toShortString(), e.toString());
+            return new PlanResult(PathFinderChoice.BARITONE, planId,
+                    BaritoneStylePathFinder.calculatePath(start, target, world), null, null, 0L, false);
+        }
+    }
+
+    /** Builds the per-search view and context on this thread and runs the unified search. */
+    static PlanResult runUnified(BlockPos start, BlockPos target, ServerWorld world, PlanRequest req,
+                                 WorldTerrainView.BotSnapshot snapshot, long planId) {
+        SearchContext ctx = unifiedContext(start, target, world, req, snapshot, planId);
+        PathPlan plan = UnifiedPathFinder.search(ctx);
+        List<PathNode> nodes = plan.status() == PlanStatus.NO_PATH
+                ? new ArrayList<>() : new ArrayList<>(PlanAdapter.toPathNodes(plan, ctx));
+        if (plan.status() == PlanStatus.NO_PATH) {
+            // walkTo's boxed-in branch reads the old flag until slice C reads the reason. A protected
+            // box with only the start expanded is boxed in for a bot that cannot break there.
+            noteSearchBoxedIn(plan.reason() == NoPathReason.BOXED_IN
+                    || (plan.reason() == NoPathReason.BLOCKED_PROTECTED && plan.nodesExpanded() <= 1));
+        }
+        return new PlanResult(PathFinderChoice.UNIFIED, planId, nodes, plan, ctx, plan.elapsedMs(), false);
+    }
+
+    /** The search context for one unified search: a fresh {@link WorldTerrainView} owned by this thread. */
+    public static SearchContext unifiedContext(BlockPos start, BlockPos target, ServerWorld world, PlanRequest req,
+                                               WorldTerrainView.BotSnapshot snapshot, long planId) {
+        WorldTerrainView.BotSnapshot snap = snapshot != null ? snapshot : WorldTerrainView.BotSnapshot.NONE;
+        WorldTerrainView view = new WorldTerrainView(world, snap, req.allowBreak(), req.allowPlace());
+        return req.applyTo(SearchContext.builder(view,
+                        start.getX(), start.getY(), start.getZ(),
+                        target.getX(), target.getY(), target.getZ()))
+                .canSprint(snap.canSprint())
+                .scaffoldCount(snap.scaffoldCount())
+                .hazardPenaltyTicks(view::hazardPenaltyTicks)
+                .anchorBonusTicks(view::anchorBonusTicks)
+                .planId(planId)
+                .build();
+    }
+
+    /**
+     * The same search context over a fresh {@link WorldTerrainView} (same world, snapshot and gates,
+     * empty memos) built on the calling thread, with the hazard and anchor functions rebound to it.
+     * For reading a plan's terrain on another thread (PathCompare) or live before a unit (CostVerifier).
+     */
+    public static SearchContext rebindToFreshView(SearchContext ctx) {
+        if (!(ctx.terrain() instanceof WorldTerrainView old)) {
+            return ctx;
+        }
+        WorldTerrainView view = old.fresh();
+        return ctx.toBuilder()
+                .terrain(view)
+                .hazardPenaltyTicks(view::hazardPenaltyTicks)
+                .anchorBonusTicks(view::anchorBonusTicks)
+                .build();
+    }
+
     /**
      * Runs one finder with the timeout it normally gets (Baritone: its primary timeout; bidir:
-     * {@link #PATHFIND_TIMEOUT_MS}). No {@code [PathFinder] mode=} line, so the shadow compare
-     * can call it without skewing the mode counts.
+     * {@link #PATHFIND_TIMEOUT_MS}; unified: {@link PlanRequest#legacyWalk()}). No
+     * {@code [PathFinder] mode=} line, so the shadow compare can call it without skewing the mode counts.
      */
     static List<PathNode> runFinder(PathFinderChoice choice, BlockPos start, BlockPos target, ServerWorld world) {
         if (choice == PathFinderChoice.BARITONE) {
             return BaritoneStylePathFinder.calculatePath(start, target, world);
+        }
+        if (choice == PathFinderChoice.UNIFIED) {
+            return runUnified(start, target, world, PlanRequest.legacyWalk(), WorldTerrainView.BotSnapshot.NONE, 0L)
+                    .nodes();
         }
         return calculatePathBidirectional(start, target, world);
     }
@@ -200,11 +367,23 @@ public class PathFinder {
     }
 
     /**
-     * Quick reachability probe. Returns true if the Baritone pathfinder finds ANY path
-     * (even partial) within the given time budget. Does NOT cache or return the path.
-     * Use for "can I walk there?" decisions without committing to full navigation.
+     * Quick reachability probe. Returns true if the finder finds ANY path (even partial) within the
+     * given time budget. Does NOT cache or return the path. Use for "can I walk there?" decisions
+     * without committing to full navigation. With {@link #ACTIVE} UNIFIED it is a unified probe
+     * ({@link PlanRequest#probe}: the caller's budget is the whole budget, no swim, 3000 nodes);
+     * otherwise the Baritone-style finder as before. No log line, no plan ID.
      */
     public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, long timeoutMs) {
+        if (ACTIVE == PathFinderChoice.UNIFIED) {
+            try {
+                PathPlan plan = UnifiedPathFinder.search(unifiedContext(start, goal, world, PlanRequest.probe(timeoutMs),
+                        WorldTerrainView.BotSnapshot.NONE, 0L));
+                return plan.status() != PlanStatus.NO_PATH;
+            } catch (RuntimeException e) {
+                LOGGER.warn("[PathFinder] unified probe failed from={} to={}: {}; using baritone",
+                        start.toShortString(), goal.toShortString(), e.toString());
+            }
+        }
         return !BaritoneStylePathFinder.calculatePath(start, goal, world, timeoutMs).isEmpty();
     }
 

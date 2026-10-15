@@ -2,20 +2,32 @@ package net.wcfcarolina13.PathFinding;
 
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.PathFinding.unified.MoveSimulator;
+import net.wcfcarolina13.PathFinding.unified.PathPlan;
+import net.wcfcarolina13.PathFinding.unified.PlanRequest;
+import net.wcfcarolina13.PathFinding.unified.PlanStatus;
+import net.wcfcarolina13.PathFinding.unified.SearchContext;
+import net.wcfcarolina13.PathFinding.unified.UnifiedPathFinder;
+import net.wcfcarolina13.PathFinding.unified.WorldTerrainView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Opt-in shadow compare for head-to-head finder data (1.1.240 slice D). When on, every walkTo
- * plan also runs the OTHER finder on the same start/goal on one low-priority daemon thread and
- * logs one {@link PathCompareFormat} line. The shadow result is never used for movement.
+ * Opt-in shadow compare for head-to-head finder data (1.1.240 slice D, three finders since 1.1.242).
+ * When on, every bot plan also runs the two NON-primary finders on the same start/goal on one
+ * low-priority daemon thread and logs one {@link PathCompareFormat} line with all three and the
+ * primary's plan ID. The shadow results are never used for movement. Old finders' status comes from
+ * {@link PathFinder#isPathExecutable}; the unified finder's from {@link MoveSimulator} on this thread's
+ * own {@link WorldTerrainView} (never the primary thread's).
  *
  * <p>Never runs on the server thread and never blocks the primary: the queue is bounded and a
  * full queue drops the job (counted). World reads on the shadow thread follow the same rules as
@@ -63,12 +75,13 @@ public final class PathCompareService {
     }
 
     /**
-     * Queues the shadow run. Called by {@link PathFinder} right after the primary search, with
-     * the primary's timing and an immutable snapshot of its node positions.
+     * Queues the shadow run. Called by {@link PathFinder} right after the primary search, with the
+     * primary's result, the request and bot snapshot it ran with (the unified shadow reuses both, so
+     * it plans what the primary caller would have executed), and an immutable copy of its positions.
      */
     static void submit(String botName, BlockPos start, BlockPos target, ServerWorld world,
-                       PathFinderChoice primary, long primaryMs, List<BlockPos> primaryPath) {
-        if (!enabled || world == null || start == null || target == null) {
+                       PathFinder.PlanResult primary, PlanRequest request, WorldTerrainView.BotSnapshot snapshot) {
+        if (!enabled || world == null || start == null || target == null || primary == null) {
             return;
         }
         ThreadPoolExecutor executor = exec;
@@ -77,49 +90,83 @@ public final class PathCompareService {
             return;
         }
         SUBMITTED.incrementAndGet();
+        List<BlockPos> primaryPath = positions(primary.nodes());
         // The rejection handler counts a drop when the queue is full.
         executor.execute(() -> runShadow(botName, start.toImmutable(), target.toImmutable(), world,
-                primary, primaryMs, primaryPath));
+                primary, primaryPath, request, snapshot));
+    }
+
+    /** One finder's {@code <ms>ms/<len>/<status>} value. */
+    private record Value(long ms, int len, String status) {
     }
 
     private static void runShadow(String botName, BlockPos start, BlockPos target, ServerWorld world,
-                                  PathFinderChoice primary, long primaryMs, List<BlockPos> primaryPath) {
+                                  PathFinder.PlanResult primary, List<BlockPos> primaryPath,
+                                  PlanRequest request, WorldTerrainView.BotSnapshot snapshot) {
         try {
             if (!enabled || net.wcfcarolina13.GameAI.services.TaskService.isServerStopping()
                     || Thread.currentThread().isInterrupted()) {
                 return;
             }
-            PathFinderChoice shadow = primary.other();
-            long t0 = System.nanoTime();
-            List<PathFinder.PathNode> shadowNodes = PathFinder.runFinder(shadow, start, target, world);
-            long shadowMs = (System.nanoTime() - t0) / 1_000_000L;
-            if (net.wcfcarolina13.GameAI.services.TaskService.isServerStopping()) {
-                return;
+            PathFinderChoice primaryChoice = primary.finder();
+            Map<PathFinderChoice, Value> values = new EnumMap<>(PathFinderChoice.class);
+            for (PathFinderChoice shadow : primaryChoice.others()) {
+                if (net.wcfcarolina13.GameAI.services.TaskService.isServerStopping()
+                        || Thread.currentThread().isInterrupted()) {
+                    return;
+                }
+                values.put(shadow, runOne(shadow, start, target, world, request, snapshot));
             }
-            List<BlockPos> shadowPath = positions(shadowNodes);
+            // The primary's re-check after the shadows, back to back with theirs, on this thread's own view.
+            values.put(primaryChoice, primaryValue(primary, primaryPath, world));
 
-            // Both re-checks here, back to back, so they read the same world.
-            String primaryStatus = PathCompareFormat.status(primaryPath.size(),
-                    PathFinder.isPathExecutable(primaryPath, world));
-            String shadowStatus = PathCompareFormat.status(shadowPath.size(),
-                    PathFinder.isPathExecutable(shadowPath, world));
-
-            boolean primaryIsBidir = primary == PathFinderChoice.BIDIR;
+            Value bidir = values.get(PathFinderChoice.BIDIR);
+            Value baritone = values.get(PathFinderChoice.BARITONE);
+            Value unified = values.get(PathFinderChoice.UNIFIED);
             String line = PathCompareFormat.line(botName,
                     start.getX(), start.getY(), start.getZ(),
                     target.getX(), target.getY(), target.getZ(),
-                    primary,
-                    primaryIsBidir ? primaryMs : shadowMs,
-                    primaryIsBidir ? primaryPath.size() : shadowPath.size(),
-                    primaryIsBidir ? primaryStatus : shadowStatus,
-                    primaryIsBidir ? shadowMs : primaryMs,
-                    primaryIsBidir ? shadowPath.size() : primaryPath.size(),
-                    primaryIsBidir ? shadowStatus : primaryStatus);
+                    primaryChoice,
+                    bidir.ms(), bidir.len(), bidir.status(),
+                    baritone.ms(), baritone.len(), baritone.status(),
+                    unified.ms(), unified.len(), unified.status(),
+                    primary.planId());
             LOGGER.info(line);
             LOGGED.incrementAndGet();
         } catch (Throwable t) {
             LOGGER.debug("[PathCompare] shadow run failed for bot={}: {}", botName, t.toString());
         }
+    }
+
+    private static Value runOne(PathFinderChoice choice, BlockPos start, BlockPos target, ServerWorld world,
+                                PlanRequest request, WorldTerrainView.BotSnapshot snapshot) {
+        long t0 = System.nanoTime();
+        if (choice == PathFinderChoice.UNIFIED) {
+            SearchContext ctx = PathFinder.unifiedContext(start, target, world, request, snapshot, 0L);
+            PathPlan plan = UnifiedPathFinder.search(ctx);
+            long ms = (System.nanoTime() - t0) / 1_000_000L;
+            return unifiedValue(ms, plan, ctx);
+        }
+        List<BlockPos> path = positions(PathFinder.runFinder(choice, start, target, world));
+        long ms = (System.nanoTime() - t0) / 1_000_000L;
+        return new Value(ms, path.size(), PathCompareFormat.status(path.size(), PathFinder.isPathExecutable(path, world)));
+    }
+
+    private static Value primaryValue(PathFinder.PlanResult primary, List<BlockPos> primaryPath, ServerWorld world) {
+        if (primary.plan() != null && primary.context() != null) {
+            // The primary's view belongs to the primary's thread: simulate on a fresh one built here.
+            return unifiedValue(primary.elapsedMs(), primary.plan(), PathFinder.rebindToFreshView(primary.context()));
+        }
+        return new Value(primary.elapsedMs(), primaryPath.size(),
+                PathCompareFormat.status(primaryPath.size(), PathFinder.isPathExecutable(primaryPath, world)));
+    }
+
+    /** Status from {@link MoveSimulator} on a read-only overlay of {@code ctx}'s terrain (this thread's view). */
+    private static Value unifiedValue(long ms, PathPlan plan, SearchContext ctx) {
+        boolean noPath = plan.status() == PlanStatus.NO_PATH;
+        boolean executable = !noPath && MoveSimulator.simulate(ctx, plan).executable();
+        return new Value(ms, PathCompareFormat.unifiedLen(noPath, plan.moves().size()),
+                PathCompareFormat.unifiedStatus(noPath, executable));
     }
 
     static List<BlockPos> positions(List<PathFinder.PathNode> nodes) {
