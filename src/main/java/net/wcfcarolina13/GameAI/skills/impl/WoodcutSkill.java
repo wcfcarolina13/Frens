@@ -55,6 +55,7 @@ import net.wcfcarolina13.GameAI.skills.support.WoodcutApproachFeasibilityPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutChatLines;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutHungerPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutProtectionNudgePolicy;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
@@ -165,6 +166,13 @@ public final class WoodcutSkill implements Skill {
      * skill is one shared instance; filled at run start and removed in the run's finally.
      */
     private final Map<UUID, WoodcutRefusedTargets> refusedMineTargetsByBot = new ConcurrentHashMap<>();
+    /** Bots told "no food" this run (WoodcutHungerPolicy WARN_ONCE). Removed in the run's finally. */
+    private final Set<UUID> hungerWarnedBots = ConcurrentHashMap.newKeySet();
+    /**
+     * Bots whose run must pause for starvation. Sticky for the run: an approach loop that sees it
+     * returns false, and the target loop head turns it into the pause. Removed in the run's finally.
+     */
+    private final Set<UUID> starvationPauseBots = ConcurrentHashMap.newKeySet();
     private static final String AXE_BOOTSTRAP_START_LINE = "No axe yet, so I'll punch a tree first.";
     private static final String AXE_BOOTSTRAP_CRAFT_FAILED_LINE =
             "I punched enough wood for an axe but couldn't craft one. Give me an axe or some room for a crafting table and try again.";
@@ -837,13 +845,10 @@ public final class WoodcutSkill implements Skill {
                 // table-placement failure, or a new Y). The craft is otherwise reached only before a
                 // log is mined, so after the last reachable log the retry never came (1.1.234).
                 tryPendingAxeBootstrapRetry(bot);
-                // Hunger-aware interruption: don't fell trees until starvation kills the bot.
-                if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(bot)) {
-                    net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(bot);
-                    net.wcfcarolina13.ChatUtils.ChatUtils.sendChatMessages(
-                            bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                            "I'm starving and out of food. Woodcut paused — feed me, then /bot resume.");
-                    return SkillExecutionResult.failure("Woodcut paused: starving with no food.");
+                // Hunger-aware interruption: don't fell trees until starvation kills the bot. The
+                // approach loops check it too and come back here (sticky per-run flag).
+                if (checkWoodcutHunger(source, bot)) {
+                    return pauseForStarvation(source, bot);
                 }
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                     if (requestedBounds != null) {
@@ -1074,6 +1079,10 @@ public final class WoodcutSkill implements Skill {
                     workAreaState.markFailure(target.base());
                     logTargetTrace(target, reachSession, "APPROACH_FAILED");
                     logWoodcutMaintenanceSummary(target.base(), reachSession, "approach-failed");
+                    if (starvationPauseBots.contains(bot.getUuid())) {
+                        // The approach left to pause: the loop head pauses, not the trapped exit.
+                        continue;
+                    }
                     if (bot.getEntityWorld() instanceof ServerWorld trapWorld) {
                         BlockPos here = bot.getBlockPos().toImmutable();
                         boolean enclosedHere = isEnclosedHere(trapWorld, here);
@@ -1310,6 +1319,8 @@ public final class WoodcutSkill implements Skill {
             axeBootstrapSharedState.remove(bot.getUuid());
             activeRequestedBounds = null;
             refusedMineTargetsByBot.remove(bot.getUuid());
+            hungerWarnedBots.remove(bot.getUuid());
+            starvationPauseBots.remove(bot.getUuid());
             activeTreeWorkEnvelopeMin = null;
             activeTreeWorkEnvelopeMax = null;
         }
@@ -2766,6 +2777,10 @@ public final class WoodcutSkill implements Skill {
         if (isTrunkWithinReach(world, base, bot)) {
             return true;
         }
+        // Starving with nothing to eat: leave the approach, the target loop head pauses the run.
+        if (checkWoodcutHunger(source, bot)) {
+            return false;
+        }
         // In a roofed pocket with no way to climb, every stand walk fails (1.1.238 sandbox: ten
         // minutes on two trees). Leave the target before walking; the target loop ends the run
         // once targets keep failing from the same spot.
@@ -2796,6 +2811,9 @@ public final class WoodcutSkill implements Skill {
                     nearby.toShortString(), base.toShortString(), res.detail());
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
             MovementService.clearRecentWalkAttempt(bot.getUuid());
+        }
+        if (checkWoodcutHunger(source, bot)) {
+            return false;
         }
         // Fallback to planner if simple stand failed.
         MovementService.MovementOptions options = WOODCUT_MOVEMENT_OPTIONS;
@@ -2831,6 +2849,9 @@ public final class WoodcutSkill implements Skill {
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
         } else {
             LOGGER.info("Woodcut approach: no planner path for {} (reason=no dry stand)", base.toShortString());
+        }
+        if (checkWoodcutHunger(source, bot)) {
+            return false;
         }
         // Last resort: try to pillar from here to reach the trunk directly.
         if (prepareReach(bot, source, base, reachSession, sharedState)) {
@@ -2869,6 +2890,10 @@ public final class WoodcutSkill implements Skill {
         candidates.sort(Comparator.comparingDouble(p -> bot.getBlockPos().getSquaredDistance(p)));
         for (BlockPos candidate : candidates) {
             if (isAbortRequested(bot)) {
+                return false;
+            }
+            // Starving mid-approach: leave now, the target loop head pauses the run.
+            if (checkWoodcutHunger(source, bot)) {
                 return false;
             }
             BlockPos stand = findDryStandableNear(world, candidate, 1, 2);
@@ -2916,6 +2941,53 @@ public final class WoodcutSkill implements Skill {
         }
         LOGGER.info("Woodcut approach: abandoned {} (reason=no trunk reach)", base.toShortString());
         return false;
+    }
+
+    /**
+     * Hunger check for the target loop head and the approach loop heads (worker thread, like the
+     * 1.1.102 check it extends). Says the one "no food" warning a run gets, and returns true when
+     * the run must pause: starving and an eat attempt failed (HealingService.shouldPauseForStarvation).
+     * The pause is sticky for the run, so nested loops bail out without eating again.
+     */
+    private boolean checkWoodcutHunger(ServerCommandSource source, ServerPlayerEntity bot) {
+        UUID botId = bot.getUuid();
+        if (starvationPauseBots.contains(botId)) {
+            return true;
+        }
+        int food = bot.getHungerManager().getFoodLevel();
+        WoodcutHungerPolicy.Action action = WoodcutHungerPolicy.decide(
+                food,
+                HuntSkill.countSafeFoodItems(bot),
+                hungerWarnedBots.contains(botId),
+                net.wcfcarolina13.GameAI.services.HealingService.hungerWarningLevel(),
+                net.wcfcarolina13.GameAI.services.HealingService.hungerCriticalLevel());
+        if (action == WoodcutHungerPolicy.Action.WARN_ONCE && hungerWarnedBots.add(botId)) {
+            LOGGER.info("Woodcut hunger: {} food={} with no safe food, warning the owner", bot.getName().getString(), food);
+            ChatUtils.sendSystemMessage(source, WoodcutHungerPolicy.NO_FOOD_WARNING_LINE);
+        }
+        if (action == WoodcutHungerPolicy.Action.PAUSE
+                && net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(bot)) {
+            LOGGER.info("Woodcut hunger: {} starving (food={}) and could not eat; pausing the run", bot.getName().getString(), food);
+            starvationPauseBots.add(botId);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The 1.1.102 starvation pause (877cd756): flag for /bot resume and tell the owner. The line goes
+     * through sendSystemMessage like the protection nudge: sendChatMessages applies the bot-to-owner
+     * range gate (CompanionCommunicationPolicy.canBotChatToController, 32 blocks), and the 1.1.238
+     * sandbox bot was 46 blocks away, so the old line was routed and then silently dropped.
+     * No mid-task hunt (ruling): auto-hunt, when the owner enabled it, decides once the slot frees.
+     */
+    private SkillExecutionResult pauseForStarvation(ServerCommandSource source, ServerPlayerEntity bot) {
+        SkillResumeService.flagManualResume(bot);
+        ChatUtils.sendSystemMessage(source, WoodcutHungerPolicy.STARVING_PAUSE_LINE);
+        if (BotHomeService.isAutoHuntStarvingEnabled(bot)) {
+            net.wcfcarolina13.GameAI.services.BotAutoHuntService.requestDecisionNow(bot);
+        }
+        return SkillExecutionResult.failure("Woodcut paused: starving with no food.");
     }
 
     /** Whether the bot stands in a roofed, walled pocket well below the surface (pure rule in WoodcutApproachFeasibilityPolicy). */

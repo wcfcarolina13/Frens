@@ -163,6 +163,16 @@ public final class HealingService {
     private HealingService() {
     }
 
+    /** Food level at or below which a bot is hungry ("I'm hungry"). */
+    public static int hungerWarningLevel() {
+        return HUNGER_WARNING;
+    }
+
+    /** Food level at or below which a bot is starving ({@link #shouldPauseForStarvation}). */
+    public static int hungerCriticalLevel() {
+        return HUNGER_CRITICAL;
+    }
+
     public static boolean isHungry(ServerPlayerEntity bot) {
         return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_WARNING;
     }
