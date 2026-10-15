@@ -15,7 +15,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
-import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
@@ -23,10 +22,7 @@ import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
-import net.wcfcarolina13.GameAI.RLAgent;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
-import net.wcfcarolina13.Commands.modCommandRegistry;
-import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.PlayerUtils.BlockDistanceLimitedSearch;
 import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import net.wcfcarolina13.PlayerUtils.blockDetectionUnit;
@@ -38,7 +34,6 @@ import net.wcfcarolina13.PathFinding.PathTracer;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.fluid.FluidState;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -72,13 +67,10 @@ public class AutoFaceEntity {
     public static boolean botBusy;
     private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
-    public static boolean isHandlerTriggered;
     private static long lastBusyLogMs = 0L;
     private static long lastEmoteTick = -EMOTE_COOLDOWN_TICKS;
     private static long lastHostileTick = 0L;
     private static boolean isWorldTickListenerActive = true; // Flag to control execution
-    private static QTable qTable;
-    public static RLAgent rlAgent;
     public static List<Entity> hostileEntities;
 
     private static final Map<UUID, ScheduledExecutorService> botExecutors = new ConcurrentHashMap<>();
@@ -110,45 +102,6 @@ public class AutoFaceEntity {
 
         MinecraftServer server = bot.getCommandSource().getServer();
 
-        // Load Q-table from storage
-        try {
-            qTable = QTableStorage.loadQTable();
-            LOGGER.debug("Loaded Q-table from storage.");
-
-        } catch (Exception e) {
-            LOGGER.warn("No existing Q-table found. Starting fresh.", e);
-            qTable = new QTable();
-        }
-
-
-        // RL agent hook
-        rlAgent = null;
-
-        if (modCommandRegistry.isTrainingMode) {
-
-            rlAgent = new RLAgent(); // Initialize RL agent (use singleton or DI for reusability)
-
-        }
-        else {
-
-            try {
-
-                double epsilon = QTableStorage.loadEpsilon(BotEventHandler.qTableDir + "/epsilon.bin");
-
-                rlAgent = new RLAgent(epsilon, qTable);
-
-            }
-
-            catch (Exception e) {
-
-                LOGGER.warn("No existing epsilon found. Starting fresh.", e);
-
-            }
-
-        }
-
-
-        RLAgent finalRlAgent = rlAgent;
         autoFaceInFlight.computeIfAbsent(bot.getUuid(), uuid -> new AtomicBoolean(false));
 
         botExecutor.scheduleAtFixedRate(() -> {
@@ -162,7 +115,7 @@ public class AutoFaceEntity {
             final MinecraftServer dispatchServer = server;
             dispatchServer.execute(() -> {
                 try {
-                    runAutoFaceTick(bot, dispatchServer, finalRlAgent);
+                    runAutoFaceTick(bot, dispatchServer);
                 } finally {
                     guard.set(false);
                 }
@@ -192,7 +145,7 @@ public class AutoFaceEntity {
         bot.setSneaking(false);
     }
 
-    private static void runAutoFaceTick(ServerPlayerEntity bot, MinecraftServer server, RLAgent rlAgent) {
+    private static void runAutoFaceTick(ServerPlayerEntity bot, MinecraftServer server) {
         if (server == null || bot == null) {
             return;
         }
@@ -311,27 +264,6 @@ public class AutoFaceEntity {
                         + " at distance: " + distanceToHostileEntity);
 
                 hostileEntityInFront = true;
-
-                if (!isHandlerTriggered) {
-                    LOGGER.debug("Triggering handler for hostile entity.");
-                    isHandlerTriggered = true;
-
-                    BotEventHandler eventHandler = new BotEventHandler(server, bot);
-
-                    if (!modCommandRegistry.enableReinforcementLearning) {
-                        LOGGER.debug("RL loop disabled; skipping detectAndReact.");
-                    } else if (modCommandRegistry.isTrainingMode) {
-                        try {
-                            eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    } else {
-                        eventHandler.detectAndReactPlayMode(rlAgent, qTable);
-                    }
-                } else {
-                    LOGGER.debug("Handler already triggered. Skipping.");
-                }
             }
 
         } else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5
@@ -342,7 +274,6 @@ public class AutoFaceEntity {
             setBotExecutingTask(false);
             botBusy = true;
 
-            BotEventHandler eventHandler = new BotEventHandler(server, bot);
             if (BotEventHandler.isRegisteredBot(bot)) {
                 CombatInventoryManager.ensureCombatLoadout(bot);
             }
@@ -368,21 +299,6 @@ public class AutoFaceEntity {
                 setBotExecutingTask(false);
             }
 
-            boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, true);
-            if (runHeavyLogic) {
-                if (!modCommandRegistry.enableReinforcementLearning) {
-                    LOGGER.debug("RL loop disabled; skipping detectAndReact.");
-                } else if (modCommandRegistry.isTrainingMode) {
-                    try {
-                        eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                } else {
-                    eventHandler.detectAndReactPlayMode(rlAgent, qTable);
-                }
-            }
-
         } else {
             if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving)
                     || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
@@ -399,17 +315,6 @@ public class AutoFaceEntity {
                 hostileEntityInFront = false;
 
                 FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
-
-                boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, false);
-                if (runHeavyLogic && modCommandRegistry.isTrainingMode && modCommandRegistry.enableReinforcementLearning && !isHandlerTriggered) {
-                    isHandlerTriggered = true;
-                    BotEventHandler eventHandler = new BotEventHandler(server, bot);
-                    try {
-                        eventHandler.detectAndReact(rlAgent, Double.POSITIVE_INFINITY, qTable);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
 
                 maybePerformAmbientEmote(bot, server, nearbyEntities);
                 if (BotFleeService.tryResumeInterruptedSurvival(bot, server)) {

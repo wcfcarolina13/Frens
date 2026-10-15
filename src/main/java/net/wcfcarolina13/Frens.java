@@ -42,7 +42,6 @@ import net.wcfcarolina13.GameAI.services.HuntCatalog;
 import net.wcfcarolina13.GameAI.services.HuntHistoryService;
 import net.wcfcarolina13.GameAI.services.BotQuestService;
 
-import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.network.OpenConfigPayload;
 import net.wcfcarolina13.network.SaveAPIKeyPayload;
@@ -832,7 +831,6 @@ public class Frens implements ModInitializer {
         } catch (Exception e) {
             Frens.LOGGER.error("Failed to initialize Frens database; running without DB-backed memory.", e);
         }
-        QTableStorage.setupQTableStorage();
 
         // Legacy NLP models are NOT fetched here: requestLegacyNlpAssets() starts that on the
         // first real legacy-LLM demand (ollama4j present + world and bot LLM toggles on).
@@ -1242,8 +1240,6 @@ public class Frens implements ModInitializer {
                                 damageSource.getType(), serverPlayer.isAlive());
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetCombatState(serverPlayer.getUuid());
                         net.wcfcarolina13.GameAI.services.BotFleeService.reset(serverPlayer.getUuid());
-                        QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
-                        BotEventHandler.botDied = true; // set flag for bot's death.
 
                         // Journal the bot's death, then invalidate its soul profile so no
                         // pending delivery survives into the respawn.
@@ -1325,7 +1321,6 @@ public class Frens implements ModInitializer {
             // Check if the respawned player is the bot
             if (oldPlayer instanceof ServerPlayerEntity && newPlayer instanceof ServerPlayerEntity && BotEventHandler.isRegisteredBot(newPlayer)) {
                 System.out.println("Bot has respawned. Updating state...");
-                BotEventHandler.hasRespawned = true;
                 BotEventHandler.botSpawnCount++;
                 LOGGER.info("AFTER_RESPAWN fired for bot {} (alive flag={})", newPlayer.getName().getString(), alive);
                 AutoFaceEntity.handleBotRespawn(newPlayer);

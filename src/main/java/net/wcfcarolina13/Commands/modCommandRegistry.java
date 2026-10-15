@@ -177,7 +177,6 @@ public class modCommandRegistry {
 
     static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
-    public static boolean enableReinforcementLearning = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 

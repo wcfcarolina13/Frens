@@ -36,8 +36,6 @@ import net.minecraft.world.GameMode;
 import net.minecraft.entity.EntityType;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
-import net.wcfcarolina13.Database.QTable;
-import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.DropReachPolicy;
 import net.wcfcarolina13.GameAI.services.DropStandHelper;
@@ -57,8 +55,6 @@ import net.wcfcarolina13.GameAI.services.BotThreatService;
 import net.wcfcarolina13.GameAI.services.CreeperEvasionPolicy;
 import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotStuckService;
-import net.wcfcarolina13.GameAI.services.BotRLActionService;
-import net.wcfcarolina13.GameAI.services.BotRLPersistenceThrottleService;
 import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
@@ -66,14 +62,12 @@ import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
 import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
 import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
-import net.wcfcarolina13.Database.StateActionPair;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.FaceClosestEntity;
-import net.wcfcarolina13.LauncherDetection.LauncherEnvironment;
 
 import java.util.ArrayList;
 import net.wcfcarolina13.PlayerUtils.*;
@@ -105,7 +99,6 @@ import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -115,7 +108,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static net.wcfcarolina13.GameAI.State.isStateConsistent;
 import static net.wcfcarolina13.GameAI.services.FollowStateService.*;
 
 
@@ -123,17 +115,11 @@ public class BotEventHandler {
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
-    private static final boolean DEBUG_RL = false;
     // Stage-2 refactor: primary bot selection moved to BotLifecycleService.
-    public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
-    private static boolean isExecuting = false;
     private static final double DEFAULT_RISK_APPETITE = 0.5; // Default value upon respawn
-    public static boolean botDied = false; // Flag to track if the bot died
-    public static boolean hasRespawned = false; // flag to track if the bot has respawned before or not
     public static int botSpawnCount = 0;
     // Stage-2 refactor: last spawn state moved to BotLifecycleService.
-    private static State currentState = null;
     private static final Random RANDOM = new Random();
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
@@ -239,7 +225,6 @@ public class BotEventHandler {
     }
 
     // Stage-2 refactor: per-bot command state moved to BotCommandStateService.
-    private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
 
     /** Per-bot creeper-flee progress tracking — when distance isn't improving, force shield. */
     private record CreeperFleeMemory(UUID creeperUuid, double lastDistance, long lastTick, int stuckTicks) {}
@@ -287,26 +272,6 @@ public class BotEventHandler {
         TRAVELING
     }
     private static long lastRespawnHandledTick = -1;
-
-    private static void debugRL(String message) {
-        if (DEBUG_RL) {
-            LOGGER.debug(message);
-        }
-    }
-
-    public static boolean throttleTraining(ServerPlayerEntity bot, boolean urgent) {
-        if (bot == null || bot.getCommandSource().getServer() == null) {
-            return true;
-        }
-        int interval = urgent ? 2 : 20; // urgent ~0.1s, passive ~1s (assuming 20tps)
-        long now = bot.getCommandSource().getServer().getTicks();
-        long last = LAST_RL_SAMPLE_TICK.getOrDefault(bot.getUuid(), -1L);
-        if (last >= 0 && (now - last) < interval) {
-            return false;
-        }
-        LAST_RL_SAMPLE_TICK.put(bot.getUuid(), now);
-        return true;
-    }
 
     private static BotCommandStateService.State stateFor(ServerPlayerEntity bot) {
         return BotCommandStateService.stateFor(bot);
@@ -555,13 +520,6 @@ public class BotEventHandler {
         }
     }
 
-    public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
-        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
-        if (server != null && bot != null && (primaryUuid == null || primaryUuid.equals(bot.getUuid()))) {
-            registerBot(bot);
-        }
-    }
-
     public static void setExternalOverrideActive(boolean active) {
         if (externalOverrideActive == active) {
             return;
@@ -778,7 +736,6 @@ public class BotEventHandler {
         net.wcfcarolina13.PlayerUtils.CombatInventoryManager.forgetBot(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
-        LAST_RL_SAMPLE_TICK.remove(uuid);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
         LAST_ARMOR_AUDIT_TICK.remove(uuid);
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
@@ -841,194 +798,6 @@ public class BotEventHandler {
         return bots;
     }
 
-    private static State initializeBotState(QTable qTable) {
-        State initialState = null;
-
-        if (qTable == null || qTable.getTable().isEmpty()) {
-            debugRL("No initial state available. Q-table is empty.");
-        } else {
-            debugRL("Loaded Q-table: Total state-action pairs = " + qTable.getTable().size());
-
-            // Get the most recent state from the Q-table
-            StateActionPair recentPair = qTable.getTable().keySet().iterator().next();
-            initialState = recentPair.getState();
-
-            debugRL("Setting initial state to: " + initialState);
-        }
-
-        return initialState;
-    }
-
-    public void detectAndReact(RLAgent rlAgentHook, double distanceToHostileEntity, QTable qTable) throws IOException {
-        if (!net.wcfcarolina13.Commands.modCommandRegistry.enableReinforcementLearning) {
-            return;
-        }
-        if (bot != null) {
-            engageImmediateThreats(bot);
-        }
-        if (externalOverrideActive) {
-            LOGGER.debug("Skipping detectAndReact because external override is active.");
-            return;
-        }
-        // Never let the RL/training loop fight player-issued commands (follow/skills/guard/etc).
-        // This avoids “bot looks busy” stalls where training actions cancel commanded movement.
-        if (bot != null) {
-            Mode mode = getMode(bot);
-            if (mode != null && mode != Mode.IDLE) {
-                LOGGER.debug("Skipping detectAndReact because bot is in mode={}", mode);
-                return;
-            }
-        }
-        synchronized (monitorLock) {
-            if (isExecuting) {
-                debugRL("Executing detection code");
-                return; // Skip if already executing
-            } else {
-                debugRL("No immediate threats detected");
-                // Reset state when no threats are detected
-                BotEventHandler.currentState = createInitialState(bot);
-            }
-            isExecuting = true;
-        }
-
-        try {
-            double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
-            debugRL("Distance from danger zone: " + dangerDistance + " blocks");
-
-            List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
-            List<Entity> hostileEntities = nearbyEntities.stream()
-                    .filter(EntityUtil::isHostile)
-                    .toList();
-
-            LOGGER.debug("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
-                    hostileEntities.size(), net.wcfcarolina13.Commands.modCommandRegistry.isTrainingMode, isExecuting);
-
-            BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
-
-            List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
-
-            boolean hasSculkNearby = nearbyBlocks.stream()
-                    .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
-
-            BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
-            boolean threatDetected = shouldEnterCombat(!hostileEntities.isEmpty(), dangerDistance, hasSculkNearby);
-            BotStuckService.updateStuckTracker(bot, environmentSnapshot);
-
-            debugRL("Nearby blocks: " + nearbyBlocks);
-
-            int timeofDay = GetTime.getTimeOfWorld(bot);
-            String time = (timeofDay >= 12000 && timeofDay < 24000) ? "night" : "day";
-
-            World world = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS).getWorld();
-            RegistryKey<World> dimType = world.getRegistryKey();
-            String dimension = dimType.getValue().toString();
-
-            if (!hostileEntities.isEmpty()) {
-                // Combat callout: threat detected
-                Entity closestThreat = hostileEntities.stream()
-                        .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
-                        .orElse(null);
-                if (closestThreat != null) {
-                    net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onThreatDetected(bot, closestThreat);
-                }
-                
-                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
-                        .map(entity -> EntityDetails.from(bot, entity))
-                        .toList();
-
-                State currentState;
-
-                if (hasRespawned && botDied) {
-                    State lastKnownState = QTableStorage.loadLastKnownState(qTableDir + "/lastKnownState.bin");
-                    currentState = createInitialState(bot);
-                    BotEventHandler.botDied = false;
-
-                    if (isStateConsistent(lastKnownState, currentState)) {
-                        debugRL("Merged values from last known state.");
-                        currentState.setRiskMap(lastKnownState.getRiskMap());
-                        currentState.setPodMap(lastKnownState.getPodMap());
-                    }
-                } else {
-                    currentState = initializeBotState(qTable);
-
-                    debugRL("Created initial state");
-                }
-
-                if (botSpawnCount == 0) {
-                    currentState = createInitialState(bot);
-                }
-
-                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        distanceToHostileEntity, time, dimension);
-
-            } else if ((dangerDistance > 0.0 && dangerDistance <= 5.0) || hasSculkNearby) {
-                debugRL("Danger zone detected within 5 blocks");
-
-                debugRL("Triggered handler for danger zone case.");
-
-                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
-                        .map(entity -> EntityDetails.from(bot, entity))
-                        .toList();
-
-                State currentState;
-
-                if (hasRespawned && botDied) {
-                    State lastKnownState = QTableStorage.loadLastKnownState(qTableDir + "/lastKnownState.bin");
-                    currentState = createInitialState(bot);
-                    BotEventHandler.botDied = false;
-
-                    if (isStateConsistent(lastKnownState, currentState)) {
-                        debugRL("Merged values from last known state.");
-                        currentState.setRiskMap(lastKnownState.getRiskMap());
-                        currentState.setPodMap(lastKnownState.getPodMap());
-                    }
-                } else {
-                    currentState = initializeBotState(qTable);
-                }
-
-                if (botSpawnCount == 0) {
-                    currentState = createInitialState(bot);
-                }
-
-                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        distanceToHostileEntity, time, dimension);
-            } else {
-                debugRL("Passive environment detected. Running exploratory step.");
-
-                collectNearbyDrops(bot, 6.0D);
-
-                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
-                        .map(entity -> EntityDetails.from(bot, entity))
-                        .toList();
-
-                State currentState = BotEventHandler.currentState != null ? BotEventHandler.currentState : createInitialState(bot);
-                if (currentState.getRiskMap() == null) {
-                    currentState.setRiskMap(new HashMap<>());
-                }
-                if (currentState.getPodMap() == null) {
-                    currentState.setPodMap(new HashMap<>());
-                }
-
-                double safeDistance = Double.isFinite(distanceToHostileEntity) && distanceToHostileEntity > 0
-                        ? distanceToHostileEntity
-                        : 50.0;
-
-                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        safeDistance, time, dimension);
-            }
-
-
-        } finally {
-            synchronized (monitorLock) {
-                isExecuting = false;
-                AutoFaceEntity.isHandlerTriggered = false;
-                AutoFaceEntity.setBotExecutingTask(false);
-                AutoFaceEntity.isBotMoving = false;
-                debugRL("Resetting handler trigger flag to: " + false);
-            }
-        }
-    }
-
     public static void tickDrowningRescue(MinecraftServer server) {
         if (server == null) return;
         for (ServerPlayerEntity player : getRegisteredBots(server)) {
@@ -1083,164 +852,6 @@ public class BotEventHandler {
         }
     }
 
-
-    public static State getCurrentState() {
-
-        return BotEventHandler.currentState;
-
-    }
-
-    public void detectAndReactPlayMode(RLAgent rlAgentHook, QTable qTable) {
-        if (!net.wcfcarolina13.Commands.modCommandRegistry.enableReinforcementLearning) {
-            return;
-        }
-        if (externalOverrideActive) {
-            LOGGER.debug("Skipping detectAndReactPlayMode because external override is active.");
-            return;
-        }
-        if (bot != null) {
-            Mode mode = getMode(bot);
-            if (mode != null && mode != Mode.IDLE) {
-                LOGGER.debug("Skipping detectAndReactPlayMode because bot is in mode={}", mode);
-                return;
-            }
-        }
-        synchronized (monitorLock) {
-            if (isExecuting) {
-                debugRL("Already executing detection code, skipping...");
-                return; // Skip if already executing
-            }
-            isExecuting = true;
-        }
-
-        try {
-            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-
-
-            if (qTable == null) {
-                ChatUtils.sendChatMessages(botSource, "I have no training data to work with! Please spawn me in training mode so that I can learn first!");
-            }
-
-            else {
-                // Detect nearby hostile entities
-                List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
-                List<Entity> hostileEntities = nearbyEntities.stream()
-                        .filter(EntityUtil::isHostile)
-                        .toList();
-
-                if (!hostileEntities.isEmpty()) {
-                    // Gather state information
-                    State currentState = createInitialState(bot);
-
-//                double riskAppetite = currentState.getRiskAppetite();
-//
-                    Map<StateActions.Action, Double> riskMap = currentState.getRiskMap();
-
-
-
-                    // Choose action
-                    StateActions.Action chosenAction = rlAgentHook.chooseActionPlayMode(currentState, qTable, riskMap, "detectAndReactPlayMode");
-
-
-                    // Log chosen action for debugging
-                    debugRL("Play Mode - Chosen action: " + chosenAction);
-
-                    // Execute action
-                    executeAction(chosenAction);
-                }
-                else if (DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) {
-
-                    // Gather state information
-                    State currentState = createInitialState(bot);
-
-                    Map<StateActions.Action, Double> riskMap = currentState.getRiskMap();
-
-
-                    // Choose action
-                    StateActions.Action chosenAction = rlAgentHook.chooseActionPlayMode(currentState, qTable, riskMap, "detectAndReactPlayMode");
-
-
-                    // Log chosen action for debugging
-                    debugRL("Play Mode - Chosen action: " + chosenAction);
-
-                    // Execute action
-                    executeAction(chosenAction);
-                }
-
-
-            }
-        } finally {
-            synchronized (monitorLock) {
-                debugRL("Resetting handler trigger flag.");
-                isExecuting = false;
-                AutoFaceEntity.isHandlerTriggered = false; // Reset the trigger flag
-                AutoFaceEntity.setBotExecutingTask(false);
-                AutoFaceEntity.isBotMoving = false;
-            }
-        }
-    }
-
-    private static void executeAction(StateActions.Action chosenAction) {
-        ActionHoldTracker.recordAction(chosenAction);
-        switch (chosenAction) {
-            case MOVE_FORWARD -> performAction("moveForward");
-            case MOVE_BACKWARD -> performAction("moveBackward");
-            case TURN_LEFT -> performAction("turnLeft");
-            case TURN_RIGHT -> performAction("turnRight");
-            case JUMP -> performAction("jump");
-            case JUMP_FORWARD -> performAction("jumpForward");
-            case SNEAK -> performAction("sneak");
-            case SPRINT -> performAction("sprint");
-            case STOP_SNEAKING -> performAction("unsneak");
-            case STOP_SPRINTING -> performAction("unsprint");
-            case STOP_MOVING -> performAction("stopMoving");
-            case USE_ITEM -> performAction("useItem");
-            case EQUIP_ARMOR -> armorUtils.autoEquipArmor(bot);
-            case ATTACK -> {
-                performAction("attack");
-                // Combat callout: engagement - find nearest hostile at attack time
-                if (bot != null) {
-                    List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D).stream()
-                            .filter(e -> e instanceof net.minecraft.entity.mob.HostileEntity)
-                            .toList();
-                    if (!nearbyHostiles.isEmpty()) {
-                        Entity target = nearbyHostiles.stream()
-                                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
-                                .orElse(null);
-                        if (target != null) {
-                            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onEngagement(bot, target);
-                        }
-                    }
-                }
-            }
-            case BREAK_BLOCK_FORWARD -> performAction("breakBlock");
-            case PLACE_SUPPORT_BLOCK -> performAction("placeSupportBlock");
-            case ESCAPE_STAIRS -> performAction("escapeStairs");
-            case HOTBAR_1 -> performAction("hotbar1");
-            case HOTBAR_2 -> performAction("hotbar2");
-            case HOTBAR_3 -> performAction("hotbar3");
-            case HOTBAR_4 -> performAction("hotbar4");
-            case HOTBAR_5 -> performAction("hotbar5");
-            case HOTBAR_6 -> performAction("hotbar6");
-            case HOTBAR_7 -> performAction("hotbar7");
-            case HOTBAR_8 -> performAction("hotbar8");
-            case HOTBAR_9 -> performAction("hotbar9");
-            case STAY -> debugRL("Performing action: Stay and do nothing");
-        }
-    }
-
-    private static ServerPlayerEntity findEscortPlayer(ServerPlayerEntity bot) {
-        MinecraftServer srv = bot.getCommandSource().getServer();
-        if (srv == null) {
-            return null;
-        }
-
-        return srv.getPlayerManager().getPlayerList().stream()
-                .filter(player -> !player.getUuid().equals(bot.getUuid()))
-                .filter(player -> !player.isSpectator())
-                .min(Comparator.comparingDouble(player -> player.squaredDistanceTo(bot)))
-                .orElse(null);
-    }
 
     private static boolean shouldEnterCombat(boolean hostilesNearby, double dangerDistance, boolean hasSculkNearby) {
         boolean dangerProximity = dangerDistance > 0.0 && dangerDistance <= 5.0;
@@ -7701,167 +7312,6 @@ public class BotEventHandler {
         }
     }
 
-    private void performLearningStep(
-            RLAgent rlAgentHook,
-            QTable qTable,
-            State currentState,
-            List<EntityDetails> nearbyEntitiesList,
-            List<String> nearbyBlocks,
-            double distanceToHostileEntity,
-            String time,
-            String dimension) throws IOException {
-
-        if (externalOverrideActive) {
-            LOGGER.debug("Aborting learning step because external override is active.");
-            return;
-        }
-
-        LOGGER.info("Starting performLearningStep. Current state hash: {}, hostiles in state: {}",
-                currentState.hashCode(),
-                currentState.getNearbyEntities() != null ? currentState.getNearbyEntities().stream().filter(EntityDetails::isHostile).count() : 0);
-
-        double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
-        List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
-        Map<StateActions.Action, Double> riskMap = rlAgentHook.calculateRisk(currentState, potentialActionList);
-
-        Map<StateActions.Action, Double> chosenActionMap = rlAgentHook.chooseAction(currentState, riskAppetite, riskMap);
-        Map.Entry<StateActions.Action, Double> entry = chosenActionMap.entrySet().iterator().next();
-
-        StateActions.Action chosenAction = entry.getKey();
-        double risk = entry.getValue();
-
-        LOGGER.info("Training step chosen action: {}", chosenAction);
-
-        executeAction(chosenAction);
-
-        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
-        List<String> updatedBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
-
-        List<EntityDetails> updatedEntities = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
-                .map(entity -> EntityDetails.from(bot, entity))
-                .toList();
-
-        double newDistanceToHostile = updatedEntities.stream()
-                .filter(EntityDetails::isHostile)
-                .mapToDouble(entity -> Math.hypot(entity.getX() - bot.getX(), entity.getZ() - bot.getZ()))
-                .min()
-                .orElse(distanceToHostileEntity);
-
-        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
-        int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
-        int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
-        int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
-        Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
-        ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
-        List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
-        SelectedItemDetails selectedItem = new SelectedItemDetails(
-                hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString(),
-                hotBarUtils.getSelectedHotbarItemStack(bot).getComponents().contains(DataComponentTypes.FOOD),
-                isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
-        );
-
-	        BotStuckService.EnvironmentSnapshot nextEnv = BotStuckService.analyzeEnvironment(bot);
-	        boolean confinedNoEscape = nextEnv.enclosed() && !nextEnv.hasEscapeRoute() && !nextEnv.hasHeadroom();
-	        if (!confinedNoEscape) {
-	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
-	        }
-
-        String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
-        String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
-
-        Map<StateActions.Action, Double> basePodMap = currentState.getPodMap() != null
-                ? currentState.getPodMap()
-                : new HashMap<>();
-
-        State nextState = new State(
-                (int) bot.getX(),
-                (int) bot.getY(),
-                (int) bot.getZ(),
-                updatedEntities,
-                updatedBlocks,
-                newDistanceToHostile,
-                (int) bot.getHealth(),
-                dangerDistance,
-                hotBarItems,
-                selectedItem,
-                updatedTime,
-                updatedDimension,
-                botHungerLevel,
-                botOxygenLevel,
-                botFrostLevel,
-                offhandItem,
-                armorItems,
-                nextEnv.enclosed(),
-                nextEnv.solidNeighborCount(),
-                nextEnv.hasHeadroom(),
-                nextEnv.hasEscapeRoute(),
-                chosenAction,
-                riskMap,
-                riskAppetite,
-                basePodMap
-        );
-
-        rlAgentHook.decayEpsilon();
-        Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
-        nextState.setPodMap(actionPodMap);
-
-        ServerPlayerEntity commander = findEscortPlayer(bot);
-        Vec3d commanderPos = commander != null ? new Vec3d(commander.getX(), commander.getY(), commander.getZ()) : null;
-        float commanderHealth = commander != null ? commander.getHealth() : -1f;
-        Vec3d guardCenterVec = getGuardCenterVec();
-        double guardRadiusValue = guardCenterVec != null ? getGuardRadiusValue() : 0.0D;
-
-        ActionHoldTracker.ActionHoldSnapshot holdSnapshot = ActionHoldTracker.snapshot();
-
-        double reward = rlAgentHook.calculateReward(
-                (int) bot.getX(),
-                (int) bot.getY(),
-                (int) bot.getZ(),
-                updatedEntities,
-                updatedBlocks,
-                newDistanceToHostile,
-                (int) bot.getHealth(),
-                dangerDistance,
-                hotBarItems,
-                selectedItem,
-                updatedTime,
-                updatedDimension,
-                botHungerLevel,
-                botOxygenLevel,
-                offhandItem,
-                armorItems,
-                nextEnv.enclosed(),
-                nextEnv.hasHeadroom(),
-                nextEnv.hasEscapeRoute(),
-                nextEnv.solidNeighborCount(),
-                chosenAction,
-                risk,
-                actionPodMap.getOrDefault(chosenAction, 0.0),
-                getCurrentMode(),
-                getCombatStyle(),
-                commanderPos,
-                commanderHealth,
-                guardCenterVec,
-                guardRadiusValue,
-                holdSnapshot
-        );
-
-        LOGGER.info("Reward for action {}: {}", chosenAction, reward);
-
-        double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
-        qTable.addEntry(currentState, chosenAction, qValue, nextState);
-
-        if (BotRLPersistenceThrottleService.shouldPersistNow(bot)) {
-            QTableStorage.saveQTable(qTable, null);
-            QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
-            LOGGER.info("Persisted Q-table and epsilon (throttled) after action {}", chosenAction);
-        } else {
-            LOGGER.debug("Skipping Q-table persist due to throttle (action={})", chosenAction);
-        }
-
-        BotEventHandler.currentState = nextState;
-    }
-
 
     public static State createInitialState(ServerPlayerEntity bot) {
         List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
@@ -7930,10 +7380,6 @@ public class BotEventHandler {
     }
 
 
-    private static void performAction(String action) {
-        BotRLActionService.performAction(bot, action, BotEventHandler::debugRL);
-    }
-
     /**
      * Resets all static fields to prevent state from leaking between worlds/servers.
      * Must be called on server stop or when the bot completely disconnects.
@@ -7945,10 +7391,8 @@ public class BotEventHandler {
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
 		            BotCommandStateService.clearAll();
-		            LAST_RL_SAMPLE_TICK.clear();
 		            BotRescueService.reset();
 		            BotStuckService.resetAll();
-		            BotRLPersistenceThrottleService.resetAll();
 	            FollowStateService.reset();
 	            FollowDebugService.reset();
 	            DropSweepService.reset();
@@ -7965,13 +7409,9 @@ public class BotEventHandler {
                 TELEPORT_GRACE_UNTIL_TICK.clear();
                 STOP_COMMAND_GRACE_UNTIL_TICK.clear();
 
-            isExecuting = false;
             externalOverrideActive = false;
-            botDied = false;
-            hasRespawned = false;
             botSpawnCount = 0;
 
-		            currentState = null;
 		            lastRespawnHandledTick = -1;
 		            
 		            LOGGER.info("BotEventHandler static state reset successfully.");
