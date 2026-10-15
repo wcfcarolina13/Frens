@@ -30,8 +30,6 @@ import java.util.Set;
  */
 final class SoulSideChannelOps {
 
-    /** Sentinel token that opens the side-channel line. */
-    static final String SENTINEL = "##FRENS";
     /** At most this many facts are taken from one scene; the rest are counted as dropped. */
     static final int MAX_FACTS = 3;
     /** Whatever the model claims, an inferred fact is held no more firmly than this. */

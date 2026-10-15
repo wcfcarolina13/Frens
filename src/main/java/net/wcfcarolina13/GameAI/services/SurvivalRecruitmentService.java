@@ -326,10 +326,6 @@ public final class SurvivalRecruitmentService {
         Frens.CONFIG.save();
     }
 
-    public static Map<String, Boolean> defaultAdminPermissionGlobals() {
-        return new LinkedHashMap<>(DEFAULT_ADMIN_PERMISSION_GLOBALS);
-    }
-
     public static boolean defaultAdminPermissionAllowed(String permissionKey) {
         String normalized = normalizePermissionKey(permissionKey);
         return DEFAULT_ADMIN_PERMISSION_GLOBALS.getOrDefault(normalized, false);

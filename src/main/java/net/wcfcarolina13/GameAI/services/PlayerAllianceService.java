@@ -16,7 +16,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -215,13 +214,6 @@ public final class PlayerAllianceService {
     private static String displayName(String uuid) {
         String n = DATA.nameByUuid.get(uuid);
         return n != null ? n : uuid;
-    }
-
-    public static Optional<String> lookupName(String uuid) {
-        ensureLoaded();
-        synchronized (LOCK) {
-            return Optional.ofNullable(DATA.nameByUuid.get(uuid));
-        }
     }
 
     // --- Persistence --------------------------------------------------------
