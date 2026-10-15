@@ -144,31 +144,6 @@ public final class NavigationArtifactService {
 
     // ── Navigation tiers ──────────────────────────────────────────────────
 
-    public enum NavTier { NONE, BASIC, ENHANCED }
-
-    /**
-     * Determine navigation tier from bot + player inventories.
-     * ENHANCED: either holds Eye of Ender.
-     * BASIC: bot holds Compass, Recovery Compass, Map, or Filled Map.
-     */
-    public static NavTier getBotNavigationTier(ServerPlayerEntity bot, ServerPlayerEntity player) {
-        if (hasItemInInventory(bot, Items.ENDER_EYE) || hasItemInInventory(player, Items.ENDER_EYE)) {
-            return NavTier.ENHANCED;
-        }
-        // Lodestone compass with binding → ENHANCED tier (component check only, no chunk validation —
-        // the travel-commit path validates the block separately; tier classification should be cheap)
-        if (LodestoneCompassService.hasLodestoneCompass(bot)) {
-            return NavTier.ENHANCED;
-        }
-        if (hasItemInInventory(bot, Items.COMPASS)
-                || hasItemInInventory(bot, Items.RECOVERY_COMPASS)
-                || hasItemInInventory(bot, Items.FILLED_MAP)
-                || hasItemInInventory(bot, Items.MAP)) {
-            return NavTier.BASIC;
-        }
-        return NavTier.NONE;
-    }
-
     /** Check if both player and bot each hold at least one ender pearl. */
     public static boolean bothHaveEnderPearl(ServerPlayerEntity player, ServerPlayerEntity bot) {
         return hasItemInInventory(player, Items.ENDER_PEARL)
