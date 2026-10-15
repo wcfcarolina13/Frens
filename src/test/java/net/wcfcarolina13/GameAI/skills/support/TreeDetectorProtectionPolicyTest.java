@@ -23,6 +23,10 @@ class TreeDetectorProtectionPolicyTest {
     private static final Predicate<Zone> SERVER_BASE_ZONE =
             z -> z.label() != null && z.label().startsWith("base:") && z.owner() == null;
 
+    /** Kind for classifyZones: a base: zone without an owner here is the SERVER-owned Spawn base. */
+    private static final java.util.function.Function<Zone, WoodcutBaseAccessPolicy.ZoneKind> SERVER_BASE_KIND =
+            z -> SERVER_BASE_ZONE.test(z) ? WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE : WoodcutBaseAccessPolicy.ZoneKind.OTHER;
+
     private static final UUID PLAYER = UUID.fromString("11111111-2222-3333-4444-555555555555");
 
     private static Zone server(String label) { return new Zone(label, null); }
@@ -77,7 +81,7 @@ class TreeDetectorProtectionPolicyTest {
     void freshWorldServerSpawnBaseBlocksWoodcutWhenToggleOff() {
         // 2026-10-14 ruling: the automatic Spawn base protects its trees like a player base.
         WoodcutBaseAccessPolicy.ZoneVerdict verdict = WoodcutBaseAccessPolicy.classifyZones(
-                List.of(server("base:spawn")), SERVER_BASE_ZONE, false);
+                List.of(server("base:spawn")), SERVER_BASE_KIND, false);
         TreeDetector.WoodcutProtectionDecision decision = VillageRuntimeProtectionPolicy.decideWoodcutProtection(
                 verdict == WoodcutBaseAccessPolicy.ZoneVerdict.OTHER, false,
                 verdict == WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE, false, false);
@@ -90,7 +94,7 @@ class TreeDetectorProtectionPolicyTest {
     @Test
     void freshWorldServerSpawnBaseAllowsWoodcutWhenToggleOn() {
         WoodcutBaseAccessPolicy.ZoneVerdict verdict = WoodcutBaseAccessPolicy.classifyZones(
-                List.of(server("base:spawn")), SERVER_BASE_ZONE, true);
+                List.of(server("base:spawn")), SERVER_BASE_KIND, true);
         TreeDetector.WoodcutProtectionDecision decision = VillageRuntimeProtectionPolicy.decideWoodcutProtection(
                 verdict == WoodcutBaseAccessPolicy.ZoneVerdict.OTHER, false,
                 verdict == WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE, false, false);

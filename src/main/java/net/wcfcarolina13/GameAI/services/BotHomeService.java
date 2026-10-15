@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.PlayerUtils.DebouncedWriter;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
@@ -99,13 +100,39 @@ public final class BotHomeService {
     }
 
     /**
-     * True when a zone is the auto-zone of a SERVER-owned base (the fresh-world Spawn base or an
-     * admin-claimed one). Keyed on the zone owner UUID, never on the owner name: a player can be
-     * named "Server". {@link #parseZoneOwner} maps {@link #SERVER_OWNER_UUID} (and legacy blank
-     * owners) to a null zone owner; player bases carry their owner's UUID.
+     * Kind of a protected zone for woodcut and the Spawn-base toggle: the auto-zone of a base
+     * whose owner is literally {@link #SERVER_OWNER_UUID}, the auto-zone of a legacy base with a
+     * blank owner, or anything else (player base, user-drawn area). {@link #parseZoneOwner} maps
+     * both SERVER and blank owners to a null zone owner, so the base's stored owner is looked up
+     * by label; a zone whose base is gone falls back to the zone owner name ("Server").
      */
-    public static boolean isServerOwnedBaseZone(String zoneLabel, UUID zoneOwner) {
-        return isBaseAutoZoneLabel(zoneLabel) && zoneOwner == null;
+    public static WoodcutBaseAccessPolicy.ZoneKind baseZoneKind(
+            MinecraftServer server, ServerWorld world, ProtectedZoneService.ProtectedZone zone) {
+        String label = zone == null ? null : zone.getLabel();
+        boolean autoZone = isBaseAutoZoneLabel(label);
+        boolean hasOwner = zone == null || zone.getOwnerUuid() != null;
+        boolean baseFound = false;
+        String baseOwner = null;
+        if (autoZone && !hasOwner && server != null && world != null) {
+            String key = label.substring(AUTO_ZONE_LABEL_PREFIX.length());
+            WorldData wd = worldData(server, world);
+            synchronized (LOCK) {
+                SavedBase base = wd.basesByLabel == null ? null : wd.basesByLabel.get(key);
+                if (base != null) {
+                    baseFound = true;
+                    baseOwner = base.ownerUuid;
+                }
+            }
+        }
+        return WoodcutBaseAccessPolicy.zoneKind(
+                autoZone, hasOwner, baseFound, baseOwner, zone == null ? null : zone.getOwnerName());
+    }
+
+    /** True when {@code zone} is the auto-zone of a base owned literally by SERVER (see {@link #baseZoneKind}). */
+    public static boolean isServerOwnedBaseZone(MinecraftServer server, ServerWorld world,
+                                                ProtectedZoneService.ProtectedZone zone) {
+        return baseZoneKind(server, world, zone)
+                == WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE;
     }
 
     private static String autoZoneLabel(String baseLabel) {

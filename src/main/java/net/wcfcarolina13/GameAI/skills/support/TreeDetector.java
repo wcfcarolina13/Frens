@@ -4,6 +4,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -774,8 +775,9 @@ public final class TreeDetector {
     /**
      * Explicit-zone check for woodcut: the zone service must refuse the mutation, then the
      * containing zones are classified. A player base auto-zone or a user-drawn zone is OTHER
-     * ("admin-zone"); a SERVER-owned base auto-zone alone is SPAWN_BASE unless the admin toggle
-     * opens it to woodcut. Conservative edge: a public-mode user zone overlapping a server base
+     * ("admin-zone"); a base auto-zone owned literally by SERVER is SPAWN_BASE unless the admin
+     * toggle opens it to woodcut; a legacy ownerless base auto-zone is skipped (its radius still
+     * blocks as "base-radius"), as in 1.1.237. Conservative edge: a public-mode user zone overlapping a server base
      * zone still counts as blocking here.
      */
     private static WoodcutBaseAccessPolicy.ZoneVerdict classifyWoodcutZones(ServerWorld world, BlockPos pos,
@@ -789,8 +791,9 @@ public final class TreeDetector {
                 containing.add(zone);
             }
         }
+        MinecraftServer server = world.getServer();
         return WoodcutBaseAccessPolicy.classifyZones(containing,
-                zone -> BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()),
+                zone -> BotHomeService.baseZoneKind(server, world, zone),
                 spawnBaseWoodcutAllowed);
     }
 

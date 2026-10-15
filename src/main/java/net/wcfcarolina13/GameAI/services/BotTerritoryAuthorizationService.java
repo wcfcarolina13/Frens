@@ -10,6 +10,7 @@ import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceSe
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -40,7 +41,7 @@ public final class BotTerritoryAuthorizationService {
 
     /**
      * @param treeBlock true when the block is a log or leaves. Only then may the admin
-     *                  "Cut trees in the Spawn base" toggle exempt a SERVER-owned base zone
+     *                  "Cut trees in the Spawn base" toggle exempt a base zone owned literally by SERVER
      *                  ({@link WoodcutBaseAccessPolicy#miningExempt}). Every other zone, and every
      *                  non-tree block, is decided exactly as before.
      */
@@ -54,17 +55,30 @@ public final class BotTerritoryAuthorizationService {
         MinecraftServer server = world.getServer();
         boolean spawnBaseWoodcutAllowed = treeBlock && BotHomeService.isSpawnBaseWoodcutAllowed(server);
 
-        // Protected-zone ownership (cubic claim). Every containing zone is asked, so an exempted
-        // Spawn base zone can never hide an overlapping player or user-drawn zone.
+        // Protected-zone ownership (cubic claim). Every containing zone is asked (ZoneOverlapPolicy):
+        // any refusing zone refuses, except a SERVER-owned base zone (the Spawn base) yields to an
+        // overlapping player zone that explicitly grants the bot's owner, so a host's base drawn over
+        // Spawn keeps working. The Spawn toggle only ever opens logs/leaves.
+        List<ProtectedZoneService.ProtectedZone> containing = new ArrayList<>();
+        List<ZoneOverlapPolicy.ZoneVerdict> verdicts = new ArrayList<>();
         for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
-            if (zone == null || !zone.contains(pos) || isZoneMutationAllowed(zone, botOwner)) {
+            if (zone == null || !zone.contains(pos)) {
                 continue;
             }
-            if (WoodcutBaseAccessPolicy.miningExempt(
-                    BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()),
-                    treeBlock, spawnBaseWoodcutAllowed)) {
-                continue;
+            boolean grantsOwner = isZoneExplicitGrant(zone, botOwner);
+            boolean refuses = !isZoneMutationAllowed(zone, botOwner);
+            // Only zones without a player owner can be server bases; skip the base lookup otherwise.
+            boolean serverOwned = zone.getOwnerUuid() == null
+                    && BotHomeService.isServerOwnedBaseZone(server, world, zone);
+            if (refuses && WoodcutBaseAccessPolicy.miningExempt(serverOwned, treeBlock, spawnBaseWoodcutAllowed)) {
+                refuses = false;
             }
+            containing.add(zone);
+            verdicts.add(new ZoneOverlapPolicy.ZoneVerdict(refuses, serverOwned, grantsOwner));
+        }
+        int refusing = ZoneOverlapPolicy.firstRefusingIndex(verdicts);
+        if (refusing >= 0) {
+            ProtectedZoneService.ProtectedZone zone = containing.get(refusing);
             return new AuthorizationResult(
                     false,
                     "protected-zone",
@@ -119,6 +133,21 @@ public final class BotTerritoryAuthorizationService {
             return false;
         }
         return zone.getAllowedOwnerUuids().contains(actorOwner.toString());
+    }
+
+    /**
+     * The zone names the bot's owner: as the zone owner or on its allowlist. Public mode is not an
+     * explicit grant, so a public area cannot open an overlapping Spawn base to everyone.
+     */
+    private static boolean isZoneExplicitGrant(ProtectedZoneService.ProtectedZone zone, UUID actorOwner) {
+        if (zone == null || actorOwner == null) {
+            return false;
+        }
+        UUID zoneOwner = zone.getOwnerUuid();
+        if (zoneOwner == null) {
+            return false;
+        }
+        return zoneOwner.equals(actorOwner) || zone.getAllowedOwnerUuids().contains(actorOwner.toString());
     }
 
     private static boolean isFortMutationAllowed(FortificationPersistenceService.SavedFortification fort,

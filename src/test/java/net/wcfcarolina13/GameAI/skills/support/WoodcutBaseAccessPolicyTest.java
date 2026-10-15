@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Predicate;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,17 +13,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WoodcutBaseAccessPolicyTest {
 
-    private record Zone(String label, UUID owner) {}
+    /** Stand-in zone: label, zone owner UUID, and the stored owner of its base (null = no base found). */
+    private record Zone(String label, UUID owner, String baseOwner) {
+        Zone(String label, UUID owner) { this(label, owner, owner == null ? "SERVER" : owner.toString()); }
+    }
 
-    /** Mirrors BotHomeService.isServerOwnedBaseZone without loading it under JUnit. */
-    private static final Predicate<Zone> SERVER_BASE_ZONE =
-            z -> z.label() != null && z.label().startsWith("base:") && z.owner() == null;
+    /** Mirrors BotHomeService.baseZoneKind without loading it under JUnit. */
+    private static final Function<Zone, WoodcutBaseAccessPolicy.ZoneKind> SERVER_BASE_ZONE =
+            z -> WoodcutBaseAccessPolicy.zoneKind(z.label() != null && z.label().startsWith("base:"),
+                    z.owner() != null, z.baseOwner() != null, z.baseOwner(), null);
 
     private static final UUID PLAYER = UUID.fromString("11111111-2222-3333-4444-555555555555");
 
     private static Zone spawn() { return new Zone("base:spawn", null); }
     private static Zone playerBase() { return new Zone("base:home", PLAYER); }
     private static Zone userZone() { return new Zone("orchard", PLAYER); }
+    /** Legacy base (Nirn's home, deep dark 1): registered, blank owner, so its zone has no owner. */
+    private static Zone legacyBase() { return new Zone("base:home", null, ""); }
 
     @Test
     void detectionExemptsServerBaseOnlyWhenToggleOn() {
@@ -90,5 +96,56 @@ class WoodcutBaseAccessPolicyTest {
         assertFalse(WoodcutBaseAccessPolicy.isServerOwnedBaseOwner(PLAYER.toString()));
         assertFalse(WoodcutBaseAccessPolicy.isServerOwnedBaseOwner(null));
         assertFalse(WoodcutBaseAccessPolicy.isServerOwnedBaseOwner(""));
+    }
+
+    @Test
+    void zoneKindServerOnlyWhenBaseOwnerIsLiterallyServer() {
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, true, "SERVER", "Server"));
+        // Legacy bases with a blank or missing owner are not server bases.
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.LEGACY_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, true, null, null));
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.LEGACY_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, true, " ", null));
+        // The registered base's owner decides, even when the zone name says Server.
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.LEGACY_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, true, null, "Server"));
+    }
+
+    @Test
+    void zoneKindStaleZoneFallsBackToOwnerName() {
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, false, null, "Server"));
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.LEGACY_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, false, null, null));
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.LEGACY_BASE,
+                WoodcutBaseAccessPolicy.zoneKind(true, false, false, null, "server"));
+    }
+
+    @Test
+    void zoneKindPlayerOrUserZoneIsOther() {
+        // A player named "Server" has a real UUID, so the zone has an owner.
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.OTHER,
+                WoodcutBaseAccessPolicy.zoneKind(true, true, true, PLAYER.toString(), "Server"));
+        assertEquals(WoodcutBaseAccessPolicy.ZoneKind.OTHER,
+                WoodcutBaseAccessPolicy.zoneKind(false, false, false, null, "Server"));
+    }
+
+    @Test
+    void legacyBaseZoneIsNeverSpawnBaseAndSkippedByDetectionAsBefore() {
+        for (boolean toggle : new boolean[]{false, true}) {
+            assertEquals(WoodcutBaseAccessPolicy.ZoneVerdict.NONE,
+                    WoodcutBaseAccessPolicy.classifyZones(List.of(legacyBase()), SERVER_BASE_ZONE, toggle));
+        }
+        assertEquals(WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE,
+                WoodcutBaseAccessPolicy.classifyZones(List.of(legacyBase(), spawn()), SERVER_BASE_ZONE, false));
+        assertEquals(WoodcutBaseAccessPolicy.ZoneVerdict.OTHER,
+                WoodcutBaseAccessPolicy.classifyZones(List.of(legacyBase(), userZone()), SERVER_BASE_ZONE, true));
+    }
+
+    @Test
+    void legacyBaseZoneNeverOpenedForMiningByToggle() {
+        boolean serverOwned = SERVER_BASE_ZONE.apply(legacyBase()) == WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE;
+        assertFalse(WoodcutBaseAccessPolicy.miningExempt(serverOwned, true, true));
     }
 }

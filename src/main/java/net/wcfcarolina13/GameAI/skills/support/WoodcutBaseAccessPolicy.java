@@ -1,11 +1,12 @@
 package net.wcfcarolina13.GameAI.skills.support;
 
 import java.util.Collection;
-import java.util.function.Predicate;
+import java.util.function.Function;
 
 /**
  * Whether woodcut may touch trees inside a SERVER-owned base (the automatic fresh-world Spawn
- * base, or a base an admin handed to the server). Pure: no Minecraft types.
+ * base, or a base an admin handed to the server). Owner literally SERVER only: legacy bases with
+ * a blank owner are not server bases here. Pure: no Minecraft types.
  *
  * <p>Default (toggle off): the Spawn base protects its trees like a player base. Detection
  * reports them as protected ("spawn-base") and the miner's claim check refuses them, so target
@@ -20,6 +21,23 @@ public final class WoodcutBaseAccessPolicy {
 
     /** Mirrors BotHomeService.SERVER_OWNER_UUID (kept literal so this class loads under JUnit). */
     public static final String SERVER_OWNER_SENTINEL = "SERVER";
+
+    /** Mirrors BotHomeService.SERVER_OWNER_NAME, the owner name stamped on the automatic Spawn base. */
+    public static final String SERVER_OWNER_NAME = "Server";
+
+    /** What kind of protected zone a containing zone is, for woodcut and the Spawn toggle. */
+    public enum ZoneKind {
+        /** Auto-zone of a base whose owner is literally SERVER (the Spawn base, or one an admin gave the server). */
+        SERVER_BASE,
+        /**
+         * Auto-zone of a legacy base with a blank or missing owner (made before ownership was
+         * tracked). Never "spawn-base" and never opened by the toggle. Detection skips the zone
+         * itself (the base radius still blocks) and mining refuses it, exactly as in 1.1.237.
+         */
+        LEGACY_BASE,
+        /** A player's base auto-zone or a user-drawn protected area. */
+        OTHER
+    }
 
     /** What the explicit protected zones containing a position mean for woodcut. */
     public enum ZoneVerdict {
@@ -40,6 +58,23 @@ public final class WoodcutBaseAccessPolicy {
     }
 
     /**
+     * Kind of a protected zone. {@code baseAutoZone}: the label is a {@code base:} auto-zone label.
+     * {@code zoneHasOwner}: the zone carries a player UUID (player bases do, SERVER and legacy
+     * blank owners both map to no owner). When the zone's base is registered, its stored owner
+     * decides; otherwise (a stale zone) the zone's owner name must be exactly "Server".
+     */
+    public static ZoneKind zoneKind(boolean baseAutoZone, boolean zoneHasOwner,
+                                    boolean baseFound, String baseOwnerUuid, String zoneOwnerName) {
+        if (!baseAutoZone || zoneHasOwner) {
+            return ZoneKind.OTHER;
+        }
+        boolean server = baseFound
+                ? isServerOwnedBaseOwner(baseOwnerUuid)
+                : SERVER_OWNER_NAME.equals(zoneOwnerName);
+        return server ? ZoneKind.SERVER_BASE : ZoneKind.LEGACY_BASE;
+    }
+
+    /**
      * Detection: a base (its auto-zone or its radius) is ignored for woodcut target detection
      * only when it is server-owned and the admin toggle is on.
      */
@@ -57,22 +92,25 @@ public final class WoodcutBaseAccessPolicy {
 
     /**
      * Classifies the explicit zones that contain a position (and refuse a bot mutation there).
-     * Any zone that is not a server-owned base zone (or a null element) wins as {@link ZoneVerdict#OTHER}.
-     * Otherwise a server-owned base zone blocks as {@link ZoneVerdict#SPAWN_BASE} unless the toggle
-     * exempts it.
+     * Any {@link ZoneKind#OTHER} zone (or a null element or kind) wins as {@link ZoneVerdict#OTHER}.
+     * Otherwise a SERVER base zone blocks as {@link ZoneVerdict#SPAWN_BASE} unless the toggle
+     * exempts it. Legacy ownerless base zones are skipped here, as before 1.1.238.
      */
     public static <T> ZoneVerdict classifyZones(Collection<T> containingZones,
-                                                Predicate<T> serverOwnedBaseZone,
+                                                Function<T, ZoneKind> kindOf,
                                                 boolean spawnBaseWoodcutAllowed) {
         if (containingZones == null || containingZones.isEmpty()) {
             return ZoneVerdict.NONE;
         }
         boolean serverBase = false;
         for (T zone : containingZones) {
-            if (zone == null || !serverOwnedBaseZone.test(zone)) {
+            ZoneKind kind = zone == null ? null : kindOf.apply(zone);
+            if (kind == null || kind == ZoneKind.OTHER) {
                 return ZoneVerdict.OTHER;
             }
-            serverBase = true;
+            if (kind == ZoneKind.SERVER_BASE) {
+                serverBase = true;
+            }
         }
         if (serverBase && !detectionExempt(true, spawnBaseWoodcutAllowed)) {
             return ZoneVerdict.SPAWN_BASE;
