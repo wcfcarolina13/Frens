@@ -142,7 +142,6 @@ public class FrensClient implements ClientModInitializer {
     private static boolean stopKeyDown = false;
     private static long stopKeyDownAtMs = 0L;
     private static boolean stopKeyHoldConsumed = false;
-    private static boolean previewLockBindingMigrationChecked = false;
 
     private enum PlacementPreviewKind {
         CONSTRUCTION,
@@ -238,9 +237,6 @@ public class FrensClient implements ClientModInitializer {
     private static boolean recruitmentAutoOpenedThisSession = false;
 
     // ===== Companion spells (client UX) =====
-    // Client-side only (UX hint). Server remains authoritative.
-    private static long eyeSpellCooldownUntilMs = 0L;
-
     // One-shot (per acquisition) top-right hint shown when the player gains an item that enables spells.
     private static long spellsAcquireHintUntilMs = 0L;
     private static String spellsAcquireHintLine1 = null;
@@ -327,20 +323,6 @@ public class FrensClient implements ClientModInitializer {
 
     public static boolean isCustomSkinsEnabled() {
         return allowCustomSkins;
-    }
-
-    public static boolean isEyeSpellOnCooldown() {
-        return getEyeSpellCooldownRemainingMs() > 0L;
-    }
-
-    public static long getEyeSpellCooldownRemainingMs() {
-        long remaining = eyeSpellCooldownUntilMs - System.currentTimeMillis();
-        return Math.max(0L, remaining);
-    }
-
-    public static void armEyeSpellCooldown() {
-        // Keep aligned with server default (currently 60s). This is just a UX hint.
-        eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
     }
 
     private static boolean isGameplayTipsEnabled() {
@@ -664,11 +646,9 @@ public class FrensClient implements ClientModInitializer {
                 learningInputStreamActive = false;
                 learningInputSessionToken = 0L;
                 learningInputTickHz = 0;
-                previewLockBindingMigrationChecked = false;
                 resetNoBotsRestoreState();
                 return;
             }
-            migrateLegacyPreviewLockBinding(client);
             tickLearningInputTelemetry(client);
             tickNoBotsRestoreState(client);
             maybeWarnAboutAiPlayerConflict(client);
@@ -2016,13 +1996,6 @@ public class FrensClient implements ClientModInitializer {
             return false;
         }
 
-        // If Eye is the only access method and we are on cooldown, show an actionbar hint.
-        if (isEyeOnlyAccess(client) && isEyeSpellOnCooldown()) {
-            long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
-            client.player.sendMessage(Text.literal("Eye of Ender spell is on cooldown (" + sec + "s)."), true);
-            return true;
-        }
-
         String alias = getRecruitmentBotAlias();
         playMagicUiSound(client);
         // Open the canonical bot inventory screen preselected to its Spells tab.
@@ -2163,12 +2136,6 @@ public class FrensClient implements ClientModInitializer {
                 || isNearEnchantingTable(client, 4)
                 || hasEyeOfEnderToken(client)
                 || hasGoatHornToken(client);
-    }
-
-    private static boolean isEyeOnlyAccess(MinecraftClient client) {
-        boolean full = hasSpellbookToken(client) || isNearEnchantingTable(client, 4);
-        boolean horn = !full && hasGoatHornToken(client);
-        return !full && !horn && hasEyeOfEnderToken(client);
     }
 
     private static boolean isNearEnchantingTable(MinecraftClient client, int radius) {
@@ -2407,37 +2374,6 @@ public class FrensClient implements ClientModInitializer {
         }
     }
 
-    private static String keyTranslationOrNull(KeyBinding binding) {
-        if (binding == null) {
-            return null;
-        }
-        try {
-            Object value = KeyBinding.class.getMethod("getBoundKeyTranslationKey").invoke(binding);
-            if (value instanceof String translation && !translation.isBlank()) {
-                return translation;
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private static boolean invokeFirstNoArgMethod(Object target, String... methodNames) {
-        if (target == null || methodNames == null) {
-            return false;
-        }
-        for (String methodName : methodNames) {
-            if (methodName == null || methodName.isBlank()) {
-                continue;
-            }
-            try {
-                target.getClass().getMethod(methodName).invoke(target);
-                return true;
-            } catch (Throwable ignored) {
-            }
-        }
-        return false;
-    }
-
     /**
      * One-shot chat warning when both Frens and the upstream {@code ai-player} mod are
      * installed simultaneously. Fires after the player joins a world (so the message
@@ -2455,32 +2391,6 @@ public class FrensClient implements ClientModInitializer {
         client.player.sendMessage(Text.literal("§c[Frens] CONFLICT: 'ai-player' mod is installed alongside Frens."), false);
         client.player.sendMessage(Text.literal("§cClose the game and delete 'ai-player-*.jar' from your mods folder."), false);
         client.player.sendMessage(Text.literal("§cKeybinds will appear duplicated and commands like 'follow go-to' break until you remove it."), false);
-    }
-
-    private static void migrateLegacyPreviewLockBinding(MinecraftClient client) {
-        if (previewLockBindingMigrationChecked || client == null || KEY_LOCK_PREVIEW == null) {
-            return;
-        }
-        previewLockBindingMigrationChecked = true;
-
-        String boundTranslation = keyTranslationOrNull(KEY_LOCK_PREVIEW);
-        if (!"key.keyboard.l".equals(boundTranslation)) {
-            return;
-        }
-
-        try {
-            Object defaultKey = KeyBinding.class.getMethod("getDefaultKey").invoke(KEY_LOCK_PREVIEW);
-            if (defaultKey == null) {
-                return;
-            }
-            KeyBinding.class.getMethod("setBoundKey", defaultKey.getClass()).invoke(KEY_LOCK_PREVIEW, defaultKey);
-            invokeFirstNoArgMethod(KeyBinding.class, "updateKeysByCode");
-            invokeFirstNoArgMethod(client.options, "write", "save");
-            if (client.player != null) {
-                client.player.sendMessage(Text.literal("Preview lock hotkey moved to ';' to avoid Advancements."), true);
-            }
-        } catch (Throwable ignored) {
-        }
     }
 
     private static void tickStopHoldBehavior(MinecraftClient client) {
