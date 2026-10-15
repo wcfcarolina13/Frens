@@ -3,7 +3,18 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.243) — next session starts here
+## Session Handoff 2026-10-15 (1.1.244) — next session starts here
+
+**State:** main = origin/main @ 1.1.244. Suite 2469 green. Dead-code audit phase 2 continues (side session, build ledger in
+the session notes folder; per-build scopes in `.superpowers/sdd/run-<ver>/scope.md` of that worktree). 1.1.244 = Q1 RL and
+training (training kept as an admin alias), Q4 dev subcommands (testgear, test_chat_message behind `/bot debug on`), Phase 11,
+and `/bot debug`, `/bot emote`, `/bot wizard_tome` registered under /bot again (they were nested under spawn since b5479ada).
+Field items: Phase 6an.
+**Next removal builds:** 1.1.245 Phases 4-8 (scoped: CraftingHelper ratchet 3 -> 1), then Q2/Q3 legacy LLM chat retirement
+(~10k lines incl. ollama4j, DJL, OpenNLP, sqlite-jdbc, jsoup, commons-*; verified no live user; split across builds), then
+Phases 9-10 + Q6, Q7, Q11, Q13, Q15, Q16; Phases 13-16 + Q17 + Q5 deletions; Q8/Q9/Q14 features; Q5 wall-off rebuild.
+
+## Session Handoff 2026-10-15 (1.1.243) — superseded
 
 **State:** main = origin/main @ 1.1.243. Suite 2464 green. Dead-code audit phase 2 (removals) in progress, run from a
 side session; build ledger in the session notes folder and below. 1.1.243 = audit Phases 1-3 (legacy RAG/SQLite chain, misc
