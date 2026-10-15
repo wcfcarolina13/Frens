@@ -3,7 +3,27 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.235) — next session starts here
+## Session Handoff 2026-10-14 (1.1.236) — next session starts here
+
+**State:** main = origin/main @ 1.1.236. Suite 2171 green. Modrinth: 1.1.230 latest published; 1.1.231–1.1.236 NOT published.
+Sandbox (`mcp-sandbox`) + hardened MCP fork as in the 1.1.235 block below. The sandbox "New World" holds Jake stuck at
+41,62,25 (the finding #7 repro): load it on 1.1.236 by day and he should log `linger: allow — shallow open-sky hole`.
+
+**Shipped in 1.1.236:** shallow open-sky hole climb-out by day (UndergroundLingerPolicy; night/shelter win over the #0
+bypass; #8 uses the wide surface sample), dig-down bunker caps stand+2 so it registers, roster scoped to this save with
+an "Other worlds (N)" toggle (RosterScopePolicy, singleplayer only). Details, rulings, deferrals in changelog.
+
+**Field checks pending:** 6ah, 6ag, 6af (item 1: open **Nirn first**), 6ac remainder, 6ad, 6ae …  Now 285 items.
+
+**Next (in order):**
+1. Aiwan's "Revenant of <name>" husk duplication: waiting on his mod list (Bradley replied 2026-10-14).
+2. Deferred from 1.1.236: SHELTER_ACTIVE persistence across reload, join-check commander radius, multiplayer roster payload,
+   hand-dig stair escape for a bot with no blocks.
+3. MCP fork: render-thread stall when the window is minimized (needs a clear error), get_screen_buttons from mapped code,
+   keyboard in-world, per-action control mode upstream PR.
+4. Chat action requests. 5. Fresh-install part 2. 6. Bot livestream (Bradley considering Discord screen share).
+
+## Session Handoff 2026-10-14 (1.1.235) — superseded
 
 **State:** main = origin/main @ 1.1.235. Suite 2142 green. Modrinth: 1.1.230 latest published; 1.1.231–1.1.235 NOT published.
 **New this session:** Claude can drive Minecraft. Prism instance `mcp-sandbox` + hardened fork of langyo/minecraft-mod-mcp at

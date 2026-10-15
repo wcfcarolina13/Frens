@@ -14,6 +14,10 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 
 ## Notes for later (not done)
 
+- Fork adds `bot_view` (name, perspective first|back|front): swaps the client camera entity, captures one frame, restores. Works within render distance only. Todo: hide the HUD and hand during capture (`options.hudHidden`), keep the front/back camera from clipping into walls (it jams against the face in 1-wide spaces), and a server-side spectator camera for far bots.
+- `save_and_quit` replies "render thread timeout" because `disconnectWithSavingScreen` blocks the render thread while saving; reply first, then disconnect on the next tick.
+- `mc.sh cmd` style truncation: screenshots and bot_view return large data URLs; clients must not truncate.
+
 - Fork adds `set_time` (singleplayer only, integrated server `setTimeOfDay`) so tests can hold daylight in commands-off worlds. Upstream could offer a generic sandbox/world-control group gated to singleplayer.
 
 - **Control mode takes the camera from the player** (frees the cursor for the whole session), so a watching human can't look around. Hold it per action (enter → act → exit, what our helper does now), or yield automatically when the player moves the mouse / presses a key. Upstream UX PR.
@@ -27,3 +31,4 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 - Resource pack metadata error at startup: `mcpmod pack metadata: missing min_format and max_format` (1.21.11 pack format).
 - The take-over overlay icon (top right) overlaps mod screens (covers the corner of the Frens World Mode panel).
 - Keyboard: verify `type_text` / `press_key` on mod screens and in-world movement with the window unfocused.
+- **Every render-thread command stalls when the window is minimized or fully covered (2026-10-14).** `screen_info`, `screenshot` and `save_and_quit` all answered `render thread timeout` while the integrated server kept ticking. macOS stops presenting frames for an occluded GLFW window, so tasks queued with `client.execute` never run. Ideas: a `window_state` command that reads GLFW iconified/focused off-thread and says so in the error, or a `restore_window` command (`glfwRestoreWindow` is main-thread only, so it has the same problem; would need a pre-render hook).

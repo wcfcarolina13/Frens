@@ -1,10 +1,10 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.235-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae + 1.1.234 playthrough fixes — Phase 6af + 1.1.235 sandbox fixes and Questing flag — Phase 6ag). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.236-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae + 1.1.234 playthrough fixes — Phase 6af + 1.1.235 sandbox fixes and Questing flag — Phase 6ag + 1.1.236 shelter-hole climb-out and per-world roster — Phase 6ah). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
-Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.235** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
+Nothing has been field-tested since 1.1.184. This is the merged, deduplicated checklist for **1.1.175 → 1.1.236** plus the Lane 1 / Lane 2 items from `RALPH_TASK.md` (Backlog Lineup 2026-09-03). One continuous session, run in order — souls are enabled once, calm tests precede noisy ones, day-boundary tests sit near the end, destructive resets last.
 
 ## How the session runs
 
@@ -1469,6 +1469,21 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Pass when: no World Mode chooser, one line "Frens is in Admin mode: open the roster with [-] to bring in a companion.", the roster opens. `/bot recruit enable` answers "Questing mode is turned off on this server." An existing Questing world still recruits.
 - [ ] **Craft names (1.1.235)**
   - Pass when: `/bot craft wooden_axe` answers "Crafted 1 Wooden Axe."
+
+## Phase 6ah — Shelter-hole climb-out and per-world roster (1.1.236)
+
+- [ ] **Climb out of a shallow open-sky hole by day (1.1.236)**
+  - Bradley does (or Claude in the sandbox): load the sandbox "New World" by day, where Jake sits 3 down at 41,62,25.
+  - Claude watches for: `linger: allow — shallow open-sky hole by day, climbing out (depth=3 scaffold=N)`, then `pillar recovery`, and no more `no tools, deep underground`.
+  - Pass when: Jake is standing on the surface within a minute.
+- [ ] **Night bunker registers and holds (1.1.236)**
+  - Bradley does: let a bot with no tools face dusk away from base.
+  - Claude watches for: the dig-down cap line with `covers=true`, no `rejected reason=no_overhead_cover`, then `linger: suppressed — inside own shelter` or `nighttime, waiting it out` (no pillar through the cap).
+  - Pass when: the bot stays in its bunker until morning, then leaves.
+- [ ] **Roster shows this world only (1.1.236)**
+  - Bradley does: in a world with one companion, open the roster.
+  - Claude watches for: no `roster world scope not ready` line (or a later `arrived late, refreshing`).
+  - Pass when: only this world's companion is listed. "Other worlds (N)" lists the rest. A new world says "No companions in this world yet." Bringing one in spawns it here with empty pockets. Typing an other-world name greys Create with the tooltip.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
