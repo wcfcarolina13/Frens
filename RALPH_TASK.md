@@ -3,7 +3,16 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.244) — next session starts here
+## Session Handoff 2026-10-15 (1.1.245) — next session starts here
+
+**State:** main = origin/main @ 1.1.245. Suite 2469 green. 1.1.245 = audit Phases 4-8 (construction, services, provisioning,
+smelting dead bodies, ~1,790 lines, ratchet CraftingHelper 3 -> 1), no behaviour change, no new field items.
+**Next removal builds:** Phases 9-10 + Q6 nav_mode, Q7 nav tier payload, Q11 (modeSelected*, botSkins mirror), Q13 (village
+legacy import, stop writing mount `_legacy`), Q15, Q16 (scoped); then Phases 13-16 + Q17 + Q5 deletions; then Q2/Q3 legacy LLM
+retirement (~10k lines, deps verified safe to drop, split across builds); then Q8/Q9/Q14 features and the Q5 wall-off rebuild.
+Everything in the 1.1.244 block below still applies.
+
+## Session Handoff 2026-10-15 (1.1.244) — superseded
 
 **State:** main = origin/main @ 1.1.244. Suite 2469 green. Dead-code audit phase 2 continues (side session, build ledger in
 the session notes folder; per-build scopes in `.superpowers/sdd/run-<ver>/scope.md` of that worktree). 1.1.244 = Q1 RL and
