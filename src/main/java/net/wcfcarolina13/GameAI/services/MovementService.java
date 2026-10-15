@@ -30,7 +30,16 @@ import net.wcfcarolina13.PathFinding.PathCompareService;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import net.wcfcarolina13.PathFinding.Segment;
 import net.wcfcarolina13.PathFinding.unified.CellPos;
+import net.wcfcarolina13.PathFinding.unified.CostVerifier;
+import net.wcfcarolina13.PathFinding.unified.ExecUnit;
+import net.wcfcarolina13.PathFinding.unified.NoPathReason;
+import net.wcfcarolina13.PathFinding.unified.PathPlan;
+import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
+import net.wcfcarolina13.PathFinding.unified.PlanAdapter;
+import net.wcfcarolina13.PathFinding.unified.PlanRequest;
+import net.wcfcarolina13.PathFinding.unified.PlanStatus;
 import net.wcfcarolina13.PathFinding.unified.PlannedMove;
+import net.wcfcarolina13.PathFinding.unified.SearchContext;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
@@ -936,8 +945,14 @@ public final class MovementService {
                         new WalkResult(false, player.getBlockPos(), label + ": aborted"));
             }
             BlockPos planStart = walkPlanStart(player);
-            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(planStart, destination, world,
-                    player.getUuid(), player.getName().getString());
+            PlanRequest request = walkPlanRequest(player);
+            PathFinder.PlanResult planned = PathFinder.plan(planStart, destination, world, player, request);
+            if (planned.isUnified()) {
+                // 1.1.242: unified plans run unit by unit with their own replans and legs.
+                return recordAttempt(player, destination,
+                        walkUnifiedPlan(player, destination, label, allowSnap, deadline, planStart, request, planned));
+            }
+            List<PathFinder.PathNode> rawPath = planned.nodes();
             if (preclearPlannedStepUps(player, rawPath, "walkTo-preclear")) {
                 planStart = walkPlanStart(player);
                 rawPath = PathFinder.calculatePath(planStart, destination, world,
@@ -1028,6 +1043,194 @@ public final class MovementService {
         }
         return recordAttempt(player, destination,
                 new WalkResult(false, player.getBlockPos(), label + ": walk blocked after replans"));
+    }
+
+    /**
+     * walkTo's request (1.1.242): break and place only under the same gate as a terrain BREAK/PLACE
+     * ({@code mutationOk}: a running skill task, no obstruction-mine opt-out, no construction
+     * protection); otherwise the legacy move set walkSegment can walk.
+     */
+    private static PlanRequest walkPlanRequest(ServerPlayerEntity player) {
+        boolean mutation = PlannedMoveExecPolicy.mutationAllowed(
+                Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get()),
+                AutoFaceEntity.isBotExecutingTask(),
+                ConstructionProtectionService.hasActiveProtection(player.getUuid()));
+        return mutation ? PlanRequest.walkTo(true, true) : PlanRequest.legacyWalk();
+    }
+
+    /**
+     * Execute a unified plan unit by unit (design section 7). Before each unit, {@link CostVerifier}
+     * re-prices the next five moves on a fresh view; a cancel replans from the grounded cell. Walk runs
+     * go through {@link #walkSegment} (its stuck ladder is the fallback), action moves through
+     * {@link #executePlannedMove}. A failed unit records its first hop in {@link FailedRoutePolicy} and
+     * replans once with that hop forbidden. A PARTIAL plan earns further legs through
+     * {@link NavLegPolicy}. A NO_PATH reason is final, except the legacy boxed-in terrain move.
+     */
+    private static WalkResult walkUnifiedPlan(ServerPlayerEntity player,
+                                              BlockPos destination,
+                                              String label,
+                                              boolean allowSnap,
+                                              long deadline,
+                                              BlockPos planStart,
+                                              PlanRequest request,
+                                              PathFinder.PlanResult first) {
+        ServerWorld world = getWorld(player);
+        String bot = player.getName().getString();
+        boolean sprint = shouldSprintForDestination(player, destination);
+        PathFinder.PlanResult result = first;
+        BlockPos legStart = planStart;
+        int failureReplans = 0;
+        int legs = 0;
+        boolean boxedInTried = false;
+        boolean preclearDone = false;
+        while (true) {
+            if (abortRequested(player)) {
+                BotActions.stop(player);
+                return new WalkResult(false, player.getBlockPos(), label + ": aborted");
+            }
+            PathPlan plan = result.plan();
+            SearchContext ctx = result.context();
+            String planTag = PathPlanIds.format(result.planId());
+            if (plan.status() == PlanStatus.NO_PATH) {
+                NoPathReason reason = plan.reason();
+                if (UnifiedWalkPolicy.onNoPath(reason, request.allowBreak(), boxedInTried)
+                        == UnifiedWalkPolicy.NoPathStep.TERRAIN_MOVE) {
+                    boxedInTried = true;
+                    LOGGER.info("walkTo boxed-in start: trying terrain move toward {} [{}] bot={} from={} plan={}",
+                            destination.toShortString(), label, bot, legStart.toShortString(), planTag);
+                    tryTerrainMoveToward(player, destination, label + "-boxed-in", true);
+                    BlockPos now = walkPlanStart(player);
+                    if (!now.equals(legStart)) {
+                        legStart = now;
+                        result = PathFinder.plan(now, destination, world, player, request);
+                        if (result.isUnified()) {
+                            continue;
+                        }
+                    }
+                }
+                return new WalkResult(false, player.getBlockPos(),
+                        label + ": no walkable path reason=" + reason + " plan=" + planTag);
+            }
+            if (!preclearDone && UnifiedWalkPolicy.preclearStepUps(request.allowBreak())) {
+                // Legacy move set: keep the 1.1.240 step-up pre-trim, then replan once from the same cell.
+                preclearDone = true;
+                if (preclearPlannedStepUps(player, result.nodes(), "walkTo-preclear")) {
+                    legStart = walkPlanStart(player);
+                    PathFinder.PlanResult again = PathFinder.plan(legStart, destination, world, player, request);
+                    if (!again.isUnified()) {
+                        return new WalkResult(false, player.getBlockPos(), label + ": finder changed mid-walk");
+                    }
+                    result = again;
+                    continue;
+                }
+            }
+
+            List<ExecUnit> units = result.units();
+            LOGGER.info("walkTo unified [{}]: bot={} plan={} status={} reason={} moves={} units={} leg={} replans={}",
+                    label, bot, planTag, plan.status(), plan.reason(), plan.moves().size(), units.size(), legs + 1,
+                    failureReplans);
+            String failure = null;
+            Set<Long> forbidden = new HashSet<>();
+            for (ExecUnit unit : units) {
+                if (abortRequested(player)) {
+                    BotActions.stop(player);
+                    return new WalkResult(false, player.getBlockPos(), label + ": aborted");
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    failure = "deadline";
+                    break;
+                }
+                CostVerifier.Verdict verdict = CostVerifier.check(ctx, plan, unit.firstMoveIndex(),
+                        PathFinder.rebindToFreshView(ctx).terrain());
+                if (PlannedMoveExecPolicy.cancelLeg(verdict)) {
+                    failure = PlannedMoveExecPolicy.cancelReason(verdict);
+                    LOGGER.info("walkTo leg cancelled: {} [{}] bot={} plan={} planned={} live={}",
+                            failure, label, bot, planTag,
+                            String.format(Locale.ROOT, "%.1f", verdict.plannedTicks()),
+                            String.format(Locale.ROOT, "%.1f", verdict.liveTicks()));
+                    break;
+                }
+                if (unit instanceof ExecUnit.WalkRun run) {
+                    Queue<Segment> segments = PlanAdapter.toSegments(run, ctx.terrain(), sprint);
+                    for (Segment segment : segments) {
+                        SegmentResult seg = walkSegment(player, segment, deadline, allowSnap);
+                        if (!seg.success()) {
+                            failure = "walk blocked near " + segment.end().toShortString();
+                            BlockPos now = walkPlanStart(player);
+                            int at = UnifiedWalkPolicy.failedHopOrigin(run.nodes(), now.getX(), now.getY(), now.getZ());
+                            if (at >= 0) {
+                                BlockPos hop = PlanAdapter.pos(run.nodes().get(at + 1));
+                                recordFailedRoute(player, now, hop, label + "-unified-walk");
+                                forbidden.add(hop.asLong());
+                            }
+                            break;
+                        }
+                    }
+                } else if (unit instanceof ExecUnit.ActionUnit action) {
+                    PlannedMove move = action.move();
+                    BlockPos to = new BlockPos(move.toX(), move.toY(), move.toZ());
+                    if (walkPlanStart(player).equals(to)) {
+                        continue;   // already there (Baritone PathExecutor skip-forward)
+                    }
+                    PlannedMoveResult done = executePlannedMove(player, move, label + "-" + planTag);
+                    if (!done.ok()) {
+                        failure = "planned " + move.kind() + " failed: " + done.reason();
+                        BlockPos from = new BlockPos(move.fromX(), move.fromY(), move.fromZ());
+                        if (walkPlanStart(player).equals(from)) {
+                            recordFailedRoute(player, from, to, label + "-unified-action");
+                            forbidden.add(to.asLong());
+                        }
+                    }
+                }
+                if (failure != null) {
+                    break;
+                }
+            }
+
+            BlockPos now = walkPlanStart(player);
+            if (failure != null) {
+                if ("deadline".equals(failure) || !UnifiedWalkPolicy.replanAfterFailure(failureReplans)) {
+                    return new WalkResult(false, player.getBlockPos(), label + ": " + failure + " plan=" + planTag);
+                }
+                failureReplans++;
+                LOGGER.info("walkTo unified replan [{}]: bot={} after={} from={} forbidden={}",
+                        label, bot, failure, now.toShortString(), forbidden.size());
+                legStart = now;
+                result = PathFinder.plan(now, destination, world, player,
+                        request.asReplan().withForbiddenFirstHops(forbidden));
+                if (!result.isUnified()) {
+                    return new WalkResult(false, player.getBlockPos(), label + ": finder changed mid-walk");
+                }
+                continue;
+            }
+
+            double distSq = player.getBlockPos().getSquaredDistance(destination);
+            boolean arrived = distSq <= ARRIVAL_DISTANCE_SQ;
+            legs++;
+            double progress = Math.sqrt(legStart.getSquaredDistance(destination)) - Math.sqrt(now.getSquaredDistance(destination));
+            UnifiedWalkPolicy.AfterPlan next = UnifiedWalkPolicy.afterPlan(plan.status(), arrived, legs, progress,
+                    abortRequested(player), System.currentTimeMillis() > deadline);
+            switch (next) {
+                case ARRIVED -> {
+                    return new WalkResult(true, player.getBlockPos(), label + ": walked to destination");
+                }
+                case STOP -> {
+                    String why = plan.status() == PlanStatus.PARTIAL
+                            ? "partial plan stopped after " + legs + " legs reason=" + plan.reason()
+                            : "walk ended " + String.format(Locale.ROOT, "%.2f", Math.sqrt(distSq)) + " blocks away";
+                    return new WalkResult(false, player.getBlockPos(), label + ": " + why + " plan=" + planTag);
+                }
+                case NEXT_LEG -> {
+                    LOGGER.info("walkTo unified leg [{}]: bot={} legs={} progress={} from={}",
+                            label, bot, legs, String.format(Locale.ROOT, "%.1f", progress), now.toShortString());
+                    legStart = now;
+                    result = PathFinder.plan(now, destination, world, player, request);
+                    if (!result.isUnified()) {
+                        return new WalkResult(false, player.getBlockPos(), label + ": finder changed mid-walk");
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -3545,11 +3748,15 @@ public final class MovementService {
         boolean dirt = world.getBlockState(placeCell).isOf(Blocks.DIRT);
         if (!pillared || !dirt) {
             recordFailedRoute(bot, from, from.up(), label + "-planned-place");
-            if (pillared) {
-                LOGGER.warn("planned stair [{}]: pillarUp placed {} at {}, not dirt", label,
-                        world.getBlockState(placeCell).getBlock().getTranslationKey(), CellPos.format(placeCell.asLong()));
+            if (!pillared) {
+                return PlannedMoveResult.fail("place-failed", 0, 0);
             }
-            return PlannedMoveResult.fail(pillared ? "placed-not-dirt" : "place-failed", 0, pillared ? 1 : 0);
+            // pillarUp can retarget its placement; an open planned cell means the block went elsewhere.
+            boolean offCell = !hasCollision(world, placeCell);
+            LOGGER.warn("planned stair [{}]: pillarUp placed {} at {}", label,
+                    offCell ? "off the planned cell" : world.getBlockState(placeCell).getBlock().getTranslationKey(),
+                    CellPos.format(placeCell.asLong()));
+            return PlannedMoveResult.fail(offCell ? "placed-off-cell" : "placed-not-dirt", 0, 1);
         }
         if (abortRequested(bot)) {
             return PlannedMoveResult.fail("aborted", 0, 1);
