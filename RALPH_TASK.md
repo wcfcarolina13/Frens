@@ -3,7 +3,19 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.240) — next session starts here
+## Session Handoff 2026-10-15 (1.1.241) — next session starts here
+
+**State:** main = origin/main @ 1.1.241. Suite 2357 green. 1.1.241 = the small items after 1.1.240: woodcut tree claims
+(`WoodcutTreeClaims`, sandbox #19), creeper backoff says a plain line instead of `creeper-fuse` (#18), torch-hold log keyed
+on gate not light, `[PathCompareOutcome]` walk outcomes joined by the analyzer, woodcut bounds/envelope per bot. Field items
+now 300 (Phase 6al). Log prune LaunchAgent `com.bradley.frens-log-prune` is INSTALLED (daily 11:15, Bradley approved
+2026-10-15): Nirn's 239 old logs archived with digests in ~/Library/Application Support/PrismLauncher/frens-log-archive.
+**Next:** the merged single pathfinder (now 1.1.242; session card proposed) and the dead-code audit (session card). First
+field number for the pathfinder work: walks with an executable plan reached the goal 61.5% (8/13), so the walk executor is
+the gap. Add a plan ID shared by `[PathCompare]` and `[PathCompareOutcome]` there.
+Everything in the 1.1.240 block below still applies (minus the items shipped here).
+
+## Session Handoff 2026-10-15 (1.1.240) — superseded
 
 **State:** main = origin/main @ 1.1.240. Suite 2337 green. Not on Modrinth. 1.1.240 = multi-step navigation (Bradley's ask
 with screenshots, 2026-10-14): both finders plan only executable moves (`PathMovePolicy`), Baritone is the default (one-time

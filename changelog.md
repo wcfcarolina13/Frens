@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Tree claims, plain creeper line, quieter torch log, walk outcomes in PathCompare; 1.1.241 (2026-10-15)
+
+The smaller open items from the 1.1.240 sandbox runs (PLAYTHROUGH_1.1.234_SANDBOX.md #18, #19), Bradley: "Knock out those smaller open items too".
+
+- **Woodcut bots claim their tree** (`c1b60dac`, `fdc6c8bf`, `34272455`, #19). Three bots used to queue single file on one tree. Pure `WoodcutTreeClaims`: a bot claims its target (dimension + base, 60 s, refreshed on every mine), other bots skip it and anything within 2 blocks of it (a tree's base moves as it is cut) and the logs floating near it. Claims count only near the bot (search radius + 8, same dimension). With no free tree the bot waits up to 20 s, then shares. A bot whose claim lapses and is taken abandons the tree (no logs cut, no bridging toward them, its own scaffold still cleaned up). Release is per run, so a quick restart keeps the new run's claim. Also moved the woodcut work bounds and tree envelope from shared fields into per-bot maps (one WoodcutSkill instance serves every bot, so two bots with different bounds overwrote each other). Field: `Woodcut: tree 77, 72, 154 is claimed by Carl, picking another`.
+- **Creeper line** (`af14ad7f`, #18). The backoff abort reason was the key `creeper-fuse`, sent to chat as a bot line and echoed again as the skill result. Now "A creeper! I dropped what I was doing to get clear." once (avoids "stop", which the soul observer files as a manual stop). Not resuming stays as designed in 1.1.126 (`970a199b`).
+- **torch-hold log** (`af14ad7f`). The 1.1.202 diagnostics (`d217456`) already logged on change only, but the change key held the light level, which flickers under canopy (133 lines/min). Key is now verdict + gate + mob + action.
+- **Walk outcomes** (`0bf5d4ce`, `1f8fe7ef`). With `/bot config pathcompare on`, each walk also logs `[PathCompareOutcome] bot=… to=… reached=yes|no detail=…`. The analyzer joins it to the nearest compare line (within 15 s after, never an older one) and reports reached rate per finder and "exec but not reached". First field numbers: exec plans reached 61.5% (8/13), so walking, not planning, is the next gap.
+- **Rulings (cost if wrong):** a lost claim abandons the tree rather than racing for it (cost: a slow bot may give up a half-cut tree). Claims wait at most 20 s then share (cost: a lone forest still gets two bots at the end).
+- **Deferred:** a plan ID shared by PathCompare and its outcome line (quick retries can still mis-pair), bounds put/remove on same-bot restart (same pattern as other per-bot maps).
+- **Tests:** 2337 → 2357.
+- **Field checks:** Phase 6al.
+
 ## Multi-step navigation: executable paths, wading, break/place/walk when stuck, Baritone default; 1.1.240 (2026-10-15)
 
 Bradley, watching a bot slam into a 2-high sand step beside a pond (sandbox screenshots 2026-10-14 23:02): "breaking blocks, scaffolding, and simply walking around are all options a human player would use to reach its destination with little effort here." Design and field notes in `docs/testing/NAV_1.1.240_DESIGN.md`, research in `docs/research/PATHFINDING_RESEARCH_2026-10.md`.
