@@ -24,7 +24,7 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 - `open_chat` and `pause_game` fail in production (reflective class/method names); fork adds `send_chat`, `pause_menu`, `save_and_quit` from mapped code.
 
 - `get_screen_buttons` returns `[]` in production (reflective field names). A per-version module could walk `Screen.children()` from mapped code and return label, x, y, w, h in screenshot pixels: the single most useful tool for UI testing.
-- `screenshot_to_file` writes to any path. Restrict to the instance's screenshots dir (security).
+- **DONE in the fork (2026-10-14, `1c18057`): `screenshot_to_file` wrote to any path the client sent.** Now only `.png` files under `<gameDir>/screenshots/mcp/` (absolute paths and `..` refused, timestamped default name). Upstream candidate, security group.
 - `screenshot` returns a bare `data:` string, not JSON like other commands. Make it `{"result":"data:…","w":…,"h":…}`.
 - Control mode: a client can call `enter_control_mode` itself, so the in-game "MCP Take Over" consent is advisory. Upstream could require the in-game toggle (or a token) before input works.
 - Bridge runs `npx` unpinned by default in docs; recommend `npm i -g minecraft-mod-mcp@<ver>`.
@@ -46,7 +46,7 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 
 Order: security first, then fixes that make production builds work, then new commands. Each PR is one fork commit (branch `hardened` in `~/dev/minecraft-mod-mcp-hardened`), rebased onto upstream main and split per loader where needed (our commits touch only the 1.21.11 Fabric module plus `packages/common`). Bradley approves each PR's text before anything is opened (outbound action).
 
-1. **Security: loopback bind + Origin/Host refusal, no `Access-Control-Allow-Origin: *`** (`fdd4b47`, McpHttpServer part). Any web page could drive the game through the open CORS API. Common module, all loaders benefit.
+1. **Security: loopback bind + Origin/Host refusal, no `Access-Control-Allow-Origin: *`** (`fdd4b47`, McpHttpServer part). Any web page could drive the game through the open CORS API. Common module, all loaders benefit. Same PR: `screenshot_to_file` path restriction (`1c18057`).
 2. **Production Fabric: pass the mapped client in** (`fdd4b47`, ModDevMcpMod part). Reflection by Yarn names fails under intermediary names in real installs ("Failed to get Minecraft instance").
 3. **Screenshots via vanilla ScreenshotRecorder** (`fdd4b47`). The reflective glReadPixels path returned slivers on macOS.
 4. **`save_and_quit` hang** (pause-menu disconnect path) and **`pause_menu` blocked in control mode** (`a42e7ed`).

@@ -3,7 +3,28 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.238) — next session starts here
+## Session Handoff 2026-10-14 (1.1.239) — next session starts here
+
+**State:** main = origin/main @ 1.1.239. Suite 2262 green. Not on Modrinth (Bradley: not until playthroughs settle). 1.1.239 is
+from the 1.1.238 sandbox run (PLAYTHROUGH_1.1.234_SANDBOX.md #12-#17): movement obstruction mining refuses slow blocks
+(stone by hand, `ObstructionMinePolicy`, 100-tick cap) and cancels timed-out jobs; woodcut skips trees it cannot reach from a
+roofed pocket, exits trapped, caps dry reposition at 4 stands; hunger warned once in chat and the starvation pause checked at
+approach loop heads (its "feed me" line was being dropped by the 32-block range gate); surface recovery with no blocks backs
+off 30 s to 10 min with a truthful climb check and one owner line; a stopped bot holds still underground. Field items now 293
+(Phase 6aj). Sandbox pre-release check passed for #10, #14, #17 (see changelog Field).
+**MCP fork (`hardened`):** new `bot_state` (server-side food, inventory, onGround, sky), `players` uses server time,
+`screenshot_to_file` restricted to `screenshots/mcp/`. Built, deployed to the sandbox.
+**Next build (1.1.240): multi-step navigation (Bradley 2026-10-14, with sandbox screenshots).** From a pond-side gully at
+22,63,126 a fresh bot never moved in 7 min: bidirectional A* timed out at 1536 iterations (~7 ms each) on every try, local
+escape repeated one impossible 2-high step, woodcut retried adjacent stands and prepareReach after the 4-stand cap. Bradley:
+"breaking blocks, scaffolding, and simply walking around are all options a human player would use to reach its destination
+with little effort here." Design scope (Fable) in progress: A* speed (#13 campfire check), partial-path waypoints on timeout,
+failed-route memory, costed break/place/walk moves, skip the rest of a target after a timeout from an unchanged position.
+**Deferred from 1.1.239:** blind walkDirect fallback after no path, A* neighbour passability, hand-dig stair escape, bundle
+food in the no-food warning, the gated hunger lines in CollectDirt/StripMine, SkillResumeService vs recovery thread, #10 audio
+regeneration (needs Bradley's triage). Everything in the 1.1.236 block below still applies.
+
+## Session Handoff 2026-10-14 (1.1.238) — superseded
 
 **State:** main = origin/main @ 1.1.238. Suite 2204 green. Not on Modrinth. 1.1.238: Spawn-base trees protected from woodcut
 by default (Bradley's ruling 2026-10-14, reversing 1.1.229), admin toggle in Admin, World Settings; spawn nudge line; refused
