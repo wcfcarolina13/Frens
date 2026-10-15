@@ -41,3 +41,17 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 - **DONE in the fork (2026-10-14): `type_text` + `press_key`.** `type_text` focuses a text field (by index from `screen_buttons`, the focused one, or the only one) and feeds characters through the screen's `charTyped`, so the screen's change listeners run (`replace=true` clears first). `press_key` sends enter/escape/backspace/tab/arrows/delete/home/end to the open screen. `screen_buttons` now reports text field values. Covers the roster Create-name check without Bradley.
 - **DONE in the fork (2026-10-14): `bot_view` hides the viewer's HUD** (the hotbar/hearts in bot shots were the player's, not the bot's); `hud=true` keeps it.
 - **DONE in the fork (2026-10-14): `players`.** Lists player entities the client sees (bots are fake players): position, health, held item, distance, plus time of day. Read-only.
+
+## Upstream PR plan (langyo/minecraft-mod-mcp, prepared 2026-10-14, nothing sent)
+
+Order: security first, then fixes that make production builds work, then new commands. Each PR is one fork commit (branch `hardened` in `~/dev/minecraft-mod-mcp-hardened`), rebased onto upstream main and split per loader where needed (our commits touch only the 1.21.11 Fabric module plus `packages/common`). Bradley approves each PR's text before anything is opened (outbound action).
+
+1. **Security: loopback bind + Origin/Host refusal, no `Access-Control-Allow-Origin: *`** (`fdd4b47`, McpHttpServer part). Any web page could drive the game through the open CORS API. Common module, all loaders benefit.
+2. **Production Fabric: pass the mapped client in** (`fdd4b47`, ModDevMcpMod part). Reflection by Yarn names fails under intermediary names in real installs ("Failed to get Minecraft instance").
+3. **Screenshots via vanilla ScreenshotRecorder** (`fdd4b47`). The reflective glReadPixels path returned slivers on macOS.
+4. **`save_and_quit` hang** (pause-menu disconnect path) and **`pause_menu` blocked in control mode** (`a42e7ed`).
+5. **`health` / stuck detection** (`502af9a`).
+6. **`screen_buttons` / `click_button` with list rows** (`7a7aa46` + rows commit), replacing `get_screen_buttons` (always `[]` in production).
+7. **`type_text` / `press_key`** (`03a4a20`), **`players`**, **`bot_view`** (+ HUD hiding), **`set_time`**, **`click_px`**, **pack metadata** (`1c28266`).
+
+Open questions for upstream: whether they want game-specific helpers (`set_time`, `bot_view`, `players`) or only generic UI control; their loader matrix (NeoForge/Forge equivalents of our Fabric-only changes).
