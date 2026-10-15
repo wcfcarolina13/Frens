@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.skills.support;
 
+import java.util.Comparator;
+
 /**
  * Which world blocks an early-game bot may dig by hand for scaffold: soft, non-falling members of
  * the dirt family (dirt, grass block, coarse and rooted dirt, podzol, mycelium, mud, moss).
@@ -20,8 +22,21 @@ public final class ScaffoldMaterialPolicy {
     /** Grass block and mycelium; the softest blocks a bare hand breaks in under a second. */
     public static final float MAX_HAND_HARDNESS = 0.6F;
 
-    /** Horizontal reach of the axe-bootstrap hand gather around the bot. */
-    public static final int HAND_GATHER_RADIUS = 3;
+    /**
+     * Horizontal search radius of the woodcut hand gather around the bot. 3 until 1.1.240: in a new
+     * world's Spawn base every dirt cell that close was protected, so the bot gathered nothing
+     * (protection stays strict, ruling 2026-10-14; the search widens instead). Cells beyond reach
+     * cost a short bounded walk, so {@link #gatherOrder()} puts unprotected and near cells first.
+     * Only WoodcutSkill uses it.
+     */
+    public static final int HAND_GATHER_RADIUS = 6;
+
+    /** A gather cell as an offset from the bot's feet block, and whether territory protects it. */
+    public record GatherCandidate(int dx, int dy, int dz, boolean protectedCell) {
+        public int distanceSq() {
+            return dx * dx + dy * dy + dz * dz;
+        }
+    }
 
     private ScaffoldMaterialPolicy() {
     }
@@ -40,6 +55,16 @@ public final class ScaffoldMaterialPolicy {
             return false;
         }
         return Math.abs(dx) <= HAND_GATHER_RADIUS && Math.abs(dz) <= HAND_GATHER_RADIUS;
+    }
+
+    /**
+     * Gather order: unprotected cells first (a protected cell only ever yields a refusal), then
+     * nearest (least walking), then feet level before head level.
+     */
+    public static Comparator<GatherCandidate> gatherOrder() {
+        return Comparator.comparing(GatherCandidate::protectedCell)
+                .thenComparingInt(GatherCandidate::distanceSq)
+                .thenComparingInt(GatherCandidate::dy);
     }
 
     public static boolean isHandScaffold(float hardness, boolean falls, boolean inDirtTag, boolean requiresTool) {

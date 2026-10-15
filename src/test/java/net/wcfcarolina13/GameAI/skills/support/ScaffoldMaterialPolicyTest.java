@@ -36,8 +36,8 @@ class ScaffoldMaterialPolicyTest {
 
     @Test
     void handGatherNeverDigsTheStandingRowOrBelow() {
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
                 assertFalse(ScaffoldMaterialPolicy.mayHandGather(dx, -1, dz));
                 assertFalse(ScaffoldMaterialPolicy.mayHandGather(dx, -2, dz));
             }
@@ -45,12 +45,41 @@ class ScaffoldMaterialPolicyTest {
     }
 
     @Test
-    void handGatherTakesFeetAndHeadLevelBesideTheBotWithinRadiusThree() {
+    void handGatherTakesFeetAndHeadLevelBesideTheBotWithinRadiusSix() {
         assertTrue(ScaffoldMaterialPolicy.mayHandGather(1, 0, 0));
         assertTrue(ScaffoldMaterialPolicy.mayHandGather(-3, 1, 3));
+        assertTrue(ScaffoldMaterialPolicy.mayHandGather(4, 0, 0), "radius 6 since 1.1.240");
+        assertTrue(ScaffoldMaterialPolicy.mayHandGather(-6, 1, 6));
         assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 0, 0), "the bot's own cell");
         assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 1, 0), "the bot's head cell");
-        assertFalse(ScaffoldMaterialPolicy.mayHandGather(4, 0, 0));
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(7, 0, 0));
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 0, -7));
         assertFalse(ScaffoldMaterialPolicy.mayHandGather(0, 2, 1));
+        assertFalse(ScaffoldMaterialPolicy.mayHandGather(6, -1, 0), "standing row stays off limits at radius 6");
+    }
+
+    // ── 1.1.240: unprotected cells first, then nearest, then feet before head ─────────────────
+
+    @Test
+    void gatherOrderPutsUnprotectedCellsFirstThenNearest() {
+        ScaffoldMaterialPolicy.GatherCandidate nearProtected = new ScaffoldMaterialPolicy.GatherCandidate(1, 0, 0, true);
+        ScaffoldMaterialPolicy.GatherCandidate farFree = new ScaffoldMaterialPolicy.GatherCandidate(5, 0, 2, false);
+        ScaffoldMaterialPolicy.GatherCandidate midFree = new ScaffoldMaterialPolicy.GatherCandidate(-3, 0, 1, false);
+        ScaffoldMaterialPolicy.GatherCandidate midProtected = new ScaffoldMaterialPolicy.GatherCandidate(2, 1, 2, true);
+        ScaffoldMaterialPolicy.GatherCandidate nearFreeHead = new ScaffoldMaterialPolicy.GatherCandidate(0, 1, 2, false);
+        java.util.List<ScaffoldMaterialPolicy.GatherCandidate> cells = new java.util.ArrayList<>(java.util.List.of(
+                nearProtected, farFree, midFree, midProtected, nearFreeHead));
+        cells.sort(ScaffoldMaterialPolicy.gatherOrder());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.List.of(nearFreeHead, midFree, farFree, nearProtected, midProtected), cells);
+    }
+
+    @Test
+    void gatherOrderTakesFeetLevelBeforeHeadLevelAtEqualDistance() {
+        ScaffoldMaterialPolicy.GatherCandidate head = new ScaffoldMaterialPolicy.GatherCandidate(0, 1, 2, false);
+        ScaffoldMaterialPolicy.GatherCandidate feet = new ScaffoldMaterialPolicy.GatherCandidate(1, 0, 2, false);
+        java.util.List<ScaffoldMaterialPolicy.GatherCandidate> cells = new java.util.ArrayList<>(java.util.List.of(head, feet));
+        cells.sort(ScaffoldMaterialPolicy.gatherOrder());
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(feet, head), cells);
     }
 }

@@ -51,6 +51,7 @@ import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutStandRetryPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutApproachFeasibilityPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutChatLines;
@@ -99,6 +100,10 @@ public final class WoodcutSkill implements Skill {
     private static final int MAX_CONSECUTIVE_FAILURES = 6;
     private static final int SUNSET_TIME_OF_DAY = 12000;
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
+    // Hand scaffold gather beyond reach (radius 6 since 1.1.240): a few short bounded walks per gather.
+    private static final int MAX_SCAFFOLD_GATHER_WALKS = 3;
+    private static final double SCAFFOLD_GATHER_WALK_REACH_SQ = 9.0D;
+    private static final long SCAFFOLD_GATHER_WALK_TIMEOUT_MS = 2_500L;
     private static final long PILLAR_STEP_DELAY_MS = 100L;
     private static final long MINING_TIMEOUT_MS = 12_000L;
     private static final int MAX_RETRY_MINING = 5;
@@ -166,6 +171,9 @@ public final class WoodcutSkill implements Skill {
      * skill is one shared instance; filled at run start and removed in the run's finally.
      */
     private final Map<UUID, WoodcutRefusedTargets> refusedMineTargetsByBot = new ConcurrentHashMap<>();
+    // The last failed stand walk's detail per bot (moveToStandDirect), read by the dry reposition
+    // loop for WoodcutStandRetryPolicy. Cleared before each stand.
+    private final Map<UUID, String> lastStandMoveDetailByBot = new ConcurrentHashMap<>();
     /** Bots told "no food" this run (WoodcutHungerPolicy WARN_ONCE). Removed in the run's finally. */
     private final Set<UUID> hungerWarnedBots = ConcurrentHashMap.newKeySet();
     /**
@@ -480,6 +488,10 @@ public final class WoodcutSkill implements Skill {
         // Failed dry-reposition stands for this target on any side. Parallel to the sign-keyed
         // repeatedRepositionFailures, which resets when sorted candidates alternate sides.
         private int dryRepositionFailures;
+        // Where the bot stood at this target's first approach; a stand walk's path failure from
+        // about the same cell skips the rest of the target (WoodcutStandRetryPolicy).
+        private Vec3d approachOrigin;
+        private boolean standsSkipped;
         private int minorTerrainCorrections;
         private int rerouteFailures;
         private int rerouteBlacklistSkips;
@@ -1324,6 +1336,7 @@ public final class WoodcutSkill implements Skill {
             axeBootstrapSharedState.remove(bot.getUuid());
             activeRequestedBounds = null;
             refusedMineTargetsByBot.remove(bot.getUuid());
+            lastStandMoveDetailByBot.remove(bot.getUuid());
             hungerWarnedBots.remove(bot.getUuid());
             starvationPauseBots.remove(bot.getUuid());
             activeTreeWorkEnvelopeMin = null;
@@ -2779,6 +2792,11 @@ public final class WoodcutSkill implements Skill {
             return false;
         }
         LOGGER.info("Woodcut approach: target base={} from {}", base.toShortString(), bot.getBlockPos().toShortString());
+        Vec3d approachOrigin = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        if (reachSession != null) {
+            reachSession.approachOrigin = approachOrigin;
+            reachSession.standsSkipped = false;
+        }
         clearBaseObstacles(world, bot, base);
         if (isTrunkWithinReach(world, base, bot)) {
             return true;
@@ -2817,6 +2835,9 @@ public final class WoodcutSkill implements Skill {
                     nearby.toShortString(), base.toShortString(), res.detail());
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
             MovementService.clearRecentWalkAttempt(bot.getUuid());
+            if (shouldSkipRemainingStands(bot, base, approachOrigin, res.detail())) {
+                return false;
+            }
         }
         if (checkWoodcutHunger(source, bot)) {
             return false;
@@ -2845,6 +2866,10 @@ public final class WoodcutSkill implements Skill {
                 }
                 LOGGER.warn("Woodcut approach: planner move to {} for {} failed (reason=path failed detail={})",
                         approach.toShortString(), base.toShortString(), result.detail());
+                if (shouldSkipRemainingStands(bot, base, approachOrigin, result.detail())) {
+                    ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
+                    return false;
+                }
             }
             // Clear overhead soft blocks around bot before repositioning — the bot may be in a
             // depression with leaves at head level preventing all diagonal movement.
@@ -2853,6 +2878,10 @@ public final class WoodcutSkill implements Skill {
                 return true;
             }
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
+            // A stand walk failed from the cell the approach started in: no post-abandon reposition.
+            if (reachSession != null && reachSession.standsSkipped) {
+                return false;
+            }
         } else {
             LOGGER.info("Woodcut approach: no planner path for {} (reason=no dry stand)", base.toShortString());
         }
@@ -2870,6 +2899,28 @@ public final class WoodcutSkill implements Skill {
         ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
         LOGGER.warn("Woodcut approach: no trunk reach for {} (reason=no trunk reach)", base.toShortString());
         return false;
+    }
+
+    /** Horizontal blocks the bot moved since the target's first approach (unknown origin: never "unmoved"). */
+    private static double movedSinceApproach(ServerPlayerEntity bot, Vec3d approachOrigin) {
+        if (bot == null || approachOrigin == null) {
+            return Double.MAX_VALUE;
+        }
+        return WoodcutStandRetryPolicy.horizontalMoved(approachOrigin.x, approachOrigin.z, bot.getX(), bot.getZ());
+    }
+
+    /**
+     * WoodcutStandRetryPolicy adapter: true (and one log line) when a stand walk for {@code base}
+     * failed for a path reason while the bot is still within a block of where the approach began.
+     * The caller abandons the target; the target loop counts it as one failed approach, as before.
+     */
+    private boolean shouldSkipRemainingStands(ServerPlayerEntity bot, BlockPos base, Vec3d approachOrigin, String detail) {
+        double moved = movedSinceApproach(bot, approachOrigin);
+        if (!WoodcutStandRetryPolicy.skipRemainingStands(detail, moved)) {
+            return false;
+        }
+        LOGGER.info(WoodcutStandRetryPolicy.skipLine(base.toShortString(), detail));
+        return true;
     }
 
     private boolean tryDryRepositionAroundTrunk(ServerCommandSource source,
@@ -2919,11 +2970,19 @@ public final class WoodcutSkill implements Skill {
                 break;
             }
             LOGGER.info("Woodcut approach: retrying trunk reposition via {}", stand.toShortString());
+            lastStandMoveDetailByBot.remove(bot.getUuid());
             if (moveToStand(source, bot, world, stand, base)) {
                 if (reachSession != null) {
                     reachSession.clearRepositionFailureTracking();
                 }
                 return true;
+            }
+            if (reachSession != null
+                    && shouldSkipRemainingStands(bot, base, reachSession.approachOrigin,
+                            lastStandMoveDetailByBot.remove(bot.getUuid()))) {
+                reachSession.dryRepositionFailures++;
+                reachSession.standsSkipped = true;
+                return false;
             }
             if (reachSession != null) {
                 reachSession.recordRepositionFailure(base, stand, "reposition-around-trunk");
@@ -3715,6 +3774,10 @@ public final class WoodcutSkill implements Skill {
         MovementService.MovementResult result = executeMovementPlan(source, bot, plan, "move-to-stand");
         if (!result.success()) {
             MovementService.clearRecentWalkAttempt(bot.getUuid());
+            String detail = result.detail();
+            if (detail != null) {
+                lastStandMoveDetailByBot.put(bot.getUuid(), detail);
+            }
         }
         return result.success()
                 || bot.getBlockPos().getSquaredDistance(stand) <= 4.0D
@@ -5554,31 +5617,66 @@ public final class WoodcutSkill implements Skill {
         int gathered = 0;
         BlockPos origin = bot.getBlockPos();
         int radius = ScaffoldMaterialPolicy.HAND_GATHER_RADIUS;
-        // Feet level first, then head level; never the row the bot stands on or below it, so
-        // gathering leaves no holes in the lawn and never digs out the bot's own footing.
-        List<BlockPos> candidates = new ArrayList<>();
+        // Feet and head level only; never the row the bot stands on or below it, so gathering
+        // leaves no holes in the lawn and never digs out the bot's own footing. Source blocks are
+        // filtered before the territory check, which is the costly part of the scan.
+        List<BlockPos> sources = new ArrayList<>();
+        Map<BlockPos, ScaffoldMaterialPolicy.GatherCandidate> keys = new HashMap<>();
+        int protectedCells = 0;
         for (BlockPos pos : BlockPos.iterate(origin.add(-radius, 0, -radius), origin.add(radius, 1, radius))) {
-            if (ScaffoldMaterialPolicy.mayHandGather(pos.getX() - origin.getX(), pos.getY() - origin.getY(),
-                    pos.getZ() - origin.getZ())) {
-                candidates.add(pos.toImmutable());
+            int dx = pos.getX() - origin.getX();
+            int dy = pos.getY() - origin.getY();
+            int dz = pos.getZ() - origin.getZ();
+            if (!ScaffoldMaterialPolicy.mayHandGather(dx, dy, dz)) {
+                continue;
             }
-        }
-        candidates.sort(Comparator.<BlockPos>comparingInt(p -> p.getY() - origin.getY())
-                .thenComparingDouble(p -> p.getSquaredDistance(origin)));
-        int protectedSkipped = 0;
-        for (BlockPos pos : candidates) {
-            if (gathered >= toGather || TaskService.isServerStopping() || isAbortRequested(bot)) {
-                break;
-            }
-            BlockState state = world.getBlockState(pos);
             // By block state, not asItem: grass block, podzol and mycelium drop dirt.
-            if (!isHandScaffoldSource(world, pos, state)) {
+            if (!isHandScaffoldSource(world, pos, world.getBlockState(pos))) {
                 continue;
             }
             // The miner's own territory check, asked first: a new world's Spawn base covers the
             // spawn area, and mining there only returns "protected claim" (1.1.234 playthrough).
-            if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
-                protectedSkipped++;
+            // Protection stays strict (ruling 2026-10-14); protected cells sort last and are skipped.
+            boolean protectedCell = !BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed();
+            if (protectedCell) {
+                protectedCells++;
+            }
+            BlockPos immutable = pos.toImmutable();
+            sources.add(immutable);
+            keys.put(immutable, new ScaffoldMaterialPolicy.GatherCandidate(dx, dy, dz, protectedCell));
+        }
+        Comparator<ScaffoldMaterialPolicy.GatherCandidate> order = ScaffoldMaterialPolicy.gatherOrder();
+        sources.sort((a, b) -> order.compare(keys.get(a), keys.get(b)));
+        int walks = 0;
+        for (BlockPos pos : sources) {
+            if (gathered >= toGather || TaskService.isServerStopping() || isAbortRequested(bot)) {
+                break;
+            }
+            if (keys.get(pos).protectedCell()) {
+                break; // protected cells sort last: nothing left to gather
+            }
+            if (!isHandScaffoldSource(world, pos, world.getBlockState(pos))) {
+                continue;
+            }
+            if (bot.squaredDistanceTo(Vec3d.ofCenter(pos)) > REACH_DISTANCE_SQ) {
+                // Out of reach: one short, bounded walk toward it (at most a few per gather).
+                if (walks >= MAX_SCAFFOLD_GATHER_WALKS) {
+                    continue;
+                }
+                walks++;
+                LOGGER.info("Woodcut scaffold gather: walking toward {} (walk {}/{})",
+                        pos.toShortString(), walks, MAX_SCAFFOLD_GATHER_WALKS);
+                MovementService.nudgeTowardUntilClose(bot, pos, SCAFFOLD_GATHER_WALK_REACH_SQ,
+                        SCAFFOLD_GATHER_WALK_TIMEOUT_MS, 0.20D, "scaffold-gather");
+                if (bot.squaredDistanceTo(Vec3d.ofCenter(pos)) > REACH_DISTANCE_SQ) {
+                    continue;
+                }
+            }
+            // Re-guard footing from where the bot stands now: never a block under or beside its feet row.
+            BlockPos feet = bot.getBlockPos();
+            if (pos.getY() < feet.getY()
+                    && Math.abs(pos.getX() - feet.getX()) <= 1
+                    && Math.abs(pos.getZ() - feet.getZ()) <= 1) {
                 continue;
             }
             LookController.faceBlock(bot, pos);
@@ -5588,10 +5686,12 @@ public final class WoodcutSkill implements Skill {
                 LOGGER.debug("Woodcut scaffold collected at {}", pos.toShortString());
             }
         }
-        if (protectedSkipped > 0) {
+        if (protectedCells > 0) {
             LOGGER.info("Woodcut scaffold gather: skipped {} protected cell(s) near {}",
-                    protectedSkipped, origin.toShortString());
+                    protectedCells, origin.toShortString());
         }
+        LOGGER.info("Woodcut scaffold gather: {} source cell(s) within {} of {} ({} protected), gathered {} of {} ({} walk(s))",
+                sources.size(), radius, origin.toShortString(), protectedCells, gathered, toGather, walks);
         return gathered;
     }
 
