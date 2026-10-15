@@ -506,7 +506,7 @@ public final class SafePositionService {
         return getWalkableGroundY(world, x, z);
     }
 
-    private static int wideSurfaceFeetY(ServerWorld world, int x, int z) {
+    static int wideSurfaceFeetY(ServerWorld world, int x, int z) {
         // Use the median of surrounding surface samples rather than the max.
         // Max is biased upward by nearby tree trunks (MOTION_BLOCKING_NO_LEAVES
         // still counts log blocks), causing nearSurface=false under canopies

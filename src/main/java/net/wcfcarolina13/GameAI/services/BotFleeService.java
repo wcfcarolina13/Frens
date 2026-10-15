@@ -1015,19 +1015,24 @@ public final class BotFleeService {
             // Try digPos first, then lower positions closer to the bot.
             BlockPos[] capPlacedAt = {null};
             MinecraftServer server = bot.getCommandSource().getServer();
-            BlockPos botCurrentPos = bot.getBlockPos();
             server.execute(() -> {
-                // Try: original ground level, then each level down toward bot
+                // Try just above the bot's head first: that is the cell the shelter validator
+                // (hasOverheadCover, stand + 2) reads as cover. Capping higher left stand + 2 as
+                // the mined air gap, so the bunker never registered (no_overhead_cover).
+                // Then fall back toward the original ground level.
+                BlockPos feetNow = bot.getBlockPos();
                 BlockPos[] candidates = {
-                    digPos,              // original ground (ideal cap)
+                    feetNow.up(2),       // just above bot's head (validator's cover cell)
                     digPos.down(),       // one below ground
-                    botCurrentPos.up(2)  // just above bot's head
+                    digPos               // original ground
                 };
                 for (BlockPos cap : candidates) {
                     if (bot.getEntityWorld().getBlockState(cap).isAir()) {
                         if (BotActions.placeBlockAt(bot, cap)) {
                             capPlacedAt[0] = cap.toImmutable();
-                            LOGGER.debug("Cap placed at {}", cap.toShortString());
+                            LOGGER.info("Bot {} dig-down cap placed at {} (feet {}, covers={})",
+                                    bot.getName().getString(), cap.toShortString(), feetNow.toShortString(),
+                                    UndergroundLingerPolicy.bunkerCapCovers(feetNow.getY(), cap.getY()));
                             break;
                         }
                     }
@@ -2183,6 +2188,21 @@ public final class BotFleeService {
         //    intentional underground location, not a random pit.
         SafePositionService.SurfaceCandidateAssessment posCheck =
                 SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
+        int feetY = bot.getBlockY();
+        int wideSurfaceY = SafePositionService.wideSurfaceFeetY(world, bot.getBlockX(), bot.getBlockZ());
+        int scaffoldCount = countScaffoldBlocks(bot);
+        UndergroundLingerPolicy.Decision lingerPre = UndergroundLingerPolicy.decide(
+                posCheck.openSky(), feetY, wideSurfaceY, world.isDay(), world.isThundering(),
+                scaffoldCount, foodLevel, isInShelter(botId));
+        // Shelter and night win over the #0 bypass (which used to skip the night check #9).
+        if (lingerPre == UndergroundLingerPolicy.Decision.SUPPRESS_SHELTERED) {
+            LOGGER.info("Bot {} linger: suppressed — inside own shelter", name);
+            return true;
+        }
+        if (lingerPre == UndergroundLingerPolicy.Decision.SUPPRESS_NIGHT) {
+            LOGGER.info("Bot {} linger: suppressed — nighttime, waiting for dawn (food={})", name, foodLevel);
+            return true;
+        }
         if (!posCheck.openSky() && !posCheck.nearSurface()) {
             boolean commanderHere = isCommanderNearby(bot, server);
             boolean nearBase = BotHomeService.isNearAnyBase(bot, 32.0D);
@@ -2270,9 +2290,18 @@ public final class BotFleeService {
             COMMANDER_LEFT_TICK.remove(botId);
         }
 
+        // 7b. Shallow open-sky hole by day with scaffold — pillar out (mines overhead by hand),
+        //     no pickaxe needed and no reason to wait just because the bot is fed (#8, #12).
+        if (lingerPre == UndergroundLingerPolicy.Decision.ALLOW_RECOVERY) {
+            LOGGER.info("Bot {} linger: allow — shallow open-sky hole by day, climbing out (depth={} scaffold={})",
+                    name, UndergroundLingerPolicy.depthBelowSurface(feetY, wideSurfaceY), scaffoldCount);
+            UNDERGROUND_LINGER_START.remove(botId);
+            return false;
+        }
+
         // 8. No tools and NOT near surface with soft blocks — can't mine out, wait for rescue
         boolean hasPickaxe = hasAnyPickaxe(bot);
-        if (!hasPickaxe && !isNearSurfaceWithSoftBlocks(bot, world)) {
+        if (!hasPickaxe && !isNearSurfaceWithSoftBlocks(bot, world, wideSurfaceY)) {
             LOGGER.info("Bot {} linger: suppressed — no tools, deep underground, waiting for rescue", name);
             return true;
         }
@@ -2419,9 +2448,10 @@ public final class BotFleeService {
      * Allows tool-less breakfree when the bot is just a few blocks below ground
      * with dirt/sand/gravel above (e.g., after tactical shelter with no tools).
      */
-    private static boolean isNearSurfaceWithSoftBlocks(ServerPlayerEntity bot, ServerWorld world) {
+    private static boolean isNearSurfaceWithSoftBlocks(ServerPlayerEntity bot, ServerWorld world, int surfaceY) {
+        // surfaceY is the wide (median of 9 columns) surface sample: in a 1-wide open shaft the
+        // bot's own column heightmap is the shaft floor, which read as depth 0 / "deep underground".
         int botY = bot.getBlockY();
-        int surfaceY = SafePositionService.getWalkableGroundY(world, bot.getBlockX(), bot.getBlockZ());
         int delta = surfaceY - botY;
         if (delta < 1 || delta > 5) return false; // must be 1-5 blocks below surface
 
