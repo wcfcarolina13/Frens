@@ -55,7 +55,8 @@ public class AdminWorldSettingsScreen extends Screen {
         int centerX = this.width / 2;
         int fieldY = this.height / 2 - 10;
 
-        this.radiusField = new TextFieldWidget(this.textRenderer, centerX - 40, fieldY, 80, 20,
+        // Rows: radius field + Apply, Spawn-base toggle, Done last (fits 342x328 at GUI scale 5).
+        this.radiusField = new TextFieldWidget(this.textRenderer, centerX - 80, fieldY, 75, 20,
                 Text.literal("Max base radius"));
         this.radiusField.setMaxLength(5);
         this.radiusField.setText(currentMaxRadius > 0 ? Integer.toString(currentMaxRadius) : "");
@@ -63,21 +64,21 @@ public class AdminWorldSettingsScreen extends Screen {
         this.addDrawableChild(this.radiusField);
 
         this.applyButton = ButtonWidget.builder(Text.literal("Apply"), b -> onApply())
-                .dimensions(centerX - 80, fieldY + 30, 75, 20)
+                .dimensions(centerX + 5, fieldY, 75, 20)
                 .build();
         this.addDrawableChild(this.applyButton);
 
-        this.doneButton = ButtonWidget.builder(Text.literal("Done"), b -> close())
-                .dimensions(centerX + 5, fieldY + 30, 75, 20)
-                .build();
-        this.addDrawableChild(this.doneButton);
-
         int toggleWidth = UiFitPolicy.popupExtent(200, this.width, 16);
         this.spawnWoodcutButton = ButtonWidget.builder(Text.literal(spawnWoodcutLabel(toggleWidth)), b -> onToggleSpawnWoodcut())
-                .dimensions(centerX - toggleWidth / 2, fieldY + 55, toggleWidth, 20)
+                .dimensions(centerX - toggleWidth / 2, fieldY + 30, toggleWidth, 20)
                 .build();
         this.spawnWoodcutButton.active = this.spawnWoodcutAllowed != null;
         this.addDrawableChild(this.spawnWoodcutButton);
+
+        this.doneButton = ButtonWidget.builder(Text.literal("Done"), b -> close())
+                .dimensions(centerX - 37, fieldY + 55, 75, 20)
+                .build();
+        this.addDrawableChild(this.doneButton);
 
         // Fire queries to the server; the S2C state handlers call applyState() / applySpawnWoodcutState().
         ClientPlayNetworking.send(new AdminMaxBaseRadiusPayload(-1));
