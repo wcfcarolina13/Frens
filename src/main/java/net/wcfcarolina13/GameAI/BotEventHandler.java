@@ -139,10 +139,6 @@ public class BotEventHandler {
     // actively moving through the doorway (a 1-block transit takes ~5-8 ticks at follow speed).
     private static final int  FOLLOW_DOOR_STUCK_ABORT_TICKS = 24;
     private static final long FOLLOW_DOOR_ABORT_AVOID_MS = 12_000L;
-    // Stuck-jump trigger: after ~0.4s of no block-position change while ticking a door plan,
-    // force a jump each tick. Slabs/stairs/trapdoors at head level block horizontal motion
-    // but are cleared by a simple hop. Same remedy as commander's own jump nudging the bot.
-    private static final int  FOLLOW_DOOR_STUCK_JUMP_TICKS = FollowDoorRules.STUCK_JUMP_TICKS;
     private static final double COME_REACHABILITY_PROBE_RANGE_SQ = 32.0D * 32.0D;
     private static final long COME_REACHABILITY_PROBE_TIMEOUT_MS = 60L;
     private static final long COME_REACHABILITY_PROBE_COOLDOWN_TICKS = 80L;
@@ -853,32 +849,6 @@ public class BotEventHandler {
     }
 
 
-    private static boolean shouldEnterCombat(boolean hostilesNearby, double dangerDistance, boolean hasSculkNearby) {
-        boolean dangerProximity = dangerDistance > 0.0 && dangerDistance <= 5.0;
-        return hostilesNearby || dangerProximity || hasSculkNearby;
-    }
-
-    private static boolean assessImmediateThreat(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
-        List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10);
-        boolean hostilesNearby = nearbyEntities.stream().anyMatch(EntityUtil::isHostile);
-        boolean hasSculkNearby = false;
-        if (!hostilesNearby) {
-            try {
-                BlockDistanceLimitedSearch search = new BlockDistanceLimitedSearch(bot, 3, 5);
-                hasSculkNearby = search.detectNearbyBlocks().stream()
-                        .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
-            } catch (Exception e) {
-                LOGGER.warn("Unable to evaluate sculk proximity while assessing threats: {}", e.getMessage());
-            }
-        }
-        return shouldEnterCombat(hostilesNearby, dangerDistance, hasSculkNearby);
-    }
-
-
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
@@ -1461,41 +1431,6 @@ public class BotEventHandler {
         return "Now following " + target.getName().getString() + ".";
     }
 
-    public static String setFollowModeWalk(ServerPlayerEntity bot, ServerPlayerEntity target, double stopRange) {
-        if (bot == null || target == null) {
-            return "Unable to follow — target not found.";
-        }
-        registerBot(bot);
-        setFollowTarget(bot, target.getUuid());
-        BotCommandStateService.State state = stateFor(bot);
-        if (state != null) {
-            state.followNoTeleport = true;
-            state.followStopRange = Math.max(1.5D, stopRange);
-            state.followStandoffRange = 0.0D;
-            state.followFixedGoal = null;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeRerouteAttempts = 0;
-            state.comeNextRerouteTick = 0L;
-            state.comeNextSkillTick = 0L;
-            state.comeRecoverySkillInFlight = false;
-            state.comeRecoverySkillStartTick = 0L;
-            state.comeRecoverySkillAttempts = 0;
-            state.comeAllowRecoverySkills = true;
-        }
-        setMode(bot, Mode.FOLLOW);
-        clearGuard(bot);
-        clearBase(bot);
-        UUID id = bot.getUuid();
-        FollowStateService.clearIdleSweep(id);
-        DropSweepService.requestCancel(bot, "follow-start-walk");
-        FollowStateService.clearPlanning(id);
-        FollowDebugService.clear(id);
-        requestFollowPathPlan(bot, target, true, "follow-start-walk");
-        sendBotMessage(bot, "Walking to you.");
-        return "Walking to " + target.getName().getString() + ".";
-    }
-
     public static String setComeModeWalk(ServerPlayerEntity bot,
                                         ServerPlayerEntity commander,
                                         BlockPos fixedGoal,
@@ -1893,11 +1828,6 @@ public class BotEventHandler {
 
     public static Mode getCurrentMode(ServerPlayerEntity bot) {
         return getMode(bot);
-    }
-
-    public static boolean isPassiveMode() {
-        Mode mode = getCurrentMode();
-        return mode == Mode.IDLE || mode == Mode.STAY || mode == Mode.GUARD || mode == Mode.PATROL;
     }
 
     public static CombatStyle getCombatStyle() {
@@ -7089,41 +7019,11 @@ public class BotEventHandler {
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
-    private static boolean shouldPlanFollow(ServerPlayerEntity bot, ServerPlayerEntity target) {
-        if (bot == null || target == null) {
-            return false;
-        }
-        UUID id = bot.getUuid();
-        long now = System.currentTimeMillis();
-        BlockPos currentTargetPos = target.getBlockPos();
-
-        BlockPos lastPos = LAST_FOLLOW_TARGET_POS.get(id);
-        Long lastTime = LAST_FOLLOW_PLAN_MS.get(id);
-
-        boolean movedEnough = lastPos == null || lastPos.getSquaredDistance(currentTargetPos) > 9; // >3 blocks
-        boolean timeElapsed = lastTime == null || now - lastTime > 500; // 0.5s throttle
-
-        if (movedEnough || timeElapsed) {
-            LAST_FOLLOW_TARGET_POS.put(id, currentTargetPos.toImmutable());
-            LAST_FOLLOW_PLAN_MS.put(id, now);
-            return true;
-        }
-        return false;
-    }
-
     private static void handleFollowPersonalSpace(ServerPlayerEntity bot,
                                                   ServerPlayerEntity target,
                                                   double distanceSq,
                                                   Vec3d targetPos) {
         FollowMovementService.handleFollowPersonalSpace(bot, target, distanceSq, targetPos, FOLLOW_BACKUP_DISTANCE, FOLLOW_BACKUP_TRIGGER_MS);
-    }
-
-    private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {
-        return entities.stream()
-                .filter(entity -> entity instanceof net.minecraft.entity.ItemEntity)
-                .filter(entity -> entity.squaredDistanceTo(bot) <= radius * radius)
-                .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
-                .orElse(null);
     }
 
     private static Entity findNearestDrop(ServerPlayerEntity bot, double radius) {

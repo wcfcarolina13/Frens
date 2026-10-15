@@ -37,8 +37,6 @@ public final class FollowStateService {
                                     int doorTraverseAttempts) {
     }
 
-    public static final Map<UUID, Long> LAST_FOLLOW_PLAN_MS = new ConcurrentHashMap<>();
-    public static final Map<UUID, BlockPos> LAST_FOLLOW_TARGET_POS = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_TOO_CLOSE_SINCE = new ConcurrentHashMap<>();
     public static final Map<UUID, Double> FOLLOW_LAST_DISTANCE_SQ = new ConcurrentHashMap<>();
     public static final Map<UUID, Integer> FOLLOW_STAGNANT_TICKS = new ConcurrentHashMap<>();
@@ -274,8 +272,6 @@ public final class FollowStateService {
             return;
         }
         clearPlanning(botId);
-        LAST_FOLLOW_PLAN_MS.remove(botId);
-        LAST_FOLLOW_TARGET_POS.remove(botId);
         FOLLOW_TOO_CLOSE_SINCE.remove(botId);
         FOLLOW_LAST_TELEPORT_TICK.remove(botId);
         FOLLOW_LAST_DOOR_BASE.remove(botId);
@@ -303,8 +299,6 @@ public final class FollowStateService {
     }
 
     public static void reset() {
-        LAST_FOLLOW_PLAN_MS.clear();
-        LAST_FOLLOW_TARGET_POS.clear();
         FOLLOW_TOO_CLOSE_SINCE.clear();
         FOLLOW_LAST_DISTANCE_SQ.clear();
         FOLLOW_STAGNANT_TICKS.clear();

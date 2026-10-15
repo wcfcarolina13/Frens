@@ -1471,16 +1471,6 @@ public final class BotActions {
         return success;
     }
 
-    private static int findWeaponSlot(ServerPlayerEntity bot) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && isLikelyWeapon(stack)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     private static int meleeWeaponScore(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return 0;
@@ -1602,32 +1592,6 @@ public final class BotActions {
         for (int slot = 0; slot < inventory.size(); slot++) {
             ItemStack stack = inventory.getStack(slot);
             if (!DurabilityPolicyService.shouldAvoid(bot, stack) && meleeWeaponScore(stack) > 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isLikelyWeapon(ItemStack stack) {
-        if (stack.isEmpty()) {
-            return false;
-        }
-
-        if (stack.isOf(Items.BOW) || stack.isOf(Items.CROSSBOW) || stack.isOf(Items.TRIDENT)) {
-            return true;
-        }
-
-        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("spear");
-    }
-
-    public static boolean hasAnyTrident(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        PlayerInventory inventory = bot.getInventory();
-        for (int slot = 0; slot < inventory.size(); slot++) {
-            if (inventory.getStack(slot).isOf(Items.TRIDENT)) {
                 return true;
             }
         }
@@ -3163,21 +3127,6 @@ public final class BotActions {
     }
 
     /**
-     * Returns true if the bot's current ranged line to the target is blocked by terrain,
-     * cobweb, or a friendly (non-bot) player in the fire cone.
-     * Used by engageHostiles to decide whether to fall through to melee approach.
-     */
-    public static boolean isRangedLineCurrentlyBlocked(ServerPlayerEntity bot, LivingEntity target) {
-        if (bot == null || target == null) {
-            return false;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        return isRangedLineBlocked(world, bot, bot.getEyePos(), target);
-    }
-
-    /**
      * Returns true if there is a cobweb block between the bot's eye and the target entity.
      * Used by combat logic to switch from "engage" to "take cover" — the bot can't
      * effectively shoot or melee through a cobweb (arrows stop, path is deadly), so it
@@ -3191,15 +3140,6 @@ public final class BotActions {
                 target.getY() + target.getStandingEyeHeight() / 2.0D,
                 target.getZ());
         return isRangedLineBlockedByCobweb(world, from, to);
-    }
-
-    /** Cancel any committed reposition in progress (e.g. when LoS clears or target changes). */
-    public static void cancelCommittedReposition(ServerPlayerEntity bot) {
-        if (bot == null) return;
-        RangedAttackState state = RANGED_STATE.get(bot.getUuid());
-        if (state != null) {
-            state.committedRepositionTarget = null;
-        }
     }
 
     public static void resetRangedState(UUID uuid) {
