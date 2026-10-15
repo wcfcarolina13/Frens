@@ -1241,6 +1241,9 @@ public final class MovementService {
                     return new WalkResult(false, player.getBlockPos(), label + ": " + failure + " plan=" + planTag);
                 }
                 failureReplans++;
+                // A swim cell kept its momentum; zero it so the replan starts from where the bot stays.
+                BotActions.stop(player);
+                now = walkPlanStart(player);
                 LOGGER.info("walkTo unified replan [{}]: bot={} after={} from={} forbidden={}",
                         label, bot, failure, now.toShortString(), forbidden.size());
                 legStart = now;
@@ -3617,7 +3620,7 @@ public final class MovementService {
         if (originStep == PlannedMoveExecPolicy.OriginStep.SETTLE) {
             // A walk run ends up to 1.5 blocks short of its last cell (walkSegment's close-enough), which
             // is this move's origin: settle onto it instead of failing the leg (review C1).
-            nudgeTowardExactBlock(bot, from, false, label + "-planned-settle");
+            nudgeTowardExactBlock(bot, from, from.getY() > origin.getY(), label + "-planned-settle");
             origin = groundedOrigin(bot);
             atOrigin = isAtPlannedOrigin(bot, world, origin, from);
         }
