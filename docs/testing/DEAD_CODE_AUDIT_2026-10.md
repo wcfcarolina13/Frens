@@ -20,6 +20,8 @@ Provenance note: the package rename to `net.wcfcarolina13` landed in b5479ada (2
 
 ## 2. Live bugs (ranked by severity)
 
+**Status 2026-10-15 (overnight run):** B1 (Fortify and ReturnBaseStuck sites), B2, B3, B4, B5, B7 and B8 are fixed in `6fc7812f` (thread hops or `state.hasBlockEntity()`, ratchet counts unchanged). `MiningHazardDetector:294` was left as is on purpose: the `CHEST_BLOCKS` check above it already catches chests, so swapping the tail to `state.hasBlockEntity()` would make mining stop at every furnace or sign with "I found a chest!". The rest wait for Bradley's answers in section 5.
+
 B1 to B5 are one family (worker-thread `getBlockEntity` reads) and are kept together so one fix pattern covers them. Within the family B2 is the highest single item. B6 onward are in severity order.
 
 Thread facts that several entries rest on: `World.getBlockEntity` returns null off the server thread in 1.21.11 (CHANGELOG line 588, javap-verified for 1.1.221). Skills run on `mod-command-skill-N` worker threads (`modCommandRegistry.java:157`, `SkillManager.java:229` attaches the executing thread). Brigadier command bodies run on the server thread. `BlockState.hasBlockEntity()` is a pure state read and is already used at `SoulSnapshotBuilder.java:327` and `HovelPerimeterSafetyService.java:75`. The reference hop for a real block-entity read is `ShelterSkill.java:840` (`callOnServer(world, () -> world.getBlockEntity(pos))`, a private helper in that skill). `BotActions.callOnServerThread` (`BotActions.java:163`) is also `private static`. Both are patterns to copy into the file being fixed, or `world.getServer().submit(...).join()` directly.
