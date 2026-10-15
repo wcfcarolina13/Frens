@@ -78,7 +78,6 @@ import net.wcfcarolina13.PlayerUtils.*;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.ServiceLLMClients.LLMClient;
 import net.wcfcarolina13.ServiceLLMClients.LLMServiceHandler;
-import net.wcfcarolina13.Commands.modCommandRegistry;
 import net.wcfcarolina13.WebSearch.WebSearchTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1442,10 +1441,6 @@ public class FunctionCallerV2 {
     }
 
     private static void prepareForExternalCommand() {
-        if (modCommandRegistry.isTrainingMode) {
-            BotEventHandler.setExternalOverrideActive(true);
-            logger.info("📴 Pausing training loop for external command");
-        }
         PathTracer.flushAllMovementTasks();
         AutoFaceEntity.isBotMoving = false;
         if (currentBotSource() != null) {
@@ -1600,9 +1595,6 @@ public class FunctionCallerV2 {
         PathTracer.flushAllMovementTasks();
         AutoFaceEntity.setBotExecutingTask(false);
         AutoFaceEntity.isBotMoving = false;
-        if (modCommandRegistry.isTrainingMode) {
-            BotEventHandler.setExternalOverrideActive(false);
-        }
         boolean moving = PathTracer.BotSegmentManager.getBotMovementStatus();
         logger.info("✔️ Pipeline cleanup executed. movementStatus={} blockDetectionActive={}", moving, blockDetectionUnit.getBlockDetectionStatus());
         System.out.println("[FunctionCaller] Cleanup complete. movementStatus=" + moving);

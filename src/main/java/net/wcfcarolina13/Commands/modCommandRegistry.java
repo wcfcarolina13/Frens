@@ -176,7 +176,6 @@ public class modCommandRegistry {
     }
 
     static final double DEFAULT_GUARD_RADIUS = 6.0D;
-    public static boolean isTrainingMode = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 
@@ -1887,16 +1886,7 @@ public class modCommandRegistry {
     }
 
     private static String normalizeSpawnModeOrNull(String rawMode) {
-        if (rawMode == null) {
-            return null;
-        }
-        String mode = rawMode.trim().toLowerCase(Locale.ROOT);
-        return switch (mode) {
-            case "admin", "play" -> "admin";
-            case "questing", "quest" -> "questing";
-            case "training", "train" -> "training";
-            default -> null;
-        };
+        return net.wcfcarolina13.GameAI.services.SpawnModePolicy.normalizeOrNull(rawMode);
     }
 
     private static boolean isAdminLikeSpawnMode(String normalizedMode) {
@@ -2215,35 +2205,6 @@ public class modCommandRegistry {
     }
 
 
-    /** Post-spawn setup for a training bot. Runs on the server thread, immediately or when a deferred spawn lands. */
-    private static void initTrainingBot(MinecraftServer server, ServerPlayerEntity bot, String botName, ServerPlayerEntity owner) {
-
-        Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-
-        RespawnHandler.registerRespawnListener(bot);
-        BotEventHandler.registerBot(bot);
-        if (owner != null) {
-            Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
-        }
-        // Training bots auto-respawn on death by default, but preserve any
-        // user-customized autoRespawnOnDeath from prior sessions.
-        {
-            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
-            if (ctrl != null) {
-                ctrl.setSpawnMode("training");
-                if (ctrl.getRawAutoRespawnOnDeath() == null) {
-                    ctrl.setAutoRespawnOnDeath(true);
-                }
-                // Manual /bot spawn always clears shelved state (user wants the bot back).
-                ctrl.setAutoSpawnOnLoad(true);
-            }
-        }
-
-        AutoFaceEntity.startAutoFace(bot);
-
-    }
-
     /** Post-spawn setup for an admin/questing bot, including the optional LLM client. Server thread only. */
     private static void initAdminLikeBot(MinecraftServer server, ServerPlayerEntity bot, String botName,
                                          String normalizedSpawnMode, ServerPlayerEntity owner, ServerCommandSource serverSource) {
@@ -2440,9 +2401,9 @@ public class modCommandRegistry {
                 LOGGER.warn("spawnBot: invalid spawn mode '{}' for requested bot", requestedSpawnMode);
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
-                        "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
+                        "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing> [gamemode: survival|creative]");
                 ChatUtils.sendSystemMessage(serverSource,
-                        "Legacy aliases: play -> admin, quest -> questing, train -> training");
+                        "Legacy aliases: play, training and train load as admin, quest loads as questing");
                 return SpawnOutcome.REFUSED;
             }
 
@@ -2609,52 +2570,8 @@ public class modCommandRegistry {
             SpawnOutcome outcome = SpawnOutcome.SPAWNED;
             // Captured now: a deferred spawn finishes after this command has returned.
             final ServerPlayerEntity spawnOwner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
-            if ("training".equalsIgnoreCase(normalizedSpawnMode)) {
-
-                LOGGER.info("spawnBot: entering training branch for {}", botName);
-
-                CompletableFuture<Void> spawnFuture = createFakePlayer.createFake(
-                        botName,
-                        server,
-                        pos,
-                        facing.y,
-                        facing.x,
-                        dimType,
-                        mode,
-                        false
-                );
-
-                ServerWorld spawnWorld = server.getWorld(dimType);
-                if (spawnWorld != null) {
-                    LOGGER.info("spawnBot: remembering spawn for training bot {}", botName);
-                    BotEventHandler.rememberSpawn(spawnWorld, pos, facing.y, facing.x);
-                }
-
-                isTrainingMode = true;
-
-                LOGGER.info("Spawned new training bot {}!", botName);
-
-                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
-
-                final String spawnedName = botName;
-                switch (net.wcfcarolina13.GameAI.services.SpawnResultPolicy.classify(bot != null, !spawnFuture.isDone())) {
-                    case READY -> initTrainingBot(server, bot, spawnedName, spawnOwner);
-                    case PENDING -> outcome = deferPostSpawnInit(server, serverSource, spawnFuture, spawnedName,
-                            late -> initTrainingBot(server, late, spawnedName, spawnOwner));
-                    case FAILED -> {
-                        LOGGER.error("spawnBot: training bot {} was not found after createFake", botName);
-                        ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
-                        outcome = SpawnOutcome.FAILED;
-                    }
-                }
-
-                // don't initialize ollama client for training mode.
-
-            } else if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
+            if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
                 LOGGER.info("spawnBot: entering {} branch for {}", normalizedSpawnMode, botName);
-
-                isTrainingMode = false;
-                LOGGER.info("Training mode disabled for {} spawn.", normalizedSpawnMode);
 
                 LOGGER.info("About to call createFakePlayer.createFake for {} bot {}", normalizedSpawnMode, botName);
                 CompletableFuture<Void> spawnFuture = createFakePlayer.createFake(
@@ -2719,7 +2636,7 @@ public class modCommandRegistry {
                 LOGGER.warn("spawnBot: invalid spawn mode '{}' for bot {}", spawnMode, botName);
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
-                    "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
+                    "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing> [gamemode: survival|creative]");
                 outcome = SpawnOutcome.REFUSED;
             }
             return outcome;
@@ -6303,7 +6220,7 @@ public class modCommandRegistry {
         }
         String alias = bot.getName().getString();
         String caller = context.getSource() != null ? context.getSource().getName() : "(unknown)";
-        LOGGER.info("Stop command invoked: caller={} targetBot={} trainingMode={}", caller, alias, isTrainingMode);
+        LOGGER.info("Stop command invoked: caller={} targetBot={}", caller, alias);
         // Cancel any in-flight drop sweep so it doesn't keep driving movement after /stop.
         net.wcfcarolina13.GameAI.services.DropSweepService.requestCancel(bot, "command-stop");
         // 60s drop-sweep cooldown — after the user explicitly halted the bot, don't let it

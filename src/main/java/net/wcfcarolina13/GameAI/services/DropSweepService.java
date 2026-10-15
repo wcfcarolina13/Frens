@@ -13,7 +13,6 @@ import net.wcfcarolina13.GameAI.DropSweeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -45,7 +44,6 @@ public final class DropSweepService {
     private static volatile String dropSweepCancelReason = null;
     private static final long DROP_RETRY_COOLDOWN_MS = 15_000L;
     private static final ConcurrentHashMap<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
-    private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
 
     /** Per-bot drop-sweep suppression timestamps (set by /bot stop and stand-down). */
     private static final ConcurrentHashMap<UUID, Long> suppressUntilMs = new ConcurrentHashMap<>();
@@ -157,7 +155,6 @@ public final class DropSweepService {
 
     public static void collectNearbyDrops(ServerPlayerEntity bot,
                                           double radius,
-                                          boolean trainingMode,
                                           boolean commandDrivenSweep,
                                           BooleanSupplier isExternalOverrideActive,
                                           Consumer<Boolean> setExternalOverrideActive) {
@@ -238,53 +235,6 @@ public final class DropSweepService {
             }
         }
         if (drops.isEmpty()) {
-            return;
-        }
-
-        if (trainingMode) {
-            ItemEntity closest = drops.stream()
-                    .min(Comparator.comparingDouble(bot::squaredDistanceTo))
-                    .orElse(null);
-            if (closest == null) {
-                return;
-            }
-            double distanceSq = bot.squaredDistanceTo(closest);
-            if (!commandDrivenSweep && distanceSq > RL_MANUAL_NUDGE_DISTANCE_SQ) {
-                dropRetryTimestamps.put(closest.getBlockPos().toImmutable(), now);
-                return;
-            }
-            if (!dropSweepInProgress.compareAndSet(false, true)) {
-                return;
-            }
-
-            dropSweepOwner = bot.getUuid();
-            dropSweepCancelRequested.set(false);
-            dropSweepCancelReason = null;
-
-            BlockPos dropPos = closest.getBlockPos().toImmutable();
-            long startedAt = System.currentTimeMillis();
-            dropRetryTimestamps.put(dropPos, startedAt);
-
-            int maxTargets = commandDrivenSweep ? 6 : 2;
-            long durationMs = commandDrivenSweep ? 4500L : 3000L;
-
-            CompletableFuture<Void> sweepTask = CompletableFuture.runAsync(() -> {
-                        try {
-                            ServerCommandSource source = bot.getCommandSource().withSilent();
-                            DropSweeper.sweep(source, radius, verticalRange, maxTargets, durationMs);
-                        } catch (Exception sweepError) {
-                            LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
-                        }
-                    })
-                    .orTimeout(durationMs + 750L, TimeUnit.MILLISECONDS);
-
-            lastDropSweepMs = startedAt;
-            sweepTask.whenComplete((ignored, throwable) -> srv.execute(() -> {
-                dropSweepInProgress.set(false);
-                dropSweepCancelRequested.set(false);
-                dropSweepOwner = null;
-                dropSweepCancelReason = null;
-            }));
             return;
         }
 

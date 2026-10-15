@@ -2976,12 +2976,10 @@ public class BotEventHandler {
 
     public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
         Mode currentMode = getMode(bot);
-        boolean trainingMode = net.wcfcarolina13.Commands.modCommandRegistry.isTrainingMode;
         boolean commandDrivenSweep = currentMode == Mode.GUARD || currentMode == Mode.PATROL;
         DropSweepService.collectNearbyDrops(
                 bot,
                 radius,
-                trainingMode,
                 commandDrivenSweep,
                 BotEventHandler::isExternalOverrideActive,
                 BotEventHandler::setExternalOverrideActive

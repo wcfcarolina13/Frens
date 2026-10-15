@@ -505,13 +505,9 @@ public class BotControlScreen extends Screen {
         spawning.add(makeOnOff("Auto Spawn on Load",
                 "Automatically spawn this bot when the world loads. Turn off to keep the bot shelved until manually spawned.",
                 autoSpawnOnLoad, TOGGLE_W));
-        spawning.add(makeString("Spawn Mode", "Training is sandboxed. Questing/Admin use full gameplay presets.",
-                spawnModeUi, "training", "questing", "admin",
-                v -> Text.of(switch (v) {
-                    case "admin" -> "Admin";
-                    case "questing" -> "Questing";
-                    default -> "Training";
-                }), WIDE_TOGGLE_W));
+        spawning.add(makeString("Spawn Mode", "Questing or Admin. Both use full gameplay presets.",
+                spawnModeUi, "questing", "admin",
+                v -> Text.of("questing".equals(v) ? "Questing" : "Admin"), WIDE_TOGGLE_W));
         spawning.add(makeString("Game Mode", "Minecraft gamemode (inventory, damage, etc).",
                 gameMode, "survival", "creative",
                 v -> Text.of("creative".equals(v) ? "Creative" : "Survival"), WIDE_TOGGLE_W));
@@ -540,15 +536,9 @@ public class BotControlScreen extends Screen {
 
     private String canonicalSpawnModeForUi(String raw) {
         // Fresh/unknown bots default to "admin" to match the BotControlSettings
-        // field default in ManualConfig.  Only explicit "training"/"train" maps
-        // to training.  Anything else (null, blank, unknown) falls back to admin.
-        if (raw == null || raw.isBlank()) return "admin";
-        String normalized = raw.trim().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "training", "train" -> "training";
-            case "questing", "quest" -> "questing";
-            default -> "admin";
-        };
+        // field default in ManualConfig. Saved "training" bots also show as admin.
+        String normalized = net.wcfcarolina13.GameAI.services.SpawnModePolicy.normalizeOrNull(raw);
+        return normalized != null ? normalized : "admin";
     }
 
     private SettingEntry makeOnOff(String label, String desc, boolean value, int w) {
