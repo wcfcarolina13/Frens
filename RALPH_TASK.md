@@ -3,7 +3,15 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.236) — next session starts here
+## Session Handoff 2026-10-14 (1.1.237) — next session starts here
+
+**State:** main = origin/main @ 1.1.237. Suite 2174 green. Not on Modrinth. 1.1.237 = one fix on top of 1.1.236: the low-roof
+branch of `isRecoveryReadySurface` requires the wide near-surface check (`SurfaceReadinessPolicy.lowRoofReady`), so a capped
+pit below grade is not "at the surface" and underground survival actually runs (sandbox finding #8). Everything in the
+1.1.236 block below still applies (next items, deferrals). MCP fork now on branch `hardened` in ~/dev/minecraft-mod-mcp-hardened
+(save_and_quit uses the pause-menu disconnect path, new `health` command with stuck_save/render_idle verdicts).
+
+## Session Handoff 2026-10-14 (1.1.236) — superseded
 
 **State:** main = origin/main @ 1.1.236. Suite 2171 green. Modrinth: 1.1.230 latest published; 1.1.231–1.1.236 NOT published.
 Sandbox (`mcp-sandbox`) + hardened MCP fork as in the 1.1.235 block below. The sandbox "New World" holds Jake stuck at

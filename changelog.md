@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Capped pit no longer counts as the surface; 1.1.237 (2026-10-14)
+
+From sandbox finding #8 (PLAYTHROUGH_1.1.234_SANDBOX.md), found minutes after 1.1.236 went into the sandbox.
+
+- **786b2743 — a capped pit below the real surface is not "at the surface".** Reloaded on 1.1.236, Jake came back in the other cell of his 2-cell trench (42,62,25), under a leftover bunker cap, 3 below the wide surface. He logged nothing: `BotUndergroundSurvivalService` skips bots for which `BotFleeService.isAtSurface` is true, and `SafePositionService.isRecoveryReadySurface`'s low-roof branch said yes because its gap check reads the tile's own column (the cap). BotFleeService already documented this lenient fallback and fixed it only inside ensureAtSurface, so the 1.1.236 climb-out never got a chance to run. The branch is now the pure `SurfaceReadinessPolicy.lowRoofReady(...)` and also requires the wide-sample near-surface check. A tree overhang or porch at the real surface still counts.
+- **Caller sweep (no code changed):** ~30 `isAtSurface` callers. None relied on "covered pit below grade = ready". Visible effects: the join enclosure check, guard stuck escape, hunt start, woodcut start, cook/operational hobbies and post-task return now treat such a bot as underground and escape first.
+- **Ruling (cost if wrong):** narrow the one branch instead of switching every caller to the strict check (cost: other lenient shapes, e.g. the ±1-Y non-standable branch, may still misread a pit, field watch).
+- **Tests:** 2171 → 2174.
+- **Field checks:** Phase 6ah item 1 (the climb-out) now covers this. No new items.
+
 ## Stuck in a shelter hole, per-world roster; 1.1.236 (2026-10-14)
 
 From sandbox finding #7 (PLAYTHROUGH_1.1.234_SANDBOX.md) and AiwanChu25's Discord report.
