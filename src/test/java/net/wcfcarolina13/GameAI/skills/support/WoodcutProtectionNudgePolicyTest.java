@@ -119,4 +119,31 @@ class WoodcutProtectionNudgePolicyTest {
         said.clear(); // what WoodcutSkill.clearProtectionNudges() does on server stop
         assertTrue(WoodcutProtectionNudgePolicy.claimNudge(base, said).isPresent());
     }
+
+    @Test
+    void spawnBaseDominantSaysSpawnLine() {
+        Set<String> said = new HashSet<>();
+        Optional<String> line = WoodcutProtectionNudgePolicy.claimNudge(Map.of("spawn-base", 12, "human", 3), said);
+        assertEquals(Optional.of(WoodcutProtectionNudgePolicy.SPAWN_BASE_LINE), line);
+        assertEquals(Optional.empty(), WoodcutProtectionNudgePolicy.claimNudge(Map.of("spawn-base", 12), said));
+    }
+
+    @Test
+    void spawnBaseLosesTiesToPlayerClaims() {
+        assertEquals(Optional.of("admin-zone"),
+                WoodcutProtectionNudgePolicy.dominantReason(Map.of("spawn-base", 4, "admin-zone", 4)));
+        assertEquals(Optional.of("base-radius"),
+                WoodcutProtectionNudgePolicy.dominantReason(Map.of("spawn-base", 4, "base-radius", 4)));
+        assertEquals(Optional.of("spawn-base"),
+                WoodcutProtectionNudgePolicy.dominantReason(Map.of("spawn-base", 4, "mapped-village", 4)));
+    }
+
+    @Test
+    void spawnLineIsPlainPublicText() {
+        String line = WoodcutProtectionNudgePolicy.SPAWN_BASE_LINE;
+        assertEquals("The trees around spawn are protected, so I'm heading out to find others.", line);
+        assertFalse(line.contains("\u2014"));
+        assertFalse(line.contains("\u2013"));
+        assertFalse(line.contains(";"));
+    }
 }

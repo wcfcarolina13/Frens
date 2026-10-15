@@ -130,7 +130,8 @@ public class MiningTool {
         }
 
         if (bot.getEntityWorld() instanceof ServerWorld serverWorld) {
-            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos);
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos,
+                    isTreeBlock(serverWorld.getBlockState(targetBlockPos)));
             if (!auth.allowed()) {
                 miningResult.complete("⚠️ Cannot mine: protected claim.");
                 return miningResult;
@@ -242,7 +243,8 @@ public class MiningTool {
                 }
 
                 if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld) {
-                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos);
+                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos,
+                            isTreeBlock(serverWorld.getBlockState(targetBlockPos)));
                     if (!auth.allowed()) {
                         miningResult.complete("⚠️ Cannot mine: protected claim.");
                         return;
@@ -348,6 +350,11 @@ public class MiningTool {
         });
 
         return miningResult;
+    }
+
+    /** Logs and leaves: the only blocks the Spawn-base woodcut toggle can open to mining. */
+    private static boolean isTreeBlock(BlockState state) {
+        return state != null && (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES));
     }
 
     private static boolean isNeverMineBlock(BlockState state) {

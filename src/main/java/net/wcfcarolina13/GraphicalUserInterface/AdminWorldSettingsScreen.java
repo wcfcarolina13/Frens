@@ -7,12 +7,16 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.network.AdminMaxBaseRadiusPayload;
+import net.wcfcarolina13.network.AdminSpawnWoodcutPayload;
+
+import java.util.List;
 
 /**
  * Admin-only screen for world-wide frens settings. Currently hosts:
  *
  * <ul>
  *   <li>Max user-settable base radius (integer, bounded by server's absolute ceiling)</li>
+ *   <li>Whether bots may cut trees in the automatic Spawn base (default off)</li>
  * </ul>
  *
  * <p>Opens from the Admin tab inside {@link BotPlayerInventoryScreen}. When shown, the screen
@@ -25,6 +29,8 @@ public class AdminWorldSettingsScreen extends Screen {
     /** Kept accessible so the FrensClient S2C receiver can push state into the active screen. */
     private static AdminWorldSettingsScreen INSTANCE;
 
+    private static final String AWAITING = "Applied. Awaiting confirmation...";
+
     private final Screen parent;
 
     private int currentMaxRadius = -1;       // -1 = unknown until server responds
@@ -32,6 +38,8 @@ public class AdminWorldSettingsScreen extends Screen {
     private TextFieldWidget radiusField;
     private ButtonWidget applyButton;
     private ButtonWidget doneButton;
+    private ButtonWidget spawnWoodcutButton;
+    private Boolean spawnWoodcutAllowed;     // null = unknown until server responds
     private String statusMessage = "Requesting current value from server...";
 
     public AdminWorldSettingsScreen(Screen parent) {
@@ -64,8 +72,16 @@ public class AdminWorldSettingsScreen extends Screen {
                 .build();
         this.addDrawableChild(this.doneButton);
 
-        // Fire a query to the server; the S2C state handler will call applyState() when it arrives.
+        int toggleWidth = UiFitPolicy.popupExtent(200, this.width, 16);
+        this.spawnWoodcutButton = ButtonWidget.builder(Text.literal(spawnWoodcutLabel(toggleWidth)), b -> onToggleSpawnWoodcut())
+                .dimensions(centerX - toggleWidth / 2, fieldY + 55, toggleWidth, 20)
+                .build();
+        this.spawnWoodcutButton.active = this.spawnWoodcutAllowed != null;
+        this.addDrawableChild(this.spawnWoodcutButton);
+
+        // Fire queries to the server; the S2C state handlers call applyState() / applySpawnWoodcutState().
         ClientPlayNetworking.send(new AdminMaxBaseRadiusPayload(-1));
+        ClientPlayNetworking.send(new AdminSpawnWoodcutPayload(-1));
         updateApplyState();
     }
 
@@ -93,7 +109,40 @@ public class AdminWorldSettingsScreen extends Screen {
             return;
         }
         ClientPlayNetworking.send(new AdminMaxBaseRadiusPayload(parsed));
-        this.statusMessage = "Applied. Awaiting confirmation...";
+        this.statusMessage = AWAITING;
+    }
+
+    private String spawnWoodcutLabel(int buttonWidth) {
+        String state = this.spawnWoodcutAllowed == null ? "..." : (this.spawnWoodcutAllowed ? "On" : "Off");
+        return UiFitPolicy.pickLabel(List.of(
+                "Cut trees in the Spawn base: " + state,
+                "Spawn base trees: " + state,
+                "Spawn trees: " + state), buttonWidth - 8, this.textRenderer::getWidth);
+    }
+
+    private void onToggleSpawnWoodcut() {
+        if (this.spawnWoodcutAllowed == null) return;
+        ClientPlayNetworking.send(new AdminSpawnWoodcutPayload(this.spawnWoodcutAllowed ? 0 : 1));
+        this.statusMessage = AWAITING;
+    }
+
+    /** Called by the client networking handler when the server sends the Spawn woodcut toggle. */
+    public static void pushSpawnWoodcutState(boolean allowed) {
+        AdminWorldSettingsScreen s = INSTANCE;
+        if (s != null) {
+            s.applySpawnWoodcutState(allowed);
+        }
+    }
+
+    private void applySpawnWoodcutState(boolean allowed) {
+        this.spawnWoodcutAllowed = allowed;
+        if (AWAITING.equals(this.statusMessage)) {
+            this.statusMessage = allowed ? "Bots may cut trees in the Spawn base." : "Spawn base trees are protected.";
+        }
+        if (this.spawnWoodcutButton != null) {
+            this.spawnWoodcutButton.active = true;
+            this.spawnWoodcutButton.setMessage(Text.literal(spawnWoodcutLabel(this.spawnWoodcutButton.getWidth())));
+        }
     }
 
     /** Called by the client networking handler when the server sends current state. */
@@ -132,7 +181,7 @@ public class AdminWorldSettingsScreen extends Screen {
                 Text.literal("Max base radius (blocks)"), centerX, titleY + 20, 0xFFCCCCCC);
         if (this.statusMessage != null) {
             context.drawCenteredTextWithShadow(this.textRenderer,
-                    Text.literal(this.statusMessage), centerX, this.height / 2 + 60, 0xFFAAAAAA);
+                    Text.literal(this.statusMessage), centerX, this.height / 2 + 85, 0xFFAAAAAA);
         }
     }
 

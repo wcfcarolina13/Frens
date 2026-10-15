@@ -74,15 +74,40 @@ class TreeDetectorProtectionPolicyTest {
     }
 
     @Test
-    void freshWorldServerSpawnBaseAllowsWoodcut() {
-        // Server-owned Spawn base: its auto-zone is exempt and isNearPlayerOwnedBase skips it.
-        boolean explicit = VillageRuntimeProtectionPolicy.anyNonExemptZone(List.of(server("base:spawn")), SERVER_BASE_ZONE);
-        TreeDetector.WoodcutProtectionDecision decision =
-                VillageRuntimeProtectionPolicy.decideWoodcutProtection(explicit, false, false, false);
+    void freshWorldServerSpawnBaseBlocksWoodcutWhenToggleOff() {
+        // 2026-10-14 ruling: the automatic Spawn base protects its trees like a player base.
+        WoodcutBaseAccessPolicy.ZoneVerdict verdict = WoodcutBaseAccessPolicy.classifyZones(
+                List.of(server("base:spawn")), SERVER_BASE_ZONE, false);
+        TreeDetector.WoodcutProtectionDecision decision = VillageRuntimeProtectionPolicy.decideWoodcutProtection(
+                verdict == WoodcutBaseAccessPolicy.ZoneVerdict.OTHER, false,
+                verdict == WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE, false, false);
 
-        assertFalse(explicit);
+        assertEquals(WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE, verdict);
+        assertTrue(decision.blocked());
+        assertEquals("spawn-base", decision.reason());
+    }
+
+    @Test
+    void freshWorldServerSpawnBaseAllowsWoodcutWhenToggleOn() {
+        WoodcutBaseAccessPolicy.ZoneVerdict verdict = WoodcutBaseAccessPolicy.classifyZones(
+                List.of(server("base:spawn")), SERVER_BASE_ZONE, true);
+        TreeDetector.WoodcutProtectionDecision decision = VillageRuntimeProtectionPolicy.decideWoodcutProtection(
+                verdict == WoodcutBaseAccessPolicy.ZoneVerdict.OTHER, false,
+                verdict == WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE, false, false);
+
+        assertEquals(WoodcutBaseAccessPolicy.ZoneVerdict.NONE, verdict);
         assertFalse(decision.blocked());
         assertEquals("none", decision.reason());
+    }
+
+    @Test
+    void playerClaimsOutrankSpawnBaseReason() {
+        assertEquals("admin-zone",
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(true, false, true, false, false).reason());
+        assertEquals("base-radius",
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, true, true, false, false).reason());
+        assertEquals("spawn-base",
+                VillageRuntimeProtectionPolicy.decideWoodcutProtection(false, false, true, true, true).reason());
     }
 
     @Test

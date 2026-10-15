@@ -8,6 +8,7 @@ import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 
 import java.util.List;
 import java.util.Locale;
@@ -34,15 +35,36 @@ public final class BotTerritoryAuthorizationService {
     }
 
     public static AuthorizationResult authorizeBlockMutation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        return authorizeBlockMutation(bot, world, pos, false);
+    }
+
+    /**
+     * @param treeBlock true when the block is a log or leaves. Only then may the admin
+     *                  "Cut trees in the Spawn base" toggle exempt a SERVER-owned base zone
+     *                  ({@link WoodcutBaseAccessPolicy#miningExempt}). Every other zone, and every
+     *                  non-tree block, is decided exactly as before.
+     */
+    public static AuthorizationResult authorizeBlockMutation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                                             boolean treeBlock) {
         if (bot == null || world == null || pos == null) {
             return ALLOW;
         }
 
         UUID botOwner = resolveBotOwnerUuid(bot);
+        MinecraftServer server = world.getServer();
+        boolean spawnBaseWoodcutAllowed = treeBlock && BotHomeService.isSpawnBaseWoodcutAllowed(server);
 
-        // Protected-zone ownership (cubic claim)
-        ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
-        if (zone != null && !isZoneMutationAllowed(zone, botOwner)) {
+        // Protected-zone ownership (cubic claim). Every containing zone is asked, so an exempted
+        // Spawn base zone can never hide an overlapping player or user-drawn zone.
+        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
+            if (zone == null || !zone.contains(pos) || isZoneMutationAllowed(zone, botOwner)) {
+                continue;
+            }
+            if (WoodcutBaseAccessPolicy.miningExempt(
+                    BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()),
+                    treeBlock, spawnBaseWoodcutAllowed)) {
+                continue;
+            }
             return new AuthorizationResult(
                     false,
                     "protected-zone",
@@ -52,7 +74,6 @@ public final class BotTerritoryAuthorizationService {
         }
 
         // Fort interior ownership (convex-hull claim)
-        MinecraftServer server = world.getServer();
         if (server == null) {
             return ALLOW;
         }

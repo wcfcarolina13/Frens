@@ -757,23 +757,31 @@ public final class TreeDetector {
         if (BotBeehiveRegistryService.findProtectingBeehive(world, pos) != null) {
             return new WoodcutProtectionDecision(true, "beehive");
         }
+        boolean spawnBaseWoodcutAllowed = BotHomeService.isSpawnBaseWoodcutAllowed(world.getServer());
+        WoodcutBaseAccessPolicy.ZoneVerdict zoneVerdict = classifyWoodcutZones(world, pos, spawnBaseWoodcutAllowed);
+        boolean spawnBaseBlocked = zoneVerdict == WoodcutBaseAccessPolicy.ZoneVerdict.SPAWN_BASE
+                || (!WoodcutBaseAccessPolicy.detectionExempt(true, spawnBaseWoodcutAllowed)
+                && CompanionSafeZoneService.isNearServerOwnedBase(world, pos));
         return VillageRuntimeProtectionPolicy.decideWoodcutProtection(
-                isInNonServerBaseProtectedZone(world, pos),
+                zoneVerdict == WoodcutBaseAccessPolicy.ZoneVerdict.OTHER,
                 CompanionSafeZoneService.isNearPlayerOwnedBase(world, pos),
+                spawnBaseBlocked,
                 CompanionSafeZoneService.isInsideFortificationZone(world, pos),
                 MappedVillageService.isInsideMappedVillage(world, pos)
         );
     }
 
     /**
-     * Explicit-zone check for woodcut: the zone service must refuse the mutation AND at least
-     * one containing zone must be something other than a SERVER-owned base auto-zone. Player
-     * base auto-zones and user-drawn zones still block. Conservative edge: a public-mode user
-     * zone overlapping a server base zone still counts as blocking here.
+     * Explicit-zone check for woodcut: the zone service must refuse the mutation, then the
+     * containing zones are classified. A player base auto-zone or a user-drawn zone is OTHER
+     * ("admin-zone"); a SERVER-owned base auto-zone alone is SPAWN_BASE unless the admin toggle
+     * opens it to woodcut. Conservative edge: a public-mode user zone overlapping a server base
+     * zone still counts as blocking here.
      */
-    private static boolean isInNonServerBaseProtectedZone(ServerWorld world, BlockPos pos) {
+    private static WoodcutBaseAccessPolicy.ZoneVerdict classifyWoodcutZones(ServerWorld world, BlockPos pos,
+                                                                             boolean spawnBaseWoodcutAllowed) {
         if (!CompanionSafeZoneService.isInExplicitProtectedZone(world, pos, null)) {
-            return false;
+            return WoodcutBaseAccessPolicy.ZoneVerdict.NONE;
         }
         List<ProtectedZoneService.ProtectedZone> containing = new ArrayList<>();
         for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
@@ -781,8 +789,9 @@ public final class TreeDetector {
                 containing.add(zone);
             }
         }
-        return VillageRuntimeProtectionPolicy.anyNonExemptZone(containing,
-                zone -> BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()));
+        return WoodcutBaseAccessPolicy.classifyZones(containing,
+                zone -> BotHomeService.isServerOwnedBaseZone(zone.getLabel(), zone.getOwnerUuid()),
+                spawnBaseWoodcutAllowed);
     }
 
     public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover) {

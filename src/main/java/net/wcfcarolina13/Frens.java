@@ -590,6 +590,8 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetRadiusPayload.ID, net.wcfcarolina13.network.BaseSetRadiusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.AdminMaxBaseRadiusPayload.ID, net.wcfcarolina13.network.AdminMaxBaseRadiusPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.ID, net.wcfcarolina13.network.AdminMaxBaseRadiusStatePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.AdminSpawnWoodcutPayload.ID, net.wcfcarolina13.network.AdminSpawnWoodcutPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.AdminSpawnWoodcutStatePayload.ID, net.wcfcarolina13.network.AdminSpawnWoodcutStatePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetOwnerPayload.ID, net.wcfcarolina13.network.BaseSetOwnerPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetHomePayload.ID, net.wcfcarolina13.network.BaseSetHomePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGoToPayload.ID, net.wcfcarolina13.network.BaseGoToPayload.CODEC);

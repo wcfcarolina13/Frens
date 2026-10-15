@@ -1906,6 +1906,39 @@ public final class BotHomeService {
         return clamped;
     }
 
+    /**
+     * Admin toggle (default off): may woodcut cut trees inside SERVER-owned bases, i.e. the
+     * automatic Spawn base? Off, the Spawn base protects its trees like a player base. Stored on
+     * the Overworld's per-save data, since bases are Overworld-only, so the answer is the same
+     * whichever dimension the admin or the bot is in. A missing field (older saves) reads false.
+     */
+    public static boolean isSpawnBaseWoodcutAllowed(MinecraftServer server) {
+        if (server == null) {
+            return false;
+        }
+        ServerWorld overworld = server.getOverworld();
+        if (overworld == null) {
+            return false;
+        }
+        WorldData wd = worldData(server, overworld);
+        synchronized (LOCK) {
+            return wd.spawnBaseWoodcutAllowed;
+        }
+    }
+
+    /** Sets {@link #isSpawnBaseWoodcutAllowed}. Returns the stored value. Caller gates on admin. */
+    public static boolean setSpawnBaseWoodcutAllowed(MinecraftServer server, boolean allowed) {
+        if (server == null || server.getOverworld() == null) {
+            return false;
+        }
+        WorldData wd = worldData(server, server.getOverworld());
+        synchronized (LOCK) {
+            wd.spawnBaseWoodcutAllowed = allowed;
+        }
+        flush();
+        return allowed;
+    }
+
     public static Optional<BlockPos> resolvePreferredHomeBase(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return Optional.empty();
@@ -1964,6 +1997,7 @@ public final class BotHomeService {
         Map<String, List<SavedWaterSpot>> waterSpotsByBot = new HashMap<>();
         int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
         boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
+        boolean spawnBaseWoodcutAllowed; // admin toggle; Gson defaults a missing field to false
     }
 
     private static final class SavedBase {

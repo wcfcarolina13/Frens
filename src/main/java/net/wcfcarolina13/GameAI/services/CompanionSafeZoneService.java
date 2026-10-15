@@ -5,6 +5,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,15 +110,27 @@ public final class CompanionSafeZoneService {
 
     /**
      * Like {@link #isNearSavedBase} but ignores SERVER-owned bases (fresh-world Spawn, admin
-     * claims). Woodcut uses this: trees around spawn are fair game, a player's base is not.
+     * claims). Woodcut uses this for its "base-radius" reason. The Spawn base is checked
+     * separately by {@link #isNearServerOwnedBase}, so woodcut can say why it leaves spawn and an
+     * admin toggle can open it (see WoodcutBaseAccessPolicy).
      */
     public static boolean isNearPlayerOwnedBase(ServerWorld world, BlockPos pos) {
+        return isNearBaseOwnedBy(world, pos, false);
+    }
+
+    /** Like {@link #isNearSavedBase} but only SERVER-owned bases (the automatic Spawn base). */
+    public static boolean isNearServerOwnedBase(ServerWorld world, BlockPos pos) {
+        return isNearBaseOwnedBy(world, pos, true);
+    }
+
+    private static boolean isNearBaseOwnedBy(ServerWorld world, BlockPos pos, boolean serverOwned) {
+        if (world == null || pos == null) return false;
         MinecraftServer server = world.getServer();
         if (server == null) return false;
 
         for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
             if (base.pos() == null) continue;
-            if (BotHomeService.SERVER_OWNER_UUID.equals(base.ownerUuid())) continue;
+            if (WoodcutBaseAccessPolicy.isServerOwnedBaseOwner(base.ownerUuid()) != serverOwned) continue;
             int radius = base.radius();
             double rSq = (double) radius * radius;
             if (base.pos().getSquaredDistance(pos) <= rSq) {

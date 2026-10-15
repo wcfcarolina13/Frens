@@ -8,14 +8,25 @@ final class VillageRuntimeProtectionPolicy {
     private VillageRuntimeProtectionPolicy() {
     }
 
+    /** Same as the five-argument form with no Spawn-base protection. */
+    static TreeDetector.WoodcutProtectionDecision decideWoodcutProtection(boolean explicitProtectedZone,
+                                                                          boolean nearSavedBase,
+                                                                          boolean insideFortificationZone,
+                                                                          boolean insideMappedVillage) {
+        return decideWoodcutProtection(explicitProtectedZone, nearSavedBase, false,
+                insideFortificationZone, insideMappedVillage);
+    }
+
     /**
      * Woodcut protection verdict. {@code explicitProtectedZone} arrives with SERVER-owned base
-     * auto-zones already filtered out by the caller via {@link #anyNonExemptZone}, and
-     * {@code nearSavedBase} counts only player-owned bases, so the fresh-world Spawn base no
-     * longer blocks every tree near spawn while a player's base still does.
+     * auto-zones already filtered out by the caller, and {@code nearSavedBase} counts only
+     * player-owned bases. {@code insideBlockedSpawnBase} is the server Spawn base (zone or radius)
+     * when the admin toggle has not opened it to woodcut; it is reported as its own reason so the
+     * bot can say why it leaves spawn. Player claims win the tie, since their line is more useful.
      */
     static TreeDetector.WoodcutProtectionDecision decideWoodcutProtection(boolean explicitProtectedZone,
                                                                           boolean nearSavedBase,
+                                                                          boolean insideBlockedSpawnBase,
                                                                           boolean insideFortificationZone,
                                                                           boolean insideMappedVillage) {
         if (explicitProtectedZone) {
@@ -23,6 +34,9 @@ final class VillageRuntimeProtectionPolicy {
         }
         if (nearSavedBase) {
             return new TreeDetector.WoodcutProtectionDecision(true, "base-radius");
+        }
+        if (insideBlockedSpawnBase) {
+            return new TreeDetector.WoodcutProtectionDecision(true, WoodcutBaseAccessPolicy.SPAWN_BASE_REASON);
         }
         if (insideFortificationZone) {
             return new TreeDetector.WoodcutProtectionDecision(true, "fort-buffer");

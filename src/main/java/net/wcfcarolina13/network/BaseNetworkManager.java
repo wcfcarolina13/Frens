@@ -560,6 +560,29 @@ public final class BaseNetworkManager {
                             current, BotHomeService.HARD_MAX_BASE_RADIUS_LIMIT));
                 }));
 
+        ServerPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.AdminSpawnWoodcutPayload.ID, (payload, context) ->
+                context.server().execute(() -> {
+                    ServerPlayerEntity player = context.player();
+                    if (player == null) return;
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    if (srv == null) return;
+                    int requested = payload.value();
+                    if (requested >= 0) {
+                        // Set request: same operator-or-host gate as the max base radius. Non-admins get the current value back.
+                        if (!BotAccessGate.isServerAdmin(player)) {
+                            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                    "Only operators or the host can change whether bots cut trees in the Spawn base.");
+                        } else {
+                            boolean applied = BotHomeService.setSpawnBaseWoodcutAllowed(srv, requested > 0);
+                            ChatUtils.sendSystemMessage(player.getCommandSource(), applied
+                                    ? "Bots may now cut trees in the Spawn base."
+                                    : "Bots will leave the trees in the Spawn base alone.");
+                        }
+                    }
+                    ServerPlayNetworking.send(player, new net.wcfcarolina13.network.AdminSpawnWoodcutStatePayload(
+                            BotHomeService.isSpawnBaseWoodcutAllowed(srv)));
+                }));
+
         ServerPlayNetworking.registerGlobalReceiver(BaseSetOwnerPayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();

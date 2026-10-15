@@ -16,6 +16,8 @@ public final class WoodcutProtectionNudgePolicy {
             "The trees around here are inside your base, so I'm leaving them alone and heading out to find others.";
     public static final String ADMIN_ZONE_LINE =
             "The trees around here are in a protected area, so I'm heading out to find others.";
+    public static final String SPAWN_BASE_LINE =
+            "The trees around spawn are protected, so I'm heading out to find others.";
     public static final String VILLAGE_LINE =
             "The trees around here belong to the village, so I'm heading out to find others.";
     public static final String BEEHIVE_LINE =
@@ -23,7 +25,8 @@ public final class WoodcutProtectionNudgePolicy {
 
     /** Tie-break order when two reasons have the same count. */
     private static final List<String> PRIORITY =
-            List.of("base-radius", "admin-zone", "beehive", "mapped-village", "fort-buffer");
+            List.of("base-radius", "admin-zone", WoodcutBaseAccessPolicy.SPAWN_BASE_REASON,
+                    "beehive", "mapped-village", "fort-buffer");
 
     private WoodcutProtectionNudgePolicy() {
     }
@@ -57,6 +60,7 @@ public final class WoodcutProtectionNudgePolicy {
         return switch (reason) {
             case "base-radius" -> BASE_RADIUS_LINE;
             case "admin-zone" -> ADMIN_ZONE_LINE;
+            case WoodcutBaseAccessPolicy.SPAWN_BASE_REASON -> SPAWN_BASE_LINE;
             case "mapped-village", "fort-buffer" -> VILLAGE_LINE;
             case "beehive" -> BEEHIVE_LINE;
             default -> null;
