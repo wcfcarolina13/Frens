@@ -3,7 +3,28 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-14 (1.1.234) — next session starts here
+## Session Handoff 2026-10-14 (1.1.235) — next session starts here
+
+**State:** main = origin/main @ 1.1.235. Suite 2142 green. Modrinth: 1.1.230 latest published; 1.1.231–1.1.235 NOT published.
+**New this session:** Claude can drive Minecraft. Prism instance `mcp-sandbox` + hardened fork of langyo/minecraft-mod-mcp at
+`~/dev/minecraft-mod-mcp-hardened` (loopback only, browser/Host refusal, vanilla screenshots, click_px, send_chat,
+pause_menu, save_and_quit, set_time, bot_view). How-to: docs/testing/JAVA_MINECRAFT_AUTOMATION.md (log 2026-10-14);
+fork/upstream notes: docs/testing/MCP_MOD_IMPROVEMENTS.md. Sandbox findings: docs/testing/PLAYTHROUGH_1.1.234_SANDBOX.md.
+
+**Shipped in 1.1.235:** crafting table placement never blocks itself, bootstrap gather skips protected cells and regathers at
+the tree, table-failure retry from a new stand, plain tree chat lines, Questing behind `questingModeEnabled` (default off,
+new worlds auto-Admin + roster), `/bot craft` display names. Details in changelog.
+
+**Field checks pending:** 6ag, 6af (item 1: open **Nirn first**), 6ac remainder, 6ad, 6ae … Now 282 items.
+
+**Next (in order):**
+1. AiwanChu25 (Discord #general, 2026-10-14): roster lists bots from every world (filter to this save + import option);
+   another mod's "Revenant of <name>" husks copy bot gear → duplication; need his mod list (reply drafted, needs Bradley's OK).
+2. Sandbox: night shelter dig-down then immediate underground-survival pillar-out (two systems fighting, log 19:40:18-31).
+3. MCP fork: get_screen_buttons from mapped code, keyboard in-world, per-action control mode upstream PR.
+4. Chat action requests. 5. Fresh-install part 2. 6. Bot livestream (Bradley considering Discord screen share).
+
+## Session Handoff 2026-10-14 (1.1.234) — superseded
 
 **State:** main = origin/main @ 1.1.234. Suite 2112 green. Codex seats still paused (Opus reviewers). Modrinth: 1.1.230 is
 the latest published; 1.1.231–1.1.234 NOT published (Bradley: no Modrinth until live playthroughs settle).

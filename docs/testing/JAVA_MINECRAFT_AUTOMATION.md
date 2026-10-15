@@ -42,6 +42,12 @@ Bradley clicks, Claude watches `latest.log` and calls pass/fail with evidence. G
 
 ## Log
 
+- **2026-10-14: Claude drives the game.** Prism instance `mcp-sandbox` ("MCP sandbox (throwaway)": Fabric API + Frens + a hardened local build of langyo/minecraft-mod-mcp 0.4.6 at `~/dev/minecraft-mod-mcp-hardened`, JVM `-Dmcp.port=9876`). Patches over upstream: binds loopback only, refuses any request with an Origin header or a non-localhost Host (403), no `Access-Control-Allow-Origin: *`; hands the remapped `MinecraftClient` + window handle to its reflection cache (upstream `Class.forName("...MinecraftClient")` misses in production Fabric); screenshots go through vanilla `ScreenshotRecorder` (`VanillaScreenshotInputHandler`), the upstream glReadPixels path returned 120x329 / 4x1708 garbage on macOS. Verified: LAN address refused, browser-style request 403.
+  - API: `POST http://127.0.0.1:9876/api/cmd` JSON `{"cmd":"…", …params as strings}`. `screenshot` returns a raw `data:image/png;base64,…` string (1708x960 framebuffer). Input needs `{"cmd":"enter_control_mode"}` first (the in-game "MCP Take Over" consent).
+  - **`click` x,y are window points = screenshot pixels / 2** on Retina (the mod divides by GUI scale itself). Passing framebuffer pixels clicked the copyright link.
+  - `get_screen_buttons` returns `[]` (reflective widget lookup misses intermediary names): click by coordinates from the screenshot for now.
+  - First drive: title → Singleplayer → Create New World → World Mode chooser opened (1.1.234 per-save fix confirmed). Quit a title-screen game with SIGTERM to the `instances/mcp-sandbox/natives` java process; inside a world use the menu.
+
 - **2026-10-14:** Research pass on full control, see `MINECRAFT_CONTROL_RESEARCH_2026-10.md`. Quick win: langyo/minecraft-mod-mcp (1.21.11 Fabric, screenshots + clicks + keys + typing via the game itself) but it binds 0.0.0.0 with no auth and open CORS, so throwaway instance only, then fork to 127.0.0.1 + token. Long-term: Fabric client gametests (`fabric-client-gametest-api-v1` already in our fabric-api). Medium: copy Prism's java launcher into a real `.app` to get a grantable bundle ID (untested).
 
 - **2026-10-13:** First attempt at a fully autonomous fresh-install test. Instance creation, launch, Ollama control and log reading all worked. Game window blocked for both per-app and full-screen control (filtered out of screenshots on the external monitor TD1655 too). Fell back to the guided split above.

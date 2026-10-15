@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Sandbox playthrough fixes and Questing behind a flag; 1.1.235 (2026-10-14)
+
+From the first playthrough Claude drove itself (sandbox instance with a hardened minecraft-mod-mcp, `docs/testing/PLAYTHROUGH_1.1.234_SANDBOX.md`, findings #1 to #6) plus Bradley's ruling on Questing mode. Three implementers (Opus), one batch review (no Critical/Important), one minor fix wave. Not on Modrinth.
+
+- **Crafting table no longer blocks itself** (`452f0483`, `d70f6cda`). The placement planner picked a cell the bot's off-centre hitbox reached into, and the retry walked the bot onto the place cell (`bot-intersects-target` twice). The planner skips cells the hitbox overlaps, the retry steps to the planned stand and re-centers whenever the bot still overlaps (`UtilityPlacementStandPolicy`). Chest placement shares the planner fix.
+- **Axe bootstrap in a new world** (`3e8eb5e7`, `d70f6cda`). Hand gathering skips protected cells (the new world's own Spawn base refused every dig) and gathers once more at each tree's stand. A table-placement failure retries once from a new stand cell, not only a new Y. Tree chat is one plain line counted from logs that actually left the tree ("Got 3 logs from that tree.", "Got 3 logs, the rest of that tree needs an axe.", "Done with that tree."), replacing "Woodcut target cleared (1 min 4)".
+- **Questing mode behind a flag** (`e22e2eb3`, `d70f6cda`). New server flag `questingModeEnabled`, default off (`/bot config questingMode on|off`, op/host). Off: a new world never shows the World Mode chooser, it is set to Admin on the first host/op join with one chat line and the roster opens (`OpenRosterPayload`). Questing entry points (chooser, `/bot recruit enable`, Admin "Enable recruit") answer "Questing mode is turned off on this server." Existing Questing worlds keep working untouched. Guide topics and the inventory screen's recruit button and dialogue banner are hidden while off. `/bot worldmode reset` reports the mode actually in effect.
+- **`/bot craft` names items** ("Crafted 1 Wooden Axe." instead of the raw id).
+- **Rulings:** (1) Questing hidden for new worlds, code and existing worlds kept (Bradley). Cost if wrong: a player who wants village recruitment must turn the flag on. (2) A held crafting table after a failed craft is read as a placement failure (retry from a new cell). Cost if wrong: one extra bounded attempt.
+- **Deferred:** review minors (#5 cause misread when the bot already carried a table, #9 reset auto-Admin may address the first eligible player rather than the command's sender), the dead `ManualConfig.survivalRecruitmentMode` / Admin "Recruitment" toggle, BotControlScreen per-bot "questing" spawn mode, ring-0 flaw in the 3-arg `findPlacementRelocationStand` (dormant). From Discord (AiwanChu25): the roster still lists bots from every world; geared husks from another mod duplicate bot gear (mod not identified yet).
+- Tests 2112 → 2142.
+- **Field checks:** Phase 6ag.
+
 ## Playthrough fixes: first axe on the ground, survival-speed scaffold breaks, per-save worlds, quieter chat; 1.1.234 (2026-10-14)
 
 From the live playthrough of 1.1.233 on a new commands-off Survival world (`docs/testing/PLAYTHROUGH_1.1.233.md`, findings #1 to #10). Three read-only scopes, five parallel implementers (Opus), one batch review, one fix wave, one scoped re-review. Not on Modrinth.
