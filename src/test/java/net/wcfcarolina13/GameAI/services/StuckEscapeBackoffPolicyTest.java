@@ -75,6 +75,39 @@ class StuckEscapeBackoffPolicyTest {
         assertEquals(Outcome.NOTIFY_ONCE, again.outcome());
     }
 
+    private static Result failUnreachable(State prior, long now) {
+        return StuckEscapeBackoffPolicy.recordAttempt(prior, false, true, Y, 0, true, now, false);
+    }
+
+    @Test
+    void deadOrOfflineOwnerKeepsTheNoticePendingUntilReachable() {
+        // 1.1.239 field: owner on the death screen when the first cooldown started; the line
+        // was dropped, so it must not use up the episode's notice.
+        Result r1 = failUnreachable(StuckEscapeBackoffPolicy.NONE_STATE, 0L);
+        Result r2 = failUnreachable(r1.state(), 1000L);
+        assertEquals(Outcome.COOLDOWN_STARTED, r2.outcome());
+        assertFalse(r2.state().notified());
+        assertEquals(600L, r2.cooldownTicks());
+
+        Result r3 = failUnreachable(r2.state(), 2000L);
+        assertEquals(Outcome.COOLDOWN_STARTED, r3.outcome());
+        assertFalse(r3.state().notified());
+
+        // The next failed attempt with the owner back: tell them, once.
+        Result r4 = fail(r3.state(), 5000L);
+        assertEquals(Outcome.NOTIFY_ONCE, r4.outcome());
+        assertTrue(r4.state().notified());
+        assertEquals(Outcome.COOLDOWN_STARTED, fail(r4.state(), 9000L).outcome());
+    }
+
+    @Test
+    void ownerReachableNeedsOnlineAndAlive() {
+        assertTrue(StuckEscapeBackoffPolicy.ownerReachable(true, false, true));
+        assertFalse(StuckEscapeBackoffPolicy.ownerReachable(false, false, false));
+        assertFalse(StuckEscapeBackoffPolicy.ownerReachable(true, true, true));
+        assertFalse(StuckEscapeBackoffPolicy.ownerReachable(true, false, false));
+    }
+
     @Test
     void successEndsTheEpisode() {
         State s = failTimes(3);

@@ -1065,7 +1065,12 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 workAreaState.markActiveTarget(target.base());
-                if (!approachBase(source, bot, target.base(), sharedState, reachSession)) {
+                // The streak only counts from about where it started; moved away, it is stale.
+                int streakHere = trappedAnchor != null
+                        && Math.floor(Math.sqrt(trappedAnchor.getSquaredDistance(bot.getBlockPos())))
+                                < WoodcutApproachFeasibilityPolicy.TRAPPED_MOVE_BLOCKS
+                        ? trappedStreak : 0;
+                if (!approachBase(source, bot, target.base(), sharedState, reachSession, streakHere)) {
                     totalFailures++;
                     consecutiveFailures++;
                     pathFailures++;
@@ -2764,7 +2769,8 @@ public final class WoodcutSkill implements Skill {
                                  ServerPlayerEntity bot,
                                  BlockPos base,
                                  Map<String, Object> sharedState,
-                                 WoodcutReachSession reachSession) {
+                                 WoodcutReachSession reachSession,
+                                 int trappedStreak) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -2782,9 +2788,9 @@ public final class WoodcutSkill implements Skill {
             return false;
         }
         // In a roofed pocket with no way to climb, every stand walk fails (1.1.238 sandbox: ten
-        // minutes on two trees). Leave the target before walking; the target loop ends the run
-        // once targets keep failing from the same spot.
-        if (approachFeasibility(world, bot, base, reachSession) == WoodcutApproachFeasibilityPolicy.Verdict.SKIP_TARGET) {
+        // minutes on two trees). After one real failed approach from this spot, leave further
+        // targets before walking; the target loop ends the run once targets keep failing here.
+        if (approachFeasibility(world, bot, base, reachSession, trappedStreak) == WoodcutApproachFeasibilityPolicy.Verdict.SKIP_TARGET) {
             LOGGER.info("Woodcut approach: skipping {} (reason=enclosed, cannot climb)", base.toShortString());
             return false;
         }
@@ -3028,7 +3034,8 @@ public final class WoodcutSkill implements Skill {
     private WoodcutApproachFeasibilityPolicy.Verdict approachFeasibility(ServerWorld world,
                                                                          ServerPlayerEntity bot,
                                                                          BlockPos base,
-                                                                         WoodcutReachSession reachSession) {
+                                                                         WoodcutReachSession reachSession,
+                                                                         int trappedStreak) {
         BlockPos feet = bot.getBlockPos();
         SafePositionService.SurfaceCandidateAssessment here = SafePositionService.analyzeSurfaceCandidate(world, feet);
         if (!WoodcutApproachFeasibilityPolicy.isEnclosed(here.openSky(), here.nearSurface(), here.blockedCardinals())) {
@@ -3038,10 +3045,10 @@ public final class WoodcutSkill implements Skill {
         int scaffold = scaffoldBlocksAvailable(bot);
         boolean onPillar = isOnWoodcutPillar(bot, reachSession);
         WoodcutApproachFeasibilityPolicy.Verdict verdict = WoodcutApproachFeasibilityPolicy.beforeApproach(
-                here.openSky(), here.nearSurface(), here.blockedCardinals(), mayPillar, scaffold, onPillar);
-        LOGGER.info("Woodcut approach feasibility: base={} from={} openSky={} nearSurface={} blocked={} mayPillar={} scaffold={} onPillar={} verdict={}",
+                here.openSky(), here.nearSurface(), here.blockedCardinals(), mayPillar, scaffold, onPillar, trappedStreak);
+        LOGGER.info("Woodcut approach feasibility: base={} from={} openSky={} nearSurface={} blocked={} mayPillar={} scaffold={} onPillar={} streak={} verdict={}",
                 base.toShortString(), feet.toShortString(), here.openSky(), here.nearSurface(), here.blockedCardinals(),
-                mayPillar, scaffold, onPillar, verdict);
+                mayPillar, scaffold, onPillar, trappedStreak, verdict);
         return verdict;
     }
 

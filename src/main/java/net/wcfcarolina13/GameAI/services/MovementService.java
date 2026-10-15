@@ -3778,7 +3778,8 @@ public final class MovementService {
 
     /**
      * Runs after tool selection. True (and one log line) when {@link ObstructionMinePolicy} refuses the
-     * block: it needs a tool the bot is not holding, or takes too long on the ground. The refusal holds
+     * block: it takes too long on the ground (a tool-required block without its tool is timed with the
+     * /100 hand penalty, so stone by hand is refused and snow by hand is not). The refusal holds
      * the per-block cooldown for {@link #OBSTRUCTION_MINE_REFUSAL_HOLD_MS} so the line is not repeated
      * every walk tick; the walk then falls through to its own unstick / give-up.
      */
@@ -3789,9 +3790,9 @@ public final class MovementService {
         boolean suitable = !held.isEmpty() && held.isSuitableFor(state);
         float hardness = state.getHardness(world, pos);
         int groundTicks = ObstructionMinePolicy.groundBreakTicks(
-                held.getMiningSpeedMultiplier(state), hardness, !requiresTool || suitable);
+                held.getMiningSpeedMultiplier(state), hardness, ObstructionMinePolicy.canHarvest(requiresTool, suitable));
         ObstructionMinePolicy.Verdict verdict = ObstructionMinePolicy.evaluate(
-                requiresTool, suitable, groundTicks, ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS);
+                groundTicks, ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS);
         if (verdict == ObstructionMinePolicy.Verdict.ALLOW) {
             return false;
         }
@@ -3799,17 +3800,12 @@ public final class MovementService {
         perBot.put(pos.toImmutable(),
                 System.currentTimeMillis() + OBSTRUCTION_MINE_REFUSAL_HOLD_MS - OBSTRUCTION_MINE_COOLDOWN_MS);
         String heldName = held.isEmpty() ? "hand" : held.getItem().getTranslationKey();
-        if (verdict == ObstructionMinePolicy.Verdict.NEEDS_TOOL) {
-            LOGGER.info("movement {} refused [{}]: bot={} {} at {} needs a tool (held={})",
-                    kind, label, bot.getName().getString(),
-                    state.getBlock().getTranslationKey(), pos.toShortString(), heldName);
-        } else {
-            LOGGER.info("movement {} refused [{}]: bot={} {} at {} too slow ({} ground ticks > {}, held={})",
-                    kind, label, bot.getName().getString(),
-                    state.getBlock().getTranslationKey(), pos.toShortString(),
-                    groundTicks == Integer.MAX_VALUE ? "unbreakable" : groundTicks,
-                    ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS, heldName);
-        }
+        String how = ObstructionMinePolicy.canHarvest(requiresTool, suitable) ? "with held tool" : "by hand";
+        LOGGER.info("movement {} refused [{}]: bot={} {} at {} too slow {} ({} ground ticks > {}, held={})",
+                kind, label, bot.getName().getString(),
+                state.getBlock().getTranslationKey(), pos.toShortString(), how,
+                groundTicks == Integer.MAX_VALUE ? "unbreakable" : groundTicks,
+                ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS, heldName);
         return true;
     }
 

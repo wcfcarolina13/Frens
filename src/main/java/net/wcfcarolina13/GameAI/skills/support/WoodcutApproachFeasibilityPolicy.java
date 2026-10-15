@@ -63,18 +63,28 @@ public final class WoodcutApproachFeasibilityPolicy {
 
     /**
      * The verdict before walking to any stand for a target. Already on its own pillar: proceed
-     * (the climb is under way). Enclosed and unable to climb: skip the target. Otherwise proceed.
+     * (the climb is under way). Enclosed and unable to climb: skip the target, but only once a
+     * real approach already failed from this spot ({@code trappedStreak >= 1}). The first target
+     * from an enclosed spot always gets one bounded walk, because the enclosure read can miss an
+     * open side (a dip on a slope walled on three sides). Otherwise proceed.
+     *
+     * @param trappedStreak failed targets in a row from about this spot (0 when the bot has moved
+     *                      {@link #TRAPPED_MOVE_BLOCKS} or more since the streak's anchor)
      */
     public static Verdict beforeApproach(boolean openSky,
                                          boolean nearSurface,
                                          int blockedCardinals,
                                          boolean mayPillar,
                                          int scaffoldBlocks,
-                                         boolean onPillar) {
+                                         boolean onPillar,
+                                         int trappedStreak) {
         if (onPillar || !isEnclosed(openSky, nearSurface, blockedCardinals)) {
             return Verdict.PROCEED;
         }
-        return canClimb(mayPillar, scaffoldBlocks) ? Verdict.PROCEED : Verdict.SKIP_TARGET;
+        if (canClimb(mayPillar, scaffoldBlocks) || trappedStreak < 1) {
+            return Verdict.PROCEED;
+        }
+        return Verdict.SKIP_TARGET;
     }
 
     /**

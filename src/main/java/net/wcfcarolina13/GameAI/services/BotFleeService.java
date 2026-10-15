@@ -410,7 +410,17 @@ public final class BotFleeService {
                 Thread thread = isInShelter(botId) ? clearShelterAndBreakFree(bot) : forceBreakFree(bot);
                 yield thread != null;
             }
-            case SURFACE_RECOVERY -> ensureAtSurface(bot, world);
+            // Callers are tick code; ensureAtSurface blocks (sleeps, landing waits), so it runs on
+            // its own thread like BREAK_FREE. A recovery already running counts as resumed.
+            case SURFACE_RECOVERY -> {
+                if (!isSurfaceRecoveryActive(botId)) {
+                    Thread thread = new Thread(() -> ensureAtSurface(bot, world),
+                            "surface-recovery-resume-" + bot.getName().getString());
+                    thread.setDaemon(true);
+                    thread.start();
+                }
+                yield true;
+            }
         };
         if (resumed) {
             PENDING_SURVIVAL_RESUME.remove(botId);

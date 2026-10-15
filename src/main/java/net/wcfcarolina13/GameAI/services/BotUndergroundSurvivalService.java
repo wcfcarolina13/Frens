@@ -42,6 +42,12 @@ public final class BotUndergroundSurvivalService {
     /** Per-bot stuck-escape episodes (see {@link StuckEscapeBackoffPolicy}); absent = no episode. */
     private static final Map<UUID, StuckEscapeBackoffPolicy.State> STUCK_STATE = new ConcurrentHashMap<>();
 
+    /**
+     * Set when {@link #recordRecoveryAttempt} runs on this thread, so the survival-level feed in
+     * {@link #onServerTick} does not record the same attempt twice (one attempt = one record).
+     */
+    private static final ThreadLocal<Boolean> ATTEMPT_RECORDED = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);
     private static volatile ExecutorService EXECUTOR = createExecutor();
 
@@ -57,6 +63,10 @@ public final class BotUndergroundSurvivalService {
 
     public static void shutdownExecutors() {
         EXECUTOR.shutdownNow();
+        // Both are keyed to this server's tick count; a same-UUID bot in the next save must not
+        // inherit a cooldown or throttle from it.
+        STUCK_STATE.clear();
+        NEXT_CHECK_TICK.clear();
     }
 
     /** Re-create the underground survival executor if it was shut down. Called from {@code SERVER_STARTED}. */
@@ -136,13 +146,41 @@ public final class BotUndergroundSurvivalService {
                 try {
                     if (TaskService.isServerStopping()) return;
                     if (bot.isRemoved() || !bot.isAlive()) return;
-                    BotFleeService.ensureAtSurface(bot, world);
+                    ATTEMPT_RECORDED.set(Boolean.FALSE);
+                    long startTick = server.getTicks();
+                    boolean reached = BotFleeService.ensureAtSurface(bot, world);
+                    recordUnfedFailure(bot, world, server, reached, startTick);
                 } catch (Throwable t) {
                     LOGGER.warn("Underground survival check failed for {}: {}",
                             bot.getName().getString(), t.getMessage());
+                } finally {
+                    ATTEMPT_RECORDED.remove();
                 }
             });
         }
+    }
+
+    /**
+     * Worker thread only. Feeds the backoff from an {@code ensureAtSurface} attempt that really ran
+     * (it stamped a surface-recovery failure during this call, so linger suppression and duplicate
+     * requests are not counted) and ended below the surface, when {@code escapeToSurface} did not
+     * already record it. Any failure path counts: 1.1.239 sandbox, a stale stop latch aborted the
+     * staging walk and {@code escapeToSurface} returned before recording, so 29 attempts in 5
+     * minutes never engaged the backoff.
+     */
+    private static void recordUnfedFailure(ServerPlayerEntity bot, ServerWorld world, MinecraftServer server,
+                                           boolean reached, long startTick) {
+        if (reached || ATTEMPT_RECORDED.get() || bot.isRemoved() || !bot.isAlive()) {
+            return;
+        }
+        long endTick = server.getTicks();
+        if (!BotFleeService.hadRecentSurfaceRecoveryFailure(bot.getUuid(), endTick, Math.max(1L, endTick - startTick))) {
+            return;
+        }
+        if (BotFleeService.isAtSurface(bot, world)) {
+            return;
+        }
+        recordRecoveryAttempt(bot, false, BotFleeService.countScaffoldBlocks(bot), world.isDay(), endTick);
     }
 
     /** Modes only an owner command sets; leaving IDLE for one of these ends a stuck episode. */
@@ -174,7 +212,7 @@ public final class BotUndergroundSurvivalService {
 
     /**
      * Feeds one finished surface-recovery attempt into the stuck-escape backoff. Called from
-     * {@code BotFleeService.escapeToSurface} on a worker thread; the owner line goes through
+     * {@code BotFleeService.escapeToSurface} and {@link #recordUnfedFailure} on a worker thread; the owner line goes through
      * {@link ChatUtils#sendSystemMessage}, which hops to the server thread itself.
      */
     static void recordRecoveryAttempt(ServerPlayerEntity bot, boolean succeeded, int scaffoldCount,
@@ -183,13 +221,15 @@ public final class BotUndergroundSurvivalService {
             return;
         }
         UUID botId = bot.getUuid();
+        ATTEMPT_RECORDED.set(Boolean.TRUE);
         if (!succeeded) {
             awaitLanding(bot, 800L); // an apex Y would read as a ground change and reset the episode
         }
+        boolean ownerReachable = isOwnerReachable(bot);
         StuckEscapeBackoffPolicy.Result[] holder = new StuckEscapeBackoffPolicy.Result[1];
         STUCK_STATE.compute(botId, (id, prior) -> {
             StuckEscapeBackoffPolicy.Result r = StuckEscapeBackoffPolicy.recordAttempt(prior, succeeded,
-                    bot.isOnGround(), bot.getBlockY(), scaffoldCount, isDay, nowTick);
+                    bot.isOnGround(), bot.getBlockY(), scaffoldCount, isDay, nowTick, ownerReachable);
             holder[0] = r;
             return r.state().active() ? r.state() : null;
         });
@@ -203,6 +243,17 @@ public final class BotUndergroundSurvivalService {
                 result.cooldownTicks() / 20L);
         if (result.outcome() == StuckEscapeBackoffPolicy.Outcome.NOTIFY_ONCE) {
             ChatUtils.sendSystemMessage(bot.getCommandSource(), STUCK_NOTIFY_LINE);
+        } else if (!result.state().notified()) {
+            LOGGER.info("Stuck-escape backoff: owner of {} offline or dead, stuck notice kept pending",
+                    bot.getName().getString());
         }
+    }
+
+    /** The owner is online and alive, so the stuck line would not be dropped. */
+    private static boolean isOwnerReachable(ServerPlayerEntity bot) {
+        MinecraftServer server = bot.getCommandSource().getServer();
+        ServerPlayerEntity owner = server != null ? CompanionCommunicationPolicy.resolveController(server, bot) : null;
+        return StuckEscapeBackoffPolicy.ownerReachable(owner != null, owner != null && owner.isRemoved(),
+                owner != null && owner.isAlive());
     }
 }

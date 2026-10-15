@@ -8,7 +8,8 @@ package net.wcfcarolina13.GameAI.services;
  * <p>An episode counts failed recovery attempts made with no scaffold blocks and no gain in the
  * bot's on-ground Y. The first {@link #FREE_ATTEMPTS} - 1 failures are free. From failure
  * {@link #FREE_ATTEMPTS} on, the next attempt waits 30 s, doubling per further failure, capped at
- * 10 minutes. The owner is told once per episode, when the first cooldown starts.</p>
+ * 10 minutes. The owner is told once per episode, when the first cooldown starts while the owner
+ * is online and alive (otherwise at the next failed attempt that finds them reachable).</p>
  *
  * <p>An episode ends on: a successful recovery, a failure while holding scaffold, a change of the
  * bot's on-ground Y, its scaffold count going from 0 to more than 0, a night to day transition, or
@@ -74,6 +75,26 @@ public final class StuckEscapeBackoffPolicy {
      */
     public static Result recordAttempt(State prior, boolean succeeded, boolean onGround, int blockY,
                                        int scaffoldCount, boolean isDay, long nowTick) {
+        return recordAttempt(prior, succeeded, onGround, blockY, scaffoldCount, isDay, nowTick, true);
+    }
+
+    /**
+     * Whether the owner can receive the stuck line now: online (resolved, not removed) and alive.
+     * A dead owner's chat line is dropped, so it must not use up the episode's one notice.
+     */
+    public static boolean ownerReachable(boolean ownerResolved, boolean ownerRemoved, boolean ownerAlive) {
+        return ownerResolved && !ownerRemoved && ownerAlive;
+    }
+
+    /**
+     * As {@link #recordAttempt(State, boolean, boolean, int, int, boolean, long)}, with the owner's
+     * reachability ({@link #ownerReachable}). The episode is marked notified only when the notice
+     * can be delivered; otherwise it stays pending and the next failed attempt that starts a
+     * cooldown retries it.
+     */
+    public static Result recordAttempt(State prior, boolean succeeded, boolean onGround, int blockY,
+                                       int scaffoldCount, boolean isDay, long nowTick,
+                                       boolean ownerReachable) {
         State base = prior != null ? prior : NONE_STATE;
         if (succeeded || scaffoldCount > 0) {
             return new Result(NONE_STATE, Outcome.NONE, 0L);
@@ -84,7 +105,7 @@ public final class StuckEscapeBackoffPolicy {
         int groundY = onGround || !base.active() ? blockY : base.groundY();
         int failures = base.failures() + 1;
         long cooldown = cooldownTicks(failures);
-        boolean notify = cooldown > 0 && !base.notified();
+        boolean notify = cooldown > 0 && !base.notified() && ownerReachable;
         State next = new State(failures, groundY, scaffoldCount, isDay,
                 cooldown > 0 ? nowTick + cooldown : 0L, base.notified() || notify);
         Outcome outcome = notify ? Outcome.NOTIFY_ONCE
