@@ -402,59 +402,6 @@ public class modCommandRegistry {
                                                 )
                                             )
                                             )
-
-                                        // In-game debug toggle: /bot debug <on|off>, /bot debug status, /bot debug clear
-                                        .then(literal("debug")
-                                            .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> {
-                                                    boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
-                                                    DebugToggleService.setRuntimeVerbose(enabled);
-                                                    refreshCommandTrees(context.getSource().getServer());
-                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug set to " + (enabled ? "on" : "off"));
-                                                    return 1;
-                                                })
-                                            )
-                                            .then(literal("status")
-                                                .executes(context -> {
-                                                    Boolean override = DebugToggleService.getRuntimeOverride();
-                                                    boolean effective = DebugToggleService.verbose();
-                                                    String msg = "Debug: runtimeOverride=" + (override == null ? "none" : override.toString()) + " effective=" + effective;
-                                                    ChatUtils.sendSystemMessage(context.getSource(), msg);
-                                                    return 1;
-                                                })
-                                            )
-                                            .then(literal("clear")
-                                                .executes(context -> {
-                                                    DebugToggleService.clearRuntimeOverride();
-                                                    refreshCommandTrees(context.getSource().getServer());
-                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
-                                                    return 1;
-                                                })
-                                            )
-                                            .then(literal("nav-hazard")
-                                                .executes(context -> {
-                                                    var src = context.getSource();
-                                                    var server = src.getServer();
-                                                    var world = src.getWorld();
-                                                    var rows = net.wcfcarolina13.GameAI.services.navigation.NavHazardCache
-                                                            .debugTopCells(server, world, 10);
-                                                    if (rows.isEmpty()) {
-                                                        ChatUtils.sendSystemMessage(src, "nav-hazard: no entries for current world+dimension");
-                                                    } else {
-                                                        ChatUtils.sendSystemMessage(src, "nav-hazard top " + rows.size() + " cells:");
-                                                        for (var r : rows) {
-                                                            ChatUtils.sendSystemMessage(src, String.format(
-                                                                    "  (%d,%d,%d) score=%.2f rejects=%d successes=%d ageTicks=%d",
-                                                                    r.cell().getX(), r.cell().getY(), r.cell().getZ(),
-                                                                    r.score(), r.rejects(), r.successes(), r.ageTicks()));
-                                                        }
-                                                    }
-                                                    ChatUtils.sendSystemMessage(src, "file: "
-                                                            + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.stateFilePath());
-                                                    return 1;
-                                                })
-                                            )
-                                        )
                                         // Manual emote test: /bot emote list -> print available names.
                                         // /bot emote <name> -> force-play on every nearby registered bot.
                                         // /bot emote <name> <bot> -> force-play on a specific bot.
@@ -497,6 +444,58 @@ public class modCommandRegistry {
                                         )
                                 )
 	                        )
+                        // In-game debug toggle: /bot debug <on|off>, /bot debug status, /bot debug clear
+                        .then(literal("debug")
+                            .then(CommandManager.argument("mode", StringArgumentType.string())
+                                .executes(context -> {
+                                    boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
+                                    DebugToggleService.setRuntimeVerbose(enabled);
+                                    refreshCommandTrees(context.getSource().getServer());
+                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug set to " + (enabled ? "on" : "off"));
+                                    return 1;
+                                })
+                            )
+                            .then(literal("status")
+                                .executes(context -> {
+                                    Boolean override = DebugToggleService.getRuntimeOverride();
+                                    boolean effective = DebugToggleService.verbose();
+                                    String msg = "Debug: runtimeOverride=" + (override == null ? "none" : override.toString()) + " effective=" + effective;
+                                    ChatUtils.sendSystemMessage(context.getSource(), msg);
+                                    return 1;
+                                })
+                            )
+                            .then(literal("clear")
+                                .executes(context -> {
+                                    DebugToggleService.clearRuntimeOverride();
+                                    refreshCommandTrees(context.getSource().getServer());
+                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
+                                    return 1;
+                                })
+                            )
+                            .then(literal("nav-hazard")
+                                .executes(context -> {
+                                    var src = context.getSource();
+                                    var server = src.getServer();
+                                    var world = src.getWorld();
+                                    var rows = net.wcfcarolina13.GameAI.services.navigation.NavHazardCache
+                                            .debugTopCells(server, world, 10);
+                                    if (rows.isEmpty()) {
+                                        ChatUtils.sendSystemMessage(src, "nav-hazard: no entries for current world+dimension");
+                                    } else {
+                                        ChatUtils.sendSystemMessage(src, "nav-hazard top " + rows.size() + " cells:");
+                                        for (var r : rows) {
+                                            ChatUtils.sendSystemMessage(src, String.format(
+                                                    "  (%d,%d,%d) score=%.2f rejects=%d successes=%d ageTicks=%d",
+                                                    r.cell().getX(), r.cell().getY(), r.cell().getZ(),
+                                                    r.score(), r.rejects(), r.successes(), r.ageTicks()));
+                                        }
+                                    }
+                                    ChatUtils.sendSystemMessage(src, "file: "
+                                            + net.wcfcarolina13.GameAI.services.navigation.NavHazardCache.stateFilePath());
+                                    return 1;
+                                })
+                            )
+                        )
 	                        .then(literal("llm")
 	                                .then(literal("world")
 	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
