@@ -567,13 +567,14 @@ public final class BaseNetworkManager {
                     MinecraftServer srv = player.getCommandSource().getServer();
                     if (srv == null) return;
                     int requested = payload.value();
+                    if (requested < -1 || requested > 1) return; // only -1 query, 0 off, 1 on
                     if (requested >= 0) {
                         // Set request: same operator-or-host gate as the max base radius. Non-admins get the current value back.
                         if (!BotAccessGate.isServerAdmin(player)) {
                             ChatUtils.sendSystemMessage(player.getCommandSource(),
                                     "Only operators or the host can change whether bots cut trees in the Spawn base.");
                         } else {
-                            boolean applied = BotHomeService.setSpawnBaseWoodcutAllowed(srv, requested > 0);
+                            boolean applied = BotHomeService.setSpawnBaseWoodcutAllowed(srv, requested == 1);
                             ChatUtils.sendSystemMessage(player.getCommandSource(), applied
                                     ? "Bots may now cut trees in the Spawn base."
                                     : "Bots will leave the trees in the Spawn base alone.");
