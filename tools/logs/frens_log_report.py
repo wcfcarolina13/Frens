@@ -26,6 +26,9 @@ from typing import Dict, List, Optional, Tuple
 HEADER_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\] \[([^\]]*)/([A-Z]+)\]: ?(.*)$")
 # Pools whose threads serve one bot at a time but many bots over a session.
 SHARED_THREADS = ("Server thread", "Render thread", "main")
+# The shadow PathCompare thread re-runs the other finder; its [BaritonePathFinder] / A* lines are
+# already summarised by its [PathCompare] line, so they stay out of section 3's finder counts.
+PATHCOMPARE_THREAD = "frens-pathcompare"
 
 MASK_SUBS = [
     (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"), "<uuid>"),
@@ -197,6 +200,7 @@ class Analyzer(object):
         # pathfinding
         self.paths = defaultdict(lambda: {"elapsed": [], "len0": 0, "n": 0})
         self.astar_timeouts = 0
+        self.shadow_finder_lines = 0  # finder lines from the PathCompare thread, not counted above
         self.baritone = Counter()
         self.thread_mode = {}  # type: Dict[str, str]
         self.walk = defaultdict(Counter)  # mode -> outcome counter
@@ -418,9 +422,15 @@ class Analyzer(object):
                 b["path_len0"] += 1
 
     def _h_astar_timeout(self, m, t, thread, bot, msg, level):
+        if thread == PATHCOMPARE_THREAD:
+            self.shadow_finder_lines += 1
+            return
         self.astar_timeouts += 1
 
     def _h_baritone_event(self, m, t, thread, bot, msg, level):
+        if thread == PATHCOMPARE_THREAD:
+            self.shadow_finder_lines += 1
+            return
         self.baritone[m.group(1).rstrip("!")] += 1
 
     def _walk(self, thread, outcome):
@@ -622,6 +632,7 @@ class Analyzer(object):
             c = [x for x in costs if x is not None]
             terrain[d] = {"count": len(costs), "median_cost": median(c)}
         return {"modes": modes, "astar_timeouts": self.astar_timeouts, "baritone": dict(self.baritone),
+                "shadow_finder_lines_excluded": self.shadow_finder_lines,
                 "local_escape_repeats": rep, "terrain_moves": terrain, "obstruction_mine": dict(self.obstruction)}
 
     def _ab_report(self):
@@ -772,6 +783,9 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
             _fmt(p.get("pathLen0_pct")), p["walk_outcomes"] or "{}"))
     o.append("- A* timeouts %d | Baritone %s | obstruction mine %s" % (
         pf["astar_timeouts"], pf["baritone"] or "{}", pf["obstruction_mine"] or "{}"))
+    if pf.get("shadow_finder_lines_excluded"):
+        o.append("- (%d finder lines from the %s thread excluded; see section 4)" % (
+            pf["shadow_finder_lines_excluded"], PATHCOMPARE_THREAD))
     if pf["terrain_moves"]:
         o.append("- terrain moves: " + ", ".join("%s n=%d cost~%s" % (d, v["count"], _fmt(v["median_cost"]))
                                                 for d, v in sorted(pf["terrain_moves"].items())))

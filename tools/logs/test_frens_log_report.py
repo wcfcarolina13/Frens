@@ -103,6 +103,25 @@ class ReportUnitTest(unittest.TestCase):
         self.assertEqual(rows["Bob"]["paths"], 2)
         self.assertEqual(rows["Bob"]["pathLen0_pct"], 100.0)
 
+    def test_pathcompare_thread_finder_lines_stay_out_of_section_3(self):
+        rep = run_lines("""
+[10:00:00] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Bob on thread mod-command-skill-1
+[10:00:01] [mod-command-skill-1/WARN]: [BaritonePathFinder] Open set exhausted, 1 nodes expanded
+[10:00:01] [mod-command-skill-1/INFO]: [PathFinder] mode=baritone elapsed=3ms pathLen=0 from=1, 2, 3 to=4, 5, 6
+[10:00:01] [frens-pathcompare/INFO]: Starting Bi-directional A* pathfinding with block tagging...
+[10:00:11] [frens-pathcompare/WARN]: A* pathfinding timed out after 10000ms (900 iterations) from 1, 2, 3 to 4, 5, 6
+[10:00:12] [frens-pathcompare/INFO]: [BaritonePathFinder] Start=(1,2,3) Target=(4,5,6) timeout=500ms
+[10:00:12] [frens-pathcompare/WARN]: [BaritonePathFinder] Open set exhausted, 1 nodes expanded
+[10:00:12] [frens-pathcompare/INFO]: [BaritonePathFinder] Goal reached! 12 iterations, 10 nodes expanded
+[10:00:13] [mod-command-skill-1/WARN]: A* pathfinding timed out after 10000ms (900 iterations) from 1, 2, 3 to 4, 5, 6
+""")
+        pf = rep["pathfinding"]
+        self.assertEqual(pf["astar_timeouts"], 1)
+        self.assertEqual(pf["baritone"], {"Open set exhausted": 1})
+        self.assertEqual(pf["shadow_finder_lines_excluded"], 3)
+        self.assertEqual(pf["modes"]["baritone"]["count"], 1)
+        self.assertIn("3 finder lines from the frens-pathcompare thread excluded", flr.render_md(rep))
+
     def test_spam_and_masking(self):
         lines = "\n".join("[10:00:%02d] [Server thread/WARN]: Mining attempt 1/3 out-of-reach at %d, 64, 2" % (i % 60, i)
                           for i in range(70))

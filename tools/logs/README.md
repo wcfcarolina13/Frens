@@ -41,7 +41,9 @@ frens_log_report.py LOG [LOG ...] [--since HH:MM:SS] [--until HH:MM:SS] [--bot N
 3. **Pathfinding**: for each `[PathFinder] mode=`: count, p50/p90/max ms, % pathLen=0, and the
    walk-failure mentions on that thread after a path from that mode. Also A* timeouts,
    Baritone outcomes, `movement obstruction mine` mined and refused, `terrain move:` decisions
-   with median cost, and local-escape routes repeated at least 3 times per bot.
+   with median cost, and local-escape routes repeated at least 3 times per bot. A* timeouts and
+   Baritone outcomes logged by the shadow `frens-pathcompare` thread are left out (they are
+   counted once, as excluded, and their result is in the `[PathCompare]` line).
 4. **PathCompare**: pairs up `[PathCompare] bot=… primary=… bidir=<ms>ms/<len>/<exec|noexec|none>
    baritone=…` lines. For each finder: found %, executable % of found, p50/p90 ms. For each
    pair: both found, only one found, neither, who was faster, and the median ms ratio. Also a
