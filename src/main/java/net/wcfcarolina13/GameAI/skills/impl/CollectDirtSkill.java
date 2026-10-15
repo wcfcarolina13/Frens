@@ -82,19 +82,13 @@ public class CollectDirtSkill implements Skill {
     private static final int EXPLORATION_STEP_RADIUS = 6;
     private static final int EXPLORATION_STEP_VERTICAL = 2;
     private static final double DROP_SEARCH_RADIUS = 6.0;
-    private static final int SPIRAL_RADIUS_LIMIT = 5;
     private static final int STRAIGHT_STAIR_HEADROOM = 4;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
-    private static final int MAX_STALLED_FAILURES = 5;
     private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000; // 5 seconds between messages
     private static final long ESCAPE_COOLDOWN_MS = 15_000L;
-    private static final long FALLING_BLOCK_SETTLE_MAX_MS = 5_000L;
-    private static final long FALLING_BLOCK_SETTLE_POLL_MS = 200L;
-    private static final long FALLING_BLOCK_MESSAGE_COOLDOWN_MS = 1_500L;
     
     private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
     private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
-    private static final Map<UUID, Long> LAST_FALLING_BLOCK_MESSAGE = new HashMap<>();
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
 
     private final String skillName;
@@ -1443,68 +1437,6 @@ public class CollectDirtSkill implements Skill {
         return ok;
     }
 
-    private boolean waitForNearbyFallingBlocksToSettle(ServerPlayerEntity player,
-                                                      ServerWorld world,
-                                                      BlockPos focus,
-                                                      long maxWaitMs) {
-        if (player == null || world == null || focus == null || maxWaitMs <= 0) {
-            return true;
-        }
-
-        long deadline = System.currentTimeMillis() + maxWaitMs;
-        while (System.currentTimeMillis() < deadline) {
-            final boolean[] hasFalling = new boolean[] { false };
-            runOnServerThread(player, () -> {
-                Box box = new Box(
-                    focus.getX(), focus.getY(), focus.getZ(),
-                    focus.getX() + 1, focus.getY() + 1, focus.getZ() + 1
-                ).expand(3.5D, 10.0D, 3.5D);
-                hasFalling[0] = !world.getEntitiesByClass(
-                        net.minecraft.entity.FallingBlockEntity.class,
-                        box,
-                        entity -> entity != null && entity.isAlive()
-                ).isEmpty();
-            });
-
-            if (!hasFalling[0]) {
-                return true;
-            }
-
-            runOnServerThread(player, () -> BotActions.stop(player));
-            maybeSendFallingBlockWaitMessage(player);
-            try {
-                Thread.sleep(FALLING_BLOCK_SETTLE_POLL_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private void maybeSendFallingBlockWaitMessage(ServerPlayerEntity player) {
-        if (player == null) {
-            return;
-        }
-        UUID id = player.getUuid();
-        long now = System.currentTimeMillis();
-        Long last = LAST_FALLING_BLOCK_MESSAGE.get(id);
-        if (last != null && (now - last) < FALLING_BLOCK_MESSAGE_COOLDOWN_MS) {
-            return;
-        }
-        LAST_FALLING_BLOCK_MESSAGE.put(id, now);
-        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                "Waiting for sand/gravel to settle...");
-    }
-
-    private boolean isFallingBlock(BlockState state) {
-        if (state == null) {
-            return false;
-        }
-        Block b = state.getBlock();
-        return b instanceof net.minecraft.block.FallingBlock;
-    }
-    
     // ==================== ASCENT METHOD (Walk-and-jump upward) ====================
     
     private SkillExecutionResult runAscent(SkillContext context,
@@ -2335,18 +2267,5 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         return SafePositionService.isOperationalSurface(world, player.getBlockPos());
-    }
-
-    @SuppressWarnings("unchecked")
-    private Set<Identifier> getTargetBlockIdsParameter(SkillContext context, Set<Identifier> defaultIds) {
-        Object raw = context.parameters().get("targetBlocks");
-        if (raw instanceof Set<?> set) {
-            try {
-                return (Set<Identifier>) set;
-            } catch (ClassCastException e) {
-                LOGGER.warn("targetBlocks parameter contained unexpected value: {}", set);
-            }
-        }
-        return defaultIds;
     }
 }

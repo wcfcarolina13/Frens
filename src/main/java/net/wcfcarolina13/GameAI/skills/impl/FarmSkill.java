@@ -39,7 +39,6 @@ import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.impl.WoodcutSkill;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
-import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,7 +89,6 @@ public class FarmSkill implements Skill {
     private static final int AUTO_MAX_CUT_DEPTH = 2;
     private static final int MANUAL_MAX_CUT_DEPTH = 4;
     private static final int MAX_FILL_DEPTH = 3;
-    private static final int PRECIPICE_DEPTH = 4;
     private static final int PILLAR_STEP_DELAY_MS = 120;
     private static final Set<Item> PILLAR_BLOCKS = Set.of(
             Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE,
@@ -760,10 +758,6 @@ public class FarmSkill implements Skill {
             }
         }
         return null;
-    }
-
-    private static boolean treeNear(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
-        return countBlockingTreeBlocks(world, center) > 0;
     }
 
     private static SkillExecutionResult runWoodcutInline(ServerCommandSource source, SkillContext ctx) {
@@ -1900,27 +1894,6 @@ public class FarmSkill implements Skill {
         return collectBlockingTreeBlocks(world, footprint).size();
     }
 
-    private static BlockPos snapToFarmGrid(ServerWorld world, BlockPos center) {
-        int grid = HYDRATION_RADIUS * 2 + 2; // 10-wide footprint
-        int baseX = Math.floorDiv(center.getX(), grid) * grid;
-        int baseZ = Math.floorDiv(center.getZ(), grid) * grid;
-        BlockPos best = new BlockPos(baseX, center.getY(), baseZ);
-        if (farmAreaClear(world, best)) {
-            return best;
-        }
-        // Search nearby grid cells for a clear spot
-        int[] offsets = {0, 1, -1, 2, -2};
-        for (int dx : offsets) {
-            for (int dz : offsets) {
-                BlockPos candidate = new BlockPos(baseX + dx * grid, center.getY(), baseZ + dz * grid);
-                if (farmAreaClear(world, candidate)) {
-                    return candidate;
-                }
-            }
-        }
-        return center; // fallback: original center if no clear grid cell
-    }
-
     private static boolean farmAreaClear(ServerWorld world, BlockPos center) {
         String rejectReason = farmAreaRejectReason(world, center);
         if (rejectReason != null) {
@@ -2011,11 +1984,6 @@ public class FarmSkill implements Skill {
         }
 
         return null;
-    }
-
-    private static boolean needsWoodcut(ServerPlayerEntity bot, ServerWorld world) {
-        var tree = TreeDetector.findNearestTree(bot, TREE_CLEAR_RADIUS, 6, null);
-        return tree.isPresent();
     }
 
     private static boolean fillIrrigation(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, BlockPos refillSource) {
@@ -2785,17 +2753,6 @@ public class FarmSkill implements Skill {
         return sb.toString();
     }
 
-    private static int stillNeighborCount(ServerWorld world, BlockPos pos) {
-        int stillNeighbors = 0;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockState neighbor = world.getBlockState(pos.offset(dir));
-            if (neighbor.isOf(Blocks.WATER) && neighbor.getFluidState().isStill()) {
-                stillNeighbors++;
-            }
-        }
-        return stillNeighbors;
-    }
-
     /**
      * Higher means more likely to be on a shoreline (easier/safer to refill from).
      * Ocean-interior blocks typically have a score of 0.
@@ -3008,28 +2965,6 @@ public class FarmSkill implements Skill {
     private static BlockPos findStandingNearWater(ServerWorld world, BlockPos water) {
         List<BlockPos> positions = enumerateStandingNearWater(world, water);
         return positions.isEmpty() ? null : positions.get(0);
-    }
-
-    private static BlockPos offsetAwayFromWater(ServerWorld world, BlockPos center, BlockPos water, int minDistance) {
-        int dx = center.getX() - water.getX();
-        int dz = center.getZ() - water.getZ();
-        if (dx == 0 && dz == 0) {
-            dx = 1;
-        }
-        double len = Math.sqrt(dx * dx + dz * dz);
-        double scale = (minDistance / Math.max(1.0, len));
-        int shiftX = (int) Math.round(dx * scale);
-        int shiftZ = (int) Math.round(dz * scale);
-        BlockPos candidate = new BlockPos(center.getX() + shiftX, center.getY(), center.getZ() + shiftZ);
-        // adjust Y to surface if needed
-        for (int y = candidate.getY() + 2; y >= candidate.getY() - 3; y--) {
-            BlockPos check = new BlockPos(candidate.getX(), y, candidate.getZ());
-            if (!world.getBlockState(check).isAir()) {
-                candidate = check;
-                break;
-            }
-        }
-        return candidate;
     }
 
     private static BlockPos offsetAwayFromNearbyFarmland(ServerWorld world, BlockPos center, int minDistance) {
@@ -4206,19 +4141,6 @@ public class FarmSkill implements Skill {
         return count;
     }
 
-    private static int ensureHotbarItem(ServerPlayerEntity bot, Item item) {
-        PlayerInventory inventory = bot.getInventory();
-        int hotbar = findHotbarItemSlot(inventory, item);
-        if (hotbar != -1) {
-            return hotbar;
-        }
-        int slot = findInventoryItemSlot(inventory, item);
-        if (slot == -1) {
-            return -1;
-        }
-        return ensureHotbarAccess(bot, slot);
-    }
-
     /**
      * Resolve a usable hotbar slot for {@code slot}, swapping the stack into the hotbar
      * when needed. Returns -1 when the hotbar is locked and the item lives outside it —
@@ -4359,21 +4281,6 @@ public class FarmSkill implements Skill {
                 LOGGER.debug("ReturnBaseStuck tick failed during waitUntilClose: {}", e.getMessage());
             }
         }
-    }
-
-    private static BlockPos findNonFarmlandAdjacent(ServerPlayerEntity bot, ServerWorld world) {
-        BlockPos botPos = bot.getBlockPos();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos checkPos = botPos.offset(dir);
-            BlockState groundState = world.getBlockState(checkPos.down());
-            BlockState atPos = world.getBlockState(checkPos);
-            if (!groundState.isOf(Blocks.FARMLAND)
-                    && groundState.isSolidBlock(world, checkPos.down())
-                    && atPos.isAir()) {
-                return checkPos;
-            }
-        }
-        return null;
     }
 
     private static BlockPos findNearestNonFarmland(ServerPlayerEntity bot, ServerWorld world, int radius) {

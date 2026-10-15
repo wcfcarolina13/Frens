@@ -1088,55 +1088,6 @@ public final class WoodcutCleanupSkill implements Skill {
         };
     }
 
-    private boolean isCleanupFloaterCandidate(ServerWorld world,
-                                              ServerPlayerEntity bot,
-                                              BlockPos pos,
-                                              long deadline,
-                                              boolean floatingLogsOnly) {
-        if (world == null || bot == null || pos == null) {
-            return false;
-        }
-        if (!world.getBlockState(pos).isIn(BlockTags.LOGS)) {
-            return false;
-        }
-        try {
-            if (TreeDetector.detectTreeAt(world, pos).isPresent()) {
-                LOGGER.debug("woodcut_cleanup: skipping log {} because it's part of a detected full tree", pos.toShortString());
-                return false;
-            }
-        } catch (Exception ignored) {
-        }
-        boolean visible = hasLineOfSight(bot, Vec3d.ofCenter(pos));
-        if (visible) {
-            return true;
-        }
-        boolean floatingOrOrphan = isFloatingOrOrphanLog(world, pos, bot, deadline);
-        boolean suspended = isSuspendedCleanupLog(world, pos);
-        if (floatingLogsOnly) {
-            return floatingOrOrphan || suspended;
-        }
-        return floatingOrOrphan || suspended || TreeDetector.hasLeavesNearby(world, pos, 3, 3);
-    }
-
-    private boolean isSuspendedCleanupLog(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null || !world.getBlockState(pos).isIn(BlockTags.LOGS)) {
-            return false;
-        }
-        BlockPos lowest = pos.toImmutable();
-        int depth = 0;
-        while (depth < 16 && world.getBlockState(lowest.down()).isIn(BlockTags.LOGS)) {
-            lowest = lowest.down();
-            depth++;
-        }
-        BlockPos below = lowest.down();
-        BlockState belowState = world.getBlockState(below);
-        boolean unsupported = belowState.isAir()
-                || belowState.isReplaceable()
-                || belowState.isIn(BlockTags.LEAVES)
-                || belowState.getCollisionShape(world, below).isEmpty();
-        return unsupported && TreeDetector.hasLeavesNearby(world, pos, 3, 3);
-    }
-
     private void pruneExpiredCooldowns(Map<Long, Long> failedCooldowns) {
         if (failedCooldowns == null || failedCooldowns.isEmpty()) {
             return;
@@ -1151,60 +1102,6 @@ public final class WoodcutCleanupSkill implements Skill {
         }
         Long until = failedCooldowns.get(pos.asLong());
         return until != null && until > System.currentTimeMillis();
-    }
-
-    private boolean isFloatingOrOrphanLog(ServerWorld world, BlockPos start, ServerPlayerEntity bot, long deadline) {
-        // Determine if this log is part of a component that connects to the ground.
-        // This avoids chopping intact diagonal/leaning trunks (e.g. acacia).
-        int limit = 1024;
-
-        Set<BlockPos> visited = new HashSet<>();
-        Deque<BlockPos> q = new ArrayDeque<>();
-        q.add(start);
-        visited.add(start);
-
-        int steps = 0;
-        while (!q.isEmpty() && visited.size() < limit) {
-            steps++;
-            if ((steps & 0xF) == 0) { // every ~16 nodes - check abort more frequently
-                if (System.currentTimeMillis() >= deadline) {
-                    return false;
-                }
-                if (bot != null && SkillManager.shouldAbortSkill(bot)) {
-                    return false;
-                }
-            }
-
-            BlockPos pos = q.removeFirst();
-            BlockPos below = pos.down();
-            BlockState belowState = world.getBlockState(below);
-            boolean belowIsLog = belowState.isIn(BlockTags.LOGS);
-            boolean belowIsSolid = !belowState.getCollisionShape(world, below).isEmpty() && !belowState.isIn(BlockTags.LEAVES);
-
-            if (!belowIsLog && belowIsSolid) {
-                // Connected to ground => treat as standing tree / placed log structure.
-                return false;
-            }
-
-            for (Direction dir : Direction.values()) {
-                BlockPos n = pos.offset(dir);
-                if (visited.contains(n)) {
-                    continue;
-                }
-                if (!world.getBlockState(n).isIn(BlockTags.LOGS)) {
-                    continue;
-                }
-                visited.add(n);
-                q.addLast(n);
-                if (visited.size() >= limit) {
-                    // Too large/uncertain: be conservative and treat as not orphan.
-                    return false;
-                }
-            }
-        }
-
-        // No grounded logs found in the connected component.
-        return true;
     }
 
     private List<BlockPos> findSuspiciousScaffold(ServerWorld world,

@@ -36,7 +36,6 @@ public final class TreeDetector {
     private static final int TREE_ENVELOPE_SCAN_HORIZONTAL = 7;
     private static final int TREE_ENVELOPE_SCAN_VERTICAL_ABOVE = 6;
     private static final int TREE_ENVELOPE_SCAN_VERTICAL_BELOW = 2;
-    private static final int TREE_ENVELOPE_LEAF_NEIGHBOR_RADIUS = 2;
 
     private static final Set<Block> SOIL_BLOCKS = Set.of(
             Blocks.DIRT,
@@ -127,16 +126,8 @@ public final class TreeDetector {
             return kind == CleanupLogDispositionKind.BLOCKED_PROTECTED;
         }
 
-        public boolean blockedHumanAdjacent() {
-            return kind == CleanupLogDispositionKind.BLOCKED_HUMAN_ADJACENT;
-        }
-
         public boolean rejectedFullTree() {
             return kind == CleanupLogDispositionKind.REJECTED_FULL_TREE;
-        }
-
-        public boolean rejectedGroundedOrNonFloater() {
-            return kind == CleanupLogDispositionKind.REJECTED_GROUNDED_OR_NON_FLOATER;
         }
 
         public boolean floaterLike() {
@@ -260,53 +251,6 @@ public final class TreeDetector {
             double distSq = origin.getSquaredDistance(candidate);
             if (distSq < bestDistSq) {
                 bestDistSq = distSq;
-                best = candidate.toImmutable();
-            }
-        }
-        return Optional.ofNullable(best);
-    }
-
-    /**
-        * Floating log: no adjacent logs and no nearby leaves; intended for cleanup of stray blocks (unlikely player builds).
-        */
-    public static Optional<BlockPos> findFloatingLog(ServerPlayerEntity bot,
-                                                     int horizontalRadius,
-                                                     int verticalRange,
-                                                     Set<BlockPos> visited) {
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return Optional.empty();
-        }
-        BlockPos origin = bot.getBlockPos();
-        double bestDistSq = Double.MAX_VALUE;
-        BlockPos best = null;
-        for (BlockPos candidate : BlockPos.iterate(origin.add(-horizontalRadius, -verticalRange, -horizontalRadius),
-                origin.add(horizontalRadius, verticalRange, horizontalRadius))) {
-            if (visited != null && visited.contains(candidate)) {
-                continue;
-            }
-            BlockState state = world.getBlockState(candidate);
-            if (!isLog(state)) {
-                continue;
-            }
-            if (isNearHumanBlocks(world, candidate, 3) || isProtected(world, candidate, 3)) {
-                continue;
-            }
-            boolean hasLogNeighbor = false;
-            for (Direction dir : Direction.values()) {
-                if (isLog(world.getBlockState(candidate.offset(dir)))) {
-                    hasLogNeighbor = true;
-                    break;
-                }
-            }
-            if (hasLogNeighbor) {
-                continue;
-            }
-            if (hasLeavesNearby(world, candidate, 2, 2)) {
-                continue;
-            }
-            double d = origin.getSquaredDistance(candidate);
-            if (d < bestDistSq) {
-                bestDistSq = d;
                 best = candidate.toImmutable();
             }
         }
@@ -563,67 +507,6 @@ public final class TreeDetector {
         return true;
     }
 
-    public static List<BlockPos> collectOwnedTreeLogs(ServerWorld world, TreeTarget target) {
-        List<BlockPos> owned = new ArrayList<>();
-        if (world == null || target == null) {
-            return owned;
-        }
-        BlockPos min = target.envelopeMin().add(-1, -1, -1);
-        BlockPos max = target.envelopeMax().add(1, 1, 1);
-        for (BlockPos candidate : BlockPos.iterate(min, max)) {
-            if (isOwnedTreeLog(world, target, candidate)) {
-                owned.add(candidate.toImmutable());
-            }
-        }
-        return owned;
-    }
-
-    public static boolean isOwnedTreeLog(ServerWorld world, TreeTarget target, BlockPos candidate) {
-        if (world == null || target == null || candidate == null) {
-            return false;
-        }
-        if (!isLog(world.getBlockState(candidate))) {
-            return false;
-        }
-        if (!isWithinBounds(candidate, target.envelopeMin().add(-1, -1, -1), target.envelopeMax().add(1, 1, 1))) {
-            return false;
-        }
-        Optional<BasicTreeInfo> strictOwner = resolveStandingTreeBasic(world, candidate, TreeDetectionMode.STRICT_STANDING);
-        if (strictOwner.isPresent() && !strictOwner.get().base().equals(target.base())) {
-            return false;
-        }
-        for (var entry : target.nearbyRootedBases().entrySet()) {
-            BlockPos otherBase = entry.getKey();
-            int otherTopY = entry.getValue();
-            if (Math.abs(candidate.getX() - otherBase.getX()) <= 1
-                    && Math.abs(candidate.getZ() - otherBase.getZ()) <= 1
-                    && candidate.getY() >= otherBase.getY() - 1
-                    && candidate.getY() <= otherTopY + 1) {
-                return false;
-            }
-        }
-        if (Math.abs(candidate.getX() - target.base().getX()) <= 1
-                && Math.abs(candidate.getZ() - target.base().getZ()) <= 1
-                && candidate.getY() >= target.base().getY()
-                && candidate.getY() <= target.top().getY() + 1) {
-            return true;
-        }
-        if (target.canopyLeaves().isEmpty()) {
-            return Math.abs(candidate.getX() - target.base().getX()) <= 2
-                    && Math.abs(candidate.getZ() - target.base().getZ()) <= 2
-                    && candidate.getY() >= target.base().getY() - 1
-                    && candidate.getY() <= target.top().getY() + TREE_ENVELOPE_SCAN_VERTICAL_ABOVE;
-        }
-        for (BlockPos leaf : target.canopyLeaves()) {
-            if (Math.abs(candidate.getX() - leaf.getX()) <= TREE_ENVELOPE_LEAF_NEIGHBOR_RADIUS
-                    && Math.abs(candidate.getY() - leaf.getY()) <= TREE_ENVELOPE_LEAF_NEIGHBOR_RADIUS
-                    && Math.abs(candidate.getZ() - leaf.getZ()) <= TREE_ENVELOPE_LEAF_NEIGHBOR_RADIUS) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public static List<BlockPos> collectTrunk(ServerWorld world, BlockPos base) {
         List<BlockPos> trunk = new ArrayList<>();
         if (world == null || base == null) {
@@ -635,45 +518,6 @@ public final class TreeDetector {
             cursor = cursor.up();
         }
         return trunk;
-    }
-
-    public static List<BlockPos> collectConnectedLogs(ServerWorld world,
-                                                      BlockPos start,
-                                                      int horizontalLimit,
-                                                      int verticalLimit) {
-        List<BlockPos> found = new ArrayList<>();
-        if (world == null || start == null) {
-            return found;
-        }
-        Queue<BlockPos> queue = new ArrayDeque<>();
-        Set<BlockPos> visited = new HashSet<>();
-        queue.add(start);
-        visited.add(start);
-
-        while (!queue.isEmpty()) {
-            BlockPos pos = queue.poll();
-            found.add(pos);
-            for (Direction dir : Direction.values()) {
-                BlockPos neighbor = pos.offset(dir);
-                if (visited.contains(neighbor)) {
-                    continue;
-                }
-                if (!withinLimits(start, neighbor, horizontalLimit, verticalLimit)) {
-                    continue;
-                }
-                if (isLog(world.getBlockState(neighbor))) {
-                    visited.add(neighbor);
-                    queue.add(neighbor);
-                }
-            }
-        }
-        return found;
-    }
-
-    private static boolean withinLimits(BlockPos origin, BlockPos candidate, int horizontal, int vertical) {
-        return Math.abs(candidate.getX() - origin.getX()) <= horizontal
-                && Math.abs(candidate.getZ() - origin.getZ()) <= horizontal
-                && Math.abs(candidate.getY() - origin.getY()) <= vertical;
     }
 
     private static boolean isWithinBounds(BlockPos pos, BlockPos min, BlockPos max) {
