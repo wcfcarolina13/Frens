@@ -717,18 +717,27 @@ public final class TreeDetector {
         BlockPos min = base.add(-HUMAN_SCAN_RADIUS, -1, -HUMAN_SCAN_RADIUS);
         BlockPos max = base.add(HUMAN_SCAN_RADIUS, height + 2, HUMAN_SCAN_RADIUS);
         for (BlockPos pos : BlockPos.iterate(min, max)) {
-            BlockState state = world.getBlockState(pos);
-            Block block = state.getBlock();
-            if (state.isIn(BlockTags.PLANKS)
-                    || state.isIn(BlockTags.BEDS)
-                    || state.isIn(BlockTags.WOODEN_DOORS)
-                    || state.isIn(BlockTags.WOODEN_PRESSURE_PLATES)
-                    || state.isIn(BlockTags.FENCES)
-                    || HUMAN_BLOCKS.contains(block)) {
+            if (isHumanBlock(world.getBlockState(pos))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** The scan window of {@link #isNearHumanBlocks}: x/z +-this around the base. */
+    public static int humanScanRadius() {
+        return HUMAN_SCAN_RADIUS;
+    }
+
+    /** One cell of {@link #isNearHumanBlocks}: a block a player builds with or places. */
+    public static boolean isHumanBlock(BlockState state) {
+        return state != null
+                && (state.isIn(BlockTags.PLANKS)
+                || state.isIn(BlockTags.BEDS)
+                || state.isIn(BlockTags.WOODEN_DOORS)
+                || state.isIn(BlockTags.WOODEN_PRESSURE_PLATES)
+                || state.isIn(BlockTags.FENCES)
+                || HUMAN_BLOCKS.contains(state.getBlock()));
     }
 
     public static boolean isProtected(ServerWorld world, BlockPos pos) {

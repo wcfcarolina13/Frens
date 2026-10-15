@@ -15,7 +15,8 @@ import net.wcfcarolina13.GameAI.services.ObstructionMinePolicy;
  * {@code d} dirt, {@code s} sand (gravity), {@code l} leaves, {@code w} log (added: trunks for
  * {@code trees_2x2}), {@code m} magma, {@code c} lit campfire (2-block berth, PF semantics: feet cells
  * within dx,dz +-2 and dy +-1 read HAZARD), {@code P} protected stone, {@code p} protected sand,
- * {@code _} bottom slab, {@code L} locked door. Any cell can also be marked protected (a zone box).
+ * {@code _} bottom slab, {@code L} locked door, {@code n} planks or fence (a floor the executor never
+ * breaks on a path: NEVER_BREAK, though its ticks are finite: 60 by hand). Any cell can also be marked protected (a zone box).
  * Cells outside the box read as unloaded (props 0).</p>
  *
  * <p>Break ticks come from {@link ObstructionMinePolicy#groundBreakTicks} with the {@link ToolTable}'s
@@ -58,7 +59,7 @@ public final class VoxelGrid implements MutableTerrainView {
                 case 'm' -> new Material(0.5f, true, Tool.PICK);
                 case 'd', 's' -> new Material(0.5f, false, null);
                 case 'l' -> new Material(0.2f, false, null);
-                case 'w' -> new Material(2.0f, false, Tool.AXE);
+                case 'w', 'n' -> new Material(2.0f, false, Tool.AXE);
                 default -> null;
             };
         }
@@ -172,7 +173,7 @@ public final class VoxelGrid implements MutableTerrainView {
 
     static boolean solidGlyph(char c) {
         return switch (c) {
-            case '#', 'P', 'd', 's', 'p', 'l', 'w', 'm', '_' -> true;
+            case '#', 'P', 'd', 's', 'p', 'l', 'w', 'm', '_', 'n' -> true;
             default -> false;
         };
     }
@@ -208,6 +209,7 @@ public final class VoxelGrid implements MutableTerrainView {
             case '#', 'P', 'd', 'l', 'w' -> p |= SOLID_FLOOR;
             case 's', 'p' -> p |= SOLID_FLOOR | GRAVITY;
             case 'm' -> p |= SOLID_FLOOR | HAZARD;
+            case 'n' -> p |= SOLID_FLOOR | NEVER_BREAK;
             case '_' -> p |= SOLID_FLOOR | SLAB_TOP;
             case 'c' -> p |= HAZARD | NEVER_BREAK;
             case 'L' -> p |= LOCKED_DOOR;

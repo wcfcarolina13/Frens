@@ -50,17 +50,20 @@ public final class UnifiedPathFinder {
         }
     }
 
-    /** Whether a cell can be a goal: standable, or a swim cell when swimming is allowed. */
+    /**
+     * Whether a cell can be a goal: standable (a floor, wading allowed). Never a swim cell, even when
+     * swimming is allowed: a FULL plan ends where the bot can stand, as a PARTIAL does
+     * ({@link #trimPartial}); a goal in deep water snaps to the shore (design section 5.1).
+     */
     public static boolean isGoalCell(SearchContext ctx, int x, int y, int z) {
-        return ctx.box().contains(x, y, z)
-                && (MoveCosts.isStanding(ctx.terrain(), x, y, z)
-                || (ctx.allowSwim() && MoveCosts.isSwimCell(ctx.terrain(), x, y, z)));
+        return ctx.box().contains(x, y, z) && MoveCosts.isStanding(ctx.terrain(), x, y, z);
     }
 
     /**
      * The goal the search aims at: the goal itself when standable, else the nearest standable cell
      * within {@link #GOAL_SNAP_RADIUS} (squared distance, then scan order), else null. An unloaded goal
-     * is returned as is: the search heads toward it for a partial.
+     * is returned as is: the search heads toward it for a partial. On null, {@link #search} still heads
+     * toward the raw goal for a partial, as the Baritone-style finder does (it has no goal check).
      */
     public static int[] snapGoal(SearchContext ctx) {
         int gx = ctx.goalX();
@@ -133,8 +136,12 @@ public final class UnifiedPathFinder {
         }
         boolean goalLoaded = CellProps.loaded(t.props(ctx.goalX(), ctx.goalY(), ctx.goalZ()));
         int[] goal = snapGoal(ctx);
+        // An unstandable goal with nothing standable within 2 can never be popped (no move lands on
+        // it), so the search runs out and returns the best-so-far partial toward it, reason
+        // GOAL_NOT_STANDABLE (1.1.242 field: Baritone-style returns a partial there, unified refused).
+        boolean goalStandable = goal != null;
         if (goal == null) {
-            return PathPlan.noPath(ctx.planId(), NoPathReason.GOAL_NOT_STANDABLE, 0, clock.getAsLong() - t0);
+            goal = new int[]{ctx.goalX(), ctx.goalY(), ctx.goalZ()};
         }
         int gx = goal[0];
         int gy = goal[1];
@@ -181,6 +188,10 @@ public final class UnifiedPathFinder {
             expanded++;
             if (cur.x == gx && cur.y == gy && cur.z == gz) {
                 List<PlannedMove> moves = reconstruct(cur);
+                int over = firstUnaffordablePlacement(moves, ctx.scaffoldCount());
+                if (over >= 0) {
+                    return scaffoldTruncated(ctx, moves, over, expanded, clock.getAsLong() - t0);
+                }
                 return new PathPlan(ctx.planId(), PlanStatus.FULL, NoPathReason.NONE, 0, moves, cur.g, expanded,
                         clock.getAsLong() - t0);
             }
@@ -236,7 +247,9 @@ public final class UnifiedPathFinder {
             }
         }
 
-        NoPathReason reason = reason(ctx, refusals, expanded, budgetHit, goalLoaded, goalInBox);
+        NoPathReason reason = goalStandable
+                ? reason(ctx, refusals, expanded, budgetHit, goalLoaded, goalInBox)
+                : NoPathReason.GOAL_NOT_STANDABLE;
         for (int k = 0; k < COEFFICIENTS.length; k++) {
             SearchNode b = best[k];
             if (b == null || distSq(b, sx, sy, sz) <= MIN_DIST_PATH * MIN_DIST_PATH) {
@@ -245,6 +258,10 @@ public final class UnifiedPathFinder {
             List<PlannedMove> moves = trimPartial(reconstruct(b));
             if (moves.isEmpty()) {
                 break;
+            }
+            int over = firstUnaffordablePlacement(moves, ctx.scaffoldCount());
+            if (over >= 0) {
+                return scaffoldTruncated(ctx, moves, over, expanded, clock.getAsLong() - t0);
             }
             double ticks = 0;
             for (PlannedMove m : moves) {
@@ -284,6 +301,52 @@ public final class UnifiedPathFinder {
             return NoPathReason.NO_SCAFFOLD;
         }
         return NoPathReason.BOXED_IN;
+    }
+
+    /**
+     * Index of the first move whose placements the bot cannot afford, counting placements from
+     * {@code scaffoldCount} along the plan, or -1. The search's {@code scaffoldLeftAfter} labels are not
+     * trusted here: the scaffold count is not in the node key (review I4), so a relaxed parent can leave a
+     * descendant priced under a larger count than the chain really has.
+     */
+    static int firstUnaffordablePlacement(List<PlannedMove> moves, int scaffoldCount) {
+        int left = scaffoldCount;
+        for (int i = 0; i < moves.size(); i++) {
+            int n = moves.get(i).toPlace().length;
+            if (n == 0) {
+                continue;
+            }
+            if (n > left) {
+                return i;
+            }
+            left -= n;
+        }
+        return -1;
+    }
+
+    /**
+     * A plan cut before move {@code over} (the first unaffordable placement): PARTIAL with reason
+     * NO_SCAFFOLD when the cut, after {@link #trimPartial}, still ends past {@link #MIN_DIST_PATH},
+     * else NO_PATH(NO_SCAFFOLD). The cut keeps whole moves and never ends on a swim cell or an action.
+     */
+    static PathPlan scaffoldTruncated(SearchContext ctx, List<PlannedMove> moves, int over, int expanded,
+                                      long elapsedMs) {
+        List<PlannedMove> cut = trimPartial(moves.subList(0, over));
+        if (!cut.isEmpty()) {
+            PlannedMove last = cut.get(cut.size() - 1);
+            long dx = last.toX() - ctx.startX();
+            long dy = last.toY() - ctx.startY();
+            long dz = last.toZ() - ctx.startZ();
+            if (dx * dx + dy * dy + dz * dz > (long) MIN_DIST_PATH * MIN_DIST_PATH) {
+                double ticks = 0;
+                for (PlannedMove m : cut) {
+                    ticks += m.ticks();
+                }
+                return new PathPlan(ctx.planId(), PlanStatus.PARTIAL, NoPathReason.NO_SCAFFOLD, 0, cut, ticks,
+                        expanded, elapsedMs);
+            }
+        }
+        return PathPlan.noPath(ctx.planId(), NoPathReason.NO_SCAFFOLD, expanded, elapsedMs);
     }
 
     /** 10% tail cut beyond 30 moves; never end on a swim cell or right after a break/place action. */

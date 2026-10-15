@@ -21,7 +21,12 @@ public final class CellProps {
     public static final int HAZARD = 1 << 5;
     /** ProtectedZoneService.isProtected for the bot owner (strict). */
     public static final int PROTECTED = 1 << 6;
-    /** ProtectedStructureBlockHelper.isNeverBreakBlock or hasBlockEntity. */
+    /**
+     * Never broken by a planned move: ProtectedStructureBlockHelper.isNeverBreakBlock, hasBlockEntity, a
+     * door, and (on a view that may break) the executor's plannedStepTrimAllowed state refusals (logs,
+     * planks, wool, fences, walls, gates, glass-like, dirt path, beds, shulkers, persistent leaves,
+     * hardness out of 0..12) and cells near human blocks.
+     */
     public static final int NEVER_BREAK = 1 << 7;
     /** FallingBlock (sand, gravel, concrete powder). */
     public static final int GRAVITY = 1 << 8;

@@ -50,12 +50,98 @@ class UnifiedPathFinderTest {
     }
 
     @Test
-    void goalWithNothingStandableNearIsRefused() {
+    void goalWithNothingStandableNearGivesAPartialTowardIt() {
+        // Like the Baritone-style finder (no goal check, best-so-far partial): head toward the raw goal.
         VoxelGrid g = flat(14, 5);
         g.fill(8, 0, 0, 13, 0, 4, '.');
-        PathPlan plan = UnifiedPathFinder.search(SearchContext.builder(g, 1, 1, 2, 12, 1, 2).build());
-        assertEquals(PlanStatus.NO_PATH, plan.status());
+        PathPlan plan = UnifiedPathFinder.search(SearchContext.builder(g, 1, 1, 2, 12, 1, 2).build(), () -> 0L);
+        assertEquals(PlanStatus.PARTIAL, plan.status());
         assertEquals(NoPathReason.GOAL_NOT_STANDABLE, plan.reason());
+        assertEquals(7, plan.endX());
+        // Nothing past 5 blocks from the start: NO_PATH with the same reason.
+        PathPlan near = UnifiedPathFinder.search(SearchContext.builder(g, 5, 1, 2, 12, 1, 2).build(), () -> 0L);
+        assertEquals(PlanStatus.NO_PATH, near.status());
+        assertEquals(NoPathReason.GOAL_NOT_STANDABLE, near.reason());
+    }
+
+    /** A 24-long bank with a deep pond at x 12..20 (surface y2, bank top y2, stand y3). */
+    private static VoxelGrid pond() {
+        VoxelGrid g = new VoxelGrid(0, 0, 0, 24, 6, 3, VoxelGrid.ToolTable.HAND);
+        g.fill(0, 0, 0, 23, 2, 2, 'd');
+        g.fill(12, 0, 0, 20, 2, 2, '~');
+        return g;
+    }
+
+    @Test
+    void goalOverDeepWaterNeverEndsInTheWater() {
+        VoxelGrid g = pond();
+        // Mid-pond (4 from either shore): no standable cell within 2, so a partial that ends on the shore.
+        SearchContext mid = SearchContext.builder(g, 1, 3, 1, 16, 3, 1).allowSwim(true).maxSwimRun(10).build();
+        assertNull(UnifiedPathFinder.snapGoal(mid));
+        PathPlan p = UnifiedPathFinder.search(mid, () -> 0L);
+        assertEquals(PlanStatus.PARTIAL, p.status());
+        assertEquals(NoPathReason.GOAL_NOT_STANDABLE, p.reason());
+        assertTrue(MoveCosts.isStanding(g, p.endX(), p.endY(), p.endZ()));
+        assertFalse(MoveCosts.isSwimCell(g, p.endX(), p.endY(), p.endZ()));
+        // Near the far shore: the goal snaps to the shore and the FULL plan swims across and stands there.
+        SearchContext edge = SearchContext.builder(g, 1, 3, 1, 19, 2, 1).allowSwim(true).maxSwimRun(10).build();
+        PathPlan full = UnifiedPathFinder.search(edge);
+        assertEquals(PlanStatus.FULL, full.status());
+        assertTrue(full.moves().stream().anyMatch(m -> m.kind() == MoveKind.SWIM));
+        assertTrue(MoveCosts.isStanding(g, full.endX(), full.endY(), full.endZ()));
+        assertEquals(21, full.endX());
+    }
+
+    @Test
+    void plankWallIsWalkedAroundWhileStoneIsStillMined() {
+        // A 2-high wall across x10 with a gap at z15: the detour is 28 extra blocks, so mining the two
+        // wall cells is cheaper whenever the wall is breakable at all (planks with a stone axe more so).
+        VoxelGrid planks = new VoxelGrid(0, 0, 0, 20, 6, 16, VoxelGrid.ToolTable.STONE_AXE);
+        planks.fill(0, 0, 0, 19, 0, 15, 'd');
+        planks.fill(10, 1, 0, 10, 2, 14, 'n');
+        PathPlan around = UnifiedPathFinder.search(
+                SearchContext.builder(planks, 2, 1, 1, 18, 1, 1).allowBreak(true).build());
+        assertEquals(PlanStatus.FULL, around.status());
+        assertTrue(around.moves().stream().allMatch(m -> m.toBreak().length == 0), "planks never broken");
+        assertTrue(around.moves().stream().anyMatch(m -> m.toZ() == 15), "walks through the gap");
+
+        // The same wall in stone with a wooden pickaxe: mining through is still cheaper, as before.
+        VoxelGrid stone = planks.copy();
+        stone.fill(10, 1, 0, 10, 2, 14, '#');
+        stone.setTool(VoxelGrid.ToolTable.WOOD_PICK);
+        PathPlan through = UnifiedPathFinder.search(
+                SearchContext.builder(stone, 2, 1, 1, 18, 1, 1).allowBreak(true).build());
+        assertEquals(PlanStatus.FULL, through.status());
+        assertTrue(through.moves().stream().anyMatch(m -> m.toBreak().length > 0), "stone still mined");
+    }
+
+    @Test
+    void placementsBeyondTheScaffoldCountAreCutToANoScaffoldPartial() {
+        // Hand-built: 7 walks then 2 placements; the bot holds 1 dirt.
+        List<PlannedMove> moves = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            moves.add(new PlannedMove(MoveKind.TRAVERSE, i, 1, 0, i + 1, 1, 0, null, null, 4.6, 5, 0));
+        }
+        moves.add(new PlannedMove(MoveKind.ASCEND_PLACE, 7, 1, 0, 8, 2, 0, null,
+                new long[]{CellPos.pack(7, 1, 0)}, 30, 4, 0));
+        moves.add(new PlannedMove(MoveKind.ASCEND_PLACE, 8, 2, 0, 9, 3, 0, null,
+                new long[]{CellPos.pack(8, 2, 0)}, 30, 3, 0));
+        assertEquals(-1, UnifiedPathFinder.firstUnaffordablePlacement(moves, 2));
+        assertEquals(8, UnifiedPathFinder.firstUnaffordablePlacement(moves, 1));
+        assertEquals(7, UnifiedPathFinder.firstUnaffordablePlacement(moves, 0));
+
+        VoxelGrid g = flat(12, 3);
+        SearchContext ctx = SearchContext.builder(g, 0, 1, 0, 9, 3, 0).scaffoldCount(1).build();
+        // Cut before move 8, then trimPartial drops the trailing ASCEND_PLACE: 7 walks, past 5 blocks.
+        PathPlan cut = UnifiedPathFinder.scaffoldTruncated(ctx, moves, 8, 9, 0);
+        assertEquals(PlanStatus.PARTIAL, cut.status());
+        assertEquals(NoPathReason.NO_SCAFFOLD, cut.reason());
+        assertEquals(7, cut.moves().size());
+        assertEquals(7 * 4.6, cut.totalTicks(), 1e-9);
+        // A cut that ends within 5 blocks of the start is NO_PATH(NO_SCAFFOLD).
+        PathPlan none = UnifiedPathFinder.scaffoldTruncated(ctx, moves, 3, 9, 0);
+        assertEquals(PlanStatus.NO_PATH, none.status());
+        assertEquals(NoPathReason.NO_SCAFFOLD, none.reason());
     }
 
     @Test

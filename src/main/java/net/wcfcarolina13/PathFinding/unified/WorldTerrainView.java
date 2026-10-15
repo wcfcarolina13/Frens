@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -13,6 +14,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.SlabBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.block.enums.SlabType;
@@ -42,6 +44,7 @@ import net.wcfcarolina13.GameAI.services.WalkablePartialBlocks;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
 import net.wcfcarolina13.GameAI.services.navigation.NavHazardCache;
 import net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService;
+import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.PathFinding.WadeableWater;
 
 /**
@@ -65,10 +68,16 @@ import net.wcfcarolina13.PathFinding.WadeableWater;
  * <p>Mutation bits are computed only when the view was built for a search that may break or place:
  * PROTECTED ({@link ProtectedZoneService#isProtected} with the bot owner, strict; the territory claim
  * through {@link BotTerritoryAuthorizationService#authorizeBlockMutation}; a construction-protected
- * cell), NEVER_BREAK ({@link ProtectedStructureBlockHelper#isNeverBreakBlock}, any block entity, any
- * door) and PLACEABLE. The per-cell painting/redstone neighbour scan of {@code isNeverBreakAt} and the
- * human-block / mining-hazard checks of {@code plannedStepTrimAllowed} are left to the executor's
- * directed mine, which refuses at execution and records a failed route.</p>
+ * cell), NEVER_BREAK and PLACEABLE. NEVER_BREAK is {@link ProtectedStructureBlockHelper#isNeverBreakBlock},
+ * any block entity and any door always, and, on a view that may break, every refusal of the executor's
+ * {@code MovementService.plannedStepTrimAllowed} that reads only the block state or the terrain
+ * (review C2, 1.1.242): logs, planks, wool, fences, walls, fence gates, glass-like, dirt paths, beds,
+ * shulker boxes, player-placed (persistent) leaves, hardness below 0 or 12 and up, and any cell within
+ * {@link TreeDetector#isNearHumanBlocks}{@code (pos, 6)} of a human block (an unloaded cell in that
+ * window counts as one). Left to the executor, which refuses at execution and records a failed route:
+ * {@code MiningHazardDetector} (needs the live bot), reach, the per-block mine cooldowns and remembered
+ * failed routes (runtime memory), the painting/redstone neighbour scan of {@code isNeverBreakAt}, and the
+ * executor's held-tool timing (the view prices the best hotbar tool).</p>
  */
 public final class WorldTerrainView implements TerrainView {
 
@@ -139,6 +148,8 @@ public final class WorldTerrainView implements TerrainView {
     private final Long2DoubleOpenHashMap anchorMemo = new Long2DoubleOpenHashMap();
     private final LongOpenHashSet scannedSections = new LongOpenHashSet();
     private final LongOpenHashSet berthCells = new LongOpenHashSet();
+    /** Per chunk section: 1 no human block, 2 has one, 3 unloaded. */
+    private final Long2ByteOpenHashMap humanSections = new Long2ByteOpenHashMap();
 
     /**
      * @param allowBreak compute PROTECTED / NEVER_BREAK for solid cells (the search may break)
@@ -301,6 +312,10 @@ public final class WorldTerrainView implements TerrainView {
         }
 
         boolean breakCandidate = mutationBreak && !air && fluid.isEmpty() && !passable;
+        if (breakCandidate && (p & CellProps.NEVER_BREAK) == 0
+                && (refusedForPath(s, pos) || nearHumanBlocks(x, y, z))) {
+            p |= CellProps.NEVER_BREAK;
+        }
         boolean placeCandidate = mutationPlace && (air || s.isReplaceable()) && fluid.isEmpty()
                 && isSolid(state(x, y - 1, z));
         if (breakCandidate || placeCandidate) {
@@ -316,6 +331,84 @@ public final class WorldTerrainView implements TerrainView {
             p |= CellProps.HAZARD;
         }
         return p;
+    }
+
+    /**
+     * The pure state refusals of {@code MovementService.plannedStepTrimAllowed} (keep in step with it):
+     * build materials and trunks, fences and walls, glass-like, dirt paths, beds, shulker boxes,
+     * player-placed leaves, and blocks too hard (hardness below 0 or 12 and up).
+     */
+    private boolean refusedForPath(BlockState s, BlockPos pos) {
+        if (s.isIn(BlockTags.LOGS) || s.isIn(BlockTags.PLANKS) || s.isIn(BlockTags.WOOL)
+                || s.isIn(BlockTags.FENCES) || s.isIn(BlockTags.WALLS) || s.isIn(BlockTags.FENCE_GATES)
+                || s.isIn(BlockTags.BEDS) || s.isIn(BlockTags.SHULKER_BOXES)
+                || s.isOf(Blocks.DIRT_PATH) || ProtectedStructureBlockHelper.isProtectedGlassLike(s)) {
+            return true;
+        }
+        if (s.isIn(BlockTags.LEAVES)) {
+            return s.contains(LeavesBlock.PERSISTENT) && s.get(LeavesBlock.PERSISTENT);
+        }
+        float hardness = s.getHardness(world, pos);
+        return hardness < 0.0F || hardness >= 12.0F;
+    }
+
+    /**
+     * {@link TreeDetector#isNearHumanBlocks}{@code (pos, 6)} over this view's chunk cache (the world read
+     * would hop to the server thread per cell off-thread): x/z +-{@link TreeDetector#humanScanRadius},
+     * y -1..+8. Sections with no human block in their palette are skipped; an unloaded cell in the
+     * window counts as near (refuse rather than force a load). Memoized with the cell's props.
+     */
+    private boolean nearHumanBlocks(int x, int y, int z) {
+        int r = TreeDetector.humanScanRadius();
+        int y0 = y - 1;
+        int y1 = y + 8;
+        boolean any = false;
+        for (int sx = (x - r) >> 4; sx <= (x + r) >> 4; sx++) {
+            for (int sz = (z - r) >> 4; sz <= (z + r) >> 4; sz++) {
+                for (int sy = y0 >> 4; sy <= y1 >> 4; sy++) {
+                    byte h = humanSection(sx, sy, sz);
+                    if (h == 3) {
+                        return true;
+                    }
+                    any |= h == 2;
+                }
+            }
+        }
+        if (!any) {
+            return false;
+        }
+        for (int cy = y0; cy <= y1; cy++) {
+            if (cy < minY || cy > maxY) {
+                continue;
+            }
+            for (int cz = z - r; cz <= z + r; cz++) {
+                for (int cx = x - r; cx <= x + r; cx++) {
+                    BlockState b = state(cx, cy, cz);
+                    if (b == null || TreeDetector.isHumanBlock(b)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private byte humanSection(int sx, int sy, int sz) {
+        long key = ChunkSectionPos.asLong(sx, sy, sz);
+        byte h = humanSections.get(key);
+        if (h != 0) {
+            return h;
+        }
+        WorldChunk chunk = chunk(sx, sz);
+        if (chunk == null) {
+            h = 3;
+        } else {
+            int index = chunk.getSectionIndex(sy << 4);
+            ChunkSection section = index >= 0 && index < chunk.countVerticalSections() ? chunk.getSection(index) : null;
+            h = section != null && !section.isEmpty() && section.hasAny(TreeDetector::isHumanBlock) ? (byte) 2 : (byte) 1;
+        }
+        humanSections.put(key, h);
+        return h;
     }
 
     /** {@code BaritoneStylePathFinder.isPassable} minus the deadly and lock checks done by the caller. */
