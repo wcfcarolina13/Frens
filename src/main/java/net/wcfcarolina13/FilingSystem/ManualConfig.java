@@ -89,7 +89,12 @@ public class ManualConfig {
     private List<String> mutedTextCategories = new ArrayList<>();
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
-    private boolean baritonePathfinderEnabled = false;
+    // Baritone-style finder is the default since 1.1.240 (Bradley, 2026-10-14).
+    private boolean baritonePathfinderEnabled = true;
+    // One-time 1.1.240 migration marker: configs written before 1.1.240 persisted the old
+    // default (false). Must initialise to false — Gson keeps the initializer for fields the
+    // file lacks, so an old file reads as "not migrated yet". New files are stamped true.
+    private boolean baritoneDefaultMigrated = false;
     private boolean fortifyForcePlaceEnabled = false;
     private boolean verboseDiagnostics = false;
     /** Global override for teleportDuringSkills. When non-null, overrides all per-bot settings. */
@@ -449,6 +454,7 @@ public class ManualConfig {
         if (!file.exists()) {
             LOGGER.info("Config file not found. Creating a new one.");
             ManualConfig defaultConfig = new ManualConfig();
+            defaultConfig.baritoneDefaultMigrated = true; // fresh file already has the new default
             defaultConfig.save(); // Save the new config to create the file
             return defaultConfig;
         }
@@ -491,6 +497,9 @@ public class ManualConfig {
             // The first real access with a worldKey will resolve the _legacy entry.
             loadedConfig.migrateLegacyToPerWorld();
             loadedConfig.normalizeAliasBackedMaps();
+            if (loadedConfig.applyBaritoneDefaultMigration()) {
+                loadedConfig.save();
+            }
             return loadedConfig;
         } catch (IOException e) {
             LOGGER.error("Failed to load config file. Using default config.", e);
@@ -1064,6 +1073,28 @@ public class ManualConfig {
 
     public boolean isBaritonePathfinderEnabled() { return baritonePathfinderEnabled; }
     public void setBaritonePathfinderEnabled(boolean v) { this.baritonePathfinderEnabled = v; }
+    public boolean isBaritoneDefaultMigrated() { return baritoneDefaultMigrated; }
+
+    /**
+     * One-time 1.1.240 migration: a config written before Baritone became the default holds
+     * {@code baritonePathfinderEnabled=false} only because that was the old default, so flip
+     * it to true once. The marker is set either way, so a user who picks classic afterwards
+     * keeps classic. No I/O here; {@link #load()} saves when this returns true.
+     *
+     * @return true when the config changed (flag set and/or finder flipped) and should be saved
+     */
+    public boolean applyBaritoneDefaultMigration() {
+        if (baritoneDefaultMigrated) {
+            return false;
+        }
+        baritoneDefaultMigrated = true;
+        if (!baritonePathfinderEnabled) {
+            baritonePathfinderEnabled = true;
+            LOGGER.info("[Frens] 1.1.240 config migration: pathfinder switched to baritone (the new default); "
+                    + "use /bot config pathfinder classic to go back.");
+        }
+        return true;
+    }
 
     public boolean isFortifyForcePlaceEnabled() { return fortifyForcePlaceEnabled; }
     public void setFortifyForcePlaceEnabled(boolean v) { this.fortifyForcePlaceEnabled = v; }

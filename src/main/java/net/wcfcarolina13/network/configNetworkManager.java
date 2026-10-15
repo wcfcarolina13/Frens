@@ -213,6 +213,9 @@ public final class configNetworkManager {
                 boolean reloadSouls = ConfigSaveReloadPolicy.needsSoulReload(before, SharedConfig.capture(config));
                 if (config != null) {
                     config.save();
+                    // The live finder switch is a static copied at server start; mirror a
+                    // shared-settings save into it so a multiplayer change applies now.
+                    net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = config.isBaritonePathfinderEnabled();
                 }
                 if (reloadSouls && config != null) {
                     SoulRuntime.current().ifPresent(runtime ->
