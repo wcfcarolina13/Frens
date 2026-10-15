@@ -85,6 +85,8 @@ public final class MovementService {
     /** Interrupt door-close scheduler. Called during server shutdown. */
     public static void shutdownExecutors() {
         DOOR_CLOSE_SCHEDULER.shutdownNow();
+        // Cell-keyed memory belongs to the world that is stopping.
+        FAILED_ROUTES.clearAll();
     }
 
     /** Re-create the door-close scheduler if it was shut down. Called from {@code SERVER_STARTED}. */
@@ -298,7 +300,8 @@ public final class MovementService {
                                         boolean leavesTrap,
                                         boolean overrideTarget,
                                         String reason,
-                                        List<BlockPos> route) {}
+                                        List<BlockPos> route,
+                                        BlockPos origin) {}
 
     private record LocalEscapeMove(BlockPos target, boolean stepUp) {}
 
@@ -1175,7 +1178,7 @@ public final class MovementService {
                 ? List.of(candidate.target())
                 : candidate.route();
         BlockPos firstHop = route.get(0);
-        BlockPos beforeHop = player.getBlockPos();
+        BlockPos beforeHop = candidate.origin() != null ? candidate.origin() : groundedOrigin(player);
         if (beforeHop.equals(firstHop)) {
             commitLocalEscape(player, candidate, destination);
             return true;
@@ -1188,8 +1191,11 @@ public final class MovementService {
             commitLocalEscape(player, candidate, destination);
         } else {
             clearLocalEscapeCommitment(player.getUuid());
+            recordFailedRoute(player, beforeHop, firstHop, label);
         }
-        return reached || !player.getBlockPos().equals(beforeHop);
+        // 1.1.240: success only when the hop was actually reached. A block change from a jump bob
+        // used to count, which reset walkDirect's stagnation and starved the step-up/mine assists.
+        return reached;
     }
 
     private static boolean nudgeTowardExactBlock(ServerPlayerEntity bot,
@@ -1316,45 +1322,162 @@ public final class MovementService {
         if (world == null) {
             return null;
         }
-        BlockPos start = player.getBlockPos();
-        LocalEscapeCandidate directiveCandidate = peekLocalEscapeDirective(player, destination, world, start);
-        if (directiveCandidate != null) {
-            return directiveCandidate;
-        }
+        // Evaluate from a grounded cell: a mid-jump read (y+1) produced hops that are really two up.
+        BlockPos start = groundedOrigin(player);
+        UUID botId = player.getUuid();
+        FailedRouteSkips skips = new FailedRouteSkips();
+        try {
+            LocalEscapeCandidate directiveCandidate = peekLocalEscapeDirective(player, destination, world, start);
+            if (directiveCandidate != null) {
+                if (!isRememberedFailedRoute(botId, start, directiveCandidate.target())) {
+                    return directiveCandidate;
+                }
+                skips.note(start, directiveCandidate.target());
+            }
 
-        int currentOpenNeighbors = countOpenCardinalNeighbors(world, start);
-        int currentReachableArea = estimateLocalEscapeReachableArea(world, start, 2);
-        double startDistBlocks = Math.sqrt(start.getSquaredDistance(destination));
-        if (currentOpenNeighbors >= 3 && currentReachableArea >= 7 && startDistBlocks > 4.5D) {
+            int currentOpenNeighbors = countOpenCardinalNeighbors(world, start);
+            int currentReachableArea = estimateLocalEscapeReachableArea(world, start, 2);
+            double startDistBlocks = Math.sqrt(start.getSquaredDistance(destination));
+            if (currentOpenNeighbors >= 3 && currentReachableArea >= 7 && startDistBlocks > 4.5D) {
+                return null;
+            }
+            LocalEscapeCandidate best = searchForLocalEscapeRoute(
+                    world,
+                    botId,
+                    start,
+                    destination,
+                    currentOpenNeighbors,
+                    currentReachableArea,
+                    startDistBlocks,
+                    skips
+            );
+            if (best != null) {
+                return best;
+            }
+
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    BlockPos flat = start.add(dx, 0, dz);
+                    best = chooseBetterLocalEscape(best, unlessRememberedFailed(botId, start, skips,
+                            evaluateLocalEscapeCandidate(world, start, destination, flat, false, currentOpenNeighbors, startDistBlocks)));
+
+                    BlockPos step = start.add(dx, 1, dz);
+                    best = chooseBetterLocalEscape(best, unlessRememberedFailed(botId, start, skips,
+                            evaluateLocalEscapeCandidate(world, start, destination, step, true, currentOpenNeighbors, startDistBlocks)));
+                }
+            }
+            return best;
+        } finally {
+            skips.logOnce(player);
+        }
+    }
+
+    /** Failed (origin, first hop) routes, skipped for {@link FailedRoutePolicy#TTL_MS}. */
+    private static final FailedRoutePolicy FAILED_ROUTES = new FailedRoutePolicy();
+
+    private static FailedRoutePolicy.Key failedRouteKey(BlockPos origin, BlockPos hop) {
+        return FailedRoutePolicy.key(origin.getX(), origin.getY(), origin.getZ(), hop.getX(), hop.getY(), hop.getZ());
+    }
+
+    private static boolean isRememberedFailedRoute(UUID botId, BlockPos origin, BlockPos hop) {
+        if (botId == null || origin == null || hop == null) {
+            return false;
+        }
+        return FAILED_ROUTES.isFailed(botId, failedRouteKey(origin, hop), System.currentTimeMillis());
+    }
+
+    private static void recordFailedRoute(ServerPlayerEntity bot, BlockPos origin, BlockPos hop, String label) {
+        if (bot == null || bot.getUuid() == null || origin == null || hop == null) {
+            return;
+        }
+        FAILED_ROUTES.record(bot.getUuid(), failedRouteKey(origin, hop), System.currentTimeMillis());
+        LOGGER.debug("movement failed route recorded [{}]: bot={} origin={} firstHop={} ttlMs={}",
+                label, bot.getName().getString(), origin.toShortString(), hop.toShortString(), FailedRoutePolicy.TTL_MS);
+    }
+
+    public static void clearFailedRoutes(UUID botId) {
+        FAILED_ROUTES.clear(botId);
+    }
+
+    private static LocalEscapeCandidate unlessRememberedFailed(UUID botId, BlockPos origin, FailedRouteSkips skips,
+                                                               LocalEscapeCandidate candidate) {
+        if (candidate == null || candidate.target() == null) {
+            return candidate;
+        }
+        if (isRememberedFailedRoute(botId, origin, candidate.target())) {
+            skips.note(origin, candidate.target());
             return null;
         }
-        LocalEscapeCandidate best = searchForLocalEscapeRoute(
-                world,
-                start,
-                destination,
-                currentOpenNeighbors,
-                currentReachableArea,
-                startDistBlocks
-        );
-        if (best != null) {
-            return best;
+        return candidate;
+    }
+
+    /** Per-search tally of skipped remembered routes, logged as one line. */
+    private static final class FailedRouteSkips {
+        private int count;
+        private BlockPos origin;
+        private BlockPos firstHop;
+
+        void note(BlockPos origin, BlockPos hop) {
+            if (count == 0) {
+                this.origin = origin.toImmutable();
+                this.firstHop = hop.toImmutable();
+            }
+            count++;
         }
 
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-                BlockPos flat = start.add(dx, 0, dz);
-                best = chooseBetterLocalEscape(best,
-                        evaluateLocalEscapeCandidate(world, start, destination, flat, false, currentOpenNeighbors, startDistBlocks));
+        void logOnce(ServerPlayerEntity bot) {
+            if (count == 0 || bot == null || bot.getUuid() == null) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            FailedRoutePolicy.Key key = failedRouteKey(origin, firstHop);
+            if (!FAILED_ROUTES.claimSkipLog(bot.getUuid(), key, now)) {
+                return;
+            }
+            LOGGER.info("movement local escape skip remembered failed route: bot={} origin={} firstHop={} skipped={} ttlLeftMs={}",
+                    bot.getName().getString(), origin.toShortString(), firstHop.toShortString(), count,
+                    FAILED_ROUTES.remainingMs(bot.getUuid(), key, now));
+        }
+    }
 
-                BlockPos step = start.add(dx, 1, dz);
-                best = chooseBetterLocalEscape(best,
-                        evaluateLocalEscapeCandidate(world, start, destination, step, true, currentOpenNeighbors, startDistBlocks));
+    /**
+     * The cell the bot stands in, read on the ground. Mid-jump, {@code getBlockPos()} is one cell
+     * high, so a route searched from it starts one level up. On a worker thread this waits up to
+     * 400 ms for the bot to land; on the server thread (no sleeping) or if it is still airborne,
+     * it uses the first air cell above a collision floor within two cells below.
+     */
+    static BlockPos groundedOrigin(ServerPlayerEntity bot) {
+        BlockPos pos = bot.getBlockPos();
+        if (bot.isOnGround() || bot.isTouchingWater() || bot.isClimbing() || bot.hasVehicle()) {
+            return pos;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server != null && !server.isOnThread()) {
+            long deadline = System.currentTimeMillis() + 400L;
+            while (System.currentTimeMillis() < deadline && !bot.isOnGround()) {
+                sleep(40L);
+            }
+            pos = bot.getBlockPos();
+            if (bot.isOnGround()) {
+                return pos;
             }
         }
-        return best;
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return pos;
+        }
+        for (int dy = 0; dy <= 2; dy++) {
+            BlockPos cell = pos.down(dy);
+            BlockPos floor = cell.down();
+            if (world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()
+                    && !world.getBlockState(floor).getCollisionShape(world, floor).isEmpty()) {
+                return cell.toImmutable();
+            }
+        }
+        return pos;
     }
 
     private static LocalEscapeCandidate peekLocalEscapeDirective(ServerPlayerEntity player,
@@ -1394,7 +1517,8 @@ public final class MovementService {
                 leavesTrap,
                 true,
                 directive.reason(),
-                List.of(directive.target().toImmutable())
+                List.of(directive.target().toImmutable()),
+                start.toImmutable()
         );
     }
 
@@ -1409,11 +1533,13 @@ public final class MovementService {
     }
 
     private static LocalEscapeCandidate searchForLocalEscapeRoute(ServerWorld world,
+                                                                  UUID botId,
                                                                   BlockPos start,
                                                                   BlockPos destination,
                                                                   int currentOpenNeighbors,
                                                                   int currentReachableArea,
-                                                                  double startDistBlocks) {
+                                                                  double startDistBlocks,
+                                                                  FailedRouteSkips skips) {
         if (world == null || start == null || destination == null) {
             return null;
         }
@@ -1468,15 +1594,20 @@ public final class MovementService {
                 );
                 if (leavesTrap && route.size() > 1) {
                     BlockPos firstHop = route.get(1);
-                    best = chooseBetterLocalEscape(best, new LocalEscapeCandidate(
-                            firstHop,
-                            score,
-                            firstHop.getY() > start.getY(),
-                            true,
-                            false,
-                            describeLocalEscapeReason(route, candidateOpenNeighbors, candidateReachableArea, elevationGain),
-                            List.copyOf(route.subList(1, route.size()))
-                    ));
+                    if (skips != null && isRememberedFailedRoute(botId, start, firstHop)) {
+                        skips.note(start, firstHop);
+                    } else {
+                        best = chooseBetterLocalEscape(best, new LocalEscapeCandidate(
+                                firstHop,
+                                score,
+                                firstHop.getY() > start.getY(),
+                                true,
+                                false,
+                                describeLocalEscapeReason(route, candidateOpenNeighbors, candidateReachableArea, elevationGain),
+                                List.copyOf(route.subList(1, route.size())),
+                                start.toImmutable()
+                        ));
+                    }
                 }
 
                 if (nextDepth < maxHops) {
@@ -1637,7 +1768,8 @@ public final class MovementService {
                 leavesTrap,
                 false,
                 stepUp ? "step-up" : "flat",
-                List.of(candidate.toImmutable())
+                List.of(candidate.toImmutable()),
+                start.toImmutable()
         );
     }
 
@@ -3301,7 +3433,9 @@ public final class MovementService {
         if (world == null) {
             return false;
         }
-        BlockPos start = bot.getBlockPos();
+        BlockPos start = groundedOrigin(bot);
+        int rememberedSkips = 0;
+        BlockPos firstSkipped = null;
 
         // Build a small ordered set of candidate directions.
         int dx = goal.getX() - start.getX();
@@ -3347,6 +3481,12 @@ public final class MovementService {
             if (!isSolidStandable(world, step.down(), step)) {
                 continue;
             }
+            if (isRememberedFailedRoute(bot.getUuid(), start, step)) {
+                if (rememberedSkips++ == 0) {
+                    firstSkipped = step;
+                }
+                continue;
+            }
             tryTrimStepUpClearance(bot, start, step, label + "-trim");
 
             LOGGER.debug("step-up assist [{}]: from={} dir={} front={} step={}",
@@ -3356,12 +3496,24 @@ public final class MovementService {
                     front.toShortString(),
                     step.toShortString());
 
-            // nudgeToward will jump automatically for dy>0.6
-            if (nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup")) {
+            // nudgeToward will jump automatically for dy>0.6. Its reach (1.5 blocks to the step's
+            // centre) is met at a jump apex, so success is checked again once the bot has landed.
+            if (nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup")
+                    && groundedOrigin(bot).getY() >= step.getY()) {
                 return true;
             }
+            recordFailedRoute(bot, start, step, label + "-stepup");
         }
 
+        if (rememberedSkips > 0 && bot.getUuid() != null) {
+            long now = System.currentTimeMillis();
+            FailedRoutePolicy.Key key = failedRouteKey(start, firstSkipped);
+            if (FAILED_ROUTES.claimSkipLog(bot.getUuid(), key, now)) {
+                LOGGER.info("movement step-up skip remembered failed route [{}]: bot={} origin={} step={} skipped={} ttlLeftMs={}",
+                        label, bot.getName().getString(), start.toShortString(), firstSkipped.toShortString(),
+                        rememberedSkips, FAILED_ROUTES.remainingMs(bot.getUuid(), key, now));
+            }
+        }
         return false;
     }
 
