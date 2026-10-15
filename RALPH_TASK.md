@@ -3,7 +3,18 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.245) — next session starts here
+## Session Handoff 2026-10-15 (1.1.246) — next session starts here
+
+**State:** main = origin/main @ 1.1.246. Suite 2472 green. 1.1.246 = audit Phases 9-10, Q6 nav_mode (Guide topic rewritten
+from the real gates), Q7 nav tier payload, Q11 (modeSelected*, botSkins mirror), Q13 (village legacy import, mount `_legacy`
+write stopped), Q15, Q16. Field items: Phase 6ao.
+**Next:** 1.1.247 Phases 13-16 + Q17 + Q5 deletions (scoped), plus the mount `_legacy` promotion removal (Q13, one build after
+the write stopped). Then Q8/Q9/Q14 features (scoped), the Q2/Q3 legacy LLM retirement (split builds), the Q5 wall-off rebuild.
+**Needs Bradley:** Q14 as answered names force-dismount and `/bot unmount`, but force-dismount deliberately keeps the leash
+target (the held lead is restored on rejoin) and `/bot unmount` does not exist, so leash clearing is wired only where a lead
+is really released (tied to a fence, bot death). `/bot base remove` and `rename` have no admin or owner gate.
+
+## Session Handoff 2026-10-15 (1.1.245) — superseded
 
 **State:** main = origin/main @ 1.1.245. Suite 2469 green. 1.1.245 = audit Phases 4-8 (construction, services, provisioning,
 smelting dead bodies, ~1,790 lines, ratchet CraftingHelper 3 -> 1), no behaviour change, no new field items.
