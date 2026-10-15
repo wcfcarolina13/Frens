@@ -59,21 +59,6 @@ public final class BotStandDownService {
         }
     }
 
-    public static boolean isStandingDown(UUID botId) {
-        if (botId == null) {
-            return false;
-        }
-        StandDown active = ACTIVE.get(botId);
-        if (active == null) {
-            return false;
-        }
-        if (System.currentTimeMillis() >= active.expiresAtMs) {
-            ACTIVE.remove(botId);
-            return false;
-        }
-        return true;
-    }
-
     public static long getRemainingMs(UUID botId) {
         if (botId == null) {
             return 0L;

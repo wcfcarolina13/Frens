@@ -473,11 +473,6 @@ public final class BotChestRegistryService {
         if (changed) flush();
     }
 
-    /** Capture a snapshot of a chest's contents (merges duplicate items across slots). */
-    public static List<ItemSnapshot> captureContents(net.minecraft.inventory.Inventory inv) {
-        return captureSnapshotData(inv).contents();
-    }
-
     private static SnapshotData captureSnapshotData(net.minecraft.inventory.Inventory inv) {
         if (inv == null) {
             return new SnapshotData(List.of(), 0, 0, 0, System.currentTimeMillis());

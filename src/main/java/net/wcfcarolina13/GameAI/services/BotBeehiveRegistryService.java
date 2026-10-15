@@ -18,7 +18,6 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -272,23 +271,5 @@ public final class BotBeehiveRegistryService {
 
     public static boolean isProtected(ServerWorld world, BlockPos pos) {
         return findProtectingBeehive(world, pos) != null;
-    }
-
-    public static List<BeehiveRecord> listBeehives(ServerWorld world) {
-        if (world == null) {
-            return List.of();
-        }
-        MinecraftServer server = world.getServer();
-        if (server == null) {
-            return List.of();
-        }
-        verifyBeehives(world);
-        WorldData wd = worldData(server, world);
-        synchronized (LOCK) {
-            if (wd.hives == null || wd.hives.isEmpty()) {
-                return List.of();
-            }
-            return Collections.unmodifiableList(new ArrayList<>(wd.hives));
-        }
     }
 }

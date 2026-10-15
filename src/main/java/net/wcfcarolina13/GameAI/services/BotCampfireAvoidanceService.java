@@ -266,12 +266,4 @@ public final class BotCampfireAvoidanceService {
         // Campfire is exposed if any side is open
         return solidCount < 4;
     }
-
-    /**
-     * Check if a specific block is a campfire (regular or soul).
-     * Made public for external pathfinding checks.
-     */
-    public static boolean isCampfireBlock(BlockState state) {
-        return isCampfire(state);
-    }
 }

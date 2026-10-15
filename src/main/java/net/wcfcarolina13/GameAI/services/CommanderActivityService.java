@@ -38,12 +38,6 @@ public final class CommanderActivityService {
         lastBreakMs.put(player.getUuid(), System.currentTimeMillis());
     }
 
-    public static boolean isPlayerRecentlyMining(UUID playerId) {
-        if (playerId == null) return false;
-        Long ts = lastBreakMs.get(playerId);
-        return ts != null && (System.currentTimeMillis() - ts) < MINING_WINDOW_MS;
-    }
-
     /**
      * True if any real player in {@code world} has broken a block within {@link #MINING_WINDOW_MS}
      * and is currently within {@link #MINING_DROP_EXCLUSION_RADIUS} of the drop position.
