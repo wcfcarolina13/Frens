@@ -179,6 +179,8 @@ public final class LeashToFenceSkill implements Skill {
                 net.wcfcarolina13.GameAI.services.RideSyncService.clearLeashTarget(bot.getUuid());
                 LOGGER.info("[leash-target] {} cleared leash target {} after tying to a fence",
                         bot.getName().getString(), targetId);
+                net.wcfcarolina13.GameAI.services.MountPersistenceService.forgetHeldByBot(bot, targetId,
+                        net.wcfcarolina13.GameAI.services.LeashTargetPolicy.Event.TIED_TO_FENCE);
             } else {
                 LOGGER.info("[leash-target] {} kept leash target {}, still on its lead after the fence tie",
                         bot.getName().getString(), targetId);

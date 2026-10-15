@@ -199,6 +199,35 @@ public final class MountPersistenceService {
         }
     }
 
+    /**
+     * Rewrites the bot's saved mount record (current world) to {@code heldByBot=false} when
+     * {@link LeashTargetPolicy#shouldForgetHeldRecord} says so, so a rejoin does not re-leash an
+     * animal the bot already let go of. Works with the mount unloaded. Server thread only
+     * (STATE is a plain HashMap).
+     *
+     * @param mountUuid the leash target that was let go, or null when the event is not tied to one
+     * @return true when the record was rewritten
+     */
+    public static boolean forgetHeldByBot(ServerPlayerEntity bot, UUID mountUuid, LeashTargetPolicy.Event event) {
+        MountState state = getRecordedState(bot);
+        if (state == null) {
+            return false;
+        }
+        boolean matches = mountUuid != null && mountUuid.equals(state.mountUuid());
+        if (!LeashTargetPolicy.shouldForgetHeldRecord(event, state.heldByBot(), matches)) {
+            return false;
+        }
+        String alias = bot.getName().getString().toLowerCase();
+        String saveWorldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
+        MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
+                state.mountType(), state.saddled(), state.health(), state.wasMounted(), false);
+        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
+        flush();
+        LOGGER.info("[leash-target] {} saved mount {} no longer held by bot ({})",
+                bot.getName().getString(), state.mountUuid(), event);
+        return true;
+    }
+
     public static MountState getRecordedState(ServerPlayerEntity bot) {
         if (bot == null) {
             return null;

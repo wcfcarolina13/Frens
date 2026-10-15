@@ -38,4 +38,24 @@ public final class LeashTargetPolicy {
             case HELD_BY_BOT, DISCONNECT -> false;
         };
     }
+
+    /**
+     * Whether the saved mount record ({@code MountPersistenceService}) should drop its
+     * {@code heldByBot} flag, so a rejoin does not put the animal back on the bot's lead.
+     *
+     * @param event              what happened (only TIED_TO_FENCE and DIED ever rewrite)
+     * @param recordHeldByBot    the saved record says the bot holds the mount on a lead
+     * @param recordMountMatches the saved record's mount is the leash target that was let go.
+     *                           Ignored for {@link Event#DIED}: death drops every lead
+     */
+    public static boolean shouldForgetHeldRecord(Event event, boolean recordHeldByBot, boolean recordMountMatches) {
+        if (event == null || !recordHeldByBot) {
+            return false;
+        }
+        return switch (event) {
+            case TIED_TO_FENCE -> recordMountMatches;
+            case DIED -> true;
+            case HELD_BY_BOT, DISCONNECT -> false;
+        };
+    }
 }

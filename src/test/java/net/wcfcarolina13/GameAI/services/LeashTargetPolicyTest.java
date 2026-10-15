@@ -39,4 +39,32 @@ class LeashTargetPolicyTest {
     void nullEventKeepsTheTarget() {
         assertFalse(LeashTargetPolicy.shouldClear(null, false));
     }
+
+    @Test
+    void fenceTieForgetsTheSavedHeldRecordForThatMount() {
+        assertTrue(LeashTargetPolicy.shouldForgetHeldRecord(Event.TIED_TO_FENCE, true, true));
+    }
+
+    @Test
+    void fenceTieLeavesARecordForAnotherMount() {
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.TIED_TO_FENCE, true, false));
+    }
+
+    @Test
+    void deathForgetsAnyHeldRecord() {
+        assertTrue(LeashTargetPolicy.shouldForgetHeldRecord(Event.DIED, true, false));
+    }
+
+    @Test
+    void recordsNotHeldAreNeverRewritten() {
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.TIED_TO_FENCE, false, true));
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.DIED, false, false));
+    }
+
+    @Test
+    void holdingOrLeavingKeepsTheHeldRecord() {
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.HELD_BY_BOT, true, true));
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.DISCONNECT, true, true));
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(null, true, true));
+    }
 }
