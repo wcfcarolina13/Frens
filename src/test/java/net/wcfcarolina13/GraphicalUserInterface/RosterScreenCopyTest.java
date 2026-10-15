@@ -52,6 +52,29 @@ class RosterScreenCopyTest {
     }
 
     @Test
+    void emptyListLineNeverRepeatsTheTitle() {
+        for (RosterScreenCopy.State s : RosterScreenCopy.State.values()) {
+            String line = RosterScreenCopy.emptyListLine(s);
+            if (line.isEmpty()) {
+                continue;
+            }
+            java.util.Set<String> titlePairs = wordPairs(RosterScreenCopy.title(s));
+            for (String pair : wordPairs(line)) {
+                assertFalse(titlePairs.contains(pair), s + " placeholder repeats title words \"" + pair + "\": " + line);
+            }
+        }
+    }
+
+    private static java.util.Set<String> wordPairs(String text) {
+        String[] words = text.toLowerCase().replaceAll("[^a-z ]", " ").trim().split("\\s+");
+        java.util.Set<String> pairs = new java.util.HashSet<>();
+        for (int i = 0; i + 1 < words.length; i++) {
+            pairs.add(words[i] + " " + words[i + 1]);
+        }
+        return pairs;
+    }
+
+    @Test
     void otherWorldsCopyNamesTheCountAndWhatImportDoes() {
         assertEquals("Other worlds (2)", RosterScreenCopy.otherWorldsToggle(2, false));
         assertEquals("Back to this world", RosterScreenCopy.otherWorldsToggle(2, true));

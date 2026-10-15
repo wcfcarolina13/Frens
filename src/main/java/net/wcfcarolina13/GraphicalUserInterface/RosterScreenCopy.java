@@ -56,13 +56,16 @@ public final class RosterScreenCopy {
         };
     }
 
-    /** Placeholder shown where the list would be. Empty for {@link State#HAS_RESTORABLE}. */
+    /**
+     * Placeholder shown where the list would be. Empty for {@link State#HAS_RESTORABLE}. Never
+     * repeats the title, which is drawn just above it.
+     */
     public static String emptyListLine(State state) {
         return switch (state) {
             case HAS_RESTORABLE -> "";
-            case NONE_SAVED -> "(No saved bots yet. Create one below.)";
+            case NONE_SAVED -> "(Your bots will be listed here.)";
             case ALL_PRESENT -> "(Everyone you saved is already in this world.)";
-            case NONE_HERE -> "(No companions in this world yet.)";
+            case NONE_HERE -> "(Your saved companions are in other worlds.)";
         };
     }
 

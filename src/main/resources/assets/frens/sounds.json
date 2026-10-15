@@ -10672,6 +10672,11 @@
       }
     ]
   },
+  "bot.line.iron_golem_daisy_earned": {
+    "category": "voice",
+    "sounds": [],
+    "replace": false
+  },
   "bot.line.leaf_litter_fuel_run": {
     "category": "voice",
     "sounds": [
@@ -10752,6 +10757,11 @@
         "weight": 1
       }
     ]
+  },
+  "bot.line.snow_golem_ammo": {
+    "category": "voice",
+    "sounds": [],
+    "replace": false
   },
   "bot.line.snow_golem_friend": {
     "category": "voice",
@@ -10870,6 +10880,16 @@
       }
     ]
   },
+  "bot.line.snowball_escalate_on_now": {
+    "category": "voice",
+    "sounds": [],
+    "replace": false
+  },
+  "bot.line.snowball_escalate_in_for_it": {
+    "category": "voice",
+    "sounds": [],
+    "replace": false
+  },
   "bot.line.snowball_probe_heads_up": {
     "category": "voice",
     "sounds": [
@@ -10878,6 +10898,11 @@
         "weight": 1
       }
     ]
+  },
+  "bot.line.snowball_probe_incoming": {
+    "category": "voice",
+    "sounds": [],
+    "replace": false
   },
   "bot.line.snowball_taunt_all_you_got": {
     "category": "voice",
