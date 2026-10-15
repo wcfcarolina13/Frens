@@ -39,7 +39,7 @@ an "Other worlds (N)" toggle (RosterScopePolicy, singleplayer only). Details, ru
 **Field checks pending:** 6ah, 6ag, 6af (item 1: open **Nirn first**), 6ac remainder, 6ad, 6ae …  Now 285 items.
 
 **Next (in order):**
-1. Aiwan's "Revenant of <name>" husk duplication: waiting on his mod list (Bradley replied 2026-10-14).
+1. ~~Aiwan's "Revenant of <name>" husk duplication~~ CLOSED 2026-10-14: Aiwan confirmed the Maze Runner mod spawns them, not a Frens interaction.
 2. Deferred from 1.1.236: SHELTER_ACTIVE persistence across reload, join-check commander radius, multiplayer roster payload,
    hand-dig stair escape for a bot with no blocks.
 3. MCP fork: render-thread stall when the window is minimized (needs a clear error), get_screen_buttons from mapped code,
