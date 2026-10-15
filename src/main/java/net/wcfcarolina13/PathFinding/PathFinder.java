@@ -23,8 +23,12 @@ public class PathFinder {
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
     private static final int MAX_SEGMENT_MANHATTAN_SPAN = 6;
 
-    /** A/B test flag: set to true to use the Baritone-style pathfinder. */
-    public static boolean USE_BARITONE_STYLE = false;
+    /**
+     * Which finder {@link #calculatePath} uses. Baritone-style is the default since 1.1.240
+     * (Bradley, 2026-10-14); the bidirectional A* below is the "classic" fallback. Frens.java
+     * copies the persisted config value in at server start.
+     */
+    public static boolean USE_BARITONE_STYLE = true;
 
     public static class PathNode {
         public final BlockPos pos;
@@ -136,6 +140,7 @@ public class PathFinder {
 
         long deadline = System.currentTimeMillis() + PATHFIND_TIMEOUT_MS;
         int iterations = 0;
+        CampfireMemo campfires = new CampfireMemo(world);
 
         while (!openForward.isEmpty() && !openBackward.isEmpty()) {
             // Time-limit check every 512 iterations to avoid System.currentTimeMillis() overhead
@@ -150,7 +155,7 @@ public class PathFinder {
             openMapForward.remove(currentForward.position);
             closedForward.put(currentForward.position, currentForward);
 
-            for (BlockPos neighbor : getNeighbors(currentForward.position, world)) {
+            for (BlockPos neighbor : getNeighbors(currentForward.position, world, campfires)) {
                 if (closedForward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor)
@@ -185,7 +190,7 @@ public class PathFinder {
             openMapBackward.remove(currentBackward.position);
             closedBackward.put(currentBackward.position, currentBackward);
 
-            for (BlockPos neighbor : getNeighbors(currentBackward.position, world)) {
+            for (BlockPos neighbor : getNeighbors(currentBackward.position, world, campfires)) {
                 if (closedBackward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor)
@@ -240,24 +245,13 @@ public class PathFinder {
             boolean canStand = solidBelow && bodyClear && headClear;
             boolean jumpNeeded = current.jumpNeeded();
 
-            if (!canStand) {
-                // Try jumping up
-                BlockPos upFeetPos = feetPos.up();
-                BlockPos upBodyPos = bodyPos.up();
-                BlockPos upHeadPos = headPos.up();
-
-                boolean solidBelowUp = isSolidBlock(world, upFeetPos);
-                boolean bodyClearUp = isPassable(world, upBodyPos);
-                boolean headClearUp = isPassable(world, upHeadPos);
-
-                if (solidBelowUp && bodyClearUp && headClearUp) {
-                    canStand = true;
-                    jumpNeeded = true;
-                    pos = pos.up(); // Adjust to landing position
-                } else {
-                LOGGER.debug("Unwalkable multi-block obstacle at {}, skipping.", pos);
-                continue; // Completely blocked
-            }
+            // 1.1.240: never lift a node onto the block above it (that turned a planned cell
+            // into a hop nobody checked). The first node is the bot's own cell and stays where
+            // it is even mid-jump; a later cell that stopped being standable since planning
+            // is skipped, as before.
+            if (!canStand && !simplifiedPath.isEmpty()) {
+                LOGGER.debug("Unwalkable cell at {}, skipping.", pos);
+                continue;
             }
 
             String feetBlockType = world.getBlockState(feetPos).getBlock().getName().getString().toLowerCase();
@@ -495,29 +489,20 @@ public class PathFinder {
                 }
             }
 
-            if (!canStand) {
-                BlockPos upFeet = feetPos.up();
-                BlockPos upBody = bodyPos.up();
-                BlockPos upHead = headPos.up();
-
-                boolean canStandUp = isSolidBlock(world, upFeet) && isPassable(world, upBody) && isPassable(world, upHead);
-
-                if (canStandUp) {
-                    BlockState upHeadState = world.getBlockState(upHead);
-                    boolean isSlab = upHeadState.isIn(BlockTags.SLABS);
-                    boolean hasCollision = !upHeadState.getCollisionShape(world, upHead).isEmpty();
-
-                    if (isSlab || hasCollision) {
-                        LOGGER.debug("Jump blocked: obstacle above {} is slab/partial block", upHead);
-                        continue; // skip blocked path
-                    }
-
-                    canStand = true;
-                    jumpRequired = true;
-                    pos = pos.up();
-                } else {
-                    continue; // skip fully blocked
+            // 1.1.240: nodes are never lifted or dropped. getNeighbors only yields standing
+            // cells joined by executable edges, so:
+            //  - index 0 is the bot's own cell (may be mid-jump or in a slab): emitted as-is;
+            //  - the goal may be a block cell (a chest, a log, the ground under a stand
+            //    spot): it is trimmed and the walk ends on the standing cell next to it;
+            //  - any other non-standing cell breaks the invariant: the path is refused.
+            if (!canStand && i > 0) {
+                if (i == rawPath.size() - 1) {
+                    LOGGER.debug("Goal {} is not a standing cell; path ends at the cell before it", pos);
+                    continue;
                 }
+                LOGGER.warn("[PathFinder] Refusing path: node {} of {} at {} is not a standing cell",
+                        i, rawPath.size(), pos.toShortString());
+                return new ArrayList<>();
             }
 
             String feetBlockType = world.getBlockState(feetPos).getBlock().getName().getString().toLowerCase();
@@ -628,71 +613,177 @@ public class PathFinder {
         return path;
     }
 
-    private static List<BlockPos> getNeighbors(BlockPos pos, ServerWorld world) {
-        List<BlockPos> neighbors = new ArrayList<>();
+    private static final int[][] CARDINALS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
-        // Candidate positions (all directions)
-        List<BlockPos> candidates = new ArrayList<>();
-        
-        // Standard moves on same level
-        candidates.add(pos.add(1, 0, 0));  // East
-        candidates.add(pos.add(-1, 0, 0)); // West
-        candidates.add(pos.add(0, 0, 1));  // South
-        candidates.add(pos.add(0, 0, -1)); // North
-        candidates.add(pos.add(0, -1, 0)); // Down
-        candidates.add(pos.add(0, 1, 0));  // Up - careful: raw vertical climb
+    /**
+     * Neighbours of a standing cell. Every candidate is a standing cell (floor, body, head)
+     * joined by an edge {@link PathMovePolicy} calls executable: flat, step-up of one block
+     * with headroom above the origin, step-down of one block with a clear head lane. There is
+     * no raw vertical "Up" candidate (1.1.240) — it planned pillars no executor can walk.
+     *
+     * <p>The rule is symmetric for standing cells, which the bidirectional search needs: the
+     * backward frontier expands with this same function, so every edge must be walkable in
+     * both directions.
+     */
+    private static List<BlockPos> getNeighbors(BlockPos pos, ServerWorld world, CampfireMemo campfires) {
+        List<BlockPos> neighbors = new ArrayList<>(6);
+        // Lazily read once per node: headroom above the origin, only needed for a step-up.
+        Boolean originHeadroom = null;
 
-        // Smart step-up moves: only add if there's a block in front
-        for (BlockPos flatNeighbor : List.of(
-                pos.add(1, 0, 0),
-                pos.add(-1, 0, 0),
-                pos.add(0, 0, 1),
-                pos.add(0, 0, -1))) {
-
-            BlockPos blockInFront = flatNeighbor;
-            BlockPos topOfBlock = blockInFront.up();
-            BlockPos headSpace = topOfBlock.up();
-
-            if (isSolidBlock(world, blockInFront) && isPassable(world, topOfBlock) && isPassable(world, headSpace)) {
-                candidates.add(topOfBlock); // stepping onto it
+        for (int[] d : CARDINALS) {
+            BlockPos flat = pos.add(d[0], 0, d[1]);
+            boolean flatBodyClear = isPassable(world, flat);
+            if (flatBodyClear) {
+                boolean flatHeadClear = isPassable(world, flat.up());
+                if (hasSupportedFloor(world, flat)) {
+                    // Flat move.
+                    if (flatHeadClear) {
+                        addIfSafe(neighbors, flat, world, campfires);
+                    }
+                } else {
+                    // Step-down: the flat cell is the landing head, flat.up() the head lane.
+                    BlockPos drop = flat.down();
+                    if (PathMovePolicy.isExecutable(-1,
+                            hasSupportedFloor(world, drop),
+                            isPassable(world, drop),
+                            true,
+                            false,
+                            flatHeadClear)) {
+                        addIfSafe(neighbors, drop, world, campfires);
+                    }
+                }
+            } else if (isSolidBlock(world, flat)) {
+                // Step-up onto the block in front.
+                BlockPos top = flat.up();
+                if (originHeadroom == null) {
+                    originHeadroom = isPassable(world, pos.up(2));
+                }
+                if (PathMovePolicy.isExecutable(1,
+                        true,
+                        isPassable(world, top),
+                        isPassable(world, top.up()),
+                        originHeadroom,
+                        false)) {
+                    addIfSafe(neighbors, top, world, campfires);
+                }
             }
         }
 
-        // Smart step-down moves: when flat neighbor has no floor, check one block lower
-        for (BlockPos flatNeighbor : List.of(
-                pos.add(1, 0, 0),
-                pos.add(-1, 0, 0),
-                pos.add(0, 0, 1),
-                pos.add(0, 0, -1))) {
-
-            BlockPos dropPos = flatNeighbor.down();
-            if (isPassable(world, dropPos) && isPassable(world, flatNeighbor)
-                    && hasSupportedFloor(world, dropPos)) {
-                candidates.add(dropPos);
-            }
-        }
-
-        // Filter out positions near exposed campfires and dangerous floor blocks
-        for (BlockPos candidate : candidates) {
-            // Skip positions that are too close to exposed campfires
-            if (BotCampfireAvoidanceService.isNearExposedCampfire(world, candidate, 2)) {
-                LOGGER.debug("PathFinder: skipping {} - too close to exposed campfire", candidate);
-                continue;
-            }
-            // Never path onto magma blocks (solid, but deal contact damage)
-            BlockState floorState = world.getBlockState(candidate.down());
-            if (floorState.isOf(Blocks.MAGMA_BLOCK)) {
-                continue;
-            }
-            // Floor check: flat and downward moves require supported floor
-            int dy = candidate.getY() - pos.getY();
-            if (dy <= 0 && !hasSupportedFloor(world, candidate)) {
-                continue;
-            }
-            neighbors.add(candidate);
+        // Straight down onto a floor. Only passes from a floorless origin (the bot's own cell
+        // read mid-jump, or a floating goal); from a standing cell the body cell is the floor.
+        BlockPos below = pos.down();
+        if (isPassable(world, below) && PathMovePolicy.isExecutable(-1,
+                hasSupportedFloor(world, below),
+                isPassable(world, below),
+                isPassable(world, pos),
+                false,
+                isPassable(world, pos.up()))) {
+            addIfSafe(neighbors, below, world, campfires);
         }
 
         return neighbors;
+    }
+
+    /** Hazard filters, cheapest first: magma floor, then the (memoised) campfire berth. */
+    private static void addIfSafe(List<BlockPos> neighbors, BlockPos candidate, ServerWorld world,
+                                  CampfireMemo campfires) {
+        // Never path onto magma blocks (solid, but deal contact damage)
+        if (world.getBlockState(candidate.down()).isOf(Blocks.MAGMA_BLOCK)) {
+            return;
+        }
+        // Keep the same 2-block berth from exposed campfires the per-candidate scan gave.
+        if (campfires.isNearExposedCampfire(candidate)) {
+            return;
+        }
+        neighbors.add(candidate);
+    }
+
+    /**
+     * Per-search memo for {@link BotCampfireAvoidanceService#isNearExposedCampfire} with
+     * radius 2 (box x±2, y±1, z±2), same answer at a fraction of the cost.
+     *
+     * <p>The old filter read 75 cells for every candidate (about 2,000 block reads per A*
+     * iteration). Here each 16³ chunk section the search touches is asked once whether its
+     * palette holds a campfire at all ({@code ChunkSection.hasAny}), which is near-free and
+     * false almost everywhere. Only a section that does hold one is enumerated, once, and
+     * every exposed campfire in it marks the cells within its berth as dangerous. A candidate
+     * is then one set lookup. A candidate's box only reaches campfires in the sections its
+     * own box overlaps, so scanning exactly those sections keeps the semantics exact.
+     * Unloaded chunks are skipped, like the original scan, and never force-loaded.
+     */
+    static final class CampfireMemo {
+        private static final int RADIUS_XZ = 2;
+        private static final int RADIUS_Y = 1;
+
+        private final ServerWorld world;
+        private final Set<Long> scannedSections = new HashSet<>();
+        private final Set<Long> dangerCells = new HashSet<>();
+
+        CampfireMemo(ServerWorld world) {
+            this.world = world;
+        }
+
+        boolean isNearExposedCampfire(BlockPos pos) {
+            int x = pos.getX(), y = pos.getY(), z = pos.getZ();
+            for (int sx = (x - RADIUS_XZ) >> 4; sx <= (x + RADIUS_XZ) >> 4; sx++) {
+                for (int sz = (z - RADIUS_XZ) >> 4; sz <= (z + RADIUS_XZ) >> 4; sz++) {
+                    for (int sy = (y - RADIUS_Y) >> 4; sy <= (y + RADIUS_Y) >> 4; sy++) {
+                        scanSection(sx, sy, sz);
+                    }
+                }
+            }
+            return !dangerCells.isEmpty() && dangerCells.contains(pos.asLong());
+        }
+
+        private void scanSection(int sx, int sy, int sz) {
+            long key = net.minecraft.util.math.ChunkSectionPos.asLong(sx, sy, sz);
+            if (!scannedSections.add(key)) {
+                return;
+            }
+            if (!world.isChunkLoaded(sx, sz)) {
+                return;
+            }
+            net.minecraft.world.chunk.WorldChunk chunk = world.getChunk(sx, sz);
+            int index = chunk.getSectionIndex(sy << 4);
+            if (index < 0 || index >= chunk.countVerticalSections()) {
+                return;
+            }
+            net.minecraft.world.chunk.ChunkSection section = chunk.getSection(index);
+            if (section == null || section.isEmpty() || !section.hasAny(CampfireMemo::isCampfire)) {
+                return;
+            }
+            int baseX = sx << 4, baseY = sy << 4, baseZ = sz << 4;
+            BlockPos.Mutable cursor = new BlockPos.Mutable();
+            for (int ly = 0; ly < 16; ly++) {
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        if (!isCampfire(section.getBlockState(lx, ly, lz))) {
+                            continue;
+                        }
+                        BlockPos campfire = cursor.set(baseX + lx, baseY + ly, baseZ + lz).toImmutable();
+                        if (!BotCampfireAvoidanceService.isCampfireExposed(world, campfire)) {
+                            continue;
+                        }
+                        markBerth(campfire);
+                    }
+                }
+            }
+        }
+
+        private void markBerth(BlockPos campfire) {
+            for (int dx = -RADIUS_XZ; dx <= RADIUS_XZ; dx++) {
+                for (int dy = -RADIUS_Y; dy <= RADIUS_Y; dy++) {
+                    for (int dz = -RADIUS_XZ; dz <= RADIUS_XZ; dz++) {
+                        dangerCells.add(BlockPos.asLong(campfire.getX() + dx, campfire.getY() + dy, campfire.getZ() + dz));
+                    }
+                }
+            }
+        }
+
+        private static boolean isCampfire(BlockState state) {
+            return state != null
+                    && (state.isOf(Blocks.CAMPFIRE) || state.isOf(Blocks.SOUL_CAMPFIRE));
+        }
     }
 
 
