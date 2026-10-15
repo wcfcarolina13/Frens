@@ -80,17 +80,6 @@ public final class DropSweepService {
         return true;
     }
 
-    public static long getSuppressionRemainingMs(UUID botId) {
-        if (botId == null) {
-            return 0L;
-        }
-        Long until = suppressUntilMs.get(botId);
-        if (until == null) {
-            return 0L;
-        }
-        return Math.max(0L, until - System.currentTimeMillis());
-    }
-
     public static boolean isInProgress() {
         return dropSweepInProgress.get();
     }

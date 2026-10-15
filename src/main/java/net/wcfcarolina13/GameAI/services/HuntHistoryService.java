@@ -179,50 +179,6 @@ public final class HuntHistoryService {
         }
     }
 
-    public static boolean hasAnyFoodKill(ServerWorld world) {
-        if (world == null) {
-            return false;
-        }
-        MinecraftServer server = world.getServer();
-        if (server == null) {
-            return false;
-        }
-        WorldData wd = worldData(server, world);
-        synchronized (LOCK) {
-            if (wd.huntedByPlayer == null || wd.huntedByPlayer.isEmpty()) {
-                return false;
-            }
-            for (List<String> list : wd.huntedByPlayer.values()) {
-                if (list != null && !list.isEmpty()) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    }
-
-    public static boolean hasFoodKill(ServerPlayerEntity player) {
-        if (player == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
-        }
-        MinecraftServer server = world.getServer();
-        if (server == null) {
-            return false;
-        }
-        WorldData wd = worldData(server, world);
-        String playerId = playerKey(player);
-        if (playerId.isBlank()) {
-            return false;
-        }
-        synchronized (LOCK) {
-            if (wd.huntedByPlayer == null) {
-                return false;
-            }
-            List<String> list = wd.huntedByPlayer.get(playerId);
-            return list != null && !list.isEmpty();
-        }
-    }
-
     public static Set<Identifier> getWorldHistory(ServerWorld world) {
         if (world == null) {
             return Collections.emptySet();

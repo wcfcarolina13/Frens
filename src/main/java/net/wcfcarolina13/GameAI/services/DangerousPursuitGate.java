@@ -9,7 +9,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotActions;
 
@@ -143,20 +142,5 @@ public final class DangerousPursuitGate {
             return true;
         }
         return BotActions.hasRangedWeapon(bot);
-    }
-
-    /**
-     * Convenience: is this entity-position pair safe to pursue at all?
-     * Combines location safety with the non-aggro rule. Used when the bot
-     * is considering walking *to* an enemy position to fight.
-     */
-    public static boolean isCombatPursuitSafe(ServerPlayerEntity bot, Entity candidate, World world) {
-        if (!shouldEngageNonAggro(bot, candidate)) {
-            return false;
-        }
-        if (candidate == null) {
-            return false;
-        }
-        return isLocationSafeForPursuit(bot, BlockPos.ofFloored(new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ())), world);
     }
 }

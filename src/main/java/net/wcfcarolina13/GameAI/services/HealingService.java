@@ -181,10 +181,6 @@ public final class HealingService {
         return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_CRITICAL;
     }
 
-    public static boolean isEmergencyHungry(ServerPlayerEntity bot) {
-        return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_EMERGENCY;
-    }
-
     /**
      * Iteration-boundary helper for long-running skills. Returns true iff the bot is
      * starving AND a single autoEat pass couldn't fix it (no food in inventory or only

@@ -81,13 +81,6 @@ public final class HotbarLockService {
         return LOCKED_SLOT.get(bot.getUuid());
     }
 
-    public static String getReason(ServerPlayerEntity bot) {
-        if (!isLocked(bot)) {
-            return null;
-        }
-        return LOCK_REASON.get(bot.getUuid());
-    }
-
     public static void maybeLogBlocked(ServerPlayerEntity bot, String subsystem) {
         if (bot == null || !isLocked(bot)) {
             return;
