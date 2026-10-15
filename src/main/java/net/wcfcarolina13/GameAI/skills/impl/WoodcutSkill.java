@@ -85,6 +85,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -138,7 +139,12 @@ public final class WoodcutSkill implements Skill {
     private static final int WOODCUT_OFFLOAD_LOCAL_CHEST_RADIUS = 48;
     private static final int WOODCUT_OFFLOAD_LOCAL_CHEST_YSPAN = 8;
     private static final double WOODCUT_NEARBY_REMEMBERED_PROBE_DIST_SQ = 56.0D * 56.0D;
-    private RequestedWorkBounds activeRequestedBounds;
+    /**
+     * Each bounded run's requested bounds, keyed per bot: the registered skill instance is shared
+     * by every bot, so one bot's bounds must never gate (or free) another's moves. No entry =
+     * unbounded. Set at run start, removed in the run's finally.
+     */
+    private final Map<UUID, RequestedWorkBounds> activeRequestedBoundsByBot = new ConcurrentHashMap<>();
     /** Bots running this woodcut bare-handed until they hold wood for a first axe. Keyed per bot: the registered skill instance is shared. */
     private final Set<UUID> axeBootstrapBots = ConcurrentHashMap.newKeySet();
     /** Bootstrap bots' last failed axe craft: cell and cause (WoodcutAxeBootstrapPolicy.mayAttemptCraft). */
@@ -180,8 +186,20 @@ public final class WoodcutSkill implements Skill {
      * worked, released in the per-tree finally and all at once in the run's finally.
      */
     private static final WoodcutTreeClaims TREE_CLAIMS = new WoodcutTreeClaims();
-    /** The tree base (packed) each bot currently holds a claim on, for cheap refreshes. */
-    private final Map<UUID, Long> activeTreeClaimByBot = new ConcurrentHashMap<>();
+    /** The tree each bot's run currently holds a claim on, for cheap refreshes; lost once another bot took it. */
+    private record ActiveTreeClaim(WoodcutTreeClaims.TreeKey tree, long runToken, boolean lost) {
+    }
+    private final Map<UUID, ActiveTreeClaim> activeTreeClaimByBot = new ConcurrentHashMap<>();
+    /** Per-run token stamped on claims, so a run's finally frees only the claims that run made. */
+    private static final AtomicLong WOODCUT_RUN_TOKENS = new AtomicLong();
+    /** Claims count for the wait and the scan only within the search radius plus this margin (XZ). */
+    private static final int CLAIM_RELEVANCE_MARGIN = 8;
+    /** Mining and felling detail when the bot's tree claim was lost to another bot mid-tree. */
+    private static final String LOST_TREE_CLAIM_DETAIL = "lost-tree-claim";
+    /** A strict or loose candidate whose base is this close (XZ) to a claimed base is that bot's tree (moved base). */
+    private static final int CLAIMED_BASE_NEAR_RADIUS = 2;
+    /** A floating log this close (XZ) to a claimed base is that bot's canopy. */
+    private static final int CLAIMED_CANOPY_NEAR_RADIUS = 4;
     /** How long a bot with no target waits on other bots' claimed trees before sharing one. */
     private static final long CLAIMED_TREES_WAIT_MS = 20_000L;
     // The last failed stand walk's detail per bot (moveToStandDirect), read by the dry reposition
@@ -201,8 +219,10 @@ public final class WoodcutSkill implements Skill {
     // this box are treated as within the requested bounds so the bot may prune
     // canopy/leaves that overhang the caller's bounds (e.g. farm AABB) for the
     // currently-targeted tree. Cleared when the tree's iteration ends.
-    private BlockPos activeTreeWorkEnvelopeMin;
-    private BlockPos activeTreeWorkEnvelopeMax;
+    // Keyed per bot because the skill instance is shared.
+    private record TreeWorkEnvelope(BlockPos min, BlockPos max) {
+    }
+    private final Map<UUID, TreeWorkEnvelope> activeTreeWorkEnvelopeByBot = new ConcurrentHashMap<>();
     private static final int LOCAL_TREE_CLEANUP_RADIUS = 6;
     private static final int LOCAL_TREE_CLEANUP_VERTICAL_RANGE = 8;
     private static final long LOCAL_TREE_CLEANUP_DURATION_MS = 6_000L;
@@ -651,63 +671,69 @@ public final class WoodcutSkill implements Skill {
         return "woodcut";
     }
 
-    private boolean isBoundedWorkMode() {
-        return activeRequestedBounds != null;
+    /** This bot's requested bounds for its current run, or null when it runs unbounded. */
+    private RequestedWorkBounds requestedBoundsFor(ServerPlayerEntity bot) {
+        return bot == null ? null : activeRequestedBoundsByBot.get(bot.getUuid());
     }
 
-    private boolean isWithinRequestedBounds(BlockPos pos) {
-        if (activeRequestedBounds == null) {
+    private boolean isBoundedWorkMode(ServerPlayerEntity bot) {
+        return requestedBoundsFor(bot) != null;
+    }
+
+    private boolean isWithinRequestedBounds(ServerPlayerEntity bot, BlockPos pos) {
+        RequestedWorkBounds bounds = requestedBoundsFor(bot);
+        if (bounds == null) {
             return true;
         }
         if (pos == null) {
             return false;
         }
-        if (activeRequestedBounds.contains(pos)) {
+        if (bounds.contains(pos)) {
             return true;
         }
         // Per-tree overlay: let the bot prune canopy/leaves of the tree it's
         // actively felling even if they overhang the caller's bounds.
-        return isWithinActiveTreeWorkEnvelope(pos);
+        return isWithinActiveTreeWorkEnvelope(bot, pos);
     }
 
-    private boolean isWithinActiveTreeWorkEnvelope(BlockPos pos) {
-        if (activeTreeWorkEnvelopeMin == null || activeTreeWorkEnvelopeMax == null || pos == null) {
+    private boolean isWithinActiveTreeWorkEnvelope(ServerPlayerEntity bot, BlockPos pos) {
+        TreeWorkEnvelope envelope = bot == null ? null : activeTreeWorkEnvelopeByBot.get(bot.getUuid());
+        if (envelope == null || pos == null) {
             return false;
         }
-        return pos.getX() >= activeTreeWorkEnvelopeMin.getX()
-                && pos.getX() <= activeTreeWorkEnvelopeMax.getX()
-                && pos.getY() >= activeTreeWorkEnvelopeMin.getY()
-                && pos.getY() <= activeTreeWorkEnvelopeMax.getY()
-                && pos.getZ() >= activeTreeWorkEnvelopeMin.getZ()
-                && pos.getZ() <= activeTreeWorkEnvelopeMax.getZ();
+        return pos.getX() >= envelope.min().getX()
+                && pos.getX() <= envelope.max().getX()
+                && pos.getY() >= envelope.min().getY()
+                && pos.getY() <= envelope.max().getY()
+                && pos.getZ() >= envelope.min().getZ()
+                && pos.getZ() <= envelope.max().getZ();
     }
 
-    private boolean isWithinRequestedBoundsXZ(BlockPos pos) {
-        return activeRequestedBounds == null || activeRequestedBounds.containsXZ(pos);
-    }
-
-    private boolean isTreeWorkEnvelopeWithinBounds(TreeDetector.TreeTarget target) {
-        if (activeRequestedBounds == null || target == null) {
+    private boolean isTreeWorkEnvelopeWithinBounds(ServerPlayerEntity bot, TreeDetector.TreeTarget target) {
+        RequestedWorkBounds bounds = requestedBoundsFor(bot);
+        if (bounds == null || target == null) {
             return true;
         }
         // Only the trunk (base → top) must be inside the caller's bounds. The
         // leaf envelope may overhang — once selected, mining authority for the
         // canopy is granted via the per-tree work envelope overlay (see
-        // isWithinRequestedBounds / activeTreeWorkEnvelope*).
-        return activeRequestedBounds.contains(target.base())
-                && activeRequestedBounds.contains(target.top());
+        // isWithinRequestedBounds / activeTreeWorkEnvelopeByBot).
+        return bounds.contains(target.base())
+                && bounds.contains(target.top());
     }
 
-    private RequestedWorkBounds.CleanupBounds clampCleanupBounds(int minX,
+    private RequestedWorkBounds.CleanupBounds clampCleanupBounds(ServerPlayerEntity bot,
+                                                                 int minX,
                                                                  int maxX,
                                                                  int minY,
                                                                  int maxY,
                                                                  int minZ,
                                                                  int maxZ) {
-        if (activeRequestedBounds == null) {
+        RequestedWorkBounds bounds = requestedBoundsFor(bot);
+        if (bounds == null) {
             return new RequestedWorkBounds.CleanupBounds(minX, maxX, minY, maxY, minZ, maxZ);
         }
-        return activeRequestedBounds.clampCleanupBounds(minX, maxX, minY, maxY, minZ, maxZ);
+        return bounds.clampCleanupBounds(minX, maxX, minY, maxY, minZ, maxZ);
     }
 
     private MovementService.MovementResult executeMovementPlan(ServerCommandSource source,
@@ -718,26 +744,26 @@ public final class WoodcutSkill implements Skill {
             return new MovementService.MovementResult(false, null, bot == null ? null : bot.getBlockPos(), "null-plan");
         }
         BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
-        if (!isWithinRequestedBounds(approach) || !isWithinRequestedBounds(plan.finalDestination())) {
+        if (!isWithinRequestedBounds(bot, approach) || !isWithinRequestedBounds(bot, plan.finalDestination())) {
             LOGGER.info("Woodcut bounded: rejecting movement [{}] final={} approach={} bounds={}",
                     label,
                     plan.finalDestination() == null ? "null" : plan.finalDestination().toShortString(),
                     approach == null ? "null" : approach.toShortString(),
-                    activeRequestedBounds);
+                    requestedBoundsFor(bot));
             return new MovementService.MovementResult(false, plan.mode(), bot == null ? null : bot.getBlockPos(), "requested-bounds");
         }
         return MovementService.execute(source, bot, plan, false, true, true, false);
     }
 
-    private int maxBridgeLengthWithinBounds(BlockPos origin, Direction direction, int requestedLength) {
-        if (activeRequestedBounds == null || origin == null || direction == null) {
+    private int maxBridgeLengthWithinBounds(ServerPlayerEntity bot, BlockPos origin, Direction direction, int requestedLength) {
+        if (!isBoundedWorkMode(bot) || origin == null || direction == null) {
             return requestedLength;
         }
         int maxAllowed = 0;
         for (int step = 1; step <= requestedLength; step++) {
             BlockPos walkPos = origin.offset(direction, step);
             BlockPos bridgePos = walkPos.down();
-            if (!isWithinRequestedBounds(walkPos) || !isWithinRequestedBounds(bridgePos)) {
+            if (!isWithinRequestedBounds(bot, walkPos) || !isWithinRequestedBounds(bot, bridgePos)) {
                 break;
             }
             maxAllowed = step;
@@ -769,7 +795,13 @@ public final class WoodcutSkill implements Skill {
         int searchRadius = Math.max(6, getIntParameter(context.parameters(), "searchRadius", DEFAULT_SEARCH_RADIUS));
         int verticalRange = Math.max(4, getIntParameter(context.parameters(), "verticalRange", DEFAULT_VERTICAL_RANGE));
         RequestedWorkBounds requestedBounds = RequestedWorkBounds.fromParameters(context.parameters());
-        activeRequestedBounds = requestedBounds;
+        if (requestedBounds != null) {
+            activeRequestedBoundsByBot.put(bot.getUuid(), requestedBounds);
+        } else {
+            activeRequestedBoundsByBot.remove(bot.getUuid());
+        }
+        // Stamped on this run's tree claims, so its finally frees only those (WoodcutTreeClaims).
+        long runToken = WOODCUT_RUN_TOKENS.incrementAndGet();
         refusedMineTargetsByBot.put(bot.getUuid(), new WoodcutRefusedTargets());
         try {
             int startTimeOfDay = bot.getEntityWorld() != null ? (int) (bot.getEntityWorld().getTimeOfDay() % 24000L) : 0;
@@ -940,7 +972,9 @@ public final class WoodcutSkill implements Skill {
                 // on them with nothing else in range (a lone tree is then shared, not blocked).
                 boolean ignoreClaimsThisScan = ignoreClaimsNextScan;
                 ignoreClaimsNextScan = false;
-                Set<BlockPos> claimedByOthers = ignoreClaimsThisScan ? Set.of() : treesClaimedByOthers(bot);
+                // Only claims in this dimension near the bot count, for the scan and for the wait.
+                int claimRadius = claimRelevanceRadius(effectiveSearchRadius);
+                Set<BlockPos> claimedByOthers = ignoreClaimsThisScan ? Set.of() : treesClaimedByOthers(bot, claimRadius);
                 WoodcutDetectionSnapshot detection = scanDetectionSnapshot(bot, effectiveSearchRadius, verticalRange, visitedBases, failedBases, failedBaseReasons, requestedBounds, claimedByOthers);
                 long detectionDurationMs = (System.nanoTime() - detectionStartedAt) / 1_000_000L;
                 logDetectionSnapshot(detection, detectionDurationMs);
@@ -970,7 +1004,7 @@ public final class WoodcutSkill implements Skill {
                 }
                 if (targetOpt.isEmpty()) {
                     if (detection.floatingLog() != null && !failedBases.contains(detection.floatingLog())
-                            && !isNearClaimedTree(detection.floatingLog(), claimedByOthers)) {
+                            && !isNearClaimedTree(detection.floatingLog(), claimedByOthers, CLAIMED_CANOPY_NEAR_RADIUS)) {
                         LOGGER.warn("Woodcut: cleaning floating log at {}", detection.floatingLog().toShortString());
                         TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(detection.floatingLog(), detection.floatingLog(), 1);
                         targetOpt = Optional.of(synthetic);
@@ -979,7 +1013,7 @@ public final class WoodcutSkill implements Skill {
                             claimWaitUsed = true;
                             LOGGER.info("Woodcut: no free tree near {}; {} tree(s) claimed by other bots, waiting up to {}s",
                                     bot.getBlockPos().toShortString(), claimedByOthers.size(), CLAIMED_TREES_WAIT_MS / 1000L);
-                            ignoreClaimsNextScan = waitForClaimedTrees(bot);
+                            ignoreClaimsNextScan = waitForClaimedTrees(bot, claimRadius);
                             if (ignoreClaimsNextScan) {
                                 LOGGER.info("Woodcut: trees still claimed after waiting; rescanning once including them");
                             }
@@ -1031,7 +1065,7 @@ public final class WoodcutSkill implements Skill {
 
                 TreeDetector.TreeTarget target = targetOpt.get();
                 protectedOnlyScanStreak = 0;
-                if (!isTreeWorkEnvelopeWithinBounds(target)) {
+                if (!isTreeWorkEnvelopeWithinBounds(bot, target)) {
                     LOGGER.info("Woodcut bounded: rejecting target base={} top={} envelope=[{} -> {}] bounds={} reason=out-of-bounds-tree-envelope",
                             target.base().toShortString(),
                             target.top().toShortString(),
@@ -1090,18 +1124,18 @@ public final class WoodcutSkill implements Skill {
                         continue;
                     }
                 }
-                if (!claimTree(bot, target.base())) {
+                if (!claimTree(bot, target.base(), runToken)) {
                     if (ignoreClaimsThisScan) {
                         // The one rescan after waiting on claimed trees: share rather than idle.
                         LOGGER.info("Woodcut: tree {} is claimed by {}, sharing it (no free tree after waiting)",
                                 target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
                     } else {
-                        // Raced another bot to this tree (or a remembered site it holds): skipped like
-                        // a failed base this pass, but not marked failed, so it is free again later.
+                        // Raced another bot to this tree (or a remembered site it holds): skipped, but
+                        // not marked failed, so it is free again later. Not a failure toward
+                        // relocation either: the next scan leaves the claimed tree out.
                         LOGGER.info("Woodcut: tree {} is claimed by {}, picking another",
                                 target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
                         totalFailures++;
-                        consecutiveFailures++;
                         continue;
                     }
                 }
@@ -1113,10 +1147,10 @@ public final class WoodcutSkill implements Skill {
 
                 // Activate per-tree work envelope so the felling phase may prune
                 // canopy/leaves overhanging the caller's bounds for this tree.
-                activeTreeWorkEnvelopeMin = target.envelopeMin().add(
-                        -WOODCUT_LOG_SCAN_EXPANSION, -1, -WOODCUT_LOG_SCAN_EXPANSION);
-                activeTreeWorkEnvelopeMax = target.envelopeMax().add(
-                        WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION);
+                TreeWorkEnvelope treeEnvelope = new TreeWorkEnvelope(
+                        target.envelopeMin().add(-WOODCUT_LOG_SCAN_EXPANSION, -1, -WOODCUT_LOG_SCAN_EXPANSION),
+                        target.envelopeMax().add(WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION, WOODCUT_LOG_SCAN_EXPANSION));
+                activeTreeWorkEnvelopeByBot.put(bot.getUuid(), treeEnvelope);
                 try {
 
                 // Track footprint to size post-run drop sweep.
@@ -1137,6 +1171,14 @@ public final class WoodcutSkill implements Skill {
                                 < WoodcutApproachFeasibilityPolicy.TRAPPED_MOVE_BLOCKS
                         ? trappedStreak : 0;
                 if (!approachBase(source, bot, target.base(), sharedState, reachSession, streakHere)) {
+                    if (isTreeClaimLost(bot)) {
+                        // Another bot took the tree after our claim expired: leave it to them.
+                        // Not a failure (no relocation count, not a failed base); the per-tree
+                        // finally releases nothing that is theirs.
+                        LOGGER.info("Woodcut: abandoning tree {} during approach; claimed by {}",
+                                target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                        continue;
+                    }
                     totalFailures++;
                     consecutiveFailures++;
                     pathFailures++;
@@ -1183,13 +1225,23 @@ public final class WoodcutSkill implements Skill {
                 // minus after), not mine attempts: retries and other break paths cannot skew it.
                 ServerWorld logCountWorld = bot.getEntityWorld() instanceof ServerWorld w ? w : null;
                 int envelopeLogsBefore = countEnvelopeLogs(logCountWorld, target);
-                refreshTreeClaim(bot);
+                if (!refreshTreeClaim(bot)) {
+                    LOGGER.info("Woodcut: abandoning tree {} before felling; claimed by {}",
+                            target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                    continue;
+                }
                 TreeHarvestResult harvest = fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters, reachSession);
                 int logsCutFromTree = Math.max(0, envelopeLogsBefore - countEnvelopeLogs(logCountWorld, target));
                 trunkMineStarts += reachSession.trunkMineAttemptsStarted;
                 leafBlocksBroken += reachSession.leafBlocksBroken;
                 scaffoldPlaced += reachSession.scaffoldPlaced;
                 scaffoldRemoved += reachSession.scaffoldRemoved;
+                if (!harvest.success() && LOST_TREE_CLAIM_DETAIL.equals(harvest.detail())) {
+                    LOGGER.info("Woodcut: abandoning tree {} mid-felling after {} log(s); claimed by {}",
+                            target.base().toShortString(), logsCutFromTree, treeClaimOwnerName(bot, target.base()));
+                    logTargetTrace(target, reachSession, "LOST_CLAIM");
+                    continue;
+                }
                 if (!harvest.success()) {
                     totalFailures++;
                     consecutiveFailures++;
@@ -1254,9 +1306,8 @@ public final class WoodcutSkill implements Skill {
                     sinceCleanup = 0;
                 }
                 } finally {
-                    activeTreeWorkEnvelopeMin = null;
-                    activeTreeWorkEnvelopeMax = null;
-                    releaseTreeClaim(bot, target.base());
+                    activeTreeWorkEnvelopeByBot.remove(bot.getUuid(), treeEnvelope);
+                    releaseTreeClaim(bot, target.base(), runToken);
                 }
             }
 
@@ -1280,7 +1331,7 @@ public final class WoodcutSkill implements Skill {
                     WoodcutReachSession floaterSession = new WoodcutReachSession();
                     // Clear leaves toward floater before approach
                     Direction towardFloater = directionToward(bot.getBlockPos(), floater);
-                    if (!isWithinRequestedBounds(floater)) {
+                    if (!isWithinRequestedBounds(bot, floater)) {
                         LOGGER.info("Woodcut bounded: skipping floater {} outside requested bounds {}", floater.toShortString(), requestedBounds);
                         continue;
                     }
@@ -1390,15 +1441,17 @@ public final class WoodcutSkill implements Skill {
             axeBootstrapLastFailure.remove(bot.getUuid());
             axeBootstrapFailedAttempts.remove(bot.getUuid());
             axeBootstrapSharedState.remove(bot.getUuid());
-            activeRequestedBounds = null;
+            if (requestedBounds != null) {
+                activeRequestedBoundsByBot.remove(bot.getUuid(), requestedBounds);
+            }
             refusedMineTargetsByBot.remove(bot.getUuid());
             lastStandMoveDetailByBot.remove(bot.getUuid());
             hungerWarnedBots.remove(bot.getUuid());
             starvationPauseBots.remove(bot.getUuid());
-            activeTreeWorkEnvelopeMin = null;
-            activeTreeWorkEnvelopeMax = null;
-            // Every way out of the run (finish, forceAbort, starvation pause, exception) frees its trees.
-            releaseAllTreeClaims(bot);
+            // The tree envelope is removed by the per-tree finally, which always runs first.
+            // Every way out of the run (finish, forceAbort, starvation pause, exception) frees its
+            // trees: only this run's claims, so a quick restart of the same bot keeps its own.
+            releaseAllTreeClaims(bot, runToken);
         }
     }
 
@@ -1508,7 +1561,7 @@ public final class WoodcutSkill implements Skill {
             return;
         }
         try {
-            RequestedWorkBounds.CleanupBounds clamped = clampCleanupBounds(minX, maxX, minY, maxY, minZ, maxZ);
+            RequestedWorkBounds.CleanupBounds clamped = clampCleanupBounds(bot, minX, maxX, minY, maxY, minZ, maxZ);
             Map<String, Object> params = new HashMap<>();
             params.put("radius", Math.max(8, radius));
             params.put("verticalRange", Math.max(6, verticalRange));
@@ -1622,7 +1675,7 @@ public final class WoodcutSkill implements Skill {
             params.put("durationMs", LOCAL_TREE_CLEANUP_DURATION_MS);
             params.put("sweep", false);
             params.put("scaffold", true);
-            RequestedWorkBounds.CleanupBounds clamped = clampCleanupBounds(
+            RequestedWorkBounds.CleanupBounds clamped = clampCleanupBounds(bot,
                     base.getX() - LOCAL_TREE_CLEANUP_RADIUS,
                     base.getX() + LOCAL_TREE_CLEANUP_RADIUS,
                     base.getY() - 3,
@@ -1652,7 +1705,7 @@ public final class WoodcutSkill implements Skill {
         if (bot == null || source == null || isInventoryFull(bot) || TaskService.isServerStopping() || isAbortRequested(bot)) {
             return;
         }
-        if (isBoundedWorkMode()) {
+        if (isBoundedWorkMode(bot)) {
             return;
         }
         double radius = QUICK_TREE_SWEEP_RADIUS;
@@ -1838,12 +1891,12 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 // No axe yet: the logs above stay for later (floaters) instead of a pillar of axe wood.
-                boolean ascentBlockedByBootstrap = !success && !isAbortRequested(bot)
+                boolean ascentBlockedByBootstrap = !success && !isTreeWorkStopped(bot)
                         && !bootstrapAllowsPillar(bot, "fell-ascent");
                 if (ascentBlockedByBootstrap) {
                     terminalReason = "bootstrap-no-pillar";
                 }
-                if (!success && !ascentBlockedByBootstrap && !isAbortRequested(bot)) {
+                if (!success && !ascentBlockedByBootstrap && !isTreeWorkStopped(bot)) {
                     // Phase 2: Position at trunk base (walk into cleared column)
                     boolean positioned = false;
                     if (isDryWoodcutStandCell(world, trunkBase)) {
@@ -1884,7 +1937,7 @@ public final class WoodcutSkill implements Skill {
                         int maxScanY = target.top().getY() + 2;
                         int pillarSteps = 0;
                         for (int step = 0; step <= maxSteps; step++) {
-                            if (TaskService.isServerStopping() || isAbortRequested(bot)) {
+                            if (TaskService.isServerStopping() || isTreeWorkStopped(bot)) {
                                 terminalReason = "abort-requested";
                                 break;
                             }
@@ -1916,7 +1969,7 @@ public final class WoodcutSkill implements Skill {
                                 terminalReason = "pillar-failed";
                                 break;
                             }
-                            recordRecoveryPlacements(world, placed, sharedState, reachSession);
+                            recordRecoveryPlacements(bot, world, placed, sharedState, reachSession);
                             bot.setSneaking(true);
                             sleepQuiet(PILLAR_STEP_DELAY_MS);
                             if (!verifyPillarProgress(bot, world, column, target, reachSession, startY)) {
@@ -1931,12 +1984,12 @@ public final class WoodcutSkill implements Skill {
                             }
 
                             // Bridge sweep from elevated pillar: reach distant branch logs laterally
-                            if (!isAbortRequested(bot) && pillarSteps >= 2) {
+                            if (!isTreeWorkStopped(bot) && pillarSteps >= 2) {
                                 BlockPos preBridgePos = bot.getBlockPos().toImmutable();
                                 for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
                                     if (isAbortRequested(bot)) break;
                                     boolean hasTargetsInDir = false;
-                                    int maxBridgeLength = maxBridgeLengthWithinBounds(bot.getBlockPos(), bridgeDir, 6);
+                                    int maxBridgeLength = maxBridgeLengthWithinBounds(bot, bot.getBlockPos(), bridgeDir, 6);
                                     if (maxBridgeLength <= 0) {
                                         continue;
                                     }
@@ -1944,7 +1997,7 @@ public final class WoodcutSkill implements Skill {
                                         BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
                                         for (int dy = -2; dy <= 4; dy++) {
                                             BlockPos check = probe.up(dy);
-                                            if (!isWithinRequestedBounds(check)) {
+                                            if (!isWithinRequestedBounds(bot, check)) {
                                                 continue;
                                             }
                                             if (world.getBlockState(check).isIn(BlockTags.LOGS)) {
@@ -2000,8 +2053,12 @@ public final class WoodcutSkill implements Skill {
             reachSession.trunkMineAttemptsStarted = totalMined;
 
             // Fallback: if leftovers remain, pillar up near the tree and bridge outward
+            // Lost the tree to another bot: leave its logs to them, not to this run's floater pass.
+            if (isTreeClaimLost(bot)) {
+                return new TreeHarvestResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, LOST_TREE_CLAIM_DETAIL);
+            }
             List<BlockPos> leftoverClusterLogs = collectRemainingEnvelopeLogs(bot, world, target);
-            if (!leftoverClusterLogs.isEmpty() && !isAbortRequested(bot)
+            if (!leftoverClusterLogs.isEmpty() && !isTreeWorkStopped(bot)
                     && bootstrapAllowsPillar(bot, "fell-fallback")) {
                 LOGGER.info("Woodcut fallback bridge: attempting pillar+bridge for {} remaining logs at base {}",
                         leftoverClusterLogs.size(), trunkBase.toShortString());
@@ -2012,7 +2069,7 @@ public final class WoodcutSkill implements Skill {
                 if (pillarNeeded > 0) {
                     List<BlockPos> pillarPlaced = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
                     if (!pillarPlaced.isEmpty()) {
-                        recordRecoveryPlacements(world, pillarPlaced, sharedState, reachSession);
+                        recordRecoveryPlacements(bot, world, pillarPlaced, sharedState, reachSession);
                         sleepQuiet(PILLAR_STEP_DELAY_MS);
                         canBridge = true;
                     } else {
@@ -2023,7 +2080,7 @@ public final class WoodcutSkill implements Skill {
                     for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
                         if (isAbortRequested(bot)) break;
                         boolean hasTargetsInDir = false;
-                        int maxBridgeLength = maxBridgeLengthWithinBounds(bot.getBlockPos(), bridgeDir, 6);
+                        int maxBridgeLength = maxBridgeLengthWithinBounds(bot, bot.getBlockPos(), bridgeDir, 6);
                         if (maxBridgeLength <= 0) {
                             continue;
                         }
@@ -2031,7 +2088,7 @@ public final class WoodcutSkill implements Skill {
                             BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
                             for (int dy = -3; dy <= 4; dy++) {
                                 BlockPos check = probe.up(dy);
-                                if (!isWithinRequestedBounds(check)) {
+                                if (!isWithinRequestedBounds(bot, check)) {
                                     continue;
                                 }
                                 if (world.getBlockState(check).isIn(BlockTags.LOGS)) {
@@ -2176,19 +2233,19 @@ public final class WoodcutSkill implements Skill {
         List<BlockPos> remaining = new ArrayList<>();
         for (Long key : visited) {
             BlockPos pos = allLogs.get(key);
-            if (pos != null && isWithinRequestedBounds(pos)) {
+            if (pos != null && isWithinRequestedBounds(bot, pos)) {
                 remaining.add(pos);
             }
         }
         remaining = bot != null
                 ? WoodcutKnowledgeService.mergeRememberedLogs(bot, world, target, remaining)
                 : remaining;
-        if (activeRequestedBounds != null) {
+        if (isBoundedWorkMode(bot)) {
             // NOTE: Stream.toList() returns an unmodifiable list. The
             // subsequent sort() call below would throw UOE. Wrap in a
             // mutable ArrayList.
             remaining = remaining.stream()
-                    .filter(this::isWithinRequestedBounds)
+                    .filter(pos -> isWithinRequestedBounds(bot, pos))
                     .collect(Collectors.toCollection(ArrayList::new));
         }
         remaining.sort(Comparator
@@ -2531,7 +2588,7 @@ public final class WoodcutSkill implements Skill {
 
     /** Breaks leaf blocks along the ray to a target log so the bot can reach it. */
     private void clearPathToTarget(ServerPlayerEntity bot, BlockPos target) {
-        if (!isWithinRequestedBounds(target)) {
+        if (!isWithinRequestedBounds(bot, target)) {
             return;
         }
         if (hasLineOfSight(bot, Vec3d.ofCenter(target))) return;
@@ -2545,7 +2602,7 @@ public final class WoodcutSkill implements Skill {
             if (hit == null || hit.getType() != HitResult.Type.BLOCK) return;
             BlockPos hitPos = hit.getBlockPos();
             if (hitPos.equals(target)) return;
-            if (!isWithinRequestedBounds(hitPos)) {
+            if (!isWithinRequestedBounds(bot, hitPos)) {
                 return;
             }
             BlockState state = world.getBlockState(hitPos);
@@ -2845,12 +2902,14 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (!isWithinRequestedBounds(base)) {
-            LOGGER.info("Woodcut bounded: rejecting approach base {} outside requested bounds {}", base.toShortString(), activeRequestedBounds);
+        if (!isWithinRequestedBounds(bot, base)) {
+            LOGGER.info("Woodcut bounded: rejecting approach base {} outside requested bounds {}", base.toShortString(), requestedBoundsFor(bot));
             return false;
         }
         LOGGER.info("Woodcut approach: target base={} from {}", base.toShortString(), bot.getBlockPos().toShortString());
-        refreshTreeClaim(bot);
+        if (!refreshTreeClaim(bot)) {
+            return false;
+        }
         Vec3d approachOrigin = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         if (reachSession != null) {
             reachSession.approachOrigin = approachOrigin;
@@ -2876,7 +2935,7 @@ public final class WoodcutSkill implements Skill {
         }
         // First try a low, human-like standable near the base.
         BlockPos nearby = findDryStandableNear(world, base, 4, 4);
-        if (nearby != null && isWithinRequestedBounds(nearby)) {
+        if (nearby != null && isWithinRequestedBounds(bot, nearby)) {
             LOGGER.info("Woodcut approach: direct dry stand {} for {}", nearby.toShortString(), base.toShortString());
             Direction towardNearby = directionToward(bot.getBlockPos(), nearby);
             if (towardNearby != null) {
@@ -2915,7 +2974,7 @@ public final class WoodcutSkill implements Skill {
         if (planOpt.isPresent()) {
             MovementService.MovementPlan plan = planOpt.get();
             BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
-            if (!isWithinRequestedBounds(approach)) {
+            if (!isWithinRequestedBounds(bot, approach)) {
                 LOGGER.info("Woodcut bounded: rejecting planner approach {} for {} reason=out-of-bounds", approach.toShortString(), base.toShortString());
             } else if (!isUsableWoodcutStand(world, approach)) {
                 LOGGER.info("Woodcut approach: planner candidate {} for {} rejected (reason=no dry stand)",
@@ -3051,7 +3110,7 @@ public final class WoodcutSkill implements Skill {
             if (stand == null || !isUsableWoodcutStand(world, stand)) {
                 continue;
             }
-            if (!isWithinRequestedBounds(stand)) {
+            if (!isWithinRequestedBounds(bot, stand)) {
                 continue;
             }
             if (!attemptedStands.add(stand.asLong())) {
@@ -3265,8 +3324,8 @@ public final class WoodcutSkill implements Skill {
         if (!needsDeposit) {
             return true;
         }
-        if (isBoundedWorkMode()) {
-            LOGGER.info("Woodcut bounded: refusing offload outside requested bounds {}; inventory remains constrained", activeRequestedBounds);
+        if (isBoundedWorkMode(bot)) {
+            LOGGER.info("Woodcut bounded: refusing offload outside requested bounds {}; inventory remains constrained", requestedBoundsFor(bot));
             return false;
         }
         List<ChestStoreService.StorageChestCandidate> candidates = ChestStoreService.listDepositChestCandidates(
@@ -3679,7 +3738,7 @@ public final class WoodcutSkill implements Skill {
         }
         MovementService.MovementPlan plan = planOpt.get();
         BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
-        if (!isWithinRequestedBounds(approach)) {
+        if (!isWithinRequestedBounds(bot, approach)) {
             LOGGER.info("Woodcut bounded: reposition candidate {} for {} rejected (reason=requested-bounds)",
                     approach.toShortString(), target.toShortString());
             return false;
@@ -3820,11 +3879,11 @@ public final class WoodcutSkill implements Skill {
         if (source == null || bot == null || world == null || stand == null) {
             return false;
         }
-        if (!isWithinRequestedBounds(stand) || (target != null && !isWithinRequestedBounds(target))) {
+        if (!isWithinRequestedBounds(bot, stand) || (target != null && !isWithinRequestedBounds(bot, target))) {
             LOGGER.info("Woodcut bounded: rejecting stand move stand={} target={} bounds={}",
                     stand.toShortString(),
                     target == null ? "none" : target.toShortString(),
-                    activeRequestedBounds);
+                    requestedBoundsFor(bot));
             if (reachSession != null) {
                 reachSession.recordFailedReroute(target, stand, "requested-bounds");
             }
@@ -3868,7 +3927,7 @@ public final class WoodcutSkill implements Skill {
         if (source == null || bot == null || world == null || stand == null) {
             return false;
         }
-        if (!isWithinRequestedBounds(stand) || (target != null && !isWithinRequestedBounds(target))) {
+        if (!isWithinRequestedBounds(bot, stand) || (target != null && !isWithinRequestedBounds(bot, target))) {
             return false;
         }
         breakSoftBlock(world, bot, stand);
@@ -3949,7 +4008,7 @@ public final class WoodcutSkill implements Skill {
         addSafeWoodcutRerouteCandidate(candidates, world, findDryStandableNear(world, bot.getBlockPos(), 2, 3));
         return candidates.stream()
                 .filter(Objects::nonNull)
-                .filter(this::isWithinRequestedBounds)
+                .filter(pos -> isWithinRequestedBounds(bot, pos))
                 .filter(pos -> reachSession == null || !reachSession.isBlacklistedReroute(target, pos))
                 .sorted(Comparator.comparingDouble(pos -> {
                     SafePositionService.SurfaceCandidateAssessment assessment =
@@ -4317,7 +4376,9 @@ public final class WoodcutSkill implements Skill {
                     }
                     // Another bot is cutting this tree: counted like a visited one, so its logs
                     // never read as a protected-only or empty scan.
-                    if (claimedByOthers != null && claimedByOthers.contains(tree.base())) {
+                    // Near rather than equal: the base moves as the other bot cuts (a lower log
+                    // gone, or another column of a 2x2 trunk).
+                    if (isNearClaimedTree(tree.base(), claimedByOthers, CLAIMED_BASE_NEAR_RADIUS)) {
                         visitedLogs++;
                         continue;
                     }
@@ -4351,7 +4412,7 @@ public final class WoodcutSkill implements Skill {
                     TreeDetector.TreeTarget looseTree = looseTreeOpt.get();
                     if ((visited == null || !visited.contains(looseTree.base()))
                             && (failedBases == null || !failedBases.contains(looseTree.base()))
-                            && (claimedByOthers == null || !claimedByOthers.contains(looseTree.base()))) {
+                            && !isNearClaimedTree(looseTree.base(), claimedByOthers, CLAIMED_BASE_NEAR_RADIUS)) {
                         double looseTreeDistSq = origin.getSquaredDistance(looseTree.base());
                         if (looseTreeDistSq < nearestLooseTreeDist) {
                             nearestLooseTreeDist = looseTreeDistSq;
@@ -4866,7 +4927,7 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (!isWithinRequestedBounds(target)) {
+        if (!isWithinRequestedBounds(bot, target)) {
             return false;
         }
         MovementService.MovementPlan plan = MovementService.planLootApproach(
@@ -4882,7 +4943,7 @@ public final class WoodcutSkill implements Skill {
                         bot.getHorizontalFacing()
                 ));
         BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
-        if (!isWithinRequestedBounds(approach) || !isUsableWoodcutStand(world, approach)) {
+        if (!isWithinRequestedBounds(bot, approach) || !isUsableWoodcutStand(world, approach)) {
             LOGGER.info("Woodcut relocation: rejected target {} via {} (reason=no-dry-stand)",
                     target.toShortString(), approach.toShortString());
             return false;
@@ -4919,7 +4980,7 @@ public final class WoodcutSkill implements Skill {
                                      Map<String, Object> sharedState,
                                      WoodcutReachSession reachSession) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
-        if (!isWithinRequestedBounds(target)) {
+        if (!isWithinRequestedBounds(bot, target)) {
             LOGGER.info("Woodcut bounded: refusing scaffold placement outside bounds at {}", target.toShortString());
             return false;
         }
@@ -4965,7 +5026,7 @@ public final class WoodcutSkill implements Skill {
                 if (world.getFluidState(alt.down()).isIn(net.minecraft.registry.tag.FluidTags.WATER)) {
                     continue;
                 }
-                if (!isWithinRequestedBounds(alt)) {
+                if (!isWithinRequestedBounds(bot, alt)) {
                     continue;
                 }
                 if (!isPlaceableTarget(world, alt)) {
@@ -5000,7 +5061,7 @@ public final class WoodcutSkill implements Skill {
             return null;
         }
         BlockPos below = target.down();
-        if (!isWithinRequestedBounds(below)) {
+        if (!isWithinRequestedBounds(bot, below)) {
             return null;
         }
         BlockState belowState = world.getBlockState(below);
@@ -5160,8 +5221,17 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "no-world");
         }
-        if (!isWithinRequestedBounds(pos)) {
-            LOGGER.info("Woodcut bounded: refusing to mine {} outside requested bounds {}", pos.toShortString(), activeRequestedBounds);
+        // Every mine refreshes the tree claim: a long scaffold or offload phase can outlast the TTL.
+        // Lost to another bot: stop taking that tree's logs and leaves, but still mine our own
+        // scaffold on the way down and out.
+        if (!refreshTreeClaim(bot) && pos != null) {
+            BlockState lostClaimState = world.getBlockState(pos);
+            if (lostClaimState.isIn(BlockTags.LOGS) || lostClaimState.isIn(BlockTags.LEAVES)) {
+                return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, LOST_TREE_CLAIM_DETAIL);
+            }
+        }
+        if (!isWithinRequestedBounds(bot, pos)) {
+            LOGGER.info("Woodcut bounded: refusing to mine {} outside requested bounds {}", pos.toShortString(), requestedBoundsFor(bot));
             return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "requested-bounds");
         }
         WoodcutRefusedTargets refusedTargets = refusedMineTargetsByBot.get(bot.getUuid());
@@ -5289,7 +5359,7 @@ public final class WoodcutSkill implements Skill {
                 bot.setSneaking(wasSneaking);
                 return;
             }
-            if (!isWithinRequestedBounds(placed)) {
+            if (!isWithinRequestedBounds(bot, placed)) {
                 LOGGER.info("Woodcut bounded: skipping scaffold cleanup outside requested bounds at {}", placed.toShortString());
                 reachSession.cleanupIncomplete = true;
                 continue;
@@ -5317,7 +5387,7 @@ public final class WoodcutSkill implements Skill {
 
                 // Try to escape to safe ground
                 BlockPos escape = findEscapeStandNear(world, bot.getBlockPos(), 8);
-                if (escape != null && isWithinRequestedBounds(escape)) {
+                if (escape != null && isWithinRequestedBounds(bot, escape)) {
                     MovementService.MovementPlan escapePlan = new MovementService.MovementPlan(
                             MovementService.Mode.DIRECT, escape, escape, null, null, bot.getHorizontalFacing());
                     executeMovementPlan(source, bot, escapePlan, "cleanup-escape");
@@ -5348,7 +5418,7 @@ public final class WoodcutSkill implements Skill {
         if (isWithinReach(bot, placed)) {
             return true;
         }
-        if (!isWithinRequestedBounds(placed)) {
+        if (!isWithinRequestedBounds(bot, placed)) {
             return false;
         }
         BlockPos stand = reachSession == null ? null : reachSession.groundedWoodcutStand();
@@ -5361,7 +5431,7 @@ public final class WoodcutSkill implements Skill {
         if (stand == null) {
             return false;
         }
-        if (!isWithinRequestedBounds(stand)) {
+        if (!isWithinRequestedBounds(bot, stand)) {
             return false;
         }
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -5394,8 +5464,8 @@ public final class WoodcutSkill implements Skill {
         if (safeGround == null) {
             return false;
         }
-        if (!isWithinRequestedBounds(safeGround)) {
-            LOGGER.info("Woodcut bounded: refusing cleanup bridge toward {} outside requested bounds {}", safeGround.toShortString(), activeRequestedBounds);
+        if (!isWithinRequestedBounds(bot, safeGround)) {
+            LOGGER.info("Woodcut bounded: refusing cleanup bridge toward {} outside requested bounds {}", safeGround.toShortString(), requestedBoundsFor(bot));
             return false;
         }
 
@@ -5414,7 +5484,7 @@ public final class WoodcutSkill implements Skill {
         }
 
         int bridgeLength = Math.min(6, (int) Math.sqrt(bot.getBlockPos().getSquaredDistance(safeGround)));
-        bridgeLength = maxBridgeLengthWithinBounds(bot.getBlockPos(), bridgeDir, bridgeLength);
+        bridgeLength = maxBridgeLengthWithinBounds(bot, bot.getBlockPos(), bridgeDir, bridgeLength);
         if (bridgeLength <= 0) {
             return false;
         }
@@ -5423,7 +5493,7 @@ public final class WoodcutSkill implements Skill {
         for (int i = 0; i < bridgeLength; i++) {
             if (isAbortRequested(bot)) break;
             BlockPos bridgePos = current.offset(bridgeDir, i + 1).down();
-            if (!isWithinRequestedBounds(bridgePos)) {
+            if (!isWithinRequestedBounds(bot, bridgePos)) {
                 break;
             }
             if (world.getBlockState(bridgePos).getCollisionShape(world, bridgePos).isEmpty()) {
@@ -5435,7 +5505,7 @@ public final class WoodcutSkill implements Skill {
             }
             // Walk forward
             BlockPos nextPos = current.offset(bridgeDir, i + 1);
-            if (!isWithinRequestedBounds(nextPos)) {
+            if (!isWithinRequestedBounds(bot, nextPos)) {
                 break;
             }
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -5928,7 +5998,7 @@ public final class WoodcutSkill implements Skill {
             LOGGER.info("Woodcut {}: pillar-up {} step(s) from {} toward surfaceY={}",
                     label, pillarSteps, bot.getBlockPos().toShortString(), targetSurfaceY);
             List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps);
-            recordRecoveryPlacements(world, placed, sharedState, reachSession);
+            recordRecoveryPlacements(bot, world, placed, sharedState, reachSession);
             if (world.isSkyVisible(bot.getBlockPos().up()) && bot.getBlockY() + 1 >= targetSurfaceY) {
                 return true;
             }
@@ -6013,7 +6083,7 @@ public final class WoodcutSkill implements Skill {
         if (source == null || bot == null || target == null) {
             return false;
         }
-        if (!isWithinRequestedBounds(target)) {
+        if (!isWithinRequestedBounds(bot, target)) {
             return false;
         }
         Optional<MovementService.MovementPlan> plan =
@@ -6027,7 +6097,8 @@ public final class WoodcutSkill implements Skill {
         return MovementService.nudgeTowardUntilClose(bot, target, 2.0D, 3_000L, 0.20D, label);
     }
 
-    private void recordRecoveryPlacements(ServerWorld world,
+    private void recordRecoveryPlacements(ServerPlayerEntity bot,
+                                          ServerWorld world,
                                           List<BlockPos> placements,
                                           Map<String, Object> sharedState,
                                           WoodcutReachSession reachSession) {
@@ -6038,7 +6109,7 @@ public final class WoodcutSkill implements Skill {
             if (placed == null) {
                 continue;
             }
-            if (!isWithinRequestedBounds(placed)) {
+            if (!isWithinRequestedBounds(bot, placed)) {
                 LOGGER.info("Woodcut bounded: dropping out-of-bounds recovery placement {}", placed.toShortString());
                 continue;
             }
@@ -6053,7 +6124,7 @@ public final class WoodcutSkill implements Skill {
         if (bot == null || source == null || isInventoryFull(bot) || TaskService.isServerStopping() || isAbortRequested(bot)) {
             return;
         }
-        if (isBoundedWorkMode()) {
+        if (isBoundedWorkMode(bot)) {
             return;
         }
         try {
@@ -6429,7 +6500,7 @@ public final class WoodcutSkill implements Skill {
             LOGGER.warn("Woodcut approach: no dry stand under/near {} (reason=no dry stand)", target.toShortString());
             return false;
         }
-        if (!isWithinRequestedBounds(stand) || !isWithinRequestedBounds(target)) {
+        if (!isWithinRequestedBounds(bot, stand) || !isWithinRequestedBounds(bot, target)) {
             return false;
         }
         breakSoftBlock(world, bot, stand);
@@ -6477,7 +6548,9 @@ public final class WoodcutSkill implements Skill {
         String lastDetail = "unknown";
         for (int attempt = 0; attempt < MAX_RETRY_MINING; attempt++) {
             LOGGER.info("Woodcut mining attempt {} for {}", attempt + 1, target.toShortString());
-            refreshTreeClaim(bot);
+            if (!refreshTreeClaim(bot)) {
+                return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, LOST_TREE_CLAIM_DETAIL);
+            }
             if (horizontalDistance(bot.getBlockPos(), target) > 2.5) {
                 moveUnderTarget(source, bot, target);
             }
@@ -7094,7 +7167,7 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             BlockPos pos = BlockPos.fromLong(packed);
-            if (!isWithinRequestedBounds(pos)) {
+            if (!isWithinRequestedBounds(bot, pos)) {
                 continue;
             }
             if (Math.abs(pos.getX() - base.getX()) > radius
@@ -7139,22 +7212,43 @@ public final class WoodcutSkill implements Skill {
         return bot != null && (TaskService.isServerStopping() || SkillManager.shouldAbortSkill(bot) || !TaskService.hasActiveTask(bot.getUuid()));
     }
 
-    /** Tree bases other bots hold live claims on (empty when no other bot is cutting). */
-    private static Set<BlockPos> treesClaimedByOthers(ServerPlayerEntity bot) {
-        Set<Long> packed = TREE_CLAIMS.claimedByOthers(bot.getUuid(), System.currentTimeMillis());
-        if (packed.isEmpty()) {
+    /** The claim key for a tree base in the bot's dimension. */
+    private static WoodcutTreeClaims.TreeKey treeKey(ServerPlayerEntity bot, BlockPos base) {
+        return new WoodcutTreeClaims.TreeKey(dimensionId(bot), base.getX(), base.getY(), base.getZ());
+    }
+
+    private static String dimensionId(ServerPlayerEntity bot) {
+        return bot == null || bot.getEntityWorld() == null
+                ? "" : bot.getEntityWorld().getRegistryKey().getValue().toString();
+    }
+
+    /**
+     * Tree bases other bots hold live claims on in this bot's dimension and within {@code radius}
+     * blocks (XZ) of it; a negative radius means anywhere in the dimension. Empty when no other
+     * bot is cutting nearby.
+     */
+    private static Set<BlockPos> treesClaimedByOthers(ServerPlayerEntity bot, int radius) {
+        BlockPos here = bot.getBlockPos();
+        Set<WoodcutTreeClaims.TreeKey> keys = TREE_CLAIMS.claimedByOthersNear(bot.getUuid(), dimensionId(bot),
+                here.getX(), here.getZ(), radius, System.currentTimeMillis());
+        if (keys.isEmpty()) {
             return Set.of();
         }
-        Set<BlockPos> out = new HashSet<>(packed.size());
-        for (long base : packed) {
-            out.add(BlockPos.fromLong(base));
+        Set<BlockPos> out = new HashSet<>(keys.size());
+        for (WoodcutTreeClaims.TreeKey key : keys) {
+            out.add(new BlockPos(key.x(), key.y(), key.z()));
         }
         return out;
     }
 
-    /** This run's failed bases plus other bots' claimed trees, for the search exclusions. */
+    /** The radius claims matter within for a scan of {@code effectiveSearchRadius}. */
+    private static int claimRelevanceRadius(int effectiveSearchRadius) {
+        return effectiveSearchRadius + CLAIM_RELEVANCE_MARGIN;
+    }
+
+    /** This run's failed bases plus other bots' claimed trees (this dimension), for the search exclusions. */
     private static Set<BlockPos> withTreesClaimedByOthers(ServerPlayerEntity bot, Set<BlockPos> failedBases) {
-        Set<BlockPos> claimed = treesClaimedByOthers(bot);
+        Set<BlockPos> claimed = treesClaimedByOthers(bot, -1);
         if (claimed.isEmpty()) {
             return failedBases;
         }
@@ -7165,54 +7259,85 @@ public final class WoodcutSkill implements Skill {
         return out;
     }
 
-    /** Claims the target tree for this bot; false when another bot holds a live claim on it. */
-    private boolean claimTree(ServerPlayerEntity bot, BlockPos base) {
-        long packed = base.asLong();
-        if (!TREE_CLAIMS.tryClaim(packed, bot.getUuid(), System.currentTimeMillis(), WoodcutTreeClaims.DEFAULT_TTL_MS)) {
+    /** Claims the target tree for this bot's run; false when another bot holds a live claim on it. */
+    private boolean claimTree(ServerPlayerEntity bot, BlockPos base, long runToken) {
+        WoodcutTreeClaims.TreeKey key = treeKey(bot, base);
+        if (!TREE_CLAIMS.tryClaim(key, bot.getUuid(), runToken, System.currentTimeMillis(), WoodcutTreeClaims.DEFAULT_TTL_MS)) {
             return false;
         }
-        activeTreeClaimByBot.put(bot.getUuid(), packed);
+        activeTreeClaimByBot.put(bot.getUuid(), new ActiveTreeClaim(key, runToken, false));
         return true;
     }
 
-    /** Keeps this bot's claim on the tree it is working alive (called per approach and mining step). */
-    private void refreshTreeClaim(ServerPlayerEntity bot) {
+    /**
+     * Keeps this bot's claim on the tree it is working alive (called per approach and mining step).
+     * False when the claim was lost: it expired (a long offload or scaffold phase) and another bot
+     * took the tree. The bot then abandons that tree; the loss is sticky until the tree's iteration
+     * ends. True when the bot holds no claim (cleanup passes, a shared tree).
+     */
+    private boolean refreshTreeClaim(ServerPlayerEntity bot) {
         if (bot == null) {
-            return;
+            return true;
         }
-        Long base = activeTreeClaimByBot.get(bot.getUuid());
-        if (base != null
-                && !TREE_CLAIMS.tryClaim(base, bot.getUuid(), System.currentTimeMillis(), WoodcutTreeClaims.DEFAULT_TTL_MS)) {
-            LOGGER.debug("Woodcut: {} lost its expired claim on tree {}", bot.getName().getString(),
-                    BlockPos.fromLong(base).toShortString());
+        ActiveTreeClaim active = activeTreeClaimByBot.get(bot.getUuid());
+        if (active == null) {
+            return true;
         }
+        if (active.lost()) {
+            return false;
+        }
+        if (TREE_CLAIMS.tryClaim(active.tree(), bot.getUuid(), active.runToken(), System.currentTimeMillis(),
+                WoodcutTreeClaims.DEFAULT_TTL_MS)) {
+            return true;
+        }
+        BlockPos base = new BlockPos(active.tree().x(), active.tree().y(), active.tree().z());
+        LOGGER.info("Woodcut: {} lost its expired claim on tree {} to {}; abandoning that tree",
+                bot.getName().getString(), base.toShortString(), treeClaimOwnerName(bot, base));
+        activeTreeClaimByBot.replace(bot.getUuid(), active, new ActiveTreeClaim(active.tree(), active.runToken(), true));
+        return false;
     }
 
-    /** A floating log within a few blocks of another bot's claimed tree is that bot's canopy, not ours. */
-    private static boolean isNearClaimedTree(BlockPos log, Set<BlockPos> claimedByOthers) {
+    /** True once this bot's refresh found its tree taken by another bot (see {@link #refreshTreeClaim}). */
+    private boolean isTreeClaimLost(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        ActiveTreeClaim active = activeTreeClaimByBot.get(bot.getUuid());
+        return active != null && active.lost();
+    }
+
+    /** Abort, or this bot lost the claim on the tree it is felling. */
+    private boolean isTreeWorkStopped(ServerPlayerEntity bot) {
+        return isAbortRequested(bot) || isTreeClaimLost(bot);
+    }
+
+    /** A log within {@code radius} blocks (XZ) of another bot's claimed tree base is that bot's tree, not ours. */
+    private static boolean isNearClaimedTree(BlockPos log, Set<BlockPos> claimedByOthers, int radius) {
         if (log == null || claimedByOthers == null || claimedByOthers.isEmpty()) {
             return false;
         }
         for (BlockPos base : claimedByOthers) {
-            if (Math.abs(base.getX() - log.getX()) <= 4 && Math.abs(base.getZ() - log.getZ()) <= 4) {
+            if (WoodcutTreeClaims.withinXZ(base.getX(), base.getZ(), log.getX(), log.getZ(), radius)) {
                 return true;
             }
         }
         return false;
     }
 
-    private void releaseTreeClaim(ServerPlayerEntity bot, BlockPos base) {
-        TREE_CLAIMS.release(base.asLong(), bot.getUuid());
-        activeTreeClaimByBot.remove(bot.getUuid(), base.asLong());
+    /** Ends this run's claim on the tree (no-op when another bot took it). */
+    private void releaseTreeClaim(ServerPlayerEntity bot, BlockPos base, long runToken) {
+        TREE_CLAIMS.release(treeKey(bot, base), bot.getUuid(), runToken);
+        activeTreeClaimByBot.computeIfPresent(bot.getUuid(), (uuid, active) -> active.runToken() == runToken ? null : active);
     }
 
-    private void releaseAllTreeClaims(ServerPlayerEntity bot) {
-        TREE_CLAIMS.releaseAll(bot.getUuid());
-        activeTreeClaimByBot.remove(bot.getUuid());
+    /** Frees only the claims this run made, so a quick restart of the same bot keeps its new claims. */
+    private void releaseAllTreeClaims(ServerPlayerEntity bot, long runToken) {
+        TREE_CLAIMS.releaseAll(bot.getUuid(), runToken);
+        activeTreeClaimByBot.computeIfPresent(bot.getUuid(), (uuid, active) -> active.runToken() == runToken ? null : active);
     }
 
     private static String treeClaimOwnerName(ServerPlayerEntity bot, BlockPos base) {
-        UUID owner = TREE_CLAIMS.ownerOf(base.asLong(), System.currentTimeMillis());
+        UUID owner = TREE_CLAIMS.ownerOf(treeKey(bot, base), System.currentTimeMillis());
         if (owner == null) {
             return "another bot";
         }
@@ -7226,17 +7351,18 @@ public final class WoodcutSkill implements Skill {
     }
 
     /**
-     * No target while other bots hold claims: wait up to {@link #CLAIMED_TREES_WAIT_MS} for them to
-     * free a tree. Returns true when the wait ran its course with the claims still held (the
-     * caller then rescans once ignoring them), false when it was cut short.
+     * No target while other bots hold claims nearby: wait up to {@link #CLAIMED_TREES_WAIT_MS} for
+     * them to free a tree. Only claims in this dimension within {@code radius} (XZ) count. Returns
+     * true when the wait ran its course with those claims still held (the caller then rescans once
+     * ignoring them), false when it was cut short.
      */
-    private boolean waitForClaimedTrees(ServerPlayerEntity bot) {
+    private boolean waitForClaimedTrees(ServerPlayerEntity bot, int radius) {
         if (bot.getEntityWorld() instanceof ServerWorld world && world.getServer().isOnThread()) {
             return true;
         }
         long deadline = System.currentTimeMillis() + CLAIMED_TREES_WAIT_MS;
         while (System.currentTimeMillis() < deadline) {
-            if (isAbortRequested(bot) || treesClaimedByOthers(bot).isEmpty()) {
+            if (isAbortRequested(bot) || treesClaimedByOthers(bot, radius).isEmpty()) {
                 return false;
             }
             sleepQuiet(1_000L);
@@ -7244,7 +7370,7 @@ public final class WoodcutSkill implements Skill {
                 return false;
             }
         }
-        return !treesClaimedByOthers(bot).isEmpty();
+        return !treesClaimedByOthers(bot, radius).isEmpty();
     }
 
     private void sleepQuiet(long millis) {
