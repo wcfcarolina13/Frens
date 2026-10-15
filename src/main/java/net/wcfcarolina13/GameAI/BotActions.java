@@ -64,7 +64,6 @@ import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -91,7 +90,6 @@ public final class BotActions {
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-actions");
 
     private static final double STEP_DISTANCE = 0.45;
-    private static final float TURN_DEGREES = 20.0f;
     private static final int BOW_MIN_CHARGE_TICKS = 15;
     private static final int RANGED_COOLDOWN_TICKS = 20;
     // Ranged repositioning: dripstone/uneven terrain often blocks arrows even when canSee() is true.
@@ -317,14 +315,6 @@ public final class BotActions {
             return;
         }
         bot.clearActiveItem();
-    }
-
-    public static void turnLeft(ServerPlayerEntity bot) {
-        rotate(bot, -TURN_DEGREES);
-    }
-
-    public static void turnRight(ServerPlayerEntity bot) {
-        rotate(bot, TURN_DEGREES);
     }
 
     public static void jump(ServerPlayerEntity bot) {
@@ -733,27 +723,6 @@ public final class BotActions {
         if (cooldown >= 0.9f) {
             bot.attack(target);
             bot.swingHand(Hand.MAIN_HAND, true);
-        }
-    }
-
-    public static void attackNearest(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
-        Entity target = nearbyEntities.stream()
-                .filter(EntityUtil::isHostile)
-                .filter(e -> e.getType() != net.minecraft.entity.EntityType.GHAST) // ranged/deflect only
-                .filter(e -> e.getType() != net.minecraft.entity.EntityType.PHANTOM
-                        || (e.getY() - bot.getY()) <= 3.0) // melee only on low phantoms
-                .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
-                .orElse(null);
-
-        if (target != null) {
-            CombatWeaponPolicy.CloseRangeChoice choice =
-                    prepareCloseRangeWeapon(bot, target instanceof LivingEntity);
-            if (choice == CombatWeaponPolicy.CloseRangeChoice.RANGED
-                    && target instanceof LivingEntity living
-                    && performRangedAttack(bot, living, bot.getCommandSource().getServer().getTicks())) {
-                return;
-            }
-            attackTarget(bot, target);
         }
     }
 
@@ -2174,13 +2143,6 @@ public final class BotActions {
         inventory.setStack(from, toStack);
         inventory.setStack(to, fromStack);
         inventory.markDirty();
-    }
-
-    private static void rotate(ServerPlayerEntity bot, float angle) {
-        float newYaw = bot.getYaw() + angle;
-        bot.setYaw(newYaw);
-        bot.setHeadYaw(newYaw);
-        bot.setBodyYaw(newYaw); // Keep body, head, and yaw aligned for simplicity
     }
 
     public static void autoJumpIfNeeded(ServerPlayerEntity bot) {

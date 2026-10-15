@@ -16,9 +16,6 @@ public class State implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L; // Recommended for Serializable classes
 
-    private static final double DISTANCE_TOLERANCE = 8.0; // Maximum allowable difference
-    private static final double ENTITY_SIMILARITY_THRESHOLD = 0.5; // 50% overlap
-    private static final double BLOCK_SIMILARITY_THRESHOLD = 0.5; // 50% overlap
 
     private final int botX, botY, botZ;
     private final int frostLevel;
@@ -235,70 +232,6 @@ public class State implements Serializable {
     }
 
 
-    public static boolean isStateConsistent(State lastState, State currentState) {
-        if (lastState == null) return false;
-
-        // Numeric comparison with tolerance
-        boolean distanceToHostileEntitySimilar = Math.abs(lastState.getDistanceToHostileEntity() - currentState.getDistanceToHostileEntity()) <= DISTANCE_TOLERANCE;
-        boolean distanceToDangerZoneSimilar = Math.abs(lastState.getDistanceToDangerZone() - currentState.getDistanceToDangerZone()) <= DISTANCE_TOLERANCE;
-
-        // Exact match for categorical parameters
-        boolean timeOfDaySimilar = lastState.getTimeOfDay().equals(currentState.getTimeOfDay());
-        boolean dimensionTypeSimilar = lastState.getDimensionType().equals(currentState.getDimensionType());
-
-        // Overlap check for collections
-        boolean nearbyEntitiesSimilar = calculateEntityOverlap(lastState.getNearbyEntities(), currentState.getNearbyEntities()) >= ENTITY_SIMILARITY_THRESHOLD;
-        boolean nearbyBlocksSimilar = calculateBlockOverlap(lastState.getNearbyBlocks(), currentState.getNearbyBlocks()) >= BLOCK_SIMILARITY_THRESHOLD;
-
-        // All scalar checks must match, and at least one environmental heuristic must line up.
-        return distanceToHostileEntitySimilar
-                && distanceToDangerZoneSimilar
-                && timeOfDaySimilar
-                && dimensionTypeSimilar
-                && (nearbyEntitiesSimilar || nearbyBlocksSimilar);
-    }
-
-    private static double calculateBlockOverlap( List<String> lastBlocks, List<String> currentBlocks) {
-
-        if (lastBlocks.isEmpty()) {
-            return 0.0; // No overlap if block list is empty
-        }
-
-        long similarBlocksCount = currentBlocks.stream()
-                .filter(block -> lastBlocks.stream().anyMatch(lastBlock -> lastBlock.contains(block)))
-                .count();
-
-        double blockOverlapRatio = (double) similarBlocksCount / Math.max(lastBlocks.size(), currentBlocks.size());
-
-        // Maintain a conservative match threshold by slightly damping the raw overlap ratio.
-        return blockOverlapRatio / 2.0;
-    }
-
-
-    private static double calculateEntityOverlap(List<EntityDetails> lastEntities, List<EntityDetails> currentEntities) {
-        if (lastEntities.isEmpty()) {
-            return 0.0; // No overlap if one or both lists are empty
-        }
-
-        // Extract names from both entity lists
-        List<String> lastEntityNames = lastEntities.stream()
-                .map(EntityDetails::getName)
-                .toList();
-
-        List<String> currentEntityNames = currentEntities.stream()
-                .map(EntityDetails::getName)
-                .toList();
-
-        // Count exact name matches
-        long exactNameMatches = currentEntityNames.stream()
-                .filter(lastEntityNames::contains)
-                .count();
-
-        // Calculate overlap ratio (based on exact matches)
-        double overlapRatio = (double) exactNameMatches / Math.max(lastEntityNames.size(), currentEntityNames.size());
-
-        return overlapRatio;
-    }
 
 
     @Override

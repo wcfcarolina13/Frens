@@ -134,57 +134,5 @@ public class LauncherEnvironment {
         return gameDir + File.separator + subDirectory;
     }
 
-    /**
-     * Get launcher-specific information for debugging
-     */
-    public static String getLauncherInfo() {
-        LauncherType launcher = detectLauncher();
-        StringBuilder info = new StringBuilder();
-
-        info.append("Launcher: ").append(launcher.getDisplayName()).append("\n");
-        info.append("Game Directory: ").append(FabricLoader.getInstance().getGameDir()).append("\n");
-        info.append("User Home: ").append(System.getProperty("user.home")).append("\n");
-        info.append("User Name: ").append(System.getProperty("user.name")).append("\n");
-        info.append("OS: ").append(System.getProperty("os.name")).append("\n");
-
-        return info.toString();
-    }
-
-    /**
-     * Check if the current environment supports shared data storage
-     */
-    public static boolean supportsSharedStorage() {
-        LauncherType launcher = detectLauncher();
-
-        switch (launcher) {
-            case VANILLA_LAUNCHER:
-                return true; // Can share data in .minecraft
-
-            case MODRINTH_APP:
-            case MULTIMC:
-            case PRISM_LAUNCHER:
-            case CURSEFORGE:
-            case ATLAUNCHER:
-                return false; // Instance-specific, no sharing between profiles
-
-            default:
-                return false; // Unknown, assume no sharing
-        }
-    }
-
-    /**
-     * Get fallback directories in order of preference
-     */
-    public static String[] getFallbackDirectories(String subDirectory) {
-        String userHome = System.getProperty("user.home");
-        String tempDir = System.getProperty("java.io.tmpdir");
-
-        return new String[] {
-                getStorageDirectory(subDirectory), // Primary
-                userHome + File.separator + ".minecraft" + File.separator + subDirectory, // Fallback 1
-                userHome + File.separator + "minecraft_data" + File.separator + subDirectory, // Fallback 2
-                tempDir + File.separator + "minecraft_frens" + File.separator + subDirectory // Last resort
-        };
-    }
 }
 
