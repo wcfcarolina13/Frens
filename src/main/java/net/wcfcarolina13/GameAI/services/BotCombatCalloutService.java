@@ -254,7 +254,9 @@ public final class BotCombatCalloutService {
             meta.maxDangerousMobCount = active;
         }
 
-        if (active >= 3 && checkCooldown(botId, LAST_COMBAT_MULTI_MS, COMBAT_MULTI_COOLDOWN_MS, now)) {
+        if (FriendlyFireCalloutPolicy.isMultiHostileFight(active)
+                && checkCooldown(botId, LAST_COMBAT_MULTI_MS, COMBAT_MULTI_COOLDOWN_MS, now)) {
+            LOGGER.info("[combat-callout] {} faces {} hostiles, multi-mob line", bot.getName().getString(), active);
             maybePlayWeightedLine(bot, COMBAT_MULTI_LINES, null);
         }
     }
@@ -505,16 +507,21 @@ public final class BotCombatCalloutService {
         IN_COMBAT.put(botId, false);
         CombatMetadata meta = COMBAT_META.remove(botId);
 
-        WeightedLine line;
-        if (meta != null && meta.explosionSeen) {
-            WeightedLine[] pool = meta.creeperExplosionSeen ? POST_EXPLOSION_CREEPER_LINES : POST_EXPLOSION_LINES;
-            line = pickWeightedLine(pool, null);
-        } else if (meta != null && meta.maxDangerousMobCount >= 3) {
-            line = pickWeightedLine(POST_COMBAT_MULTI_LINES, null);
-        } else if (meta != null && meta.sawAnyHostile && meta.maxDangerousMobCount <= 1 && !meta.sawNonWeakHostile) {
-            line = pickWeightedLine(POST_COMBAT_SINGLE_LINES, null);
-        } else {
-            line = pickWeightedLine(POST_COMBAT_GENERAL_LINES, null);
+        FriendlyFireCalloutPolicy.PostCombatBucket bucket = meta == null
+                ? FriendlyFireCalloutPolicy.postCombatBucket(false, false, false, 0, false, false)
+                : FriendlyFireCalloutPolicy.postCombatBucket(true, meta.explosionSeen, meta.creeperExplosionSeen,
+                        meta.maxDangerousMobCount, meta.sawAnyHostile, meta.sawNonWeakHostile);
+        WeightedLine[] pool = switch (bucket) {
+            case EXPLOSION_CREEPER -> POST_EXPLOSION_CREEPER_LINES;
+            case EXPLOSION -> POST_EXPLOSION_LINES;
+            case MULTI -> POST_COMBAT_MULTI_LINES;
+            case SINGLE -> POST_COMBAT_SINGLE_LINES;
+            case GENERAL -> POST_COMBAT_GENERAL_LINES;
+        };
+        WeightedLine line = pickWeightedLine(pool, null);
+        if (bucket == FriendlyFireCalloutPolicy.PostCombatBucket.MULTI) {
+            LOGGER.info("[combat-callout] {} combat ended after up to {} hostiles, post-combat multi line",
+                    bot.getName().getString(), meta.maxDangerousMobCount);
         }
 
         if (line != null) {
@@ -649,6 +656,8 @@ public final class BotCombatCalloutService {
             return;
         }
         WeightedLine line = pickWeightedLine(FF_DEALT_LINES, null);
+        LOGGER.info("[combat-callout] {} hit player {} for {} damage, apology line",
+                bot.getName().getString(), player.getName().getString(), String.format(java.util.Locale.ROOT, "%.1f", damage));
         if (line != null) {
             sayWithSound(bot, line.text, line.sound);
         }

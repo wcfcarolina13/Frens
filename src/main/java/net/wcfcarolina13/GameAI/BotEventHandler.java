@@ -1187,6 +1187,9 @@ public class BotEventHandler {
         // Without this, long skeleton fights can go quiet for >5s and trigger a premature "standing down".
         try {
             net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteCombatOngoing(bot, !augmentedHostiles.isEmpty());
+            // Raw scan only: counts the hostiles the bot itself faces (not ally-assist targets) for the
+            // multi-mob callout and the post-combat line pool.
+            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteCombatSituation(bot, hostileEntities);
         } catch (Throwable ignored) {
         }
 

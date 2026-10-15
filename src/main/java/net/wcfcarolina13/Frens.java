@@ -1230,6 +1230,23 @@ public class Frens implements ModInitializer {
             return true; // Allow the damage
         });
 
+        // A bot's hit on a real player (melee or its arrow) that actually landed: the bot apologises.
+        // Bot victims are covered by their own friendly-fire-received line in ALLOW_DAMAGE above.
+        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
+            if (!(entity instanceof ServerPlayerEntity victim) || source == null) {
+                return;
+            }
+            Entity attacker = source.getAttacker();
+            boolean victimIsHuman = !(victim instanceof net.wcfcarolina13.Entity.createFakePlayer);
+            boolean attackerIsBot = attacker instanceof ServerPlayerEntity botAttacker
+                    && BotEventHandler.isRegisteredBot(botAttacker);
+            if (net.wcfcarolina13.GameAI.services.FriendlyFireCalloutPolicy.shouldApologize(
+                    victimIsHuman, attackerIsBot, attacker == victim, blocked, damageTaken)) {
+                net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onBotHitPlayer(
+                        (ServerPlayerEntity) attacker, victim, damageTaken);
+            }
+        });
+
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
                 boolean shouldAutoRespawn = true;
