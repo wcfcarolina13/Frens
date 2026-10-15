@@ -2522,16 +2522,18 @@ public final class BotFleeService {
             return;
         }
 
+        long attemptTick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
         if (result != null && result.success()) {
             SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
             SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
             LOGGER.info("Bot {} reached surface via dedicated surface recovery", bot.getName().getString());
+            BotUndergroundSurvivalService.recordRecoveryAttempt(bot, true, countScaffoldBlocks(bot), world.isDay(), attemptTick);
         } else {
-            long nowTick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
-            SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
+            SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), attemptTick);
             SURFACE_RECOVERY_FAILURE_REASON.put(bot.getUuid(), result != null ? String.valueOf(result.message()) : "null result");
             LOGGER.warn("Bot {} ascent failed: {}",
                     bot.getName().getString(), result != null ? result.message() : "null result");
+            BotUndergroundSurvivalService.recordRecoveryAttempt(bot, false, countScaffoldBlocks(bot), world.isDay(), attemptTick);
         }
     }
 
@@ -3158,7 +3160,7 @@ public final class BotFleeService {
         }
     }
 
-    private static int countScaffoldBlocks(ServerPlayerEntity bot) {
+    static int countScaffoldBlocks(ServerPlayerEntity bot) {
         if (bot == null) {
             return 0;
         }

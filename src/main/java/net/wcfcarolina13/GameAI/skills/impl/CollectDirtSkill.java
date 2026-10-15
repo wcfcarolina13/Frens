@@ -1677,9 +1677,28 @@ public class CollectDirtSkill implements Skill {
         //    places a block under the bot's feet. This is the proven reliable pillar mechanism.
         List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(player, 1);
         int afterY = player.getBlockY();
-        if (afterY > beforeY) {
+        if (!placed.isEmpty() && afterY > beforeY) {
             LOGGER.info("Vertical ascent step: climbed from Y={} to Y={}", beforeY, afterY);
             return SkillExecutionResult.success("Pillar-up climb");
+        }
+        // Nothing placed: pillarUp may have returned at its jump apex (1.1.239 finding #17, a bot
+        // with 0 blocks logged hundreds of false "climbed from Y=62 to Y=63"). Only a landed Y counts.
+        if (placed.isEmpty()) {
+            if (!waitForLanding(player, LANDING_WAIT_MAX_MILLIS)) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return SkillExecutionResult.failure("Interrupted during ascent.");
+                }
+                // Still airborne: skip the overhead mines (they would target blocks out of reach
+                // once the bot lands) and let the no-progress limit count this step.
+                LOGGER.info("Vertical ascent step: no climb (airborne, nothing placed) at Y={}", player.getBlockY());
+                return SkillExecutionResult.success("No progress - will retry");
+            }
+            int landedY = player.getBlockY();
+            if (landedY > beforeY) {
+                LOGGER.info("Vertical ascent step: climbed from Y={} to Y={} (landed, nothing placed)", beforeY, landedY);
+                return SkillExecutionResult.success("Pillar-up climb");
+            }
+            LOGGER.info("Vertical ascent step: no climb (landed at Y={}, nothing placed)", landedY);
         }
 
         // 3. Pillar failed (no scaffold material or couldn't place). Try mining above + bare jump.
@@ -1715,13 +1734,44 @@ public class CollectDirtSkill implements Skill {
             Thread.currentThread().interrupt();
             return SkillExecutionResult.failure("Interrupted during ascent.");
         }
-        int jumpY = player.getBlockY();
-        if (jumpY > beforeY) {
-            LOGGER.info("Vertical ascent bare jump: climbed from Y={} to Y={}", beforeY, jumpY);
-            return SkillExecutionResult.success("Jump climb");
+        // Only an on-ground Y counts: a mid-jump reading is not a climb.
+        if (waitForLanding(player, LANDING_WAIT_AFTER_JUMP_MILLIS)) {
+            int jumpY = player.getBlockY();
+            if (jumpY > beforeY) {
+                LOGGER.info("Vertical ascent bare jump: climbed from Y={} to Y={}", beforeY, jumpY);
+                return SkillExecutionResult.success("Jump climb");
+            }
+        } else if (Thread.currentThread().isInterrupted()) {
+            return SkillExecutionResult.failure("Interrupted during ascent.");
         }
 
         return SkillExecutionResult.success("No progress - will retry");
+    }
+
+    /** Bound on the landing wait after a pillar attempt that placed nothing (worker thread only). */
+    private static final long LANDING_WAIT_MAX_MILLIS = 800L;
+    /** Extra landing wait after the bare jump's fixed 500 ms sleep (worker thread only). */
+    private static final long LANDING_WAIT_AFTER_JUMP_MILLIS = 400L;
+
+    /**
+     * Polls until the bot is on the ground, at most {@code maxMillis}. Sleeps, so it must only run
+     * on a worker thread (runAscent never runs on the server thread). Returns false on timeout or
+     * interrupt (the interrupt flag is restored).
+     */
+    private static boolean waitForLanding(ServerPlayerEntity player, long maxMillis) {
+        long deadline = System.currentTimeMillis() + maxMillis;
+        while (!player.isOnGround()) {
+            if (player.isRemoved() || System.currentTimeMillis() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
     }
     
 
